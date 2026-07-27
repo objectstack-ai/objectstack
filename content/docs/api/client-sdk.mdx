@@ -109,16 +109,22 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | Namespace | Status | Methods | Purpose |
 |:----------|:------:|:--------|:--------|
 | **discovery** | ✅ | 1 | API version & capabilities detection |
-| **meta** | ✅ | 11 | Metadata read/write, published versions & drafts (ADR-0033), FSM introspection (ADR-0020) |
-| **data** | ✅ | 10 | CRUD & query operations |
+| **meta** | ✅ | 18 | Metadata read/write, published versions & drafts (ADR-0033), per-item publish/rollback/diff, FSM introspection (ADR-0020), diagnostics, references, audit trail, book trees (ADR-0046) |
+| **data** | ✅ | 12 | CRUD & query operations, record clone, streaming export (M10.9) |
 | **auth** | ✅ | 5 | Authentication & user management |
 | **packages** | ✅ | 17 | Package lifecycle: install/enable, drafts (ADR-0033), commits & rollback (ADR-0067), export/duplicate (ADR-0070) |
-| **analytics** | ✅ | 3 | Analytics queries |
+| **analytics** | ✅ | 4 | Analytics queries + semantic-layer dataset query (ADR-0021) |
 | **automation** | ✅ | 18 | Flow CRUD, trigger/execute, runs, screen-flow resume, descriptor/status registries |
 | **actions** | ✅ | 2 | Server-registered action handlers (`engine.registerAction`) |
+| **approvals** | ✅ | 12 | Approval requests (ADR-0019): inbox, decisions, recall, revise/resubmit (ADR-0044), thread interactions, audit trail |
+| **reports** | ✅ | 8 | Saved reports: definitions, execution, recurring email schedules (501 without `@objectstack/plugin-reports`) |
+| **shares** | ✅ | 8 | Per-record sharing grants (list/grant/revoke) + tenant-wide sharing rules (`shares.rules.*`, M10.17) |
+| **search** | ✅ | 1 | Global cross-object search (M10.5) |
+| **email** | ✅ | 1 | Transactional send via IEmailService (M11.B1) |
+| **datasources** | ✅ | 5 | External-datasource federation admin: browse/draft/import remote tables (ADR-0015) |
 | **keys** | ✅ | 1 | API key minting (one-time secret) |
 | **shareLinks** | ✅ | 3 | Record share-link management |
-| **security** | ✅ | 3 | Suggested audience bindings (admin) |
+| **security** | ✅ | 4 | Access explanation (ADR-0090 D6) + suggested audience bindings (admin) |
 | **storage** | ✅ | 2 | File upload & download |
 | **i18n** | ✅ | 3 | Internationalization |
 | **notifications** | ✅ | 3 | List, mark-read, mark-all-read (inbox/receipt spine, ADR-0030) |
@@ -163,6 +169,20 @@ if (cached.notModified) {
 
 // Get auto-generated view
 const listView = await client.meta.getView('account', 'list');
+
+// Compound names (sub-resources) pass through unencoded
+const view = await client.meta.getItem('object', 'views/all_leads');
+
+// Per-item draft lifecycle (ADR-0033)
+await client.meta.publishItem('object', 'account', { message: 'go live' });
+await client.meta.rollbackItem('object', 'account', 3);
+const diff = await client.meta.diffItem('object', 'account', { from: 2, to: 5 });
+
+// Introspection & governance
+const bad = await client.meta.getDiagnostics({ severity: 'error' });
+const refs = await client.meta.getReferences('object', 'account');
+const trail = await client.meta.getAudit('object', 'account', { limit: 20 });
+const tree = await client.meta.getBookTree('handbook');
 ```
 
 ### `client.data` — CRUD & Batch

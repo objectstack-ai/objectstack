@@ -382,6 +382,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "プロバイダー ID",
         help: "OAuth プロバイダー識別子（google、github など）"
       },
+      issuer: {
+        label: "発行者",
+        help: "プロバイダーのアカウント ID を保証した発行主体 — OIDC の issuer、または issuer を持たないプロバイダーの場合は local:…"
+      },
       account_id: {
         label: "プロバイダーアカウント ID",
         help: "プロバイダーシステム内のユーザー ID"

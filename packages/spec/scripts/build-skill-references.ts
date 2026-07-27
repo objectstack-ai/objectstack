@@ -113,7 +113,6 @@ const SKILL_MAP: Record<string, string[]> = {
     'kernel/plugin-lifecycle-events.zod.ts',
     'kernel/plugin-capability.zod.ts',
     'kernel/plugin-loading.zod.ts',
-    'kernel/feature.zod.ts',
     'kernel/metadata-plugin.zod.ts',
   ],
   'objectstack-i18n': [

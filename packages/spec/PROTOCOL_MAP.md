@@ -192,7 +192,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`manifest.zod.ts`](src/kernel/manifest.zod.ts) | ⭐ | **Manifest**. The `package.json` equivalent for the stack. |
 | [`context.zod.ts`](src/kernel/context.zod.ts) | | **Execution Context**. Request-scoped context (user, transaction). |
 | [`events.zod.ts`](src/kernel/events.zod.ts) | | **Kernel Events**. System lifecycle events. |
-| [`feature.zod.ts`](src/kernel/feature.zod.ts) | | **Feature Flags**. Toggleable system features. |
 | [`service-registry.zod.ts`](src/kernel/service-registry.zod.ts) | | **Service Registry**. Internal dependency injection. |
 | [`metadata-loader.zod.ts`](src/kernel/metadata-loader.zod.ts) | | **Loader**. Logic for loading definitions from disk/DB. |
 | [`plugin-loading.zod.ts`](src/kernel/plugin-loading.zod.ts) | ⭐ | **Plugin Loading**. Loading strategies, production-safe hot reload (`environment`, `productionSafety`), full plugin sandboxing (`scope`, `ipc`), code splitting, caching, and performance monitoring. |

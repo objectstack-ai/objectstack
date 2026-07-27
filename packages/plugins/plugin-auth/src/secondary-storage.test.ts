@@ -48,3 +48,99 @@ describe('cacheSecondaryStorage (ADR-0069 D2 — shared rate-limit/session store
     expect(await ss.get('k')).toBeNull();
   });
 });
+
+// better-auth 1.7 promoted both of these from optional to REQUIRED on
+// SecondaryStorage: single-use verification values are consumed through
+// getAndDelete, and `rateLimit.storage: 'secondary-storage'` throws at boot
+// without `increment`.
+describe('cacheSecondaryStorage — getAndDelete (single-use verification values)', () => {
+  it('returns the value and removes it in one call', async () => {
+    const cache = makeCache();
+    const ss = cacheSecondaryStorage(cache as any);
+    await ss.set('verification:abc', '{"value":"token"}');
+
+    expect(await ss.getAndDelete!('verification:abc')).toBe('{"value":"token"}');
+    expect(cache.delete).toHaveBeenCalledWith('verification:abc');
+    // A replay of the same token finds nothing.
+    expect(await ss.getAndDelete!('verification:abc')).toBeNull();
+  });
+
+  it('maps a MISS to null (better-auth contract) and still issues the delete', async () => {
+    const cache = makeCache();
+    const ss = cacheSecondaryStorage(cache as any);
+    expect(await ss.getAndDelete!('absent')).toBeNull();
+  });
+});
+
+describe('cacheSecondaryStorage — increment (fixed-window rate-limit counter)', () => {
+  it('creates the counter at 1 with the requested TTL', async () => {
+    const cache = makeCache();
+    const ss = cacheSecondaryStorage(cache as any);
+
+    expect(await ss.increment!('rl:ip', 60)).toBe(1);
+    expect(cache.set).toHaveBeenCalledWith('rl:ip', expect.any(String), 60);
+  });
+
+  it('returns the POST-increment count on every call in the window', async () => {
+    const cache = makeCache();
+    const ss = cacheSecondaryStorage(cache as any);
+
+    expect(await ss.increment!('rl:ip', 60)).toBe(1);
+    expect(await ss.increment!('rl:ip', 60)).toBe(2);
+    expect(await ss.increment!('rl:ip', 60)).toBe(3);
+  });
+
+  it('never extends the window — later increments carry only the REMAINING ttl', async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = makeCache();
+      const ss = cacheSecondaryStorage(cache as any);
+
+      await ss.increment!('rl:ip', 60);
+      vi.advanceTimersByTime(45_000);
+      await ss.increment!('rl:ip', 60);
+
+      // 60s window opened 45s ago → 15s left, NOT a fresh 60s.
+      expect(cache.set).toHaveBeenLastCalledWith('rl:ip', expect.any(String), 15);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restarts the count once the window has elapsed', async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = makeCache();
+      const ss = cacheSecondaryStorage(cache as any);
+
+      await ss.increment!('rl:ip', 10);
+      await ss.increment!('rl:ip', 10);
+      vi.advanceTimersByTime(10_001);
+
+      // The cache stand-in has no TTL eviction, so this also proves the window
+      // end is enforced by the envelope rather than by cache expiry alone.
+      expect(await ss.increment!('rl:ip', 10)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('accepts an envelope handed back as an object (memory-style adapter)', async () => {
+    const cache = makeCache();
+    const ss = cacheSecondaryStorage(cache as any);
+
+    await ss.increment!('rl:ip', 60);
+    // Re-store the same envelope unparsed, the way a memory cache would.
+    cache.store.set('rl:ip', JSON.parse(cache.store.get('rl:ip') as string));
+
+    expect(await ss.increment!('rl:ip', 60)).toBe(2);
+  });
+
+  it('restarts the window on a corrupt or foreign value instead of throwing', async () => {
+    const cache = makeCache();
+    const ss = cacheSecondaryStorage(cache as any);
+
+    cache.store.set('rl:ip', 'not-json');
+    expect(await ss.increment!('rl:ip', 60)).toBe(1);
+  });
+});

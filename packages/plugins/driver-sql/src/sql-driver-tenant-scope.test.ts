@@ -368,4 +368,75 @@ describe('SqlDriver tenant scope (organization_id)', () => {
       expect(warnSpy).toHaveLength(0);
     });
   });
+
+  // [ADR-0105 D2 / #3623] Group posture: the engine threads the caller's whole
+  // membership set as `tenantIds`; the native scope widens to `IN (...)` so it
+  // matches the Layer 0 union instead of collapsing it to active-org equality.
+  describe('union tenant scope — tenantIds (group posture, #3623)', () => {
+    it('find with tenantIds spans exactly the listed tenants', async () => {
+      const rows = await driver.find(
+        'account',
+        { object: 'account' },
+        { tenantId: 'org_a', tenantIds: ['org_a', 'org_b'] } as any,
+      );
+      expect(rows.map(r => r.id).sort()).toEqual(['a1', 'a2', 'b1', 'b2']);
+    });
+
+    it('tenants OUTSIDE the set stay invisible', async () => {
+      await driver.create('account', { id: 'c1', organization_id: 'org_c', name: 'C1' });
+      const rows = await driver.find(
+        'account',
+        { object: 'account' },
+        { tenantId: 'org_a', tenantIds: ['org_a', 'org_b'] } as any,
+      );
+      expect(rows.map(r => r.id)).not.toContain('c1');
+    });
+
+    it('keeps the NULL-tenant global-row carve-out (#2734) on the union path', async () => {
+      await driver.create('account', { id: 'g1', name: 'GLOBAL' });
+      const rows = await driver.find(
+        'account',
+        { object: 'account' },
+        { tenantId: 'org_a', tenantIds: ['org_a'] } as any,
+      );
+      expect(rows.map(r => r.id).sort()).toEqual(['a1', 'a2', 'g1']);
+    });
+
+    it('an empty or malformed tenantIds falls back to tenantId equality (fail toward isolation)', async () => {
+      const empty = await driver.find(
+        'account',
+        { object: 'account' },
+        { tenantId: 'org_a', tenantIds: [] } as any,
+      );
+      expect(empty.map(r => r.id).sort()).toEqual(['a1', 'a2']);
+      const malformed = await driver.find(
+        'account',
+        { object: 'account' },
+        { tenantId: 'org_a', tenantIds: [null, ''] } as any,
+      );
+      expect(malformed.map(r => r.id).sort()).toEqual(['a1', 'a2']);
+    });
+
+    it('update/delete reach widens with the set — but only within it', async () => {
+      const unionOpts = { tenantId: 'org_a', tenantIds: ['org_a', 'org_b'] } as any;
+      await driver.update('account', 'b1', { tier: 'platinum' }, unionOpts);
+      const b1 = await driver.findOne('account', { object: 'account', where: { id: 'b1' } });
+      expect(b1.tier).toBe('platinum');
+      // A tenant OUTSIDE the set stays untouchable — the widened wall still walls.
+      await driver.create('account', { id: 'c1', organization_id: 'org_c', name: 'C1', tier: 'gold' });
+      await driver.update('account', 'c1', { tier: 'compromised' }, unionOpts);
+      const c1 = await driver.findOne('account', { object: 'account', where: { id: 'c1' } });
+      expect(c1.tier).toBe('gold');
+    });
+
+    it('insert injection STILL stamps from tenantId (active org = write target, D5)', async () => {
+      await driver.create(
+        'account',
+        { id: 'n1', name: 'New' },
+        { tenantId: 'org_a', tenantIds: ['org_a', 'org_b'] } as any,
+      );
+      const row = await driver.findOne('account', { object: 'account', where: { id: 'n1' } });
+      expect(row?.organization_id).toBe('org_a');
+    });
+  });
 });

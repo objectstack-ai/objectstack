@@ -12,7 +12,6 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/datasource.zod.ts` — Driver Identifier
 - `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Seed Import Strategy
 - `node_modules/@objectstack/spec/src/kernel/context.zod.ts` — Runtime Mode Enum
-- `node_modules/@objectstack/spec/src/kernel/feature.zod.ts` — Feature Rollout Strategy
 - `node_modules/@objectstack/spec/src/kernel/manifest.zod.ts` — Structured permission grants requested by a plugin (ADR-0025 §3.2).
 - `node_modules/@objectstack/spec/src/kernel/metadata-plugin.zod.ts` — Metadata Plugin Protocol
 - `node_modules/@objectstack/spec/src/kernel/plugin-capability.zod.ts` — Plugin Capability Protocol

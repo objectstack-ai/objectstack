@@ -382,6 +382,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "ID del proveedor",
         help: "Identificador del proveedor OAuth (google, github, etc.)."
       },
+      issuer: {
+        label: "Emisor",
+        help: "Autoridad que avaló el id de cuenta del proveedor: un emisor OIDC, o local:… para proveedores que no tienen uno"
+      },
       account_id: {
         label: "ID de cuenta del proveedor",
         help: "ID del usuario en el sistema del proveedor."

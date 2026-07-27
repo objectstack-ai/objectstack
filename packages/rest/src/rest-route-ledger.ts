@@ -28,10 +28,13 @@
  * `external-datasource-routes.ts`) — the conformance test enumerates those by
  * capturing a mock server's registration calls, so they are guarded too.
  *
- * NOT COVERED HERE (known third surface): services that autonomously mount
+ * NOT COVERED HERE (the third surface): services that autonomously mount
  * routes on the host `IHttpServer` — `service-storage` (`storage-routes.ts`,
  * the SDK's whole storage surface) and `service-i18n`. Those live outside
- * `@objectstack/rest`; auditing them is follow-up work under #3587.
+ * `@objectstack/rest` and carry their own per-package ledgers + guards since
+ * #3636 (tranche 3): `packages/services/service-storage/src/storage-route-ledger.ts`
+ * and `packages/services/service-i18n/src/i18n-route-ledger.ts`. All three
+ * surfaces the SDK reaches are now ledgered.
  *
  * This module is package-internal (not exported from the index): it is the
  * guard's data, not public API. It must stay import-free — the client-side
@@ -80,32 +83,26 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
 
   // ── metadata ──────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/meta', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getTypes' },
-  { route: 'GET /api/v1/meta/diagnostics', family: 'metadata', source: 'route-manager', disposition: 'gap',
-    note: 'spec-validation diagnostics listing — Studio-grade admin data with no SDK expression' },
+  { route: 'GET /api/v1/meta/diagnostics', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getDiagnostics' },
   { route: 'GET /api/v1/meta/_drafts', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.listDrafts' },
   { route: 'GET /api/v1/meta/:type', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItems' },
-  { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', source: 'route-manager', disposition: 'gap',
-    note: 'reverse-reference listing with no SDK expression' },
-  { route: 'GET /api/v1/meta/book/:name/tree', family: 'metadata', source: 'route-manager', disposition: 'gap',
-    note: 'ADR-0046 §6 book-spine resolution with no SDK expression' },
+  { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getReferences' },
+  { route: 'GET /api/v1/meta/book/:name/tree', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getBookTree' },
   { route: 'GET /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem' },
   { route: 'PUT /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.saveItem' },
   { route: 'DELETE /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.deleteItem',
     note: 'REST-only: the dispatcher /meta branch has no DELETE handling — it falls into the read path' },
   { route: 'GET /api/v1/meta/:type/:name/history', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getHistory',
     note: 'REST-only: the dispatcher /meta branch swallows /history as a compound name and 404s' },
-  { route: 'GET /api/v1/meta/:type/:name/audit', family: 'metadata', source: 'route-manager', disposition: 'gap',
-    note: 'protection-audit events with no SDK expression' },
-  { route: 'POST /api/v1/meta/:type/:name/publish', family: 'metadata', source: 'route-manager', disposition: 'gap',
-    note: 'per-item draft→active publish (ADR-0033) with no SDK expression; packages.publishDrafts covers only the package-scoped flow' },
-  { route: 'POST /api/v1/meta/:type/:name/rollback', family: 'metadata', source: 'route-manager', disposition: 'gap',
-    note: 'restore-at-history-version with no SDK expression' },
-  { route: 'GET /api/v1/meta/:type/:name/diff', family: 'metadata', source: 'route-manager', disposition: 'gap',
-    note: 'metadata version diff (?from/?to) with no SDK expression' },
-  { route: 'GET /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'gap',
-    note: 'compound-name read; meta.getItem URL-encodes the slash so it cannot reach this shape — needs the unencoded pass-through meta.getPublished got in #3579' },
-  { route: 'PUT /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'gap',
-    note: 'compound-name save; same encoding barrier as the compound read' },
+  { route: 'GET /api/v1/meta/:type/:name/audit', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getAudit' },
+  { route: 'POST /api/v1/meta/:type/:name/publish', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.publishItem',
+    note: 'per-item ADR-0033 publish; packages.publishDrafts remains the package-scoped flow' },
+  { route: 'POST /api/v1/meta/:type/:name/rollback', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.rollbackItem' },
+  { route: 'GET /api/v1/meta/:type/:name/diff', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.diffItem' },
+  { route: 'GET /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem',
+    note: 'compound names pass through getItem unencoded (URL-pinned in client.test.ts); only deleteItem encodes' },
+  { route: 'PUT /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.saveItem',
+    note: 'compound names pass through saveItem unencoded (URL-pinned in client.test.ts)' },
 
   // ── ui ────────────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/ui/view/:object/:type', family: 'ui', source: 'route-manager', disposition: 'sdk', client: 'meta.getView',
@@ -120,8 +117,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'DELETE /api/v1/data/:object/:id', family: 'crud', source: 'route-manager', disposition: 'sdk', client: 'data.delete' },
 
   // ── data actions (clone / import / import jobs / export) ──────────────────
-  { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'gap',
-    note: 'record clone (object enable.clone) with no SDK expression' },
+  { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.clone' },
   { route: 'POST /api/v1/data/:object/import', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.import' },
   { route: 'POST /api/v1/data/:object/import/jobs', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.createImportJob' },
   { route: 'POST /api/v1/data/import/jobs/:jobId/cancel', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.cancelImportJob' },
@@ -129,16 +125,14 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/data/import/jobs/:jobId/results', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.getImportJobResults' },
   { route: 'GET /api/v1/data/import/jobs/:jobId', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.getImportJobProgress' },
   { route: 'GET /api/v1/data/import/jobs', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.listImportJobs' },
-  { route: 'GET /api/v1/data/:object/export', family: 'data-actions', source: 'route-manager', disposition: 'gap',
-    note: 'streaming CSV/JSON/XLSX export with no SDK expression' },
+  { route: 'GET /api/v1/data/:object/export', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.export',
+    note: 'file-stream response; the SDK returns the raw Response rather than a JSON envelope' },
 
   // ── search ────────────────────────────────────────────────────────────────
-  { route: 'GET /api/v1/search', family: 'search', source: 'route-manager', disposition: 'gap',
-    note: 'global cross-object search with no SDK expression' },
+  { route: 'GET /api/v1/search', family: 'search', source: 'route-manager', disposition: 'sdk', client: 'search' },
 
   // ── email ─────────────────────────────────────────────────────────────────
-  { route: 'POST /api/v1/email/send', family: 'email', source: 'route-manager', disposition: 'gap',
-    note: 'transactional send via EmailService with no SDK expression' },
+  { route: 'POST /api/v1/email/send', family: 'email', source: 'route-manager', disposition: 'sdk', client: 'email.send' },
 
   // ── public forms ──────────────────────────────────────────────────────────
   { route: 'GET /api/v1/forms/:slug', family: 'forms', source: 'route-manager', disposition: 'public',
@@ -149,34 +143,24 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'anonymous scoped lookup picker (publicPicker-gated)' },
 
   // ── analytics (semantic layer) ────────────────────────────────────────────
-  { route: 'POST /api/v1/analytics/dataset/query', family: 'analytics', source: 'route-manager', disposition: 'gap',
-    note: 'ADR-0021 dataset preview/query with no SDK expression (analytics.query speaks the dispatcher dialect)' },
+  { route: 'POST /api/v1/analytics/dataset/query', family: 'analytics', source: 'route-manager', disposition: 'sdk', client: 'analytics.queryDataset' },
 
   // ── security explain (ADR-0090 D6) ────────────────────────────────────────
-  { route: 'GET /api/v1/security/explain', family: 'security-explain', source: 'route-manager', disposition: 'gap',
-    note: 'authorization explain (query form) with no SDK expression' },
-  { route: 'POST /api/v1/security/explain', family: 'security-explain', source: 'route-manager', disposition: 'gap',
-    note: 'authorization explain (body form) with no SDK expression' },
+  { route: 'GET /api/v1/security/explain', family: 'security-explain', source: 'route-manager', disposition: 'sdk', client: 'security.explain',
+    note: 'query transport of the same ExplainRequestSchema contract; the SDK speaks the POST form' },
+  { route: 'POST /api/v1/security/explain', family: 'security-explain', source: 'route-manager', disposition: 'sdk', client: 'security.explain' },
 
   // ── per-record shares ─────────────────────────────────────────────────────
-  { route: 'GET /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'gap',
-    note: 'per-record sharing grants listing with no SDK expression' },
-  { route: 'POST /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'gap',
-    note: 'grant a per-record share with no SDK expression' },
-  { route: 'DELETE /api/v1/data/:object/:id/shares/:shareId', family: 'record-shares', source: 'route-manager', disposition: 'gap',
-    note: 'revoke a per-record share with no SDK expression' },
+  { route: 'GET /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.list' },
+  { route: 'POST /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.grant' },
+  { route: 'DELETE /api/v1/data/:object/:id/shares/:shareId', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.revoke' },
 
   // ── sharing rules ─────────────────────────────────────────────────────────
-  { route: 'GET /api/v1/sharing/rules', family: 'sharing-rules', source: 'route-manager', disposition: 'gap',
-    note: 'sharing-rule listing with no SDK expression' },
-  { route: 'POST /api/v1/sharing/rules', family: 'sharing-rules', source: 'route-manager', disposition: 'gap',
-    note: 'sharing-rule upsert with no SDK expression' },
-  { route: 'GET /api/v1/sharing/rules/:idOrName', family: 'sharing-rules', source: 'route-manager', disposition: 'gap',
-    note: 'sharing-rule read with no SDK expression' },
-  { route: 'DELETE /api/v1/sharing/rules/:idOrName', family: 'sharing-rules', source: 'route-manager', disposition: 'gap',
-    note: 'sharing-rule delete (cascades materialised grants) with no SDK expression' },
-  { route: 'POST /api/v1/sharing/rules/:idOrName/evaluate', family: 'sharing-rules', source: 'route-manager', disposition: 'gap',
-    note: 'sharing-rule re-evaluation/reconcile with no SDK expression' },
+  { route: 'GET /api/v1/sharing/rules', family: 'sharing-rules', source: 'route-manager', disposition: 'sdk', client: 'shares.rules.list' },
+  { route: 'POST /api/v1/sharing/rules', family: 'sharing-rules', source: 'route-manager', disposition: 'sdk', client: 'shares.rules.save' },
+  { route: 'GET /api/v1/sharing/rules/:idOrName', family: 'sharing-rules', source: 'route-manager', disposition: 'sdk', client: 'shares.rules.get' },
+  { route: 'DELETE /api/v1/sharing/rules/:idOrName', family: 'sharing-rules', source: 'route-manager', disposition: 'sdk', client: 'shares.rules.delete' },
+  { route: 'POST /api/v1/sharing/rules/:idOrName/evaluate', family: 'sharing-rules', source: 'route-manager', disposition: 'sdk', client: 'shares.rules.evaluate' },
 
   // ── security suggested-bindings (ADR-0090 D5/D9) ──────────────────────────
   { route: 'GET /api/v1/security/suggested-bindings', family: 'security', source: 'route-manager', disposition: 'sdk', client: 'security.suggestedBindings.list',
@@ -187,41 +171,27 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'duplicate mount with the dispatcher /security domain' },
 
   // ── reports ───────────────────────────────────────────────────────────────
-  { route: 'GET /api/v1/reports', family: 'reports', source: 'route-manager', disposition: 'gap',
-    note: 'saved-report listing with no SDK expression' },
-  { route: 'POST /api/v1/reports', family: 'reports', source: 'route-manager', disposition: 'gap',
-    note: 'saved-report upsert with no SDK expression' },
-  { route: 'GET /api/v1/reports/:id', family: 'reports', source: 'route-manager', disposition: 'gap',
-    note: 'saved-report read with no SDK expression' },
-  { route: 'DELETE /api/v1/reports/:id', family: 'reports', source: 'route-manager', disposition: 'gap',
-    note: 'saved-report delete (cascades schedules) with no SDK expression' },
-  { route: 'POST /api/v1/reports/:id/run', family: 'reports', source: 'route-manager', disposition: 'gap',
-    note: 'report execution with no SDK expression' },
-  { route: 'POST /api/v1/reports/:id/schedule', family: 'reports', source: 'route-manager', disposition: 'gap',
-    note: 'recurring email schedule creation with no SDK expression' },
-  { route: 'GET /api/v1/reports/:id/schedules', family: 'reports', source: 'route-manager', disposition: 'gap',
-    note: 'schedule listing with no SDK expression' },
-  { route: 'DELETE /api/v1/reports/schedules/:scheduleId', family: 'reports', source: 'route-manager', disposition: 'gap',
-    note: 'schedule delete with no SDK expression' },
+  { route: 'GET /api/v1/reports', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.list' },
+  { route: 'POST /api/v1/reports', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.save' },
+  { route: 'GET /api/v1/reports/:id', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.get' },
+  { route: 'DELETE /api/v1/reports/:id', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.delete' },
+  { route: 'POST /api/v1/reports/:id/run', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.run' },
+  { route: 'POST /api/v1/reports/:id/schedule', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.schedule' },
+  { route: 'GET /api/v1/reports/:id/schedules', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.listSchedules' },
+  { route: 'DELETE /api/v1/reports/schedules/:scheduleId', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.unschedule' },
 
   // ── approvals ─────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/approvals/requests', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.listRequests' },
   { route: 'GET /api/v1/approvals/requests/:id', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.getRequest' },
   { route: 'POST /api/v1/approvals/requests/:id/approve', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.approve' },
   { route: 'POST /api/v1/approvals/requests/:id/reject', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.reject' },
-  { route: 'POST /api/v1/approvals/requests/:id/recall', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'recall/withdraw with no SDK expression' },
-  { route: 'POST /api/v1/approvals/requests/:id/revise', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'send-back-for-revision (ADR-0044) with no SDK expression' },
-  { route: 'POST /api/v1/approvals/requests/:id/resubmit', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'resubmit-after-revision with no SDK expression' },
+  { route: 'POST /api/v1/approvals/requests/:id/recall', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.recall' },
+  { route: 'POST /api/v1/approvals/requests/:id/revise', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.revise' },
+  { route: 'POST /api/v1/approvals/requests/:id/resubmit', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.resubmit' },
   { route: 'POST /api/v1/approvals/requests/:id/reassign', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.reassign' },
-  { route: 'POST /api/v1/approvals/requests/:id/remind', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'thread reminder with no SDK expression' },
-  { route: 'POST /api/v1/approvals/requests/:id/request-info', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'thread request-info with no SDK expression' },
-  { route: 'POST /api/v1/approvals/requests/:id/comment', family: 'approvals', source: 'route-manager', disposition: 'gap',
-    note: 'thread comment with no SDK expression' },
+  { route: 'POST /api/v1/approvals/requests/:id/remind', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.remind' },
+  { route: 'POST /api/v1/approvals/requests/:id/request-info', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.requestInfo' },
+  { route: 'POST /api/v1/approvals/requests/:id/comment', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.comment' },
   { route: 'GET /api/v1/approvals/requests/:id/actions', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.listActions' },
 
   // ── batch ─────────────────────────────────────────────────────────────────
@@ -242,14 +212,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'shadows the dispatcher twin (registered first); full uninstall via protocol.deletePackage (#2747)' },
 
   // ── external datasource federation (ADR-0015 §6.2, direct-mount) ──────────
-  { route: 'GET /api/v1/datasources/:name/external/tables', family: 'external-datasource', source: 'direct-mount', disposition: 'gap',
-    note: 'remote-table listing with no SDK expression (503-degrading when federation absent)' },
-  { route: 'POST /api/v1/datasources/:name/external/tables/:remote/draft', family: 'external-datasource', source: 'direct-mount', disposition: 'gap',
-    note: 'object-draft generation with no SDK expression' },
-  { route: 'POST /api/v1/datasources/:name/external/tables/:remote/import', family: 'external-datasource', source: 'direct-mount', disposition: 'gap',
-    note: 'import-as-federated-object with no SDK expression' },
-  { route: 'POST /api/v1/datasources/:name/external/refresh-catalog', family: 'external-datasource', source: 'direct-mount', disposition: 'gap',
-    note: 'catalog refresh with no SDK expression' },
-  { route: 'POST /api/v1/datasources/:name/external/validate', family: 'external-datasource', source: 'direct-mount', disposition: 'gap',
-    note: 'federated-object validation with no SDK expression' },
+  { route: 'GET /api/v1/datasources/:name/external/tables', family: 'external-datasource', source: 'direct-mount', disposition: 'sdk', client: 'datasources.external.listTables' },
+  { route: 'POST /api/v1/datasources/:name/external/tables/:remote/draft', family: 'external-datasource', source: 'direct-mount', disposition: 'sdk', client: 'datasources.external.draft' },
+  { route: 'POST /api/v1/datasources/:name/external/tables/:remote/import', family: 'external-datasource', source: 'direct-mount', disposition: 'sdk', client: 'datasources.external.import' },
+  { route: 'POST /api/v1/datasources/:name/external/refresh-catalog', family: 'external-datasource', source: 'direct-mount', disposition: 'sdk', client: 'datasources.external.refreshCatalog' },
+  { route: 'POST /api/v1/datasources/:name/external/validate', family: 'external-datasource', source: 'direct-mount', disposition: 'sdk', client: 'datasources.external.validate' },
 ];

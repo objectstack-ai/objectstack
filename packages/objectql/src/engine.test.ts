@@ -591,6 +591,50 @@ describe('ObjectQL Engine', () => {
         });
     });
 
+    describe('group posture widens driver scope to the membership union (#3623, ADR-0105 D2)', () => {
+        // Regression: the engine stamped only the active-org `tenantId` into
+        // driver options, so the SQL driver's native equality scope ANDed
+        // under the Layer 0 union and collapsed `group` reads back to
+        // active-org reach. Under the group posture (reported by the
+        // SecurityPlugin-wired provider) the engine now ALSO threads the
+        // caller's `accessible_org_ids` as `tenantIds`.
+        beforeEach(async () => {
+            engine.registerDriver(mockDriver, true);
+            await engine.init();
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: {} });
+        });
+
+        const lastFindOpts = () => (mockDriver.find as any).mock.calls.at(-1)?.[2];
+        const groupCtx = { tenantId: 'org_a', accessible_org_ids: ['org_a', 'org_b'] } as any;
+
+        it('threads accessible_org_ids as tenantIds under the group posture', async () => {
+            (engine as any).setTenancyPostureProvider(() => 'group');
+            await engine.find('task', { filters: [] }, { context: groupCtx });
+            expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a', tenantIds: ['org_a', 'org_b'] });
+        });
+
+        it('no provider (no enforcement layer) → equality only, never widened', async () => {
+            await engine.find('task', { filters: [] }, { context: groupCtx });
+            expect(lastFindOpts()?.tenantIds).toBeUndefined();
+            expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a' });
+        });
+
+        it('isolated posture → equality only (the union is a group-only widening)', async () => {
+            (engine as any).setTenancyPostureProvider(() => 'isolated');
+            await engine.find('task', { filters: [] }, { context: groupCtx });
+            expect(lastFindOpts()?.tenantIds).toBeUndefined();
+        });
+
+        it('group with an absent/empty accessible set → equality only (fail toward isolation)', async () => {
+            (engine as any).setTenancyPostureProvider(() => 'group');
+            await engine.find('task', { filters: [] }, { context: { tenantId: 'org_a', accessible_org_ids: [] } as any });
+            expect(lastFindOpts()?.tenantIds).toBeUndefined();
+            await engine.find('task', { filters: [] }, { context: { tenantId: 'org_a' } as any });
+            expect(lastFindOpts()?.tenantIds).toBeUndefined();
+        });
+
+    });
+
     describe('tenancy.enabled:false objects are platform-global (#3249, ADR-0066)', () => {
         // Regression: buildDriverOptions stamped execCtx.tenantId into driver
         // options unconditionally, so a platform-global object (sys_license)

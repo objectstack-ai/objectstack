@@ -1050,43 +1050,21 @@ const metrics = kernel.getPluginMetrics();
 
 ## Feature Flags
 
-Feature flags are a **protocol shape, not a config key**. `FeatureFlagSchema` (from
-`@objectstack/spec/kernel`) defines the flag document. There is **no `featureFlags:` /
-`features:` key on `defineStack`** — strict parsing silently strips unknown keys, so such
-config would be a no-op. (The static `ObjectStackCapabilities.system.features` descriptor
-that once carried flags was removed with the dead capabilities-descriptor cluster — no
-endpoint ever served it; runtime capability discovery is `GET /api/v1/discovery`.)
+Feature flags are **not a spec/metadata concept**. There is no `featureFlags:` /
+`features:` key on `defineStack` (strict parsing silently strips unknown keys), and the
+former `FeatureFlagSchema` (`@objectstack/spec/kernel`) was removed — it had zero runtime
+consumers, and its only protocol home (the static `ObjectStackCapabilities.system.features`
+descriptor) was itself dead: no endpoint ever served it. Runtime capability discovery is
+`GET /api/v1/discovery`.
 
-<!-- os:check -->
-```typescript
-import { FeatureFlag } from '@objectstack/spec/kernel';
+The live toggle surfaces are runtime configuration, not authored metadata:
 
-// FeatureFlag.create() gives you a compile-checked flag value:
-const aiCopilot = FeatureFlag.create({
-  name: 'experimental_ai_copilot',
-  label: 'AI Copilot',
-  enabled: true,
-  strategy: 'percentage',
-  conditions: { percentage: 25 },   // 25% of users
-  environment: 'prod',              // 'dev' | 'staging' | 'prod' | 'all' (default 'all')
-});
-
-const betaKanban = FeatureFlag.create({
-  name: 'beta_kanban_view',
-  label: 'Kanban View',
-  enabled: true,
-  strategy: 'group',
-  conditions: { groups: ['beta_testers'] },
-  environment: 'all',
-});
-```
-
-Strategies: `boolean` | `percentage` | `user_list` | `group` | `custom`
-
-Looking for live, resolvable toggles today? Those are different surfaces, not
-`FeatureFlagSchema`: the `feature_flags` settings manifest
-(`@objectstack/service-settings`, env-overridable via `OS_FEATURE_FLAGS_*`) and auth
-capability gates (`requiresFeature` → `PUBLIC_AUTH_FEATURES`).
+- **`feature_flags` settings manifest** (`@objectstack/service-settings`) — org-tunable
+  toggles like `ai_enabled` / `beta_*`, resolvable at runtime and env-overridable via
+  `OS_FEATURE_FLAGS_*` (ADR-0007 settings cascade).
+- **Auth capability gates** — `requiresFeature` on actions/params lowers to the
+  `PUBLIC_AUTH_FEATURES` registry (`kernel/public-auth-features.ts`), the fixed
+  deployment-level flags plugin-auth advertises to anonymous clients.
 
 ---
 ---

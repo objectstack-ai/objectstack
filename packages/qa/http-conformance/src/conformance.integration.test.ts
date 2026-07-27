@@ -150,6 +150,9 @@ describe.each(ADAPTERS)('IHttpServer conformance on $label adapter', ({ makePlug
     });
 
     // ── Error semantics ───────────────────────────────────────────────────
+    // These lock the FORMAL unmatched-request contract on `IHttpServer`
+    // (spec/src/contracts/http-server.ts, #3607) — no longer just observed
+    // parity: new adapters must satisfy the interface JSDoc verbatim.
 
     it('404s unknown paths with the shared not-found body', async () => {
         const res = await fetch(`${base}/api/v1/this-route-does-not-exist`);

@@ -31,9 +31,12 @@ export const SysAccount = ObjectSchema.create({
 
   // Custom actions — sysadmins routinely need to revoke a user's OAuth
   // link (e.g. when an SSO provider is decommissioned or the user
-  // requests it). Better-auth exposes `/unlink-account { providerId,
-  // accountId }` for this. The form is locked to the row's values so
-  // it acts as a one-click confirmation rather than a free-form edit.
+  // requests it). Better-auth exposes `/unlink-account { accountId }` for
+  // this, where `accountId` is the account ROW id (better-auth 1.7 narrowed
+  // the body from the old `{ providerId, accountId }` pair, and `accountId`
+  // no longer means the provider's id for the user — that field is now
+  // `providerAccountId`). The form is locked to the row's values so it acts
+  // as a one-click confirmation rather than a free-form edit.
   //
   // `link_social` is the self-service counterpart — a toolbar action
   // that redirects the browser to better-auth's social sign-in endpoint
@@ -82,8 +85,7 @@ export const SysAccount = ObjectSchema.create({
       successMessage: 'Identity link removed',
       refreshAfter: true,
       params: [
-        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
-        { name: 'accountId', field: 'account_id', defaultFromRow: true, required: true },
+        { name: 'accountId', field: 'id', defaultFromRow: true, required: true },
       ],
     },
   ],
@@ -144,7 +146,23 @@ export const SysAccount = ObjectSchema.create({
       required: true,
       description: 'OAuth provider identifier (google, github, etc.)',
     }),
-    
+
+    // better-auth 1.7 keys account identity on (issuer, account_id) rather than
+    // on the provider id alone: the issuer names the authority that vouched for
+    // that id — an OIDC `iss` claim for federated logins, or a synthetic
+    // `local:credential` / `local:oauth:<provider>` for providers that have
+    // none. better-auth writes it on every new account; rows created before the
+    // 1.7 upgrade are stamped at boot by the auth plugin's issuer backfill.
+    //
+    // Deliberately NOT `required` even though better-auth always supplies it: a
+    // NOT NULL column cannot be added to a table that already holds rows, and
+    // schema sync runs before the backfill.
+    issuer: Field.text({
+      label: 'Issuer',
+      required: false,
+      description: 'Authority that vouched for the provider account id — an OIDC issuer, or local:… for providers without one',
+    }),
+
     account_id: Field.text({
       label: 'Provider Account ID',
       required: true,
@@ -208,6 +226,10 @@ export const SysAccount = ObjectSchema.create({
   indexes: [
     { fields: ['user_id'], unique: false },
     { fields: ['provider_id', 'account_id'], unique: true },
+    // better-auth 1.7 resolves accounts by (issuer, providerAccountId) and
+    // declares that pair unique on its own `account` table — mirror it here so
+    // the physical table enforces the same identity key the auth code assumes.
+    { fields: ['issuer', 'account_id'], unique: true },
   ],
   
   enable: {

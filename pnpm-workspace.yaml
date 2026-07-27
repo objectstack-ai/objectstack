@@ -31,22 +31,32 @@ onlyBuiltDependencies:
 #     7.28.0 line (stays in the 7.x major cheerio supports). CI audit gate.
 #   - @better-auth/scim: GHSA-j8v8-g9cx-5qf4 (high) — account/provider
 #     takeover. The advisory is patched only in >=1.7.0-beta.4 — there is NO
-#     stable patched release yet (npm `latest` is still 1.6.23). Pin to the
-#     newest pre-release (1.7.0-rc.1) to clear the CI audit gate; revert to a
-#     stable `^1.7.x` line the moment one ships.
+#     stable patched release yet (npm `latest` is still on the 1.6.x line), so
+#     a pre-release pin is what clears the CI audit gate; revert to a stable
+#     `^1.7.x` line the moment one ships.
+#     Held at 1.7.0-rc.1 while the rest of the family moves to rc.2: rc.2 is a
+#     ground-up rewrite of this plugin — the `scimProvider` model and its
+#     generate-token endpoint are gone, replaced by code-defined connections
+#     plus six new models (scimUser, scimGroup, scimGroupMember, scimSubject,
+#     scimConnectionBinding, scimIdentityTombstone). Adopting it means new
+#     platform objects, retiring `sys_scim_provider`, and a new way for a
+#     tenant to register a connection — a feature migration (ADR-0071), not a
+#     version bump. rc.1's peer range accepts rc.2 core, and it still carries
+#     the advisory fix.
 #   - @better-auth/oauth-provider: GHSA-p2fr-6hmx-4528 — same better-auth
 #     monorepo and same situation as @better-auth/scim above. The fix first
-#     ships in the 1.7.0 pre-release line. Pin to 1.7.0-rc.1. The 1.7
+#     ships in the 1.7.0 pre-release line. Pin to 1.7.0-rc.2. The 1.7
 #     oauth-provider is exercised on the sign-in path and imports symbols
 #     (e.g. CLIENT_ASSERTION_TYPE) that only exist in @better-auth/core 1.7.x,
-#     so the ENTIRE better-auth family must move to 1.7.0-rc.1 together —
-#     mixing a 1.7 plugin with 1.6.23 core throws "Cannot set properties of
+#     so the ENTIRE better-auth family must move to 1.7.0-rc.2 together —
+#     mixing a 1.7 plugin with 1.6.x core throws "Cannot set properties of
 #     undefined (setting 'modelName')" during better-auth init and 500s every
-#     auth endpoint at runtime. The full family is pinned below; revert all of
-#     them to a stable `^1.7.x` line the moment one ships.
+#     auth endpoint at runtime, and mixing rc.2 with rc.1 is the same class of
+#     hazard. The full family is pinned below; revert all of them to a stable
+#     `^1.7.x` line the moment one ships.
 #     IMPORTANT: these overrides do NOT ship with published packages — a
 #     downstream `npx create-objectstack` install resolves plugin-auth's own
-#     declared ranges. plugin-auth therefore pins the same exact 1.7.0-rc.1 in
+#     declared ranges. plugin-auth therefore pins the same exact 1.7.0-rc.2 in
 #     its dependencies (a `^1.6.23` range there resolved to the broken 1.6.23
 #     mix and 500'd every fresh 15.1.0 project). Keep both in sync — CI
 #     enforces this via scripts/check-override-consistency.mjs.
@@ -75,17 +85,20 @@ overrides:
   'form-data@<4.0.6': '>=4.0.6'
   'undici@>=7.23.0 <7.28.0': '^7.28.0'
   # better-auth family — kept on one line (see @better-auth/oauth-provider note).
-  'better-auth@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/core@<1.7.0-rc.1': '1.7.0-rc.1'
+  'better-auth@<1.7.0-rc.2': '1.7.0-rc.2'
+  '@better-auth/core@<1.7.0-rc.2': '1.7.0-rc.2'
+  # scim is deliberately held one pre-release BEHIND the rest of the family —
+  # see the @better-auth/scim note above. Do not "align" it without doing the
+  # connection/credential migration first.
   '@better-auth/scim@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/oauth-provider@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/sso@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/drizzle-adapter@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/kysely-adapter@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/memory-adapter@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/mongo-adapter@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/prisma-adapter@<1.7.0-rc.1': '1.7.0-rc.1'
-  '@better-auth/telemetry@<1.7.0-rc.1': '1.7.0-rc.1'
+  '@better-auth/oauth-provider@<1.7.0-rc.2': '1.7.0-rc.2'
+  '@better-auth/sso@<1.7.0-rc.2': '1.7.0-rc.2'
+  '@better-auth/drizzle-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
+  '@better-auth/kysely-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
+  '@better-auth/memory-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
+  '@better-auth/mongo-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
+  '@better-auth/prisma-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
+  '@better-auth/telemetry@<1.7.0-rc.2': '1.7.0-rc.2'
   'uuid@<11.1.1': '^11.1.1'
   'postcss@<8.5.10': '^8.5.10'
   'cookie@<0.7.0': '0.7.0'

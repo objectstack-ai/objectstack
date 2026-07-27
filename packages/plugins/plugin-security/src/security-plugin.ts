@@ -510,6 +510,19 @@ export class SecurityPlugin implements Plugin {
         this.tenancyPosture = 'single';
       }
     }
+    // [ADR-0105 D2 / #3623] Hand the engine a posture accessor so its
+    // driver-level NATIVE tenant scoping can widen to the caller's membership
+    // union (`DriverOptions.tenantIds`) under the `group` posture. Wired from
+    // HERE — the enforcement layer — on purpose: widening the driver wall is
+    // only safe while the Layer 0 union wall enforces above it, so an
+    // embedding without SecurityPlugin never widens (drivers keep active-org
+    // equality — fail toward isolation).
+    try {
+      const engineSvc = ctx.getService<{ setTenancyPostureProvider?: (p: () => string | undefined) => void }>('objectql');
+      engineSvc?.setTenancyPostureProvider?.(() => this.tenancyPosture);
+    } catch {
+      /* engine absent — nothing to widen */
+    }
     // [ADR-0105 D11] Optional app/plugin membership resolver for the §7.3.1
     // `IN (current_user.<key>)` sets. Absent is the norm — probe once.
     try {

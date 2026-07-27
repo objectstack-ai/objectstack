@@ -89,9 +89,9 @@
     "@objectstack/trigger-schedule": "workspace:*",
     "@objectstack/types": "workspace:*",
     "@objectstack/verify": "workspace:*",
-    "@oclif/core": "^4.11.14",
+    "@oclif/core": "^4.13.0",
     "bundle-require": "^5.1.0",
-    "chalk": "^5.6.2",
+    "chalk": "^6.0.0",
     "chokidar": "^5.0.0",
     "dotenv-flow": "^4.1.0",
     "esbuild": "^0.28.1",
@@ -101,8 +101,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@oclif/plugin-help": "^6.2.53",
-    "@oclif/plugin-plugins": "^5.4.84",
+    "@oclif/plugin-help": "^6.2.55",
+    "@oclif/plugin-plugins": "^5.4.86",
     "@types/node": "^26.1.1",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",

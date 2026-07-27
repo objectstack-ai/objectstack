@@ -92,6 +92,48 @@ describe('SecurityPlugin', () => {
     await expect(plugin.destroy()).resolves.toBeUndefined();
   });
 
+  // [ADR-0105 D2 / #3623] start() hands the engine a posture accessor so the
+  // driver-level native tenant scope can widen to the membership union under
+  // `group`. Wired from the enforcement layer on purpose: no SecurityPlugin,
+  // no widening.
+  it('wires the tenancy-posture provider onto the engine, reporting the LIVE cached posture', async () => {
+    const plugin = new SecurityPlugin();
+    const registerMiddleware = vi.fn();
+    const setTenancyPostureProvider = vi.fn();
+    const manifestService = { register: vi.fn() };
+    const ctx: any = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      registerService: vi.fn(),
+      getService: vi.fn().mockImplementation((name: string) => {
+        if (name === 'manifest') return manifestService;
+        if (name === 'tenancy') return { posture: 'group' };
+        return { registerMiddleware, setTenancyPostureProvider };
+      }),
+    };
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    expect(setTenancyPostureProvider).toHaveBeenCalledWith(expect.any(Function));
+    const provider = setTenancyPostureProvider.mock.calls[0][0] as () => string;
+    expect(provider()).toBe('group');
+  });
+
+  it('an engine without the provider seam is tolerated (older engine)', async () => {
+    const plugin = new SecurityPlugin();
+    const registerMiddleware = vi.fn();
+    const manifestService = { register: vi.fn() };
+    const ctx: any = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      registerService: vi.fn(),
+      getService: vi.fn().mockImplementation((name: string) => {
+        if (name === 'manifest') return manifestService;
+        if (name === 'tenancy') return { posture: 'group' };
+        return { registerMiddleware };
+      }),
+    };
+    await plugin.init(ctx);
+    await expect(plugin.start(ctx)).resolves.toBeUndefined();
+  });
+
   // -------------------------------------------------------------------------
   // org-scoping probe — when @objectstack/plugin-org-scoping is installed
   // (i.e. the `org-scoping` service is registered), SecurityPlugin keeps

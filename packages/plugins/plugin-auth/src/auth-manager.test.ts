@@ -310,7 +310,10 @@ describe('AuthManager', () => {
       expect(capturedConfig.account.fields).toEqual(expect.objectContaining({
         userId: 'user_id',
         providerId: 'provider_id',
-        accountId: 'account_id',
+        // 1.7 identity key: (issuer, providerAccountId), the latter renamed
+        // from `accountId` but still living in the `account_id` column.
+        issuer: 'issuer',
+        providerAccountId: 'account_id',
         accessToken: 'access_token',
         refreshToken: 'refresh_token',
         idToken: 'id_token',
@@ -594,6 +597,113 @@ describe('AuthManager', () => {
       ).resolves.toBeUndefined();
       expect(dataEngine.findOne).not.toHaveBeenCalled();
       expect(dataEngine.find).not.toHaveBeenCalled();
+    });
+
+    // [ADR-0105 D8] afterAcceptInvitation → onInvitationAccepted host seam.
+    it('forwards afterAcceptInvitation to onInvitationAccepted with the mapped payload + raw rows', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+
+      const onInvitationAccepted = vi.fn();
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        plugins: { organization: true },
+        onInvitationAccepted,
+      });
+      await manager.getAuthInstance();
+      warnSpy.mockRestore();
+
+      const orgPlugin = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+      const afterAccept = orgPlugin._opts.organizationHooks?.afterAcceptInvitation;
+      expect(typeof afterAccept).toBe('function');
+
+      // The invitation row carries D8 placement intent as extension fields —
+      // the seam hands the RAW row through so the host reads them directly.
+      const invitation = { id: 'inv-1', organizationId: 'org-42', email: 'p@x.test', role: 'member', business_unit_id: 'bu-7' };
+      const member = { id: 'mem-9', userId: 'u-3', organizationId: 'org-42', role: 'member' };
+      await afterAccept({
+        invitation,
+        member,
+        user: { id: 'u-3' },
+        organization: { id: 'org-42' },
+      });
+
+      expect(onInvitationAccepted).toHaveBeenCalledTimes(1);
+      expect(onInvitationAccepted).toHaveBeenCalledWith({
+        invitationId: 'inv-1',
+        organizationId: 'org-42',
+        userId: 'u-3',
+        memberId: 'mem-9',
+        role: 'member',
+        email: 'p@x.test',
+        invitation,
+        member,
+      });
+    });
+
+    it('onInvitationAccepted failures are isolated — acceptance never rolls back', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+
+      const onInvitationAccepted = vi.fn(async () => {
+        throw new Error('placement service down');
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        plugins: { organization: true },
+        onInvitationAccepted,
+      });
+      await manager.getAuthInstance();
+
+      const orgPlugin = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+      const afterAccept = orgPlugin._opts.organizationHooks.afterAcceptInvitation;
+
+      await expect(
+        afterAccept({
+          invitation: { id: 'inv-1' },
+          member: { id: 'mem-9', userId: 'u-3' },
+          user: { id: 'u-3' },
+          organization: { id: 'org-42' },
+        }),
+      ).resolves.toBeUndefined();
+      expect(onInvitationAccepted).toHaveBeenCalledTimes(1);
+      expect(
+        warnSpy.mock.calls.some((c) => String(c[0]).includes('onInvitationAccepted callback failed')),
+      ).toBe(true);
+      warnSpy.mockRestore();
+    });
+
+    it('no onInvitationAccepted configured — the hook is a no-op', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        plugins: { organization: true },
+      });
+      await manager.getAuthInstance();
+      warnSpy.mockRestore();
+
+      const orgPlugin = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+      const afterAccept = orgPlugin._opts.organizationHooks.afterAcceptInvitation;
+      await expect(
+        afterAccept({ invitation: { id: 'i' }, member: {}, user: {}, organization: {} }),
+      ).resolves.toBeUndefined();
     });
 
     it('should register twoFactor plugin with schema mapping when enabled', async () => {
