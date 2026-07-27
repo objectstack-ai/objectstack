@@ -32,9 +32,11 @@
  * drives every SDK method and matches the URL it builds against the UNION of
  * all four ledgers — so the `route` strings below are now load-bearing for the
  * client half too, not just for dispatcher enumeration. Note what that guard
- * can and cannot do with a `dynamic` row: `* /ai/**` and `* /auth/**` claim a
- * prefix family, not a resolvable route, and 60 SDK methods match on nothing
- * stronger than that (ratcheted in the guard; #3656 tracks enumerating them).
+ * can and cannot do with a `dynamic` row: a `**` row claims a prefix family,
+ * not a resolvable route. `* /auth/**` was the worst of it — 54 SDK methods
+ * resting on a prefix claim — until #3656 enumerated better-auth's real table
+ * into `plugin-auth/src/auth-route-ledger.ts`, dropping the guard's
+ * wildcard-only count 60 → 3. The `* /ai/**` row below is what remains.
  *
  * This module is runtime-internal (not exported from the package index): it is
  * the guard's data, not public API. Promotion to `@objectstack/spec` is a
@@ -176,7 +178,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
 
   // ── auth (better-auth passthrough) ────────────────────────────────────────
   { route: '* /auth/**', domain: '/auth', disposition: 'sdk', client: 'auth.me',
-    note: 'wholesale delegate to the auth service; the client expresses 26 selected better-auth endpoints (auth/oauth/organizations surfaces) — not enumerable route-by-route here' },
+    note: 'wholesale delegate to the auth service. Not enumerable route-by-route HERE, but no longer unenumerated: since #3656 plugin-auth/src/auth-route-ledger.ts carries the 55 SDK-reached routes plus the full mounted inventory, read off better-auth\'s live auth.api table' },
 
   // ── ai (dynamic route table) ──────────────────────────────────────────────
   { route: '* /ai/**', domain: '/ai', disposition: 'dynamic',
