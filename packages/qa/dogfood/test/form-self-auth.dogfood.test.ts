@@ -9,9 +9,9 @@
 // while staying least-privilege. Proven at the engine boundary (the same
 // middleware the HTTP form-submit route flows through).
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 const idOf = (r: any) => r?.id ?? r?.record?.id ?? r?.data?.id ?? r;
 
@@ -21,12 +21,10 @@ describe('ADR-0056 Option A — public-form grant (declaration-derived)', () => 
   let ql: any;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await getSharedShowcase();
     await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
   }, 60_000);
-
-  afterAll(async () => { await stack?.stop(); });
 
   it('authorizes CREATE on exactly the declared object (no userId / no guest_portal)', async () => {
     const ctx = { publicFormGrant: { object: 'showcase_private_note' } };

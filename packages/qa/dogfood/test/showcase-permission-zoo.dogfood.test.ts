@@ -10,9 +10,9 @@
 //
 // @proof: showcase-permission-zoo
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -28,7 +28,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await getSharedShowcase();
     adminTok = await stack.signIn();
     ownerTok = await stack.signUp('zoo-owner@verify.test');
     plainTok = await stack.signUp('zoo-plain@verify.test');
@@ -74,10 +74,6 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     }
     expect(noteId, 'probe note id resolved').toBeTruthy();
   }, 120_000);
-
-  afterAll(async () => {
-    await stack?.stop();
-  });
 
   // ── The app seed can plant the platform org tree ─────────────────────────
   it('seeds the sys_business_unit tree with explicit ids and parent links', async () => {

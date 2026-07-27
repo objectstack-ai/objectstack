@@ -9,9 +9,9 @@
 // executor's security posture is pinned at the HTTP level, not just in
 // `search-filter.test.ts` unit tests.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 describe('showcase: $search over the HTTP API (ADR-0061 conformance proof)', () => {
   let stack: VerifyStack;
@@ -25,10 +25,9 @@ describe('showcase: $search over the HTTP API (ADR-0061 conformance proof)', () 
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await getSharedShowcase();
     token = await stack.signIn();
   }, 60_000);
-  afterAll(async () => { await stack?.stop(); });
 
   it('multi-field match: "retail" returns Northwind via industry, not name', async () => {
     const records = await query({ search: 'retail' });

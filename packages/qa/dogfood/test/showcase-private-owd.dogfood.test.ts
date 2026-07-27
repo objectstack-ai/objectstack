@@ -8,9 +8,9 @@
 // `owner_id`. This is the canonical "declare one word, get owner isolation"
 // capability — proven end-to-end through the real HTTP stack.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 const OBJ = '/data/showcase_private_note';
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id ?? b?.recordId;
@@ -23,7 +23,7 @@ describe('showcase: declarative private OWD (ADR-0056)', () => {
   let bNoteId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await getSharedShowcase();
     await stack.signIn(); // seed dev admin (first user)
     aToken = await stack.signUp('owd-alice@verify.test');
     bToken = await stack.signUp('owd-bob@verify.test');
@@ -40,8 +40,6 @@ describe('showcase: declarative private OWD (ADR-0056)', () => {
     expect(aNoteId, 'alice note id').toBeTruthy();
     expect(bNoteId, 'bob note id').toBeTruthy();
   }, 60_000);
-
-  afterAll(async () => { await stack?.stop(); });
 
   it('owner_id is auto-stamped (no manual assignment, no predicate)', async () => {
     const ql: any = await stack.kernel.getServiceAsync('objectql');

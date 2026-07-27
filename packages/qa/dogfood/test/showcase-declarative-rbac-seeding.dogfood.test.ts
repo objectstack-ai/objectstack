@@ -7,20 +7,19 @@
 //
 // @proof: showcase-declarative-rbac-seeding
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 describe('showcase: declarative RBAC seeding (ADR-0057 D6 / #2077)', () => {
   let stack: VerifyStack;
   let ql: any;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await getSharedShowcase();
     await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
   }, 60_000);
-  afterAll(async () => { await stack?.stop(); });
 
   it('declared roles land in sys_position (was count = 0)', async () => {
     const roles = await ql.find('sys_position', { where: {}, context: { isSystem: true } });

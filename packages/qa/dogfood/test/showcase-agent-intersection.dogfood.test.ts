@@ -18,9 +18,9 @@
 //
 // @proof: showcase-agent-intersection
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -35,7 +35,7 @@ describe('showcase: ADR-0090 D10 agent intersection (served engine)', () => {
     (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await getSharedShowcase();
     await stack.signIn(); // admin (ensures bootstrap)
     ownerTok = await stack.signUp('int-owner@verify.test');
     await stack.signUp('int-agent@verify.test');
@@ -65,10 +65,6 @@ describe('showcase: ADR-0090 D10 agent intersection (served engine)', () => {
       ?? (await ql.findOne('showcase_private_note', { where: { title: "delegator's own note" }, context: SYS }))?.id;
     expect(delsNoteId, "delegator's note id").toBeTruthy();
   }, 120_000);
-
-  afterAll(async () => {
-    await stack?.stop();
-  });
 
   // Agent context as it reaches the engine middleware (auth layer resolved the
   // agent's own grants into `permissions`; the delegator's are reconstructed

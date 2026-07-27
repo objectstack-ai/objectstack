@@ -26,9 +26,9 @@
 // is the stand-in for the #3003 approval/status/amount columns — readonly,
 // "computed by scoring rules — not user-editable", never on the create form.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 const OBJ = '/data/showcase_contact';
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id ?? b?.recordId;
@@ -40,7 +40,7 @@ describe('showcase: static readonly write enforcement (#2948 / #3003 / #3043)', 
   let contactId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await getSharedShowcase();
     await stack.signIn();
     token = await stack.signUp('ro-worker@verify.test');
 
@@ -57,8 +57,6 @@ describe('showcase: static readonly write enforcement (#2948 / #3003 / #3043)', 
     contactId = idOf(await created.json());
     expect(contactId).toBeTruthy();
   }, 60_000);
-
-  afterAll(async () => { await stack?.stop(); });
 
   it('INSERT forging the readonly field is silently stripped — the forged value never persists (#3043)', async () => {
     const res = await stack.apiAs(token, 'GET', `${OBJ}/${contactId}`);

@@ -12,9 +12,9 @@
 // is what a fresh production deployment gets) and asserts every surface denies
 // an anonymous caller with 401 while an authenticated member is unaffected.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 const OBJ = '/data/showcase_private_note';
 
@@ -23,12 +23,10 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   let memberToken: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack); // platform default (deny anonymous)
+    stack = await getSharedShowcase(); // platform default (deny anonymous)
     await stack.signIn();
     memberToken = await stack.signUp('surfaces-member@verify.test');
   }, 60_000);
-
-  afterAll(async () => { await stack?.stop(); });
 
   // ── /meta ──────────────────────────────────────────────────────────────
   it('anonymous GET /meta is denied (401)', async () => {
@@ -40,7 +38,6 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     const r = await stack.apiAs(memberToken, 'GET', '/meta');
     expect(r.status, 'authenticated metadata read must clear the auth gate').not.toBe(401);
   });
-
 
   // ── /data (surface-level; raw-hono handler proven in plugin-hono-server) ──
   it('anonymous READ of the data surface is denied (401)', async () => {

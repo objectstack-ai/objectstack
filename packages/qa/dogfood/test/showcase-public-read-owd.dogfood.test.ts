@@ -7,9 +7,9 @@
 // sibling of the `private` proof: same owner-write protection, but rows are
 // VISIBLE across owners (the read-visibility axis of OWD).
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 const OBJ = '/data/showcase_announcement';
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id ?? b?.recordId;
@@ -21,7 +21,7 @@ describe('showcase: public-read OWD (ADR-0056)', () => {
   let aAnnId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await getSharedShowcase();
     await stack.signIn();
     aToken = await stack.signUp('pr-alice@verify.test');
     bToken = await stack.signUp('pr-bob@verify.test');
@@ -31,8 +31,6 @@ describe('showcase: public-read OWD (ADR-0056)', () => {
     aAnnId = idOf(await a.json());
     expect(aAnnId).toBeTruthy();
   }, 60_000);
-
-  afterAll(async () => { await stack?.stop(); });
 
   it('every member READS another owner’s announcement (public-read)', async () => {
     const byId = await stack.apiAs(bToken, 'GET', `${OBJ}/${aAnnId}`);

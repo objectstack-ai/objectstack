@@ -16,9 +16,9 @@
 //        owning the row, and "delete" resets to the shipped declaration.
 //        Forging package provenance through the admin door stays refused.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 describe('two-doors permission separation (ADR-0086 P2)', () => {
   let stack: VerifyStack;
@@ -27,12 +27,11 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
   let adminToken: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await getSharedShowcase();
     adminToken = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
     protocol = await stack.kernel.getServiceAsync('protocol');
   }, 60_000);
-  afterAll(async () => { await stack?.stop(); });
 
   const findSet = async (name: string) =>
     (await ql.find('sys_permission_set', { where: { name } }, { context: { isSystem: true } }))?.[0];

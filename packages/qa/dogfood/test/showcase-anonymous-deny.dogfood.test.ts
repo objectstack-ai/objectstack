@@ -9,9 +9,9 @@
 // Public forms survive the same default via the declaration-derived
 // publicFormGrant — see showcase-public-form.dogfood.test.ts.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { getSharedShowcase } from './shared-showcase.js';
 
 const OBJ = '/data/showcase_private_note';
 
@@ -20,12 +20,10 @@ describe('showcase: anonymous default-deny (ADR-0056 D2)', () => {
   let memberToken: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack); // harness boots on the platform default (deny anonymous)
+    stack = await getSharedShowcase(); // harness boots on the platform default (deny anonymous)
     await stack.signIn();
     memberToken = await stack.signUp('d2-member@verify.test'); // anonymous /auth call → proves control-plane is open
   }, 60_000);
-
-  afterAll(async () => { await stack?.stop(); });
 
   it('control-plane is open for anonymous (sign-up succeeded without a token)', () => {
     expect(memberToken, 'anonymous /auth/sign-up returned a token').toBeTruthy();
