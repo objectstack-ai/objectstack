@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { defineFlow } from '@objectstack/spec';
+import { DynamicApprovalFlow } from './dynamic-approval.flow';
 
 /**
  * Task Completed → Notify — an autolaunched, record-triggered flow that fires
@@ -1620,4 +1621,6 @@ export const allFlows = [
   ResilientSyncFlow,
   ProjectEscalationFlow,
   InboundTaskWebhookFlow,
+  // #3447 P2 dogfood: expression approvers + decision outputs, end to end.
+  DynamicApprovalFlow,
 ];
