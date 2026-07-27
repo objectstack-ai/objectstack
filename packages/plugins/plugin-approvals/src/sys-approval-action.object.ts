@@ -26,6 +26,15 @@ export const SysApprovalAction = ObjectSchema.create({
   titleFormat: '{action} · {step_name}',
   highlightFields: ['request_id', 'step_name', 'action', 'actor_id', 'created_at'],
 
+  // ADR-0104 D3 wave 2. `attachments` is a media field, so the files it holds
+  // are OWNED by this row — and the storage service would otherwise authorize
+  // their download by testing whether the caller can READ this row. It cannot:
+  // this table is deliberately closed to ordinary approver positions, so that
+  // test denies the very approver the attachment was filed for. The approvals
+  // service already owns the rule for seeing a decision (visibility of the
+  // parent request, exactly as `listActions` applies it), so it answers.
+  fileAccessDelegate: 'approvals',
+
   listViews: {
     recent: {
       type: 'grid',

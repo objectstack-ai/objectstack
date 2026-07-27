@@ -192,3 +192,28 @@ export interface IStorageService {
      */
     abortChunkedUpload?(uploadId: string): Promise<void>;
 }
+
+/**
+ * A kernel service that answers file-read authorization on behalf of an object
+ * (ADR-0104 D3 wave 2). Named by that object's `fileAccessDelegate`.
+ *
+ * Exists because "can the caller READ the owning row?" — the storage service's
+ * default question — is the wrong question for an object whose access is
+ * mediated by a service rather than by row permissions. `sys_approval_action`
+ * is the motivating case: it is deliberately unreadable to ordinary approver
+ * positions, yet an approver must still be able to open a decision attachment.
+ * The approvals service already knows who may see a request's history, so it
+ * answers instead.
+ *
+ * Implementations should apply the SAME rule that governs reading the record
+ * through their own API — not a looser one. The delegate widens who can reach
+ * the bytes, so a permissive implementation is a data leak.
+ */
+export interface IFileAccessDelegate {
+    /**
+     * May this caller download a file owned by `recordId` on the delegating
+     * object? Return `false` (never throw) to deny; a throw is treated as a
+     * denial too, since authorization must fail closed.
+     */
+    authorizeFileRead(recordId: string, context: unknown): Promise<boolean>;
+}

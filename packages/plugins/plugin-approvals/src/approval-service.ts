@@ -2887,4 +2887,36 @@ export class ApprovalService implements IApprovalService {
     }
     return actions;
   }
+
+  /**
+   * `IFileAccessDelegate` — may this caller download a decision attachment?
+   * (ADR-0104 D3 wave 2; declared by `sys_approval_action.fileAccessDelegate`.)
+   *
+   * A file referenced by `sys_approval_action.attachments` is owned by that
+   * audit row, so the storage service would otherwise authorize the download by
+   * testing whether the caller can READ the row. It cannot: `sys_approval_action`
+   * is deliberately closed to ordinary approver positions, so that test denies
+   * the very approver the attachment was filed for.
+   *
+   * The rule that actually governs seeing a decision is the one `listActions`
+   * applies — can the caller see the PARENT REQUEST? — so this reuses it
+   * exactly, rather than inventing a second, looser rule for the bytes. Fails
+   * closed on any error.
+   */
+  async authorizeFileRead(actionId: string, context: SharingExecutionContext): Promise<boolean> {
+    if (!actionId) return false;
+    try {
+      const rows = await this.engine.find('sys_approval_action', {
+        where: { id: actionId },
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+      const requestId = (Array.isArray(rows) ? rows[0] : undefined)?.request_id;
+      if (!requestId) return false;
+      // Same gate as listActions: visibility of the decision's parent request.
+      return !!(await this.getRequest(String(requestId), context));
+    } catch {
+      return false;
+    }
+  }
 }

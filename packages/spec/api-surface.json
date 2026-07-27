@@ -3510,6 +3510,7 @@
     "IEmbedder (interface)",
     "IExportService (interface)",
     "IExternalDatasourceService (interface)",
+    "IFileAccessDelegate (interface)",
     "IHierarchyScopeResolver (interface)",
     "IHttpRequest (interface)",
     "IHttpResponse (interface)",

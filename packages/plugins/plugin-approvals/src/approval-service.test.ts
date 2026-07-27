@@ -9,7 +9,7 @@
  * the read API, and the global record-lock hook.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ApprovalService, REMIND_COOLDOWN_MS } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
 
@@ -2003,5 +2003,71 @@ describe('ApprovalService — queue approver is unresolved (#3508)', () => {
     // which matches no real user id — the request routes to nobody.
     expect(req.pending_approvers).toEqual(['queue:q_west']);
     expect(warnings.some(([msg]) => String(msg).includes("'queue'") && String(msg).includes('#3508'))).toBe(true);
+  });
+});
+
+// ── File-access delegate (ADR-0104 D3 wave 2) ────────────────────────
+//
+// A decision attachment is OWNED by its `sys_approval_action` row, so the
+// storage service would otherwise authorize the download by testing whether
+// the caller can READ that row. It cannot — the table is closed to ordinary
+// approver positions — which denied the very approver the attachment was filed
+// for (reproduced in the browser against app-showcase). `sys_approval_action`
+// therefore declares `fileAccessDelegate: 'approvals'` and the service answers,
+// reusing the rule that already governs seeing a decision: visibility of the
+// PARENT REQUEST, exactly as listActions applies it.
+describe('ApprovalService — authorizeFileRead delegate (ADR-0104 D3 wave 2)', () => {
+  const svcFor = (engine: any) => {
+    let n = 0;
+    return new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+    });
+  };
+
+  const seedDecision = async (engine: any) => {
+    const svc = svcFor(engine);
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9', attachments: ['file_a'] }, SYS);
+    const action = engine._tables['sys_approval_action'].find((a: any) => a.action === 'approve');
+    return { svc, req, actionId: String(action.id) };
+  };
+
+  it('allows a caller who can see the parent request', async () => {
+    const engine = makeFakeEngine();
+    const { svc, actionId } = await seedDecision(engine);
+
+    expect(await svc.authorizeFileRead(actionId, SYS)).toBe(true);
+  });
+
+  it('denies a caller who cannot see the parent request', async () => {
+    const engine = makeFakeEngine();
+    const { svc, actionId } = await seedDecision(engine);
+    // getRequest is the single gate this delegates to — when it yields nothing
+    // for this caller, the bytes must be refused too.
+    vi.spyOn(svc as any, 'getRequest').mockResolvedValue(null);
+
+    expect(await svc.authorizeFileRead(actionId, CTX)).toBe(false);
+  });
+
+  it('denies an unknown action id', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = await seedDecision(engine);
+
+    expect(await svc.authorizeFileRead('aact_does_not_exist', SYS)).toBe(false);
+    expect(await svc.authorizeFileRead('', SYS)).toBe(false);
+  });
+
+  it('fails CLOSED when the lookup throws', async () => {
+    const engine = makeFakeEngine();
+    const { svc, actionId } = await seedDecision(engine);
+    vi.spyOn(engine as any, 'find').mockRejectedValue(new Error('driver down'));
+
+    expect(await svc.authorizeFileRead(actionId, SYS)).toBe(false);
+  });
+
+  it('sys_approval_action declares the delegate, so the storage gate asks the service', async () => {
+    const { SysApprovalAction } = await import('./sys-approval-action.object.js');
+    expect((SysApprovalAction as any).fileAccessDelegate).toBe('approvals');
   });
 });
