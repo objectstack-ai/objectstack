@@ -3460,6 +3460,8 @@
     "DatasetCompareTo (interface)",
     "DatasetSelection (interface)",
     "DefineSharingRuleInput (interface)",
+    "DelegableAdminScope (interface)",
+    "DelegableScope (interface)",
     "DeployExecutionResult (interface)",
     "DriverCapabilities (interface)",
     "EMBEDDER_SERVICE (const)",
