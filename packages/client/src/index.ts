@@ -651,6 +651,133 @@ export class ObjectStackClient {
         });
         return this.unwrapResponse<{ package: any; message?: string }>(res);
     },
+
+    /* [#3563 PR-4] Lifecycle beyond install/enable — these eleven routes
+     * existed server-side (ADR-0033 drafts, ADR-0067 commits, ADR-0070
+     * portability) with no SDK expression; Studio reached them via raw
+     * fetch. Shapes mirror `domains/packages.ts` exactly. */
+
+    /**
+     * Edit a package's manifest (partial: name / description / version).
+     * Identity (`id` / `scope` / `type`) and lifecycle state are not editable
+     * here; the server rejects an empty patch and non-semantic versions.
+     */
+    update: async (id: string, patch: { name?: string; description?: string; version?: string }) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(patch),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** Publish the package's metadata snapshot. */
+    publish: async (id: string, opts?: Record<string, unknown>) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/publish`, {
+            method: 'POST',
+            body: JSON.stringify(opts ?? {}),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0033 "publish whole app": promote every pending draft bound to the
+     * package to active in one shot. Published `seed` drafts also materialize
+     * their rows (reported under `seedApplied`).
+     */
+    publishDrafts: async (id: string, opts?: { actor?: string }) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/publish-drafts`, {
+            method: 'POST',
+            body: JSON.stringify(opts ?? {}),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** ADR-0033: drop every pending draft bound to the package. */
+    discardDrafts: async (id: string, opts?: { actor?: string }) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/discard-drafts`, {
+            method: 'POST',
+            body: JSON.stringify(opts ?? {}),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** ADR-0067: the package's commit timeline (newest-first). */
+    listCommits: async (id: string) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/commits`);
+        return this.unwrapResponse<{ commits: any[] }>(res);
+    },
+
+    /** ADR-0067: revert ONE commit (the revert is itself a commit). */
+    revertCommit: async (id: string, commitId: string, opts?: { actor?: string }) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(id)}/commits/${encodeURIComponent(commitId)}/revert`,
+            { method: 'POST', body: JSON.stringify(opts ?? {}) },
+        );
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** ADR-0067: roll back through all commits newer than `commitId`. */
+    rollback: async (id: string, commitId: string, opts?: { actor?: string }) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/rollback`, {
+            method: 'POST',
+            body: JSON.stringify({ commitId, ...(opts ?? {}) }),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** Revert the package to its last published state. */
+    revert: async (id: string) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/revert`, {
+            method: 'POST',
+        });
+        return this.unwrapResponse<{ success: boolean }>(res);
+    },
+
+    /**
+     * ADR-0070: assemble the package's portable manifest (offline export) —
+     * the same shape `marketplace-install-local` consumes.
+     */
+    export: async (id: string) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/export`);
+        return this.unwrapResponse<any>(res);
+    },
+
+    /** ADR-0070 D5: bulk-rebind package-less (orphaned) metadata into this base. */
+    adoptOrphans: async (id: string, opts?: { actor?: string }) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/adopt-orphans`, {
+            method: 'POST',
+            body: JSON.stringify(opts ?? {}),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0070 D4: clone this base into a NEW writable package,
+     * re-namespacing objects and rewriting references.
+     * `targetPackageId` is required (the server 400s without it).
+     */
+    duplicate: async (
+        id: string,
+        targetPackageId: string,
+        opts?: { targetName?: string; targetNamespace?: string; actor?: string },
+    ) => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/duplicate`, {
+            method: 'POST',
+            body: JSON.stringify({ targetPackageId, ...(opts ?? {}) }),
+        });
+        return this.unwrapResponse<any>(res);
+    },
   };
 
   /**
