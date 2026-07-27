@@ -27,8 +27,14 @@
  * path pattern with a client method that exists; it does not check that the
  * client builds a URL any server actually mounts. The three `/i18n` rows below
  * looked healthy for exactly that reason while two of the three SDK methods
- * spoke a `?locale=` dialect nothing routed (#3636). Cross-surface URL
- * conformance is the capstone guard tracked in #3642.
+ * spoke a `?locale=` dialect nothing routed (#3636). That direction is covered
+ * since #3642 by `packages/client/src/client-url-conformance.test.ts`, which
+ * drives every SDK method and matches the URL it builds against the UNION of
+ * all four ledgers — so the `route` strings below are now load-bearing for the
+ * client half too, not just for dispatcher enumeration. Note what that guard
+ * can and cannot do with a `dynamic` row: `* /ai/**` and `* /auth/**` claim a
+ * prefix family, not a resolvable route, and 60 SDK methods match on nothing
+ * stronger than that (ratcheted in the guard; #3656 tracks enumerating them).
  *
  * This module is runtime-internal (not exported from the package index): it is
  * the guard's data, not public API. Promotion to `@objectstack/spec` is a
