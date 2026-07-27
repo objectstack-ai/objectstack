@@ -101,8 +101,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@oclif/plugin-help": "^6.2.53",
-    "@oclif/plugin-plugins": "^5.4.84",
+    "@oclif/plugin-help": "^6.2.55",
+    "@oclif/plugin-plugins": "^5.4.86",
     "@types/node": "^26.1.1",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
