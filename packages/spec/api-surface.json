@@ -3092,6 +3092,8 @@
     "DashboardNavItemSchema (const)",
     "DashboardSchema (const)",
     "DashboardWidget (type)",
+    "DashboardWidgetOptions (type)",
+    "DashboardWidgetOptionsSchema (const)",
     "DashboardWidgetSchema (const)",
     "Dataset (type)",
     "DatasetDimension (type)",
