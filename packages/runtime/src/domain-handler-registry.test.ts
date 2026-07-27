@@ -236,3 +236,68 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
         expect(result.response?.status ?? 404).not.toBe(200);
     });
 });
+
+// ---------------------------------------------------------------------------
+// PR-3 — keys / storage / ui extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
+    it('POST /keys rejects anonymous callers with 401 (identity gate inside the extracted body)', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/keys', { name: 'k' }, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(401);
+    });
+
+    it('GET /keys answers 405 (mint is POST-only), and /keysfoo is NOT claimed (segment semantics)', async () => {
+        const dispatcher = makeDispatcher();
+        const wrongMethod = await dispatcher.dispatch('GET', '/keys', undefined, {}, {} as any);
+        expect(wrongMethod.response?.status).toBe(405);
+        const lexical = await dispatcher.dispatch('POST', '/keysfoo', { name: 'k' }, {}, {} as any);
+        expect(lexical.response?.status ?? 404).not.toBe(405);
+    });
+
+    it('POST /keys mints a key pinned to the caller (thin delegate carries the extracted body)', async () => {
+        const insert = vi.fn().mockResolvedValue({ id: 'key-row-1' });
+        const objectql = {
+            insert,
+            find: vi.fn().mockResolvedValue([]),
+            getObjects: vi.fn().mockReturnValue({}),
+            registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
+        };
+        const context: any = { executionContext: { userId: 'caller-1' } };
+        // Direct delegate call — dispatch() would re-resolve identity off the
+        // auth-less mock kernel and overwrite the seeded executionContext.
+        const result = await makeDispatcher({ objectql }).handleKeys('POST', { name: 'CI Key', user_id: 'attacker' }, context);
+        expect(result.response?.status).toBe(201);
+        const row = insert.mock.calls[0][1];
+        expect(insert.mock.calls[0][0]).toBe('sys_api_key');
+        // user_id pinned to caller; body's user_id ignored; only the hash stored.
+        expect(row.user_id).toBe('caller-1');
+        expect(row.key).not.toBe(result.response?.body?.data?.key);
+        expect(result.response?.body?.data?.key).toBeTruthy();
+    });
+
+    it('/storage responds 501 when file-storage is not configured (extracted body keeps in-handler semantics)', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/storage/upload', { blob: 1 }, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(501);
+    });
+
+    it('/storage/upload uploads through the file-storage service', async () => {
+        const upload = vi.fn().mockResolvedValue({ id: 'f1' });
+        const result = await makeDispatcher({ 'file-storage': { upload, download: vi.fn() } })
+            .dispatch('POST', '/storage/upload', { some: 'file' }, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(upload).toHaveBeenCalledTimes(1);
+    });
+
+    it('/ui/view/:object serves the protocol getUiView result; 503 without a protocol service', async () => {
+        const getUiView = vi.fn().mockResolvedValue({ view: 'list-def' });
+        const ok = await makeDispatcher({ protocol: { getUiView } }).dispatch('GET', '/ui/view/account/list', undefined, {}, {} as any);
+        expect(ok.response?.status).toBe(200);
+        expect(getUiView).toHaveBeenCalledWith({ object: 'account', type: 'list' });
+
+        const missing = await makeDispatcher().dispatch('GET', '/ui/view/account', undefined, {}, {} as any);
+        expect(missing.response?.status).toBe(503);
+    });
+});

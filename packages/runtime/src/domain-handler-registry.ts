@@ -80,6 +80,13 @@ export interface DomainHandlerDeps {
     resolveService(name: string, environmentId?: string): any;
     /** Unscoped service lookup on the current kernel (may return a Promise). */
     getService(name: string): any;
+    /**
+     * Environment-scoped ObjectQL lookup with a registry-shape check
+     * (resolves the `objectql` service and returns it only when it exposes
+     * `.registry`; null otherwise). The data-plane domains (/keys today,
+     * /data /meta when they migrate) depend on this.
+     */
+    getObjectQL(environmentId?: string): Promise<any>;
     /** Standard success envelope. */
     success(data: any, meta?: any): { status: number; body: any };
     /** Standard error envelope. */

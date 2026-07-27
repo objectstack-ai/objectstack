@@ -19,6 +19,9 @@ import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analyti
 import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
 import { createNotificationsDomain, handleNotificationRequest } from './domains/notifications.js';
 import { createSecurityDomain, handleSecurityRequest } from './domains/security.js';
+import { createKeysDomains, handleKeysRequest } from './domains/keys.js';
+import { createStorageDomain, handleStorageRequest } from './domains/storage.js';
+import { createUiDomain, handleUiRequest } from './domains/ui.js';
 
 /** Minimal local interface — full EnvironmentScopeManager was removed in Phase R. */
 interface EnvironmentScopeManager {
@@ -28,7 +31,6 @@ import {
     resolveExecutionContext,
     isPermissionDeniedError,
 } from './security/resolve-execution-context.js';
-import { generateApiKey } from './security/api-key.js';
 
 /** Browser-safe UUID generator — prefers Web Crypto, falls back to RFC 4122 v4 */
 function randomUUID(): string {
@@ -241,6 +243,7 @@ export class HttpDispatcher {
         // Deps take plain strings (domain modules pass CoreServiceName enum
         // values anyway); the dispatcher method's parameter is the enum type.
         getService: (name) => this.getService(name as Parameters<HttpDispatcher['getService']>[0]),
+        getObjectQL: (environmentId) => this.getObjectQLService(environmentId),
         success: (data, meta) => this.success(data, meta),
         error: (message, code, details) => this.error(message, code, details),
     };
@@ -287,6 +290,9 @@ export class HttpDispatcher {
         this.domainRegistry.register(createI18nDomain(this.domainDeps));
         this.domainRegistry.register(createNotificationsDomain(this.domainDeps));
         this.domainRegistry.register(createSecurityDomain(this.domainDeps));
+        for (const route of createKeysDomains(this.domainDeps)) this.domainRegistry.register(route);
+        this.domainRegistry.register(createStorageDomain(this.domainDeps));
+        this.domainRegistry.register(createUiDomain(this.domainDeps));
     }
 
     /**
@@ -1473,101 +1479,9 @@ export class HttpDispatcher {
         return 'global';
     }
 
-    /**
-     * Generate a `sys_api_key` and return the raw secret EXACTLY ONCE
-     * (`POST /keys`). This is the only mint path — the raw key is never stored
-     * (only its sha256 hash) and never re-displayable.
-     *
-     * Security (zero-tolerance):
-     *  - Requires an authenticated principal; `user_id` is PINNED to that
-     *    caller and is NEVER read from the request body (no impersonation).
-     *  - Body is whitelisted to `name` (+ optional `expires_at`); any
-     *    `key` / `id` / `user_id` / `revoked` in the body is ignored, so a
-     *    caller cannot forge a known-secret or escalate.
-     *  - `scopes` are intentionally NOT accepted from the body in v1: the
-     *    verify path ADDS scopes to the principal's permissions, so honouring
-     *    arbitrary body scopes would be an escalation vector. A generated key
-     *    therefore acts exactly AS the caller (via `user_id` resolution).
-     *    Narrowing/scoped keys need subset-enforcement — deferred.
-     *  - The raw key and its hash never enter logs or error messages.
-     *  - The row is written with an elevated `{ isSystem: true }` context
-     *    because `sys_api_key` is protection-locked; safe because the row's
-     *    contents are fully server-controlled (user_id pinned to caller).
-     */
+    /** Thin delegate — body (incl. the zero-tolerance security contract) extracted to `./domains/keys.ts` (D11③ PR-3). */
     async handleKeys(method: string, body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        if (method !== 'POST') {
-            return { handled: true, response: this.error('Method not allowed', 405) };
-        }
-
-        const ec = context.executionContext;
-        if (!ec || !ec.userId) {
-            return { handled: true, response: this.error('Unauthorized: sign in to generate an API key', 401) };
-        }
-
-        // ── Whitelist the body. Only `name` and optional `expires_at`. ──
-        const rawName = typeof body?.name === 'string' ? body.name.trim() : '';
-        const name = rawName || 'API Key';
-
-        let expiresAt: string | undefined;
-        if (body?.expires_at != null && body.expires_at !== '') {
-            const ms = typeof body.expires_at === 'number'
-                ? (body.expires_at < 1e12 ? body.expires_at * 1000 : body.expires_at)
-                : Date.parse(String(body.expires_at));
-            if (Number.isNaN(ms)) {
-                return { handled: true, response: this.error('Invalid expires_at: must be a parseable date', 400) };
-            }
-            if (ms <= Date.now()) {
-                return { handled: true, response: this.error('Invalid expires_at: must be in the future', 400) };
-            }
-            expiresAt = new Date(ms).toISOString();
-        }
-
-        const ql = (await this.getObjectQLService(context.environmentId))
-            ?? (await this.resolveService('objectql', context.environmentId));
-        if (!ql || typeof ql.insert !== 'function') {
-            return { handled: true, response: this.error('Data service not available', 503) };
-        }
-
-        // Generate AFTER validation so we never mint on a rejected request.
-        const generated = generateApiKey();
-
-        // Server-controlled row. user_id is pinned to the caller; only the hash
-        // is persisted. NOTHING from the body can set key/id/user_id/revoked.
-        const row: Record<string, unknown> = {
-            name,
-            key: generated.hash,
-            prefix: generated.prefix,
-            user_id: ec.userId,
-            revoked: false,
-        };
-        if (expiresAt) row.expires_at = expiresAt;
-
-        let inserted: any;
-        try {
-            inserted = await ql.insert('sys_api_key', row, { context: { isSystem: true } });
-        } catch {
-            // Never surface the underlying error (could echo row contents).
-            return { handled: true, response: this.error('Failed to create API key', 500) };
-        }
-        const id = inserted?.id ?? (Array.isArray(inserted) ? inserted[0]?.id : undefined);
-
-        // Raw key returned ONCE. Do not log it.
-        return {
-            handled: true,
-            response: {
-                status: 201,
-                body: {
-                    success: true,
-                    data: {
-                        id,
-                        name,
-                        prefix: generated.prefix,
-                        key: generated.raw,
-                        ...(expiresAt ? { expires_at: expiresAt } : {}),
-                    },
-                },
-            },
-        };
+        return handleKeysRequest(this.domainDeps, method, body, context);
     }
 
     /**
@@ -3346,88 +3260,14 @@ export class HttpDispatcher {
         }
     }
 
-    /**
-     * Handles Storage requests
-     * path: sub-path after /storage/
-     */
+    /** Thin delegate — body extracted to `./domains/storage.ts` (D11③ PR-3). */
     async handleStorage(path: string, method: string, file: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        const storageService = await this.getService(CoreServiceName.enum['file-storage']) || this.kernel.services?.['file-storage'];
-        if (!storageService) {
-             return { handled: true, response: this.error('File storage not configured', 501) };
-        }
-        
-        const m = method.toUpperCase();
-        const parts = path.replace(/^\/+/, '').split('/');
-        
-        // POST /storage/upload
-        if (parts[0] === 'upload' && m === 'POST') {
-            if (!file) {
-                 return { handled: true, response: this.error('No file provided', 400) };
-            }
-            const result = await storageService.upload(file, { request: context.request });
-            return { handled: true, response: this.success(result) };
-        }
-        
-        // GET /storage/file/:id
-        if (parts[0] === 'file' && parts[1] && m === 'GET') {
-            const id = parts[1];
-            const result = await storageService.download(id, { request: context.request });
-            
-            // Result can be URL (redirect), Stream/Blob, or metadata
-            if (result.url && result.redirect) {
-                // Must be handled by adapter to do actual redirect
-                return { handled: true, result: { type: 'redirect', url: result.url } };
-            }
-            
-            if (result.stream) {
-                 // Must be handled by adapter to pipe stream
-                 return { 
-                     handled: true, 
-                     result: { 
-                         type: 'stream', 
-                         stream: result.stream, 
-                         headers: {
-                             'Content-Type': result.mimeType || 'application/octet-stream',
-                             'Content-Length': result.size
-                         }
-                     } 
-                 };
-            }
-            
-            return { handled: true, response: this.success(result) };
-        }
-        
-        return { handled: false };
+        return handleStorageRequest(this.domainDeps, path, method, file, context);
     }
 
-    /**
-     * Handles UI requests
-     * path: sub-path after /ui/
-     */
+    /** Thin delegate — body extracted to `./domains/ui.ts` (D11③ PR-3). */
     async handleUi(path: string, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
-        
-        // GET /ui/view/:object (with optional type param)
-        if (parts[0] === 'view' && parts[1]) {
-            const objectName = parts[1];
-            // Support both path param /view/obj/list AND query param /view/obj?type=list
-            const type = parts[2] || query?.type || 'list';
-
-            const protocol = await this.resolveService('protocol');
-            
-            if (protocol && typeof protocol.getUiView === 'function') {
-                try {
-                    const result = await protocol.getUiView({ object: objectName, type });
-                    return { handled: true, response: this.success(result) };
-                } catch (e: any) {
-                    return { handled: true, response: this.error(e.message, 500) };
-                }
-            } else {
-                 return { handled: true, response: this.error('Protocol service not available', 503) };
-            }
-        }
-
-        return { handled: false };
+        return handleUiRequest(this.domainDeps, path, query, _context);
     }
 
     /**
@@ -4479,22 +4319,14 @@ export class HttpDispatcher {
             return this.handleMcp(body, context);
         }
 
-        if (cleanPath === '/keys' || cleanPath.startsWith('/keys/') || cleanPath.startsWith('/keys?')) {
-            return this.handleKeys(method, body, context);
-        }
+        // /keys moved to the domain registry (D11 step ③).
 
         if (cleanPath.startsWith('/graphql')) {
              if (method === 'POST') return this.handleGraphQL(body, context);
              // GraphQL usually GET for Playground is handled by middleware but we can return 405 or handle it
         }
 
-        if (cleanPath.startsWith('/storage')) {
-             return this.handleStorage(cleanPath.substring(8), method, body, context); // body here is file/stream for upload
-        }
-        
-        if (cleanPath.startsWith('/ui')) {
-             return this.handleUi(cleanPath.substring(3), query, context);
-        }
+        // /storage and /ui moved to the domain registry (D11 step ③).
 
         if (cleanPath.startsWith('/automation')) {
              return this.handleAutomation(cleanPath.substring(11), method, body, context, query);
