@@ -40,14 +40,20 @@
     },
     "body": {
       "status": "dead",
+      "authorWarn": true,
+      "authorHint": "The dispatcher always sends its own fixed envelope (object/recordId/action/timestamp + full record); a custom `body` is never sent (#1878).",
       "note": "No consumer. The bridge folds it into definition_json (bootstrap-declared-webhooks.ts:203), but parseRow never reads a custom body and the dispatcher always sends its own fixed envelope (object/recordId/action/timestamp + full record, auto-enqueuer.ts:336-342). Enforce-or-remove (#1878)."
     },
     "payloadFields": {
       "status": "dead",
+      "authorWarn": true,
+      "authorHint": "No field projection — the full record is always sent; `payloadFields` is ignored (#1878).",
       "note": "No consumer. In definition_json now, but there is no field projection — the full record is always sent (auto-enqueuer.ts:341). Enforce-or-remove (#1878)."
     },
     "includeSession": {
       "status": "dead",
+      "authorWarn": true,
+      "authorHint": "No session is injected into the webhook payload; `includeSession` is ignored (#1878).",
       "note": "No consumer. In definition_json now, but no session is injected into the enqueue payload (auto-enqueuer.ts:336-342). Enforce-or-remove (#1878)."
     },
     "authentication": {
@@ -57,7 +63,9 @@
     },
     "retryPolicy": {
       "status": "dead",
-      "note": "No consumer. In definition_json now, but retry is not in EnqueueHttpInput (service-messaging/src/http-outbox.ts:87-98) — the messaging HttpDispatcher owns a fixed retry schedule; authored maxRetries/backoffStrategy/initialDelayMs/maxDelayMs are ignored. (The showcase's TaskChangedWebhook still authors a retryPolicy that does nothing.) Enforce-or-remove (#1878)."
+      "authorWarn": true,
+      "authorHint": "The retry schedule is owned by the shared messaging HTTP dispatcher — authored maxRetries/backoffStrategy/initialDelayMs/maxDelayMs are ignored (#1878). Remove them until enforcement lands.",
+      "note": "No consumer. In definition_json now, but retry is not in EnqueueHttpInput (service-messaging/src/http-outbox.ts:87-98) — the messaging HttpDispatcher owns a fixed retry schedule; authored maxRetries/backoffStrategy/initialDelayMs/maxDelayMs are ignored. (The showcase's TaskChangedWebhook still authors a retryPolicy that does nothing.) Enforce-or-remove (#1878). Now that authoring is otherwise live, this is the misleading-dead prop that carries the author warning (previously `url` did, as the whole-artifact-dead heads-up)."
     },
     "timeoutMs": {
       "status": "live",

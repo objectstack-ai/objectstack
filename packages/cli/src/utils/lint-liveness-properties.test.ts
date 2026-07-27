@@ -159,27 +159,26 @@ describe('lintLivenessProperties', () => {
     expect(findings).toEqual([]);
   });
 
-  // ── webhook (#3462) ───────────────────────────────────────────────────────
-  // The ENTIRE WebhookSchema authoring surface is disconnected from the
-  // sys_webhook dispatcher (#3461): authoring `webhooks:` never materializes a
-  // dispatchable row. Rather than warn on all 16 dead props, the ledger warns
-  // once per webhook via the required `url` carrier — one no-op heads-up per
-  // artifact. These run against the REAL webhook.json ledger.
+  // ── webhook (#3461 bridge landed → #3490) ─────────────────────────────────
+  // The WebhookSchema authoring surface is now materialized into dispatchable
+  // sys_webhook rows on boot (#3489), so most props are live. The author warning
+  // moved OFF the now-live `url` carrier onto the props that are STILL dead and
+  // misleading — retryPolicy/body/payloadFields/includeSession (folded into
+  // definition_json but never read) — plus experimental `authentication`. These
+  // run against the REAL webhook.json ledger.
 
-  it('warns once per authored webhook via the url carrier', () => {
+  it('does not warn on a webhook that only authors now-live props (#3490)', () => {
     const findings = lintLivenessProperties({
-      webhooks: [{ name: 'w1', url: 'https://hooks.example/x' }],
+      webhooks: [{ name: 'w1', object: 'task', triggers: ['create'], url: 'https://hooks.example/x', method: 'POST', isActive: true }],
     });
-    const f = findings.find((x) => x.message.includes('`url`'));
-    expect(f).toBeDefined();
-    expect(f!.where).toBe("webhook 'w1'");
-    expect(f!.hint.toLowerCase()).toContain('sys_webhook');
+    expect(findings).toEqual([]);
   });
 
-  it('emits exactly one warning for a fully-authored (showcase-shaped) webhook', () => {
-    // object/triggers/method/retryPolicy/isActive/description are all dead too,
-    // but only `url` carries authorWarn — so the whole no-op artifact yields ONE
-    // finding, not one-per-prop. (isActive is default(true), deliberately unmarked.)
+  it('emits exactly one warning for the showcase webhook — its still-dead retryPolicy', () => {
+    // object/triggers/url/method/isActive/description are live now; only
+    // retryPolicy is still dead + misleading (the messaging dispatcher owns a
+    // fixed retry schedule), so the showcase-shaped webhook yields ONE finding,
+    // not one-per-prop.
     const findings = lintLivenessProperties({
       webhooks: [{
         name: 'showcase_task_changed',
@@ -193,7 +192,8 @@ describe('lintLivenessProperties', () => {
       }],
     });
     expect(findings.length).toBe(1);
-    expect(findings[0].message).toContain('`url`');
+    expect(findings[0].message).toContain('`retryPolicy`');
+    expect(findings[0].where).toBe("webhook 'showcase_task_changed'");
   });
 
   it('also warns on authentication (experimental — HMAC-secret-only)', () => {
@@ -203,7 +203,7 @@ describe('lintLivenessProperties', () => {
     expect(paths(findings).some((m) => m.includes('`authentication`'))).toBe(true);
   });
 
-  it('does NOT warn on isActive (default(true) boolean, deliberately unmarked)', () => {
+  it('does NOT warn on isActive (live now — remapped to sys_webhook.active by the bridge)', () => {
     const findings = lintLivenessProperties({
       webhooks: [{ name: 'w1', url: 'https://hooks.example/x', isActive: true }],
     });
