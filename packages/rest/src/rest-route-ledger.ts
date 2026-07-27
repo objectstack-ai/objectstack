@@ -108,8 +108,8 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'compound-name save; same encoding barrier as the compound read' },
 
   // ── ui ────────────────────────────────────────────────────────────────────
-  { route: 'GET /api/v1/ui/view/:object/:type', family: 'ui', source: 'route-manager', disposition: 'mismatch',
-    note: 'path-param dialect; meta.getView sends /ui/view/:object?type= (query dialect), which this pattern cannot match — the dispatcher /ui domain answers it instead. Reconcile shapes or retire one dialect.' },
+  { route: 'GET /api/v1/ui/view/:object/:type', family: 'ui', source: 'route-manager', disposition: 'sdk', client: 'meta.getView',
+    note: 'was mismatch — meta.getView spoke the ?type= query dialect this pattern cannot match; since #3611 the client sends the path form both surfaces accept' },
 
   // ── data CRUD ─────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/data/:object', family: 'crud', source: 'route-manager', disposition: 'sdk', client: 'data.find' },
@@ -232,8 +232,8 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'POST /api/v1/data/:object/deleteMany', family: 'batch', source: 'route-manager', disposition: 'sdk', client: 'data.deleteMany' },
 
   // ── packages (direct-mount registrar, service-gated) ──────────────────────
-  { route: 'POST /api/v1/packages', family: 'packages', source: 'direct-mount', disposition: 'mismatch',
-    note: 'REST handler is registry publish ({manifest, metadata}); the dispatcher /packages domain gives POST /packages install semantics with a different body. REST registers first, so packages.install traffic lands here — reconcile before relying on either.' },
+  { route: 'POST /api/v1/packages/publish', family: 'packages', source: 'direct-mount', disposition: 'server-only',
+    note: 'marketplace registry publish ({manifest, metadata}) — publisher tooling, not app-SDK surface. Moved off the bare POST /packages in #3610: that verb+path is the dispatcher install route, and REST registering it first swallowed every packages.install call with a 400.' },
   { route: 'GET /api/v1/packages', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.list',
     note: 'shadows the dispatcher twin (registered first); merges registry + database packages' },
   { route: 'GET /api/v1/packages/:id', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.get',

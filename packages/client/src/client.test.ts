@@ -105,6 +105,20 @@ describe('ObjectStackClient', () => {
         expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/v1/meta/object/customer', expect.any(Object));
         expect(result.name).toBe('customer');
     });
+
+    it('meta.getView speaks the path-param dialect both surfaces accept (#3611)', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { type: 'list' } });
+        await client.meta.getView('customer');
+        // NOT the ?type= query dialect — REST mounts only /ui/view/:object/:type,
+        // so the query form 404s wherever REST is the serving surface.
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/ui/view/customer/list',
+        );
+        await client.meta.getView('customer', 'form');
+        expect(String(fetchMock.mock.calls[1][0])).toBe(
+            'http://localhost:3000/api/v1/ui/view/customer/form',
+        );
+    });
 });
 
 describe('Approvals namespace (ADR-0019)', () => {

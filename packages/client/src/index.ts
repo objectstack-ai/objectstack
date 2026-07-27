@@ -495,7 +495,14 @@ export class ObjectStackClient {
     
     getView: async (object: string, type: 'list' | 'form' = 'list') => {
         const route = this.getRoute('ui');
-        const res = await this.fetch(`${this.baseUrl}${route}/view/${object}?type=${type}`);
+        // Path-param dialect (#3611): both surfaces accept it — the dispatcher
+        // /ui domain takes /view/:object/:type?, and the REST server mounts
+        // ONLY /ui/view/:object/:type. The old ?type= query dialect matched
+        // nothing on REST, so it 404'd wherever REST is the serving surface
+        // (e.g. project-scoped bases).
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/view/${encodeURIComponent(object)}/${type}`,
+        );
         return this.unwrapResponse(res);
     },
 

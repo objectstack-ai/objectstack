@@ -32,10 +32,18 @@ export interface PackageRoutesOptions {
  *
  * Provides endpoints for publishing, retrieving, and managing packages.
  * Routes:
- * - POST /api/v1/packages - Publish a package
+ * - POST /api/v1/packages/publish - Publish a package to the marketplace registry
  * - GET /api/v1/packages - List all packages (merges registry + database)
  * - GET /api/v1/packages/:id - Get a specific package
  * - DELETE /api/v1/packages/:id - Delete a package
+ *
+ * Marketplace publish lives at `/packages/publish`, NOT at the bare
+ * `POST /packages` (#3610): that verb+path is the dispatcher packages
+ * domain's *install* route, and this registrar registers first in the
+ * production stack (first-match-wins), so claiming it here silently
+ * swallowed every `client.packages.install` call with a 400. The
+ * dispatcher's own `POST /packages/:id/publish` (ADR-0033 draft publish)
+ * is two segments — different shape, no clash.
  */
 export function registerPackageRoutes(
   server: IHttpServer,
@@ -45,8 +53,8 @@ export function registerPackageRoutes(
 ) {
   const packagesPath = `${basePath}/packages`;
 
-  // POST /api/v1/packages - Publish a package
-  server.post(packagesPath, async (req, res) => {
+  // POST /api/v1/packages/publish - Publish a package to the marketplace
+  server.post(`${packagesPath}/publish`, async (req, res) => {
     try {
       const { manifest, metadata } = req.body || {};
 
