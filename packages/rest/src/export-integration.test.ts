@@ -383,3 +383,110 @@ describe('export route — FLS column projection (#3391 blocking)', () => {
     }
   });
 });
+
+// ===========================================================================
+// #3547: export column projection via the security service's getReadableFields
+// — the LONG-TERM correct path that replaces inferring readability from masked
+// data rows (#3498). The route asks `security.getReadableFields(object, ctx)`
+// for the readable column set BEFORE streaming, so the header is derived from
+// the schema + context, never from row content — immune to an all-null
+// readable column and to an empty result set.
+// ===========================================================================
+describe('export route — FLS column projection via getReadableFields (#3547)', () => {
+  // Boot a real engine + protocol, seed tasks, and wire a RestServer whose
+  // `security` service (host provider) resolves to the supplied
+  // getReadableFields — mirroring how plugin-security registers the service.
+  async function bootWithSecurity(opts: {
+    getReadableFields: (object: string, context?: any) => string[] | undefined;
+    tasks?: Array<Record<string, unknown>>;
+  }) {
+    const { driver } = makeMemoryDriver();
+    const engine = new ObjectQL();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject(USER as any);
+    engine.registry.registerObject(TASK as any);
+    await engine.insert('user', { id: 'u1', name: '张三' });
+    const tasks = opts.tasks ?? [
+      { id: '1', title: '写代码', done: true, priority: 'high', due: '2026-06-30T00:00:00.000Z', owner: 'u1' },
+      { id: '2', title: '写文档', done: false, priority: 'low', due: '2026-07-01T00:00:00.000Z', owner: 'u1' },
+    ];
+    for (const t of tasks) await engine.insert('task', t);
+    const protocol = new ObjectStackProtocolImplementation(engine as any);
+    // 16th positional ctor arg is `securityServiceProvider`.
+    const securityServiceProvider = async () => ({ getReadableFields: opts.getReadableFields });
+    const rest = new RestServer(
+      createMockServer() as any,
+      protocol as any,
+      { api: { requireAuth: false } } as any,
+      undefined, // kernelManager
+      undefined, // envRegistry
+      undefined, // defaultEnvironmentIdProvider
+      undefined, // authServiceProvider
+      undefined, // objectQLProvider
+      undefined, // emailServiceProvider
+      undefined, // sharingServiceProvider
+      undefined, // reportsServiceProvider
+      undefined, // approvalsServiceProvider
+      undefined, // sharingRulesServiceProvider
+      undefined, // i18nServiceProvider
+      undefined, // analyticsServiceProvider
+      undefined, // settingsServiceProvider
+      undefined, // serviceExistsProvider
+      securityServiceProvider,
+    );
+    rest.registerRoutes();
+    const route = rest.getRoutes().find(
+      (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',
+    );
+    return { engine, route };
+  }
+
+  it('projects columns from getReadableFields — drops a masked field even though rows still carry it', async () => {
+    // The service says `title` is NOT readable; every row still HAS a title
+    // value. The route must drop 标题 from the header — proving the projection
+    // comes from the service, not the row keys (the masked-row inference would
+    // have kept 标题 because it is present in the rows).
+    const { route } = await bootWithSecurity({
+      getReadableFields: () => ['id', 'done', 'priority', 'due', 'owner'],
+    });
+    const csv = makeRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, csv.res);
+    const header = parseCsv(csv.chunks.join(''))[0];
+    expect(header).not.toContain('标题');
+    expect(header).toEqual(['ID', '完成', '优先级', '截止', '负责人']);
+  });
+
+  it('keeps a readable column that is absent from every row (null-value immunity)', async () => {
+    // All tasks omit `due` → the masked-row inference would DROP 截止 from the
+    // header (no row carries the key). getReadableFields lists it, so the
+    // column survives — the header no longer depends on row content.
+    const { route } = await bootWithSecurity({
+      getReadableFields: () => ['id', 'title', 'done', 'priority', 'due', 'owner'],
+      tasks: [
+        { id: '1', title: 'A', done: true, priority: 'high', owner: 'u1' }, // no `due`
+        { id: '2', title: 'B', done: false, priority: 'low', owner: 'u1' }, // no `due`
+      ],
+    });
+    const csv = makeRes();
+    await route.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, csv.res);
+    const header = parseCsv(csv.chunks.join(''))[0];
+    expect(header).toContain('截止'); // survives despite being absent from every row
+    expect(header).toEqual(['ID', '标题', '完成', '优先级', '截止', '负责人']);
+  });
+
+  it('explicit ?fields= is still honored verbatim (service projection only narrows schema-derived headers)', async () => {
+    // getReadableFields would drop `title`, but an explicit request wins — the
+    // projection only applies to schema-derived headers (fieldsFromSchema).
+    const { route } = await bootWithSecurity({
+      getReadableFields: () => ['id', 'done'],
+    });
+    const csv = makeRes();
+    await route.handler(
+      { params: { object: 'task' }, query: { format: 'csv', fields: 'id,title' } } as any,
+      csv.res,
+    );
+    const header = parseCsv(csv.chunks.join(''))[0];
+    expect(header).toEqual(['ID', '标题']); // requested columns kept as asked
+  });
+});

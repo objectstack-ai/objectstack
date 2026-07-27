@@ -546,6 +546,12 @@ export class SecurityPlugin implements Plugin {
       };
       ctx.registerService('security', {
         getReadFilter: (object: string, context?: any) => this.getReadFilter(object, context),
+        // [#3547] Readable-field projection for a context — the authoritative
+        // column set for a read-derived export (`export ⊆ list`, #3391).
+        // Same field mask as the read middleware (no drift). The REST export
+        // route uses it to project columns instead of inferring readability
+        // from already-masked data rows. See getReadableFields.
+        getReadableFields: (object: string, context?: any) => this.getReadableFields(object, context),
         // [ADR-0046 §6.7] Effective permission-set NAMES for a caller — the
         // primitive the REST read layer needs to evaluate a permission-set-
         // gated book/doc audience ({ permissionSet: '…' }). Same resolution
@@ -571,7 +577,7 @@ export class SecurityPlugin implements Plugin {
         dismissAudienceBindingSuggestion: (callerContext: any, id: string) =>
           dismissAudienceBindingSuggestion(suggestionDeps, callerContext, id),
       });
-      ctx.logger.info('[security] registered "security" service (getReadFilter, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / #3547');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -2042,6 +2048,71 @@ export class SecurityPlugin implements Plugin {
       );
       return { ...RLS_DENY_FILTER };
     }
+  }
+
+  /**
+   * [#3547] Query surface: the field names the caller MAY READ on `object`
+   * under `context`. This is the authoritative column projection for a
+   * read-derived export (`export ⊆ list`, #3391) — the REST export route
+   * consumes it to project columns directly, instead of inferring readability
+   * from already-masked data rows (which loses an all-readable-but-all-null
+   * column and falls back to the full schema on an empty result set, #3498).
+   *
+   * Same-source-as-read-middleware, so it can never drift from data-plane FLS:
+   * it resolves the caller's permission sets via
+   * {@link resolvePermissionSetsForContext}, builds the field-permission map
+   * with the SAME evaluator + `requiredPermissions` fold the read mask uses,
+   * intersects the on-behalf-of delegator's mask (ADR-0090 D10, fail-closed on
+   * a dangling delegator), then returns every schema field NOT marked
+   * non-readable — the exact complement of what {@link FieldMasker.maskResults}
+   * deletes (fields without an explicit permission entry pass through).
+   *
+   * Returns `undefined` when the object schema can't be resolved, so the caller
+   * falls back to its own projection. A system context (`context.isSystem`)
+   * bypasses FLS and returns the full field set, mirroring the middleware's
+   * `isSystem` skip.
+   */
+  async getReadableFields(object: string, context?: any): Promise<string[] | undefined> {
+    const objectName = String(object ?? '');
+    if (!objectName) return undefined;
+    // The field universe — the SAME source the RLS field pass uses (ObjectQL's
+    // live SchemaRegistry first, metadata artifact fallback). `null` → schema
+    // not resolvable → let the caller fall back rather than guess.
+    const fieldNameSet = await this.getObjectFieldNames(this.metadata, objectName, this.ql);
+    if (!fieldNameSet) return undefined;
+    const allFields = [...fieldNameSet];
+    // System operations bypass FLS (mirrors the middleware's isSystem skip).
+    if (context?.isSystem) return allFields;
+
+    const permissionSets = await this.resolvePermissionSetsForContext(context);
+    // No sets resolved (e.g. unauthenticated) → no field mask applies, exactly
+    // as the middleware (getFieldPermissions([]) === {} → nothing deleted).
+    if (permissionSets.length === 0) return allFields;
+
+    const secMeta = await this.getObjectSecurityMeta(objectName);
+    let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
+    fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
+
+    // [ADR-0090 D10] On an on-behalf-of read the readable set must NOT widen
+    // past what the DELEGATOR can read — intersect the delegator's field mask
+    // too. A dangling delegator fails CLOSED (expose no columns), the same
+    // fail-closed stance the CRUD middleware takes on a 'missing' delegator.
+    if (context?.onBehalfOf?.userId) {
+      const del = await resolveDelegatorContext(this.ql, context);
+      if (del.kind === 'missing') return [];
+      if (del.kind === 'resolved') {
+        const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+        let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
+        delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
+        fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
+      }
+    }
+
+    // Readable = every schema field NOT explicitly masked non-readable. A field
+    // with no permission entry passes through (the field allow-list only
+    // enumerates fields it names) — the exact complement of maskResults' delete
+    // set, so the export header matches list's readable columns by construction.
+    return allFields.filter((f) => fieldPerms[f]?.readable !== false);
   }
 
   /**

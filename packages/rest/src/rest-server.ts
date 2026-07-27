@@ -4325,6 +4325,35 @@ export class RestServer {
                     // (and thus a name). Batched $in inside findData — no N+1.
                     const expandFields = referenceFieldNames(metaMap);
 
+                    // [#3547] Column projection ≡ list's field-level security — the
+                    // LONG-TERM correct path. Ask the security service which fields the
+                    // caller may READ under this context (the SAME field mask the read
+                    // middleware applies, so it can never drift) and narrow the
+                    // schema-derived header to that set BEFORE streaming. This replaces
+                    // inferring readability from the first masked data chunk (#3498): it
+                    // is immune to an all-readable-but-all-null column (which a driver may
+                    // omit from every row) and to an empty result set (which left the
+                    // masked-row inference with nothing to narrow). Explicit `?fields=`
+                    // requests are honored as asked (fieldsFromSchema=false → untouched;
+                    // values still masked to empty by the read path). When no security
+                    // service is reachable (no plugin-security / single-kernel without a
+                    // provider) the per-chunk masked-row inference below remains as the
+                    // fallback, so there is zero regression.
+                    let readableProjected = false;
+                    if (fieldsFromSchema && fields && fields.length > 0) {
+                        try {
+                            const security = await this.resolveSecurityService(environmentId, req);
+                            if (security && typeof security.getReadableFields === 'function') {
+                                const readable = await security.getReadableFields(objectName, context);
+                                if (Array.isArray(readable)) {
+                                    const readableSet = new Set(readable);
+                                    fields = fields.filter((f) => readableSet.has(f));
+                                    readableProjected = true;
+                                }
+                            }
+                        } catch { /* fall back to the masked-row inference below */ }
+                    }
+
                     // Prepare streaming response. Set headers BEFORE first write.
                     if (format === 'csv') {
                         res.header('Content-Type', 'text/csv; charset=utf-8');
@@ -4378,18 +4407,19 @@ export class RestServer {
                             fields = Object.keys(rows[0] ?? {});
                         }
 
-                        // [#3391] Column projection ≡ list's field-level security.
-                        // The read middleware (FieldMasker) DELETES unreadable keys from
-                        // each row, so a schema-derived header would still leak the
-                        // *names* of FLS-hidden columns as empty cells. Narrow the
-                        // schema-derived header to the keys actually present across the
-                        // first masked chunk (their ∩ with schema fields is implicit —
-                        // `fields` already came from `metaMap.keys()`), so export headers
-                        // match list's readable columns. Explicit `?fields=` requests are
-                        // left untouched (values still masked to empty, as with list
-                        // `$select`); a fully empty first chunk leaves the header as-is
-                        // (same as today — no worse).
-                        if (fieldsFromSchema && firstChunk && fields && fields.length > 0) {
+                        // [#3391] Column projection ≡ list's field-level security —
+                        // FALLBACK path when the #3547 security-service projection above
+                        // was unavailable (`!readableProjected`). The read middleware
+                        // (FieldMasker) DELETES unreadable keys from each row, so a
+                        // schema-derived header would still leak the *names* of FLS-hidden
+                        // columns as empty cells. Narrow the schema-derived header to the
+                        // keys actually present across the first masked chunk (their ∩
+                        // with schema fields is implicit — `fields` already came from
+                        // `metaMap.keys()`), so export headers match list's readable
+                        // columns. Explicit `?fields=` requests are left untouched (values
+                        // still masked to empty, as with list `$select`); a fully empty
+                        // first chunk leaves the header as-is (same as today — no worse).
+                        if (!readableProjected && fieldsFromSchema && firstChunk && fields && fields.length > 0) {
                             const readable = new Set<string>();
                             for (const row of rows) {
                                 if (row && typeof row === 'object') {
@@ -4451,6 +4481,28 @@ export class RestServer {
                 tags: ['data', 'export'],
             },
         });
+    }
+
+    /**
+     * [#3547] Resolve the environment's `security` service — the ENVIRONMENT's
+     * kernel service first (its evaluator / FieldMasker are bound to that
+     * kernel's data engine), the host provider as the single-kernel fallback.
+     * Mirrors the resolver in registerSecurityExplainEndpoints. Returns
+     * `undefined` when no security service is reachable (no plugin-security /
+     * single-kernel without a provider), so callers degrade gracefully.
+     */
+    private async resolveSecurityService(environmentId?: string, req?: any): Promise<any | undefined> {
+        try {
+            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
+            if (envId && envId !== 'platform' && this.kernelManager) {
+                const kernel = await this.kernelManager.getOrCreate(envId);
+                const svc = await kernel.getServiceAsync<any>('security').catch(() => undefined);
+                if (svc) return svc;
+            }
+        } catch { /* fall back to the host provider */ }
+        if (!this.securityServiceProvider) return undefined;
+        try { return await this.securityServiceProvider(environmentId); }
+        catch { return undefined; }
     }
 
     /**
