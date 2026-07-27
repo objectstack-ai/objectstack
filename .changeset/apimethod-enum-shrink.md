@@ -1,12 +1,15 @@
 ---
-"@objectstack/spec": major
+"@objectstack/spec": minor
 "@objectstack/objectql": patch
 "@objectstack/platform-objects": patch
 ---
 
 feat(spec)!: shrink the `ApiMethod` enum to the six primitives — legacy values are stripped at parse, never honored (#3543, P2 of #3391)
 
-**BREAKING:** the authored `enable.apiMethods` enum is now exactly the six
+**BREAKING** (ships as `minor` per the lockstep launch-window policy — every
+package versions together, so a `major` here would promote the entire
+monorepo; the `!` marker and this changeset are the breaking-change record):
+the authored `enable.apiMethods` enum is now exactly the six
 primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`). The eight
 legacy values (`upsert`, `aggregate`, `history`, `search`, `restore`, `purge`,
 `import`, `export`) are no longer authorable — they are DERIVED effective
