@@ -127,6 +127,18 @@ function idTokensIn(value: unknown): string[] {
   return isFileIdToken(value) ? [value] : [];
 }
 
+/** Does `row`'s recorded owner name exactly this slot? */
+function isSameSlot(
+  row: Record<string, unknown>,
+  object: string,
+  recordId: string,
+  field: string,
+): boolean {
+  return (
+    row.ref_object === object && String(row.ref_id) === String(recordId) && row.ref_field === field
+  );
+}
+
 /**
  * Is this module live for `objectName`? Guards every entry point:
  *  - `sys_file` itself is excluded so the module's own bookkeeping writes
@@ -229,13 +241,9 @@ async function applyCopyOnClaim(
       // Unclaimed: the after-hook will claim it for this slot. Nothing to copy.
       if (row.ref_id == null) continue;
       // Already ours (an update rewriting the same value) — no-op.
-      if (
-        row.ref_object === object &&
-        String(row.ref_id) === String(recordId ?? ' ') &&
-        row.ref_field === field
-      ) {
-        continue;
-      }
+      // `recordId` is null on insert, where a brand-new record can never be
+      // the current owner — so there, every already-owned id is a copy.
+      if (recordId !== null && isSameSlot(row, object, recordId, field)) continue;
 
       const storage = getStorage();
       if (!storage) {
@@ -286,10 +294,7 @@ async function claimFile(
 ): Promise<void> {
   const row = await engine.findOne('sys_file', { where: { id: fileId }, context: { ...SYSTEM_CTX } });
   if (!row) return; // not a platform-managed file — nothing to own
-  if (
-    row.ref_id != null &&
-    !(row.ref_object === object && String(row.ref_id) === String(recordId) && row.ref_field === field)
-  ) {
+  if (row.ref_id != null && !isSameSlot(row, object, recordId, field)) {
     logger.warn(
       `[storage] file reference: ${fileId} is already owned by ` +
         `${row.ref_object}/${row.ref_id}.${row.ref_field} — not transferring it to ${object}/${recordId}.${field}`,
