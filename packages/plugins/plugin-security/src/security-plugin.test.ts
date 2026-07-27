@@ -453,19 +453,21 @@ describe('SecurityPlugin', () => {
       await harness.run(opCtx); // must not throw
     });
 
-    it('[ADR-0105 D5] a write that omits organization_id is STAMPED with the active org', async () => {
+    it("a write that doesn't supply organization_id is untouched (auto-stamp's job)", async () => {
       const harness = await boot();
       const opCtx: any = {
         object: 'task', operation: 'insert', data: { name: 'A' },
         context: memberCtx(),
       };
-      await harness.run(opCtx); // must not throw — the stamped value satisfies the wall
-      // The engine owns the stamp under any wall-enforcing posture; the enterprise
-      // organizations plugin remains free to run too (neither overwrites a value).
-      expect(opCtx.data.organization_id).toBe('org-1');
+      await harness.run(opCtx); // must not throw — no cross-tenant check on an absent value
+      // [ADR-0105 D5/D12] SecurityPlugin never stamps organization_id. That stays
+      // with the enterprise organizations runtime, which is also what activates a
+      // walled posture — so a forged `org-scoping` registration yields NULL-org
+      // rows the wall hides (a broken deployment), not a working unlicensed one.
+      expect(opCtx.data.organization_id).toBeUndefined();
     });
 
-    it('[ADR-0105 D5] a BULK insert stamps every row that omits organization_id', async () => {
+    it('[ADR-0105 D5] a BULK insert leaves rows that omit organization_id untouched', async () => {
       const harness = await boot();
       const opCtx: any = {
         object: 'task', operation: 'insert',
@@ -473,7 +475,7 @@ describe('SecurityPlugin', () => {
         context: memberCtx(),
       };
       await harness.run(opCtx);
-      expect(opCtx.data.map((r: any) => r.organization_id)).toEqual(['org-1', 'org-1']);
+      expect(opCtx.data.map((r: any) => r.organization_id)).toEqual([undefined, 'org-1']);
     });
 
     it('[ADR-0105 D5] a BULK insert with ONE forged row is denied entirely', async () => {

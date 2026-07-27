@@ -61,25 +61,39 @@ describe('createTenancyService', () => {
     expect(t.degraded).toBe(false);
   });
 
-  // [ADR-0105 D1/D12] `group` is enforced by the OPEN engine — the union wall,
-  // `accessible_org_ids`, and write stamping are all open code — so it never
-  // probes for the enterprise package and can never resolve degraded.
-  describe('group posture (open-enforced)', () => {
-    it('is active without the enterprise org-scoping service', () => {
-      const probe = vi.fn(() => false);
-      const t = createTenancyService({ requested: 'group', probeIsolation: probe });
+  // [ADR-0105 D1 / ADR-0081 D2] Multi-organization operation is an ENTITLEMENT.
+  // The wall's code is open, but activating either walled posture requires the
+  // enterprise org-scoping runtime — otherwise `group` would be a free multi-org
+  // back door around the `isolated` gate. The iron rule (cloud ADR-0016) is
+  // satisfied by refusing to run an unwalled multi-org deployment, not by giving
+  // the posture away: an unenforceable request resolves to `single` + degraded,
+  // and the CLI fails fast on that (ADR-0093 D5).
+  describe('group posture (entitled, like isolated)', () => {
+    it('is ACTIVE when the enterprise org-scoping service is present', () => {
+      const t = createTenancyService({ requested: 'group', probeIsolation: () => true });
       expect(t.posture).toBe('group');
       expect(t.isolationActive).toBe(true);
-      expect(t.requested).toBe(true);
       expect(t.degraded).toBe(false);
-      expect(probe).not.toHaveBeenCalled();
     });
 
-    it('never guesses a default org — membership is explicit', async () => {
+    it('DEGRADES without the enterprise package — never a silent free multi-org', () => {
+      const probe = vi.fn(() => false);
+      const t = createTenancyService({ requested: 'group', probeIsolation: probe });
+      expect(t.requestedPosture).toBe('group');
+      expect(t.posture).toBe('single'); // behaves single-org — nothing walls it
+      // The probe is lazy — org-scoping registers after plugin-auth — so it
+      // fires on the first read of a derived fact, not at construction.
+      expect(probe).toHaveBeenCalled();
+      expect(t.isolationActive).toBe(false);
+      expect(t.requested).toBe(true);
+      expect(t.degraded).toBe(true);
+    });
+
+    it('never guesses a default org while active — membership is explicit', async () => {
       const engine = makeEngine([{ id: 'org_default', slug: 'default' }]);
       const t = createTenancyService({
         requested: 'group',
-        probeIsolation: () => false,
+        probeIsolation: () => true,
         getEngine: () => engine,
       });
       expect(await t.defaultOrgId()).toBeNull();
@@ -167,5 +181,86 @@ describe('resolveDefaultOrgId', () => {
   it('returns null for a missing/invalid engine', async () => {
     expect(await resolveDefaultOrgId(undefined)).toBeNull();
     expect(await resolveDefaultOrgId({})).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [ADR-0105 D12] Posture ENTITLEMENT is declared by the commercial runtime.
+//
+// Presence-of-package answers "may this deployment run multi-org at all", not
+// "which shapes of it". Whether `group` and `isolated` are one tier or two is a
+// packaging decision the enterprise runtime owns, so the open core asks instead
+// of assuming — and fails closed on anything not entitled.
+// ---------------------------------------------------------------------------
+describe('posture entitlement declared by the org-scoping runtime', () => {
+  const installed = () => true;
+
+  it('entitles every walled posture when the runtime declares nothing (back-compat)', () => {
+    for (const posture of ['group', 'isolated'] as const) {
+      const t = createTenancyService({
+        requested: posture,
+        probeIsolation: installed,
+        probeEntitledPostures: () => undefined,
+      });
+      expect(t.posture, posture).toBe(posture);
+      expect(t.degraded).toBe(false);
+    }
+  });
+
+  it('activates a posture the runtime DOES entitle', () => {
+    const t = createTenancyService({
+      requested: 'group',
+      probeIsolation: installed,
+      probeEntitledPostures: () => ['group'],
+    });
+    expect(t.posture).toBe('group');
+    expect(t.isolationActive).toBe(true);
+    expect(t.degraded).toBe(false);
+  });
+
+  it('DEGRADES a posture the runtime does not entitle, even though it is installed', () => {
+    // e.g. a licence covering legal-entity isolation but not the group shape.
+    const t = createTenancyService({
+      requested: 'group',
+      probeIsolation: installed,
+      probeEntitledPostures: () => ['isolated'],
+    });
+    expect(t.requestedPosture).toBe('group');
+    expect(t.posture).toBe('single');
+    expect(t.isolationActive).toBe(false);
+    expect(t.degraded).toBe(true); // → the CLI refuses to boot (ADR-0093 D5)
+  });
+
+  it('fails closed on an EMPTY entitlement set', () => {
+    const t = createTenancyService({
+      requested: 'isolated',
+      probeIsolation: installed,
+      probeEntitledPostures: () => [],
+    });
+    expect(t.isolationActive).toBe(false);
+    expect(t.degraded).toBe(true);
+  });
+
+  it('fails closed when the entitlement probe throws', () => {
+    const t = createTenancyService({
+      requested: 'group',
+      probeIsolation: installed,
+      probeEntitledPostures: () => {
+        throw new Error('licence service unreachable');
+      },
+    });
+    expect(t.isolationActive).toBe(false);
+    expect(t.degraded).toBe(true);
+  });
+
+  it('never consults entitlement when the runtime is absent (already degraded)', () => {
+    const entitle = vi.fn(() => ['group'] as const);
+    const t = createTenancyService({
+      requested: 'group',
+      probeIsolation: () => false,
+      probeEntitledPostures: entitle,
+    });
+    expect(t.degraded).toBe(true);
+    expect(entitle).not.toHaveBeenCalled();
   });
 });

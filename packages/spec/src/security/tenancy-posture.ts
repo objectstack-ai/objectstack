@@ -20,9 +20,18 @@
  * group-wide visibility and cross-org workflow are inherent to the shape, and
  * a hard per-org wall makes both an architecture problem.
  *
- * The wall's CORRECTNESS is never a paid feature (cloud ADR-0016 铁律): every
- * posture is enforced by the open engine. What stays commercial is managing
- * organizations at scale, not being safe.
+ * ## Open code, entitled activation
+ *
+ * The wall's IMPLEMENTATION is open — the Layer 0 compiler, `accessible_org_ids`
+ * resolution and the D5 write stamping all ship in open packages — but ENABLING
+ * a multi-organization posture (`group` or `isolated`) requires the enterprise
+ * `@objectstack/organizations` runtime (ADR-0081 D2). The two are separate
+ * questions and must not be conflated: open code does not mean free activation.
+ *
+ * Cloud ADR-0016's 铁律 (强制免费、治理收费) is satisfied by the first half alone —
+ * it guarantees that a deployment RUNNING a multi-org shape is safe, which the
+ * platform delivers by REFUSING to run one unwalled (ADR-0093 D5), not by giving
+ * the posture away. You never silently get an unenforced organization boundary.
  */
 
 import { z } from 'zod';
@@ -46,9 +55,16 @@ export function postureEnforcesWall(posture: TenancyPosture): boolean {
 }
 
 /**
- * Does this posture stamp and validate `organization_id` on write (ADR-0105 D5)?
- * True exactly when a wall is enforced — the write side must be the twin of the
- * read side or a forged/absent value would slip under the wall.
+ * Does this posture require `organization_id` to be stamped on write?
+ *
+ * True exactly when a wall is enforced: an absent value would land a row behind
+ * a wall that then hides it. The STAMPER, however, is the enterprise
+ * `@objectstack/organizations` runtime, not the open engine — the same runtime
+ * whose presence activates these postures in the first place, so the two can
+ * never be out of step. This predicate is the shared vocabulary that runtime
+ * compiles against; the open engine only VALIDATES supplied values (the write
+ * side of the Layer 0 wall), which is a security property rather than a
+ * packaging one.
  */
 export function postureStampsOrganization(posture: TenancyPosture): boolean {
   return postureEnforcesWall(posture);
@@ -63,6 +79,23 @@ export function postureStampsOrganization(posture: TenancyPosture): boolean {
  */
 export function postureUsesUnionScope(posture: TenancyPosture): boolean {
   return posture === 'group';
+}
+
+/**
+ * [ADR-0105 D12] The shape the `org-scoping` service may expose to declare which
+ * walled postures the installed multi-organization runtime entitles.
+ *
+ * Presence-of-package answers "may this deployment run multi-org at all"; it
+ * cannot answer "which shapes of it" — that is a packaging decision, and the
+ * commercial runtime owns it. Declaring the set here lets the enterprise package
+ * gate `group` and `isolated` independently (different tiers, a license flag, a
+ * trial) without the open core hard-coding anyone's price list.
+ *
+ * Omitting `supportedPostures` entitles every walled posture, which is what
+ * every runtime predating this seam did.
+ */
+export interface OrgScopingEntitlement {
+  readonly supportedPostures?: readonly TenancyPosture[];
 }
 
 /**

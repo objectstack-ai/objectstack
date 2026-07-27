@@ -11,6 +11,7 @@ import {
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { resolveTenancyPosture } from '@objectstack/types';
+import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
 import {
   AuthManager,
   resolveOidcProviderEnabled,
@@ -283,6 +284,18 @@ export class AuthPlugin implements Plugin {
           return false;
         }
       },
+      // [ADR-0105 D12] Which walled postures the installed multi-org runtime
+      // entitles. The open side ASKS rather than assuming "package present ⇒
+      // every posture": whether `group` and `isolated` are one commercial tier
+      // or two is packaging policy, and that belongs to the commercial runtime.
+      // A runtime that declares nothing keeps today's behavior (both).
+      probeEntitledPostures: () => {
+        try {
+          return ctx.getService<OrgScopingEntitlement>('org-scoping')?.supportedPostures;
+        } catch {
+          return undefined;
+        }
+      },
       getEngine: () => {
         try {
           return ctx.getService('objectql');
@@ -552,18 +565,13 @@ export class AuthPlugin implements Plugin {
       await this.maybeSeedDevAdmin(ctx);
     });
 
-    // ADR-0081 D1 — default-organization bootstrap, owned here for every posture
-    // the OPEN engine enforces (`single` and, per ADR-0105 D12, `group`).
-    // `isolated` keeps its existing owner (the enterprise organizations package,
-    // which runs the same idempotent helper with the seed-ownership step
-    // injected); one crisp owner per posture.
-    //
-    // `group` needs this as much as `single` does: the union wall resolves an
-    // EMPTY access set for a member of no organization and fails closed, so an
-    // open group deployment with no first organization could not admit its own
-    // admin. The bootstrap creates exactly one org and binds the first platform
-    // admin as owner; every further organization is created deliberately.
-    if (this.options.autoDefaultOrganization !== false && resolveTenancyPosture() !== 'isolated') {
+    // ADR-0081 D1 — single-org default-organization bootstrap. Every WALLED
+    // posture (`group` and `isolated`) keeps its existing owner: the enterprise
+    // organizations package, which runs the same idempotent helper with the
+    // seed-ownership step injected. One crisp owner per posture, and the open
+    // package never bootstraps an organization for a deployment whose
+    // multi-organization runtime it does not provide.
+    if (this.options.autoDefaultOrganization !== false && !postureEnforcesWall(resolveTenancyPosture())) {
       const runEnsure = async () => {
         try {
           const ql: any = ctx.getService<any>('objectql');

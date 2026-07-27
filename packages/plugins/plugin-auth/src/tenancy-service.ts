@@ -22,15 +22,22 @@
  *   business-unit tree.
  * - `group` — wall = `organization_id IN accessible_org_ids`. Organizations are
  *   membership/invitation boundaries over one shared dataset, with union (MOAC)
- *   read access. **Enforced by the OPEN engine**: the Layer 0 union wall, the
- *   `accessible_org_ids` resolution, and the D5 write stamping/validation all
- *   ship open, because the correctness of a wall is never a paid feature
- *   (cloud ADR-0016 铁律「强制免费、治理收费」). Managing organizations at
- *   scale stays commercial.
+ *   read access.
  * - `isolated` — wall = `organization_id = activeOrganizationId`. The hard
- *   legal-entity wall, formerly spelled `multi`. Its machinery still comes from
- *   the enterprise `@objectstack/organizations` package, so this posture keeps
- *   the historical `org-scoping` probe and can still resolve DEGRADED.
+ *   legal-entity wall, formerly spelled `multi`.
+ *
+ * ## Open code, entitled activation
+ *
+ * Both walled postures require the enterprise `@objectstack/organizations`
+ * package (the `org-scoping` service) to ACTIVATE, and both can resolve
+ * DEGRADED without it. The wall's implementation is open — the Layer 0
+ * compiler, `accessible_org_ids` resolution and the D5 write
+ * stamping/validation all ship in open packages — but multi-organization
+ * operation is a commercial capability (ADR-0081 D2).
+ *
+ * That is not in tension with cloud ADR-0016's 铁律 (强制免费、治理收费): the rule
+ * guarantees a deployment RUNNING a multi-org shape is safe, which is satisfied
+ * by refusing to run one unwalled (ADR-0093 D5), not by giving the posture away.
  *
  * Registered by plugin-auth (the open-core home, alongside the default-org
  * bootstrap).
@@ -90,10 +97,25 @@ export interface TenancyServiceDeps {
    * cheap (a service-registry lookup); consumers that read it hot should cache
    * the result themselves, as SecurityPlugin does at `start()`.
    *
-   * Consulted ONLY for the `isolated` posture. `group` is enforced by the open
-   * engine and never probes.
+   * Consulted for BOTH walled postures (`group` and `isolated`).
    */
   probeIsolation: () => boolean;
+  /**
+   * [ADR-0105 D12] Which walled postures the installed multi-org runtime
+   * ENTITLES, as declared by that runtime itself (`org-scoping`'s optional
+   * `supportedPostures`).
+   *
+   * Presence-of-package is a coarse entitlement: it answers "may this
+   * deployment run multi-org at all", not "which shapes of it". Deciding that
+   * `group` and `isolated` are the same commercial tier — or different ones —
+   * is a PACKAGING policy, and packaging policy belongs to the commercial
+   * runtime, not to this open-core service. So the open side asks instead of
+   * assuming, and fails closed on anything not entitled.
+   *
+   * `undefined` (no declaration) means "every walled posture", preserving the
+   * behavior of every runtime that predates this seam.
+   */
+  probeEntitledPostures?: () => readonly TenancyPosture[] | undefined;
   /** ObjectQL engine accessor, for {@link TenancyService.defaultOrgId}. */
   getEngine?: () => unknown | undefined;
   logger?: { info?: (msg: string, meta?: any) => void; warn?: (msg: string, meta?: any) => void };
@@ -143,15 +165,30 @@ export function createTenancyService(deps: TenancyServiceDeps): TenancyService {
    * Can the REQUESTED posture actually be enforced?
    *
    * - `single` — nothing to enforce.
-   * - `group` — always: the union wall, `accessible_org_ids`, and write
-   *   stamping/validation are all open-engine code (ADR-0105 D12).
-   * - `isolated` — only with the enterprise org-scoping machinery.
+   * - `group` / `isolated` — only with the org-scoping machinery registered.
+   *
+   * BOTH walled postures probe. The wall's CODE is open (the Layer 0 compiler,
+   * `accessible_org_ids` resolution and D5 stamping all live in open packages),
+   * but ENABLING a multi-organization posture is an entitlement — exactly the
+   * shape `isolated` has had since ADR-0081 D2. Open code, entitled activation:
+   * the two are separate questions, and conflating them is what briefly made
+   * `group` a free multi-org back door around the `isolated` gate.
+   *
+   * This does not weaken cloud ADR-0016's iron rule (强制免费、治理收费). The rule
+   * is that a deployment RUNNING the group shape must be safe, not that anyone
+   * may switch it on: a `group` request that cannot be enforced resolves to
+   * `single` and reports {@link TenancyService.degraded}, and the CLI refuses to
+   * boot on that unless the operator explicitly opts in (ADR-0093 D5). You never
+   * silently get unwalled multi-org — you get a refusal.
    */
   const isolationActive = (): boolean => {
     if (requestedPosture === 'single') return false;
-    if (requestedPosture === 'group') return true;
     try {
-      return !!deps.probeIsolation();
+      if (!deps.probeIsolation()) return false;
+      // The runtime is installed; ask whether it entitles THIS posture.
+      const entitled = deps.probeEntitledPostures?.();
+      if (entitled && !entitled.includes(requestedPosture)) return false;
+      return true;
     } catch {
       return false;
     }

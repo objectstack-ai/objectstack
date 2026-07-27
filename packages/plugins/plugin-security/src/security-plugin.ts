@@ -41,7 +41,6 @@ import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenan
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
-  postureStampsOrganization,
   type TenancyPosture,
 } from '@objectstack/spec/security';
 import {
@@ -1425,21 +1424,21 @@ export class SecurityPlugin implements Plugin {
       // platform admin on a posture-permitting object is exempt via Layer 0 (same
       // rule as reads/insert).
       //
-      // [ADR-0105 D5] Two changes here, both closing gaps in the above:
+      // [ADR-0105 D5] BULK inserts are covered here too. The check previously
+      // required a non-array payload, so an `insert` of an ARRAY of rows could
+      // carry a forged `organization_id` per row and never meet the wall — the
+      // same defect #2937 closed for the single-row shape, one call-site down
+      // (AGENTS.md #10: a `case` label is not enforcement, check the call site).
       //
-      //   • STAMPING moved into the engine. `organization_id` used to be filled
-      //     only by the enterprise organizations plugin, so the `group` posture —
-      //     which the open engine now enforces — would have written NULL-org rows
-      //     that its own wall then hides. Under any wall-enforcing posture the
-      //     engine stamps the caller's ACTIVE organization onto an insert that
-      //     carries no value, then lets the check below validate it like any
-      //     other. Idempotent w.r.t. the enterprise auto-stamp: whoever runs
-      //     first sets it, and neither overwrites a supplied value.
-      //   • BULK inserts are now covered. The check previously required a
-      //     non-array payload, so an `insert` of an ARRAY of rows could carry a
-      //     forged `organization_id` per row and never meet the wall — the same
-      //     defect #2937 closed for the single-row shape, one call-site down
-      //     (AGENTS.md #10: a `case` label is not enforcement, check the call site).
+      // This validates SUPPLIED values only; it never fills an absent one.
+      // Auto-stamping `organization_id` stays with the enterprise
+      // `@objectstack/organizations` runtime (its Middleware A), which is also
+      // what ACTIVATES every walled posture — so a deployment that reaches this
+      // code with a walled posture always has the stamper installed. Keeping the
+      // stamp there means a forged `org-scoping` registration yields NULL-org
+      // rows that the wall hides, i.e. a broken deployment rather than a working
+      // unlicensed one; validation stays here because it is a security property,
+      // not a packaging one.
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
@@ -1451,26 +1450,6 @@ export class SecurityPlugin implements Plugin {
         ).filter((r: unknown): r is Record<string, unknown> =>
           !!r && typeof r === 'object' && !Array.isArray(r),
         );
-
-        if (
-          opCtx.operation === 'insert' &&
-          postureStampsOrganization(this.tenancyPosture) &&
-          writeRows.some((r) => r.organization_id == null || r.organization_id === '') &&
-          (await this.isTenantScopedObject(opCtx.object))
-        ) {
-          const activeOrg = opCtx.context?.tenantId;
-          if (activeOrg != null && activeOrg !== '') {
-            for (const row of writeRows) {
-              if (row.organization_id == null || row.organization_id === '') {
-                row.organization_id = activeOrg;
-              }
-            }
-          }
-          // No active organization under a walled posture: leave the value
-          // absent. The row would be unreachable behind its own wall, and the
-          // read-side Layer 0 already fails such a context closed — inventing a
-          // tenant here is the one thing that could smuggle a row past it.
-        }
 
         const suppliedRows = writeRows.filter(
           (r) => r.organization_id != null && r.organization_id !== '',
@@ -2839,24 +2818,6 @@ export class SecurityPlugin implements Plugin {
       if (bag[key] === undefined) bag[key] = value.filter((v) => typeof v === 'string');
     }
     if (Object.keys(bag).length > 0) context.rlsMembership = bag;
-  }
-
-  /**
-   * [ADR-0105 D5] Is this object subject to the organization wall — i.e. does it
-   * carry an `organization_id` column and NOT opt out of tenancy?
-   *
-   * Uses the SAME two facts Layer 0 decides with (field set + tenancy posture),
-   * so the write-side stamp can never disagree with the read-side wall about
-   * what counts as a tenant object. An unresolvable field set (boot window)
-   * answers `false`: stamping is an additive convenience, and guessing a column
-   * onto an object that may not have one would fail the insert outright — the
-   * #2937 post-image check still guards any value that IS supplied.
-   */
-  private async isTenantScopedObject(object: string): Promise<boolean> {
-    const meta = await this.getObjectSecurityMeta(object);
-    if (this.tenancyDisabledCache.get(object) === true || meta.tenancyDisabled) return false;
-    const objectFields = await this.getObjectFieldNames(this.metadata, object, this.ql);
-    return objectFields ? objectFields.has('organization_id') : false;
   }
 
   private async computeWriteTenantCheckFilter(

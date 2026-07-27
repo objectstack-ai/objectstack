@@ -9,7 +9,7 @@ import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { resolveDriverType, createStorageDriver, UnsupportedDriverError } from '../utils/storage-driver.js';
-import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveAllowDegradedTenancy, isMcpServerEnabled, resolveSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, resolveSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
@@ -1588,7 +1588,14 @@ export default class Serve extends Command {
             // it, deployments are single-org: the open member-management
             // basics (plugin-auth's default-org bootstrap + better-auth
             // invitations) still work.
-            const multiTenant = resolveMultiOrgEnabled();
+            // [ADR-0105 D1] Key off the resolved POSTURE, not the legacy boolean.
+            // Both walled postures (`group` and `isolated`) need this package:
+            // gating on `OS_MULTI_ORG_ENABLED` alone would let
+            // `OS_TENANCY_POSTURE=group` skip the load AND the fail-fast below,
+            // silently degrading to an unwalled single-org deployment — the exact
+            // ADR-0049 class this guard exists to close.
+            const tenancyPosture = resolveTenancyPosture();
+            const multiTenant = tenancyPosture !== 'single';
             if (multiTenant) {
               try {
                 const organizationsPkg = '@objectstack/organizations';
@@ -1612,12 +1619,13 @@ export default class Serve extends Command {
                 if (!resolveAllowDegradedTenancy()) {
                   console.error(
                     chalk.red(
-                      '\n  ✖ FATAL: OS_MULTI_ORG_ENABLED=true but @objectstack/organizations could not be loaded,\n' +
-                        '    so tenant isolation is INACTIVE. Refusing to boot — a deployment that requested\n' +
-                        '    multi-tenant isolation must not serve traffic without it (ADR-0093 D5).\n\n' +
+                      `\n  ✖ FATAL: tenancy posture '${tenancyPosture}' was requested but ` +
+                        '@objectstack/organizations could not be loaded,\n' +
+                        '    so the organization wall is INACTIVE. Refusing to boot — a deployment that requested\n' +
+                        '    multi-organization isolation must not serve traffic without it (ADR-0093 D5).\n\n' +
                         '    Fix one of:\n' +
                         '      • install @objectstack/organizations (the enterprise multi-org runtime), or\n' +
-                        '      • unset OS_MULTI_ORG_ENABLED to run single-org, or\n' +
+                        "      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org, or\n" +
                         '      • set OS_ALLOW_DEGRADED_TENANCY=1 to boot in an explicitly degraded single-org state.\n\n' +
                         `    cause: ${cause}\n`,
                     ),
@@ -1629,9 +1637,9 @@ export default class Serve extends Command {
                 // /auth/config and the Setup dashboard so it stays visible.
                 console.warn(
                   chalk.yellow(
-                    '  ⚠ DEGRADED TENANCY (OS_ALLOW_DEGRADED_TENANCY=1): OS_MULTI_ORG_ENABLED=true but ' +
-                      '@objectstack/organizations is unavailable — booting with tenant isolation INACTIVE. ' +
-                      'Organization boundaries are NOT enforced; wildcard tenant RLS is stripped. (ADR-0093 D5)',
+                    `  ⚠ DEGRADED TENANCY (OS_ALLOW_DEGRADED_TENANCY=1): posture '${tenancyPosture}' requested but ` +
+                      '@objectstack/organizations is unavailable — booting with the organization wall INACTIVE. ' +
+                      'Organization boundaries are NOT enforced. (ADR-0093 D5)',
                   ),
                 );
               }

@@ -3882,6 +3882,7 @@
     "ObjectAccessScopeSchema (const)",
     "ObjectPermission (type)",
     "ObjectPermissionSchema (const)",
+    "OrgScopingEntitlement (interface)",
     "PLATFORM_CAPABILITIES (const)",
     "PLATFORM_CAPABILITY_NAMES (const)",
     "PUBLIC_FORM_SERVER_MANAGED_FIELDS (const)",

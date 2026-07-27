@@ -360,17 +360,13 @@ describe('authz Layer-0 matrix gate — ADR-0095 D1 (post-extraction)', () => {
     it('member inserting the SAME-tenant organization_id is allowed (row keeps it)', async () => {
       expect(await insertOrg(OBJECTS.task, ROLES.member, 'org-1')).toBe('org-1');
     });
-    it('member inserting with NO organization_id is STAMPED with the active org', async () => {
-      // [ADR-0105 D5] The engine now owns the stamp. It used to belong solely to
-      // the enterprise organizations plugin, which left the open `group` posture
-      // writing NULL-org rows that its own wall then hid. Idempotent w.r.t. that
-      // plugin: neither overwrites a supplied value, so ordering stays irrelevant.
-      expect(await insertOrg(OBJECTS.task, ROLES.member, undefined)).toBe('org-1');
-    });
-    it('member with NO active org inserting without organization_id is left ABSENT (never invented)', async () => {
-      // [ADR-0105 D5] Stamping a tenant the caller does not have would smuggle a
-      // row past the very wall the caller already fails closed against.
-      expect(await insertOrg(OBJECTS.task, ROLES.no_org_member, undefined)).toBe('<<absent>>');
+    it('member inserting with NO organization_id passes the wall (auto-stamp territory)', async () => {
+      // plugin-security validates SUPPLIED values; it never fills an absent one.
+      // Stamping belongs to the enterprise organizations runtime — which is also
+      // what activates a walled posture, so the two are never out of step
+      // (ADR-0105 D5/D12). The Layer 0 check must NOT deny an absent value
+      // (ordering-independent w.r.t. that middleware).
+      expect(await insertOrg(OBJECTS.task, ROLES.member, undefined)).toBe('<<absent>>');
     });
     it('member with NO active org supplying ANY organization_id is fail-closed DENIED', async () => {
       expect(await insertOrg(OBJECTS.task, ROLES.no_org_member, 'org-1')).toBe('CRUD_DENY:PermissionDeniedError');
