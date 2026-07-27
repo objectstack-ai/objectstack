@@ -55,7 +55,7 @@ const result = ApprovalDecision.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'user' \| 'org_membership_level' \| 'role' \| 'position' \| 'team' \| 'department' \| 'manager' \| 'field' \| 'queue' \| 'expression'>` | ✅ |  |
-| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
+| **value** | `string` | optional | User id / membership tier / position / team / department / field — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
 | **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
 | **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
 

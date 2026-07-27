@@ -207,11 +207,14 @@ Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 
 Approver entries resolve by kind — `position`, `user`, `field`, `manager`,
-`team`, `department`, `queue`, `org_membership_level`, and `expression`
+`team`, `department`, `org_membership_level`, and `expression`
 (described in the [callout above](#3-the-approval-node) and in
 [Dynamic approvers](#dynamic-approvers-3447)); `org_membership_level` is the
 one that silently resolves to nobody when it's mistaken for a business
-hierarchy. `field`, `manager`, and `expression` resolve against the record's
+hierarchy. `queue` still parses so stored flows keep loading, but it is **not
+implemented** by the runtime and is no longer offered for authoring (#3508) —
+a queue entry resolves to nobody. Route to a `team`, `department`, or
+`position` instead. `field`, `manager`, and `expression` resolve against the record's
 **live** state at node entry (#3447). An entry that resolves
 to nobody is not an error: the request opens with an empty `pending_approvers`
 and nothing can move it, so the run parks forever.
