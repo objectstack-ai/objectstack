@@ -85,6 +85,50 @@ ObjectStack customers build portals and products whose authenticated callers
 the platform cannot vouch for. Enforcement must be the platform default
 (ADR-0049).
 
+### Business context — what masking is worth
+
+The value scale of this ADR is not "prevents data breaches" (the data plane
+already enforces reads and writes); it is what the *disclosure* boundary
+buys the platform and its customers:
+
+- **The invariant becomes claimable.** After this ADR the platform can state
+  — in security questionnaires, audits, and competitive POCs — one complete,
+  testable sentence: *a field the caller cannot read does not exist for that
+  caller, on any plane*. Today a competent pentester falsifies the "we have
+  field-level security" claim with a single unauthenticated-of-privilege
+  `curl /meta/object/<name>`; a pentest finding is remediation cost and a
+  deal blocker. The industry benchmark behaves this way already —
+  Salesforce's `describe` omits fields the caller cannot read — so "FLS
+  comparable to Salesforce" is only true once this ships.
+
+- **Only the platform can fix it.** Data-plane exposure is configurable by
+  customers through permission sets; what `/meta` serves is not. A customer
+  building a dealer/supplier/patient portal has **no** remediation available
+  in their own tier today except modeling discipline ("keep sensitive fields
+  off portal-visible objects"). One platform-side fix is inherited by every
+  deployment — the classic platform-leverage shape.
+
+- **It unlocks mixed-sensitivity modeling.** Without masking, the honest
+  guidance forces *object splitting*: the same business entity duplicated
+  into an internal object and a portal object, with synchronization,
+  reporting, and flow costs doubled. With masking, "one `account` object —
+  40 fields for staff, 12 for dealers" is a supported, first-class modeling
+  style. That is a product capability (external users on the primary data
+  model), not merely hygiene.
+
+- **Schema shape is itself business information.** Field names alone answer
+  "what does this company record" (`salary_grade`, `layoff_flag`, a
+  diagnosis field); picklist option sets are operational taxonomies
+  (customer tiers, risk bands); formula expressions are pricing and scoring
+  IP; `requiredPermissions` names hand an attacker the exact capability to
+  escalate toward. Removing the schema removes the reconnaissance map — the
+  cheapest layer of defense in depth.
+
+Against this, the cost side is deliberately near-zero (D3: unrestricted
+callers get byte-identical responses; cache storage unchanged) with an
+escape hatch (D8) — which is the business case for shipping it in the
+current major rather than deferring.
+
 ### What is already in place
 
 - `security.getReadableFields(object, ctx)` (#3547): the authoritative
