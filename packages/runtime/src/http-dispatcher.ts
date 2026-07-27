@@ -8,7 +8,6 @@ import { isMcpServerEnabled } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName } from '@objectstack/spec/system';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
-import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { pluralToSingular } from '@objectstack/spec/shared';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
@@ -25,6 +24,8 @@ import { createPackagesDomain, handlePackagesRequest } from './domains/packages.
 import { createAutomationDomain, handleAutomationRequest } from './domains/automation.js';
 import { createAuthDomain, handleAuthRequest } from './domains/auth.js';
 import { createAiDomain, handleAIRequest } from './domains/ai.js';
+import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
+import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge } from './domains/mcp.js';
 
 /** Minimal local interface — full EnvironmentScopeManager was removed in Phase R. */
 interface EnvironmentScopeManager {
@@ -37,10 +38,6 @@ import {
 
 // randomUUID moved to ./domains/auth.ts with its only consumer (D11③ PR-7).
 
-/** A `sys_`-prefixed object is a system table — off-limits to external MCP agents. */
-function isSystemObjectName(name: string): boolean {
-    return /^sys_/i.test(name);
-}
 
 // The per-request `Server-Timing` disclosure predicate (#2408) now lives in
 // `@objectstack/observability` — the ONE definition shared by every HTTP entry
@@ -255,6 +252,20 @@ export class HttpDispatcher {
             if (k?.context?.trigger) await k.context.trigger(event, payload);
         },
         logger: (this as any).logger,
+        getDefaultEnvironmentId: () => this.resolveDefaultProject()?.environmentId,
+        resolveProjectKernelObjectQL: async (context) => {
+            if (!this.kernelResolver || !context.environmentId || context.environmentId === 'platform') return null;
+            try {
+                const projectKernel: any = await this.kernelResolver.resolveKernel(context, this.defaultKernel);
+                if (projectKernel) {
+                    this.kernel = projectKernel;
+                    if (typeof projectKernel.getServiceAsync === 'function') {
+                        return await projectKernel.getServiceAsync('objectql').catch(() => null);
+                    }
+                }
+            } catch { /* fall back to defaultKernel resolution downstream */ }
+            return null;
+        },
         isAuthRequired: () => this.requireAuth,
         getRegisteredAiRoutes: () => (this.kernel as any)?.__aiRoutes,
     };
@@ -309,6 +320,8 @@ export class HttpDispatcher {
         this.domainRegistry.register(createAutomationDomain(this.domainDeps));
         this.domainRegistry.register(createAuthDomain(this.domainDeps));
         this.domainRegistry.register(createAiDomain(this.domainDeps));
+        this.domainRegistry.register(createActionsDomain(this.domainDeps));
+        for (const route of createMcpDomains(this.domainDeps)) this.domainRegistry.register(route);
     }
 
     /**
@@ -440,117 +453,14 @@ export class HttpDispatcher {
         return actionExec.callData(this.domainDeps, action, params, dataDriver, scopeId, executionContext);
     }
 
-    /**
-     * Handle an MCP request over the Streamable HTTP transport (`/mcp`).
-     *
-     * Gating + auth (fail-closed):
-     *  - **default-on**: served unless `OS_MCP_SERVER_ENABLED=false` (single-env
-     *    runtime; MCP is a core platform capability). Multi-tenant cloud
-     *    overrides this gate per env. When opted out we return 404 so the
-     *    surface isn't advertised.
-     *  - **auth**: requires a principal already resolved by
-     *    `resolveExecutionContext` (the `sys_api_key` Bearer/header path or a
-     *    session). Anonymous → 401.
-     *
-     * Execution: the MCP runtime builds a stateless per-request server whose
-     * object-CRUD tools run through {@link callData} bound to THIS request's
-     * ExecutionContext — i.e. the exact permission + RLS path the REST API
-     * uses. An external agent can never exceed the key's authority.
-     */
+    /** Thin delegate — body extracted to `./domains/mcp.ts` (D11③ PR-9). */
     async handleMcp(body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        if (!HttpDispatcher.isMcpEnabled()) {
-            return { handled: true, response: this.error('MCP server is not enabled for this environment', 404) };
-        }
+        return handleMcpRequest(this.domainDeps, body, context);
+    }
 
-        const mcp: any = await this.resolveService('mcp', context.environmentId);
-        if (!mcp || typeof mcp.handleHttpRequest !== 'function') {
-            return { handled: true, response: this.error('MCP server is not available', 501) };
-        }
-
-        const ec = context.executionContext;
-        if (!ec || (!ec.userId && !ec.isSystem)) {
-            // Per the MCP authorization spec (RFC 9728 §5.1), a 401 from the
-            // protected resource advertises where its metadata lives so an
-            // OAuth-capable client can bootstrap discovery → DCR → PKCE.
-            // Only advertised when the OAuth track is actually live (AS on +
-            // TLS rule satisfied); API-key-only deployments return a plain 401.
-            const resourceMetadataUrl = await this.getMcpResourceMetadataUrl(context);
-            const response = this.error(
-                resourceMetadataUrl
-                    ? 'Unauthorized: a valid OAuth access token or API key is required'
-                    : 'Unauthorized: a valid API key is required',
-                401,
-            ) as { status: number; body: any; headers?: Record<string, string> };
-            if (resourceMetadataUrl) {
-                response.headers = {
-                    'WWW-Authenticate':
-                        `Bearer realm="ObjectStack MCP", resource_metadata="${resourceMetadataUrl}"`,
-                };
-            }
-            return { handled: true, response };
-        }
-
-        // ── OAuth scope → tool-family enforcement (fail-closed, #2698) ──
-        // `oauthScopes` is set ONLY for OAuth-token provenance. A token that
-        // grants none of the MCP tool families gets 403 insufficient_scope
-        // up front; a partial grant narrows the tool set at registration
-        // time inside the MCP runtime. API-key / session principals
-        // (`oauthScopes` undefined) keep the full principal-bound surface.
-        const grantedScopes = Array.isArray((ec as any).oauthScopes)
-            ? ((ec as any).oauthScopes as string[])
-            : undefined;
-        if (grantedScopes && !grantedScopes.some((s) => (MCP_OAUTH_SCOPES as readonly string[]).includes(s))) {
-            const resourceMetadataUrl = await this.getMcpResourceMetadataUrl(context);
-            const response = this.error(
-                `Forbidden: the access token grants none of the MCP scopes (${MCP_OAUTH_SCOPES.join(', ')})`,
-                403,
-            ) as { status: number; body: any; headers?: Record<string, string> };
-            response.headers = {
-                'WWW-Authenticate':
-                    'Bearer error="insufficient_scope"' +
-                    `, scope="${MCP_OAUTH_SCOPES.join(' ')}"` +
-                    (resourceMetadataUrl ? `, resource_metadata="${resourceMetadataUrl}"` : ''),
-            };
-            return { handled: true, response };
-        }
-
-        // The MCP transport needs a Web-standard Request. The runtime HTTP
-        // adapter may hand us a node/Hono-style req (plain `headers` object,
-        // path-only `url`), so normalise it.
-        const webRequest = this.toMcpWebRequest(context.request, body);
-        if (!webRequest) {
-            return { handled: true, response: this.error('MCP transport requires a standard HTTP request', 400) };
-        }
-
-        const bridge = this.buildMcpBridge(context);
-        let webRes: Response;
-        try {
-            webRes = await mcp.handleHttpRequest(webRequest, {
-                bridge,
-                parsedBody: body,
-                // undefined = not scope-limited (API key / session); an array
-                // narrows the registered tool families inside the MCP runtime.
-                ...(grantedScopes ? { toolOptions: { grantedScopes } } : {}),
-            });
-        } catch (err: any) {
-            return { handled: true, response: this.error(err?.message ?? 'MCP request failed', 500) };
-        }
-
-        // Convert the transport's buffered Web Response into the dispatcher's
-        // `{ status, headers, body }` shape (JSON-response mode → fully buffered).
-        const headers: Record<string, string> = {};
-        try { webRes.headers.forEach((v, k) => { headers[k] = v; }); } catch { /* no headers */ }
-        const text = await webRes.text().catch(() => '');
-        let responseBody: any = null;
-        if (text) {
-            const ct = headers['content-type'] ?? '';
-            if (ct.includes('application/json')) {
-                try { responseBody = JSON.parse(text); } catch { responseBody = text; }
-            } else {
-                responseBody = text;
-            }
-        }
-        return { handled: true, response: { status: webRes.status, headers, body: responseBody } };
+    /** Thin delegate — body extracted to `./domains/mcp.ts` (D11③ PR-9); kept for direct callers (tests). */
+    buildMcpBridge(context: HttpProtocolContext): any {
+        return buildMcpBridge(this.domainDeps, context);
     }
 
     /**
@@ -558,275 +468,17 @@ export class HttpDispatcher {
      * Default-on core capability; `OS_MCP_SERVER_ENABLED=false` opts out
      * (single decision point: `isMcpServerEnabled` in `@objectstack/types`).
      */
-    private static isMcpEnabled(): boolean {
-        return isMcpServerEnabled();
-    }
 
-    /**
-     * Absolute URL of the RFC 9728 protected-resource metadata for the MCP
-     * endpoint, advertised via `WWW-Authenticate` (#2698). `null` when the
-     * OAuth track is off — the auth service owns the decision (AS enabled +
-     * OAuth 2.1 TLS rule), the dispatcher only relays it. Never throws.
-     */
-    private async getMcpResourceMetadataUrl(context: HttpProtocolContext): Promise<string | null> {
-        try {
-            const authService: any = await this.resolveService('auth', context.environmentId);
-            const url = authService?.getMcpResourceMetadataUrl?.();
-            return typeof url === 'string' && url ? url : null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * `GET /mcp/skill` — the environment-customized portable Agent Skill
-     * (`SKILL.md`), rendered by the MCP service (ADR-0036 Amendment C: ONE
-     * generic skill; only the connection URL is environment-specific).
-     *
-     * Served PUBLIC like `/discovery`: the content is generic agent
-     * instructions plus a URL the caller already knows — no schema, no
-     * tenant data. Gated on the same default-on switch as the `/mcp` route
-     * (404 when opted out, so the surface isn't advertised) and 501 when the
-     * MCP plugin isn't loaded, mirroring `handleMcp`.
-     */
+    /** Thin delegate — body extracted to `./domains/mcp.ts` (D11③ PR-9). */
     async handleMcpSkill(method: string, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        if (!HttpDispatcher.isMcpEnabled()) {
-            return { handled: true, response: this.error('MCP server is not enabled for this environment', 404) };
-        }
-        if (method !== 'GET') {
-            return {
-                handled: true,
-                response: {
-                    status: 405,
-                    headers: { Allow: 'GET' },
-                    body: { success: false, error: { message: 'Method not allowed — use GET', code: 405 } },
-                },
-            };
-        }
-
-        const mcp: any = await this.resolveService('mcp', context.environmentId);
-        if (!mcp || typeof mcp.renderSkill !== 'function') {
-            return { handled: true, response: this.error('MCP server is not available', 501) };
-        }
-
-        // Resolve this environment's MCP URL for the skill's Connect section:
-        // the auth service owns the canonical value (base URL config); fall
-        // back to deriving from the request host so the endpoint still works
-        // when the auth plugin isn't loaded.
-        let mcpUrl: string | undefined;
-        try {
-            const authService: any = await this.resolveService('auth', context.environmentId);
-            const url = authService?.getMcpResourceUrl?.();
-            if (typeof url === 'string' && url) mcpUrl = url;
-        } catch { /* fall through to host derivation */ }
-        if (!mcpUrl) {
-            try {
-                const webReq = this.toMcpWebRequest(context.request, undefined);
-                const host = webReq?.headers.get('host');
-                if (host) {
-                    const proto = webReq?.headers.get('x-forwarded-proto') || 'http';
-                    mcpUrl = `${proto}://${host}/api/v1/mcp`;
-                }
-            } catch { /* leave the documented placeholder in place */ }
-        }
-
-        const markdown: string = mcp.renderSkill({ mcpUrl });
-        // Raw text must NOT ride the `response` channel — `sendResult` JSON-
-        // encodes those bodies unconditionally. The `result` stream channel is
-        // the one raw pipe through every adapter (string events are written
-        // verbatim, custom headers honored), so serve the markdown as a
-        // single-chunk "stream".
-        return {
-            handled: true,
-            result: {
-                type: 'stream',
-                status: 200,
-                contentType: 'text/markdown; charset=utf-8',
-                headers: {
-                    'content-type': 'text/markdown; charset=utf-8',
-                    'content-disposition': 'inline; filename="SKILL.md"',
-                    // Same reasoning as /discovery (cloud#152): reflects mutable
-                    // runtime config (base URL), must never be edge-cached stale.
-                    'cache-control': 'no-store',
-                },
-                events: (async function* () {
-                    yield markdown;
-                })(),
-            },
-        } as any;
+        return handleMcpSkillRequest(this.domainDeps, method, context);
     }
 
-    /**
-     * Normalise the inbound request into a Web-standard `Request` for the MCP
-     * transport. Accepts an already-Web `Request`, or a node/Hono-style req
-     * (plain `headers` object, path-only `url`). Returns undefined only if the
-     * shape is unusable. The body is carried separately via `parsedBody`, so a
-     * GET/DELETE (no body) and a POST (JSON-RPC) both normalise cleanly.
-     */
-    private toMcpWebRequest(raw: any, parsedBody: any): Request | undefined {
-        if (!raw) return undefined;
-        // Already a Web Request.
-        if (typeof raw.headers?.get === 'function' && typeof raw.url === 'string' && typeof raw.method === 'string') {
-            return raw as Request;
-        }
-        try {
-            const method = String(raw.method ?? 'POST').toUpperCase();
 
-            // Normalise headers (plain object or Headers-like).
-            const headers = new Headers();
-            const h = raw.headers;
-            if (h) {
-                if (typeof h.forEach === 'function') {
-                    h.forEach((v: any, k: any) => { if (v != null) headers.set(String(k), String(v)); });
-                } else {
-                    for (const k of Object.keys(h)) {
-                        const v = (h as any)[k];
-                        if (v != null) headers.set(k, Array.isArray(v) ? v.join(',') : String(v));
-                    }
-                }
-            }
-
-            // Build an absolute URL (node req.url is path-only).
-            let url: string;
-            try {
-                url = new URL(String(raw.url)).toString();
-            } catch {
-                const host = headers.get('host') || 'mcp.local';
-                const path = typeof raw.url === 'string' && raw.url ? raw.url : '/api/v1/mcp';
-                url = `https://${host}${path.startsWith('/') ? path : `/${path}`}`;
-            }
-
-            const init: { method: string; headers: Headers; body?: string } = { method, headers };
-            if (method !== 'GET' && method !== 'HEAD' && method !== 'DELETE') {
-                init.body = typeof parsedBody === 'string' ? parsedBody : JSON.stringify(parsedBody ?? {});
-            }
-            return new Request(url, init);
-        } catch {
-            return undefined;
-        }
-    }
-
-    /**
-     * Build a principal-bound {@link McpDataBridge}: every method runs AS the
-     * request's ExecutionContext through {@link callData} (RLS/permissions) and
-     * the per-env metadata service. Keeps the MCP tool layer free of any direct
-     * engine access.
-     */
-    private buildMcpBridge(context: HttpProtocolContext): any {
-        const ec = context.executionContext;
-        const envId = context.environmentId;
-        const driver = (context as any).dataDriver;
-        const callData = this.callData.bind(this);
-        const getMeta = () => this.resolveService('metadata', envId);
-
-        return {
-            listObjects: async () => {
-                const meta: any = await getMeta();
-                const objs: any[] = (await meta?.listObjects?.()) ?? [];
-                return objs.map((o) => ({
-                    name: o.name,
-                    label: o.label ?? o.name,
-                    fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
-                }));
-            },
-            describeObject: async (name: string) => {
-                const meta: any = await getMeta();
-                const def: any = await meta?.getObject?.(name);
-                if (!def) return null;
-                const fields = def.fields ?? {};
-                return {
-                    name: def.name,
-                    label: def.label ?? def.name,
-                    fields: Object.entries(fields).map(([k, f]: [string, any]) => ({
-                        name: k,
-                        type: f?.type,
-                        label: f?.label ?? k,
-                        required: f?.required ?? false,
-                    })),
-                    enableFeatures: def.enable ?? {},
-                };
-            },
-            query: async (object: string, o: any) => {
-                const query: any = {};
-                if (o?.where) query.where = o.where;
-                if (o?.fields) query.fields = o.fields;
-                if (typeof o?.limit === 'number') query.limit = o.limit;
-                if (typeof o?.offset === 'number') query.offset = o.offset;
-                if (o?.orderBy) query.orderBy = o.orderBy;
-                return await callData('query', { object, query }, driver, envId, ec);
-            },
-            get: async (object: string, id: string) => {
-                const res: any = await callData('get', { object, id }, driver, envId, ec);
-                return res?.record ?? res ?? null;
-            },
-            aggregate: async (object: string, o: any) => {
-                // NOTE: `driver` (the raw per-env db driver) is deliberately NOT
-                // passed — callData's aggregate branch resolves the ObjectQL
-                // engine itself so the security middleware (RLS + FLS aggregate
-                // gate) always runs. See the branch comment in callData.
-                const res: any = await callData(
-                    'aggregate',
-                    {
-                        object,
-                        where: o?.where,
-                        groupBy: o?.groupBy,
-                        aggregations: o?.aggregations,
-                        timezone: o?.timezone,
-                    },
-                    undefined,
-                    envId,
-                    ec,
-                );
-                return res?.rows ?? [];
-            },
-            create: async (object: string, data: any) =>
-                await callData('create', { object, data }, driver, envId, ec),
-            update: async (object: string, id: string, data: any) =>
-                await callData('update', { object, id, data }, driver, envId, ec),
-            remove: async (object: string, id: string) =>
-                await callData('delete', { object, id }, driver, envId, ec),
-
-            // ── Business-action surface (McpActionBridge) ──────────────
-            // Resolution + dispatch flow through the framework's own action
-            // mechanism (engine.executeAction / automation flow runner). All
-            // gating is at INVOKE time — `ai.exposed` (author opt-in, #2849) +
-            // the ADR-0066 D4 capability gate + record load under the caller's
-            // RLS. Script/body handlers then run TRUSTED (see
-            // buildActionEngineFacade); flows honour `runAs` with the caller's
-            // identity forwarded. No `@objectstack/service-ai`.
-            listActions: async () => {
-                const meta: any = await getMeta();
-                const hasAutomation = Boolean(
-                    await this.resolveService('automation', envId).catch(() => null),
-                );
-                const out: any[] = [];
-                for (const { action, objectName, obj } of await actionExec.collectActionDeclarations(this.domainDeps, meta)) {
-                    if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*
-                    if (!actionExec.isHeadlessInvokableAction(this.domainDeps, action, hasAutomation)) continue;
-                    // [#2849 / ADR-0011] MCP is an AI surface: only actions the
-                    // author explicitly opted in via `ai.exposed` are listed.
-                    // Fail-closed — bodies run as trusted code (see
-                    // buildActionEngineFacade), so author opt-in is the boundary.
-                    if (actionExec.actionAiExposureError(this.domainDeps, action)) continue;
-                    // Hide actions the caller is not permitted to run.
-                    if (this.actionPermissionError(action, ec)) continue;
-                    out.push(actionExec.summarizeAction(this.domainDeps, action, obj, objectName));
-                }
-                return out;
-            },
-            runAction: async (
-                name: string,
-                input: { objectName?: string; recordId?: string; params?: Record<string, unknown> },
-            ) => actionExec.invokeBusinessAction(this.domainDeps, name, input ?? {}, { driver, envId, ec, getMeta, callData }),
-        };
-    }
 
     // ── MCP action bridge helpers ──────────────────────────────────────
 
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
-    private actionPermissionError(actionDef: any, ec: any, objectName?: string): string | null {
-        return actionExec.actionPermissionError(this.domainDeps, actionDef, ec, objectName);
-    }
 
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
 
@@ -847,14 +499,6 @@ export class HttpDispatcher {
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
 
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
-    private enforceActionParams(
-        action: any,
-        obj: any,
-        bag: Record<string, unknown>,
-        where: { objectName?: string; actionName?: string },
-    ): string | null {
-        return actionExec.enforceActionParams(this.domainDeps, action, obj, bag, where);
-    }
 
     /**
      * Slim engine facade matching the ActionContext.engine shape handlers expect.
@@ -869,9 +513,6 @@ export class HttpDispatcher {
      * mirroring flows (ADR-0049) — tracked in #2849.
      */
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
-    private buildActionSession(ec: any): any | undefined {
-        return actionExec.buildActionSession(this.domainDeps, ec);
-    }
 
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
 
@@ -1148,7 +789,7 @@ export class HttpDispatcher {
                 // single source (rest-server.ts), so the two discovery producers
                 // stay symmetric. The route-parity gate asserts the lockstep
                 // holds (advertised ⇒ reachable, never 501).
-                mcp:           HttpDispatcher.isMcpEnabled() ? `${prefix}/mcp` : undefined,
+                mcp:           isMcpServerEnabled() ? `${prefix}/mcp` : undefined,
         };
 
         // Build per-service status map
@@ -1941,217 +1582,9 @@ export class HttpDispatcher {
         return null;
     }
 
-    /**
-     * Handle action invocation routes (`/actions/...`).
-     *
-     * Dispatches a named, server-registered action handler (registered via
-     * `engine.registerAction(objectName, actionName, handler)`) over HTTP.
-     * Three URL shapes are accepted to keep the client contract flexible:
-     *
-     *  - `POST /actions/:object/:action`              — record-scoped action
-     *  - `POST /actions/:object/:action/:recordId`    — record-scoped action with id in URL
-     *  - `POST /actions/global/:action`               — wildcard ("*") action
-     *
-     * Body shape: `{ recordId?: string, params?: Record<string, unknown> }`.
-     * The handler is invoked with an `ActionContext` of:
-     *   `{ record, user, engine, params }`
-     * where `engine` exposes the slimmed CRUD surface used by CRM handlers
-     * (`insert`, `update`, `delete`, `find`).
-     */
+    /** Thin delegate — body extracted to `./domains/actions.ts` (D11③ PR-9). */
     async handleActions(path: string, method: string, body: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        if (method.toUpperCase() !== 'POST') {
-            return { handled: true, response: this.error('Method not allowed', 405) };
-        }
-        const parts = path.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
-        if (parts.length < 2) {
-            return { handled: true, response: this.error('Path must be /actions/:object/:action', 400) };
-        }
-        const objectName = parts[0];
-        const actionName = parts[1];
-        const recordIdFromPath = parts[2];
-
-        // Resolve project scope so the right project kernel's ObjectQL is
-        // used. For bare URLs the URL prefix already stripped any `/projects/:id`
-        // segment, so fall back to the single-environment default if unset.
-        if (!_context.environmentId) {
-            const def = this.resolveDefaultProject();
-            if (def?.environmentId) _context.environmentId = def.environmentId;
-        }
-
-        // Kernel-resolution fallback for the per-project kernel. HTTP action
-        // routes now flow through `dispatcher.dispatch()` (like data/meta/
-        // automation), which already swapped to the project kernel and resolved
-        // `executionContext` before reaching here — so on that path this block
-        // re-resolves idempotently (a no-op in single-kernel mode). Kept for
-        // DIRECT `handleActions` callers (unit tests / internal dispatch) so the
-        // call still lands on the kernel where the bundle's actions are
-        // registered, not the control-plane kernel (ADR-0006 Phase 5).
-        let projectQl: any = null;
-        if (this.kernelResolver && _context.environmentId && _context.environmentId !== 'platform') {
-            try {
-                const projectKernel: any = await this.kernelResolver.resolveKernel(_context, this.defaultKernel);
-                if (projectKernel) {
-                    this.kernel = projectKernel;
-                    // Resolve the project kernel's own ObjectQL DIRECTLY so we
-                    // bypass the control-plane's scoped factory (which would
-                    // hand back a different instance with no registered
-                    // actions/hooks for this project's bundle).
-                    if (typeof projectKernel.getServiceAsync === 'function') {
-                        projectQl = await projectKernel.getServiceAsync('objectql').catch(() => null);
-                    }
-                }
-            } catch {
-                // fall back to defaultKernel — getObjectQLService will report
-                // "Data engine not available" if no engine is reachable.
-            }
-        }
-
-        const ql: any = projectQl ?? await this.getObjectQLService(_context?.environmentId);
-        if (!ql || typeof ql.executeAction !== 'function') {
-            return { handled: true, response: this.error('Data engine not available', 503) };
-        }
-
-        // [ADR-0066 D4] Dual-surface action gate — the server is the source of
-        // truth. Resolve the action's declared `requiredPermissions` from the
-        // object schema and reject (403) when the caller's systemPermissions
-        // don't cover them. The objectui ActionRunner hides/disables the same
-        // action from the identical declaration, so a UI-hidden action is also
-        // server-closed (and the inverse footgun is removed). System/engine
-        // self-invocation (isSystem) bypasses; an unauthenticated caller holds
-        // no capabilities and is therefore denied for a gated action.
-        // Resolve the object schema + this action's declaration once — both the
-        // permission gate (ADR-0066 D4) and the param contract (ADR-0104 D2)
-        // read it.
-        let actionSchema: any;
-        let actionDef: any;
-        try {
-            actionSchema =
-                (typeof ql.getSchema === 'function' ? ql.getSchema(objectName) : undefined) ??
-                ql.registry?.getObject?.(objectName);
-            actionDef = Array.isArray(actionSchema?.actions)
-                ? actionSchema.actions.find((a: any) => a?.name === actionName)
-                : undefined;
-            const gateError = this.actionPermissionError(actionDef, _context?.executionContext, objectName);
-            if (gateError) {
-                return { handled: true, response: this.error(gateError, 403) };
-            }
-        } catch {
-            /* schema unresolved → no declared gate to enforce (handler-only action) */
-        }
-
-        // Resolve the handler — fall back to wildcard '*' if the object-specific key is missing.
-        // Since engine.executeAction throws when the key is unknown, we probe via the internal
-        // map by attempting the call inside a try/catch and rotating to '*'.
-        const tryExecute = async (obj: string) => {
-            return ql.executeAction(obj, actionName, actionContext);
-        };
-
-        const reqBody = body && typeof body === 'object' ? body : {};
-        const recordId = recordIdFromPath ?? reqBody.recordId;
-        const reqParams = (reqBody.params && typeof reqBody.params === 'object') ? reqBody.params : {};
-
-        // [ADR-0104 D2] Enforce the declared param contract before the handler
-        // runs — required/option/multiple/reference-id shape + unknown keys.
-        // Warn-first unless OS_ACTION_PARAMS_STRICT_ENABLED=1 (then a 400).
-        const paramError = this.enforceActionParams(actionDef, actionSchema, reqParams, { objectName, actionName });
-        if (paramError) {
-            return { handled: true, response: this.error(paramError, 400) };
-        }
-
-        // Load the record (best-effort) so handlers can rely on `ctx.record`.
-        let record: Record<string, unknown> = {};
-        if (recordId && objectName !== 'global') {
-            try {
-                const got = await this.callData('get', { object: objectName, id: recordId }, _context.dataDriver, _context.environmentId, _context.executionContext);
-                if (got?.record) record = got.record;
-            } catch { /* record may not exist for new-record actions; pass empty */ }
-        }
-        if (record && (record as any).id == null && recordId) (record as any).id = recordId;
-
-        // Slim engine facade matching the ActionContext.engine shape used by CRM
-        // handlers. ⚠️ TRUSTED — context-less, RLS/FLS-bypassing by design; see
-        // buildActionEngineFacade for the full security-model rationale (#2849).
-        const engineFacade = {
-            async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-                const res = await ql.insert(object, data);
-                const id = (res && (res as any).id) ?? (data as any).id;
-                return { id };
-            },
-            async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-                await ql.update(object, data, { where: { id } });
-            },
-            async delete(object: string, id: string): Promise<void> {
-                await ql.delete(object, { where: { id } });
-            },
-            async find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-                const opts = query && Object.keys(query).length ? { where: query } : undefined;
-                const rows = await ql.find(object, opts as any);
-                return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
-            },
-        };
-
-        // Resolve the caller identity from the request's ExecutionContext — the
-        // single source `dispatch()` populates via `resolveExecutionContext`,
-        // the same envelope the MCP `runAction` and record-change trigger paths
-        // read. The action body sandbox receives the operator's id and business
-        // roles (ADR-0090 `positions`, formerly `roles`) so a handler can branch
-        // on identity and enforce ownership. Falls back to a `system` principal
-        // only for a genuinely anonymous / self-invoked call (#2701).
-        const ec: any = _context?.executionContext;
-        const userFromAuth = ec?.userId
-            ? {
-                id: ec.userId,
-                name: ec.userId,
-                email: ec.email,
-                roles: Array.isArray(ec.positions) ? ec.positions : [],
-                positions: Array.isArray(ec.positions) ? ec.positions : [],
-                permissions: Array.isArray(ec.permissions) ? ec.permissions : [],
-                // `organizationId` is the blessed developer-facing name for the
-                // caller's active org (matches columns + `current_user.organizationId`).
-                // The deprecated `tenantId` alias (#3280) was removed in v11 (#3290).
-                organizationId: ec.tenantId,
-              }
-            : { id: 'system', name: 'system', roles: [], positions: [], permissions: [] };
-
-        const actionContext: any = {
-            record,
-            user: userFromAuth,
-            session: this.buildActionSession(ec),
-            engine: engineFacade,
-            params: { ...reqParams, recordId, objectName },
-        };
-
-        // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.
-        console.info(
-            `[action-audit] REST action '${objectName}/${actionName}' — body executes TRUSTED ` +
-            `(context-less engine, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
-        );
-
-        try {
-            // Try object-specific first; on "not found" error, fall back to wildcard.
-            let result: any;
-            try {
-                result = await tryExecute(objectName);
-            } catch (err: any) {
-                const msg = String(err?.message ?? err ?? '');
-                if (/not found/i.test(msg) && objectName !== '*') {
-                    result = await tryExecute('*');
-                } else {
-                    throw err;
-                }
-            }
-            return { handled: true, response: this.success({ success: true, data: result }) };
-        } catch (err: any) {
-            const full = err?.message ?? String(err);
-            // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` for
-            // server logs; surface only the business `<msg>` (SandboxError.innerMessage)
-            // to the client so an action's error toast reads as plain text instead of
-            // leaking the debug prefix. Keep the full wrapper in the log for debugging.
-            const inner: unknown = err?.innerMessage;
-            const clientMsg = (typeof inner === 'string' && inner) ? inner : full;
-            if (clientMsg !== full) console.error(`[action ${objectName}/${actionName}] ${full}`);
-            return { handled: true, response: this.success({ success: false, error: clientMsg }) };
-        }
+        return handleActionsRequest(this.domainDeps, path, method, body, _context);
     }
 
     /** Thin delegate — body extracted to `./domains/ai.ts` (D11③ PR-7). */
@@ -2296,17 +1729,7 @@ export class HttpDispatcher {
             return this.handleData(cleanPath.substring(5), method, body, query, context);
         }
 
-        // `/mcp/skill` is the one sub-path NOT owned by the MCP transport:
-        // the public, environment-customized SKILL.md download. Matched
-        // before the transport branch below, which claims everything else
-        // under `/mcp`.
-        if (cleanPath === '/mcp/skill' || cleanPath.startsWith('/mcp/skill?')) {
-            return this.handleMcpSkill(method, context);
-        }
-
-        if (cleanPath === '/mcp' || cleanPath.startsWith('/mcp/') || cleanPath.startsWith('/mcp?')) {
-            return this.handleMcp(body, context);
-        }
+        // /mcp and /mcp/skill moved to the domain registry (D11 step ③).
 
         // /keys moved to the domain registry (D11 step ③).
 
@@ -2316,9 +1739,7 @@ export class HttpDispatcher {
 
         // /automation moved to the domain registry (D11 step ③).
 
-        if (cleanPath.startsWith('/actions')) {
-             return this.handleActions(cleanPath.substring(8), method, body, context);
-        }
+        // /actions moved to the domain registry (D11 step ③).
 
         // /analytics moved to the domain registry (D11 step ③).
 

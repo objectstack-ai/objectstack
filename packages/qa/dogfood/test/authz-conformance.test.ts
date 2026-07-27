@@ -112,9 +112,9 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
     key: () => 'mcp:http-dispatcher.ts:handleMcp',
   },
   {
-    file: 'packages/runtime/src/http-dispatcher.ts',
-    re: /this\.buildMcpBridge\(context\)/g,
-    key: () => 'mcp:http-dispatcher.ts:buildMcpBridge(context-threaded)',
+    file: 'packages/runtime/src/domains/mcp.ts',
+    re: /buildMcpBridge\(deps, context\)/g,
+    key: () => 'mcp:domains/mcp.ts:buildMcpBridge(context-threaded)',
   },
   // (3) The stdio transport's PRINCIPAL binding (ADR-0101): the long-lived
   // server reads record data only under an OS_MCP_STDIO_API_KEY identity,
@@ -219,7 +219,7 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
 
   // ── ADR-0096 / #3167 — the MCP identity pins bite too ──────────────────
   it('(f) dropping the MCP HTTP context-thread → STALE covers failure (#3167)', () => {
-    const threaded = 'mcp:http-dispatcher.ts:buildMcpBridge(context-threaded)';
+    const threaded = 'mcp:domains/mcp.ts:buildMcpBridge(context-threaded)';
     // Baseline sanity: the HTTP `/mcp` handler threads the caller EC today.
     expect(discoverAnonymousDenySurfaces().has(threaded)).toBe(true);
     const problems = checkLedger(

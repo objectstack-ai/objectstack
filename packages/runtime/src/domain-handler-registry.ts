@@ -119,6 +119,18 @@ export interface DomainHandlerDeps {
     announceKernelEvent(event: string, payload: unknown): Promise<void>;
     /** Host logger when one is attached to the dispatcher; domains fall back to console. */
     logger?: any;
+    /** Single-environment default environment id (createSingleEnvironmentPlugin), if registered. */
+    getDefaultEnvironmentId(): string | undefined;
+    /**
+     * Direct-caller kernel swap (ADR-0006 Phase 5): when a host KernelResolver
+     * is present and the context names a non-platform environment, resolve and
+     * SWAP to the per-project kernel (side effect owned by the dispatcher) and
+     * return that kernel's own ObjectQL — bypassing the control-plane scoped
+     * factory, which would hand back an instance without the project bundle's
+     * actions/hooks. Returns null when no swap happened. Idempotent on
+     * dispatch()-routed requests (they already swapped).
+     */
+    resolveProjectKernelObjectQL(context: HttpProtocolContext): Promise<any | null>;
     /** The deployment's `requireAuth` posture (lazily read — construction-order safe). */
     isAuthRequired(): boolean;
     /**

@@ -20,7 +20,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { checkApiExposure } from './api-exposure.js';
 
 /** A `sys_`-prefixed object is a system table — off-limits to external MCP agents. */
-function isSystemObjectName(name: string): boolean {
+export function isSystemObjectName(name: string): boolean {
     return /^sys_/i.test(name);
 }
 
