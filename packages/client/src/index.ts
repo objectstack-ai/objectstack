@@ -546,6 +546,96 @@ export class ObjectStackClient {
             `${this.baseUrl}${route}/objects/${encodeURIComponent(object)}/state/${encodeURIComponent(field)}${qs}`,
         );
         return this.unwrapResponse<{ object: string; field: string; from: string | null; next: string[] | null }>(res);
+    },
+
+    /**
+     * Cross-type spec-validation sweep: every metadata entry that fails its
+     * registered Zod schema. Powers governance dashboards and doctor-style
+     * checks. 501s on kernels without `getMetaDiagnostics`.
+     */
+    getDiagnostics: async (opts?: { type?: string; severity?: 'error' | 'warning'; packageId?: string }) => {
+        const route = this.getRoute('metadata');
+        const params = new URLSearchParams();
+        if (opts?.type) params.set('type', opts.type);
+        if (opts?.severity) params.set('severity', opts.severity);
+        if (opts?.packageId) params.set('package', opts.packageId);
+        const qs = params.toString();
+        const res = await this.fetch(`${this.baseUrl}${route}/diagnostics${qs ? `?${qs}` : ''}`);
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * Reverse references: metadata items that reference `type`/`name`.
+     * `{ references: [] }` on kernels without reference tracking.
+     */
+    getReferences: async (type: string, name: string) => {
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/references`);
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0046 §6: resolve a book spine against the docs that exist now.
+     * An unknown name is treated as a package id (implicit per-package book).
+     */
+    getBookTree: async (name: string, opts?: { packageId?: string }) => {
+        const route = this.getRoute('metadata');
+        const qs = opts?.packageId ? `?package=${encodeURIComponent(opts.packageId)}` : '';
+        const res = await this.fetch(`${this.baseUrl}${route}/book/${encodeURIComponent(name)}/tree${qs}`);
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0010 §3.6 protection-audit trail for a metadata item: recent
+     * save/publish/rollback/delete/reset attempts, allowed and denied.
+     * `{ events: [] }` where the audit table is not provisioned.
+     */
+    getAudit: async (type: string, name: string, opts?: { limit?: number }) => {
+        const route = this.getRoute('metadata');
+        const qs = opts?.limit !== undefined ? `?limit=${opts.limit}` : '';
+        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/audit${qs}`);
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0033: promote a single item's pending draft overlay to live —
+     * the per-item flow beside `packages.publishDrafts`' package-scoped one.
+     * 404 [no_draft] when there is nothing to publish. Compound names pass
+     * through unencoded, like `getItem`.
+     */
+    publishItem: async (type: string, name: string, opts?: { message?: string }) => {
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/publish`, {
+            method: 'POST',
+            body: JSON.stringify(opts?.message ? { message: opts.message } : {}),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * Restore the body at history version `toVersion` as the new live row.
+     */
+    rollbackItem: async (type: string, name: string, toVersion: number, opts?: { message?: string }) => {
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/rollback`, {
+            method: 'POST',
+            body: JSON.stringify({ toVersion, ...(opts?.message ? { message: opts.message } : {}) }),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * Structural diff between two history versions (`from`/`to`); omit both
+     * for previous-vs-current.
+     */
+    diffItem: async (type: string, name: string, opts?: { from?: number; to?: number }) => {
+        const route = this.getRoute('metadata');
+        const params = new URLSearchParams();
+        if (opts?.from !== undefined) params.set('from', String(opts.from));
+        if (opts?.to !== undefined) params.set('to', String(opts.to));
+        const qs = params.toString();
+        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/diff${qs ? `?${qs}` : ''}`);
+        return this.unwrapResponse<any>(res);
     }
   };
 

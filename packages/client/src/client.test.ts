@@ -119,6 +119,83 @@ describe('ObjectStackClient', () => {
             'http://localhost:3000/api/v1/ui/view/customer/form',
         );
     });
+
+    it('meta.getDiagnostics pins GET /meta/diagnostics with its query params', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { items: [] } });
+        await client.meta.getDiagnostics();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/diagnostics',
+        );
+        await client.meta.getDiagnostics({ type: 'object', severity: 'warning', packageId: 'com.example.crm' });
+        expect(String(fetchMock.mock.calls[1][0])).toBe(
+            'http://localhost:3000/api/v1/meta/diagnostics?type=object&severity=warning&package=com.example.crm',
+        );
+    });
+
+    it('meta.getReferences pins GET /meta/:type/:name/references', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { references: [] } });
+        await client.meta.getReferences('object', 'customer');
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer/references',
+        );
+    });
+
+    it('meta.getBookTree pins GET /meta/book/:name/tree', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { tree: [] } });
+        await client.meta.getBookTree('handbook', { packageId: 'com.example.docs' });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/book/handbook/tree?package=com.example.docs',
+        );
+    });
+
+    it('meta.getAudit pins GET /meta/:type/:name/audit', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { events: [] } });
+        await client.meta.getAudit('object', 'customer', { limit: 20 });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer/audit?limit=20',
+        );
+    });
+
+    it('meta.publishItem pins POST /meta/:type/:name/publish and passes message', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { published: true } });
+        await client.meta.publishItem('object', 'customer', { message: 'go live' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/meta/object/customer/publish');
+        expect(init.method).toBe('POST');
+        expect(JSON.parse(init.body)).toEqual({ message: 'go live' });
+    });
+
+    it('meta.rollbackItem pins POST /meta/:type/:name/rollback with toVersion', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { restored: true } });
+        await client.meta.rollbackItem('object', 'customer', 3);
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/meta/object/customer/rollback');
+        expect(init.method).toBe('POST');
+        expect(JSON.parse(init.body)).toEqual({ toVersion: 3 });
+    });
+
+    it('meta.diffItem pins GET /meta/:type/:name/diff with from/to', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { changes: [] } });
+        await client.meta.diffItem('object', 'customer', { from: 2, to: 5 });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/customer/diff?from=2&to=5',
+        );
+    });
+
+    it('meta.getItem/saveItem pass compound names through unencoded (reaches /meta/:type/:section/:name)', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { name: 'views/all_leads' } });
+        await client.meta.getItem('object', 'views/all_leads');
+        // The slash must survive: %2F would collapse the request onto the
+        // 3-segment /meta/:type/:name route and miss the compound handler.
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/views/all_leads',
+        );
+        await client.meta.saveItem('object', 'views/all_leads', { label: 'All leads' });
+        expect(String(fetchMock.mock.calls[1][0])).toBe(
+            'http://localhost:3000/api/v1/meta/object/views/all_leads',
+        );
+        expect(fetchMock.mock.calls[1][1].method).toBe('PUT');
+    });
 });
 
 describe('Approvals namespace (ADR-0019)', () => {

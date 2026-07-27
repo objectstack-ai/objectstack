@@ -109,7 +109,7 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | Namespace | Status | Methods | Purpose |
 |:----------|:------:|:--------|:--------|
 | **discovery** | ✅ | 1 | API version & capabilities detection |
-| **meta** | ✅ | 11 | Metadata read/write, published versions & drafts (ADR-0033), FSM introspection (ADR-0020) |
+| **meta** | ✅ | 18 | Metadata read/write, published versions & drafts (ADR-0033), per-item publish/rollback/diff, FSM introspection (ADR-0020), diagnostics, references, audit trail, book trees (ADR-0046) |
 | **data** | ✅ | 10 | CRUD & query operations |
 | **auth** | ✅ | 5 | Authentication & user management |
 | **packages** | ✅ | 17 | Package lifecycle: install/enable, drafts (ADR-0033), commits & rollback (ADR-0067), export/duplicate (ADR-0070) |
@@ -163,6 +163,20 @@ if (cached.notModified) {
 
 // Get auto-generated view
 const listView = await client.meta.getView('account', 'list');
+
+// Compound names (sub-resources) pass through unencoded
+const view = await client.meta.getItem('object', 'views/all_leads');
+
+// Per-item draft lifecycle (ADR-0033)
+await client.meta.publishItem('object', 'account', { message: 'go live' });
+await client.meta.rollbackItem('object', 'account', 3);
+const diff = await client.meta.diffItem('object', 'account', { from: 2, to: 5 });
+
+// Introspection & governance
+const bad = await client.meta.getDiagnostics({ severity: 'error' });
+const refs = await client.meta.getReferences('object', 'account');
+const trail = await client.meta.getAudit('object', 'account', { limit: 20 });
+const tree = await client.meta.getBookTree('handbook');
 ```
 
 ### `client.data` — CRUD & Batch
