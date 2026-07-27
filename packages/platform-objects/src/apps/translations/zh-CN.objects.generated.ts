@@ -1875,6 +1875,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "提供方 ID",
         help: "稳定的 SCIM 提供方标识符（如 “okta-scim”）"
       },
+      provider_key: {
+        label: "Provider Key",
+        help: "Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
       scim_token: {
         label: "SCIM 令牌（哈希）",
         help: "该 SCIM 连接的哈希 Bearer 凭据——明文仅在生成令牌时显示一次。敏感信息，请勿泄露。"

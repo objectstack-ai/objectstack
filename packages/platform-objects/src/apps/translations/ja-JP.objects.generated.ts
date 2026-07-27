@@ -1875,6 +1875,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "プロバイダー ID",
         help: "安定した SCIM プロバイダー識別子（例: 「okta-scim」）"
       },
+      provider_key: {
+        label: "Provider Key",
+        help: "Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
       scim_token: {
         label: "SCIM トークン（ハッシュ）",
         help: "この SCIM 接続のハッシュ化されたベアラー資格情報——平文はトークン生成時に一度だけ表示されます。機密情報のため、公開しないでください。"

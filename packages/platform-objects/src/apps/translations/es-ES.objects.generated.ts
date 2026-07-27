@@ -1875,6 +1875,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "ID de proveedor",
         help: "Identificador de proveedor SCIM estable (p. ej. «okta-scim»)"
       },
+      provider_key: {
+        label: "Provider Key",
+        help: "Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
       scim_token: {
         label: "Token SCIM (hash)",
         help: "Credencial bearer con hash de esta conexión SCIM: el texto plano se muestra una sola vez al generar el token. Sensible; no lo exponga."

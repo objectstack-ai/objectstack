@@ -1875,6 +1875,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Provider ID",
         help: "Stable SCIM provider identifier (e.g. \"okta-scim\")"
       },
+      provider_key: {
+        label: "Provider Key",
+        help: "Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly."
+      },
       scim_token: {
         label: "SCIM Token (hash)",
         help: "Hashed bearer credential for this SCIM connection — the plaintext is shown once at generate-token. Sensitive; do not expose."
