@@ -15,6 +15,7 @@ import { validateWidgetBindings } from '@objectstack/lint';
 import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateFilterTokens } from '@objectstack/lint';
 import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
+import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
@@ -287,6 +288,10 @@ export default class Validate extends Command {
       //     `reference`/`objectOverride`, dashboard filter `optionsFrom.object`,
       //     nav `requiresObject` gates, and the name-bound action surfaces
       //     (`bulkActions`/`rowActions`, page quick-actions, nav action items).
+      //     Plus page-component field bindings and the chart surfaces outside
+      //     dashboards (report charts, list-view charts, dataset-bound page
+      //     chart components) — same ADR-0021 semantic layer, where an axis
+      //     naming a raw field instead of a measure renders an empty series.
       //     All are plain strings in the schema, so a name resolving to nothing
       //     parses, ships, and fails silently at runtime. An unprefixed miss is
       //     a typo (error); a platform-prefixed name no known package registers
@@ -295,6 +300,8 @@ export default class Validate extends Command {
       const refFindings = [
         ...validateObjectReferences(result.data as Record<string, unknown>),
         ...validateActionNameRefs(result.data as Record<string, unknown>),
+        ...validatePageFieldBindings(result.data as Record<string, unknown>),
+        ...validateChartBindings(result.data as Record<string, unknown>),
       ];
       const refErrors = refFindings.filter((f) => f.severity === 'error');
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');

@@ -36,6 +36,8 @@
  * miss; it is called out in the hint rather than guessed at.
  */
 
+import { walkPageComponents } from './page-walk.js';
+
 export const ACTION_NAME_UNDEFINED = 'action-name-undefined';
 
 export type ActionNameRefSeverity = 'error' | 'warning';
@@ -190,30 +192,23 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
     if (!page || typeof page !== 'object') continue;
     const pageName = strName(page.name) ?? `#${pi}`;
 
-    const walkComponents = (components: unknown, basePath: string) => {
-      const list = Array.isArray(components) ? (components as AnyRec[]) : [];
-      for (let ci = 0; ci < list.length; ci++) {
-        const comp = list[ci];
-        if (!comp || typeof comp !== 'object') continue;
-        const compPath = `${basePath}[${ci}]`;
-        const props = comp.properties as AnyRec | undefined;
-        if (props && typeof props === 'object') {
-          const names = strList(props.actionNames);
-          for (let ai = 0; ai < names.length; ai++) {
-            check(
-              names[ai],
-              `page "${pageName}" · component "${strName(comp.type) ?? `#${ci}`}"`,
-              `${compPath}.properties.actionNames[${ai}]`,
-              'Quick-actions bar',
-            );
-          }
-        }
-        if (Array.isArray(comp.children)) walkComponents(comp.children, `${compPath}.children`);
-        if (Array.isArray(comp.components)) walkComponents(comp.components, `${compPath}.components`);
+    // Traversal is shared (`page-walk.ts`): the component tree is NOT where a
+    // first reading suggests. Components hang off `regions[].components[]` and
+    // `slots`, never a top-level `page.components`, and sub-trees nest inside
+    // the untyped `properties` bag rather than under a `children` key.
+    for (const { component, path } of walkPageComponents(page, `pages[${pi}]`)) {
+      const props = component.properties as AnyRec | undefined;
+      if (!props || typeof props !== 'object') continue;
+      const names = strList(props.actionNames);
+      for (let ai = 0; ai < names.length; ai++) {
+        check(
+          names[ai],
+          `page "${pageName}" · component "${strName(component.type) ?? '?'}"`,
+          `${path}.properties.actionNames[${ai}]`,
+          'Quick-actions bar',
+        );
       }
-    };
-
-    walkComponents(page.components, `pages[${pi}].components`);
+    }
   }
 
   // ── App navigation: { type: 'action', actionDef: { actionName } } ──

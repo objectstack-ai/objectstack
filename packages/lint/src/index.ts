@@ -191,4 +191,16 @@ export type { ObjectRefFinding, ObjectRefSeverity } from './validate-object-refe
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
 
+export { validatePageFieldBindings, PAGE_FIELD_UNKNOWN } from './validate-page-field-bindings.js';
+export type { PageFieldFinding, PageFieldSeverity } from './validate-page-field-bindings.js';
+
+export {
+  validateChartBindings,
+  CHART_DIMENSION_UNKNOWN,
+  CHART_MEASURE_UNKNOWN,
+  CHART_DATASET_UNKNOWN,
+  CHART_AXIS_NOT_SELECTED,
+} from './validate-chart-bindings.js';
+export type { ChartBindingFinding, ChartBindingSeverity } from './validate-chart-bindings.js';
+
 export { buildAccessMatrix, diffAccessMatrix } from './build-access-matrix.js';

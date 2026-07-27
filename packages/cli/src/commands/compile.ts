@@ -14,6 +14,7 @@ import { validateWidgetBindings } from '@objectstack/lint';
 import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateFilterTokens } from '@objectstack/lint';
 import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
+import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateSecurityPosture, validateOrgAxisRedLines, buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
@@ -325,6 +326,10 @@ export default class Compile extends Command {
       //     `objectOverride`, dashboard filter `optionsFrom.object`, nav
       //     `requiresObject` gates, and the name-bound action surfaces
       //     (`bulkActions`/`rowActions`, page quick-actions, nav action items).
+      //     Plus page-component field bindings and the chart surfaces outside
+      //     dashboards (report charts, list-view charts, dataset-bound page
+      //     chart components) — same ADR-0021 semantic layer, where an axis
+      //     naming a raw field instead of a measure renders an empty series.
       //     All plain strings in the schema, so a name resolving to nothing
       //     ships and fails silently. Errors fail the build; the
       //     platform-prefixed-but-unregistered case is advisory (a third-party
@@ -333,6 +338,8 @@ export default class Compile extends Command {
       const refFindings = [
         ...validateObjectReferences(result.data as Record<string, unknown>),
         ...validateActionNameRefs(result.data as Record<string, unknown>),
+        ...validatePageFieldBindings(result.data as Record<string, unknown>),
+        ...validateChartBindings(result.data as Record<string, unknown>),
       ];
       const refErrors = refFindings.filter((f) => f.severity === 'error');
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');

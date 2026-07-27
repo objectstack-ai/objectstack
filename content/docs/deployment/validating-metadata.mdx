@@ -116,6 +116,49 @@ Interpolated targets (`${…}`, `{…}`) are skipped — they resolve at render 
 Action names get no third-party softening: the runtime ships no built-in action
 names, so a name resolving nowhere is always an **error**.
 
+### 5. Page components bound to fields that don't exist
+
+A page component's `properties` is an untyped bag, so a highlights strip, a KPI
+card, or a details section can name a field the bound object does not have. The
+component silently skips it and the page renders one item short.
+
+```ts
+// page.object = 'crm_lead'
+{ type: 'record:highlights', properties: { fields: ['status', 'total_revenue'] } }
+//                                                    ↑ not a crm_lead field → warning
+```
+
+Which object a component binds follows `dataSource.object` → `properties.object`
+→ the page's `object`, so a multi-object page is checked per element rather than
+against one page-wide guess. A `record:related_list`'s `columns`/`sort`/`filter`
+resolve against its **related** object (`objectName`), and its add-picker against
+its own. Advisory, like form-layout field references — every consumer degrades
+rather than failing.
+
+Skipped, to keep false positives at zero: relationship paths (`account.name`,
+resolved by the query engine), registry-injected system fields (`created_at`,
+`owner_id`, …), components bound to an object another package defines, and
+unregistered component types.
+
+### 6. Chart axes naming raw fields instead of dataset measures
+
+Post-[ADR-0021](/docs/data-modeling/analytics) a chart's result rows are keyed by
+the **dataset measure name**, not the underlying column — so an axis pointing at
+the raw field renders with an empty series. Dashboard widgets were already
+checked; report charts, list-view charts, and dataset-bound page chart components
+are checked the same way.
+
+```ts
+// dataset declares measure `est_hours` (sum of `estimate_hours`)
+chart: { type: 'bar', xAxis: 'status', yAxis: 'estimate_hours' }
+//                                            ↑ the base column, not the measure → error
+```
+
+An axis naming a measure the dataset declares but this chart does not *select*
+(not in `values`) is a **warning**: the query never returns it, so it plots
+nothing. The react `<ObjectChart>` block is object-bound rather than
+dataset-bound and is not checked here.
+
 ## The one gate, two entry points
 
 `os validate` and `os build` (alias of `os compile`) run the **same** validator:
@@ -127,6 +170,8 @@ names, so a name resolving nowhere is always an **error**.
 | Widget-binding integrity | ✓ | ✓ |
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ |
 | Object & action name references (#3583) | ✓ | ✓ |
+| Page-component field bindings (#3583) | ✓ | ✓ |
+| Chart bindings outside dashboards (#3583) | ✓ | ✓ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ |
 | Emits `dist/objectstack.json` | — | ✓ |
 

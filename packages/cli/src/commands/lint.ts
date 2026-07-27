@@ -11,6 +11,7 @@ import { lintDataModel } from '../lint/data-model-rules.js';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateRecordTitle, validateSemanticRoles, validateCapabilityReferences, validateSecurityPosture, validateOrgAxisRedLines, validateApprovalApprovers, validateSeedReplaySafety, validateSeedStateMachine } from '@objectstack/lint';
 import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
+import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
@@ -511,6 +512,36 @@ export function lintConfig(config: any): LintIssue[] {
   // renders and does nothing — same failure `validate-dashboard-action-refs`
   // catches for dashboards, so the same severity.
   for (const t of validateActionNameRefs(config)) {
+    issues.push({
+      severity: t.severity,
+      rule: t.rule,
+      message: `${t.where}: ${t.message}`,
+      path: t.path,
+      fix: t.hint,
+    });
+  }
+
+  // ── Page component field bindings (issue #3583) ──
+  // `PageComponent.properties` is an untyped bag, so a highlights strip, KPI
+  // card, or details section can name a field the object does not have; the
+  // component silently skips it. Advisory, matching `FORM_FIELD_UNKNOWN` —
+  // every page consumer degrades rather than failing.
+  for (const t of validatePageFieldBindings(config)) {
+    issues.push({
+      severity: t.severity,
+      rule: t.rule,
+      message: `${t.where}: ${t.message}`,
+      path: t.path,
+      fix: t.hint,
+    });
+  }
+
+  // ── Chart bindings outside dashboards (issue #3583) ──
+  // `validate-widget-bindings` covers dashboard widgets only. Report charts,
+  // list-view charts, and dataset-bound page chart components bind the same
+  // semantic layer, where an axis naming a raw field instead of a dataset
+  // measure renders an empty series (ADR-0021).
+  for (const t of validateChartBindings(config)) {
     issues.push({
       severity: t.severity,
       rule: t.rule,

@@ -84,43 +84,107 @@ describe('validateActionNameRefs — list view bulk/row actions', () => {
   });
 });
 
+// These fixtures use the REAL page shape. An earlier version of this suite
+// invented a top-level `page.components` array with `children` nesting — a
+// shape `PageSchema` does not have (components live under
+// `regions[].components[]` / `slots`, and `PageComponentSchema` is `.strict()`
+// so it carries no `children`). The rule passed those tests while visiting
+// nothing at all on a real stack.
 describe('validateActionNameRefs — page quick actions', () => {
-  it('errors on an undefined actionNames entry', () => {
+  it('errors on an undefined actionNames entry in a region', () => {
     const findings = validateActionNameRefs({
       ...withActions(),
       pages: [
         {
           name: 'lead_record',
-          components: [
+          regions: [
             {
-              type: 'record:quick_actions',
-              properties: { location: 'record_section', actionNames: ['showcase_mark_done'] },
+              name: 'main',
+              components: [
+                {
+                  type: 'record:quick_actions',
+                  properties: { location: 'record_section', actionNames: ['showcase_mark_done'] },
+                },
+              ],
             },
           ],
         },
       ],
     });
     expect(findings).toHaveLength(1);
-    expect(findings[0].path).toBe('pages[0].components[0].properties.actionNames[0]');
+    expect(findings[0].path).toBe('pages[0].regions[0].components[0].properties.actionNames[0]');
   });
 
-  it('walks nested component children', () => {
+  it('walks a slotted page', () => {
     const findings = validateActionNameRefs({
       ...withActions(),
       pages: [
         {
           name: 'p',
-          components: [
+          kind: 'slotted',
+          slots: {
+            actions: { type: 'record:quick_actions', properties: { actionNames: ['nope'] } },
+          },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('pages[0].slots.actions.properties.actionNames[0]');
+  });
+
+  it('recurses into tab children nested in the properties bag', () => {
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      pages: [
+        {
+          name: 'p',
+          regions: [
             {
-              type: 'layout:columns',
-              children: [{ type: 'record:quick_actions', properties: { actionNames: ['nope'] } }],
+              name: 'main',
+              components: [
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    items: [
+                      {
+                        label: 'Overview',
+                        children: [
+                          { type: 'record:quick_actions', properties: { actionNames: ['nope'] } },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              ],
             },
           ],
         },
       ],
     });
     expect(findings).toHaveLength(1);
-    expect(findings[0].path).toBe('pages[0].components[0].children[0].properties.actionNames[0]');
+    expect(findings[0].path).toBe(
+      'pages[0].regions[0].components[0].properties.items[0].children[0].properties.actionNames[0]',
+    );
+  });
+
+  it('skips a source-authored page (its regions are a derived cache)', () => {
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      pages: [
+        {
+          name: 'p',
+          kind: 'jsx',
+          source: '<div />',
+          regions: [
+            {
+              name: 'main',
+              components: [{ type: 'record:quick_actions', properties: { actionNames: ['nope'] } }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
   });
 });
 
