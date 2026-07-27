@@ -1959,17 +1959,18 @@ describe('ApprovalService — listActions attachments mapping (#3266)', () => {
     expect(approve?.attachments).toEqual([{ id: 'file_a' }]);
   });
 
-  // The real column value: `attachments` is a `Field.file` (multiple), which
-  // stores rich descriptors — NOT fileId strings. The old `.map(String)` turned
-  // each into "[object Object]", so the inbox chip had no name and 404'd on open.
-  // The mapping must pass the descriptor (id + name + url) through unmangled.
-  it('passes a stored file descriptor object through with its name and url', async () => {
+  // The normal case. The column STORES an opaque sys_file id (ADR-0104 D3);
+  // the ObjectQL read path resolves it into the expanded
+  // `{ id, name, size, mimeType, url }` form on the way out. The old
+  // `.map(String)` turned that object into "[object Object]", so the inbox chip
+  // had no name and 404'd on open. The mapping must pass it through unmangled.
+  it('passes the engine-expanded file value through with its name and url', async () => {
     const engine = makeFakeEngine();
     let n = 0;
     const svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
     await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
-    // Simulate the Field.file column's real shape (what the engine returns).
+    // Simulate what the read path hands back after resolving the stored id.
     const row = engine._tables['sys_approval_action'].find((a: any) => a.action === 'approve');
     row.attachments = [
       { id: 'file_a', name: 'signed-contract.pdf', mimeType: 'application/pdf', size: 24, url: '/api/v1/storage/files/file_a' },
@@ -1978,6 +1979,26 @@ describe('ApprovalService — listActions attachments mapping (#3266)', () => {
     const approve = acts.find(a => a.action === 'approve');
     expect(approve?.attachments).toEqual([
       { id: 'file_a', name: 'signed-contract.pdf', mimeType: 'application/pdf', size: 24, url: '/api/v1/storage/files/file_a' },
+    ]);
+  });
+
+  // Rows written before file-as-reference hold an inline blob whose keys are
+  // snake_case (`file_id`, `mime_type`). They stay readable until the backfill
+  // converts them, so both casings must map — the same drift that made objectui
+  // stop recognising images when the expanded form arrived.
+  it('maps a legacy inline blob (file_id / mime_type) written before the cutover', async () => {
+    const engine = makeFakeEngine();
+    let n = 0;
+    const svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    const row = engine._tables['sys_approval_action'].find((a: any) => a.action === 'approve');
+    row.attachments = [
+      { file_id: 'file_b', name: 'old.pdf', mime_type: 'application/pdf', size: 12, url: 'https://cdn/old.pdf' },
+    ];
+    const acts = await svc.listActions(req.id, SYS);
+    expect(acts.find(a => a.action === 'approve')?.attachments).toEqual([
+      { id: 'file_b', name: 'old.pdf', mimeType: 'application/pdf', size: 12, url: 'https://cdn/old.pdf' },
     ]);
   });
 });

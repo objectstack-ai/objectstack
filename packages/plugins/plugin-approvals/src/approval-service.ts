@@ -31,6 +31,7 @@ import type {
   ApprovalStatus,
   SharingExecutionContext,
 } from '@objectstack/spec/contracts';
+import { isFileIdToken } from '@objectstack/spec/data';
 import { isGrantActive } from '@objectstack/core';
 
 /**
@@ -259,22 +260,38 @@ function slaDueAt(createdAt: unknown, cfg: any): string | undefined {
 /**
  * Normalize one raw `attachments` entry into an {@link ApprovalActionAttachment}.
  *
- * The `sys_approval_action.attachments` file field stores **rich descriptors**
- * (`{ id, name, url, mimeType, size }`), not bare fileId strings — even when the
- * decision was recorded with a fileId, the field resolves it on write. The
- * original mapping did `String(entry)`, which turned each descriptor object into
- * the literal `"[object Object]"` — so the inbox timeline showed a nameless,
+ * `sys_approval_action.attachments` is a `Field.file` (multiple), so the column
+ * **stores opaque `sys_file` ids** — that is the stored form of every media
+ * field (ADR-0104 D3). What arrives here is whichever of three forms the read
+ * path produced:
+ *
+ *  1. the **expanded** `{ id, name, size, mimeType, url }` the ObjectQL read
+ *     path resolves a stored id into — the normal case;
+ *  2. a **bare id**, when there was nothing to expand it into (storage service
+ *     absent, file not committed);
+ *  3. a **legacy inline blob** (`{ file_id, name, mime_type, url, … }`) written
+ *     before file-as-reference, until the backfill converts it.
+ *
+ * The original mapping did `String(entry)`, which turned form 1 into the
+ * literal `"[object Object]"` — so the inbox timeline showed a nameless,
  * un-openable attachment chip (#3266 follow-up; caught by browser verification).
- * We pass the descriptor through, tolerating a bare-string fileId for safety.
+ *
+ * Note the casing: the expanded form carries `mimeType`, the legacy blob
+ * `mime_type`. Both are accepted for the duration of the migration window.
  */
 function normalizeActionAttachment(entry: any): ApprovalActionAttachment | undefined {
   if (entry == null) return undefined;
+  // Form 2 — a bare reference. `isFileIdToken` is the platform's single arbiter
+  // of "is this string an opaque file id, or a URL?", shared with the engine's
+  // read resolver, so the two cannot disagree about what counts as an id.
   if (typeof entry === 'string') {
     const id = entry.trim();
-    return id ? { id } : undefined;
+    if (!id) return undefined;
+    return isFileIdToken(id) ? { id } : { id, url: id };
   }
   if (typeof entry === 'object') {
-    const id = entry.id ?? entry.fileId ?? entry.file_id;
+    // Forms 1 and 3 — `file_id` is the legacy blob's key for the same thing.
+    const id = entry.id ?? entry.file_id;
     if (id == null || String(id) === '') return undefined;
     const mimeType = entry.mimeType ?? entry.mime_type;
     return {

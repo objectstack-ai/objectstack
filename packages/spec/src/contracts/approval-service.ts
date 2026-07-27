@@ -200,11 +200,18 @@ export type ApprovalActionKind =
   | 'ooo_substitute';
 
 /**
- * A file attached to a decision action (#3266). Resolved from the
- * `sys_approval_action.attachments` file field, which stores rich descriptors
- * (not bare fileIds) — so the row carries the display name and a download URL
- * directly, and consumers never need read access to the system `sys_file`
- * object to label or open an attachment.
+ * A file attached to a decision action (#3266) — the READ shape of one
+ * `sys_approval_action.attachments` entry.
+ *
+ * The column **stores an opaque `sys_file` id** (ADR-0104 D3: that is the
+ * stored form of every media field). The name, size, MIME type and URL are not
+ * stored alongside it — the ObjectQL read path resolves the id into its
+ * expanded `FileValueSchema` form on the way out, and this interface is that
+ * form plus the id. So a consumer gets everything it needs to label and open an
+ * attachment without read access to the system `sys_file` object, while the
+ * write side stays a plain id (see `ApprovalDecisionInput.attachments`).
+ *
+ * Field names follow the expanded form — `mimeType`, not `mime_type`.
  */
 export interface ApprovalActionAttachment {
   /** The `sys_file` id — pass to `GET /storage/files/:id/url` for a signed URL. */
