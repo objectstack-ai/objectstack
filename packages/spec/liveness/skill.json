@@ -45,13 +45,6 @@
       "status": "live",
       "evidence": "objectui: packages/app-shell/src/views/metadata-admin/previews/SkillPreview.tsx:44",
       "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
-    },
-    "permissions": {
-      "status": "dead",
-      "evidence": "skill.form.ts + objectui SkillPreview.tsx:48 (both authoring-side echo only); no gate in the cloud SkillRegistry",
-      "authorWarn": true,
-      "authorHint": "Skill invocation is NOT permission-gated by this list — the registry reads only `active`/`triggerConditions`/`tools`. Agent-level `access`/`permissions` ARE enforced (#1884), so gate at the agent, or gate the underlying tools' actions via permission sets (ADR-0066).",
-      "note": "CORRECTED 2026-07 (#1878 §3 recheck): was marked live on the evidence of the metadata-admin PREVIEW renderer — an echo of what the author typed, not runtime consumption. Mirrors the identical `tool.permissions` entry. Cloud documents the intent ('Layer permissions via Skill.permissions independent of the agent's permissions', service-ai-studio/src/skills/metadata-authoring-skill.ts:15) without implementing it — enforce-or-prune tracked separately."
     }
   }
 }

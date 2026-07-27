@@ -64,7 +64,6 @@ describe('SkillSchema', () => {
         { field: 'objectName', operator: 'eq' as const, value: 'order' },
         { field: 'userRole', operator: 'in' as const, value: ['sales', 'support'] },
       ],
-      permissions: ['order.manage', 'order.view'],
       active: true,
     };
 
@@ -73,7 +72,20 @@ describe('SkillSchema', () => {
     expect(result.tools).toHaveLength(4);
     expect(result.triggerPhrases).toHaveLength(3);
     expect(result.triggerConditions).toHaveLength(2);
-    expect(result.permissions).toEqual(['order.manage', 'order.view']);
+  });
+
+  it('drops a `permissions` key — skill invocation was never permission-gated (pruned)', () => {
+    const parsed = SkillSchema.parse({
+      name: 'order_management',
+      label: 'Order Management',
+      instructions: 'x',
+      tools: ['create_order'],
+      // Authored against the retired key: the schema is non-strict, so it is
+      // stripped rather than rejected. Gate at the AGENT (`access`/`permissions`,
+      // enforced #1884) or on the underlying tools' actions instead.
+      permissions: ['order.manage'],
+    } as Record<string, unknown>);
+    expect('permissions' in parsed).toBe(false);
   });
 
   it('should enforce snake_case for skill name', () => {

@@ -232,7 +232,7 @@ EOF
 | position | 4 | – | – | – | (role's ADR-0090 successor) fully live |
 | agent | 13 | 5 | 1 | – | dead `tenantId` + `planning.strategy`/`allowReplan` REMOVED (#2377) — only `planning.maxIterations` live; autonomy tier experimental; `knowledge` CORRECTED to dead 2026-07 — `search_knowledge` takes `sourceIds` from the LLM's tool-call args, never from the agent record (#1878 §3 recheck) |
 | tool | 9 | 1 | 1 | – | `permissions` dead — tool invocation not permission-gated by it |
-| skill | 9 | – | 1 | – | `permissions` CORRECTED to dead 2026-07 — the cloud SkillRegistry reads only `active`/`triggerConditions`/`tools`; mirrors the identical `tool.permissions` entry (#1878 §3 recheck) |
+| skill | 9 | – | – | – | `permissions` REMOVED 2026-07 — never permission-gated anything (the cloud SkillRegistry reads only `active`/`triggerConditions`/`tools`); owner call was prune, not enforce. Gate at the agent (`access`/`permissions`, #1884) or on the tools' underlying actions |
 | dataset | 19 | – | 0 | – | `measures.certified` (declared-but-unenforced governance flag) REMOVED in 16.0 (#2377) |
 | page | 16 | – | – | 1 | fully live + one planned |
 | view | 70 | 0 | 5 | – | list/form drilled via `children` (#2998 Track B); dead = list.{responsive,performance} + form.{data,defaultSort,aria}, all but aria authorWarn'd; form.{buttons,defaults} now live — objectui ObjectForm folds them onto its flat props (framework#1894 / #2998); audit-era DEAD lines superseded by re-verification (submitBehavior, sharing.lockedBy, list ViewData providers, and the ADR-0021 chart shape — all live now); level-2 dead residue (userActions.buttons, addRecord.mode/formView, tabs[].order) noted on parents — one drill level only |

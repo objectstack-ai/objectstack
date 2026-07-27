@@ -238,8 +238,14 @@ trigger conditions.
 | `instructions` | LLM prompt guidance specific to this skill's context |
 | `triggerPhrases` | Natural language phrases that activate the skill |
 | `triggerConditions` | Programmatic activation rules |
-| `permissions` | Required permission profiles/roles |
 | `active` | Is the skill enabled (default: `true`) |
+
+> A skill has **no `permissions` key** — it was removed in 16.x. Skill invocation
+> was never gated by it (the registry reads only `active` / `triggerConditions` /
+> `tools`), and a security-shaped field that enforces nothing is worse than no
+> field at all. Gate access at the **agent** instead — `access` / `permissions` on
+> `defineAgent` are enforced at the chat route — or on the underlying actions the
+> skill's tools call (permission sets, ADR-0066).
 
 ### Skill Example
 
@@ -272,7 +278,6 @@ export default defineSkill({
   triggerConditions: [
     { field: 'objectName', operator: 'eq', value: 'support_case' },
   ],
-  permissions: ['support_agent', 'support_admin'],
   active: true,
 });
 ```

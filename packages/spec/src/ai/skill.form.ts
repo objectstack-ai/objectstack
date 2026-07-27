@@ -40,14 +40,5 @@ export const skillForm = defineForm({
         { field: 'triggerConditions', type: 'repeater', helpText: 'Programmatic conditions (e.g., objectName == "case")' },
       ],
     },
-    {
-      label: 'Access',
-      description: 'Required permissions to use this skill.',
-      collapsible: true,
-      collapsed: true,
-      fields: [
-        { field: 'permissions', widget: 'string-tags', helpText: 'Required permissions to use this skill' },
-      ],
-    },
   ],
 });

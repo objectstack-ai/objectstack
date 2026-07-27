@@ -1717,10 +1717,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       triggers: {
         label: "Triggers",
         description: "When this skill should activate."
-      },
-      access: {
-        label: "Access",
-        description: "Required permissions to use this skill."
       }
     },
     fields: {
@@ -1755,10 +1751,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       triggerConditions: {
         label: "Trigger Conditions",
         helpText: "Programmatic conditions (e.g., objectName == \"case\")"
-      },
-      permissions: {
-        label: "Permissions",
-        helpText: "Required permissions to use this skill"
       }
     }
   }

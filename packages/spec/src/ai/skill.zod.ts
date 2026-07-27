@@ -117,9 +117,6 @@ export const SkillSchema = lazySchema(() => z.object({
    */
   triggerConditions: z.array(SkillTriggerConditionSchema).optional().describe('Programmatic activation conditions'),
 
-  /** Permission profiles/roles required to use this skill */
-  permissions: z.array(z.string()).optional().describe('Required permissions or roles'),
-
   /** Whether the skill is enabled */
   active: z.boolean().default(true).describe('Whether the skill is enabled'),
   /**
