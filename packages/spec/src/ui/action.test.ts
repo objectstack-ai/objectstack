@@ -1057,6 +1057,33 @@ describe('ActionSchema - execute → target migration', () => {
       body: { language: 'expression', source: 'true' },
     })).not.toThrow();
   });
+
+  it('should reject a body on a non-script action (it would never run)', () => {
+    // #3530: `type: 'modal'` + `params` + `body` was authored expecting the
+    // body to run when the modal is submitted. A modal action dispatches on
+    // `target` (the page to open), so the body is silently skipped — the modal
+    // opens and nothing is ever written. Fail at author time and point at the
+    // fix rather than shipping a button that does nothing.
+    for (const type of ['modal', 'url', 'flow', 'api', 'form'] as const) {
+      expect(() => ActionSchema.parse({
+        name: `${type}_with_body`,
+        label: 'Has a body',
+        type,
+        target: 'some_target',
+        body: { language: 'js', source: 'return 1;', capabilities: ['api.write'] },
+      }), `type: '${type}'`).toThrow(/script/);
+    }
+  });
+
+  it('should allow a non-script action without a body', () => {
+    expect(() => ActionSchema.parse({
+      name: 'log_call',
+      label: 'Log a Call',
+      type: 'modal',
+      target: 'log_call',
+      params: [{ name: 'subject', label: 'Call Subject', type: 'text', required: true }],
+    })).not.toThrow();
+  });
 });
 
 describe('ActionSchema - target required for non-script types', () => {
