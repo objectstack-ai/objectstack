@@ -102,6 +102,16 @@ export interface ObjectQLPluginOptions {
    */
   hydrateMetadataFromDb?: boolean;
   /**
+   * ADR-0076 Step 2 (#2462): when `false`, this plugin SKIPS its built-in
+   * protocol assembly (the `protocol` service, the metadata-storage platform
+   * objects, and the lightweight `analytics` fallback) — mount
+   * `createMetadataProtocolPlugin()` from `@objectstack/metadata-protocol`
+   * alongside to own them instead. Protocol CONSUMERS stay here either way
+   * (DB hydration + authored hook/action rebind resolve `protocol` lazily).
+   * Defaults to `true` (built-in assembly, fully backward compatible).
+   */
+  registerProtocol?: boolean;
+  /**
    * ADR-0057 LifecycleService tuning. Lifecycle enforcement is a platform
    * primitive and defaults ON — objects without a `lifecycle` declaration are
    * never touched, so a kernel with no declarations sees zero deletes. Set
@@ -134,6 +144,7 @@ export class ObjectQLPlugin implements Plugin {
   /** Serializes reload-time schema syncs so overlapping reloads can't race DDL. */
   private reloadSchemaSync: Promise<void> = Promise.resolve();
   private hydrateMetadataFromDb = false;
+  private registerProtocol = true;
   /**
    * Armed at the end of `start()` (AFTER the one-shot
    * {@link bridgeObjectsToMetadataService}, where that runs). From that
@@ -176,7 +187,41 @@ export class ObjectQLPlugin implements Plugin {
         ? opts.skipSchemaSync
         : process.env.OS_SKIP_SCHEMA_SYNC === '1';
     this.hydrateMetadataFromDb = opts.hydrateMetadataFromDb === true;
+    this.registerProtocol = opts.registerProtocol !== false;
     this.lifecycleOptions = opts.lifecycle;
+  }
+
+  /**
+   * Arm the authored hook/action rebind on protocol metadata mutations
+   * (#2588, #2605). Shared by both assembly modes: called with the in-house
+   * shim when `registerProtocol` is on, and lazily from `start()` against
+   * whatever registered `protocol` (MetadataProtocolPlugin) otherwise.
+   */
+  private subscribeMetadataRebind(ctx: PluginContext, protocol: unknown): void {
+    if (typeof (protocol as any)?.onMetadataMutation !== 'function') return;
+    const unsubscribe = (protocol as any).onMetadataMutation(
+      (evt: { type: string; name: string; state: string }) => {
+        if (evt?.state === 'draft') return;
+        if (evt?.type === 'hook') {
+          void this.resyncAuthoredHooks(ctx).catch((e: any) => {
+            ctx.logger.warn('[ObjectQLPlugin] authored-hook rebind after mutation failed', {
+              hook: evt.name,
+              error: e?.message,
+            });
+          });
+        } else if (evt?.type === 'action' || evt?.type === 'object') {
+          // `object` rows carry embedded `actions[]`, so an object edit can
+          // add/remove an authored action too — re-sync on both.
+          void this.resyncAuthoredActions(ctx).catch((e: any) => {
+            ctx.logger.warn('[ObjectQLPlugin] authored-action rebind after mutation failed', {
+              item: evt.name,
+              error: e?.message,
+            });
+          });
+        }
+      },
+    );
+    this.metadataUnsubscribes.push(unsubscribe);
   }
 
   init = async (ctx: PluginContext) => {
@@ -217,6 +262,7 @@ export class ObjectQLPlugin implements Plugin {
         services: ['objectql', 'data', 'manifest'],
     });
 
+    if (this.registerProtocol) {
     // Register the metadata-storage objects this engine's own protocol reads
     // and writes — `sys_metadata` (loadMetaFromDb / getMetaItems / saveMetaItem),
     // its history/audit siblings, and `sys_view_definition`. Doing it here
@@ -267,31 +313,7 @@ export class ObjectQLPlugin implements Plugin {
     // without a restart. Draft saves are skipped — drafts are not live by
     // design. Fire-and-forget: a resync failure is logged, never fails the
     // write.
-    if (typeof (protocolShim as any).onMetadataMutation === 'function') {
-      const unsubscribe = (protocolShim as any).onMetadataMutation(
-        (evt: { type: string; name: string; state: string }) => {
-          if (evt?.state === 'draft') return;
-          if (evt?.type === 'hook') {
-            void this.resyncAuthoredHooks(ctx).catch((e: any) => {
-              ctx.logger.warn('[ObjectQLPlugin] authored-hook rebind after mutation failed', {
-                hook: evt.name,
-                error: e?.message,
-              });
-            });
-          } else if (evt?.type === 'action' || evt?.type === 'object') {
-            // `object` rows carry embedded `actions[]`, so an object edit can
-            // add/remove an authored action too — re-sync on both.
-            void this.resyncAuthoredActions(ctx).catch((e: any) => {
-              ctx.logger.warn('[ObjectQLPlugin] authored-action rebind after mutation failed', {
-                item: evt.name,
-                error: e?.message,
-              });
-            });
-          }
-        },
-      );
-      this.metadataUnsubscribes.push(unsubscribe);
-    }
+    this.subscribeMetadataRebind(ctx, protocolShim);
 
     // Register an `analytics` service adapter that maps the dispatcher's
     // expected interface (query / getMeta / generateSql) onto the
@@ -349,6 +371,9 @@ export class ObjectQLPlugin implements Plugin {
         message: 'Analytics SQL generation not implemented by ObjectQL adapter',
       }),
     });
+    } else {
+      ctx.logger.info('registerProtocol=false — protocol assembly delegated to MetadataProtocolPlugin (ADR-0076 Step 2, #2462)');
+    }
 
     // ADR-0057: the platform-owned LifecycleService. Registered from the
     // engine plugin (not an opt-in capability) so every kernel that has data
@@ -374,6 +399,15 @@ export class ObjectQLPlugin implements Plugin {
 
   start = async (ctx: PluginContext) => {
     ctx.logger.info('ObjectQL engine starting...');
+
+    // Delegated-assembly mode (ADR-0076 Step 2): the protocol was registered
+    // by MetadataProtocolPlugin during init — arm the authored hook/action
+    // rebind against it now that all inits ran. Graceful when absent.
+    if (!this.registerProtocol) {
+      try {
+        this.subscribeMetadataRebind(ctx, ctx.getService('protocol'));
+      } catch { /* no protocol registered — rebind not armed */ }
+    }
 
     // Sync from external metadata service (e.g. MetadataPlugin) if available
     try {
