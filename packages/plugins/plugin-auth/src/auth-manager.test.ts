@@ -2472,6 +2472,46 @@ describe('AuthManager', () => {
       );
     });
 
+    // #3690 — sign-in can lock at either stage, and the counters are
+    // independent. Unlocking only `sys_user` left a 2FA-locked user with no
+    // admin escape hatch, which the now-configurable threshold makes routine.
+    it('unlockUser also clears the second factor\'s lock', async () => {
+      const engine = {
+        ...makeEngine({ id: 'u1' }),
+        find: vi.fn(async () => [{ id: 'tf1' }, { id: 'tf2' }]),
+      };
+      const m = mgr(engine);
+      await expect(m.unlockUser('u1')).resolves.toBe(true);
+      expect(engine.find).toHaveBeenCalledWith(
+        'sys_two_factor',
+        expect.objectContaining({ where: { user_id: 'u1' } }),
+      );
+      for (const id of ['tf1', 'tf2']) {
+        expect(engine.update).toHaveBeenCalledWith(
+          'sys_two_factor',
+          { id, failed_verification_count: 0, locked_until: null },
+          expect.anything(),
+        );
+      }
+    });
+
+    it('unlockUser still succeeds when the second-factor clear fails', async () => {
+      // No enrolment, a store that cannot serve the lookup, 2FA never switched
+      // on — none of that may turn the password-stage unlock the admin asked
+      // for into a failure.
+      const engine = {
+        ...makeEngine({ id: 'u1' }),
+        find: vi.fn(async () => { throw new Error('no such object: sys_two_factor'); }),
+      };
+      const m = mgr(engine);
+      await expect(m.unlockUser('u1')).resolves.toBe(true);
+      expect(engine.update).toHaveBeenCalledWith(
+        'sys_user',
+        { id: 'u1', failed_login_count: 0, locked_until: null },
+        expect.anything(),
+      );
+    });
+
     it('unlockUser returns false for an unknown user', async () => {
       const engine = makeEngine(null);
       const m = mgr(engine);

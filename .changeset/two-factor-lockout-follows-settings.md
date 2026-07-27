@@ -30,6 +30,13 @@ The threshold field is also no longer hidden behind `email_password_enabled` —
 two-factor verification exists in passwordless deployments, where the setting was
 previously unreachable.
 
+The admin **Unlock Account** action now clears both stages. It only ever reset
+`sys_user`, so a user locked at the second factor had no admin escape hatch and
+had to wait the duration out — survivable while that lock needed 10 failures,
+routine once an operator can set the threshold to 3. The second-factor clear is
+best-effort and runs after the primary write, so an account with no enrolment
+still unlocks normally.
+
 Note the plugin caps attempts at 5 per challenge (`beginAttempt(5)`), which no
 option reaches; a threshold above 5 forces a fresh challenge rather than raising
 that cap.

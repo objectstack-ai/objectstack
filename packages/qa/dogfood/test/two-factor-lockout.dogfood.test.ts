@@ -116,6 +116,7 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
   let priorTwoFactor: string | undefined;
   let secret: Buffer;
   let adminEmail: string;
+  let adminUserId: string;
 
   beforeAll(async () => {
     // The two-factor plugin is opt-in (`twoFactor: … ?? false`), resolved once
@@ -140,7 +141,9 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     const token = await stack.signIn();
     const me = await (await stack.apiAs(token, 'GET', '/auth/get-session')).json() as any;
     adminEmail = me?.user?.email;
+    adminUserId = String(me?.user?.id ?? '');
     expect(adminEmail, 'could not resolve the seeded admin email').toBeTruthy();
+    expect(adminUserId, 'could not resolve the seeded admin id').toBeTruthy();
 
     // Enrol. `enable` returns the otpauth:// URI carrying the base32 secret;
     // the stored copy is symmetrically encrypted, so this is the only place
@@ -333,5 +336,50 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     const after = await lockoutState();
     expect(after.lockedUntil ?? null, 'the expired lock must be cleared, not merely ignored').toBeNull();
     expect(after.count, 'clearing an expired lock must reset the failure budget too').toBe(0);
+  });
+
+  // [#3690] The admin escape hatch. `Unlock Account` used to clear only
+  // `sys_user`, so a user locked at the SECOND factor had no way out but to
+  // wait out the duration — tolerable while that lock needed 10 failures, much
+  // less so now that an operator can set the threshold to 3.
+  it('the admin unlock action releases a second-factor lock', async () => {
+    // A session that survives the lock. The one minted in beforeAll does not:
+    // completing enrolment rotates the session, so that bearer is stale by now.
+    // Take a fresh one through the full two-factor sign-in BEFORE re-locking —
+    // afterwards there is no way to obtain one, which is exactly why the admin
+    // escape hatch has to exist.
+    const bootstrap = await verifyWithCookie(await beginChallenge(), totp(secret));
+    expect(bootstrap.status, `sign-in for the admin session: ${await bootstrap.clone().text()}`).toBe(200);
+    const adminSession = ((await bootstrap.json()) as { token?: string }).token;
+    expect(adminSession, 'two-factor sign-in returned no session token').toBeTruthy();
+
+    // Re-lock: the previous test cleared everything.
+    let failures = 0;
+    while (failures < LOCKOUT_THRESHOLD) {
+      const cookie = await beginChallenge();
+      for (let i = 0; i < MAX_PER_CHALLENGE && failures < LOCKOUT_THRESHOLD; i++) {
+        await verifyWithCookie(cookie, '000000');
+        failures++;
+      }
+    }
+    const locked = await lockoutState();
+    expect(locked.lockedUntil ?? null, 'precondition: the account is locked again').not.toBeNull();
+    expect(locked.count).toBe(LOCKOUT_THRESHOLD);
+
+    // The lock gates VERIFICATION, not live sessions — so an already-signed-in
+    // admin can still act, which is what makes the escape hatch reachable.
+    const unlocked = await stack.apiAs(adminSession as string, 'POST', '/auth/admin/unlock-user', {
+      userId: adminUserId,
+    });
+    expect(unlocked.status, `unlock-user: ${await unlocked.clone().text()}`).toBe(200);
+
+    const cleared = await lockoutState();
+    expect(cleared.lockedUntil ?? null, 'unlock must clear the second factor, not just the password stage').toBeNull();
+    expect(cleared.count, 'unlock must reset the failure budget too — otherwise the next wrong code re-locks immediately').toBe(0);
+
+    // And the user can actually sign in again, which is the point of unlocking.
+    const cookie = await beginChallenge();
+    const ok = await verifyWithCookie(cookie, totp(secret));
+    expect(ok.status, `still locked out after unlock: ${await ok.clone().text()}`).toBe(200);
   });
 });

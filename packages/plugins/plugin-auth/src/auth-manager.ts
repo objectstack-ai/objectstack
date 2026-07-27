@@ -3961,6 +3961,14 @@ export class AuthManager {
    * ADR-0069 D2 — clear a user's lockout state (admin "Unlock" action).
    * Resets `failed_login_count` and `locked_until`. Returns false when no data
    * engine is wired or the user does not exist.
+   *
+   * [#3690] Clears BOTH stages. Sign-in can lock at the password check
+   * (`sys_user`) or at the second factor (`sys_two_factor`), and the two keep
+   * independent counters — so unlocking only the first left a 2FA-locked user
+   * with no admin escape hatch at all, waiting out the duration. That was
+   * survivable while the second factor sat on better-auth's 10-attempt default;
+   * with the threshold now operator-configurable (3 is a reasonable choice),
+   * it is a lock admins will hit routinely.
    */
   public async unlockUser(userId: string): Promise<boolean> {
     const engine = this.getDataEngine();
@@ -3975,6 +3983,25 @@ export class AuthManager {
       { id: userId, failed_login_count: 0, locked_until: null },
       { context: SYSTEM_CTX } as any,
     );
+    // Best-effort and deliberately after the primary write: a user with no
+    // enrolment (or an environment where 2FA was never switched on) must still
+    // get a successful unlock, and the password-stage clear is the part the
+    // admin asked for.
+    try {
+      const enrolments = await engine.find('sys_two_factor', {
+        where: { user_id: String(userId) }, fields: ['id'], context: SYSTEM_CTX,
+      } as any);
+      for (const row of (enrolments ?? []) as Array<{ id?: string }>) {
+        if (!row?.id) continue;
+        await engine.update(
+          'sys_two_factor',
+          { id: row.id, failed_verification_count: 0, locked_until: null },
+          { context: SYSTEM_CTX } as any,
+        );
+      }
+    } catch {
+      // Never turn a successful password-stage unlock into a failure.
+    }
     return true;
   }
 
