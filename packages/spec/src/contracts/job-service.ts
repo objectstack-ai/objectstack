@@ -35,6 +35,36 @@ export interface JobSchedule {
 export type JobHandler = (context: { jobId: string; data?: unknown }) => Promise<void>;
 
 /**
+ * Retry policy for a scheduled job (mirrors the authorable
+ * `RetryPolicySchema` in system/job.zod.ts).
+ */
+export interface JobRetryPolicy {
+    /** Maximum number of retry attempts after the initial run (default 3) */
+    maxRetries?: number;
+    /** Initial backoff delay in milliseconds (default 1000) */
+    backoffMs?: number;
+    /** Multiplier for exponential backoff (default 2) */
+    backoffMultiplier?: number;
+}
+
+/**
+ * Per-job execution options threaded from the authored JobSchema
+ * (`retryPolicy` / `timeout`) down to the executing adapter.
+ *
+ * Omitted options preserve the legacy behavior: one attempt, no time limit.
+ */
+export interface JobScheduleOptions {
+    /** Retry failed runs with exponential backoff */
+    retryPolicy?: JobRetryPolicy;
+    /**
+     * Per-attempt time limit in milliseconds. A run that exceeds it is
+     * recorded with status 'timeout'. Note: JavaScript cannot forcibly
+     * cancel the in-flight handler — the attempt is abandoned, not killed.
+     */
+    timeout?: number;
+}
+
+/**
  * Status of a job execution
  */
 export interface JobExecution {
@@ -58,8 +88,9 @@ export interface IJobService {
      * @param name - Job name (snake_case)
      * @param schedule - Schedule configuration
      * @param handler - Job handler function
+     * @param options - Optional per-job retry policy / timeout
      */
-    schedule(name: string, schedule: JobSchedule, handler: JobHandler): Promise<void>;
+    schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void>;
 
     /**
      * Cancel a scheduled job

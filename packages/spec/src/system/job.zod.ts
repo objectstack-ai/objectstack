@@ -87,8 +87,8 @@ export const JobSchema = lazySchema(() => z.object({
   description: z.string().optional().describe('Job description / purpose'),
   schedule: ScheduleSchema.describe('Job schedule configuration'),
   handler: z.string().describe('Handler function name (must match a key in `defineStack({ functions })`)'),
-  retryPolicy: RetryPolicySchema.optional().describe('Retry policy configuration. [EXPERIMENTAL — not enforced] The service-job scheduler does not yet read retryPolicy; failed runs are not retried per this config (liveness audit #1878/#1893).'),
-  timeout: z.number().int().positive().optional().describe('Timeout in milliseconds. [EXPERIMENTAL — not enforced] The service-job scheduler does not yet enforce a per-run timeout (liveness audit #1878/#1893).'),
+  retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = backoffMs * backoffMultiplier^(retry-1)) up to maxRetries retries after the initial attempt (#3494). Omit for the legacy single-attempt behavior.'),
+  timeout: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout" (#3494). The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit.'),
   enabled: z.boolean().default(true).describe('Whether the job is enabled'),
 }));
 

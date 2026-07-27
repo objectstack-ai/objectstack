@@ -5,6 +5,7 @@ import type {
   JobSchedule,
   JobHandler,
   JobExecution,
+  JobScheduleOptions,
 } from '@objectstack/spec/contracts';
 import { IntervalJobAdapter } from './interval-job-adapter.js';
 
@@ -76,18 +77,18 @@ export class DbJobAdapter implements IJobService {
 
   // ── IJobService ──────────────────────────────────────────────────
 
-  async schedule(name: string, schedule: JobSchedule, handler: JobHandler): Promise<void> {
+  async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
     const wrapped = this.wrap(name, handler, 'schedule');
 
     if (schedule.type === 'cron') {
-      if (this.cron) await this.cron.schedule(name, schedule, wrapped);
+      if (this.cron) await this.cron.schedule(name, schedule, wrapped, options);
       else this.logger?.warn?.(
         `DbJobAdapter: cron schedule registered for "${name}" without CronJobAdapter — job will only run via manual trigger`,
       );
       // Still record in inner so trigger() works
-      await this.inner.schedule(name, schedule, wrapped);
+      await this.inner.schedule(name, schedule, wrapped, options);
     } else {
-      await this.inner.schedule(name, schedule, wrapped);
+      await this.inner.schedule(name, schedule, wrapped, options);
     }
 
     await this.upsertJobRow(name, schedule, true);

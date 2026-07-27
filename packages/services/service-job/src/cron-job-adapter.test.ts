@@ -65,3 +65,70 @@ describe('CronJobAdapter', () => {
     expect(execs[0].error).toBe('boom');
   });
 });
+
+describe('CronJobAdapter retryPolicy / timeout (#3494)', () => {
+  let adapter: CronJobAdapter;
+  afterEach(async () => { await adapter?.destroy(); });
+
+  it('retries a failing handler per retryPolicy and succeeds', async () => {
+    adapter = new CronJobAdapter();
+    let calls = 0;
+    await adapter.schedule(
+      'flaky',
+      { type: 'cron', expression: '* * * * *' },
+      async () => {
+        calls++;
+        if (calls < 3) throw new Error(`attempt ${calls} boom`);
+      },
+      { retryPolicy: { maxRetries: 3, backoffMs: 1, backoffMultiplier: 1 } },
+    );
+    await adapter.trigger('flaky');
+    expect(calls).toBe(3);
+    const execs = await adapter.getExecutions('flaky');
+    expect(execs).toHaveLength(1);
+    expect(execs[0].status).toBe('success');
+  });
+
+  it('exhausts retries and records the last failure', async () => {
+    adapter = new CronJobAdapter();
+    let calls = 0;
+    await adapter.schedule(
+      'doomed',
+      { type: 'cron', expression: '* * * * *' },
+      async () => { calls++; throw new Error('always boom'); },
+      { retryPolicy: { maxRetries: 2, backoffMs: 1 } },
+    );
+    await adapter.trigger('doomed');
+    expect(calls).toBe(3); // initial + 2 retries
+    const execs = await adapter.getExecutions('doomed');
+    expect(execs[0].status).toBe('failed');
+    expect(execs[0].error).toBe('always boom');
+  });
+
+  it('does not retry when no retryPolicy is given (legacy behavior)', async () => {
+    adapter = new CronJobAdapter();
+    let calls = 0;
+    await adapter.schedule('legacy', { type: 'cron', expression: '* * * * *' }, async () => {
+      calls++;
+      throw new Error('boom');
+    });
+    await adapter.trigger('legacy');
+    expect(calls).toBe(1);
+    const execs = await adapter.getExecutions('legacy');
+    expect(execs[0].status).toBe('failed');
+  });
+
+  it('enforces a per-attempt timeout and records status "timeout"', async () => {
+    adapter = new CronJobAdapter();
+    await adapter.schedule(
+      'slow',
+      { type: 'cron', expression: '* * * * *' },
+      async () => { await new Promise((r) => setTimeout(r, 150)); },
+      { timeout: 25 },
+    );
+    await adapter.trigger('slow');
+    const execs = await adapter.getExecutions('slow');
+    expect(execs[0].status).toBe('timeout');
+    expect(execs[0].error).toMatch(/timed out after 25ms/);
+  });
+});
