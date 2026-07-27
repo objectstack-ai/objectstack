@@ -3,7 +3,7 @@
 /**
  * Client-URL conformance — the capstone guard (#3642).
  *
- * WHAT THE OTHER FOUR GUARDS DO NOT ASK. The dispatcher (#3563), REST (#3587)
+ * WHAT THE SERVER-SIDE GUARDS DO NOT ASK. The dispatcher (#3563), REST (#3587)
  * and service-mount (#3636) ledgers all run server → client: enumerate what a
  * surface mounts, demand a reviewed disposition, and for `sdk` rows demand the
  * named client method exists. *The method exists* is not *the method can be
@@ -21,8 +21,9 @@
  *
  * This suite closes the direction. It drives every method on a real client
  * with a recording `fetch`, then matches each captured URL against the UNION
- * of all four ledgers. A union, not an intersection: a route mounted by only
- * one surface is still legitimately reachable.
+ * of all five ledgers — dispatcher, REST, storage, i18n, auth. A union, not an
+ * intersection: a route mounted by only one surface is still legitimately
+ * reachable.
  *
  * WHY A REAL DRIVE, NOT A DECLARATION. Asserting "method X targets route Y" in
  * a table would be an assertion *about* the code that the code can drift away
@@ -48,6 +49,7 @@ import { ROUTE_LEDGER } from '../../runtime/src/route-ledger';
 import { REST_ROUTE_LEDGER } from '../../rest/src/rest-route-ledger';
 import { STORAGE_ROUTE_LEDGER } from '../../services/service-storage/src/storage-route-ledger';
 import { I18N_ROUTE_LEDGER } from '../../services/service-i18n/src/i18n-route-ledger';
+import { AUTH_ROUTE_LEDGER } from '../../plugins/plugin-auth/src/auth-route-ledger';
 
 const BASE = 'http://localhost:9';
 
@@ -106,7 +108,14 @@ const PATTERNS: Pattern[] = [
   ...REST_ROUTE_LEDGER.map((r) => r.route).flatMap((r) => compile(r, '', 'rest')),
   ...STORAGE_ROUTE_LEDGER.map((r) => r.route).flatMap((r) => compile(r, '', 'storage')),
   ...I18N_ROUTE_LEDGER.map((r) => r.route).flatMap((r) => compile(r, '', 'i18n')),
-];
+  ...AUTH_ROUTE_LEDGER.map((r) => r.route).flatMap((r) => compile(r, '', 'auth')),
+]
+  // Exact rows before wildcard families, so a URL that a real route covers is
+  // never CREDITED to a `**` prefix claim that happens to sit earlier in the
+  // list. Without this, adding the auth ledger would change nothing: every
+  // `/api/v1/auth/*` URL would still be absorbed by the dispatcher's
+  // `* /auth/**` row and keep counting as weak evidence.
+  .sort((a, b) => Number(a.route.includes('**')) - Number(b.route.includes('**')));
 
 function matches(verb: string, path: string): Pattern | undefined {
   return PATTERNS.find((p) => (p.verb === '*' || p.verb === verb) && p.re.test(path));
@@ -360,14 +369,17 @@ describe('client URL conformance ↔ the union of all four route ledgers (#3642)
     expect(controlPlane.length, 'the projects namespace should still be reaching the control plane').toBeGreaterThan(0);
 
     // HOW STRONG IS THIS GUARD, HONESTLY. A `**` row asserts only that a prefix
-    // family is claimed, not that the specific URL resolves — `/auth/**` alone
-    // covers 26 SDK methods. Those matches are real but weak, so the count is
-    // ratcheted: enumerating a dynamic family (or dropping one) may lower it,
-    // and nothing may raise it without a deliberate decision.
+    // family is CLAIMED, not that the specific URL resolves. That was this
+    // guard's biggest weakness at #3642: 60 of ~196 matched calls rested on
+    // nothing better, 54 of them on `* /auth/**`. #3656 enumerated better-auth's
+    // real route table, so those now match exact rows and the bound fell 60 → 3.
+    // What remains is `* /ai/**`, whose routes service-ai builds at plugin start.
+    // Ratcheted: enumerating that family lowers it; nothing raises it without a
+    // deliberate decision.
     expect(
       wildcardOnly.length,
       'methods matched only by a wildcard `**` family — weaker evidence than an exact ' +
         `route. Enumerate a dynamic family to lower this bound; do not raise it:\n${wildcardOnly.join('\n')}`,
-    ).toBeLessThanOrEqual(60);
+    ).toBeLessThanOrEqual(3);
   });
 });

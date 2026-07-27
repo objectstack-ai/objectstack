@@ -48,6 +48,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-v3-
 
+      # This job ran the full workspace build cold on every main push (~4½
+      # min) — the same omission lint.yml's typecheck job had. Same key scheme
+      # as ci.yml. Runs only on main pushes, so plain save+restore is right
+      # here (this job is one of the cache seeders).
+      - name: Setup Turbo cache
+        uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -57,12 +70,33 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # The vendored Console dist is a pure function of the objectui pin (and
+      # of the build script itself) — yet it was cloned + vite-built from
+      # scratch on every main push (~3 min). Cache the finished dist keyed on
+      # exactly those inputs; the stamp check below still verifies whatever
+      # dist ends up in place, restored or fresh.
+      - name: Cache vendored Console dist (keyed on the objectui pin)
+        id: console-dist-cache
+        uses: actions/cache@v6
+        with:
+          path: packages/console/dist
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+
       - name: Build vendored @objectstack/console SPA
         # Clones objectstack-ai/objectui at the SHA pinned in .objectui-sha,
         # builds @object-ui/console, and copies dist/ into
         # packages/console/dist/. Must run before publish so the
-        # prepublishOnly guard in @objectstack/console passes.
+        # prepublishOnly guard in @objectstack/console passes. Skipped when the
+        # cache above restored a dist built from the same pin.
+        if: steps.console-dist-cache.outputs.cache-hit != 'true'
         run: bash scripts/build-console.sh
+
+      # Belt-and-suspenders for the cache path: build-console.sh stamps the
+      # objectui SHA it built from into dist/.objectui-sha; check:console-sha
+      # fails loudly if the dist in place (restored or fresh) drifts from the
+      # pin.
+      - name: Verify Console dist stamp matches pin
+        run: pnpm check:console-sha
 
       - name: Downstream backward-compat smoke (live hotcrm)
         # Pre-publish gate (#2035): the about-to-publish @objectstack/spec must

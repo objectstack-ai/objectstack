@@ -1,21 +1,24 @@
 name: CodeQL Security Analysis
 
+# Deliberately NOT on pull_request: the analysis took ~4½ runner-minutes per
+# PR sync, and everything a PR introduces is analyzed on main within minutes
+# of the merge anyway (multi-agent merge cadence). Alerts surface on main's
+# runs + the weekly deep pass instead of blocking/occupying PR runners.
+# If branch protection ever required the "Analyze (javascript)" check, that
+# requirement must be dropped along with this trigger.
 on:
   push:
-    branches:
-      - main
-  pull_request:
     branches:
       - main
   schedule:
     # Run at 02:00 UTC every Monday
     - cron: '0 2 * * 1'
 
-# A superseded analysis of an outdated commit has no value — cancel it. PR runs
-# group by PR number; push/schedule runs group by ref, so a newer main push
-# cancels only an in-flight main analysis (the newer commit gets analyzed).
+# A superseded analysis of an outdated commit has no value — cancel it. A newer
+# main push cancels only an in-flight main analysis (the newer commit still
+# gets analyzed).
 concurrency:
-  group: codeql-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

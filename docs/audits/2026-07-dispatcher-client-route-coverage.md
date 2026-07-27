@@ -232,10 +232,44 @@ rots silently:
   from both ends: a non-`projects` method reaching `/cloud/` fails. Tracked as
   #3655.
 - **Dynamic families.** A `**` row claims a prefix, not a resolvable route.
-  **60 of ~196 matched calls (~31%) rest on nothing stronger** — 54 of them on
+  **60 of ~196 matched calls (~31%) rested on nothing stronger** — 54 of them on
   `* /auth/**`, where the routes come from a third-party dependency on its own
   release cadence. The guard counts and ratchets this, so it can only shrink.
-  Tracked as #3656.
+  Closed to **3** by #3656, below.
+
+## 11. The auth surface, enumerated (#3656)
+
+The widest hole §10 measured. `plugin-auth` mounts better-auth with one
+catch-all — `rawApp.all(`${basePath}/*`)` — so there are no per-route
+registration calls to capture the way tranche 3 captured
+`registerStorageRoutes`. The seam is **`auth.api`**: every better-auth endpoint
+object carries `.path` and `.options.method`, so a live instance *is* the route
+table. `packages/plugins/plugin-auth/src/auth-route-ledger.ts` reads it.
+
+Two halves, checked differently on purpose:
+
+| Half | Check | Catches |
+|---|---|---|
+| `AUTH_ROUTE_LEDGER` — 55 reviewed rows, every route the SDK calls, each naming its client method | **strict**: each must exist in the live table | an upstream **rename**. `auth.me` targets `/get-session`; if better-auth renames it, 26 `auth.*` methods 404 and nothing noticed before |
+| `BETTER_AUTH_MOUNTED_SURFACE` — 129 wire paths, the whole inventory | **exact equality**, both directions | a version bump silently **adding** publicly-mounted auth endpoints |
+
+The asymmetry is deliberate: demanding a hand-written rationale for all 129
+would turn every better-auth upgrade into a hundred-row review, and the ledger
+would rot into rubber-stamping. But the catch-all publishes whatever upstream
+adds, so growth still has to be a reviewable CI diff — hence a
+machine-maintained inventory rather than reviewed prose.
+
+Enumeration is config-dependent (better-auth plugins are opt-in), so the
+inventory is pinned at the configuration enabling every plugin the SDK targets
+— the maximal surface — with the participating `OS_*` env vars cleared so a
+developer's shell cannot produce a spurious diff. Mutation-checked: renaming a
+ledgered route fails the suite naming it.
+
+Effect on §10's guard: the wildcard-only count **fell 60 → 3** (only `* /ai/**`
+remains, whose routes `service-ai buildAIRoutes()` builds at plugin start). The
+capstone also had to prefer exact rows over wildcard families when matching —
+otherwise every `/auth/*` URL would still have been absorbed by `* /auth/**`
+and the new ledger would have changed nothing.
 
 ## Follow-up slicing (proposed)
 
@@ -250,7 +284,8 @@ rots silently:
 9. **Autonomous service mounts** (§9) — done in #3636.
 10. **Cross-surface URL conformance** (§10, the reverse direction) — done in #3642.
 11. **Control-plane surface** (§10) — #3655, needs a ledger in the `cloud` repo.
-12. **Enumerate `/auth/**`** (§10) — #3656, lowers the wildcard ratchet.
+12. **Enumerate `/auth/**`** (§11) — done in #3656; wildcard ratchet 60 → 3.
+13. **Enumerate `/ai/**`** — the last dynamic family, 3 SDK methods.
 
 Each gap closed must flip its ledger row to `sdk` and lower the ratchet bound
 in the conformance test — the guard enforces both directions from PR-1 onward.

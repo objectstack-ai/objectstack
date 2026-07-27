@@ -111,8 +111,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-v3-
 
-      - name: Setup Turbo cache
-        uses: actions/cache@v6
+      # Restore-only on PRs: PR-side saves (~5 turbo entries per push) churned
+      # the repo's 10 GB Actions cache pool and evicted the main-branch seeds —
+      # observed as sudden cold-cache spikes (Build Core 51s → 4m30s). PRs fall
+      # back to main's entries via the prefix restore-keys; only main pushes
+      # save (the "Save Turbo cache" step at the end of the job).
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
@@ -142,25 +147,25 @@ jobs:
           TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
         run: pnpm turbo run test --affected --filter=!@objectstack/dogfood --concurrency=4
 
-      # Push to main: full run, but exclude spec's plain test task — the
-      # coverage step below executes the exact same 250-file spec suite once,
-      # with coverage. Previously the spec suite ran twice per push. Dogfood is
-      # excluded for the same reason as the PR step: the Dogfood job runs it.
+      # Push to main: full run. Spec's suite runs here plain (uninstrumented);
+      # the coverage-instrumented pass moved to the nightly Spec Coverage
+      # workflow (coverage-nightly.yml) — instrumentation added minutes to
+      # every main push for a trend artifact that is consulted occasionally at
+      # best. Dogfood is excluded for the same reason as the PR step: the
+      # Dogfood job runs it.
       - name: Run all tests (push)
         if: github.event_name == 'push'
-        run: pnpm turbo run test --filter=!@objectstack/spec --filter=!@objectstack/dogfood --concurrency=4
+        run: pnpm turbo run test --filter=!@objectstack/dogfood --concurrency=4
 
-      - name: Generate coverage report
-        if: github.event_name == 'push'
-        run: pnpm --filter @objectstack/spec test:coverage
-
-      - name: Upload coverage reports
-        if: github.event_name == 'push'
-        uses: actions/upload-artifact@v7
+      # Seed the shared Turbo cache from main only (see the restore step
+      # above). always(): keep the seed fresh even when a test fails, matching
+      # the old actions/cache post-step behavior.
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@v6
         with:
-          name: coverage-report
-          path: packages/spec/coverage/
-          retention-days: 30
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
 
   dogfood:
     # Sharded 2-way: the suite is ~60 independent test files, each booting its
@@ -209,10 +214,11 @@ jobs:
             ${{ runner.os }}-pnpm-store-v3-
 
       # Shard-scoped key: the turbo test hash differs per shard (pass-through
-      # args are part of the task hash), and two same-named matrix jobs would
-      # otherwise race to save one cache entry per sha.
-      - name: Setup Turbo cache
-        uses: actions/cache@v6
+      # args are part of the task hash). Restore-only on PRs — see the Restore
+      # Turbo cache comment in the test job; the save step at the end of this
+      # job seeds from main only.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
@@ -246,6 +252,15 @@ jobs:
             OS_LOG_LEVEL=error node packages/cli/bin/run.js verify --app "$app/objectstack.config.ts" --rls
             echo "::endgroup::"
           done
+
+      # Seed the shared Turbo cache from main only (see the restore step
+      # above); shard-scoped key so the two matrix jobs don't collide.
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
 
   dogfood-gate:
     # Stable required-check name for a SHARDED job (#3622 follow-up).
@@ -312,8 +327,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-v3-
 
-      - name: Setup Turbo cache
-        uses: actions/cache@v6
+      # Restore-only on PRs: PR-side saves (~5 turbo entries per push) churned
+      # the repo's 10 GB Actions cache pool and evicted the main-branch seeds —
+      # observed as sudden cold-cache spikes (Build Core 51s → 4m30s). PRs fall
+      # back to main's entries via the prefix restore-keys; only main pushes
+      # save (the "Save Turbo cache" step at the end of the job).
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
@@ -376,6 +396,14 @@ jobs:
             packages/spec/dist/
             packages/spec/json-schema/
           retention-days: 30
+
+      # Seed the shared Turbo cache from main only (see the restore step above).
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
 
   build-docs:
     name: Build Docs
