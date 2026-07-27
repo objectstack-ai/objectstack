@@ -17,6 +17,7 @@ function makeService(overrides: Partial<ISecurityService> = {}): ISecurityServic
   return {
     getReadFilter: async () => undefined,
     getReadableFields: async () => [],
+    canExport: async () => true,
     resolvePermissionSetNames: async () => [],
     explain: async () => ({}) as any,
     listAudienceBindingSuggestions: async () => ({
@@ -35,6 +36,7 @@ describe('Security Service Contract', () => {
     for (const m of [
       'getReadFilter',
       'getReadableFields',
+      'canExport',
       'resolvePermissionSetNames',
       'explain',
       'listAudienceBindingSuggestions',
@@ -43,6 +45,22 @@ describe('Security Service Contract', () => {
     ] as const) {
       expect(typeof service[m]).toBe('function');
     }
+  });
+
+  it('canExport: an access-narrowing answer — false denies, and absence is feature-detectable', async () => {
+    // [#3544] The bulk-egress question. It fails CLOSED, so a consumer must
+    // never read a `false` (or a throw) as "no restriction" the way it may
+    // read getReadFilter's `undefined`.
+    const denied = makeService({ canExport: async () => false });
+    await expect(denied.canExport('deal', { userId: 'u1' })).resolves.toBe(false);
+
+    const allowed = makeService({ canExport: async () => true });
+    await expect(allowed.canExport('deal', { userId: 'u1' })).resolves.toBe(true);
+
+    // A system context bypasses, mirroring the engine middleware's isSystem skip.
+    const service = makeService({ canExport: async (_object, context) => context?.isSystem === true });
+    await expect(service.canExport('deal', { isSystem: true })).resolves.toBe(true);
+    await expect(service.canExport('deal', { userId: 'u1' })).resolves.toBe(false);
   });
 
   it('getReadFilter: undefined means NO row restriction — the only thing it may mean', async () => {
