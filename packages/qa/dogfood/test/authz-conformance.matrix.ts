@@ -152,6 +152,10 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'secure-by-default-posture', summary: 'ADR-0066 ④ — sensitive system objects opt out of the wildcard grant (access.default: private)', state: 'enforced',
     enforcement: 'plugin-security/permission-evaluator.ts resolveObjectPermission (plain wildcard does not cover a private object) + posture-gated superuser bypass; declarations in platform-objects (sys_secret, sys_jwks, sys_verification, sys_oauth_access_token, sys_oauth_refresh_token, sys_device_code) + sys_scim_provider D3 capability gate',
     note: 'Primitive enforcement unit-proven in plugin-security/security-plugin.test.ts (ADR-0066 posture suite); the per-object declarations are pinned by platform-objects.test.ts "secure-by-default posture" so dropping the flag from a secret store fails CI, not review. Member self-service objects (sys_session, sys_api_key, sys_oauth_application, sys_two_factor) deliberately stay public-posture — the Account app reads them with a member context; row scoping (owner/tenant RLS + _self carve-outs) is their guard.' },
+  { id: 'flow-run-as', summary: 'flow runAs — data nodes execute under the run\'s effective identity (#1888)', state: 'enforced',
+    enforcement: 'service-automation/engine.ts runAs authorization envelope → runtime-identity.ts → builtin/crud-nodes.ts (runAs:\'system\' → RLS-bypassing; runAs:\'user\' → trigger identity, RLS enforced as that user)',
+    proof: 'flow-runas.dogfood.test.ts',
+    note: 'ADR-0049 originally classified runAs as roadmap M2, but #1888 implemented it for flow data nodes (create/update/delete/query run under the chosen identity). Also proven for scheduled flows in flow-runas-schedule.dogfood.test.ts.' },
 
   // ── Experimental — declared, NOT enforced (ADR-0049/0056 D8) ───────────
   { id: 'field-encryption', summary: 'at-rest field encryption', state: 'experimental',
@@ -174,5 +178,4 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // ── Removed — by ADR-0049 (roadmap M2) ─────────────────────────────────
   { id: 'allow-transfer-restore-purge', summary: 'transfer/restore/purge ops (RBAC gate pre-mapped)', state: 'removed',
     note: 'ADR-0049 → roadmap M2. #1883: the ops still do not exist in ObjectQL, but the evaluator PRE-MAPS them (OPERATION_TO_PERMISSION transfer/restore/purge → allowTransfer/allowRestore/allowPurge, modifyAllRecords bypass, unmapped destructive ops fail closed) — there is no ungated window when the ops ship. Unit-proven in plugin-security/security-plugin.test.ts.' },
-  { id: 'flow-run-as', summary: 'flow runAs', state: 'removed', note: 'ADR-0049 → roadmap M2' },
 ];
