@@ -74,6 +74,19 @@ export interface BootOptions {
    */
   security?: SecurityPlugin;
   /**
+   * Override the AnalyticsServicePlugin instance. Defaults to a vanilla
+   * `new AnalyticsServicePlugin()`, which auto-bridges `getReadScope` to the
+   * `security` service.
+   *
+   * The reason to override is to prove ADR-0021 D-C's SECOND belt in isolation
+   * (#3602): pass `new AnalyticsServicePlugin({ getReadScope: () => undefined })`
+   * to switch the analytics-layer scoping OFF, leaving only the ExecutionContext
+   * the bridge hands `engine.aggregate` — i.e. the engine's own RLS middleware.
+   * A gate booted that way fails if the second belt ever stops carrying its own
+   * weight, which no assertion against the fully-wired stack can detect.
+   */
+  analytics?: AnalyticsServicePlugin;
+  /**
    * Boot multi-tenant: register enterprise `@objectstack/organizations` plugin BEFORE the
    * SecurityPlugin so the wildcard `organization_id` RLS policies that ship in
    * the default permission sets actually apply (SecurityPlugin probes the
@@ -156,7 +169,7 @@ export async function bootStack(
 
   // Service plugins `objectstack dev` auto-loads for an app of this shape.
   await kernel.use(new SettingsServicePlugin());
-  await kernel.use(new AnalyticsServicePlugin());
+  await kernel.use(opts.analytics ?? new AnalyticsServicePlugin());
   // `autoDefaultOrganization: false` (ADR-0081 D1): the harness proves the two
   // ENDS of the isolation spectrum — pure single-tenant (no org, no scoping)
   // and, via `opts.multiTenant`, full multi-org (the enterprise plugin owns

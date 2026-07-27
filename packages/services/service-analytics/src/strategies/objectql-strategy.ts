@@ -4,6 +4,35 @@ import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contract
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import { normalizeAnalyticsFilters, coerceFilterValueForObjectQL } from './filter-normalizer.js';
+import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import {
+  rebucketCrossObject,
+  RECOMBINABLE_METHODS,
+  type CrossObjectDim,
+  type MeasureRecombine,
+  type RecombinableMethod,
+} from './cross-object-rebucket.js';
+
+/** Scalar analytics operators → their SQL spelling (display SQL only). */
+const SCALAR_SQL_OPS: Record<string, string> = {
+  equals: '=', notEquals: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=',
+};
+
+/** One cross-object grouping dimension planned for FK-expand (#3654). */
+interface CrossObjectPlanDim {
+  /** The caller's dimension name (output key), e.g. `region`. */
+  outputName: string;
+  /** The base lookup FK column to group the base aggregate by, e.g. `account`. */
+  fkField: string;
+  /** The related object's attribute to resolve the FK to, e.g. `region`. */
+  attr: string;
+  /** The related object name (join target), e.g. `crm_account`. */
+  refObject: string;
+}
+
+interface CrossObjectPlan {
+  crossDims: CrossObjectPlanDim[];
+}
 
 /**
  * ObjectQLStrategy — Priority 2
@@ -79,18 +108,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
 
-    // Reject cross-object grouping/aggregation this path cannot perform — the
-    // engine has no join, so it would silently mis-bucket or error (#3654). This
-    // runs BEFORE scope injection and subsumes the #3597 joined-scope concern:
-    // a rejected query never loads the joined object, so nothing is left
-    // unscoped. Independent of read scope, so it fires with security off too.
-    this.assertNoCrossObjectReferences(cube, query, groupBy, filter);
+    // #3654 — classify cross-object references. A cross-object DIMENSION within
+    // the supported envelope is served by an FK-expand (`executeCrossObject`);
+    // everything the engine cannot serve (cross-object measures/filters,
+    // multi-hop, non-recombinable measures) is REJECTED by `planCrossObject` —
+    // the engine has no join, and a silent mis-bucket is worse than a loud
+    // error. `null` ⇒ the query is base-only and takes the direct path below.
+    const plan = this.planCrossObject(cube, query, filter);
+    if (plan) {
+      return this.executeCrossObject(cube, query, aggregations, filter, plan, ctx);
+    }
 
     // ADR-0021 D-C — the base object's read scope (tenant + RLS) MUST be ANDed
-    // in before the query leaves the strategy (#3597).
-    // (`assertNoCrossObjectReferences` above guarantees `objectName` is the only
-    // object in play, so a single base-object scope is sufficient here.)
-
+    // in before the query leaves the strategy (#3597). A base-only query has a
+    // single object in play, so one base-object scope is sufficient here.
     const rows = await ctx.executeAggregate!(objectName, {
       // Structured groupBy items ({field, dateGranularity}) pass through the
       // executeAggregate bridge to engine.aggregate, which buckets them. The
@@ -102,6 +133,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // on that zone's calendar days. A non-UTC zone makes the engine bucket
       // in-memory (uniform across drivers); UTC/unset keeps the DB fast path.
       timezone: query.timezone,
+      // ADR-0021 D-C (#3602): the second belt. `withReadScope` above is this
+      // layer's own scoping; handing the engine the context makes ITS middleware
+      // inject RLS too, so a future strategy that forgets `withReadScope` still
+      // cannot read across tenants. Without it the operation reaches the engine
+      // principal-less and plugin-security falls open — the #3597 shape.
+      context: ctx.context,
     });
 
     // Remap short field names back to cube-qualified names
@@ -172,7 +209,24 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     for (const td of query.timeDimensions ?? []) {
       if (td.granularity) granByDim.set(td.dimension, td.granularity);
     }
+    const tableName = this.extractObjectName(cube);
+    // #3654 — plan cross-object dims (throws for out-of-envelope, so
+    // `/analytics/sql` and `execute()` accept/reject the SAME set). An in-envelope
+    // cross-object dim renders as a LEFT JOIN — its logical shape; `execute()`
+    // serves it via FK-expand.
+    const plan = this.planCrossObject(cube, query, Object.fromEntries(
+      normalizeAnalyticsFilters(query).map((f) => [this.resolveFieldName(cube, f.member, 'any'), true]),
+    ));
+    const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
+    const joinClauses: string[] = [];
     const dimExpr = (dim: string): string => {
+      const cd = crossByDim.get(dim);
+      if (cd) {
+        joinClauses.push(
+          `LEFT JOIN "${cd.refObject}" ON "${tableName}"."${cd.fkField}" = "${cd.refObject}"."id"`,
+        );
+        return `"${cd.refObject}"."${cd.attr}"`;
+      }
       const col = this.resolveFieldName(cube, dim, 'dimension');
       const gran = granByDim.get(dim);
       return gran ? `date_trunc('${gran}', ${col})` : col;
@@ -205,33 +259,58 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
 
-    const tableName = this.extractObjectName(cube);
-    let sql = `SELECT ${selectParts.join(', ')} FROM "${tableName}"`;
+    // ADR-0021 D-C (#3602) — render the READ SCOPE too, not just the caller's
+    // own filters (#3652 added those). Without it this string still reads as an
+    // unscoped table scan while the real aggregate is scoped (#3601), so anyone
+    // debugging a "why is this row missing" gets SQL that cannot reproduce the
+    // result. Nothing leaks — the string is never executed, and scope VALUES
+    // stay in `params`, which `execute()`'s echo discards — but a rendering
+    // that contradicts execution is worse than no rendering.
+    //
+    // The cross-object guard runs here for the same reason: this must not
+    // render SQL for a query `execute()` would reject outright (#3654).
+    //
+    // Faithfulness cuts both ways: `execute()` does NOT apply
+    // `timeDimensions[].dateRange` on this path (only `where` reaches the
+    // engine), so neither does this. Rendering a BETWEEN here would invent a
+    // predicate the ObjectQL path never applies. That gap is real but separate
+    // — filed as #3650, not papered over here.
+    // (The cross-object envelope was already enforced by `planCrossObject` above,
+    // so `/analytics/sql` rejects the same out-of-envelope set `execute()` does.)
 
-    const SQL_OPERATORS: Record<string, string> = {
-      equals: '=', notEquals: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=',
-      contains: 'LIKE', in: 'IN', notIn: 'NOT IN', set: 'IS NOT NULL', notSet: 'IS NULL',
-    };
     const whereParts: string[] = [];
     for (const f of normalizeAnalyticsFilters(query)) {
-      const col = this.resolveFieldName(cube, f.member, 'any');
-      const op = SQL_OPERATORS[f.operator] ?? '=';
-      if (f.operator === 'set' || f.operator === 'notSet') {
-        whereParts.push(`${col} ${op}`);
-        continue;
-      }
-      const values = f.values ?? [];
-      if (values.length === 0) continue;
-      if (f.operator === 'in' || f.operator === 'notIn') {
-        const placeholders = values.map((v) => { params.push(v); return `$${params.length}`; });
-        whereParts.push(`${col} ${op} (${placeholders.join(', ')})`);
-      } else {
-        params.push(values[0]);
-        whereParts.push(`${col} ${op} $${params.length}`);
+      const clause = this.buildFilterClauseSql(
+        this.resolveFieldName(cube, f.member, 'any'),
+        f.operator,
+        f.values,
+        params,
+      );
+      if (clause) whereParts.push(clause);
+    }
+    // Read scope last, so it reads as the outermost constraint. Compiled by the
+    // same fail-closed compiler `NativeSQLStrategy` uses — it throws rather than
+    // drop a predicate, which is the correct posture even for a display string:
+    // silently omitting the scope is exactly the misleading output being fixed.
+    const scope = ctx.getReadScope?.(tableName);
+    if (scope != null) {
+      const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName);
+      if (scopeSql) {
+        let i = 0;
+        // `compileScopedFilterToSql` emits `?`; renumber into this builder's $N.
+        const rendered = scopeSql.replace(/\?/g, () => {
+          params.push(scopeParams[i++]);
+          return `$${params.length}`;
+        });
+        whereParts.push(`(${rendered})`);
       }
     }
-    if (whereParts.length > 0) sql += ` WHERE ${whereParts.join(' AND ')}`;
 
+    let sql = `SELECT ${selectParts.join(', ')} FROM "${tableName}"`;
+    if (joinClauses.length > 0) sql += ' ' + joinClauses.join(' ');
+    if (whereParts.length > 0) {
+      sql += ` WHERE ${whereParts.join(' AND ')}`;
+    }
     if (groupByParts.length > 0) {
       sql += ` GROUP BY ${groupByParts.join(', ')}`;
     }
@@ -276,69 +355,256 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     return { $and: [userFilter, scopeFilter] };
   }
 
+  /** Is `field` a resolved cross-object (relationship-traversal) reference? */
+  private isCrossObjectField(cube: Cube, field: string, baseObject: string): boolean {
+    if (!field.includes('.')) return false;
+    const alias = field.split('.')[0];
+    const joinedObject = cube.joins?.[alias]?.name ?? alias;
+    return joinedObject !== baseObject;
+  }
+
   /**
-   * Fail-closed guard for cross-object references on the ObjectQL path
-   * (#3654, subsuming #3597).
+   * Plan how to serve cross-object references on this join-less path (#3654).
    *
-   * `engine.aggregate()` has NO join: it never expands a lookup, and the SQL
-   * driver's aggregate emits no `JOIN`. A dotted member like `account.region`
-   * therefore reaches the engine as a bare column that no table in the query
-   * provides. The failure is SILENT and wrong, not loud:
-   *   - native SQL path → "column account.region does not exist" (a hard error);
-   *   - in-memory path  → `row['account.region']` is always `undefined`, so every
-   *     row collapses into ONE `(null)` bucket and the measure is summed across
-   *     the whole table — a plausible-looking number that is actually a
-   *     full-table total mislabelled `(null)`.
+   * `engine.aggregate()` cannot join. A cross-object DIMENSION within a
+   * supported envelope is served by an FK-expand (`executeCrossObject`): group
+   * the base aggregate on the lookup FK, resolve the FK to the related attribute
+   * with a SCOPED read, re-bucket in memory. Returns `null` for a base-only
+   * query (direct path), a plan for an in-envelope cross-object query.
    *
-   * So we reject any cross-object reference OUTRIGHT — regardless of read scope.
-   * This also subsumes the #3597 concern: because the joined object is never
-   * loaded on this path, there is nothing to leave unscoped. Cross-object
-   * datasets are served by `NativeSQLStrategy`, which hand-compiles the LEFT
-   * JOINs (and scopes each one); this path is the fallback NativeSQL declines
-   * (date-granularity bucketing, in-memory driver, federated objects), and it
-   * cannot join, so "loud rejection" beats "silent wrong answer".
+   * THROWS for anything outside the envelope — a cross-object MEASURE or FILTER
+   * (needs a real join to evaluate), a MULTI-HOP dimension (`a.b.c`), or a
+   * non-recombinable measure (`avg`/`count_distinct`, whose sub-bucket values
+   * cannot be merged). A loud error beats the silent mis-bucket #3654 kills.
+   * `generateSql()` calls this too, so the preview accepts/rejects the same set.
    *
-   * Detection is on the RESOLVED field names (post-`resolveFieldName`), so a
-   * dotted dimension the cube flattens to a real column is NOT flagged — only
-   * genuinely-unresolved relationship traversals are.
+   * Detection is on RESOLVED field names, so a dotted dimension the cube
+   * flattens to a real column is treated as base, not cross-object.
    */
-  private assertNoCrossObjectReferences(
+  private planCrossObject(
     cube: Cube,
     query: AnalyticsQuery,
-    groupBy: Array<string | { field: string; dateGranularity: string }>,
     filter: Record<string, unknown>,
-  ): void {
-    // Field names as they will reach the engine. A dotted name whose first
-    // segment names a DIFFERENT object is a relationship traversal the engine
-    // cannot perform in an aggregate.
-    const referenced = [
-      ...groupBy.map((g) => (typeof g === 'string' ? g : g.field)),
-      ...Object.keys(filter),
-      ...(query.measures ?? []).map((m) => this.resolveMeasureAggregation(cube, m).field),
-    ];
-
+  ): CrossObjectPlan | null {
     const baseObject = this.extractObjectName(cube);
-    const offending = new Set<string>();
-    for (const fieldName of referenced) {
-      if (!fieldName.includes('.')) continue;
-      const alias = fieldName.split('.')[0];
-      const joinedObject = cube.joins?.[alias]?.name ?? alias;
-      if (joinedObject === baseObject) continue;
-      offending.add(fieldName);
-    }
-    if (offending.size === 0) return;
 
-    throw new Error(
-      `[Analytics] ObjectQLStrategy cannot group or aggregate across a ` +
-      `relationship (cross-object reference(s): ` +
-      `${[...offending].map((f) => `"${f}"`).join(', ')}). ` +
-      `engine.aggregate() does not join, so the referenced object is never ` +
-      `loaded — this path would silently bucket every row under a single ` +
-      `"(null)" group (or error outright on a SQL driver), and could not scope ` +
-      `the joined object's rows. Run this query where NativeSQLStrategy handles ` +
-      `it (a raw-SQL/JOIN-capable driver with no date-granularity bucketing), or ` +
-      `drop the cross-object dimension/measure from the query.`,
-    );
+    // A cross-object MEASURE or FILTER can only be evaluated with a real join.
+    const nonDim = [
+      ...(query.measures ?? []).map((m) => ({ where: 'measure', field: this.resolveMeasureAggregation(cube, m).field })),
+      ...Object.keys(filter).map((f) => ({ where: 'filter', field: f })),
+    ].filter((r) => this.isCrossObjectField(cube, r.field, baseObject));
+    if (nonDim.length > 0) {
+      throw new Error(
+        `[Analytics] ObjectQLStrategy cannot evaluate a cross-object ${nonDim[0].where} ` +
+        `("${nonDim[0].field}") — the engine cannot join in an aggregate. Run this ` +
+        `query on a native-SQL driver, or remove the cross-object ${nonDim[0].where}.`,
+      );
+    }
+
+    // Collect cross-object DIMENSIONS (single-hop only).
+    const crossDims: CrossObjectPlanDim[] = [];
+    for (const dim of query.dimensions ?? []) {
+      const field = this.resolveFieldName(cube, dim, 'dimension');
+      if (!this.isCrossObjectField(cube, field, baseObject)) continue;
+      const [alias, ...rest] = field.split('.');
+      const attr = rest.join('.');
+      if (attr.includes('.')) {
+        throw new Error(
+          `[Analytics] ObjectQLStrategy supports only single-hop cross-object ` +
+          `dimensions; "${field}" traverses more than one relationship.`,
+        );
+      }
+      crossDims.push({ outputName: dim, fkField: alias, attr, refObject: cube.joins?.[alias]?.name ?? alias });
+    }
+    // A date bucket over a related object's field is not supported.
+    for (const td of query.timeDimensions ?? []) {
+      const field = this.resolveFieldName(cube, td.dimension, 'dimension');
+      if (this.isCrossObjectField(cube, field, baseObject)) {
+        throw new Error(
+          `[Analytics] ObjectQLStrategy cannot bucket a cross-object time dimension ("${field}").`,
+        );
+      }
+    }
+
+    if (crossDims.length === 0) return null;
+
+    // Every measure must re-combine across the intermediate FK sub-buckets.
+    for (const m of query.measures ?? []) {
+      const { method } = this.resolveMeasureAggregation(cube, m);
+      if (!RECOMBINABLE_METHODS.has(method)) {
+        throw new Error(
+          `[Analytics] ObjectQLStrategy cannot group by a cross-object dimension ` +
+          `with a "${method}" measure ("${m}") — its value cannot be recombined ` +
+          `across the intermediate FK grouping. Use sum/count/min/max, or run on ` +
+          `a native-SQL driver.`,
+        );
+      }
+    }
+
+    return { crossDims };
+  }
+
+  /**
+   * Serve a cross-object-dimension query by FK-expand (#3654). The pure
+   * re-bucketing step lives in `cross-object-rebucket.ts`.
+   */
+  private async executeCrossObject(
+    cube: Cube,
+    query: AnalyticsQuery,
+    aggregations: Array<{ field: string; method: string; alias: string }>,
+    filter: Record<string, unknown>,
+    plan: CrossObjectPlan,
+    ctx: StrategyContext,
+  ): Promise<AnalyticsResult> {
+    const baseObject = this.extractObjectName(cube);
+    const crossByDim = new Map(plan.crossDims.map((cd) => [cd.outputName, cd]));
+
+    // Rewrite group-by: a cross-object dim becomes its base FK column; base and
+    // time dims pass through. `baseDimFields` are the group keys carried into
+    // the re-bucket verbatim (the FK columns are replaced by resolved attrs).
+    type GroupByItem = string | { field: string; dateGranularity: string };
+    const granByDim = new Map<string, string>();
+    for (const td of query.timeDimensions ?? []) {
+      if (td.granularity) granByDim.set(td.dimension, td.granularity);
+    }
+    const groupBy: GroupByItem[] = [];
+    const baseDimFields: string[] = [];
+    for (const dim of query.dimensions ?? []) {
+      const cd = crossByDim.get(dim);
+      if (cd) {
+        groupBy.push(cd.fkField);
+        continue;
+      }
+      const field = this.resolveFieldName(cube, dim, 'dimension');
+      const gran = granByDim.get(dim);
+      groupBy.push(gran ? { field, dateGranularity: gran } : field);
+      baseDimFields.push(field);
+      granByDim.delete(dim);
+    }
+    for (const [dim, gran] of granByDim) {
+      const field = this.resolveFieldName(cube, dim, 'dimension');
+      groupBy.push({ field, dateGranularity: gran });
+      baseDimFields.push(field);
+    }
+
+    // Base aggregate, grouped by the FK, scoped to the base object. Threads the
+    // ExecutionContext for the engine-side second belt too (#3602).
+    const baseRows = await ctx.executeAggregate!(baseObject, {
+      groupBy: groupBy.length > 0 ? (groupBy as unknown as string[]) : undefined,
+      aggregations: aggregations.length > 0 ? aggregations : undefined,
+      filter: this.withReadScope(baseObject, filter, ctx),
+      timezone: query.timezone,
+      context: ctx.context,
+    });
+
+    // Resolve each cross-object dim's FK → attribute, SCOPED to the referenced
+    // object: a related record the caller cannot read never yields its
+    // attribute, so it buckets as RESTRICTED (no leak; ADR-0021 D-C / #3602).
+    const resolvedDims: CrossObjectDim[] = [];
+    for (const cd of plan.crossDims) {
+      const fkValues = [...new Set(baseRows.map((r) => r[cd.fkField]).filter((v) => v != null))];
+      const fkToAttr = await this.resolveFkAttr(cd.refObject, cd.attr, fkValues, ctx);
+      resolvedDims.push({ outputName: cd.outputName, fkField: cd.fkField, fkToAttr });
+    }
+
+    const measures: MeasureRecombine[] = (query.measures ?? []).map((m) => ({
+      alias: m,
+      // planCrossObject already asserted every measure is recombinable.
+      method: this.resolveMeasureAggregation(cube, m).method as RecombinableMethod,
+    }));
+
+    const merged = rebucketCrossObject(baseRows, baseDimFields, resolvedDims, measures);
+
+    // Map resolved group keys back to the caller's dimension names.
+    const mappedRows = merged.map((row) => {
+      const out: Record<string, unknown> = {};
+      for (const dim of query.dimensions ?? []) {
+        if (crossByDim.has(dim)) {
+          if (dim in row) out[dim] = row[dim];
+        } else {
+          const field = this.resolveFieldName(cube, dim, 'dimension');
+          if (field in row) out[dim] = row[field];
+        }
+      }
+      for (const td of query.timeDimensions ?? []) {
+        if (query.dimensions?.includes(td.dimension)) continue;
+        const field = this.resolveFieldName(cube, td.dimension, 'dimension');
+        if (field in row) out[td.dimension] = row[field];
+      }
+      for (const m of query.measures ?? []) {
+        if (m in row) out[m] = row[m];
+      }
+      return out;
+    });
+
+    return { rows: mappedRows, fields: this.buildFieldMeta(query, cube) };
+  }
+
+  /**
+   * Resolve `fkValues` (ids of `refObject`) to their `attr` values, applying the
+   * referenced object's OWN read scope (#3654 / #3602). Reuses the aggregate
+   * bridge — `group by (id, attr)` is one row per record. Ids the scope hides
+   * are simply absent from the map (⇒ RESTRICTED bucket downstream).
+   */
+  private async resolveFkAttr(
+    refObject: string,
+    attr: string,
+    fkValues: unknown[],
+    ctx: StrategyContext,
+  ): Promise<Map<unknown, unknown>> {
+    const map = new Map<unknown, unknown>();
+    if (fkValues.length === 0 || typeof ctx.executeAggregate !== 'function') return map;
+    const idFilter: Record<string, unknown> = { id: { $in: fkValues } };
+    const scope = typeof ctx.getReadScope === 'function' ? ctx.getReadScope(refObject) : null;
+    const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
+    const rows = await ctx.executeAggregate(refObject, {
+      groupBy: ['id', attr],
+      aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
+      filter,
+      context: ctx.context,
+    });
+    for (const r of rows) {
+      if (r.id != null) map.set(r.id, r[attr]);
+    }
+    return map;
+  }
+
+  /**
+   * Render one normalized filter as a display SQL predicate for `generateSql`.
+   *
+   * Mirrors `NativeSQLStrategy.buildFilterClause`'s operator vocabulary so the
+   * two previews read alike, but binds through `coerceFilterValueForObjectQL`:
+   * the comparand shown is the one THIS path actually hands the engine (a real
+   * boolean, not SQL's 1/0). Returns null for an operator/value combination
+   * that carries no predicate, matching `execute()`, which drops it too.
+   */
+  private buildFilterClauseSql(
+    col: string,
+    operator: string,
+    values: string[] | undefined,
+    params: unknown[],
+  ): string | null {
+    if (operator === 'set') return `${col} IS NOT NULL`;
+    if (operator === 'notSet') return `${col} IS NULL`;
+
+    if (!values || values.length === 0) return null;
+
+    if (operator === 'in' || operator === 'notIn') {
+      const placeholders = values
+        .map((v) => { params.push(coerceFilterValueForObjectQL(v)); return `$${params.length}`; })
+        .join(', ');
+      return `${col} ${operator === 'in' ? 'IN' : 'NOT IN'} (${placeholders})`;
+    }
+
+    if (operator === 'contains' || operator === 'notContains') {
+      params.push(`%${values[0]}%`);
+      return `${col} ${operator === 'contains' ? 'LIKE' : 'NOT LIKE'} $${params.length}`;
+    }
+
+    const op = SCALAR_SQL_OPS[operator];
+    if (!op) return null;
+    params.push(coerceFilterValueForObjectQL(values[0]));
+    return `${col} ${op} $${params.length}`;
   }
 
   /**

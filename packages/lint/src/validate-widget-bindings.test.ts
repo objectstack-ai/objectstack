@@ -92,6 +92,20 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     expect(findings[0].hint).toContain('Did you mean "expense_line_metrics"?');
   });
 
+  // Issue #3583 — on the raw-config paths (`lint`/`doctor`) a widget with no
+  // `dataset` key at all fell through a bare `continue` and silently bypassed
+  // every binding and chart check. `dataset` is schema-REQUIRED, so reporting
+  // it here matches what the parsed paths already enforce.
+  it('(a2) errors on a widget that binds no dataset at all', () => {
+    const stack = chartStack();
+    delete (stack as any).dashboards[0].widgets[0].dataset;
+    const findings = validateWidgetBindings(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].rule).toBe(WIDGET_DATASET_UNKNOWN);
+    expect(findings[0].message).toContain('binds no `dataset`');
+  });
+
   it('(b) errors on a dimension name the dataset does not declare', () => {
     const findings = validateWidgetBindings(chartStack({ dimensions: ['categry'] }));
     expect(findings).toHaveLength(1);

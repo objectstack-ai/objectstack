@@ -277,6 +277,31 @@ export interface StrategyContext {
          * fast path.
          */
         timezone?: string;
+        /**
+         * ADR-0021 D-C (#3602) — the request's ExecutionContext, forwarded to
+         * `engine.aggregate` (`BaseEngineOptions.context`) so the ENGINE's own
+         * middleware chain scopes the read.
+         *
+         * This is the second belt, independent of {@link StrategyContext.getReadScope}.
+         * The two resolve scope through different paths — this one through the
+         * engine's middleware (`mergeReadContext` → RLS/sharing injection into
+         * `opCtx.ast.where`), `getReadScope` through `security.getReadFilter` at
+         * the analytics layer — and both are kept on purpose:
+         *
+         * - Without this, a strategy that forgets to call `getReadScope` runs
+         *   completely unscoped. That is exactly how #3597 happened, and the
+         *   context-less bridge is what let it through: with no principal on the
+         *   operation, the security middleware's fall-open skipped its own RLS
+         *   injection, so BOTH belts were off at once.
+         * - Without `getReadScope`, deployments that do not install
+         *   plugin-security have no engine-side RLS at all — the analytics layer
+         *   is their only belt.
+         *
+         * Optional because a bridge to a non-ObjectQL backend may have nowhere
+         * to put it; the `@objectstack/service-analytics` auto-bridge always
+         * forwards it.
+         */
+        context?: ExecutionContext;
     }): Promise<Record<string, unknown>[]>;
     /**
      * Fallback in-memory analytics service (e.g. MemoryAnalyticsService from driver-memory).
@@ -286,6 +311,24 @@ export interface StrategyContext {
         getMeta(cubeName?: string): Promise<CubeMeta[]>;
         generateSql?(query: AnalyticsQuery): Promise<{ sql: string; params: unknown[] }>;
     };
+
+    /**
+     * ADR-0021 D-C (#3602) — the ExecutionContext of the request being served
+     * (tenant, user, roles, transaction).
+     *
+     * Bound per call by the `IAnalyticsService` implementation from the
+     * `context` argument of `query()` / `generateSql()` / `queryDataset()`.
+     * Strategies forward it to `executeAggregate` so the engine's middleware
+     * chain can apply its own RLS — the depth-in-defense layer beneath
+     * {@link StrategyContext.getReadScope}, which only works if every strategy
+     * remembers to call it (#3597 is what happens when one does not).
+     *
+     * `undefined` means the caller supplied no context (in-memory/dev use, or a
+     * system-internal query). It does NOT mean "unrestricted": the analytics
+     * layer's own scoping still applies, and the engine treats a context-less
+     * operation per its own policy.
+     */
+    context?: ExecutionContext;
 
     /**
      * ADR-0021 D-C — per-object read scope (RLS + tenant isolation).

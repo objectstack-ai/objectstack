@@ -129,6 +129,51 @@ describe('computeI18nCoverage', () => {
     expect(zhKeys.has('globalActions.export_csv.successMessage')).toBe(true);
   });
 
+  // Issue #3583 — `FieldSchema.options` is canonically a `{value,label}[]`
+  // ARRAY, but coverage only walked the record-map shape, so option-label
+  // coverage silently never fired for a canonically-shaped select field.
+  it('covers options declared in the canonical array shape', () => {
+    const arrayOptionConfig: any = {
+      objects: [
+        {
+          name: 'account',
+          label: 'Account',
+          fields: {
+            stage: {
+              label: 'Stage',
+              options: [
+                { value: 'planning', label: 'Planning' },
+                { value: 'direct_mail', label: 'Direct Mail' },
+              ],
+            },
+          },
+        },
+      ],
+      translations: [{ 'zh-CN': {} }],
+    };
+    const report = computeI18nCoverage(arrayOptionConfig, { defaultLocale: 'en' });
+    const zhKeys = new Set(report.issues.filter((i) => i.locale === 'zh-CN').map((i) => i.key));
+    expect(zhKeys.has('objects.account.fields.stage.options.planning')).toBe(true);
+    expect(zhKeys.has('objects.account.fields.stage.options.direct_mail')).toBe(true);
+  });
+
+  it('covers options declared as a bare string array', () => {
+    const stringOptionConfig: any = {
+      objects: [
+        {
+          name: 'account',
+          label: 'Account',
+          fields: { stage: { label: 'Stage', options: ['planning', 'closed'] } },
+        },
+      ],
+      translations: [{ 'zh-CN': {} }],
+    };
+    const report = computeI18nCoverage(stringOptionConfig, { defaultLocale: 'en' });
+    const zhKeys = new Set(report.issues.filter((i) => i.locale === 'zh-CN').map((i) => i.key));
+    expect(zhKeys.has('objects.account.fields.stage.options.planning')).toBe(true);
+    expect(zhKeys.has('objects.account.fields.stage.options.closed')).toBe(true);
+  });
+
   it('promotes warnings to errors under --strict', () => {
     const report = computeI18nCoverage(baseConfig, { defaultLocale: 'en', strict: true });
     const zhIssues = report.issues.filter((i) => i.locale === 'zh-CN');

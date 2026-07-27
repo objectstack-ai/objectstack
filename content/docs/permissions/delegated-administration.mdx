@@ -92,6 +92,50 @@ The [explain engine](/docs/permissions/explain) closes the loop twice:
 - contributor attribution plus the `granted_by` stamp answer both *who
   granted this* and *who could have*.
 
+## Reading your own scope
+
+The gate also answers the *read* question — **what may I delegate?** — so an
+admin surface can narrow its pickers instead of offering the whole tree and
+letting the user discover the boundary by being refused:
+
+```bash
+GET /api/v1/security/my-delegable-scope
+```
+
+```ts
+const scope = await client.security.describeDelegableScope();
+```
+
+```jsonc
+{
+  "isTenantAdmin": false,
+  "placeableBusinessUnitIds": ["bu_east", "bu_east_sales"],  // where you may place people
+  "assignablePositions": ["sales_rep"],                      // positions you may hand out
+  "scopes": [                                                // the scopes those derive from
+    { "setName": "sub_admin", "businessUnit": "east", "manageAssignments": true,
+      "assignablePermissionSets": ["sales_user"], "businessUnitIds": ["bu_east", "bu_east_sales"] }
+  ]
+}
+```
+
+Three properties worth knowing:
+
+- **It narrows; it does not decide.** The lists are computed by the same
+  helpers the write gate enforces with, so an option here is one the gate
+  accepts — but the gate still runs on the write. A UI that skipped it would
+  be refused, not obeyed.
+- **A position appears only if you may hand out *every* set it distributes.**
+  `mixed_pos` bundling an allowlisted set with a non-allowlisted one is
+  withheld, exactly as the write gate would refuse it.
+- **Strictly self-scoped** — there is no target-user parameter, so it
+  discloses nothing beyond the authority you already hold. A tenant-level
+  admin comes back `isTenantAdmin: true` with everything enumerated, so
+  consumers render one uniform picker rather than special-casing.
+
+Scoped invitations (ADR-0105 D8) are the first consumer: the invitation form
+narrows its unit/position pickers with this, and the invitation's placement
+intent is then authorized against the *issuer's* scope at issuance time.
+
 ## See also
 
 - [Permission Sets](/docs/permissions/permission-sets) — the container `adminScope` rides on

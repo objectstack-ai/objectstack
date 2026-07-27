@@ -5418,6 +5418,61 @@ export class RestServer {
             handler,
             metadata: { summary: 'Explain why a principal can (or cannot) perform an operation on an object (ADR-0090 D6)', tags: ['security'] },
         });
+
+        /**
+         * [ADR-0090 D12 / ADR-0105 D8] What the CALLER may delegate.
+         *
+         *   GET {basePath}/security/my-delegable-scope
+         *
+         * The read half of the delegated-admin gate, shaped for a picker: the
+         * business units the caller may place people into and the positions
+         * they may assign. A scoped-invitation form narrows its options with
+         * this instead of listing the whole tree and letting the user find the
+         * boundary by being refused.
+         *
+         * Strictly SELF-scoped — no `userId` parameter, by design. The caller's
+         * own resolved sets are the only input, so it discloses nothing beyond
+         * the authority they already hold, and there is no "describe someone
+         * else's authority" surface to authorize (unlike `explain`, which has
+         * one and gates it). An authenticated caller is still required.
+         */
+        const delegableHandler = async (req: any, res: any) => {
+            try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+                if (!context?.userId) {
+                    return res.status(401).json({
+                        code: 'UNAUTHORIZED',
+                        message: 'The delegable-scope endpoint requires an authenticated caller.',
+                    });
+                }
+
+                const svc = await resolveService(environmentId, req);
+                if (!svc || typeof svc.describeDelegableScope !== 'function') {
+                    return res.status(501).json({
+                        code: 'NOT_IMPLEMENTED',
+                        message: 'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
+                    });
+                }
+
+                res.json(await svc.describeDelegableScope(context));
+            } catch (error: any) {
+                const msg = String(error?.message ?? error ?? '');
+                logError('[REST] Delegable scope error:', error);
+                res.status(500).json({ code: 'DELEGABLE_SCOPE_FAILED', error: msg.slice(0, 500) });
+            }
+        };
+
+        this.routeManager.register({
+            method: 'GET',
+            path: `${basePath}/security/my-delegable-scope`,
+            handler: delegableHandler,
+            metadata: {
+                summary: "The caller's delegable scope: business units they may place into and positions they may assign (ADR-0090 D12 / ADR-0105 D8)",
+                tags: ['security'],
+            },
+        });
     }
 
     private registerSharingEndpoints(basePath: string): void {

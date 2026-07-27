@@ -607,3 +607,74 @@ describe('DelegatedAdminGate — self-delegation anchor containment (cloud#830 f
       .rejects.toThrow(/only via delegation/);
   });
 });
+
+// ── [ADR-0090 D12 / ADR-0105 D8] describeDelegableScope — the READ half ──────
+//
+// A picker narrows with this; the gate still decides. So the property that
+// matters is AGREEMENT: what the report offers is what `assert()` accepts.
+describe('DelegatedAdminGate — describeDelegableScope', () => {
+  it('a delegate gets their own subtree and only the positions they may hand out', async () => {
+    const report = await h.gate.describeDelegableScope(
+      await (h.gate as any).deps.resolveSets({ principal: 'delegate' }),
+    );
+
+    expect(report.isTenantAdmin).toBe(false);
+    // east + its descendant east_sales — never hq or the west sibling.
+    expect([...report.placeableBusinessUnitIds].sort()).toEqual(['bu_east', 'bu_es']);
+    // `sales_rep` distributes sales_user (allowlisted). `mixed_pos` also
+    // distributes finance_admin, which is NOT — so it is withheld, exactly as
+    // assertAssignmentWrite would refuse it.
+    expect(report.assignablePositions).toEqual(['sales_rep']);
+    // The scope itself is reported for attribution in a UI.
+    expect(report.scopes).toHaveLength(1);
+    expect(report.scopes[0]).toMatchObject({
+      setName: 'sub_admin',
+      businessUnit: 'east',
+      manageAssignments: true,
+      assignablePermissionSets: ['sales_user', 'sub_admin'],
+    });
+  });
+
+  it('agrees with the gate: every offered (unit, position) pair is one assert() accepts', async () => {
+    const report = await h.gate.describeDelegableScope(
+      await (h.gate as any).deps.resolveSets({ principal: 'delegate' }),
+    );
+    for (const business_unit_id of report.placeableBusinessUnitIds) {
+      for (const position of report.assignablePositions) {
+        await expect(
+          insertAssignment(h.ctxOf('delegate'), { user_id: 'u_new', position, business_unit_id }),
+        ).resolves.toBeUndefined();
+      }
+    }
+    // …and a withheld position really is refused, so the narrowing is not cosmetic.
+    await expect(
+      insertAssignment(h.ctxOf('delegate'), {
+        user_id: 'u_new', position: 'mixed_pos', business_unit_id: 'bu_east',
+      }),
+    ).rejects.toThrow(/not in the scope's allowlist/);
+  });
+
+  it('a tenant admin is unconstrained — flagged, and everything enumerated for one uniform picker', async () => {
+    const report = await h.gate.describeDelegableScope(
+      await (h.gate as any).deps.resolveSets({ principal: 'tenant_admin' }),
+    );
+    expect(report.isTenantAdmin).toBe(true);
+    expect([...report.placeableBusinessUnitIds].sort()).toEqual(['bu_east', 'bu_es', 'bu_hq', 'bu_west']);
+    // Audience anchors are implicit and can never be assigned (ADR-0090 D9),
+    // so they stay out of a picker even for a tenant admin.
+    expect(report.assignablePositions).not.toContain('everyone');
+    expect([...report.assignablePositions].sort()).toEqual(['mixed_pos', 'sales_rep']);
+  });
+
+  it('plain CRUD on the RBAC tables delegates nothing (fail closed)', async () => {
+    const report = await h.gate.describeDelegableScope(
+      await (h.gate as any).deps.resolveSets({ principal: 'crud_only' }),
+    );
+    expect(report).toMatchObject({
+      isTenantAdmin: false,
+      scopes: [],
+      placeableBusinessUnitIds: [],
+      assignablePositions: [],
+    });
+  });
+});

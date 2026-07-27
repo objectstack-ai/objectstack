@@ -12,6 +12,13 @@
  *     --fill=default \
  *     --out=packages/platform-objects/src/apps/translations
  *
+ * From the repo root that is `pnpm i18n:extract`, and `pnpm check:i18n` is the
+ * same run with `--check`: it writes nothing and fails if the committed
+ * bundles differ from a fresh extract. CI runs the latter (lint.yml), so a
+ * schema change that adds, removes or renames a label now fails the build
+ * instead of silently rotting the bundles until someone re-runs this by hand
+ * (#3670).
+ *
  * The config is **build-time only** — it is not deployed and not used at
  * runtime. The Setup App still ships its own bundle via plugin-auth.
  *

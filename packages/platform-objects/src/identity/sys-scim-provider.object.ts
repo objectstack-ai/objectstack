@@ -78,6 +78,22 @@ export const SysScimProvider = ObjectSchema.create({
       group: 'Identity',
     }),
 
+    // `@better-auth/scim`'s uniqueness boundary for a connection:
+    // `<organizationId>:<providerId>`, declared `required: true, unique: true,
+    // returned: false` upstream and written on every provider insert. Same
+    // shape as `sys_team_member.membership_key` — a derived key the library
+    // owns end to end, never authored or read from the ObjectStack side.
+    // Provisioned here because the adapter writes the column; without it SCIM
+    // provider creation fails the moment SCIM is switched on. See #3653.
+    provider_key: Field.text({
+      label: 'Provider Key',
+      required: false,
+      readonly: true,
+      maxLength: 512,
+      description: 'Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly.',
+      group: 'System',
+    }),
+
     scim_token: Field.text({
       label: 'SCIM Token (hash)',
       required: false,
@@ -110,6 +126,18 @@ export const SysScimProvider = ObjectSchema.create({
     { fields: ['provider_id'], unique: true },
     { fields: ['organization_id'] },
     { fields: ['user_id'] },
+    // UNIQUE mirrors @better-auth/scim's own declaration. Nullable, so rows
+    // provisioned before the column existed admit repeated NULLs on sqlite /
+    // postgres / mysql.
+    //
+    // NOTE: upstream's boundary is `<organization>:<provider_id>`, i.e. the
+    // SAME provider_id in two different organizations is legal there, while
+    // the `provider_id` unique index above forbids it. That is a stricter
+    // constraint than the library assumes, not something this column changes —
+    // left as-is deliberately and raised separately (#3653) rather than
+    // relaxed here, since loosening a live uniqueness constraint is its own
+    // decision.
+    { fields: ['provider_key'], unique: true },
   ],
 
   enable: {

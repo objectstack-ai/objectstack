@@ -20,6 +20,7 @@
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/plugin-webhooks": "workspace:*",
+    "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-storage": "workspace:*",
     "@objectstack/spec": "workspace:*",

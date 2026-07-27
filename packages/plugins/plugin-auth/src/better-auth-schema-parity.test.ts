@@ -41,10 +41,15 @@
  *
  * `@better-auth/oauth-provider` is deliberately absent: it ships as its own
  * package with its own pinned version and already has the dedicated gate named
- * above. `@better-auth/sso` / `@better-auth/scim` are absent because they
- * expose no `schema` option at all — their mapping is applied at the adapter
- * layer (see `objectql-adapter.ts`), so `getAuthTables()` cannot report the
- * columns they actually write.
+ * above.
+ *
+ * `@better-auth/sso` / `@better-auth/scim` accept no `schema` option, so
+ * `getAuthTables()` cannot see them — they were the hole this gate shipped
+ * with (#3653). The second describe block below closes it by reading each
+ * plugin's OWN declared schema and resolving columns the way the ADAPTER
+ * does for a bridged model (mechanical camelCase → snake_case in
+ * `objectql-adapter.ts`), which is the rule that actually governs their
+ * writes.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -53,6 +58,8 @@ import { organization, twoFactor, admin } from 'better-auth/plugins';
 import { phoneNumber } from 'better-auth/plugins/phone-number';
 import { jwt } from 'better-auth/plugins/jwt';
 import { deviceAuthorization } from 'better-auth/plugins/device-authorization';
+import { sso } from '@better-auth/sso';
+import { scim } from '@better-auth/scim';
 import {
   SysAccount,
   SysDeviceCode,
@@ -63,6 +70,8 @@ import {
   SysSession,
   SysTeam,
   SysTeamMember,
+  SysScimProvider,
+  SysSsoProvider,
   SysTwoFactor,
   SysUser,
   SysVerification,
@@ -80,6 +89,7 @@ import {
   buildPhoneNumberPluginSchema,
   buildTwoFactorPluginSchema,
 } from './auth-schema-config.js';
+import { resolveProtocolName } from './objectql-adapter.js';
 
 type PlatformObject = { name: string; fields?: Record<string, unknown> };
 
@@ -89,6 +99,9 @@ const PLATFORM_OBJECTS: Record<string, PlatformObject> = Object.fromEntries(
     SysUser, SysSession, SysAccount, SysVerification,
     SysOrganization, SysMember, SysInvitation, SysTeam, SysTeamMember,
     SysTwoFactor, SysDeviceCode, SysJwks,
+    // Bridged at the adapter layer rather than via a plugin `schema` option —
+    // see the sso/scim block at the bottom of this file (#3653).
+    SysSsoProvider, SysScimProvider,
   ] as unknown as PlatformObject[]).map((o) => [o.name, o]),
 );
 
@@ -165,5 +178,90 @@ describe('better-auth schema ↔ platform-objects parity (#3624)', () => {
         + 'name here means the mapping is missing, not just the column.',
       ).toEqual([]);
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// @better-auth/sso + @better-auth/scim (#3653)
+// ---------------------------------------------------------------------------
+
+/**
+ * These two plugins hardcode their model names and read no `schema` option, so
+ * `getAuthTables()` above is blind to them. The adapter bridges them instead:
+ * `AUTH_MODEL_TO_PROTOCOL` maps the model, and `createObjectQLAdapterFactory`
+ * mechanically camelCase→snake_cases every field of a bridged model on the way
+ * in. That mechanical rule — not any hand-written mapping — is what decides
+ * the column they actually write, so it is what this reproduces.
+ *
+ * Mirrors the adapter's own `camelToSnake`.
+ */
+function adapterColumn(field: string): string {
+  return field.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase());
+}
+
+/**
+ * SCIM models with no platform object, acknowledged rather than silently
+ * skipped. These four are SCIM **group** provisioning (`/Groups` push from the
+ * IdP); ObjectStack ships only the provider row today, so an IdP pushing
+ * groups would write tables that do not exist — filed as its own feature gap.
+ *
+ * Pinned as an exact set on purpose: a NEW unmapped model is a build failure,
+ * so this list can never quietly grow the way the original hole did.
+ */
+const KNOWN_UNMAPPED_MODELS = new Set([
+  'scimGroup',
+  'scimGroupMember',
+  'scimGroupRole',
+  'scimGroupRoleGrant',
+]);
+
+describe('@better-auth/sso + @better-auth/scim schema ↔ platform-objects parity (#3653)', () => {
+  const plugins: Array<{ label: string; schema: Record<string, { fields?: Record<string, unknown> }> }> = [
+    { label: 'sso', schema: (sso() as any).schema },
+    { label: 'scim', schema: (scim({} as never) as any).schema },
+  ];
+
+  it('both plugins still expose a readable schema (the gate must not pass vacuously)', () => {
+    for (const { label, schema } of plugins) {
+      expect(Object.keys(schema ?? {}).length, `${label} exposed no schema`).toBeGreaterThan(0);
+    }
+  });
+
+  it('the set of models with no platform object is exactly the acknowledged one', () => {
+    const unmapped = plugins
+      .flatMap(({ schema }) => Object.keys(schema ?? {}))
+      .filter((model) => !PLATFORM_OBJECTS[resolveProtocolName(model)]);
+    expect(
+      unmapped.sort(),
+      'a model gained or lost a platform object. A NEW name here means the plugin added a table '
+      + 'nothing provisions — declare the object and map it in AUTH_MODEL_TO_PROTOCOL. A name that '
+      + 'DISAPPEARED means it is now provisioned — drop it from KNOWN_UNMAPPED_MODELS so it is '
+      + 'covered by the column check below.',
+    ).toEqual([...KNOWN_UNMAPPED_MODELS].sort());
+  });
+
+  for (const { label, schema } of [
+    { label: 'sso', schema: (sso() as any).schema as Record<string, { fields?: Record<string, unknown> }> },
+    { label: 'scim', schema: (scim({} as never) as any).schema as Record<string, { fields?: Record<string, unknown> }> },
+  ]) {
+    for (const [model, def] of Object.entries(schema ?? {})) {
+      if (KNOWN_UNMAPPED_MODELS.has(model)) continue;
+      const objectName = resolveProtocolName(model);
+      it(`every ${label}/${model} column exists on ${objectName}`, () => {
+        const object = PLATFORM_OBJECTS[objectName];
+        expect(object, `${model} must map to a platform object via AUTH_MODEL_TO_PROTOCOL`).toBeDefined();
+        const declared = new Set(['id', ...Object.keys(object.fields ?? {})]);
+        const missing = Object.keys(def.fields ?? {})
+          .map(adapterColumn)
+          .filter((column) => !declared.has(column));
+        expect(
+          missing,
+          `columns ${label} can write to ${objectName} but the platform object does not declare: `
+          + `${missing.join(', ')} — add the field(s) to packages/platform-objects/src/identity/. `
+          + 'These plugins take no schema option, so the adapter snake_cases their fields '
+          + 'mechanically; there is no mapping to add, only the column.',
+        ).toEqual([]);
+      });
+    }
   }
 });

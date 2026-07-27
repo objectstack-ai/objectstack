@@ -661,6 +661,26 @@ export class SecurityPlugin implements Plugin {
             { ...request, operation: String(request.operation) },
             callerContext,
           ),
+        // [ADR-0090 D12 / ADR-0105 D8] What the CALLER may delegate — the read
+        // half of the delegated-admin gate. A scoped-invitation form narrows
+        // its unit/position pickers with this instead of listing the whole
+        // tree and letting the user discover the boundary by refusal. Purely
+        // self-scoped (the caller's own resolved sets are the only input), so
+        // it discloses nothing beyond the authority they already hold.
+        describeDelegableScope: async (callerContext?: any) => {
+          const sets = await this.resolvePermissionSetsForContext(callerContext);
+          // No gate wired (degraded start) → no delegable authority, and the
+          // consumer renders an empty picker rather than a permissive one.
+          if (!this.delegatedAdminGate) {
+            return {
+              isTenantAdmin: false,
+              scopes: [],
+              placeableBusinessUnitIds: [],
+              assignablePositions: [],
+            };
+          }
+          return this.delegatedAdminGate.describeDelegableScope(sets);
+        },
         // [ADR-0090 D5/D9] Install-time suggestion surface: packages suggest
         // audience-anchor bindings; a tenant admin confirms (the binding is
         // written under the anchor + delegated-admin gates) or dismisses.

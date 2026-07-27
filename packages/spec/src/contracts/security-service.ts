@@ -63,6 +63,41 @@ import type { ExplainDecision, ExplainOperation } from '../security/explain.zod.
  */
 export type SecurityContext = Partial<ExecutionContext>;
 
+/**
+ * [ADR-0090 D12 / ADR-0105 D8] One `adminScope` the caller holds, with its
+ * business-unit subtree resolved to ids.
+ */
+export interface DelegableAdminScope {
+  /** Permission set carrying the scope (for attribution in a UI). */
+  setName: string;
+  /** `sys_business_unit.name` of the delegation root. */
+  businessUnit: string;
+  includeSubtree: boolean;
+  manageAssignments: boolean;
+  manageBindings: boolean;
+  authorEnvironmentSets: boolean;
+  /** Permission-set names the delegate may hand out. */
+  assignablePermissionSets: string[];
+  /** Resolved subtree — root plus descendants when `includeSubtree`. */
+  businessUnitIds: string[];
+}
+
+/** Return shape of {@link ISecurityService.describeDelegableScope}. */
+export interface DelegableScope {
+  /**
+   * ADR-0066 superuser wildcard: the caller is unconstrained. The lists below
+   * then enumerate everything, so a consumer renders ONE uniform picker
+   * instead of special-casing tenant admins.
+   */
+  isTenantAdmin: boolean;
+  /** Every held `adminScope`, resolved. Empty for a tenant admin (nothing narrows them). */
+  scopes: DelegableAdminScope[];
+  /** Union of subtrees where the caller may PLACE people (`manageAssignments`). */
+  placeableBusinessUnitIds: string[];
+  /** Positions the caller may assign — every set they distribute is allowlisted. */
+  assignablePositions: string[];
+}
+
 /** Selector for {@link ISecurityService.explain}. */
 export interface ExplainAccessRequest {
   /** Object API name to explain access for. */
@@ -166,6 +201,25 @@ export interface ISecurityService {
    * maintenance.
    */
   explain(request: ExplainAccessRequest, callerContext?: SecurityContext): Promise<ExplainDecision>;
+
+  /**
+   * [ADR-0090 D12 / ADR-0105 D8] Describe what the CALLER may delegate: the
+   * business units they may place people into and the positions they may
+   * assign, derived from the `adminScope`s their permission sets carry.
+   *
+   * The read half of the delegated-administration gate, and shaped for a
+   * picker: a scoped-invitation form narrows its options with this instead of
+   * offering the whole tree and letting the user discover the boundary by
+   * being refused. Computed by the same helpers the write gate enforces with,
+   * so an option this reports is one the gate accepts — it NARROWS, it does
+   * not decide.
+   *
+   * Strictly self-scoped: there is no target-user parameter, so it discloses
+   * nothing beyond the authority the caller already holds. Fail-closed —
+   * unresolvable scopes contribute nothing, and no delegated authority yields
+   * empty lists.
+   */
+  describeDelegableScope(callerContext?: SecurityContext): Promise<DelegableScope>;
 
   /**
    * List install-time audience-binding suggestions (packages propose an

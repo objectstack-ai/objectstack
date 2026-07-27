@@ -2936,6 +2936,24 @@ export class ObjectStackClient {
           return this.unwrapResponse<any>(res);
       },
 
+      /**
+       * ADR-0090 D12 / ADR-0105 D8 — what the CALLER may delegate: the
+       * business units they may place people into (`placeableBusinessUnitIds`)
+       * and the positions they may assign (`assignablePositions`), plus the
+       * `adminScope`s those derive from.
+       *
+       * Shaped for a picker: a scoped-invitation form narrows its options with
+       * this rather than offering the whole tree and letting the user find the
+       * boundary by being refused. It NARROWS — the server-side gate still
+       * decides. Strictly self-scoped (no target-user parameter), so it
+       * discloses nothing beyond the caller's own authority; a tenant admin
+       * comes back `isTenantAdmin: true` with everything enumerated.
+       */
+      describeDelegableScope: async (): Promise<any> => {
+          const res = await this.fetch(`${this.baseUrl}/api/v1/security/my-delegable-scope`);
+          return this.unwrapResponse<any>(res);
+      },
+
       suggestedBindings: {
           /** List suggestions, optionally by `status` / `packageId` (reconciles first). */
           list: async (opts?: { status?: string; packageId?: string }): Promise<any> => {

@@ -73,6 +73,31 @@ export interface DelegatedAdminGateDeps {
   delegationCeilingMs?: number;
 }
 
+/**
+ * [ADR-0090 D12 / ADR-0105 D8] What the caller may delegate — the read half
+ * of the gate, shaped for a picker (see
+ * {@link DelegatedAdminGate.describeDelegableScope}).
+ */
+export interface DelegableScopeReport {
+  /** ADR-0066 superuser wildcard: unconstrained. The lists below then enumerate everything. */
+  isTenantAdmin: boolean;
+  /** Every `adminScope` the caller holds, with its subtree resolved to ids. */
+  scopes: Array<{
+    setName: string;
+    businessUnit: string;
+    includeSubtree: boolean;
+    manageAssignments: boolean;
+    manageBindings: boolean;
+    authorEnvironmentSets: boolean;
+    assignablePermissionSets: string[];
+    businessUnitIds: string[];
+  }>;
+  /** Union of the subtrees where the caller may PLACE people (`manageAssignments`). */
+  placeableBusinessUnitIds: string[];
+  /** Positions the caller may assign — every set they distribute is allowlisted. */
+  assignablePositions: string[];
+}
+
 interface HeldScope {
   /** The set that carries the scope (for error messages). */
   setName: string;
@@ -230,6 +255,105 @@ export class DelegatedAdminGate {
       for (const bu of userBUs) if (s.subtree.has(bu)) return true;
     }
     return false;
+  }
+
+  /**
+   * [ADR-0090 D12 / ADR-0105 D8] Describe what the caller may DELEGATE —
+   * the read half of this gate.
+   *
+   * A UI that offers "place this person in a unit, with these positions"
+   * (the D8 scoped-invitation form) must narrow its options to what the
+   * issuer could actually assign; otherwise every picker lists the whole
+   * tree and the user discovers the boundary only by being refused. The
+   * lists here are computed by the SAME `resolveHeldScopes` /
+   * `setsBoundToPosition` / containment helpers the write path enforces
+   * with, so an option this report offers is one `assert()` accepts — the
+   * picker narrows, it does not decide.
+   *
+   * Self-scoped by construction: the caller's own resolved sets are the
+   * only input, so reading it discloses nothing beyond the authority they
+   * already hold. Fail-closed shape: unresolvable scopes contribute
+   * nothing, and a caller with no delegated authority gets empty lists.
+   *
+   * A tenant-level admin (ADR-0066 superuser wildcard) is unconstrained;
+   * the report says so AND enumerates everything, so a consumer can render
+   * one uniform picker instead of special-casing.
+   */
+  async describeDelegableScope(sets: PermissionSet[]): Promise<DelegableScopeReport> {
+    const ql = this.deps.ql;
+    const allPositions = async (): Promise<string[]> => {
+      if (!ql?.find) return [];
+      try {
+        const rows = await ql.find('sys_position', { limit: 1000, context: SYSTEM_CTX });
+        return (Array.isArray(rows) ? rows : [])
+          .map((r: any) => String(r?.name ?? ''))
+          .filter((n) => n && !ANCHOR_POSITIONS.has(n));
+      } catch {
+        return [];
+      }
+    };
+
+    if (isTenantAdmin(sets)) {
+      let businessUnitIds: string[] = [];
+      if (ql?.find) {
+        try {
+          const rows = await ql.find('sys_business_unit', { limit: 5000, context: SYSTEM_CTX });
+          businessUnitIds = (Array.isArray(rows) ? rows : [])
+            .map((r: any) => String(r?.id ?? ''))
+            .filter(Boolean);
+        } catch {
+          businessUnitIds = [];
+        }
+      }
+      return {
+        isTenantAdmin: true,
+        scopes: [],
+        placeableBusinessUnitIds: businessUnitIds,
+        assignablePositions: await allPositions(),
+      };
+    }
+
+    const held = await this.resolveHeldScopes(sets);
+    const scopes = held.map((h) => ({
+      setName: h.setName,
+      businessUnit: h.scope.businessUnit,
+      includeSubtree: h.scope.includeSubtree,
+      manageAssignments: h.scope.manageAssignments,
+      manageBindings: h.scope.manageBindings,
+      authorEnvironmentSets: h.scope.authorEnvironmentSets,
+      assignablePermissionSets: [...h.scope.assignablePermissionSets],
+      businessUnitIds: [...h.subtree],
+    }));
+
+    // Placement needs `manageAssignments` — a bindings-only or authoring-only
+    // scope administers capability without placing people.
+    const placing = held.filter((h) => h.scope.manageAssignments);
+    const placeableBusinessUnitIds = [...new Set(placing.flatMap((h) => [...h.subtree]))];
+
+    // A position is assignable when at least ONE placing scope allowlists
+    // every set it distributes — exactly `assertAssignmentWrite`'s test,
+    // containment check included.
+    const assignablePositions: string[] = [];
+    if (placing.length > 0) {
+      for (const positionName of await allPositions()) {
+        const boundSets = await this.setsBoundToPosition(positionName);
+        const ok = placing.some((s) =>
+          boundSets.every(
+            (bound) =>
+              s.scope.assignablePermissionSets.includes(bound.name) &&
+              this.assertScopeGrantContainment(bound, held, /*dryRun*/ true) === null,
+          ),
+        );
+        if (ok) assignablePositions.push(positionName);
+      }
+    }
+
+    return {
+      isTenantAdmin: false,
+      scopes,
+      placeableBusinessUnitIds,
+      assignablePositions,
+    };
   }
 
   // ── [ADR-0091 D3] Self-service delegation of duty ────────────────────

@@ -451,6 +451,62 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues.some(i => i.where.includes("hook 'on_close'") && /bare reference `status`/.test(i.message))).toBe(true);
     });
 
+    // Issue #3583 — an array-valued `object` previously dropped to `undefined`,
+    // so a multi-target hook got NO field-awareness at all: a condition
+    // filtering on a field that exists on neither target passed clean.
+    it('flags an unknown field in a multi-target hook condition', () => {
+      const issues = validateStackExpressions({
+        objects: [
+          { name: 'crm_lead', fields: { status: { type: 'select' } } },
+          { name: 'crm_account', fields: { status: { type: 'select' } } },
+        ],
+        hooks: [
+          { name: 'on_campaign', object: ['crm_lead', 'crm_account'], condition: 'record.campaign == "spring"' },
+        ],
+      });
+      const hookIssues = issues.filter(i => i.where.includes("hook 'on_campaign'"));
+      expect(hookIssues.length).toBeGreaterThan(0);
+      expect(hookIssues.some(i => /campaign/.test(i.message))).toBe(true);
+      // Both targets are named, so the author knows where it breaks.
+      expect(hookIssues.some(i => i.where.includes('crm_lead'))).toBe(true);
+      expect(hookIssues.some(i => i.where.includes('crm_account'))).toBe(true);
+    });
+
+    it('accepts a multi-target hook condition on a field both targets share', () => {
+      const issues = validateStackExpressions({
+        objects: [
+          { name: 'crm_lead', fields: { status: { type: 'select' } } },
+          { name: 'crm_account', fields: { status: { type: 'select' } } },
+        ],
+        hooks: [
+          { name: 'ok', object: ['crm_lead', 'crm_account'], condition: 'record.status == "closed"' },
+        ],
+      });
+      expect(issues.filter(i => i.where.includes("hook 'ok'"))).toEqual([]);
+    });
+
+    it('does not repeat one object-independent error per hook target', () => {
+      const issues = validateStackExpressions({
+        objects: [
+          { name: 'crm_lead', fields: { status: { type: 'select' } } },
+          { name: 'crm_account', fields: { status: { type: 'select' } } },
+        ],
+        hooks: [
+          { name: 'broken', object: ['crm_lead', 'crm_account'], condition: '{record.status} == "x"' },
+        ],
+      });
+      const messages = issues.filter(i => i.where.includes("hook 'broken'")).map(i => i.message);
+      expect(messages.length).toBe(new Set(messages).size);
+    });
+
+    it('still checks a wildcard hook target for syntax', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_lead', fields: { status: { type: 'select' } } }],
+        hooks: [{ name: 'star', object: '*', condition: '{record.status} == "x"' }],
+      });
+      expect(issues.some(i => i.where.includes("hook 'star'"))).toBe(true);
+    });
+
     it('flags a bare-field nested `when` on a conditional validation rule', () => {
       const issues = validateStackExpressions({
         objects: [{

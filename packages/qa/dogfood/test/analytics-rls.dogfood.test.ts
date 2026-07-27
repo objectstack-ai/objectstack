@@ -24,6 +24,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 import {
   rlsFixtureStack,
   ownerScopedMemberSet,
@@ -142,5 +143,76 @@ describe('dogfood: analytics aggregates are RLS-scoped to the caller (#3597)', (
     const memberSees = await totalFor(memberToken, notesByDay, ['created']);
     expect(memberSees).toBe(MEMBER_NOTES);
     expect(memberSees).toBeLessThan(all.length);
+  });
+});
+
+/**
+ * The SECOND belt, alone (#3602).
+ *
+ * Everything above runs the fully-wired stack, where the analytics layer scopes
+ * the query itself (#3601). That proves the system is safe today; it cannot
+ * prove the belt BENEATH it works, because the first belt masks it. #3597 was
+ * exactly a first-belt miss — a strategy that never called `getReadScope` — and
+ * a third strategy will eventually repeat it.
+ *
+ * So boot with the analytics belt explicitly OFF (`getReadScope: () => undefined`)
+ * and assert the member still counts only their own rows. The only thing left
+ * scoping the read is the ExecutionContext the `executeAggregate` bridge now
+ * hands `engine.aggregate`, which the security middleware turns into an RLS
+ * predicate on `opCtx.ast.where`. Before #3602 the bridge passed no context, the
+ * middleware's principal-less fall-open skipped its own injection, and this case
+ * would count every note in the table.
+ */
+describe('dogfood: engine-side RLS scopes analytics even with the analytics belt off (#3602)', () => {
+  let stack: VerifyStack;
+  let memberToken: string;
+
+  beforeAll(async () => {
+    stack = await bootStack(rlsFixtureStack as never, {
+      security: rlsFixtureSecurity(ownerScopedMemberSet),
+      analytics: new AnalyticsServicePlugin({ getReadScope: () => undefined }),
+    });
+
+    const adminToken = await stack.signIn();
+    memberToken = await stack.signUp('analytics-depth@verify.test');
+
+    for (let i = 0; i < ADMIN_NOTES; i++) {
+      const r = await stack.apiAs(adminToken, 'POST', '/data/rls_note', {
+        name: `admin-note-${i}`,
+        body: 'owned by admin',
+      });
+      expect(r.status).toBeLessThan(300);
+    }
+    for (let i = 0; i < MEMBER_NOTES; i++) {
+      const r = await stack.apiAs(memberToken, 'POST', '/data/rls_note', {
+        name: `member-note-${i}`,
+        body: 'owned by member',
+      });
+      expect(r.status).toBeLessThan(300);
+    }
+  }, 90_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
+
+  it('the member counts ONLY their own rows on the ObjectQL (date-bucketed) path', async () => {
+    const res = await stack.apiAs(memberToken, 'POST', '/analytics/dataset/query', {
+      dataset: notesByDay,
+      selection: { dimensions: ['created'], measures: ['cnt'] },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows?: Array<Record<string, number>> };
+    const seen = (body.rows ?? []).reduce((sum, row) => sum + Number(row.cnt ?? 0), 0);
+
+    expect(seen).toBe(MEMBER_NOTES);
+  });
+
+  it('the rows it cannot see DO exist — the belt is scoping, not an empty table', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    const all = (await ql.find('rls_note', { context: { isSystem: true } })) as unknown[];
+
+    expect(all).toHaveLength(ADMIN_NOTES + MEMBER_NOTES);
   });
 });

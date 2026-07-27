@@ -256,8 +256,49 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   // evaluated against the record, so a bare ref silently makes the hook
   // run on every record (or never) instead of the intended subset.
   for (const hook of asArray(stack.hooks)) {
-    const hookObj = typeof hook.object === 'string' ? hook.object : undefined; // array targets → no single field set
-    check(`hook '${(hook.name as string) ?? '?'}'${hookObj ? ` (${hookObj})` : ''} condition`, hook.condition, hookObj, 'record');
+    const hookName = (hook.name as string) ?? '?';
+    if (typeof hook.object === 'string') {
+      check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record');
+      continue;
+    }
+
+    // A hook may target MANY objects (`object: ['a','b']`). Previously any
+    // non-string target dropped to `undefined`, so the condition got NO
+    // field-awareness at all — a hook filtering on a field that exists on none
+    // of its targets passed clean (issue #3583). The hook body runs against
+    // each target in turn, so a ref missing from ANY of them silently
+    // misbehaves there; validate per target and de-duplicate the
+    // object-independent diagnostics (syntax/shape) that every pass repeats.
+    const targets = Array.isArray(hook.object)
+      ? (hook.object as unknown[]).filter((o): o is string => typeof o === 'string' && o !== '*')
+      : [];
+    if (targets.length === 0) {
+      // `'*'` (or an unusable shape) — no single field set to judge against;
+      // syntax/shape is still validated.
+      check(`hook '${hookName}' condition`, hook.condition, undefined, 'record');
+      continue;
+    }
+
+    const before = issues.length;
+    const seen = new Set<string>();
+    const kept: ExprIssue[] = [];
+    for (const target of targets) {
+      const mark = issues.length;
+      check(`hook '${hookName}' (${target}) condition`, hook.condition, target, 'record');
+      for (let i = mark; i < issues.length; i++) {
+        const issue = issues[i];
+        const key = `${issue.message}\u0000${issue.source ?? ''}`;
+        // Keep the first occurrence of each distinct diagnostic. A field-unknown
+        // finding differs per target (it names the object), so each survives;
+        // a syntax error is identical across targets and collapses to one.
+        if (!seen.has(key)) {
+          seen.add(key);
+          kept.push(issue);
+        }
+      }
+    }
+    issues.length = before;
+    issues.push(...kept);
   }
 
   return issues;

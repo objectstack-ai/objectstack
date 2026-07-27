@@ -248,12 +248,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "capabilities.activities": {
         label: "活动"
       },
-      "capabilities.trash": {
-        label: "回收站"
-      },
-      "capabilities.mru": {
-        label: "最近使用"
-      },
       "capabilities.clone": {
         label: "克隆"
       },
@@ -427,6 +421,26 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       summaryOperations: {
         label: "汇总操作",
         helpText: "父子关系下的汇总聚合配置"
+      },
+      "summaryOperations.object": {
+        label: "Object",
+        helpText: "Child object to aggregate"
+      },
+      "summaryOperations.function": {
+        label: "Function",
+        helpText: "Aggregation function"
+      },
+      "summaryOperations.field": {
+        label: "Field",
+        helpText: "Child field to aggregate (ignored for count)"
+      },
+      "summaryOperations.relationshipField": {
+        label: "Relationship Field",
+        helpText: "Child FK back to this parent (auto-detected when omitted)"
+      },
+      "summaryOperations.filter": {
+        label: "Filter",
+        helpText: "Only child rows matching this predicate are aggregated (e.g. status == received)"
       },
       externalId: {
         label: "外部 ID",
@@ -1611,10 +1625,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       knowledge: {
         label: "知识",
         helpText: "RAG 知识访问配置"
-      },
-      visibility: {
-        label: "可见范围",
-        helpText: "范围：全局、组织或私有"
       },
       access: {
         label: "访问",

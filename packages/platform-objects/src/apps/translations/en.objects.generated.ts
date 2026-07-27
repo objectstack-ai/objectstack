@@ -664,6 +664,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       team_id: {
         label: "Team",
         help: "Optional team to assign upon acceptance"
+      },
+      business_unit_id: {
+        label: "Placement Business Unit",
+        help: "Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer's delegated subtree."
+      },
+      positions: {
+        label: "Placement Positions",
+        help: "sys_position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
       }
     },
     _views: {
@@ -1866,6 +1874,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       provider_id: {
         label: "Provider ID",
         help: "Stable SCIM provider identifier (e.g. \"okta-scim\")"
+      },
+      provider_key: {
+        label: "Provider Key",
+        help: "Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly."
       },
       scim_token: {
         label: "SCIM Token (hash)",
