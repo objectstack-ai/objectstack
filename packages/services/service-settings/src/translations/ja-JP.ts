@@ -76,6 +76,26 @@ export const jaJP: TranslationData = {
           title: 'メールとパスワード',
           description: 'ローカルのメール/パスワードサインインとセルフサービス登録を制御します。',
         },
+        password_policy: {
+          title: 'パスワードポリシー',
+          description: 'サインアップおよびパスワードリセット時に認証プロバイダーが強制する長さ制限。',
+        },
+        anti_abuse: {
+          title: '不正利用対策',
+          description: 'ブルートフォース対策:ID ごとのアカウントロックと、認証エンドポイントへの IP ごとのレート制限。',
+        },
+        multi_factor: {
+          title: '多要素',
+          description: 'メンバーに認証アプリ(TOTP)でのアカウント保護を必須にします。',
+        },
+        sessions: {
+          title: 'セッション',
+          description: 'サインイン済みセッションの有効期間。',
+        },
+        network: {
+          title: 'ネットワーク',
+          description: 'ユーザーがどこから認証できるかを制限します。',
+        },
         social: {
           title: 'ソーシャルサインイン',
           description:
@@ -86,6 +106,70 @@ export const jaJP: TranslationData = {
         email_password_enabled: { label: 'メール/パスワードログインを有効化' },
         signup_enabled: { label: 'セルフサービス登録を許可' },
         require_email_verification: { label: 'メール確認を必須にする' },
+        password_min_length: { label: 'パスワードの最小文字数' },
+        password_max_length: { label: 'パスワードの最大文字数', help: '非常に長いパスワードのハッシュ化によるサービス拒否を防ぎます。' },
+        password_reject_breached: {
+          label: '漏洩済みパスワードを拒否',
+          help: 'Have I Been Pwned(k-匿名レンジチェック。パスワード全体は送信しません)により、公開漏洩コーパスに含まれるパスワードをブロックします。',
+        },
+        password_require_complexity: {
+          label: '複雑なパスワードを要求',
+          help: 'サインアップおよびパスワード変更/リセット時に、複数の文字種(大文字・小文字・数字・記号)の組み合わせを要求します。',
+        },
+        password_min_classes: {
+          label: '最小文字種数',
+          help: 'パスワードに含める必要がある文字種(大文字/小文字/数字/記号の4種)の数。',
+        },
+        password_history_count: {
+          label: 'パスワード履歴(再利用禁止)',
+          help: '変更/リセット時に、直近この数のパスワードの再利用を禁止します。0 で無効。',
+        },
+        password_expiry_days: {
+          label: 'パスワード有効期限(日)',
+          help: 'この日数を過ぎるとパスワード変更を強制します。0 で無効。期限切れの間、ユーザーはパスワードを変更するまでデータにアクセスできません。',
+        },
+        lockout_threshold: {
+          label: 'アカウントロックのしきい値',
+          help: '連続してこの回数サインインに失敗するとアカウントをロックします。0 でロック無効。ロック中は正しいパスワードでもサインインを拒否します。',
+        },
+        lockout_duration_minutes: {
+          label: 'ロック時間(分)',
+          help: 'しきい値を超えた後、アカウントがロックされ続ける時間。',
+        },
+        rate_limit_max: {
+          label: '認証レート制限:最大リクエスト数',
+          help: 'サインイン / サインアップ / パスワードリセットの各エンドポイントに対する、IP ごと・時間枠ごとの最大リクエスト数。',
+        },
+        rate_limit_window_seconds: {
+          label: '認証レート制限:時間枠(秒)',
+          help: '上記のリクエスト上限を数える移動時間枠。',
+        },
+        mfa_required: {
+          label: '多要素認証を必須にする',
+          help: '認証アプリを登録していないユーザーは、猶予期間の終了後にデータへのアクセスをブロックされます。これを有効にすると、ユーザーが登録できるよう二要素機能もオンになります。',
+        },
+        mfa_grace_period_days: {
+          label: 'MFA 猶予期間(日)',
+          help: 'ハードブロックまでに登録を延期できる期間。0 で即時ブロック。',
+        },
+        session_expiry_days: { label: 'セッション有効期間(日)', help: 'サインインからこの日数でセッションが失効します。' },
+        session_refresh_days: { label: '更新しきい値(日)', help: 'アクティブなセッションがこの期間を超えると延長されます。' },
+        session_idle_timeout_minutes: {
+          label: 'アイドルタイムアウト(分)',
+          help: 'この分数、無操作が続くとユーザーをサインアウトします。0 で無効。',
+        },
+        session_absolute_max_hours: {
+          label: 'セッションの絶対有効期間(時間)',
+          help: 'アクティビティに関係なく、サインインからこの時間で再認証を強制します。0 で無効。',
+        },
+        max_concurrent_sessions_per_user: {
+          label: 'ユーザーあたりの最大同時セッション数',
+          help: 'ユーザーごとの同時サインインセッション数を制限します。上限を超えると古いものからサインアウトされます。0 で無制限。',
+        },
+        allowed_ip_ranges: {
+          label: '許可 IP レンジ',
+          help: 'CIDR レンジまたは正確な IP(1行に1つ、またはカンマ区切り)。例:203.0.113.0/24。設定すると、この範囲外からのサインインを拒否します。空欄で制限なし。X-Forwarded-For を設定する信頼できるプロキシが必要です。',
+        },
         google_enabled: {
           label: 'Google ログインを有効化',
           help: 'Google Cloud Console の Google OAuth クライアント ID とシークレットが必要です。',
@@ -98,6 +182,83 @@ export const jaJP: TranslationData = {
           label: 'Google クライアントシークレット',
           help: '保存時に暗号化されます。サーバー側で GOOGLE_CLIENT_SECRET を設定することもできます。',
         },
+      },
+    },
+
+    sms: {
+      title: 'SMS 配信',
+      description: 'OTP サインイン、招待、通知に使う SMS プロバイダー設定。',
+      groups: {
+        provider: { title: 'プロバイダー', description: 'このワークスペースが送信 SMS をどう送るかを選択します。' },
+        aliyun: { title: 'Aliyun SMS' },
+        twilio: { title: 'Twilio' },
+      },
+      keys: {
+        provider: {
+          label: 'プロバイダー',
+          options: { log: 'なし（ログのみ — 実送信しない）', aliyun: 'Aliyun SMS', twilio: 'Twilio' },
+        },
+        aliyun_access_key_id: { label: 'AccessKey ID' },
+        aliyun_access_key_secret: { label: 'AccessKey Secret' },
+        aliyun_sign_name: { label: '署名（短信签名）' },
+        aliyun_template_code: {
+          label: '既定テンプレートコード',
+          help: '送信時にテンプレートが指定されない場合に使用します。単一の ${content} 変数を持つ汎用テンプレートで、一般的な通知 SMS を送信できます。',
+        },
+        twilio_account_sid: { label: 'Account SID' },
+        twilio_auth_token: { label: 'Auth トークン' },
+        twilio_from_number: {
+          label: '送信元番号',
+          help: 'E.164 形式の送信者。例:+15005550006。これか Messaging Service SID のいずれかが必要です。',
+        },
+        twilio_messaging_service_sid: { label: 'Messaging Service SID' },
+      },
+      actions: { test: { label: 'テスト SMS を送信' } },
+    },
+
+    company: {
+      title: '会社',
+      description: '法人としてのアイデンティティ — 登記名、住所、税務 ID、主担当者。',
+      groups: {
+        identity: { title: 'アイデンティティ' },
+        address: { title: '登記住所' },
+        contact: { title: '連絡先' },
+      },
+      keys: {
+        legal_name: { label: '登記名', help: '組織の登記上の正式名称（ワークスペース名と異なる場合があります）。' },
+        registration_number: { label: '登記番号', help: '会社の登記 / 設立番号（例:EIN、会社番号）。' },
+        tax_id: { label: '税務 / VAT ID', help: '請求書に表示される税務識別番号(例:VAT、GST、ABN)。' },
+        address_line1: { label: '住所 1' },
+        address_line2: { label: '住所 2' },
+        city: { label: '市区町村' },
+        state: { label: '都道府県 / 州' },
+        postal_code: { label: '郵便番号' },
+        country: { label: '国', help: 'ISO 3166-1 alpha-2 コード（例:US、GB、CN）。' },
+        phone: { label: '電話', help: '主要な業務用電話（E.164 推奨。例:+1 415 555 0100）。' },
+        website: { label: 'ウェブサイト', help: '例:https://example.com' },
+        primary_contact_name: { label: '主担当者名' },
+        primary_contact_email: { label: '主担当者メール', help: '例:ops@example.com' },
+      },
+    },
+
+    localization: {
+      title: 'ローカリゼーション',
+      description: '既定のタイムゾーン、言語、通貨、日付/数値フォーマット。',
+      groups: {
+        region: { title: '地域' },
+        formats: { title: 'フォーマット' },
+        finance: { title: '財務' },
+      },
+      keys: {
+        timezone: { label: '既定のタイムゾーン', help: 'today()/daysFromNow の解決、分析の日付バケット、日時レンダリングに使う IANA タイムゾーン。' },
+        locale: { label: '既定の言語', help: 'メッセージカタログと数値/日付フォーマットに使う BCP-47 ロケール。' },
+        default_country: { label: '既定の国', help: 'ISO 3166-1 alpha-2 コード（例:US、GB、CN）。住所と電話の既定に使用します。' },
+        date_format: { label: '日付フォーマット' },
+        time_format: { label: '時刻フォーマット' },
+        number_format: { label: '数値フォーマット', help: '表示する数値の桁区切りと小数点の記号。' },
+        first_day_of_week: { label: '週の開始日', help: '週次分析のバケットとカレンダーグリッドの基準になります。' },
+        currency: { label: '既定の通貨', help: '通貨フィールドが独自の通貨を指定しない場合に適用される ISO 4217 コード。' },
+        fiscal_year_start: { label: '会計年度の開始月', help: '会計年度の最初の月 — レポートの「今四半期 / 会計年度」を決定します。' },
       },
     },
 
@@ -168,6 +329,12 @@ export const jaJP: TranslationData = {
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
         google: { title: 'Google' },
+        deepseek: { title: 'DeepSeek', description: 'https://api.deepseek.com の OpenAI 互換 API。Base URL は自動入力されます。' },
+        dashscope: { title: '阿里通义 DashScope', description: 'dashscope.aliyuncs.com/compatible-mode/v1 の OpenAI 互換エンドポイント。Base URL は自動入力されます。' },
+        cloudflare: { title: 'Cloudflare AI Gateway', description: 'Cloudflare AI Gateway 経由で OpenAI 互換モデルをプロキシします。' },
+        siliconflow: { title: '硅基流动 SiliconFlow', description: 'api.siliconflow.cn/v1 の OpenAI 互換エンドポイント。Base URL は自動入力されます。' },
+        openrouter: { title: 'OpenRouter', description: 'openrouter.ai/api/v1 のマルチプロバイダールーター。Base URL は自動入力されます。' },
+        titles: { title: '会話タイトル', description: '新しい会話に短い要約タイトルを自動生成します。' },
         defaults: { title: '生成のデフォルト値',
           description: 'エージェントまたはチャットリクエストが独自の値を指定しない場合に適用されます。' },
         observability: { title: '可観測性' },
@@ -185,6 +352,11 @@ export const jaJP: TranslationData = {
             openai: 'OpenAI',
             anthropic: 'Anthropic',
             google: 'Google Generative AI',
+            deepseek: 'DeepSeek（OpenAI 互換）',
+            dashscope: '阿里通义 DashScope（OpenAI 互換）',
+            cloudflare: 'Cloudflare AI Gateway（OpenAI 互換）',
+            siliconflow: '硅基流动 SiliconFlow（OpenAI 互換）',
+            openrouter: 'OpenRouter（OpenAI 互換）',
           },
         },
         gateway_model: { label: 'Gateway モデル',
@@ -203,6 +375,20 @@ export const jaJP: TranslationData = {
         google_api_key: { label: 'Google API キー',
           help: 'GOOGLE_GENERATIVE_AI_API_KEY として転送されます。保存時に暗号化されます。' },
         google_model: { label: 'モデル' },
+        deepseek_api_key: { label: 'DeepSeek API キー', help: 'sk-…。platform.deepseek.com で発行。' },
+        deepseek_model: { label: 'モデル', help: '例:deepseek-chat（V3）、deepseek-reasoner（R1 推論）。' },
+        dashscope_api_key: { label: 'DashScope API キー', help: 'sk-…。dashscope.console.aliyun.com で発行。' },
+        dashscope_model: { label: 'モデル' },
+        cloudflare_account_id: { label: 'Cloudflare アカウント ID', help: 'Cloudflare ダッシュボード URL に含まれる 32 桁の 16 進数 ID。' },
+        cloudflare_gateway_id: { label: 'Gateway ID', help: 'Cloudflare → AI Gateway で設定したゲートウェイ名。既定は `default`。' },
+        cloudflare_api_key: { label: 'Cloudflare AI Gateway トークン', help: 'AI Gateway →「API tokens」タブで発行（cfut_… または sk_…）。' },
+        cloudflare_model: { label: 'モデル' },
+        siliconflow_api_key: { label: 'SiliconFlow API キー' },
+        siliconflow_model: { label: 'モデル', help: '例:Qwen/Qwen2.5-72B-Instruct、deepseek-ai/DeepSeek-V3、meta-llama/Meta-Llama-3.1-8B-Instruct。' },
+        openrouter_api_key: { label: 'OpenRouter API キー', help: 'sk-or-…' },
+        openrouter_model: { label: 'モデル', help: '形式:provider/model（例:anthropic/claude-3.5-sonnet、deepseek/deepseek-chat）。' },
+        title_generation_enabled: { label: '会話タイトルを自動要約' },
+        title_max_length: { label: 'タイトルの最大長（文字）', help: '生成タイトルの上限。超過分はサーバー側で切り詰められます。' },
         temperature: { label: 'Temperature',
           help: '0 = 決定的、2 = 非常に創造的。' },
         max_tokens: { label: '最大出力トークン数',

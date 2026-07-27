@@ -76,6 +76,26 @@ export const esES: TranslationData = {
           title: 'Correo y contraseña',
           description: 'Controla el inicio de sesión local con correo/contraseña y el registro de autoservicio.',
         },
+        password_policy: {
+          title: 'Política de contraseñas',
+          description: 'Límites de longitud que el proveedor de autenticación exige en el registro y el restablecimiento de contraseña.',
+        },
+        anti_abuse: {
+          title: 'Antiabuso',
+          description: 'Protección contra fuerza bruta: bloqueo de cuenta por identidad y límite de tasa por IP en los endpoints de autenticación.',
+        },
+        multi_factor: {
+          title: 'Multifactor',
+          description: 'Exige a los miembros proteger su cuenta con una aplicación de autenticación (TOTP).',
+        },
+        sessions: {
+          title: 'Sesiones',
+          description: 'Cuánto tiempo permanece válida una sesión iniciada.',
+        },
+        network: {
+          title: 'Red',
+          description: 'Restringe desde dónde pueden autenticarse los usuarios.',
+        },
         social: {
           title: 'Inicio de sesión social',
           description:
@@ -86,6 +106,70 @@ export const esES: TranslationData = {
         email_password_enabled: { label: 'Habilitar inicio de sesión con correo/contraseña' },
         signup_enabled: { label: 'Permitir registro de autoservicio' },
         require_email_verification: { label: 'Requerir verificación de correo' },
+        password_min_length: { label: 'Longitud mínima de contraseña' },
+        password_max_length: { label: 'Longitud máxima de contraseña', help: 'Un límite superior protege frente a la denegación de servicio por el hasheo de contraseñas muy largas.' },
+        password_reject_breached: {
+          label: 'Rechazar contraseñas filtradas',
+          help: 'Bloquea contraseñas presentes en corpus públicos de filtraciones mediante Have I Been Pwned (comprobación de rango con k-anonimato; la contraseña nunca se envía completa).',
+        },
+        password_require_complexity: {
+          label: 'Requerir contraseñas complejas',
+          help: 'Exige que las contraseñas combinen clases de caracteres (mayúsculas, minúsculas, dígitos, símbolos) en el registro y al cambiar/restablecer la contraseña.',
+        },
+        password_min_classes: {
+          label: 'Clases de caracteres mínimas',
+          help: 'Cuántas de las cuatro clases (mayúscula / minúscula / dígito / símbolo) debe incluir una contraseña.',
+        },
+        password_history_count: {
+          label: 'Historial de contraseñas (sin reutilización)',
+          help: 'Impide reutilizar este número de contraseñas anteriores al cambiar/restablecer. 0 desactiva la comprobación.',
+        },
+        password_expiry_days: {
+          label: 'Caducidad de contraseña (días)',
+          help: 'Fuerza un cambio de contraseña tras este número de días. 0 desactiva la caducidad. Mientras está caducada, el usuario no puede acceder a los datos hasta que la cambie.',
+        },
+        lockout_threshold: {
+          label: 'Umbral de bloqueo de cuenta',
+          help: 'Bloquea una cuenta tras este número de inicios de sesión fallidos consecutivos. 0 desactiva el bloqueo. Mientras está bloqueada, el inicio de sesión se rechaza incluso con la contraseña correcta.',
+        },
+        lockout_duration_minutes: {
+          label: 'Duración del bloqueo (minutos)',
+          help: 'Cuánto permanece bloqueada una cuenta una vez superado el umbral.',
+        },
+        rate_limit_max: {
+          label: 'Límite de tasa de autenticación: máx. solicitudes',
+          help: 'Máximo de solicitudes por IP y ventana a los endpoints de inicio de sesión / registro / restablecimiento de contraseña.',
+        },
+        rate_limit_window_seconds: {
+          label: 'Límite de tasa de autenticación: ventana (segundos)',
+          help: 'Ventana deslizante durante la cual se cuenta el tope de solicitudes anterior.',
+        },
+        mfa_required: {
+          label: 'Requerir autenticación multifactor',
+          help: 'Los usuarios sin un autenticador registrado quedan bloqueados del acceso a los datos al terminar su periodo de gracia. Activarlo también habilita la función de dos factores para que los usuarios puedan registrarse.',
+        },
+        mfa_grace_period_days: {
+          label: 'Periodo de gracia de MFA (días)',
+          help: 'Cuánto pueden aplazar el registro los usuarios antes del bloqueo definitivo. 0 bloquea de inmediato.',
+        },
+        session_expiry_days: { label: 'Duración de la sesión (días)', help: 'Una sesión caduca este número de días después del inicio de sesión.' },
+        session_refresh_days: { label: 'Umbral de renovación (días)', help: 'Una sesión activa se extiende cuando es más antigua que esto.' },
+        session_idle_timeout_minutes: {
+          label: 'Tiempo de inactividad (minutos)',
+          help: 'Cierra la sesión del usuario tras este número de minutos de inactividad. 0 desactiva.',
+        },
+        session_absolute_max_hours: {
+          label: 'Duración absoluta de la sesión (horas)',
+          help: 'Fuerza una reautenticación este número de horas después del inicio de sesión, independientemente de la actividad. 0 desactiva.',
+        },
+        max_concurrent_sessions_per_user: {
+          label: 'Máx. sesiones simultáneas por usuario',
+          help: 'Limita las sesiones iniciadas simultáneas por usuario; las más antiguas se cierran al superar el límite. 0 = ilimitado.',
+        },
+        allowed_ip_ranges: {
+          label: 'Rangos de IP permitidos',
+          help: 'Rangos CIDR o IP exactas (una por línea o separadas por comas), p. ej. 203.0.113.0/24. Cuando se define, se rechaza el inicio de sesión desde fuera de estos rangos. Vacío = sin restricción. Requiere un proxy de confianza que defina X-Forwarded-For.',
+        },
         google_enabled: {
           label: 'Habilitar inicio de sesión con Google',
           help: 'Requiere un ID de cliente y un secreto de OAuth de Google desde Google Cloud Console.',
@@ -98,6 +182,83 @@ export const esES: TranslationData = {
           label: 'Secreto de cliente de Google',
           help: 'Se almacena cifrado en reposo. También se puede definir GOOGLE_CLIENT_SECRET en el servidor.',
         },
+      },
+    },
+
+    sms: {
+      title: 'Envío de SMS',
+      description: 'Configuración del proveedor de SMS para inicio de sesión con OTP, invitaciones y notificaciones.',
+      groups: {
+        provider: { title: 'Proveedor', description: 'Elige cómo envía este espacio de trabajo los SMS salientes.' },
+        aliyun: { title: 'Aliyun SMS' },
+        twilio: { title: 'Twilio' },
+      },
+      keys: {
+        provider: {
+          label: 'Proveedor',
+          options: { log: 'Ninguno (solo registro — sin envío real)', aliyun: 'Aliyun SMS', twilio: 'Twilio' },
+        },
+        aliyun_access_key_id: { label: 'AccessKey ID' },
+        aliyun_access_key_secret: { label: 'AccessKey Secret' },
+        aliyun_sign_name: { label: 'Nombre de firma (短信签名)' },
+        aliyun_template_code: {
+          label: 'Código de plantilla predeterminado',
+          help: 'Se usa cuando un envío no lleva una plantilla explícita. Una plantilla genérica con una sola variable ${content} permite enviar SMS de notificación genéricos.',
+        },
+        twilio_account_sid: { label: 'Account SID' },
+        twilio_auth_token: { label: 'Token de autenticación' },
+        twilio_from_number: {
+          label: 'Número de origen',
+          help: 'Remitente en formato E.164, p. ej. +15005550006. Se necesita esto o un Messaging Service SID.',
+        },
+        twilio_messaging_service_sid: { label: 'Messaging Service SID' },
+      },
+      actions: { test: { label: 'Enviar SMS de prueba' } },
+    },
+
+    company: {
+      title: 'Empresa',
+      description: 'Identidad de la entidad legal: nombre registrado, dirección, identificadores fiscales y contacto principal.',
+      groups: {
+        identity: { title: 'Identidad' },
+        address: { title: 'Domicilio registrado' },
+        contact: { title: 'Contacto' },
+      },
+      keys: {
+        legal_name: { label: 'Razón social', help: 'Nombre legal registrado de la organización (puede diferir del nombre del espacio de trabajo).' },
+        registration_number: { label: 'Número de registro', help: 'Número de registro / constitución de la empresa (p. ej. EIN, n.º de sociedad).' },
+        tax_id: { label: 'ID fiscal / IVA', help: 'Identificador fiscal que aparece en las facturas (p. ej. IVA, GST, ABN).' },
+        address_line1: { label: 'Dirección línea 1' },
+        address_line2: { label: 'Dirección línea 2' },
+        city: { label: 'Ciudad' },
+        state: { label: 'Provincia / Estado' },
+        postal_code: { label: 'Código postal' },
+        country: { label: 'País', help: 'Código ISO 3166-1 alfa-2 (p. ej. US, GB, CN).' },
+        phone: { label: 'Teléfono', help: 'Teléfono principal de la empresa (se recomienda E.164, p. ej. +1 415 555 0100).' },
+        website: { label: 'Sitio web', help: 'Ejemplo: https://example.com' },
+        primary_contact_name: { label: 'Nombre del contacto principal' },
+        primary_contact_email: { label: 'Correo del contacto principal', help: 'Ejemplo: ops@example.com' },
+      },
+    },
+
+    localization: {
+      title: 'Localización',
+      description: 'Zona horaria, idioma, moneda y formatos de fecha/número predeterminados.',
+      groups: {
+        region: { title: 'Región' },
+        formats: { title: 'Formatos' },
+        finance: { title: 'Finanzas' },
+      },
+      keys: {
+        timezone: { label: 'Zona horaria predeterminada', help: 'Zona IANA usada para resolver today()/daysFromNow, los buckets de fecha de analítica y las fechas/horas renderizadas.' },
+        locale: { label: 'Idioma predeterminado', help: 'Configuración regional BCP-47 para los catálogos de mensajes y el formato de números/fechas.' },
+        default_country: { label: 'País predeterminado', help: 'Código ISO 3166-1 alfa-2 (p. ej. US, GB, CN). Se usa para los valores por defecto de dirección y teléfono.' },
+        date_format: { label: 'Formato de fecha' },
+        time_format: { label: 'Formato de hora' },
+        number_format: { label: 'Formato de número', help: 'Separadores de miles y decimales para los números mostrados.' },
+        first_day_of_week: { label: 'Primer día de la semana', help: 'Ancla los buckets de analítica semanal y las cuadrículas de calendario.' },
+        currency: { label: 'Moneda predeterminada', help: 'Código ISO 4217 aplicado cuando un campo de moneda no indica la suya.' },
+        fiscal_year_start: { label: 'Inicio del año fiscal', help: 'Primer mes del año fiscal: determina «este trimestre / año fiscal» en los informes.' },
       },
     },
 
@@ -171,6 +332,12 @@ export const esES: TranslationData = {
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
         google: { title: 'Google' },
+        deepseek: { title: 'DeepSeek', description: 'API compatible con OpenAI en https://api.deepseek.com. La Base URL se rellena automáticamente.' },
+        dashscope: { title: '阿里通义 DashScope', description: 'Endpoint compatible con OpenAI en dashscope.aliyuncs.com/compatible-mode/v1. La Base URL se rellena automáticamente.' },
+        cloudflare: { title: 'Cloudflare AI Gateway', description: 'Proxy de modelos compatibles con OpenAI a través de Cloudflare AI Gateway.' },
+        siliconflow: { title: '硅基流动 SiliconFlow', description: 'Endpoint compatible con OpenAI en api.siliconflow.cn/v1. La Base URL se rellena automáticamente.' },
+        openrouter: { title: 'OpenRouter', description: 'Enrutador multiproveedor en openrouter.ai/api/v1. La Base URL se rellena automáticamente.' },
+        titles: { title: 'Títulos de conversación', description: 'Genera automáticamente un título de resumen breve para las conversaciones nuevas.' },
         defaults: { title: 'Valores predeterminados de generación',
           description: 'Se aplican cuando un agente o una solicitud de chat no especifica su propio valor.' },
         observability: { title: 'Observabilidad' },
@@ -188,6 +355,11 @@ export const esES: TranslationData = {
             openai: 'OpenAI',
             anthropic: 'Anthropic',
             google: 'Google Generative AI',
+            deepseek: 'DeepSeek (compatible con OpenAI)',
+            dashscope: '阿里通义 DashScope (compatible con OpenAI)',
+            cloudflare: 'Cloudflare AI Gateway (compatible con OpenAI)',
+            siliconflow: '硅基流动 SiliconFlow (compatible con OpenAI)',
+            openrouter: 'OpenRouter (compatible con OpenAI)',
           },
         },
         gateway_model: { label: 'Modelo de Gateway',
@@ -206,6 +378,20 @@ export const esES: TranslationData = {
         google_api_key: { label: 'Clave de API de Google',
           help: 'Se reenvía como GOOGLE_GENERATIVE_AI_API_KEY. Se almacena cifrada en reposo.' },
         google_model: { label: 'Modelo' },
+        deepseek_api_key: { label: 'Clave de API de DeepSeek', help: 'sk-…, emitida en platform.deepseek.com.' },
+        deepseek_model: { label: 'Modelo', help: 'Ejemplos: deepseek-chat (V3), deepseek-reasoner (razonamiento R1).' },
+        dashscope_api_key: { label: 'Clave de API de DashScope', help: 'sk-…, emitida en dashscope.console.aliyun.com.' },
+        dashscope_model: { label: 'Modelo' },
+        cloudflare_account_id: { label: 'ID de cuenta de Cloudflare', help: 'El ID hexadecimal de 32 caracteres de la URL de tu panel de Cloudflare.' },
+        cloudflare_gateway_id: { label: 'ID de gateway', help: 'Nombre del gateway configurado en Cloudflare → AI Gateway. Por defecto `default`.' },
+        cloudflare_api_key: { label: 'Token de Cloudflare AI Gateway', help: 'Emitido en AI Gateway → pestaña «API tokens» (cfut_… o sk_…).' },
+        cloudflare_model: { label: 'Modelo' },
+        siliconflow_api_key: { label: 'Clave de API de SiliconFlow' },
+        siliconflow_model: { label: 'Modelo', help: 'Ejemplos: Qwen/Qwen2.5-72B-Instruct, deepseek-ai/DeepSeek-V3, meta-llama/Meta-Llama-3.1-8B-Instruct.' },
+        openrouter_api_key: { label: 'Clave de API de OpenRouter', help: 'sk-or-…' },
+        openrouter_model: { label: 'Modelo', help: 'Formato: provider/model (p. ej. anthropic/claude-3.5-sonnet, deepseek/deepseek-chat).' },
+        title_generation_enabled: { label: 'Resumir automáticamente los títulos de conversación' },
+        title_max_length: { label: 'Longitud máx. del título (caracteres)', help: 'Tope estricto del título generado. Todo lo que exceda se trunca en el servidor.' },
         temperature: { label: 'Temperatura',
           help: '0 = determinista, 2 = muy creativo.' },
         max_tokens: { label: 'Máximo de tokens de salida',
