@@ -301,3 +301,60 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
         expect(missing.response?.status).toBe(503);
     });
 });
+
+// ---------------------------------------------------------------------------
+// PR-4 — share-links extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
+    it('/share-links responds 501 when the shareLinks service is absent', async () => {
+        const result = await makeDispatcher().dispatch('GET', '/share-links', undefined, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(501);
+    });
+
+    it('/share-linksfoo is NOT claimed (segment semantics)', async () => {
+        const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
+        const result = await makeDispatcher({ shareLinks }).dispatch('GET', '/share-linksfoo', undefined, {}, {} as any);
+        expect(shareLinks.listLinks).not.toHaveBeenCalled();
+        expect(result.response?.status ?? 404).not.toBe(501);
+    });
+
+    it('management routes reject anonymous callers with UNAUTHENTICATED', async () => {
+        const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
+        const result = await makeDispatcher({ shareLinks })
+            .handleShareLinks('', 'POST', { object: 'account', recordId: 'r1' }, {}, {} as any);
+        expect(result.response?.status).toBe(401);
+        expect(result.response?.body?.error?.details?.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('public resolve route serves the record through the request-kernel engine with redaction', async () => {
+        const resolveToken = vi.fn().mockResolvedValue({
+            link: { id: 'l1', token: 't1', object_name: 'account', record_id: 'r1', permission: 'view', audience: 'anyone' },
+            redactFields: ['secret'],
+        });
+        const find = vi.fn().mockResolvedValue([{ id: 'r1', name: 'Acme', secret: 'hide-me' }]);
+        const dispatcher = makeDispatcher({
+            shareLinks: { resolveToken },
+            objectql: {
+                find,
+                getObjects: vi.fn().mockReturnValue({}),
+                registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
+            },
+        });
+        const result = await dispatcher.handleShareLinks('/t1/resolve', 'GET', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        const record = result.response?.body?.data?.record;
+        expect(record?.name).toBe('Acme');
+        // redactFields stripped before the record leaves the server.
+        expect(record?.secret).toBeUndefined();
+    });
+
+    it('unmatched sub-path returns the standard ROUTE_NOT_FOUND envelope', async () => {
+        const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
+        const context: any = { executionContext: { userId: 'u1' } };
+        const result = await makeDispatcher({ shareLinks }).handleShareLinks('/a/b/c', 'GET', undefined, {}, context);
+        expect(result.response?.status).toBe(404);
+        expect(result.response?.body?.error?.type).toBe('ROUTE_NOT_FOUND');
+    });
+});
