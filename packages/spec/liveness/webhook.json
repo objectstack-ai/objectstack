@@ -1,78 +1,87 @@
 {
   "type": "webhook",
-  "_note": "WebhookSchema (outbound webhook — packages/spec/src/automation/webhook.zod.ts:76). Governed via a spec-only schema override in the gate (SPEC_ONLY_SCHEMAS): webhook is NOT a registered metadata type (absent from kernel/metadata-type-schemas.ts), on purpose — registering it would turn on Studio webhook CRUD + saveMetaItem overlay acceptance, which is the wrong move while the authoring surface is still disconnected (below). THE DISCONNECT (#3461, confirmed at HEAD): the entire authored WebhookSchema surface is inert. It's authored on a Stack (stack.zod.ts:261 `webhooks: z.array(WebhookSchema)`) and by connectors (connector.zod.ts:271), but NOTHING materializes an authored webhook into a `sys_webhook` DATA row — and the runtime dispatcher reads ONLY sys_webhook rows (AutoEnqueuer.doRefresh → engine.find('sys_webhook', { where: { active: true } }), plugins/plugin-webhooks/src/auto-enqueuer.ts:175-176). Rows are hand-created by admins via the generic object CRUD UI (sys-webhook.object.ts:45); there is no seeder and zero insert('sys_webhook') anywhere. THE TRAP: objectql DOES 'ingest' `webhooks:` (engine.ts:1183/1343) — registering each as a generic in-memory metadata item under type 'webhook' — but nothing ever reads those items back, and they are NOT the sys_webhook table. It looks like an ingestion path; it dead-ends. So every prop below is classified from the AUTHOR's vantage point (the ledger's stated purpose: an authored prop with no runtime consumer is a silent no-op), which for this surface means the whole thing: all 16 authorable props are DEAD, `authentication` stays experimental via its own marker. The per-prop notes record SALVAGEABILITY — which props have a sys_webhook column/delivery equivalent a future materializer (#3461 option A) could remap (spec `object`→`object_name`, `isActive`→`active`) vs which have no sink anywhere — so this doubles as the mapping table for that work. When the bridge lands, the mapped props flip to live (cite the materializer); if the surface is retired (#3461 option B) the ledger is removed with the schema. objectui has no bespoke consumer of the spec webhook shape. `url` carries the single author-warning per webhook (one no-op heads-up per artifact, not one per prop). Field-level line refs are the runtime sys_webhook object (plugins/plugin-webhooks/src/sys-webhook.object.ts) and its dispatcher (auto-enqueuer.ts).",
+  "_note": "WebhookSchema (outbound webhook — packages/spec/src/automation/webhook.zod.ts:76). Governed via a spec-only schema override in the gate (SPEC_ONLY_SCHEMAS): webhook is still NOT a registered metadata type (absent from kernel/metadata-type-schemas.ts) — registering it would turn on Studio webhook CRUD + saveMetaItem overlay + create-seeds; that reassessment is tracked in #3490 and deliberately deferred. BRIDGE LANDED (#3461 option A, PR #3489): the authoring surface is no longer inert. `bootstrapDeclaredWebhooks` (plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts) materializes each stack/connector-authored webhook into a `sys_webhook` DATA row on boot — WebhookSchema.parse (:114) → mapWebhookToRow (:191): `object`→`object_name` (:195), `isActive`→`active` (:202), same-named `name`/`label`/`triggers`/`url`/`method`/`description`, and the FULL envelope → `definition_json` (:203). The dispatcher (AutoEnqueuer) reads those rows (auto-enqueuer.ts:175 `where:{active:true}`) and fans out on data.record.* events, reading `object_name`/`name`/`url`/`method`/`triggers` off the row and `headers`/`secret`/`timeoutMs` back out of `definition_json` (auto-enqueuer.ts:266-277). So the props the materializer + dispatcher actually consume are now LIVE. Props with NO runtime reader anywhere stay DEAD — note the nuance: the bridge folds the whole envelope into `definition_json`, so their values are now stored, but `parseRow` never reads them (auto-enqueuer.ts:255-278), so there is still no consumer (the #1878 delivery-layer enforce-or-remove worklist). `authentication` stays experimental (HMAC-`secret`-only; bearer/basic/api-key inert). Seed-not-clobber: an admin-edited row (`customized`) is never re-seeded (bootstrap-declared-webhooks.ts:143). The `object` prop carries the ADR-0054 runtime proof for the whole materialization pipeline (bound high-risk class `webhook-materialization`). Field-level line refs: materializer bootstrap-declared-webhooks.ts, runtime object plugins/plugin-webhooks/src/sys-webhook.object.ts, dispatcher auto-enqueuer.ts.",
   "props": {
     "name": {
-      "status": "dead",
-      "note": "Authored value never materialized. A sys_webhook.name column exists (sys-webhook.object.ts:97) and the dispatcher reads row.name (auto-enqueuer.ts:266) — but it's fed by admin CRUD, not by authoring. Salvageable 1:1 by a materializer."
+      "status": "live",
+      "evidence": "Materialized to sys_webhook.name by the bridge (bootstrap-declared-webhooks.ts:193, #3489); the dispatcher reads row.name for the dedup key + logging (auto-enqueuer.ts:266).",
+      "note": "Was dead pre-bridge (admin-CRUD-only). Now fed by authoring."
     },
     "label": {
-      "status": "dead",
-      "note": "Authored value never materialized. Runtime col sys-webhook.object.ts:105 (Studio list display only; never sent on the wire). Salvageable 1:1."
+      "status": "live",
+      "evidence": "Materialized to sys_webhook.label (bootstrap-declared-webhooks.ts:194, #3489); consumed by the sys_webhook Studio list views (sys-webhook.object.ts listViews — `columns: ['label', …]`).",
+      "note": "Display-only — surfaced in Studio, never sent on the wire."
     },
     "object": {
-      "status": "dead",
-      "note": "Authored value never materialized. Runtime subscription keys on col `object_name` (sys-webhook.object.ts:112), read at auto-enqueuer.ts:267 — NAME MISMATCH: spec `object` vs runtime `object_name`. A materializer must remap."
+      "status": "live",
+      "evidence": "Bridge remaps spec `object` → sys_webhook.object_name (bootstrap-declared-webhooks.ts:195, #3489); the dispatcher keys its per-object subscription on it (auto-enqueuer.ts:267).",
+      "proof": "packages/qa/dogfood/test/webhook-materialization.dogfood.test.ts#webhook-materialization",
+      "note": "ADR-0054 high-risk class (webhook-materialization): the spec `object`→runtime `object_name` remap is the representative check for the whole authoring→dispatcher pipeline that crosses manifest-decomposition → materializer → sys_webhook row → dispatcher subscription — the exact multi-layer seam that broke in integration (the materializer was first gated behind the realtime guard) despite green unit tests. The proof authors a stack `webhooks:` entry against the real in-process stack and asserts the sys_webhook row materialized with object_name set."
     },
     "triggers": {
-      "status": "dead",
-      "note": "Authored value never materialized. Runtime col sys-webhook.object.ts:123, read+mapped at auto-enqueuer.ts:212 (create/update/delete; unknown values dropped with a warning, #3196). Salvageable 1:1."
+      "status": "live",
+      "evidence": "Materialized to sys_webhook.triggers (bootstrap-declared-webhooks.ts:196, #3489); the dispatcher parses + maps them to create/update/delete (auto-enqueuer.ts:212, unknown values dropped with a warning #3196).",
+      "note": "Was dead pre-bridge. Salvaged 1:1."
     },
     "url": {
-      "status": "dead",
-      "authorWarn": true,
-      "authorHint": "Stack/connector-authored webhooks are never materialized into the sys_webhook dispatcher — nothing delivers them (#3461). Create sys_webhook rows via the admin UI (or wait for the ingestion bridge) instead of authoring `webhooks:`.",
-      "note": "Authored value never materialized. Runtime col sys-webhook.object.ts:137, read at auto-enqueuer.ts:269. Salvageable 1:1. Marked authorWarn as the one-per-webhook carrier: `url` is required so it warns exactly once per authored webhook, flagging the whole artifact as a no-op without spamming a warning per prop."
+      "status": "live",
+      "evidence": "Materialized to sys_webhook.url (bootstrap-declared-webhooks.ts:197, #3489); the dispatcher delivers to it (auto-enqueuer.ts:269).",
+      "note": "Was dead pre-bridge and carried the per-webhook authorWarn; the bridge (#3489) makes authoring live, so the warning is removed."
     },
     "method": {
-      "status": "dead",
-      "note": "Authored value never materialized. Runtime col sys-webhook.object.ts:145, read at auto-enqueuer.ts:274 (falls back to definition_json then 'POST'). Salvageable 1:1."
+      "status": "live",
+      "evidence": "Materialized (lowercased) to sys_webhook.method (bootstrap-declared-webhooks.ts:200, #3489); the dispatcher upper-cases + uses it (auto-enqueuer.ts:274).",
+      "note": "Was dead pre-bridge. Salvaged 1:1."
     },
     "headers": {
-      "status": "dead",
-      "note": "Authored value never materialized. No first-class sys_webhook column — the dispatcher reads headers only from the `definition_json` textarea of a hand-created row (auto-enqueuer.ts:275). A materializer would fold this into definition_json."
+      "status": "live",
+      "evidence": "Bridge folds the full envelope into sys_webhook.definition_json (bootstrap-declared-webhooks.ts:203, #3489); the dispatcher reads defn.headers and attaches them to the outbound request (auto-enqueuer.ts:275).",
+      "note": "Was dead pre-bridge (definition_json only reachable via hand-authored rows). Now materialized from authoring."
     },
     "body": {
       "status": "dead",
-      "note": "No sink anywhere. The dispatcher always sends its own fixed envelope (object/recordId/action/timestamp + full record, auto-enqueuer.ts:336-342); a custom body is never read. Vestigial even for a future materializer."
+      "note": "No consumer. The bridge folds it into definition_json (bootstrap-declared-webhooks.ts:203), but parseRow never reads a custom body and the dispatcher always sends its own fixed envelope (object/recordId/action/timestamp + full record, auto-enqueuer.ts:336-342). Enforce-or-remove (#1878)."
     },
     "payloadFields": {
       "status": "dead",
-      "note": "No sink anywhere. No field projection — the full record is always sent (auto-enqueuer.ts:341). Never read."
+      "note": "No consumer. In definition_json now, but there is no field projection — the full record is always sent (auto-enqueuer.ts:341). Enforce-or-remove (#1878)."
     },
     "includeSession": {
       "status": "dead",
-      "note": "No sink anywhere. No session is injected into the enqueue payload. Never read."
+      "note": "No consumer. In definition_json now, but no session is injected into the enqueue payload (auto-enqueuer.ts:336-342). Enforce-or-remove (#1878)."
     },
     "authentication": {
       "status": "experimental",
       "authorHint": "Only HMAC signing via `secret` is applied to deliveries; bearer/basic/api-key credentials are never attached to outbound requests (liveness audit #1878/#1893).",
-      "note": "Self-marked [EXPERIMENTAL — not enforced] on the schema (webhook.zod.ts:102); pinned here so the compile lint warns on it (marker-only classifications aren't read by the lint). At runtime the delivery path applies HMAC via `secret` only (auto-enqueuer.ts:276) — bearer/basic/api-key are inert."
+      "note": "Self-marked [EXPERIMENTAL — not enforced] on the schema (webhook.zod.ts:102); pinned here so the compile lint warns on it. The bridge folds it into definition_json and `secret`-based HMAC is now applied (see the `secret` prop, live), but the bearer/basic/api-key credentials in this object are still never attached to outbound requests (auto-enqueuer.ts:276 signs with the secret only)."
     },
     "retryPolicy": {
       "status": "dead",
-      "note": "No sink anywhere. Not present in EnqueueHttpInput (service-messaging/src/http-outbox.ts:87-98); the enqueuer passes no retry fields and the messaging HttpDispatcher owns a fixed retry schedule. Authored maxRetries/backoffStrategy/initialDelayMs/maxDelayMs are all ignored. (The showcase's TaskChangedWebhook authors a retryPolicy that does nothing — the canonical no-op.)"
+      "note": "No consumer. In definition_json now, but retry is not in EnqueueHttpInput (service-messaging/src/http-outbox.ts:87-98) — the messaging HttpDispatcher owns a fixed retry schedule; authored maxRetries/backoffStrategy/initialDelayMs/maxDelayMs are ignored. (The showcase's TaskChangedWebhook still authors a retryPolicy that does nothing.) Enforce-or-remove (#1878)."
     },
     "timeoutMs": {
-      "status": "dead",
-      "note": "Authored value never materialized. Honored only from the `definition_json` textarea of a hand-created row (auto-enqueuer.ts:277 → http-outbox.ts:96), never from this top-level prop."
+      "status": "live",
+      "evidence": "Bridge folds the envelope into sys_webhook.definition_json (bootstrap-declared-webhooks.ts:203, #3489); the dispatcher reads defn.timeoutMs and applies it to the delivery (auto-enqueuer.ts:277 → http-outbox.ts:96).",
+      "note": "Was dead pre-bridge (definition_json only reachable via hand-authored rows). Now materialized from authoring."
     },
     "secret": {
-      "status": "dead",
-      "note": "Authored value never materialized. Honored only from `definition_json` (auto-enqueuer.ts:276 → HMAC signingSecret at :334), never from this top-level prop."
+      "status": "live",
+      "evidence": "Bridge folds the envelope into sys_webhook.definition_json (bootstrap-declared-webhooks.ts:203, #3489); the dispatcher reads defn.secret and uses it as the HMAC signing secret (auto-enqueuer.ts:276 → signingSecret at :334).",
+      "note": "Was dead pre-bridge (definition_json only reachable via hand-authored rows). Now materialized from authoring."
     },
     "isActive": {
-      "status": "dead",
-      "_authorWarnSkipped": "default(true) boolean — the lint can't distinguish author-set true from the schema default, so warning here would fire on every authored webhook regardless of intent (README rule 2). The `url` carrier already warns once per webhook.",
-      "note": "Authored value never materialized. The dispatcher gates on col `active` (sys-webhook.object.ts:162; where: { active: true } at auto-enqueuer.ts:176) — NAME MISMATCH: spec `isActive` vs runtime `active`. A materializer must remap."
+      "status": "live",
+      "evidence": "Bridge remaps spec `isActive` → sys_webhook.active (bootstrap-declared-webhooks.ts:202, #3489); the dispatcher gates delivery on it (`where: { active: true }`, auto-enqueuer.ts:176).",
+      "note": "Was dead pre-bridge (NAME MISMATCH spec `isActive` vs runtime `active`, now remapped). Seed-not-clobber preserves an admin's `active:false` across redeploys (bootstrap-declared-webhooks.ts:132-145)."
     },
     "description": {
-      "status": "dead",
-      "note": "Authored value never materialized. Runtime col sys-webhook.object.ts:160 (Studio-editable; inert in dispatch). Salvageable 1:1."
+      "status": "live",
+      "evidence": "Materialized to sys_webhook.description (bootstrap-declared-webhooks.ts:201, #3489); Studio-editable/displayed (sys-webhook.object.ts:160).",
+      "note": "Display-only — surfaced/editable in Studio, inert in dispatch."
     },
     "tags": {
       "status": "dead",
-      "note": "No sink anywhere. No sys_webhook column, never read. Vestigial."
+      "note": "No consumer. In definition_json now, but there is no sys_webhook column and nothing reads it. Vestigial. Enforce-or-remove (#1878)."
     }
   }
 }

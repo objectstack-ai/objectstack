@@ -19,6 +19,8 @@
     "@objectstack/plugin-audit": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
+    "@objectstack/plugin-webhooks": "workspace:*",
+    "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-storage": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/verify": "workspace:*"
