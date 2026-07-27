@@ -523,6 +523,48 @@ export class ObjectStackClient {
         const route = this.getRoute('ui');
         const res = await this.fetch(`${this.baseUrl}${route}/view/${object}?type=${type}`);
         return this.unwrapResponse(res);
+    },
+
+    /* [#3563 PR-5] The three meta routes that had no SDK expression. */
+
+    /**
+     * ADR-0033: the published version of a metadata item. Compound names are
+     * passed through unencoded (e.g. `getPublished('lead', 'views/all_leads')`),
+     * matching how `getItem` addresses sub-resources.
+     */
+    getPublished: async (type: string, name: string) => {
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/published`);
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0033: pending drafts — metadata authored (e.g. by an AI) but not
+     * yet published, which the active-only item lists hide.
+     */
+    listDrafts: async (opts?: { packageId?: string; type?: string }) => {
+        const route = this.getRoute('metadata');
+        const params = new URLSearchParams();
+        if (opts?.packageId) params.set('packageId', opts.packageId);
+        if (opts?.type) params.set('type', opts.type);
+        const qs = params.toString();
+        const res = await this.fetch(`${this.baseUrl}${route}/_drafts${qs ? `?${qs}` : ''}`);
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0020 D3.3 FSM introspection: the legal next states for `field`
+     * from state `from`, per the object's `state_machine` validation rule.
+     * `next` is `null` when no FSM governs the field (or `from` is omitted),
+     * `[]` for a declared dead-end state.
+     */
+    getLegalNextStates: async (object: string, field: string, from?: string) => {
+        const route = this.getRoute('metadata');
+        const qs = from !== undefined ? `?from=${encodeURIComponent(from)}` : '';
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/objects/${encodeURIComponent(object)}/state/${encodeURIComponent(field)}${qs}`,
+        );
+        return this.unwrapResponse<{ object: string; field: string; from: string | null; next: string[] | null }>(res);
     }
   };
 
@@ -2359,6 +2401,45 @@ export class ObjectStackClient {
       /**
        * Enable or disable a flow
        */
+      /* [#3563 PR-5] The three descriptor/status routes that had no SDK
+       * expression — they back the Studio designer's pickers and badges. */
+
+      /**
+       * ADR-0018: registered action-node descriptors, optionally filtered by
+       * `paradigm` / `source` / `category`. Empty registry → `{ actions: [], total: 0 }`.
+       */
+      listActions: async (opts?: { paradigm?: string; source?: string; category?: string }): Promise<{ actions: any[]; total: number }> => {
+          const route = this.getRoute('automation');
+          const params = new URLSearchParams();
+          if (opts?.paradigm) params.set('paradigm', opts.paradigm);
+          if (opts?.source) params.set('source', opts.source);
+          if (opts?.category) params.set('category', opts.category);
+          const qs = params.toString();
+          const res = await this.fetch(`${this.baseUrl}${route}/actions${qs ? `?${qs}` : ''}`);
+          return this.unwrapResponse(res);
+      },
+
+      /**
+       * ADR-0022: registered connector descriptors (populated by connector
+       * plugins), optionally filtered by `type`.
+       */
+      listConnectors: async (opts?: { type?: string }): Promise<{ connectors: any[]; total: number }> => {
+          const route = this.getRoute('automation');
+          const qs = opts?.type ? `?type=${encodeURIComponent(opts.type)}` : '';
+          const res = await this.fetch(`${this.baseUrl}${route}/connectors${qs}`);
+          return this.unwrapResponse(res);
+      },
+
+      /**
+       * Runtime enable/bound state for every flow — engine state, not
+       * persisted metadata (backs the Studio's Automations status badges).
+       */
+      getRuntimeStatus: async (): Promise<{ flows: Array<{ name: string; enabled: boolean; bound: boolean }>; total: number }> => {
+          const route = this.getRoute('automation');
+          const res = await this.fetch(`${this.baseUrl}${route}/_status`);
+          return this.unwrapResponse(res);
+      },
+
       toggle: async (name: string, enabled: boolean): Promise<{ name: string; enabled: boolean }> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/${name}/toggle`, {

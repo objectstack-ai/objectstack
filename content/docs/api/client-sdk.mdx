@@ -109,7 +109,7 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | Namespace | Status | Methods | Purpose |
 |:----------|:------:|:--------|:--------|
 | **discovery** | ✅ | 1 | API version & capabilities detection |
-| **meta** | ✅ | 7 | Metadata operations (objects, views, plugins) |
+| **meta** | ✅ | 11 | Metadata read/write, published versions & drafts (ADR-0033), FSM introspection (ADR-0020) |
 | **data** | ✅ | 10 | CRUD & query operations |
 | **auth** | ✅ | 5 | Authentication & user management |
 | **permissions** | ✅ | 3 | Access control checks |
@@ -117,7 +117,7 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **views** | ✅ | 5 | UI view definitions |
 | **workflow** | ✅ | 3 | Workflow state transitions |
 | **analytics** | ✅ | 3 | Analytics queries |
-| **automation** | ✅ | 15 | Flow CRUD, trigger/execute, runs, screen-flow resume |
+| **automation** | ✅ | 18 | Flow CRUD, trigger/execute, runs, screen-flow resume, descriptor/status registries |
 | **actions** | ✅ | 2 | Server-registered action handlers (`engine.registerAction`) |
 | **keys** | ✅ | 1 | API key minting (one-time secret) |
 | **shareLinks** | ✅ | 3 | Record share-link management |
