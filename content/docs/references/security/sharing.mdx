@@ -16,8 +16,8 @@ The baseline security posture for an object.
 ## TypeScript Usage
 
 ```typescript
-import { CriteriaSharingRule, OWDModel, OwnerSharingRule, ShareRecipientType, SharingLevel, SharingRule, SharingRuleType } from '@objectstack/spec/security';
-import type { CriteriaSharingRule, OWDModel, OwnerSharingRule, ShareRecipientType, SharingLevel, SharingRule, SharingRuleType } from '@objectstack/spec/security';
+import { CriteriaSharingRule, OWDModel, ShareRecipientType, SharingLevel, SharingRule, SharingRuleType } from '@objectstack/spec/security';
+import type { CriteriaSharingRule, OWDModel, ShareRecipientType, SharingLevel, SharingRule, SharingRuleType } from '@objectstack/spec/security';
 
 // Validate data
 const result = CriteriaSharingRule.parse(data);
@@ -37,7 +37,7 @@ const result = CriteriaSharingRule.parse(data);
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | optional |  |
 | **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
-| **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
+| **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>; value: string }` | ✅ | The recipient of the shared access |
 | **type** | `'criteria'` | ✅ |  |
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
 
@@ -56,34 +56,15 @@ const result = CriteriaSharingRule.parse(data);
 
 ---
 
-## OwnerSharingRule
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique rule name (snake_case) |
-| **label** | `string` | optional | Human-readable label |
-| **description** | `string` | optional | Administrative notes |
-| **object** | `string` | ✅ | Target Object Name |
-| **active** | `boolean` | ✅ |  |
-| **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | ✅ |  |
-| **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
-| **type** | `'owner'` | ✅ |  |
-| **ownedBy** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | Source group/position whose records are being shared |
-
-
----
-
 ## ShareRecipientType
 
 ### Allowed Values
 
 * `user`
-* `group`
+* `team`
 * `position`
 * `unit_and_subordinates`
-* `guest`
+* `business_unit`
 
 
 ---
@@ -101,14 +82,6 @@ const result = CriteriaSharingRule.parse(data);
 
 ## SharingRule
 
-### Union Options
-
-This schema accepts one of the following structures:
-
-#### Option 1
-
-**Type:** `criteria`
-
 ### Properties
 
 | Property | Type | Required | Description |
@@ -119,31 +92,9 @@ This schema accepts one of the following structures:
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | optional |  |
 | **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
-| **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
+| **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>; value: string }` | ✅ | The recipient of the shared access |
 | **type** | `'criteria'` | ✅ |  |
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
-
----
-
-#### Option 2
-
-**Type:** `owner`
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique rule name (snake_case) |
-| **label** | `string` | optional | Human-readable label |
-| **description** | `string` | optional | Administrative notes |
-| **object** | `string` | ✅ | Target Object Name |
-| **active** | `boolean` | optional |  |
-| **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
-| **sharedWith** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | The recipient of the shared access |
-| **type** | `'owner'` | ✅ |  |
-| **ownedBy** | `{ type: Enum<'user' \| 'group' \| 'position' \| 'unit_and_subordinates' \| 'guest'>; value: string }` | ✅ | Source group/position whose records are being shared |
-
----
 
 
 ---
@@ -152,7 +103,6 @@ This schema accepts one of the following structures:
 
 ### Allowed Values
 
-* `owner`
 * `criteria`
 
 

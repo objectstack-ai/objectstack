@@ -75,7 +75,7 @@ export const ExplainMatchedRuleSchema = lazySchema(() => z.object({
     'owd_baseline',    // the object's OWD default admitted/excluded the row
     'ownership',       // the principal owns (or does not own) the record
     'record_share',    // a concrete share row targeting this record
-    'sharing_rule',    // an owner/criteria sharing rule (SharingRuleType)
+    'sharing_rule',    // a criteria sharing rule (SharingRuleType)
     'team',            // team / account-team membership grant
     'territory',       // territory assignment grant
     'rls_policy',      // a business RLS policy predicate

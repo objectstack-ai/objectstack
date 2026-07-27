@@ -4,19 +4,21 @@
  * bootstrapDeclaredSharingRules — seed stack-declared `sharingRules` into
  * `sys_sharing_rule` (ADR-0057 D6, closes #2077; reconciles #1887).
  *
- * The spec authoring shape (`SharingRuleSchema`: CEL `condition`, `ownedBy`,
+ * The spec authoring shape (`SharingRuleSchema`: CEL `condition`,
  * `sharedWith{type,value}`) diverges from the enforced runtime shape
  * (`criteria_json` JSON filter + `recipient_type`/`recipient_id`). ADR-0057 D6
- * makes the RUNTIME shape canonical and translates only the directly-mappable
- * fields. Parts the runtime cannot enforce statically are SKIPPED (logged
- * `[experimental]`) rather than seeded as a match-all rule — silently
- * over-sharing would be worse than not enforcing (ADR-0049):
- *   - `owner`-type rules (`ownedBy`): role membership is dynamic, no static
- *     `criteria_json` equivalent.
+ * makes the RUNTIME shape canonical and translates the authorable fields.
+ * Every currently-authorable recipient (`user` / `team` / `position` /
+ * `unit_and_subordinates` / `business_unit`) maps 1:1 and ENFORCES — the
+ * retired `group`/`guest` recipients and `owner`-type rules no longer parse
+ * at the spec (ADR-0078; `group` was renamed → `team`). What the runtime
+ * still cannot enforce is SKIPPED (logged) rather than seeded as a match-all
+ * rule — silently over-sharing would be worse than not enforcing (ADR-0049):
  *   - a CEL `condition` the canonical compiler cannot lower (functions,
  *     cross-object traversal) — ADR-0058 D2. Compound predicates (AND/OR,
- *     comparisons, null, in) DO lower now and are enforced (ADR-0058 D3, #1887).
- *   - `sharedWith.type` of `group`/`guest`: no runtime recipient mapping.
+ *     comparisons, null, in) DO lower and are enforced (ADR-0058 D3, #1887).
+ *   - defensively, any stale pre-built package that still registers an old
+ *     `owner`-type / unmapped-recipient shape.
  *
  * Seeding upserts via `SharingRuleService.defineRule` (idempotent by name) and
  * MUST run before `listRules()`/`bindRuleHooks` so the lifecycle hooks bind to
@@ -35,11 +37,17 @@ type Logger = { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?
 function mapRecipientType(t: unknown): SharingRuleRecipientType | null {
   switch (t) {
     case 'user': return 'user';
+    // Flat sys_team membership (ADR-0090 D3 vocabulary; the pre-D3 `group`
+    // spelling was retired) — expanded by TeamGraphService in expandRecipient.
+    case 'team': return 'team';
     case 'position': return 'position';
     // ADR-0057 D5: business-unit subtree recipient.
     case 'business_unit': return 'business_unit' as SharingRuleRecipientType;
     case 'unit_and_subordinates': return 'unit_and_subordinates' as SharingRuleRecipientType;
-    default: return null; // group / guest — no runtime mapping yet
+    // Defensive only: the authoring enum matches the cases above 1:1, but a
+    // stale pre-built package could still register a retired shape — skip,
+    // never seed match-all.
+    default: return null;
   }
 }
 
@@ -96,9 +104,11 @@ export async function bootstrapDeclaredSharingRules(
       logger?.warn?.('[sharing-rule] skipped (unmappable recipient) [experimental]', { rule: r.name, sharedWith: r.sharedWith?.type });
       skipped += 1; continue;
     }
-    // owner-type rules have no static criteria_json equivalent.
+    // Defensive: `owner`-type rules were removed from the authoring spec
+    // (live-membership-dependent, no static criteria_json equivalent) — this
+    // guards stale pre-built packages that still register the old shape.
     if (r.type === 'owner') {
-      logger?.warn?.('[sharing-rule] skipped owner-based rule (no static criteria) [experimental]', { rule: r.name });
+      logger?.warn?.('[sharing-rule] skipped owner-based rule (retired authoring shape — use a criteria rule)', { rule: r.name });
       skipped += 1; continue;
     }
     // criteria rules: translate CEL → filter. Empty condition = match-all (intentional).

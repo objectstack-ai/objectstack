@@ -72,22 +72,23 @@ export const NewInquiryFieldOpsRule = defineSharingRule({
 });
 
 /**
- * owner-based: a contributor's tasks are shared read-only with managers.
+ * criteria-based: open (not-done) tasks are shared read-only with managers
+ * for oversight.
  *
- * [experimental — not enforced] Owner-type rules depend on live position
- * membership and have no static `criteria_json` equivalent, so the seed
- * bootstrap SKIPS them (logged) rather than seeding a permissive match-all
- * (ADR-0049: nothing silently over-shares). Kept here to demonstrate the
- * authoring shape; managers actually reach contributor tasks via the
- * criteria rules above and their depth grants.
+ * This replaces the retired owner-based `share_contributor_tasks_with_manager`
+ * demonstration rule: `type: 'owner'` (`ownedBy`) no longer parses — it
+ * depended on live position membership, which the static materialiser cannot
+ * track, so it validated but was silently skipped at seed time (ADR-0078:
+ * nothing on the authoring surface may be silently inert). The enforced
+ * equivalent is a criteria rule scoping the rows managers need.
  */
 export const ContributorTaskSharingRule = defineSharingRule({
-  type: 'owner',
-  name: 'share_contributor_tasks_with_manager',
-  label: 'Contributor Tasks → Manager',
-  description: "Share each contributor's tasks with managers for oversight.",
+  type: 'criteria',
+  name: 'share_open_tasks_with_manager',
+  label: 'Open Tasks → Manager',
+  description: 'Share open (not-done) tasks with managers for oversight.',
   object: 'showcase_task',
-  ownedBy: { type: 'position', value: 'contributor' },
+  condition: 'record.done == false',
   accessLevel: 'read',
   sharedWith: { type: 'position', value: 'manager' },
   active: true,

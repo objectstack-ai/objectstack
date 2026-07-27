@@ -132,27 +132,32 @@ export const AccountTeamSharingRule = defineSharingRule({
 
 ### Recipient types
 
-`sharedWith` (and `ownedBy`) accept a `{ type, value }` recipient:
+`sharedWith` accepts a `{ type, value }` recipient. **Every authorable
+recipient is enforced** — each expands to concrete users at seed time and
+materializes `sys_record_share` grants:
 
 | `type` | Shares with |
 |:--|:--|
 | `user` | A single user |
-| `group` | All members of a public group — **declared but not enforced**: skipped at seed time with a warning (ADR-0049) |
+| `team` | All members of a `sys_team` (flat collaboration grouping) |
 | `position` | Everyone assigned that position (flat expansion — positions have no tree) |
 | `unit_and_subordinates` | Everyone in that **business unit and every unit beneath it** (the BU tree is the one hierarchy — ADR-0090 D3) |
-| `guest` | Public / anonymous (`guest`) principals — **declared but not enforced**: no runtime recipient mapping, skipped at seed time with a warning (ADR-0049) |
+| `business_unit` | Everyone in exactly that business unit (no subtree) |
 
 A criteria `condition` must be compilable by the CEL → filter pushdown
 compiler. A condition the compiler cannot lower is **skipped and logged —
 never seeded as a permissive match-all** (ADR-0049): a bad condition
 under-shares rather than over-shares.
 
-## Owner-Based Sharing Rules
-
-> **[Experimental — not enforced.]** Owner-based (`type: 'owner'`) rules
-> depend on live position membership and have no static `criteria_json`
-> equivalent, so the seeder **skips them with a warning** — they materialize
-> no record shares today. Use a criteria rule or a scope-depth grant.
+> **Retired shapes.** The pre-ADR-0090 `group` recipient was renamed to
+> `team`, and the `guest` recipient was removed — anonymous access is served
+> by the [public-form grant](/docs/permissions/authorization) and share
+> links, not sharing rules. Owner-based rules (`type: 'owner'`, `ownedBy`)
+> were also removed: they depended on live membership the static seeder
+> cannot track, so they validated but never materialized a share. Use a
+> criteria rule or a scope-depth grant instead; none of these shapes parses
+> anymore, so a stale definition fails loudly at authoring time instead of
+> silently doing nothing (ADR-0078).
 
 ## Analytics and Dataset Read Scope
 

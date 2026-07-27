@@ -22,19 +22,21 @@ export const HighValueOpportunitySharingRule = defineSharingRule({
 });
 
 /**
- * Owner-based sharing: leads owned by a Sales Rep are shared read-only
- * with their manager so managers can coach on individual pipelines.
+ * Criteria-based sharing: in-flight leads (not yet converted or disqualified)
+ * are shared read-only with Sales Managers for coaching visibility.
+ *
+ * Replaces the retired owner-based `share_rep_leads_with_manager` rule:
+ * `type: 'owner'` (`ownedBy`) no longer parses — it depended on live position
+ * membership and was silently skipped at seed time (ADR-0078). The enforced
+ * criteria form scopes the same coaching set by pipeline state instead.
  */
 export const RepLeadSharingRule = defineSharingRule({
-  type: 'owner',
-  name: 'share_rep_leads_with_manager',
-  label: "Rep's Leads → Manager (read-only)",
-  description: "Share each rep's leads with the Sales Manager role for coaching visibility.",
+  type: 'criteria',
+  name: 'share_active_leads_with_manager',
+  label: 'Active Leads → Manager (read-only)',
+  description: 'Share in-flight (not converted/disqualified) leads with Sales Managers for coaching visibility.',
   object: 'crm_lead',
-  ownedBy: {
-    type: 'position',
-    value: 'sales_rep',
-  },
+  condition: "record.status != 'converted' && record.status != 'disqualified'",
   accessLevel: 'read',
   sharedWith: {
     type: 'position',

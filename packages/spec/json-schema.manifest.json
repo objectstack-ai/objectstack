@@ -1194,7 +1194,6 @@
     "security/OWDModel",
     "security/ObjectAccessScope",
     "security/ObjectPermission",
-    "security/OwnerSharingRule",
     "security/PermissionSet",
     "security/RLSEvaluationResult",
     "security/RLSOperation",

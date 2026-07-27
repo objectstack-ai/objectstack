@@ -88,11 +88,12 @@ describe('app-crm minimal metadata bundle', () => {
     expect(stack.i18n!.supportedLocales).toContain('zh-CN');
   });
 
-  it('has sharing rules (criteria + owner types)', () => {
+  it('has criteria sharing rules (the enforced form — owner-type was retired)', () => {
     const rules = stack.sharingRules ?? [];
     expect(rules.length).toBeGreaterThanOrEqual(2);
-    expect(rules.some((r) => r.type === 'criteria')).toBe(true);
-    expect(rules.some((r) => r.type === 'owner')).toBe(true);
+    // `type: 'owner'` no longer parses (never enforced; ADR-0078): every
+    // declared rule is the enforced criteria form.
+    expect(rules.every((r) => r.type === 'criteria')).toBe(true);
   });
 
   // #3420 — official examples must boot warning-free. A generic (non-better-auth)

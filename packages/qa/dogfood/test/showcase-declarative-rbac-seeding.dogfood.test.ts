@@ -42,11 +42,21 @@ describe('showcase: declarative RBAC seeding (ADR-0057 D6 / #2077)', () => {
     expect(criteria).toEqual({ health: 'red' });
   });
 
-  it('owner-based rule is NOT seeded as a match-all (experimental, ADR-0049 honesty)', async () => {
+  it('retired owner-based rule is gone; its criteria replacement seeds and enforces', async () => {
     const rules = await ql.find('sys_sharing_rule', { where: {}, context: { isSystem: true } });
+    // `type: 'owner'` was removed from the authoring spec (never enforced —
+    // ADR-0078): the old demonstration rule can no longer exist.
     const owner = (rules ?? []).find((r: any) => r.name === 'share_contributor_tasks_with_manager');
-    // owner-type has no static criteria_json equivalent → skipped, not seeded over-broadly.
-    expect(owner, 'owner-based rule must not silently over-share').toBeFalsy();
+    expect(owner, 'retired owner-based rule must not reappear').toBeFalsy();
+    // Its replacement is a real criteria rule — seeded WITH translated
+    // criteria_json (not skipped, not match-all).
+    const open = (rules ?? []).find((r: any) => r.name === 'share_open_tasks_with_manager');
+    expect(open, 'criteria replacement seeded').toBeTruthy();
+    expect(open.object_name).toBe('showcase_task');
+    expect(open.recipient_type).toBe('position');
+    expect(open.recipient_id).toBe('manager');
+    const criteria = JSON.parse(open.criteria_json);
+    expect(criteria).toEqual({ done: false });
   });
 
   it('re-seed is idempotent (no duplicate rows on a second boot)', async () => {

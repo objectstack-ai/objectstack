@@ -2,26 +2,42 @@ import { describe, it, expect } from 'vitest';
 import {
   SharingRuleSchema,
   SharingRuleType,
+  ShareRecipientType,
   SharingLevel,
   OWDModel,
   type SharingRule,
 } from './sharing.zod';
 
 describe('SharingRuleType', () => {
-  it('should accept valid sharing rule types', () => {
-    const validTypes = ['owner', 'criteria'];
-
-    validTypes.forEach(type => {
-      expect(() => SharingRuleType.parse(type)).not.toThrow();
-    });
+  it('should accept the enforced rule type', () => {
+    expect(() => SharingRuleType.parse('criteria')).not.toThrow();
   });
 
-  it('should reject invalid sharing rule types', () => {
+  it('should reject retired/invalid sharing rule types', () => {
+    // `owner` was retired from the authoring surface (live-membership-dependent,
+    // never enforced by the static materialiser — ADR-0078).
+    expect(() => SharingRuleType.parse('owner')).toThrow();
     expect(() => SharingRuleType.parse('automatic')).toThrow();
     expect(() => SharingRuleType.parse('manual')).toThrow();
     expect(() => SharingRuleType.parse('guest')).toThrow();
     expect(() => SharingRuleType.parse('public')).toThrow();
     expect(() => SharingRuleType.parse('')).toThrow();
+  });
+});
+
+describe('ShareRecipientType', () => {
+  it('accepts exactly the enforced runtime recipients', () => {
+    const enforced = ['user', 'team', 'position', 'unit_and_subordinates', 'business_unit'];
+    enforced.forEach((t) => {
+      expect(() => ShareRecipientType.parse(t)).not.toThrow();
+    });
+  });
+
+  it('rejects the retired `group` (renamed → team) and `guest` recipients', () => {
+    expect(() => ShareRecipientType.parse('group')).toThrow();
+    expect(() => ShareRecipientType.parse('guest')).toThrow();
+    // Reserved in the runtime contract but not authorable until implemented.
+    expect(() => ShareRecipientType.parse('queue')).toThrow();
   });
 });
 
@@ -64,8 +80,8 @@ describe('SharingRuleSchema', () => {
       type: 'criteria',
       condition: "stage = 'Open'",
       sharedWith: {
-        type: 'group',
-        value: 'group_sales_team',
+        type: 'team',
+        value: 'team_sales',
       },
     };
 
@@ -79,8 +95,8 @@ describe('SharingRuleSchema', () => {
       type: 'criteria',
       condition: "status = 'Active'",
       sharedWith: {
-        type: 'group',
-        value: 'group_id',
+        type: 'team',
+        value: 'team_id',
       },
     })).not.toThrow();
 
@@ -90,8 +106,8 @@ describe('SharingRuleSchema', () => {
       type: 'criteria',
       condition: "status = 'Active'",
       sharedWith: {
-        type: 'group',
-        value: 'group_id',
+        type: 'team',
+        value: 'team_id',
       },
     })).toThrow();
 
@@ -101,8 +117,8 @@ describe('SharingRuleSchema', () => {
       type: 'criteria',
       condition: "status = 'Active'",
       sharedWith: {
-        type: 'group',
-        value: 'group_id',
+        type: 'team',
+        value: 'team_id',
       },
     })).toThrow();
   });
@@ -114,8 +130,8 @@ describe('SharingRuleSchema', () => {
       type: 'criteria',
       condition: "status = 'Active'",
       sharedWith: {
-        type: 'group',
-        value: 'group_id',
+        type: 'team',
+        value: 'team_id',
       },
     });
 
@@ -134,8 +150,8 @@ describe('SharingRuleSchema', () => {
       condition: "stage = 'Closed Won' AND amount > 100000",
       accessLevel: 'edit',
       sharedWith: {
-        type: 'group',
-        value: 'group_executive_team',
+        type: 'team',
+        value: 'team_executive',
       },
     });
 
@@ -143,35 +159,73 @@ describe('SharingRuleSchema', () => {
     expect((rule.condition as any).source).toContain('Closed Won');
   });
 
-  it('should accept different sharing rule types', () => {
-    // Criteria-based rule
-    const criteriaRule = SharingRuleSchema.parse({
-      name: 'test_criteria_rule',
-      object: 'account',
-      type: 'criteria',
-      condition: "status = 'Active'",
-      sharedWith: {
-        type: 'group',
-        value: 'group_id',
-      },
-    });
-    expect(criteriaRule.type).toBe('criteria');
+  it('should accept every enforced recipient type', () => {
+    const recipients: Array<SharingRule['sharedWith']> = [
+      { type: 'user', value: 'user_jane' },
+      { type: 'team', value: 'team_sales' },
+      { type: 'position', value: 'sales_manager' },
+      { type: 'unit_and_subordinates', value: 'bu_field_ops' },
+      { type: 'business_unit', value: 'bu_finance' },
+    ];
 
-    // Owner-based rule
-    const ownerRule = SharingRuleSchema.parse({
-      name: 'test_owner_rule',
+    recipients.forEach((sharedWith) => {
+      const rule = SharingRuleSchema.parse({
+        name: 'recipient_matrix_rule',
+        object: 'account',
+        type: 'criteria',
+        condition: "status = 'Active'",
+        sharedWith,
+      });
+      expect(rule.sharedWith.type).toBe(sharedWith.type);
+    });
+  });
+
+  it('should reject the retired owner-based rule shape', () => {
+    // Pre-ADR-0078 shape: validated but was silently skipped at seed time.
+    // It no longer parses — a criteria rule is the enforced alternative.
+    expect(() => SharingRuleSchema.parse({
+      name: 'owner_hierarchy_rule',
       object: 'account',
       type: 'owner',
       ownedBy: {
         type: 'position',
-        value: 'role_sales_rep',
+        value: 'sales_rep',
       },
+      accessLevel: 'read',
       sharedWith: {
         type: 'position',
-        value: 'role_sales_manager',
+        value: 'sales_manager',
       },
-    });
-    expect(ownerRule.type).toBe('owner');
+    })).toThrow();
+  });
+
+  it('should reject the retired guest recipient', () => {
+    // Anonymous access is the public-form grant / share-link surface, not a
+    // sharing-rule recipient.
+    expect(() => SharingRuleSchema.parse({
+      name: 'public_access',
+      object: 'knowledge_article',
+      type: 'criteria',
+      condition: "is_published = true",
+      accessLevel: 'read',
+      sharedWith: {
+        type: 'guest',
+        value: 'guest_users',
+      },
+    })).toThrow();
+  });
+
+  it('should reject the retired group recipient (renamed → team)', () => {
+    expect(() => SharingRuleSchema.parse({
+      name: 'sales_team_access',
+      object: 'opportunity',
+      type: 'criteria',
+      condition: "stage = 'Open'",
+      sharedWith: {
+        type: 'group',
+        value: 'team_sales',
+      },
+    })).toThrow();
   });
 
   it('should accept different access levels', () => {
@@ -185,48 +239,12 @@ describe('SharingRuleSchema', () => {
         condition: "status = 'Active'",
         accessLevel: level,
         sharedWith: {
-          type: 'group',
-          value: 'group_id',
+          type: 'team',
+          value: 'team_id',
         },
       });
       expect(rule.accessLevel).toBe(level);
     });
-  });
-
-  it('should accept owner-based sharing rule', () => {
-    const rule = SharingRuleSchema.parse({
-      name: 'owner_hierarchy_rule',
-      object: 'account',
-      type: 'owner',
-      ownedBy: {
-        type: 'position',
-        value: 'role_sales_rep',
-      },
-      accessLevel: 'read',
-      sharedWith: {
-        type: 'position',
-        value: 'role_sales_manager',
-      },
-    });
-
-    expect(rule.type).toBe('owner');
-  });
-
-  it('should accept criteria-based sharing rule', () => {
-    const rule = SharingRuleSchema.parse({
-      name: 'high_value_accounts',
-      object: 'account',
-      type: 'criteria',
-      condition: "annual_revenue > 1000000 AND status = 'Active'",
-      accessLevel: 'read',
-      sharedWith: {
-        type: 'group',
-        value: 'group_executive_team',
-      },
-    });
-
-    expect(rule.type).toBe('criteria');
-    expect(rule.condition).toBeDefined();
   });
 
   it('should accept criteria sharing rule for manual approval workflows', () => {
@@ -245,22 +263,6 @@ describe('SharingRuleSchema', () => {
     expect(rule.type).toBe('criteria');
   });
 
-  it('should accept guest sharing rule', () => {
-    const rule = SharingRuleSchema.parse({
-      name: 'public_access',
-      object: 'knowledge_article',
-      type: 'criteria',
-      condition: "is_published = true",
-      accessLevel: 'read',
-      sharedWith: {
-        type: 'guest',
-        value: 'guest_users',
-      },
-    });
-
-    expect(rule.type).toBe('criteria');
-  });
-
   it('should accept inactive sharing rule', () => {
     const rule = SharingRuleSchema.parse({
       name: 'disabled_rule',
@@ -269,8 +271,8 @@ describe('SharingRuleSchema', () => {
       condition: "status = 'Inactive'",
       active: false,
       sharedWith: {
-        type: 'group',
-        value: 'group_id',
+        type: 'team',
+        value: 'team_id',
       },
     });
 
@@ -286,8 +288,8 @@ describe('SharingRuleSchema', () => {
       condition: "billing_state IN ('CA', 'OR', 'WA')",
       accessLevel: 'edit',
       sharedWith: {
-        type: 'group',
-        value: 'group_west_coast_sales',
+        type: 'team',
+        value: 'team_west_coast_sales',
       },
     });
 
@@ -302,8 +304,8 @@ describe('SharingRuleSchema', () => {
       condition: "department = 'Finance'",
       accessLevel: 'edit',
       sharedWith: {
-        type: 'group',
-        value: 'group_finance_team',
+        type: 'business_unit',
+        value: 'bu_finance',
       },
     });
 
@@ -318,8 +320,8 @@ describe('SharingRuleSchema', () => {
       condition: "status = 'Executed'",
       accessLevel: 'read',
       sharedWith: {
-        type: 'group',
-        value: 'group_all_users',
+        type: 'team',
+        value: 'team_all_users',
       },
     });
 
@@ -334,8 +336,8 @@ describe('SharingRuleSchema', () => {
       condition: "stage != 'Closed Won'",
       accessLevel: 'edit',
       sharedWith: {
-        type: 'group',
-        value: 'group_sales_reps',
+        type: 'team',
+        value: 'team_sales_reps',
       },
     });
 
@@ -348,8 +350,8 @@ describe('SharingRuleSchema', () => {
       type: 'criteria',
       condition: "status = 'Active'",
       sharedWith: {
-        type: 'group',
-        value: 'group_id',
+        type: 'team',
+        value: 'team_id',
       },
     })).toThrow(); // Missing name
 
@@ -358,8 +360,8 @@ describe('SharingRuleSchema', () => {
       type: 'criteria',
       condition: "status = 'Active'",
       sharedWith: {
-        type: 'group',
-        value: 'group_id',
+        type: 'team',
+        value: 'team_id',
       },
     })).toThrow(); // Missing object
 
@@ -378,8 +380,8 @@ describe('SharingRuleSchema', () => {
       type: 'invalid_type',
       condition: "status = 'Active'",
       sharedWith: {
-        type: 'group',
-        value: 'group_id',
+        type: 'team',
+        value: 'team_id',
       },
     })).toThrow();
   });
@@ -392,8 +394,8 @@ describe('SharingRuleSchema', () => {
       condition: "status = 'Active'",
       accessLevel: 'delete',
       sharedWith: {
-        type: 'group',
-        value: 'group_id',
+        type: 'team',
+        value: 'team_id',
       },
     })).toThrow();
   });
