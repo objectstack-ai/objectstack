@@ -79,6 +79,131 @@ export type LabelScopeResolver = (
 
 const LOOKUP_TYPES = new Set(['lookup', 'master_detail']);
 
+/**
+ * Sort-key label resolution for `DatasetSelection.order` (#3680).
+ *
+ * The executor sorts the assembled grid BEFORE `queryDataset` rewrites stored
+ * dimension values into display labels, so an order key naming a `select` or
+ * `lookup`/`master_detail` dimension used to sort by the stored value / FK id —
+ * an order that presents as arbitrary once the labels render. This hook hands
+ * the executor JUST the value→label mapping for such a dimension so it can sort
+ * by what the user will actually read, while the rows keep their raw values
+ * (drill metadata depends on them) and ordering + windowing stay one adjacent
+ * step. The executor stays engine-free: it sees this interface, never the
+ * engine behind it.
+ */
+export interface OrderLabelResolver {
+  /**
+   * Whether the dimension's stored value differs from the label it renders as
+   * (`select` options, `lookup`/`master_detail` FK ids). Synchronous — the
+   * executor consults it when deciding whether the window may be pushed into
+   * SQL, before any query runs.
+   */
+  isLabelBearing(dimension: string): boolean;
+  /**
+   * Map the given raw stored values of one dimension to display labels.
+   * Values missing from the map sort by their raw form — the same thing the
+   * user will see rendered for them.
+   */
+  resolveLabels(dimension: string, values: unknown[]): Promise<Map<unknown, string> | undefined>;
+}
+
+/**
+ * Build the executor's {@link OrderLabelResolver} from the dataset's dimension
+ * list and the injected label capabilities. Mirrors the classification in
+ * {@link resolveDimensionLabels}: a dimension is label-bearing when its field
+ * carries select `options` or is a lookup/master_detail with a `reference`.
+ *
+ * - `select` resolves from field metadata — no query at all.
+ * - `lookup`/`master_detail` costs ONE batched id→name read over the distinct
+ *   grouped values, scoped to the REFERENCED object's own RLS (#3602). Fail
+ *   closed: an unresolvable scope degrades to sorting by the stored id rather
+ *   than fetching unscoped — consistent with the display pass, which renders
+ *   the raw id in that case too.
+ */
+export function createOrderLabelResolver(
+  baseObject: string,
+  dims: Array<{ name: string; field: string }>,
+  deps: DimensionLabelDeps,
+  resolveScope?: LabelScopeResolver,
+  context?: ExecutionContext,
+): OrderLabelResolver {
+  const dimByName = new Map(dims.map((d) => [d.name, d]));
+  const metaFor = (dimension: string): FieldMetaLite | undefined => {
+    const dim = dimByName.get(dimension);
+    return dim ? deps.getObjectFields(baseObject)?.[dim.field] : undefined;
+  };
+  return {
+    isLabelBearing(dimension) {
+      const meta = metaFor(dimension);
+      if (!meta) return false;
+      if (Array.isArray(meta.options) && meta.options.length > 0) return true;
+      return !!(meta.type && LOOKUP_TYPES.has(meta.type) && meta.reference);
+    },
+    async resolveLabels(dimension, values) {
+      const meta = metaFor(dimension);
+      if (!meta) return undefined;
+      if (Array.isArray(meta.options) && meta.options.length > 0) {
+        const labelByValue = new Map<unknown, string>();
+        for (const opt of meta.options) {
+          if (opt && opt.label != null) labelByValue.set(opt.value, String(opt.label));
+        }
+        return labelByValue;
+      }
+      if (meta.type && LOOKUP_TYPES.has(meta.type) && meta.reference) {
+        let scope: Record<string, unknown> | null | undefined;
+        if (resolveScope) {
+          try {
+            scope = await resolveScope(meta.reference);
+          } catch {
+            return undefined;
+          }
+        }
+        return deps.fetchRecordLabels(meta.reference, values, scope ?? undefined, context);
+      }
+      return undefined;
+    },
+  };
+}
+
+/**
+ * Wrap a {@link DimensionLabelDeps} so repeated `fetchRecordLabels` calls
+ * within ONE request fetch each id at most once. A selection that sorts by a
+ * lookup dimension resolves labels twice — once PRE-window for the sort keys
+ * (#3680, over the full grid's ids), once post-window for display (a subset of
+ * the same ids) — so with this cache the display pass costs no extra query.
+ *
+ * Per-request only: entries are keyed by target object alone, which is safe
+ * because an object's read scope is constant within one request. Never share
+ * an instance across requests.
+ */
+export function withLabelFetchCache(deps: DimensionLabelDeps): DimensionLabelDeps {
+  // Per target object: id → label, with `null` marking "fetched, no label"
+  // (RLS-hidden or orphaned) so unresolvable ids are not re-fetched every call.
+  const cache = new Map<string, Map<unknown, string | null>>();
+  return {
+    getObjectFields: (objectName) => deps.getObjectFields(objectName),
+    async fetchRecordLabels(targetObject, ids, scope, context) {
+      let known = cache.get(targetObject);
+      if (!known) {
+        known = new Map();
+        cache.set(targetObject, known);
+      }
+      const missing = ids.filter((id) => !known.has(id));
+      if (missing.length > 0) {
+        const fetched = await deps.fetchRecordLabels(targetObject, missing, scope, context);
+        for (const id of missing) known.set(id, fetched.get(id) ?? null);
+      }
+      const out = new Map<unknown, string>();
+      for (const id of ids) {
+        const label = known.get(id);
+        if (label != null) out.set(id, label);
+      }
+      return out;
+    },
+  };
+}
+
 /** Date-dimension granularity (mirrors the dataset `dateGranularity` enum). */
 export type DateGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 

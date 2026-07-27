@@ -145,6 +145,11 @@ Notes on behaviour:
   truncates a reproducible window instead of an arbitrary subset.
 - Ordering is applied to the finished grid, so a **derived measure** is a valid
   `sortBy` even though no single SQL statement computes it.
+- A `sortBy` naming a **select** or **lookup** dimension orders by the
+  **display label** the rows render (the option label / the related record's
+  name), not the stored value or foreign-key id — and the label is resolved
+  before `limit` applies, so a top-N by name truncates the right N. Sorting by
+  a measure (the common case) involves no label lookup and is unaffected.
 - A `funnel` with no declared stage order falls back to sorting by value
   descending.
 

@@ -15,8 +15,13 @@ export { CubeRegistry } from './cube-registry.js';
 export { compileDataset } from './dataset-compiler.js';
 export type { CompiledDataset, DerivedMeasureSpec, RelationshipResolver, RelationshipTarget } from './dataset-compiler.js';
 
-export { resolveDimensionLabels, pickDisplayField } from './dimension-labels.js';
-export type { DimensionLabelDeps, FieldMetaLite } from './dimension-labels.js';
+export {
+  resolveDimensionLabels,
+  pickDisplayField,
+  createOrderLabelResolver,
+  withLabelFetchCache,
+} from './dimension-labels.js';
+export type { DimensionLabelDeps, FieldMetaLite, OrderLabelResolver } from './dimension-labels.js';
 export {
   DatasetExecutor,
   evaluateDerivedMeasures,

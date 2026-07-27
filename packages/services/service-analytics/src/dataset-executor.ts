@@ -10,6 +10,7 @@ import type {
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
+import type { OrderLabelResolver } from './dimension-labels.js';
 
 // Re-export the shared protocol shapes so existing importers keep working.
 export type { DatasetSelection } from '@objectstack/spec/contracts';
@@ -52,9 +53,22 @@ export type CompareTo = DatasetCompareTo;
  * (see `canPushDownWindow`) so the database does the work and the echoed `sql`
  * shows it; the post-pass is then a no-op re-sort of already-sorted rows.
  *
+ * **What the sort key IS for a label-bearing dimension (#3680).** An order key
+ * naming a `select` or `lookup`/`master_detail` dimension sorts by the DISPLAY
+ * label the response will carry (option label / related record name), not the
+ * stored value — a "sort by Account" ordered by opaque FK ids presents as
+ * arbitrary once the labels render. The mapping comes through an injected
+ * {@link OrderLabelResolver} (built by `queryDataset` over the same
+ * label-resolution capabilities the display pass uses); rows keep their raw
+ * values — only the COMPARISON substitutes the label — so drill metadata still
+ * snapshots stored values downstream. Such keys are never pushed into SQL (the
+ * label is not a column there), and the label fetch happens BEFORE `applyWindow`
+ * so a "top 10 by account name" truncates the right ten.
+ *
  * RLS/tenant scoping is NOT handled here — it is enforced inside the strategy
  * via the StrategyContext read-scope hook (D-C). This layer is pure query
- * shaping + arithmetic.
+ * shaping + arithmetic; the order-label hook is an injected interface, not an
+ * engine dependency.
  */
 
 /** AND two optional FilterConditions into one (MongoDB-style). */
@@ -191,10 +205,17 @@ function compareValues(a: unknown, b: unknown): number {
  * Order rows by each key in `order`, in the object's own key order (first key is
  * the primary sort). Returns a NEW array; the input is not mutated. Null/empty
  * cells stay last in both directions (see {@link compareValues}).
+ *
+ * `sortKeys` substitutes the COMPARED value per key (#3680): when it holds a map
+ * for an order key, each cell compares by its mapped value — the display label a
+ * label-bearing dimension will render as — falling back to the raw cell where
+ * unmapped (an orphaned id or RLS-hidden record renders raw too, so sort and
+ * display stay consistent). The rows themselves are never rewritten here.
  */
 export function applyOrdering(
   rows: Record<string, unknown>[],
   order: Record<string, 'asc' | 'desc'> | undefined,
+  sortKeys?: Record<string, Map<unknown, unknown>>,
 ): Record<string, unknown>[] {
   const keys = Object.entries(order ?? {});
   if (keys.length === 0 || rows.length < 2) return rows;
@@ -202,8 +223,9 @@ export function applyOrdering(
   // grouping produced — an important property for reproducible LIMITs.
   return [...rows].sort((ra, rb) => {
     for (const [key, dir] of keys) {
-      const av = ra[key];
-      const bv = rb[key];
+      const map = sortKeys?.[key];
+      const av = map?.get(ra[key]) ?? ra[key];
+      const bv = map?.get(rb[key]) ?? rb[key];
       const aNull = av == null || av === '';
       const bNull = bv == null || bv === '';
       // Nulls last in BOTH directions — decided before `desc` negation.
@@ -307,7 +329,18 @@ export function shiftRange(range: [string, string], kind: CompareTo['kind']): [s
 }
 
 export class DatasetExecutor {
-  constructor(private readonly service: IAnalyticsService) {}
+  /**
+   * @param service - The analytics service the executor issues its queries to.
+   * @param orderLabels - Optional sort-key label hook (#3680). When provided,
+   *   an order key naming a label-bearing (`select`/`lookup`) dimension sorts
+   *   by its display label instead of the stored value. Omit to sort by stored
+   *   values everywhere (e.g. the draft-preview path, whose seed rows already
+   *   carry display names).
+   */
+  constructor(
+    private readonly service: IAnalyticsService,
+    private readonly orderLabels?: OrderLabelResolver,
+  ) {}
 
   /**
    * Execute a dataset selection and return the shaped rows (+ field metadata).
@@ -390,6 +423,17 @@ export class DatasetExecutor {
     // a deterministic dimension order synthesized for a bare `limit` (#3588).
     const order = resolveOrdering(selection, dimensions);
 
+    // #3680 — order keys naming a select/lookup dimension sort by the DISPLAY
+    // label the response will carry, not the stored value / FK id. Resolved
+    // over the assembled grid below; identified up front because such a key
+    // also disqualifies SQL pushdown (the label is not a column the database
+    // could ORDER BY, and a SQL LIMIT would truncate the wrong window).
+    const labelOrderKeys = this.orderLabels
+      ? Object.keys(order ?? {}).filter(
+          (k) => dimensions.includes(k) && this.orderLabels!.isLabelBearing(k),
+        )
+      : [];
+
     // Push `order`/`limit`/`offset` down into the SQL only when this selection
     // is ONE query whose columns can satisfy them. With supplementary
     // measure-scoped queries, a compareTo pass, or derived measures in play, the
@@ -399,7 +443,8 @@ export class DatasetExecutor {
     const singleQuery = filtered.length === 0 && !selection.compareTo && selectedDerived.length === 0;
     const pushDownKeys = new Set<string>([...dimensions, ...unfiltered]);
     const canPushDownWindow =
-      singleQuery && Object.keys(order ?? {}).every((k) => pushDownKeys.has(k));
+      singleQuery && labelOrderKeys.length === 0 &&
+      Object.keys(order ?? {}).every((k) => pushDownKeys.has(k));
     const windowQuery = canPushDownWindow
       ? { order, limit: selection.limit, offset: selection.offset }
       : undefined;
@@ -454,7 +499,21 @@ export class DatasetExecutor {
     // re-slices an already-sliced one; when it could not be (the ObjectQL
     // aggregate path has no ordering grammar, and date-bucketed queries are
     // forced down it), this is what makes `sortBy` work at all.
-    result.rows = applyOrdering(result.rows, order);
+    //
+    // #3680 — for label-bearing order keys, substitute the display label as
+    // the SORT KEY, resolved over the grid's distinct values BEFORE the window
+    // (a "top 10 by account name" must pick the ten by name). Rows keep their
+    // raw values — display rewriting stays in `queryDataset`, after the drill
+    // metadata snapshots the stored values. A select dimension resolves from
+    // field metadata (no query); a lookup costs one batched id→name read.
+    let sortKeys: Record<string, Map<unknown, unknown>> | undefined;
+    for (const key of labelOrderKeys) {
+      const values = [...new Set(result.rows.map((r) => r[key]).filter((v) => v != null))];
+      if (values.length === 0) continue;
+      const labels = await this.orderLabels!.resolveLabels(key, values);
+      if (labels && labels.size > 0) (sortKeys ??= {})[key] = labels;
+    }
+    result.rows = applyOrdering(result.rows, order, sortKeys);
     result.rows = applyWindow(result.rows, selection.limit, selection.offset);
 
     return result;

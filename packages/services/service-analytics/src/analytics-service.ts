@@ -18,7 +18,12 @@ import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
 import { DatasetExecutor, resolveDimensionGranularity, type DateGranularityValue } from './dataset-executor.js';
-import { resolveDimensionLabels, type DimensionLabelDeps } from './dimension-labels.js';
+import {
+  resolveDimensionLabels,
+  createOrderLabelResolver,
+  withLabelFetchCache,
+  type DimensionLabelDeps,
+} from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
 
 /**
@@ -500,6 +505,33 @@ export class AnalyticsService implements IAnalyticsService {
       }
     }
 
+    // #3602 — every label lookup in this request (sort keys below, display
+    // labels further down) reads the REFERENCED object, so bind that object's
+    // own read scope to this request once, up front.
+    const provider = this.readScopeProvider;
+    const resolveScope = provider
+      ? (targetObject: string) => provider(targetObject, context)
+      : undefined;
+    // #3680 — per-request label-fetch cache. A selection that sorts by a
+    // lookup dimension resolves labels twice (pre-window sort keys, then
+    // post-window display); the cache makes the display pass reuse the ids the
+    // sort already fetched, so label-ordering costs ONE id→name read total.
+    const labelDeps = this.labelResolver ? withLabelFetchCache(this.labelResolver) : undefined;
+    // #3680 — hand the executor the sort-key label hook so an `order` on a
+    // select/lookup dimension sorts by the label the user reads. Built over
+    // the SAME capabilities (and read scope) as the display resolution below.
+    const orderLabels = labelDeps && dataset.dimensions?.length
+      ? createOrderLabelResolver(
+          dataset.object,
+          dataset.dimensions
+            .filter((d) => !!d.field)
+            .map((d) => ({ name: d.name, field: d.field as string })),
+          labelDeps,
+          resolveScope,
+          context,
+        )
+      : undefined;
+
     // Graceful degradation: a dashboard/report widget whose backing object or
     // table is not present in this kernel (e.g. a platform dashboard like
     // System Overview that charts `sys_audit_log`, opened in an environment
@@ -508,7 +540,7 @@ export class AnalyticsService implements IAnalyticsService {
     // hard-failed on a missing source.
     let result: AnalyticsResult;
     try {
-      result = await new DatasetExecutor(this).execute(compiled, selection, context);
+      result = await new DatasetExecutor(this, orderLabels).execute(compiled, selection, context);
     } catch (err) {
       if (isMissingSourceError(err)) {
         this.logger.warn(
@@ -622,7 +654,7 @@ export class AnalyticsService implements IAnalyticsService {
     // (select option label, lookup related-record name). Charts render the
     // dimension key verbatim, so this is the single place that turns a stored
     // value / FK id into the text a user expects to read.
-    if (this.labelResolver && selectedDims.length) {
+    if (labelDeps && selectedDims.length) {
       // Same single-source rule as the drill ranges above: a date bucket must be
       // LABELLED with the granularity it was actually grouped by (#3588).
       // Formatting a `year` bucket with the dataset's `month` default rendered
@@ -636,26 +668,23 @@ export class AnalyticsService implements IAnalyticsService {
           dateGranularity: resolveDimensionGranularity(selection, d.name, d.dateGranularity),
         }));
       if (dims.length) {
-        // #3602 — bind the referenced object's read scope to THIS request so the
-        // label lookup (a per-record read of the related object) cannot surface a
-        // record the referenced object's RLS would hide. Same provider the
-        // aggregate path uses; `undefined` when no provider is configured, in
-        // which case labels fetch unscoped exactly as before.
-        const provider = this.readScopeProvider;
-        const resolveScope = provider
-          ? (targetObject: string) => provider(targetObject, context)
-          : undefined;
+        // `resolveScope` (hoisted above) binds the referenced object's read
+        // scope to THIS request so the label lookup (a per-record read of the
+        // related object) cannot surface a record the referenced object's RLS
+        // would hide (#3602). `labelDeps` is the per-request cache over the
+        // configured resolver, so ids the sort-key pass (#3680) already fetched
+        // are not fetched again here.
         try {
           // `context` rides alongside `resolveScope` — the label lookup's SECOND
           // belt. `resolveScope` is this layer's own predicate; the context lets
           // the engine's middleware scope the same per-record read itself.
-          await resolveDimensionLabels(dataset.object, dims, result.rows, this.labelResolver, resolveScope, context);
+          await resolveDimensionLabels(dataset.object, dims, result.rows, labelDeps, resolveScope, context);
           // Totals rows (#1753) carry dimension values too (a row subtotal is
           // keyed by its row bucket) — resolve each grouping's own subset.
           for (const total of result.totals ?? []) {
             const subset = dims.filter((d) => total.dimensions.includes(d.name));
             if (subset.length) {
-              await resolveDimensionLabels(dataset.object, subset, total.rows, this.labelResolver, resolveScope, context);
+              await resolveDimensionLabels(dataset.object, subset, total.rows, labelDeps, resolveScope, context);
             }
           }
         } catch (e) {
