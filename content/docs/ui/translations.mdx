@@ -73,10 +73,21 @@ export default defineStack({
 | Form sections | `objects.<name>._sections.<section>` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboards and widgets | `dashboards.<name>` |
+| Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` |
 | Global actions, settings, messages | `globalActions`, `settings`, `messages` |
 
-The metadata types resolved per request are **object, view, action, app, and
-dashboard** — a field's labels are translated as part of its object document.
+The metadata types resolved per request are **object, view, action, app,
+dashboard, and page** — a field's labels are translated as part of its object
+document.
+
+<Callout type="info">
+**Page headers are keyed by page name (#3589).** A page's `page:header`
+component has no stable id, so its `properties.title` / `properties.subtitle`
+are addressed through the page itself: `pages.<name>.title` / `subtitle`.
+`title` falls back to `pages.<name>.label`, so a page whose header title
+matches its nav label needs only `label`. Every `page:header` in the page's
+regions receives the same copy.
+</Callout>
 
 <Callout type="info">
 **One-shot result dialogs are translatable (#3347).** The post-success
