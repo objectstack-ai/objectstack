@@ -1717,10 +1717,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       triggers: {
         label: "Disparadores",
         description: "Cuándo debe activarse esta skill."
-      },
-      access: {
-        label: "Acceso",
-        description: "Permisos necesarios para usar esta skill."
       }
     },
     fields: {
@@ -1755,10 +1751,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       triggerConditions: {
         label: "Condiciones disparadoras",
         helpText: "Condiciones programáticas (p. ej., objectName == \"case\")"
-      },
-      permissions: {
-        label: "Permisos",
-        helpText: "Permisos necesarios para usar esta skill"
       }
     }
   }

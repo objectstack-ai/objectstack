@@ -1717,10 +1717,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       triggers: {
         label: "トリガー",
         description: "このスキルの起動タイミング。"
-      },
-      access: {
-        label: "アクセス",
-        description: "このスキルの使用に必要な権限。"
       }
     },
     fields: {
@@ -1755,10 +1751,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       triggerConditions: {
         label: "トリガー条件",
         helpText: "プログラム条件（例: objectName == \"case\"）"
-      },
-      permissions: {
-        label: "権限",
-        helpText: "このスキルの使用に必要な権限"
       }
     }
   }

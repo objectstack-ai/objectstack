@@ -1717,10 +1717,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       triggers: {
         label: "触发条件",
         description: "触发关键词与上下文"
-      },
-      access: {
-        label: "访问",
-        description: "哪些智能体可使用"
       }
     },
     fields: {
@@ -1755,10 +1751,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       triggerConditions: {
         label: "触发条件",
         helpText: "程序化条件（如 objectName == \"case\"）"
-      },
-      permissions: {
-        label: "权限",
-        helpText: "使用此技能所需的权限"
       }
     }
   }
