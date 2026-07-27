@@ -7,6 +7,7 @@ import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { PLATFORM_CAPABILITY_TOKENS } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
+import { hasPlatformObjectPrefix } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
 
@@ -602,9 +603,17 @@ function validateSingleApp(config: ObjectStackDefinition): string[] {
  * ADR-0090 business-unit tree (`sys_business_unit`) or grants a delegated
  * administrator CRUD on the RBAC link tables (`sys_user_position`, ADR-0090
  * D12). The typo net stays intact for the stack's OWN objects.
+ *
+ * Kept as a PREFIX test at this layer on purpose: these are hard `defineStack`
+ * throws, and a third-party package may legitimately contribute a prefixed
+ * object this repo's registry cannot know about — failing the build on that
+ * would be worse than the typo it catches. The narrower "prefixed but no known
+ * package registers it" signal (`sys_approval_process`, issue #3583) is an
+ * ADVISORY finding, so it lives in `@objectstack/lint`'s reference rules where
+ * it can warn instead of throw — see `isPlatformProvidedObjectName`.
  */
 function isPlatformObjectName(name: string): boolean {
-  return /^(sys_|cloud_|ai_)/.test(name);
+  return hasPlatformObjectPrefix(name);
 }
 
 /**
@@ -756,7 +765,6 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
     }
 
     for (const app of config.apps) {
-      if (!app.navigation) continue;
       const checkNavItems = (items: unknown[], appName: string) => {
         for (const item of items) {
           if (!item || typeof item !== 'object') continue;
@@ -787,13 +795,25 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
               `App '${appName}' navigation references report '${nav.reportName}' which is not defined in reports.`,
             );
           }
-          // Recurse into group children
-          if (nav.type === 'group' && Array.isArray(nav.children)) {
+          // Recurse into children. NOT gated on `type === 'group'`: an `object`
+          // nav item carries `children` too (NavigationItemSchema extends it
+          // with a child array for per-view entries), and a targeted child
+          // nested under one was previously skipped.
+          if (Array.isArray(nav.children)) {
             checkNavItems(nav.children, appName);
           }
         }
       };
-      checkNavItems(app.navigation, app.name);
+      // Both nav containers. `areas[]` was previously skipped entirely by an
+      // `if (!app.navigation) continue`, so an areas-based app got NO nav
+      // cross-reference checking at all (issue #3583).
+      if (Array.isArray(app.navigation)) checkNavItems(app.navigation, app.name);
+      if (Array.isArray(app.areas)) {
+        for (const area of app.areas) {
+          const nav = (area as { navigation?: unknown })?.navigation;
+          if (Array.isArray(nav)) checkNavItems(nav, app.name);
+        }
+      }
     }
   }
 

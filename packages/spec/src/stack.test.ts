@@ -683,6 +683,80 @@ describe('defineStack - Navigation Cross-Reference Validation', () => {
     };
     expect(() => defineStack(config)).not.toThrow();
   });
+
+  // Issue #3583 — an areas-based app was skipped entirely by the old
+  // `if (!app.navigation) continue`, so none of its nav references were checked.
+  it('should detect an undefined object in an area navigation', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [{ name: 'task', fields: { title: { type: 'text' } } }],
+      apps: [
+        {
+          name: 'my_app',
+          label: 'My App',
+          areas: [
+            {
+              id: 'area_work',
+              label: 'Work',
+              navigation: [
+                { id: 'nav_missing', type: 'object' as const, label: 'Missing', objectName: 'nonexistent_object' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(() => defineStack(config)).toThrow('nonexistent_object');
+  });
+
+  it('should pass when area navigation references resolve', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [{ name: 'task', fields: { title: { type: 'text' } } }],
+      apps: [
+        {
+          name: 'my_app',
+          label: 'My App',
+          areas: [
+            {
+              id: 'area_work',
+              label: 'Work',
+              navigation: [
+                { id: 'nav_tasks', type: 'object' as const, label: 'Tasks', objectName: 'task' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(() => defineStack(config)).not.toThrow();
+  });
+
+  // Children hang off `object` nav items too, not just `group` ones.
+  it('should detect an undefined object nested under an object nav item', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [{ name: 'task', fields: { title: { type: 'text' } } }],
+      apps: [
+        {
+          name: 'my_app',
+          label: 'My App',
+          navigation: [
+            {
+              id: 'nav_tasks',
+              type: 'object' as const,
+              label: 'Tasks',
+              objectName: 'task',
+              children: [
+                { id: 'nav_child', type: 'object' as const, label: 'Child', objectName: 'nonexistent_object' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(() => defineStack(config)).toThrow('nonexistent_object');
+  });
 });
 
 // ============================================================================

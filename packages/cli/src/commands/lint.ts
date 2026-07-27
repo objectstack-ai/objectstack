@@ -10,6 +10,7 @@ import { computeI18nCoverage, type CoverageIssue } from '../utils/i18n-coverage.
 import { lintDataModel } from '../lint/data-model-rules.js';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateRecordTitle, validateSemanticRoles, validateCapabilityReferences, validateSecurityPosture, validateOrgAxisRedLines, validateApprovalApprovers, validateSeedReplaySafety, validateSeedStateMachine } from '@objectstack/lint';
+import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
@@ -478,6 +479,38 @@ export function lintConfig(config: any): LintIssue[] {
   // safety net at author time: a value outside the machine's declared states is
   // almost certainly a typo. Advisory — the exemption itself is legitimate.
   for (const t of validateSeedStateMachine(config)) {
+    issues.push({
+      severity: t.severity,
+      rule: t.rule,
+      message: `${t.where}: ${t.message}`,
+      path: t.path,
+      fix: t.hint,
+    });
+  }
+
+  // ── Object-name references (issue #3583) ──
+  // The reference sites `defineStack` does not cover: action-param
+  // `reference`/`objectOverride`, dashboard filter `optionsFrom.object`, and
+  // navigation `requiresObject` gates. An unprefixed miss (`user` for
+  // `sys_user`) is a typo → error; a platform-prefixed name no known package
+  // registers (`sys_approval_process`) is advisory, since a third-party
+  // package may still provide it.
+  for (const t of validateObjectReferences(config)) {
+    issues.push({
+      severity: t.severity,
+      rule: t.rule,
+      message: `${t.where}: ${t.message}`,
+      path: t.path,
+      fix: t.hint,
+    });
+  }
+
+  // ── Action-name references (issue #3583) ──
+  // `bulkActions`/`rowActions`, page `quick_actions`, and nav action items bind
+  // an action BY NAME. A name matching no defined action ships a button that
+  // renders and does nothing — same failure `validate-dashboard-action-refs`
+  // catches for dashboards, so the same severity.
+  for (const t of validateActionNameRefs(config)) {
     issues.push({
       severity: t.severity,
       rule: t.rule,

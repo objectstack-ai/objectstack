@@ -181,4 +181,14 @@ export type {
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
 export type { FilterTokenFinding, FilterTokenSeverity } from './validate-filter-tokens.js';
 
+export {
+  validateObjectReferences,
+  OBJECT_REFERENCE_UNKNOWN,
+  OBJECT_REFERENCE_UNREGISTERED_PLATFORM,
+} from './validate-object-references.js';
+export type { ObjectRefFinding, ObjectRefSeverity } from './validate-object-references.js';
+
+export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
+export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
+
 export { buildAccessMatrix, diffAccessMatrix } from './build-access-matrix.js';

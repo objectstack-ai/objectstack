@@ -12,3 +12,4 @@
 
 export * from './paths';
 export * from './system-names';
+export * from './platform-object-names';

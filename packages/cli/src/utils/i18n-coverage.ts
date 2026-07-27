@@ -209,19 +209,32 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
           `Field ${objectName}.${fieldName} label`,
           inlineText(field?.label),
         );
+        // Options — accept BOTH shapes, exactly as `i18n-extract.ts` does.
+        // `FieldSchema.options` is canonically a `{value, label}[]` ARRAY, but
+        // this only ever handled the record map, so option coverage silently
+        // never fired for a canonically-shaped select field (issue #3583).
         const opts = field?.options;
-        if (opts && typeof opts === 'object' && !Array.isArray(opts)) {
-          for (const [optionKey, optionLabel] of Object.entries<any>(opts)) {
-            // Mirrors the extractor: an option's source text is its label, or
-            // its own value when the map holds no label string.
-            pushKey(
-              keys,
-              ['objects', objectName, 'fields', fieldName, 'options', optionKey],
-              'option',
-              `Option ${objectName}.${fieldName}.${optionKey}`,
-              inlineText(optionLabel) ?? optionKey,
-            );
-          }
+        const optionEntries: Array<[string, unknown]> = Array.isArray(opts)
+          ? opts.flatMap((opt: any) =>
+              opt && typeof opt === 'object' && 'value' in opt
+                ? [[String(opt.value), opt.label ?? opt.value] as [string, unknown]]
+                : typeof opt === 'string'
+                  ? [[opt, opt] as [string, unknown]]
+                  : [],
+            )
+          : opts && typeof opts === 'object'
+            ? Object.entries<any>(opts)
+            : [];
+        for (const [optionKey, optionLabel] of optionEntries) {
+          // Mirrors the extractor: an option's source text is its label, or
+          // its own value when no label string is present.
+          pushKey(
+            keys,
+            ['objects', objectName, 'fields', fieldName, 'options', optionKey],
+            'option',
+            `Option ${objectName}.${fieldName}.${optionKey}`,
+            inlineText(optionLabel) ?? optionKey,
+          );
         }
       }
     }

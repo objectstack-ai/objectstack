@@ -433,7 +433,27 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             `Define the dataset with defineDataset() or fix the reference (ADR-0021).`,
         });
       }
-      // Without a resolved dataset there is nothing to check names against.
+      // A widget with NO `dataset` key at all. `DashboardWidgetSchema.dataset`
+      // is REQUIRED, so the schema-parsed paths (`compile`, `validate`) reject
+      // this before we run — but `lint`/`doctor` hand us raw, un-parsed config,
+      // where it previously fell into the `continue` below and silently
+      // bypassed EVERY binding and chart check (issue #3583). Report it rather
+      // than skip: an unbound widget resolves no data and renders empty.
+      if (!dsName) {
+        push({
+          severity: 'error',
+          rule: WIDGET_DATASET_UNKNOWN,
+          message:
+            `binds no \`dataset\` — the ADR-0021 widget shape requires one, so this ` +
+            `widget resolves no data and renders empty.`,
+          hint:
+            `Set \`dataset: '<name>'\` (plus \`values\`, and \`dimensions\` where the chart ` +
+            `family needs them). Declared datasets: ${list(datasets.keys())}.`,
+        });
+        continue;
+      }
+      // A named-but-unresolvable dataset was already reported above; either way
+      // there is nothing left to check names against.
       if (!dataset) continue;
 
       // ── (a1) dashboard filter fields exist on the widget's object (#3365) ──

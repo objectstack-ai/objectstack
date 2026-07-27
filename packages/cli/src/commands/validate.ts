@@ -14,6 +14,7 @@ import { validateViewContainers } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateFilterTokens } from '@objectstack/lint';
+import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
@@ -279,6 +280,48 @@ export default class Validate extends Command {
           console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
         }
         this.exit(1);
+      }
+
+      // 3a-quater. Object-name + action-name reference integrity (#3583). The
+      //     reference sites `defineStack` does not cover: action-param
+      //     `reference`/`objectOverride`, dashboard filter `optionsFrom.object`,
+      //     nav `requiresObject` gates, and the name-bound action surfaces
+      //     (`bulkActions`/`rowActions`, page quick-actions, nav action items).
+      //     All are plain strings in the schema, so a name resolving to nothing
+      //     parses, ships, and fails silently at runtime. An unprefixed miss is
+      //     a typo (error); a platform-prefixed name no known package registers
+      //     is advisory (a third-party package may still provide it).
+      if (!flags.json) printStep('Checking object & action references (#3583)...');
+      const refFindings = [
+        ...validateObjectReferences(result.data as Record<string, unknown>),
+        ...validateActionNameRefs(result.data as Record<string, unknown>),
+      ];
+      const refErrors = refFindings.filter((f) => f.severity === 'error');
+      const refWarnings = refFindings.filter((f) => f.severity === 'warning');
+      if (refErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({
+            valid: false,
+            errors: refErrors,
+            warnings: [...widgetWarnings, ...actionRefWarnings, ...refWarnings],
+            duration: timer.elapsed(),
+          }, null, 2));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Reference integrity check failed (${refErrors.length} issue${refErrors.length > 1 ? 's' : ''})`);
+        for (const f of refErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
+      }
+      if (!flags.json) {
+        for (const w of refWarnings.slice(0, 50)) {
+          console.log(chalk.yellow(`  ⚠ ${w.where}: ${w.message}`));
+          console.log(chalk.dim(`      ${w.hint}`));
+        }
       }
 
       // 3b. SDUI scoped-styling correctness (ADR-0065) — a styled node's
