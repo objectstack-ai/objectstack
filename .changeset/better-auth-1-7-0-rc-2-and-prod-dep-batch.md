@@ -3,7 +3,7 @@
 "@objectstack/platform-objects": major
 "@objectstack/client": major
 "@objectstack/cli": patch
-"@objectstack/create-objectstack": patch
+"create-objectstack": patch
 "@objectstack/plugin-hono-server": patch
 "@objectstack/plugin-pinyin-search": patch
 "@objectstack/hono": patch

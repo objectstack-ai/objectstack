@@ -1,5 +1,5 @@
 ---
-"@objectstack/create-objectstack": patch
+"create-objectstack": patch
 "@objectstack/metadata": patch
 ---
 
