@@ -52,7 +52,13 @@ function toSnakeCase(name: string): string {
  * `parent_organization_id`.
  */
 function betterAuthFieldsByObject(): Record<string, Set<string>> {
-  const tables = getAuthTables({ plugins: [organization()] } as never);
+  // `teams: { enabled: true }` mirrors the auth-manager default. Without it
+  // better-auth omits the team models entirely, so the sys_team /
+  // sys_team_member entries below would be absent and any extension field
+  // added to those objects would collide silently. (#3624)
+  const tables = getAuthTables({
+    plugins: [organization({ teams: { enabled: true } })],
+  } as never);
   const out: Record<string, Set<string>> = {};
   for (const [model, table] of Object.entries(tables ?? {})) {
     const object = MODEL_TO_OBJECT[model];

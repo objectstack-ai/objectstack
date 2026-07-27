@@ -28,10 +28,13 @@
  * `external-datasource-routes.ts`) — the conformance test enumerates those by
  * capturing a mock server's registration calls, so they are guarded too.
  *
- * NOT COVERED HERE (known third surface): services that autonomously mount
+ * NOT COVERED HERE (the third surface): services that autonomously mount
  * routes on the host `IHttpServer` — `service-storage` (`storage-routes.ts`,
  * the SDK's whole storage surface) and `service-i18n`. Those live outside
- * `@objectstack/rest`; auditing them is follow-up work under #3587.
+ * `@objectstack/rest` and carry their own per-package ledgers + guards since
+ * #3636 (tranche 3): `packages/services/service-storage/src/storage-route-ledger.ts`
+ * and `packages/services/service-i18n/src/i18n-route-ledger.ts`. All three
+ * surfaces the SDK reaches are now ledgered.
  *
  * This module is package-internal (not exported from the index): it is the
  * guard's data, not public API. It must stay import-free — the client-side

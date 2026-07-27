@@ -164,6 +164,31 @@ export const SysTwoFactor = ObjectSchema.create({
       defaultValue: true,
       description: 'Whether the enrollment was confirmed with a valid TOTP code (managed by better-auth)',
     }),
+
+    // better-auth 1.7's 2FA lockout state (`failedVerificationCount` /
+    // `lockedUntil`). Every wrong code guard-increments the counter and, once
+    // it crosses `maxFailedAttempts`, stamps `lockedUntil`; a correct code
+    // resets both. Distinct from `sys_user.failed_login_count` / `locked_until`
+    // — those are ObjectStack's own password-stage counters (ADR-0069 D2) and
+    // better-auth is oblivious to them. Declared `input: false, returned:
+    // false` upstream, so neither crosses the API boundary. Found by the
+    // parity gate in plugin-auth while closing #3624: same failure shape as
+    // `team.memberCount` — an unprovisioned column better-auth writes on the
+    // failure path, so a wrong 2FA code 500'd instead of being counted.
+    failed_verification_count: Field.number({
+      label: 'Failed Verification Count',
+      required: false,
+      defaultValue: 0,
+      readonly: true,
+      description: 'Consecutive failed 2FA verifications; reset on success. Maintained by better-auth.',
+    }),
+
+    locked_until: Field.datetime({
+      label: 'Locked Until',
+      required: false,
+      readonly: true,
+      description: 'Set when failed 2FA verifications cross the lockout threshold. Maintained by better-auth.',
+    }),
   },
   
   indexes: [
