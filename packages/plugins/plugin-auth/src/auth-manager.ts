@@ -1855,6 +1855,9 @@ export class AuthManager {
       const { twoFactor } = await import('better-auth/plugins/two-factor');
       plugins.push(twoFactor({
         schema: buildTwoFactorPluginSchema(),
+        // ADR-0069 D2 (#3690) — the operator's lockout policy governs BOTH
+        // stages of sign-in, not just the password one.
+        accountLockout: this.resolveTwoFactorAccountLockout(),
       }));
     }
 
@@ -3891,6 +3894,46 @@ export class AuthManager {
     } catch {
       // Lockout accounting is best-effort — never break the auth response.
     }
+  }
+
+  /**
+   * ADR-0069 D2 (#3690) — project the operator's lockout settings onto
+   * better-auth's own `twoFactor({ accountLockout })` contract, so the second
+   * factor obeys the same policy as the password stage above.
+   *
+   * Deliberately reuses `lockoutThreshold` / `lockoutDurationMinutes` rather
+   * than introducing a parallel `two_factor_lockout_*` pair: an admin who
+   * tightens sign-in to 3 attempts reasonably reads that as "the login flow is
+   * tightened", and before this the second factor silently stayed at
+   * better-auth's 10 — the stricter door was the looser one, with nothing in
+   * the UI saying so. Following better-auth's own field shape (rather than
+   * inventing ObjectStack settings on top of it) also means a future upstream
+   * addition here shows up as a new option, not a conflict.
+   *
+   * `undefined` when the threshold is 0/absent — better-auth's defaults (on,
+   * 10 attempts, 15 minutes) then stand. That is NOT mapped to
+   * `enabled: false`: `0` is the password stage's "off", and a deployment may
+   * leave THAT stage unlocked because other controls cover it (per-IP rate
+   * limiting, a captcha, an IdP in front). The second factor is the last door
+   * before a session is issued, so it is not turned off by a setting that
+   * never mentioned it. Both stages remain explicitly configurable; only the
+   * "unset" case differs, and it differs toward locking.
+   *
+   * Note the plugin ALSO caps attempts per challenge at a hardcoded 5
+   * (`beginAttempt(5)` in its totp / backup-code verifiers), which no option
+   * reaches. A threshold above 5 therefore still forces a fresh challenge
+   * every 5 guesses; the account budget is what accumulates across them.
+   */
+  private resolveTwoFactorAccountLockout():
+  { enabled: boolean; maxFailedAttempts: number; durationSeconds: number } | undefined {
+    const threshold = Number(this.config.lockoutThreshold) || 0;
+    if (threshold <= 0) return undefined;
+    const minutes = Number(this.config.lockoutDurationMinutes) || 15;
+    return {
+      enabled: true,
+      maxFailedAttempts: threshold,
+      durationSeconds: minutes * 60,
+    };
   }
 
   /**

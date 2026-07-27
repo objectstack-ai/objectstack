@@ -455,9 +455,21 @@ code that reads it). Changes take effect immediately; no restart is required.
 
 | Setting | Effect |
 |---|---|
-| `lockout_threshold` | Lock an account after this many consecutive failed sign-ins. |
-| `lockout_duration_minutes` | How long a lockout lasts. Admins can clear it early with the **Unlock** action on the user record. |
+| `lockout_threshold` | Lock an account after this many consecutive failed sign-in attempts. Counts **both** stages: wrong passwords and wrong two-factor codes. |
+| `lockout_duration_minutes` | How long a lockout lasts, at either stage. Admins can clear a password-stage lockout early with the **Unlock** action on the user record. |
 | `rate_limit_max` / `rate_limit_window_seconds` | Per-IP request throttle on auth endpoints. |
+
+The two stages keep **separate counters** — `sys_user.failed_login_count` for the
+password check, `sys_two_factor.failed_verification_count` for the second factor —
+so a locked password stage and a locked second factor are independent states. Each
+counter resets on a success at its own stage.
+
+Setting `lockout_threshold` to `0` disables the **password-stage** lockout only.
+Two-factor verification keeps a built-in limit of 10 attempts per 15 minutes,
+because it is the last check before a session is issued. Two-factor verification
+additionally caps attempts at 5 per challenge, which is not configurable: a
+threshold above 5 simply forces the attacker to restart the sign-in flow more
+often before the account-level lock engages.
 
 ### Multi-factor (enforced MFA)
 

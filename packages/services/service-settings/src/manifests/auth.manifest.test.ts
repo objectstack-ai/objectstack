@@ -70,6 +70,24 @@ describe('authSettingsManifest', () => {
     expect(byKey('mfa_grace_period_days').default).toBe(7);
   });
 
+  // #3690 — the same pair now drives the second factor's lockout, not just the
+  // password stage's. Two-factor verification exists without email/password
+  // sign-in, so gating the threshold on `email_password_enabled` would leave a
+  // passwordless deployment unable to tune it at all.
+  it('keeps the lockout pair reachable in passwordless deployments (#3690)', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    const byKey = (k: string) => specs.find((s) => s.key === k);
+
+    expect(byKey('lockout_threshold').visible).toBeUndefined();
+    // The duration is still meaningless with no threshold, so that condition
+    // stays — but it must no longer depend on the password provider.
+    expect(byKey('lockout_duration_minutes').visible).toBe('${data.lockout_threshold > 0}');
+
+    // The help text is the only place an admin learns the threshold covers
+    // both stages; the wiring is invisible otherwise.
+    expect(byKey('lockout_threshold').description).toMatch(/two-factor/i);
+  });
+
   it('exposes encrypted Google OAuth credential fields', () => {
     const keys = (authSettingsManifest.specifiers as any[])
       .map((s) => s.key)

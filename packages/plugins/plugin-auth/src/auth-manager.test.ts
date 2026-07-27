@@ -885,6 +885,62 @@ describe('AuthManager', () => {
       expect(tfPlugin._opts.schema.user.fields.twoFactorEnabled).toBe('two_factor_enabled');
     });
 
+    // #3690 — the operator's lockout policy has to reach the SECOND factor too.
+    // Before this, `twoFactor()` got only a schema, so the second factor sat on
+    // better-auth's built-in 10/900s no matter how the admin tuned sign-in:
+    // tightening the threshold to 3 left the last door before a session at 10.
+    describe('two-factor account lockout follows the operator settings (#3690)', () => {
+      const buildTwoFactor = async (extra: Record<string, unknown>) => {
+        let capturedConfig: any;
+        (betterAuth as any).mockImplementation((config: any) => {
+          capturedConfig = config;
+          return { handler: vi.fn(), api: {} };
+        });
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { twoFactor: true },
+          ...extra,
+        });
+        await manager.getAuthInstance();
+        warnSpy.mockRestore();
+        return capturedConfig.plugins.find((p: any) => p.id === 'two-factor')._opts.accountLockout;
+      };
+
+      it('projects lockoutThreshold / lockoutDurationMinutes onto better-auth\'s contract', async () => {
+        // Minutes → seconds is the whole reason this needs a test: the two
+        // sides use different units for the same policy.
+        expect(await buildTwoFactor({ lockoutThreshold: 3, lockoutDurationMinutes: 30 })).toEqual({
+          enabled: true,
+          maxFailedAttempts: 3,
+          durationSeconds: 1800,
+        });
+      });
+
+      it('falls back to the password stage\'s 15-minute default when only a threshold is set', async () => {
+        expect(await buildTwoFactor({ lockoutThreshold: 5 })).toEqual({
+          enabled: true,
+          maxFailedAttempts: 5,
+          durationSeconds: 900,
+        });
+      });
+
+      // Threshold 0 is the password stage's "off". It is NOT forwarded as
+      // `enabled: false`: a deployment may leave the password stage unlocked
+      // because rate limiting or an IdP covers it, while the second factor —
+      // the last check before a session — keeps better-auth's default. Leaving
+      // the option unset is what hands that default back.
+      for (const [label, extra] of [
+        ['threshold 0 (lockout explicitly off)', { lockoutThreshold: 0 }],
+        ['no lockout settings at all', {}],
+      ] as Array<[string, Record<string, unknown>]>) {
+        it(`leaves better-auth's own default in place with ${label}`, async () => {
+          expect(await buildTwoFactor(extra)).toBeUndefined();
+        });
+      }
+    });
+
     it('should register magicLink plugin when enabled', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {

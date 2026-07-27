@@ -130,11 +130,11 @@ export const esES: TranslationData = {
         },
         lockout_threshold: {
           label: 'Umbral de bloqueo de cuenta',
-          help: 'Bloquea una cuenta tras este número de inicios de sesión fallidos consecutivos. 0 desactiva el bloqueo. Mientras está bloqueada, el inicio de sesión se rechaza incluso con la contraseña correcta.',
+          help: 'Bloquea una cuenta tras este número de intentos de inicio de sesión fallidos consecutivos, tanto contraseñas incorrectas como códigos de doble factor incorrectos. Mientras está bloqueada, el inicio de sesión se rechaza incluso con las credenciales correctas. 0 desactiva el bloqueo en la etapa de contraseña; la verificación en dos pasos conserva entonces su límite integrado (10 intentos cada 15 minutos), por ser la última comprobación antes de emitir una sesión.',
         },
         lockout_duration_minutes: {
           label: 'Duración del bloqueo (minutos)',
-          help: 'Cuánto permanece bloqueada una cuenta una vez superado el umbral.',
+          help: 'Cuánto permanece bloqueada una cuenta una vez superado el umbral, en cualquiera de las dos etapas de inicio de sesión.',
         },
         rate_limit_max: {
           label: 'Límite de tasa de autenticación: máx. solicitudes',

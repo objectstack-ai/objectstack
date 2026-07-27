@@ -137,6 +137,10 @@ const manifest = {
       description:
         'Brute-force protection: per-identity account lockout and per-IP rate limiting on auth endpoints.',
     },
+    // [#3690] The threshold/duration pair governs BOTH sign-in stages — the
+    // password check and the second factor. Always visible: two-factor
+    // verification exists in passwordless deployments too, so gating these on
+    // `email_password_enabled` would leave the 2FA lockout untunable there.
     {
       type: 'number',
       key: 'lockout_threshold',
@@ -146,8 +150,7 @@ const manifest = {
       min: 0,
       max: 20,
       description:
-        'Lock an account after this many consecutive failed sign-ins. 0 disables lockout. While locked, sign-in is rejected even with the correct password.',
-      visible: "${data.email_password_enabled !== false}",
+        'Lock an account after this many consecutive failed sign-in attempts — wrong passwords and wrong two-factor codes alike. While locked, sign-in is rejected even with the correct credentials. 0 disables the password-stage lockout; two-factor verification then keeps its built-in limit of 10 attempts per 15 minutes, since it is the last check before a session is issued.',
     },
     {
       type: 'number',
@@ -157,8 +160,8 @@ const manifest = {
       default: 15,
       min: 1,
       max: 1440,
-      description: 'How long an account stays locked once the threshold is crossed.',
-      visible: "${data.email_password_enabled !== false && data.lockout_threshold > 0}",
+      description: 'How long an account stays locked once the threshold is crossed, at either sign-in stage.',
+      visible: '${data.lockout_threshold > 0}',
     },
     {
       type: 'number',
