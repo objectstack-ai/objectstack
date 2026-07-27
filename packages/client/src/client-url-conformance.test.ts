@@ -148,6 +148,29 @@ function matches(verb: string, path: string): Pattern | undefined {
 const CONTROL_PLANE = '/api/v1/cloud/';
 const CONTROL_PLANE_NAMESPACE = 'projects.';
 
+/**
+ * The AI surface — the SECOND cross-repo prefix, and exempt for the same
+ * reason as the control plane rather than a different one.
+ *
+ * `/api/v1/ai/*` routes are built by `service-ai`'s `buildAIRoutes()` at plugin
+ * start, and `service-ai` is a Cloud/EE package living in the `cloud` repo.
+ * This repo's dispatcher only proxies to whatever that table contains (or 404s
+ * "AI service is not configured" when it is absent), so no ledger here can
+ * enumerate them — the same boundary `projects.*` sits behind.
+ *
+ * It used to be handled as a `* /ai/**` WILDCARD match instead, which was
+ * strictly worse: a wildcard says the family is claimed, so all three `ai.*`
+ * methods counted as matched. #3718 enumerated the real table in `cloud` and
+ * found the SDK's three URLs are not in it — `/nlq`, `/suggest` and
+ * `/insights` are mounted by nothing, in any repo (#3718). The wildcard was
+ * not weak evidence, it was wrong evidence, which is exactly why the ratchet
+ * below treats `**` matches as something to drive to zero rather than tolerate.
+ *
+ * Bounded the same way as the control plane: only `ai.*` may use the prefix.
+ */
+const AI_PLANE = '/api/v1/ai/';
+const AI_NAMESPACE = 'ai.';
+
 // ---------------------------------------------------------------------------
 // 2. The recorder
 // ---------------------------------------------------------------------------
@@ -326,6 +349,7 @@ describe('client URL conformance ↔ the union of all four route ledgers (#3642)
     const silent: string[] = [];
     const malformed: string[] = [];
     const controlPlane: string[] = [];
+    const aiPlane: string[] = [];
     const wildcardOnly: string[] = [];
 
     for (const name of METHODS) {
@@ -347,6 +371,7 @@ describe('client URL conformance ↔ the union of all four route ledgers (#3642)
         }
         const path = new URL(call.url, BASE).pathname;
         if (path.startsWith(CONTROL_PLANE)) { controlPlane.push(`${name} → ${call.verb} ${path}`); continue; }
+        if (path.startsWith(AI_PLANE)) { aiPlane.push(`${name} → ${call.verb} ${path}`); continue; }
         const hit = matches(call.verb, path);
         if (!hit) { unmatched.push(`${name} → ${call.verb} ${path}`); continue; }
         if (hit.route.includes('**')) wildcardOnly.push(`${name} → ${call.verb} ${path} (via ${hit.route})`);
@@ -381,18 +406,35 @@ describe('client URL conformance ↔ the union of all four route ledgers (#3642)
     ).toEqual([]);
     expect(controlPlane.length, 'the projects namespace should still be reaching the control plane').toBeGreaterThan(0);
 
+    // Same bounding for the AI prefix. `ai.*` is the ONLY namespace allowed to
+    // use it; anything else reaching /api/v1/ai/ is a method that has wandered
+    // into a surface no in-repo ledger can vouch for.
+    const aiTrespassers = aiPlane.filter((e) => !e.startsWith(AI_NAMESPACE));
+    expect(
+      aiTrespassers,
+      `non-ai methods targeting the AI plane, which service-ai owns in the cloud repo:\n${aiTrespassers.join('\n')}`,
+    ).toEqual([]);
+    expect(aiPlane.length, 'the ai namespace should still be reaching the AI plane').toBeGreaterThan(0);
+
     // HOW STRONG IS THIS GUARD, HONESTLY. A `**` row asserts only that a prefix
     // family is CLAIMED, not that the specific URL resolves. That was this
     // guard's biggest weakness at #3642: 60 of ~196 matched calls rested on
     // nothing better, 54 of them on `* /auth/**`. #3656 enumerated better-auth's
     // real route table, so those now match exact rows and the bound fell 60 → 3.
-    // What remains is `* /ai/**`, whose routes service-ai builds at plugin start.
-    // Ratcheted: enumerating that family lowers it; nothing raises it without a
-    // deliberate decision.
+    // The last 3 were `ai.nlq/suggest/insights` on `* /ai/**`, and enumerating
+    // THAT family (#3718, in `cloud`, where service-ai lives) showed the
+    // wildcard had not been weak evidence but WRONG evidence: none of the three
+    // URLs is in the real table, and nothing in any repo mounts them (#3718).
+    // They are now handled by the AI_PLANE exemption above and pinned as dead
+    // on the cloud side, so this bound is 0.
+    //
+    // ZERO IS THE POINT: every remaining matched call rests on an exact route
+    // some ledger enumerated. Raising this bound reintroduces the one kind of
+    // evidence this audit family has caught being wrong.
     expect(
       wildcardOnly.length,
       'methods matched only by a wildcard `**` family — weaker evidence than an exact ' +
-        `route. Enumerate a dynamic family to lower this bound; do not raise it:\n${wildcardOnly.join('\n')}`,
-    ).toBeLessThanOrEqual(3);
+        `route, and demonstrably able to be wrong (#3718). Enumerate the family instead:\n${wildcardOnly.join('\n')}`,
+    ).toBe(0);
   });
 });

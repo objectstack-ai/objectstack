@@ -355,6 +355,50 @@ against the framework revision cloud builds and ships against. That is the
 right revision to check — but it means a `projects.*` change landing here is
 not verified against the control plane until that pin moves.
 
+## 14. The last wildcard, and what it was actually worth (#3718)
+
+§10's capstone ratcheted "matched only by a `**` family" as *weaker* evidence,
+to be driven down by enumerating each dynamic family. 60 → 3 after #3656. The
+last 3 were `ai.nlq` / `ai.suggest` / `ai.insights` on `* /ai/**`.
+
+Enumerating that family answered the question the ratchet was really asking.
+`service-ai` lives in the `cloud` repo (Cloud/EE), so this repo could never see
+its table — the dispatcher just proxies to whatever `buildAIRoutes()` returned.
+That table is **12 routes**: `chat`, `chat/stream`, `complete`, `models`,
+`status`, `effective-model`, and six `conversations` routes.
+
+**None of them is `/nlq`, `/suggest` or `/insights`.**
+
+| | |
+|---|---|
+| `client.ai` methods | 3 — `nlq`, `suggest`, `insights` |
+| …that any repo mounts | **0** |
+| Real AI routes | 12 |
+| …expressed by the SDK | **0** |
+
+The two sets are disjoint. So the wildcard was not weak evidence — it was
+**wrong** evidence, certifying three URLs nothing serves, and its note even
+asserted the client "expresses nlq/suggest/insights against the REST AI routes"
+(never verified, false). `DEFAULT_AI_ROUTES` in `plugin-rest-api.zod.ts`
+declares all three, but has **no runtime consumer** — only the spec's own test
+reads it — and `aiNlq?` / `aiSuggest?` / `aiInsights?` are optional protocol
+methods nothing implements. Declared, never built (#3718). Instances 7–9 of the
+`the method exists ≠ the method can be called` class.
+
+`/api/v1/ai/` is now a bounded prefix exemption alongside the control plane —
+two cross-repo surfaces, both ledgered in `cloud`
+(`packages/service-ai/src/ai-route-ledger.ts`, 10 `gap` / 2 `server-only`,
+enumerated straight off the array `buildAIRoutes()` returns). **The
+wildcard-only bound is 0**, and the assertion is `toBe(0)` rather than a
+ratchet: every matched call now rests on an exact enumerated route, and
+reintroducing a `**` match reintroduces the one kind of evidence this audit
+family has caught being wrong.
+
+The generalisable lesson, and the one worth carrying out of §1–§14: **a claim
+about a family is not a claim about a member.** Wildcards, prefixes and "the
+service handles that" all read as coverage in a green suite. Every one of them
+this audit opened turned out to be hiding something.
+
 ## Follow-up slicing (proposed)
 
 1. **`client.actions.invoke(...)`** — closes the largest hole (3 routes).
@@ -370,7 +414,8 @@ not verified against the control plane until that pin moves.
 11. **Control-plane surface** (§10) — done in #3655; the ledger lives in `cloud`
     (§13), which is the only repo where both halves are in scope.
 12. **Enumerate `/auth/**`** (§11) — done in #3656; wildcard ratchet 60 → 3.
-13. **Enumerate `/ai/**`** — the last dynamic family, 3 SDK methods.
+13. **Enumerate `/ai/**`** — done (§14). The wildcard ratchet is now **0**; the
+    3 SDK methods turned out to be dead (#3718).
 14. **Response-shape conformance** (§12) — error path done in #3675 for both
     services; the storage **success** bodies (three shapes, none carrying
     `success: true`) and the dispatcher's numeric `error.code` remain.
