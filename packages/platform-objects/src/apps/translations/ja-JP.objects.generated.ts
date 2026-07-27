@@ -507,6 +507,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "多要素認証を必須化",
         help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。"
       },
+      parent_organization_id: {
+        label: "Parent Organization",
+        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
+      },
+      sort_order: {
+        label: "Sort Order",
+        help: "Display order among sibling organizations. Presentation only."
+      },
       id: {
         label: "組織 ID"
       },
@@ -709,6 +717,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "組織",
         help: "このチームの親組織"
       },
+      member_count: {
+        label: "Member Count",
+        help: "Seat counter maintained by better-auth; do not write directly."
+      },
       id: {
         label: "チーム ID"
       },
@@ -759,6 +771,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "ユーザー"
+      },
+      membership_key: {
+        label: "Membership Key",
+        help: "Derived membership digest maintained by better-auth; do not write directly."
       }
     },
     _actions: {
@@ -993,6 +1009,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       verified: {
         label: "Verified",
         help: "Whether the enrollment was confirmed with a valid TOTP code (managed by better-auth)"
+      },
+      failed_verification_count: {
+        label: "Failed Verification Count",
+        help: "Consecutive failed 2FA verifications; reset on success. Maintained by better-auth."
+      },
+      locked_until: {
+        label: "Locked Until",
+        help: "Set when failed 2FA verifications cross the lockout threshold. Maintained by better-auth."
       }
     },
     _views: {

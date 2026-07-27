@@ -507,6 +507,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Require Multi-Factor Auth",
         help: "When true, every member of this organization must enroll an authenticator app to access data."
       },
+      parent_organization_id: {
+        label: "Parent Organization",
+        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
+      },
+      sort_order: {
+        label: "Sort Order",
+        help: "Display order among sibling organizations. Presentation only."
+      },
       id: {
         label: "Organization ID"
       },
@@ -709,6 +717,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Organization",
         help: "Parent organization for this team"
       },
+      member_count: {
+        label: "Member Count",
+        help: "Seat counter maintained by better-auth; do not write directly."
+      },
       id: {
         label: "Team ID"
       },
@@ -759,6 +771,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "User"
+      },
+      membership_key: {
+        label: "Membership Key",
+        help: "Derived membership digest maintained by better-auth; do not write directly."
       }
     },
     _actions: {
@@ -993,6 +1009,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       verified: {
         label: "Verified",
         help: "Whether the enrollment was confirmed with a valid TOTP code (managed by better-auth)"
+      },
+      failed_verification_count: {
+        label: "Failed Verification Count",
+        help: "Consecutive failed 2FA verifications; reset on success. Maintained by better-auth."
+      },
+      locked_until: {
+        label: "Locked Until",
+        help: "Set when failed 2FA verifications cross the lockout threshold. Maintained by better-auth."
       }
     },
     _views: {
