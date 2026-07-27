@@ -251,6 +251,16 @@
       "status": "live",
       "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts",
       "note": "ADR-0052 §5b — the audit-writer renders tracked-field diffs as human-readable activity summaries (renderTrackedChangeSummary + getFieldDefs read field.trackHistory). Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
+    },
+    "accept": {
+      "status": "live",
+      "evidence": "packages/services/service-storage/src/file-reference-lifecycle.ts (assertFileConstraints)",
+      "note": "ADR-0104 D3 wave 2. Offered to the file picker AND enforced server-side on record write: once a media field references a sys_file, the stored mime_type/name is re-checked against the declared list, because a client-side check is bypassed by any caller talking to the API directly. Entries are only judged against metadata the file actually reports — an unrecorded MIME type cannot fail the test."
+    },
+    "maxSize": {
+      "status": "live",
+      "evidence": "packages/services/service-storage/src/file-reference-lifecycle.ts (assertFileConstraints)",
+      "note": "ADR-0104 D3 wave 2. Enforced server-side on record write against sys_file.size, not merely checked in the browser. A file with no recorded size cannot fail it."
     }
   }
 }
