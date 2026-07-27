@@ -94,7 +94,12 @@ export const ShowcaseApp = App.create({
         { id: 'nav_revenue_pulse', type: 'dashboard', dashboardName: 'showcase_revenue_pulse', label: 'Revenue Pulse (filtered)', icon: 'sliders-horizontal' },
         { id: 'nav_charts', type: 'dashboard', dashboardName: 'showcase_chart_gallery', label: 'Chart Gallery', icon: 'layout-dashboard' },
         { id: 'nav_report_tabular', type: 'object', objectName: 'showcase_task', viewName: 'tabular', label: 'Task List', icon: 'table' },
-        { id: 'nav_report_summary', type: 'report', reportName: 'showcase_hours_by_status', label: 'Hours by Status', icon: 'sigma' },
+        // Nav-affordance specimens (framework#1878 §3 recheck): `separator`
+        // draws a divider; `badge` + `badgeVariant` render a pill on the item.
+        // Both are consumed by NavigationRenderer, which UnifiedSidebar uses to
+        // render the app navigation tree — dogfooded here so the wire stays hot.
+        { id: 'nav_sep_reports', type: 'separator' },
+        { id: 'nav_report_summary', type: 'report', reportName: 'showcase_hours_by_status', label: 'Hours by Status', icon: 'sigma', badge: 'NEW', badgeVariant: 'secondary' },
         { id: 'nav_report_chart', type: 'report', reportName: 'showcase_hours_by_status_chart', label: 'Hours by Status (Chart)', icon: 'bar-chart-3' },
         { id: 'nav_report_matrix', type: 'report', reportName: 'showcase_status_priority_matrix', label: 'Status × Priority', icon: 'grid-3x3' },
         { id: 'nav_report_joined', type: 'report', reportName: 'showcase_task_overview', label: 'Task Overview', icon: 'layers' },

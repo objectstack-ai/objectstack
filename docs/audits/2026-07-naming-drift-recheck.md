@@ -31,7 +31,7 @@ stale. Three real problems remain, two of them a coupled pair that produces
 | 5 | **page `label` → `title`** | **🔴 FORWARD-DRIFT — live** | spec `label` is required (`page.zod.ts:303`); the region/SDUI renderer reads `schema.title` with no fallback (`page.tsx:503-507`). Zero `schema.label` reads in `page.tsx` |
 | 6 | page `visibility` | **ALIGNED** (item stale) | spec folds `visibility` → `visibleWhen` (`page.zod.ts:116,126`); `react/src/SchemaRenderer.tsx:285` consumes `visibleWhen`, `:294` still honors raw `visibility` |
 | 7 | dashboard `title` vs `label` | **ALIGNED** (item stale) | renderer dual-reads `title \|\| label` (`plugin-dashboard/.../DashboardRenderer.tsx:782`, `DashboardGridLayout.tsx:278`). Widget-level keys additionally hard-fail via a `.strict()` schema + naming error map (`dashboard.zod.ts:273,98-123`, #1894) |
-| 8 | app `accentColor` / `badgeVariant` / `separator` | **SPLIT** — `accentColor` aligned; the other two are **surface-conditional** | #1894 declared all three to match objectui's `NavigationRenderer`. `accentColor` is consumed on the live path (`app-shell/src/layout/ConsoleLayout.tsx:171`, `PageHeader.tsx:46`, `apps/console/src/hooks/useBranding.ts:25`). `badge`/`badgeVariant`/`separator` **are fully implemented** — but only in `layout/src/NavigationRenderer.tsx` (`:906` separator, `:983-985`/`:1024-1025` badge), which is a *publicly exported, SDUI-registered* component (`navigation-renderer`), **not** the console's own app sidebar. `UnifiedSidebar` — the component that actually renders `app.navigation` in the console — renders no badge and has no separator branch (`separator` is merely recognized as "no href" by `AppContent.tsx:849` and excluded by `nav-target.ts:17`) |
+| 8 | app `accentColor` / `badgeVariant` / `separator` | **ALIGNED** — all three live (item stale) | `accentColor`: `app-shell/src/layout/ConsoleLayout.tsx:171`, `PageHeader.tsx:46`, `apps/console/src/hooks/useBranding.ts:25`. `badge`/`badgeVariant`/`separator`: implemented in `layout/src/NavigationRenderer.tsx` (`:906` separator, `:983-985`/`:1024-1025` badge) — and `UnifiedSidebar` **delegates the whole app-navigation tree to that component** (`UnifiedSidebar.tsx:437`, passing `processedNavigation`, which only re-orders/pins and spreads every other key through). **Browser-verified** against an unmodified objectui checkout with a showcase specimen: the separator draws and a `badge: 'NEW'` + `badgeVariant: 'secondary'` pill renders |
 | 9 | action `disabled` → `enabled` | **RESOLVED 2026-07** | fixed across all six rendering surfaces (objectui#2863); showcase specimen `showcase_archive_task` (#3643) |
 | — | flow `http` vs `http_request` | **ALIGNED** (item stale) | spec enum carries `http` marked canonical (`automation/flow.zod.ts:32`); the runtime registers `HTTP_TYPE = 'http'` (`service-automation/src/builtin/http-nodes.ts:48`) |
 | — | skill `requiredPermissions` vs `permissions` | **NOT A DRIFT** — mis-filed | `requiredPermissions` **never existed** on `SkillSchema`; the spec key is and was `permissions` (`ai/skill.zod.ts:121`). The original audit described prose/label drift in the docs, not a spec-vs-runtime mismatch |
@@ -86,16 +86,15 @@ fix for this whole class; the per-item wiring below is the tactical one.
 3. **`os doctor`** pointed `reference_filters` at the removed `referenceFilters`
    instead of the live `lookupFilters` — corrected (framework).
 
+4. **app `badge`/`badgeVariant` + nav `separator` — NOT a drift; nothing to do.**
+   *(This entry twice carried a wrong verdict before it was settled empirically —
+   see "A note on how this item was got wrong", below.)* All three are consumed:
+   `NavigationRenderer` implements them, and `UnifiedSidebar` delegates the whole
+   app-navigation tree to it (`UnifiedSidebar.tsx:437`). Proven end to end by a
+   showcase specimen (`nav_sep_reports` + `badge: 'NEW'` on Hours by Status)
+   rendering correctly against an **unmodified** objectui checkout.
+
 **Recorded, not fixed (each needs an owner decision):**
-4. **app `badge`/`badgeVariant` + nav `separator` — surface-conditional, do NOT
-   prune.** The capability is fully built in `NavigationRenderer` (public export
-   + SDUI `navigation-renderer`); what is missing is the same three affordances
-   in `UnifiedSidebar`, the component that actually renders `app.navigation` in
-   the console. So an author's `badge: '3'` works if the nav is rendered through
-   the SDUI component and silently vanishes in the console shell — a
-   *surface-dependent* no-op, the hardest kind to diagnose. Disposition: port the
-   three branches into `UnifiedSidebar` (reference implementations already exist
-   at `NavigationRenderer.tsx:906,983-985`), not prune the keys.
 5. **`skill.permissions` has no gate** — mis-filed as naming drift; it is an
    aspirational-config item (§4). The ledger marks it `live` on the evidence of a
    *preview renderer* while the identically-unenforced `tool.permissions` is
@@ -103,4 +102,32 @@ fix for this whole class; the per-item wiring below is the tactical one.
    where they should get a warning.
 6. **`agent.knowledge` is inert at runtime** — naming is fixed, but RAG resolves
    its sources from the LLM tool call, not from the authored block. Wire or mark
-   experimental.
+   experimental. *(Both 5 and 6 are now tracked in #3686; the ledger was made
+   honest about them in #3685.)*
+
+## A note on how item 8 was got wrong — twice
+
+Worth recording, because the failure mode is generic and this document exists to
+stop exactly this class of error.
+
+**Round 1.** `git grep -rln "NavigationRenderer" | head -3` returned three
+CHANGELOG/ROADMAP hits, and that was read as "the component was deleted." The
+`head -3` had truncated the real source hit further down the alphabet.
+→ Published claim: *"NavigationRenderer no longer exists."* **False.**
+
+**Round 2.** `git grep -n "NavigationRenderer" -- 'packages/*/src' 'apps/*/src'`
+returned nothing, and that was read as "the component is an orphan, nobody
+imports it." The pathspec glob never matched the nested
+`packages/app-shell/src/layout/UnifiedSidebar.tsx`.
+→ Published claim: *"live nav renders no badge; port the branches."* **Also false.**
+
+**Round 3 (settled).** Author a specimen, boot the real stack, look at it. The
+separator drew and the badge rendered — against an *unmodified* renderer.
+
+Both wrong rounds share one shape: **a strong negative claim ("X does not
+exist", "nobody consumes X") resting on a search whose result set was silently
+truncated or filtered.** A grep can only ever prove presence; absence needs
+either an exhaustive search you have verified is exhaustive, or — better, and
+decisive here — a runtime observation. For liveness work specifically: when the
+question is "does authoring this key do anything", the cheapest *sound* answer
+is usually to author it and look, not to grep for readers.
