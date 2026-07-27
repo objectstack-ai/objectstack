@@ -50,9 +50,40 @@ export const SalesUser = definePermissionSet({
 | Permission | Description |
 |------------|-------------|
 | `allowCreate` / `allowRead` / `allowEdit` / `allowDelete` | CRUD on records the user can see |
+| `allowExport` | Bulk data egress — narrows read, see below |
 | `allowTransfer` / `allowRestore` / `allowPurge` | Lifecycle class (RBAC-gated ahead of the M2 operations) |
 | `viewAllRecords` | Read ALL records regardless of ownership (super-user read) |
 | `modifyAllRecords` | Edit ALL records regardless of ownership (super-user write) |
+
+### `allowExport` — the export axis
+
+Read and export are not the same privilege. Reading a record on screen and
+pulling the whole table down as a CSV differ in blast radius, which is why
+Salesforce ("Export Reports"), Dynamics ("Export to Excel"), NetSuite
+("Export Lists") and SAP (`S_GUI` 61) all carry a separate export permission.
+`allowExport` is that axis here: `export = list ∧ allowExport`.
+
+It is a **tri-state**, and unset is not the same as `false`:
+
+| Value | Meaning |
+|------------|-------------|
+| unset | Inherit read — anyone who can list can export. The default, so adding the key changes nothing for existing permission sets. |
+| `false` | Deny export while **keeping** read. The reason the axis exists. |
+| `true` | Explicitly granted. |
+
+Across several permission sets the merge is most-permissive with an explicit
+deny in the middle: any set saying `true` wins, otherwise any set saying `false`
+wins, otherwise the bit stays unset and inherits read.
+
+It narrows read — it never widens it. A set granting `allowExport: true` without
+a read grant exports nothing, and a `modifyAllRecords` super-user wildcard does
+**not** override an explicit per-object `allowExport: false`.
+
+Enforcement is server-side: `GET /api/v1/data/:object/export` answers
+`403 EXPORT_NOT_PERMITTED` before it reads the first row. The same decision is
+published on `/me/permissions` as the object's effective `apiOperations`, which
+is what makes the client hide its Export button — the button and the refusal are
+one decision, not two.
 
 ## Access depth — `readScope` / `writeScope` (ADR-0057 D1)
 
