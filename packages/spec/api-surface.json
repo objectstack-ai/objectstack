@@ -1012,6 +1012,9 @@
     "PackageFile (type)",
     "PackagePublishResult (type)",
     "PackagePublishResultSchema (const)",
+    "PageComponentLike (interface)",
+    "PageLike (interface)",
+    "PageRegionLike (interface)",
     "Plan (type)",
     "PlanInput (type)",
     "PlanSchema (const)",
@@ -1293,6 +1296,7 @@
     "translateDashboard (function)",
     "translateMetadataDocument (function)",
     "translateObject (function)",
+    "translatePage (function)",
     "translateView (function)"
   ],
   "./kernel": [
