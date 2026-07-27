@@ -101,6 +101,9 @@ ctx = {
 - Use after hooks for related-record side effects
 - Use `ctx.api.object('x')` for cross-object access so writes stay in scope
 - Handle errors gracefully
+- Verify every field your hook writes exists on the target object(s) — the
+  write set of a hook body is **not statically validated**, unlike `condition`
+  (see [Hook & Action Bodies](/docs/automation/hook-bodies#not-statically-checked-the-write-set))
 
 ❌ **DON'T:**
 - Query in loops

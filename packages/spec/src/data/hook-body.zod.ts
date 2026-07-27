@@ -62,6 +62,14 @@ export type ExpressionBody = z.infer<typeof ExpressionBodySchema>;
  * - `process`, `globalThis`, `eval`, `new Function`
  * - any identifier resolved from a value-only top-level import
  *
+ * **Write-set opacity — accepted static-analysis gap (ADR-0107, #3700).**
+ * `source` is opaque to static analysis: no lint verifies that the fields the
+ * body writes (`ctx.input.x = …`, `ctx.api.object('y').update(id, { x })`)
+ * exist on the target object(s). Only the read side (`hook.condition`) and
+ * the capability surface are statically checked. Write-target field existence
+ * is the author's responsibility; when the write set is fixed, prefer a flow
+ * `update_record` node, whose structural `fields` config IS lint-checked.
+ *
  * @example
  * ```json
  * {

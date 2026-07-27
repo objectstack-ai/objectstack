@@ -116,6 +116,22 @@ The CLI builder **rejects** any source that uses:
 
 Need outbound HTTP? Define a **Connector recipe** as metadata and call it via `ctx.connector(...)`. (Connector spec is tracked separately and ships after L1+L2 stabilises.)
 
+### Not statically checked: the write set
+
+Static validation around a hook is asymmetric, and it is worth knowing exactly where the line is:
+
+- **Checked — read side.** `hook.condition` is validated at build time against the target object's fields by the expression validator (`@objectstack/lint`), including array-valued `hook.object` targets. A condition referencing a nonexistent field fails the lint.
+- **Checked — capability side.** `body.capabilities` gates which `ctx` APIs the body may call at all; the sandbox throws on an undeclared call.
+- **Not checked — write side.** Nothing validates *which fields* your body writes. `body.source` is an opaque JS string: the fields it assigns (`ctx.input.foo = …`) or writes cross-object (`ctx.api.object('x').update(id, { foo })`) are not represented anywhere in metadata, so no lint can verify they exist. This is an **accepted gap** (ADR-0107); the structured `writes` declaration that would close it is tracked in [#3700](https://github.com/objectstack-ai/objectstack/issues/3700).
+
+Writing a field the target object doesn't have is not caught at runtime either — the write-path validator skips unknown keys. On a SQL driver the stray column reaches the database and the whole operation fails with a driver-level error, far from the authoring mistake; a schemaless driver (memory, MongoDB) silently persists the stray key.
+
+Until a structured write declaration exists:
+
+- **Check your write targets by hand.** Every field the body assigns must exist on the target object(s) — for an array or `"*"` hook, on every target.
+- **Prefer a flow `update_record` node when the write set is fixed.** Flow nodes declare their writes structurally in `fields`, so they get the static checking hook bodies can't.
+- **Exercise the hook against a real object before shipping** — on SQL drivers the mistake surfaces on the first write; schemaless drivers won't tell you.
+
 ### Signature conventions
 
 | Surface | TS authoring | Sandbox invocation |
