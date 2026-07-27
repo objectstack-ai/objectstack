@@ -187,6 +187,14 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
         expect(notification.listInbox).toHaveBeenCalledWith('u1', expect.objectContaining({ limit: 5 }));
     });
 
+    it('/notifications tolerates redundant slashes in the sub-path (split+filter, CodeQL redos fix)', async () => {
+        const notification = { listInbox: vi.fn(), markRead: vi.fn().mockResolvedValue({ updated: 1 }), markAllRead: vi.fn() };
+        const context: any = { executionContext: { userId: 'u1' } };
+        const result = await makeDispatcher({ notification }).handleNotification('//read//', 'POST', { ids: ['n1'] }, {}, context);
+        expect(result.response?.status).toBe(200);
+        expect(notification.markRead).toHaveBeenCalledWith('u1', ['n1']);
+    });
+
     it('/security responds 503 when no security service is wired (legacy in-handler semantics)', async () => {
         const result = await makeDispatcher().dispatch('GET', '/security/suggested-bindings', undefined, {}, {} as any);
         expect(result.handled).toBe(true);
@@ -226,5 +234,127 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
         const result = await makeDispatcher({ security }).dispatch('GET', '/securityfoo', undefined, {}, {} as any);
         expect(security.listAudienceBindingSuggestions).not.toHaveBeenCalled();
         expect(result.response?.status ?? 404).not.toBe(200);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PR-3 — keys / storage / ui extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
+    it('POST /keys rejects anonymous callers with 401 (identity gate inside the extracted body)', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/keys', { name: 'k' }, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(401);
+    });
+
+    it('GET /keys answers 405 (mint is POST-only), and /keysfoo is NOT claimed (segment semantics)', async () => {
+        const dispatcher = makeDispatcher();
+        const wrongMethod = await dispatcher.dispatch('GET', '/keys', undefined, {}, {} as any);
+        expect(wrongMethod.response?.status).toBe(405);
+        const lexical = await dispatcher.dispatch('POST', '/keysfoo', { name: 'k' }, {}, {} as any);
+        expect(lexical.response?.status ?? 404).not.toBe(405);
+    });
+
+    it('POST /keys mints a key pinned to the caller (thin delegate carries the extracted body)', async () => {
+        const insert = vi.fn().mockResolvedValue({ id: 'key-row-1' });
+        const objectql = {
+            insert,
+            find: vi.fn().mockResolvedValue([]),
+            getObjects: vi.fn().mockReturnValue({}),
+            registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
+        };
+        const context: any = { executionContext: { userId: 'caller-1' } };
+        // Direct delegate call — dispatch() would re-resolve identity off the
+        // auth-less mock kernel and overwrite the seeded executionContext.
+        const result = await makeDispatcher({ objectql }).handleKeys('POST', { name: 'CI Key', user_id: 'attacker' }, context);
+        expect(result.response?.status).toBe(201);
+        const row = insert.mock.calls[0][1];
+        expect(insert.mock.calls[0][0]).toBe('sys_api_key');
+        // user_id pinned to caller; body's user_id ignored; only the hash stored.
+        expect(row.user_id).toBe('caller-1');
+        expect(row.key).not.toBe(result.response?.body?.data?.key);
+        expect(result.response?.body?.data?.key).toBeTruthy();
+    });
+
+    it('/storage responds 501 when file-storage is not configured (extracted body keeps in-handler semantics)', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/storage/upload', { blob: 1 }, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(501);
+    });
+
+    it('/storage/upload uploads through the file-storage service', async () => {
+        const upload = vi.fn().mockResolvedValue({ id: 'f1' });
+        const result = await makeDispatcher({ 'file-storage': { upload, download: vi.fn() } })
+            .dispatch('POST', '/storage/upload', { some: 'file' }, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(upload).toHaveBeenCalledTimes(1);
+    });
+
+    it('/ui/view/:object serves the protocol getUiView result; 503 without a protocol service', async () => {
+        const getUiView = vi.fn().mockResolvedValue({ view: 'list-def' });
+        const ok = await makeDispatcher({ protocol: { getUiView } }).dispatch('GET', '/ui/view/account/list', undefined, {}, {} as any);
+        expect(ok.response?.status).toBe(200);
+        expect(getUiView).toHaveBeenCalledWith({ object: 'account', type: 'list' });
+
+        const missing = await makeDispatcher().dispatch('GET', '/ui/view/account', undefined, {}, {} as any);
+        expect(missing.response?.status).toBe(503);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PR-4 — share-links extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
+    it('/share-links responds 501 when the shareLinks service is absent', async () => {
+        const result = await makeDispatcher().dispatch('GET', '/share-links', undefined, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(501);
+    });
+
+    it('/share-linksfoo is NOT claimed (segment semantics)', async () => {
+        const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
+        const result = await makeDispatcher({ shareLinks }).dispatch('GET', '/share-linksfoo', undefined, {}, {} as any);
+        expect(shareLinks.listLinks).not.toHaveBeenCalled();
+        expect(result.response?.status ?? 404).not.toBe(501);
+    });
+
+    it('management routes reject anonymous callers with UNAUTHENTICATED', async () => {
+        const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
+        const result = await makeDispatcher({ shareLinks })
+            .handleShareLinks('', 'POST', { object: 'account', recordId: 'r1' }, {}, {} as any);
+        expect(result.response?.status).toBe(401);
+        expect(result.response?.body?.error?.details?.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('public resolve route serves the record through the request-kernel engine with redaction', async () => {
+        const resolveToken = vi.fn().mockResolvedValue({
+            link: { id: 'l1', token: 't1', object_name: 'account', record_id: 'r1', permission: 'view', audience: 'anyone' },
+            redactFields: ['secret'],
+        });
+        const find = vi.fn().mockResolvedValue([{ id: 'r1', name: 'Acme', secret: 'hide-me' }]);
+        const dispatcher = makeDispatcher({
+            shareLinks: { resolveToken },
+            objectql: {
+                find,
+                getObjects: vi.fn().mockReturnValue({}),
+                registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
+            },
+        });
+        const result = await dispatcher.handleShareLinks('/t1/resolve', 'GET', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        const record = result.response?.body?.data?.record;
+        expect(record?.name).toBe('Acme');
+        // redactFields stripped before the record leaves the server.
+        expect(record?.secret).toBeUndefined();
+    });
+
+    it('unmatched sub-path returns the standard ROUTE_NOT_FOUND envelope', async () => {
+        const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
+        const context: any = { executionContext: { userId: 'u1' } };
+        const result = await makeDispatcher({ shareLinks }).handleShareLinks('/a/b/c', 'GET', undefined, {}, context);
+        expect(result.response?.status).toBe(404);
+        expect(result.response?.body?.error?.type).toBe('ROUTE_NOT_FOUND');
     });
 });

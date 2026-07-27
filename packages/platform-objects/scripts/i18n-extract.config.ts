@@ -51,6 +51,8 @@ import {
   SysOauthClientResource,
   SysOauthClientAssertion,
   SysJwks,
+  SysSsoProvider,
+  SysScimProvider,
 } from '../src/identity/index.js';
 
 // ── Security ──────────────────────────────────────────────────────────────
@@ -80,6 +82,7 @@ import {
   SysJob,
   SysJobRun,
   SysJobQueue,
+  SysImportJob,
 } from '../src/audit/index.js';
 
 // ── Integration ───────────────────────────────────────────────────────────
@@ -151,6 +154,8 @@ export default defineStack({
     SysOauthClientResource,
     SysOauthClientAssertion,
     SysJwks,
+    SysSsoProvider,
+    SysScimProvider,
 
     // Security: RBAC moved to @objectstack/plugin-security, sharing to
     // @objectstack/plugin-sharing (ADR-0029 K2 / D8).
@@ -168,6 +173,7 @@ export default defineStack({
     SysJob,
     SysJobRun,
     SysJobQueue,
+    SysImportJob,
 
     // Integration: sys_webhook moved to @objectstack/plugin-webhooks (ADR-0029 D8).
 

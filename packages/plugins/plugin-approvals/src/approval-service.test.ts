@@ -246,6 +246,229 @@ describe('ApprovalService (node era)', () => {
     expect(req.pending_approvers).toEqual(['u7']);
   });
 
+  // ── approver expansion: expression (#3447 P2) ───────────────────
+  //
+  // A CEL expression resolved at node entry over three EXPLICIT roots:
+  // `current.*` (live record), `trigger.*` (submit snapshot), `vars.*` (flow
+  // variables). `record` / bare fields are rejected before evaluation — the
+  // runtime env would resolve them as dyn → null → a silently-empty slate.
+
+  const exprInput = (
+    value: string,
+    extra: Record<string, any> = {},
+    approverExtra: Record<string, any> = {},
+    configExtra: Record<string, any> = {},
+  ) => ({
+    ...openInput([]),
+    config: {
+      approvers: [{ type: 'expression' as const, value, ...approverExtra }],
+      behavior: 'unanimous' as const,
+      lockRecord: true,
+      ...configExtra,
+    },
+    ...extra,
+  });
+
+  it('expression: current.* reads the LIVE record at node entry (#3447 P2)', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', approvers_dynamic: ['u2', 'u3'] }];
+    const req = await svc.openNodeRequest(
+      exprInput('current.approvers_dynamic', { record: { id: 'opp1', approvers_dynamic: [] } }), CTX,
+    ) as any;
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3']);
+  });
+
+  it('expression: trigger.* reads the submit-time snapshot, not the live row (#3447 P2)', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', reviewer: 'new_reviewer' }];
+    const req = await svc.openNodeRequest(
+      exprInput('trigger.reviewer', { record: { id: 'opp1', reviewer: 'old_reviewer' } }), CTX,
+    ) as any;
+    expect(req.pending_approvers).toEqual(['old_reviewer']);
+  });
+
+  it('expression: vars.* reads flow variables; a CSV string fans out (#3447 P2)', async () => {
+    const req = await svc.openNodeRequest(
+      exprInput('vars.approval_lead.next_reviewers', {
+        variables: { approval_lead: { next_reviewers: 'u5, u6' } },
+      }), CTX,
+    ) as any;
+    expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+  });
+
+  it('expression: an array result fans out into one slot per id (#3447 P2)', async () => {
+    const req = await svc.openNodeRequest(
+      exprInput('vars.picked', { variables: { picked: ['u2', 'u3', 'u4'] } }), CTX,
+    ) as any;
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3', 'u4']);
+  });
+
+  it('expression: OOO delegation applies per resolved user (#3447 P2 / #1322)', async () => {
+    engine._tables['sys_approval_delegation'] = [{
+      id: 'del1', delegator_id: 'u2', delegate_id: 'u9',
+      valid_from: '2026-01-01T00:00:00Z', valid_until: '2026-12-31T00:00:00Z',
+      reason: 'leave', organization_id: 't1',
+    }];
+    const req = await svc.openNodeRequest(
+      exprInput('vars.picked', { variables: { picked: ['u2', 'u3'] } }), CTX,
+    ) as any;
+    expect(req.pending_approvers.sort()).toEqual(['u3', 'u9']);
+  });
+
+  it('expression: rejects a `record` root BEFORE evaluation, prescribing current/trigger (#3447 P2)', async () => {
+    await expect(svc.openNodeRequest(exprInput('record.approvers_dynamic'), CTX))
+      .rejects.toThrow(/VALIDATION_FAILED[\s\S]*`record`[\s\S]*current\.<field>/);
+  });
+
+  it('expression: rejects an unknown bare root with the closed-root hint (#3447 P2)', async () => {
+    await expect(svc.openNodeRequest(exprInput('approvers_dynamic'), CTX))
+      .rejects.toThrow(/VALIDATION_FAILED.*approvers_dynamic.*current\.\*/s);
+  });
+
+  it('expression: a non-parsing source fails loudly, not as an empty slate (#3447 P2)', async () => {
+    await expect(svc.openNodeRequest(exprInput('current..'), CTX))
+      .rejects.toThrow(/VALIDATION_FAILED.*does not parse/s);
+  });
+
+  it('expression: a non-id result type (bool) fails loudly (#3447 P2)', async () => {
+    const req = svc.openNodeRequest(
+      exprInput('current.amount > 100', { record: { id: 'opp1', amount: 500 } }), CTX,
+    );
+    await expect(req).rejects.toThrow(/EXPRESSION_FAILED.*must yield ids/s);
+  });
+
+  it('expression + resolveAs department: expands each returned id through the graph, one per_group group per department (#3447 P2)', async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'd1', active: true, organization_id: 't1' },
+      { id: 'd2', active: true, organization_id: 't1' },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'm1', business_unit_id: 'd1', user_id: 'u2' },
+      { id: 'm2', business_unit_id: 'd1', user_id: 'u3' },
+      { id: 'm3', business_unit_id: 'd2', user_id: 'u4' },
+    ];
+    const req = await svc.openNodeRequest(
+      exprInput('vars.picked_departments', {
+        variables: { picked_departments: ['d1', 'd2'] },
+      }, { resolveAs: 'department' }, { behavior: 'per_group' }), CTX,
+    ) as any;
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3', 'u4']);
+    // Each department forms its own sub-group: one sign-off per department.
+    const raw = engine._tables['sys_approval_request'][0];
+    const snapshot = JSON.parse(raw.node_config_json);
+    expect(snapshot.__approverGroups).toEqual({
+      u2: ['#0:d1'], u3: ['#0:d1'], u4: ['#0:d2'],
+    });
+  });
+
+  it('expression + resolveAs: an unstaffed department keeps a literal slot (#3447 P2)', async () => {
+    engine._tables['sys_business_unit'] = [{ id: 'd9', active: true, organization_id: 't1' }];
+    const req = await svc.openNodeRequest(
+      exprInput('vars.picked', { variables: { picked: ['d9'] } }, { resolveAs: 'department' }), CTX,
+    ) as any;
+    expect(req.pending_approvers).toEqual(['department:d9']);
+  });
+
+  it('expression: __resolvedFrom snapshots the resolution INPUT for audit (#3447 P2)', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', approvers_dynamic: ['u2'] }];
+    await svc.openNodeRequest(exprInput('current.approvers_dynamic', { record: { id: 'opp1' } }), CTX);
+    const raw = engine._tables['sys_approval_request'][0];
+    const snapshot = JSON.parse(raw.node_config_json);
+    expect(snapshot.__resolvedFrom).toEqual({ 'expression#0': ['u2'] });
+  });
+
+  it('expression: a MISSING key is a loud error, never a silent empty slate (#3447 P2)', async () => {
+    // CEL map access on an absent key throws ("No such key") — deliberate:
+    // referencing a variable nobody wrote is a wiring bug, not "no approvers".
+    // An EMPTY slate is expressed by a present-but-empty value (next test
+    // group); authors guard optional inputs with `has(...)` / `.?` explicitly.
+    await expect(svc.openNodeRequest(
+      exprInput('vars.never_written', { variables: {} }), CTX,
+    )).rejects.toThrow(/EXPRESSION_FAILED.*No such key/s);
+  });
+
+  // ── onEmptyApprovers policy (#3447 P2) ──────────────────────────
+  //
+  // "Empty" = the expression/field RESOLVED (key present) but yielded nobody.
+  // A missing key is a loud error instead (test above).
+
+  it("onEmptyApprovers 'fail': an empty slate fails the open loudly", async () => {
+    await expect(svc.openNodeRequest(
+      exprInput('vars.picked', { variables: { picked: [] } }, {}, { onEmptyApprovers: 'fail' }), CTX,
+    )).rejects.toThrow(/NO_APPROVERS/);
+    expect(engine._tables['sys_approval_request'] ?? []).toHaveLength(0);
+  });
+
+  it("onEmptyApprovers 'auto_approve': no request opens, outcome says autoApproved", async () => {
+    const outcome = await svc.openNodeRequest(
+      exprInput('vars.picked', { variables: { picked: [] } }, {}, { onEmptyApprovers: 'auto_approve' }), CTX,
+    );
+    expect(outcome).toEqual({ autoApproved: true, reason: 'empty_approvers' });
+    expect(engine._tables['sys_approval_request'] ?? []).toHaveLength(0);
+  });
+
+  it("onEmptyApprovers default ('admin_rescue'): the request still opens for admin takeover (#3424)", async () => {
+    const req = await svc.openNodeRequest(
+      exprInput('vars.picked', { variables: { picked: [] } }), CTX,
+    ) as any;
+    expect(req.status).toBe('pending');
+    expect(req.pending_approvers).toEqual([]);
+    expect(engine._tables['sys_approval_request']).toHaveLength(1);
+  });
+
+  // ── decision outputs (#3447 P2) ─────────────────────────────────
+
+  it('decision outputs: rejected when the node declares none', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await expect(svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u9', outputs: { next: 'u2' },
+    }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*declares no decisionOutputs/s);
+  });
+
+  it('decision outputs: rejected when a key is undeclared', async () => {
+    const req = await svc.openNodeRequest(
+      openInput(['u9'], {}, { decisionOutputs: ['next_reviewers'] }), CTX,
+    );
+    await expect(svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u9', outputs: { other_key: 1 },
+    }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*other_key.*not declared/s);
+  });
+
+  it('decision outputs: reserved keys are rejected even when declared', async () => {
+    const req = await svc.openNodeRequest(
+      openInput(['u9'], {}, { decisionOutputs: ['decision'] }), CTX,
+    );
+    await expect(svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u9', outputs: { decision: 'spoofed' },
+    }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*reserved/s);
+  });
+
+  it('decision outputs: accepted keys return from decideNode and snapshot as __decisionOutputs', async () => {
+    const req = await svc.openNodeRequest(
+      openInput(['u9'], {}, { decisionOutputs: ['next_reviewers', 'note'] }), CTX,
+    );
+    const out = await svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u9', outputs: { next_reviewers: ['u2', 'u3'] },
+    }, SYS);
+    expect(out.finalized).toBe(true);
+    expect(out.outputs).toEqual({ next_reviewers: ['u2', 'u3'] });
+    const raw = engine._tables['sys_approval_request'][0];
+    expect(JSON.parse(raw.node_config_json).__decisionOutputs).toEqual({ next_reviewers: ['u2', 'u3'] });
+  });
+
+  it('decision outputs: co-sign votes accumulate, the finalizing decision hands the merged set over', async () => {
+    const req = await svc.openNodeRequest(
+      openInput(['u1', 'u2'], {}, { behavior: 'unanimous', decisionOutputs: ['legal_note', 'finance_note'] }), CTX,
+    );
+    const first = await svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u1', outputs: { legal_note: 'ok' },
+    }, SYS);
+    expect(first.finalized).toBe(false);
+    const second = await svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u2', outputs: { finance_note: 'ok too' },
+    }, SYS);
+    expect(second.finalized).toBe(true);
+    expect(second.outputs).toEqual({ legal_note: 'ok', finance_note: 'ok too' });
+  });
+
   // ── approver expansion: position (ADR-0090 D3) ──────────────────
 
   const positionInput = (extra: Record<string, any> = {}) => ({

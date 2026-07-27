@@ -6058,6 +6058,10 @@ export class RestServer {
                                 actorId: body.actorId ?? body.actor_id ?? context?.userId,
                                 comment: body.comment,
                                 attachments: body.attachments,
+                                // #3447 P2: author-declared decision outputs — the
+                                // service validates keys against the node's
+                                // `decisionOutputs` whitelist before any write.
+                                outputs: body.outputs,
                             }, context ?? {});
                             res.json(out);
                         } catch (err: any) {

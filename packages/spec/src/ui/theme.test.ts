@@ -3,15 +3,10 @@ import {
   ThemeSchema,
   ThemeMode,
   ThemeModeSchema,
-  DensityModeSchema,
-  WcagContrastLevelSchema,
   ColorPaletteSchema,
   TypographySchema,
-  SpacingSchema,
   BorderRadiusSchema,
   ShadowSchema,
-  DensityMode,
-  WcagContrastLevel,
   type Theme,
   type ColorPalette,
 } from './theme.zod';
@@ -125,20 +120,6 @@ describe('TypographySchema', () => {
   });
 });
 
-describe('SpacingSchema', () => {
-  it('should accept spacing scale', () => {
-    const spacing = {
-      '0': '0',
-      '1': '0.25rem',
-      '2': '0.5rem',
-      '4': '1rem',
-      '8': '2rem',
-    };
-
-    expect(() => SpacingSchema.parse(spacing)).not.toThrow();
-  });
-});
-
 describe('BorderRadiusSchema', () => {
   it('should accept border radius scale', () => {
     const borderRadius = {
@@ -235,10 +216,6 @@ describe('ThemeSchema', () => {
           xl: '1.25rem',
         },
       },
-      spacing: {
-        '4': '1rem',
-        '8': '2rem',
-      },
       borderRadius: {
         base: '0.25rem',
         lg: '0.5rem',
@@ -246,23 +223,6 @@ describe('ThemeSchema', () => {
       shadows: {
         base: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
         lg: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-      },
-    };
-
-    expect(() => ThemeSchema.parse(theme)).not.toThrow();
-  });
-
-  it('should accept theme with logo configuration', () => {
-    const theme: Theme = {
-      name: 'branded_theme',
-      label: 'Branded Theme',
-      colors: {
-        primary: '#007BFF',
-      },
-      logo: {
-        light: '/assets/logo-light.svg',
-        dark: '/assets/logo-dark.svg',
-        favicon: '/assets/favicon.ico',
       },
     };
 
@@ -392,24 +352,6 @@ describe('ThemeSchema', () => {
     expect(() => ThemeSchema.parse(theme)).not.toThrow();
   });
 
-  it('should accept theme with breakpoints', () => {
-    const theme: Theme = {
-      name: 'responsive_theme',
-      label: 'Responsive Theme',
-      colors: {
-        primary: '#007BFF',
-      },
-      breakpoints: {
-        sm: '640px',
-        md: '768px',
-        lg: '1024px',
-        xl: '1280px',
-        '2xl': '1536px',
-      },
-    };
-
-    expect(() => ThemeSchema.parse(theme)).not.toThrow();
-  });
 });
 
 describe('Real-World Theme Examples', () => {
@@ -438,10 +380,6 @@ describe('Real-World Theme Examples', () => {
           base: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
           heading: 'Poppins, sans-serif',
         },
-      },
-      logo: {
-        light: '/assets/logo.svg',
-        favicon: '/assets/favicon.ico',
       },
     };
 
@@ -483,68 +421,6 @@ describe('Real-World Theme Examples', () => {
   });
 });
 
-describe('DensityMode', () => {
-  it('should accept all density modes', () => {
-    const modes = ['compact', 'regular', 'spacious'] as const;
-    modes.forEach(mode => {
-      expect(() => DensityMode.parse(mode)).not.toThrow();
-    });
-  });
-  it('should reject invalid density mode', () => {
-    expect(() => DensityMode.parse('tight')).toThrow();
-  });
-});
-
-describe('WcagContrastLevel', () => {
-  it('should accept AA and AAA', () => {
-    expect(() => WcagContrastLevel.parse('AA')).not.toThrow();
-    expect(() => WcagContrastLevel.parse('AAA')).not.toThrow();
-  });
-  it('should reject invalid level', () => {
-    expect(() => WcagContrastLevel.parse('A')).toThrow();
-  });
-});
-
-describe('Theme Density, WCAG, and RTL', () => {
-  it('should accept theme with density mode', () => {
-    expect(() => ThemeSchema.parse({
-      name: 'dense_theme',
-      label: 'Dense Theme',
-      colors: { primary: '#1a73e8' },
-      density: 'compact',
-    })).not.toThrow();
-  });
-  it('should accept theme with WCAG contrast level', () => {
-    expect(() => ThemeSchema.parse({
-      name: 'accessible_theme',
-      label: 'Accessible Theme',
-      colors: { primary: '#000000' },
-      wcagContrast: 'AAA',
-    })).not.toThrow();
-  });
-  it('should accept theme with RTL', () => {
-    expect(() => ThemeSchema.parse({
-      name: 'arabic_theme',
-      label: 'Arabic Theme',
-      colors: { primary: '#1a73e8' },
-      rtl: true,
-    })).not.toThrow();
-  });
-  it('should accept theme with all new properties', () => {
-    const theme = ThemeSchema.parse({
-      name: 'full_theme',
-      label: 'Full Theme',
-      colors: { primary: '#1a73e8' },
-      density: 'spacious',
-      wcagContrast: 'AA',
-      rtl: false,
-    });
-    expect(theme.density).toBe('spacious');
-    expect(theme.wcagContrast).toBe('AA');
-    expect(theme.rtl).toBe(false);
-  });
-});
-
 // ============================================================================
 // Issue #6: Easing naming unified to snake_case in theme animation tokens
 // ============================================================================
@@ -571,7 +447,7 @@ describe('AnimationSchema - snake_case timing keys', () => {
 });
 
 // ============================================================================
-// Issue #9: ThemeModeSchema / DensityModeSchema / WcagContrastLevelSchema
+// Issue #9: ThemeModeSchema — canonical *Schema name with deprecated alias
 // ============================================================================
 describe('ThemeModeSchema (canonical name)', () => {
   it('should accept valid theme modes', () => {
@@ -582,28 +458,5 @@ describe('ThemeModeSchema (canonical name)', () => {
 
   it('should be the same as deprecated ThemeMode alias', () => {
     expect(ThemeModeSchema).toBe(ThemeMode);
-  });
-});
-
-describe('DensityModeSchema (canonical name)', () => {
-  it('should accept valid density modes', () => {
-    expect(() => DensityModeSchema.parse('compact')).not.toThrow();
-    expect(() => DensityModeSchema.parse('regular')).not.toThrow();
-    expect(() => DensityModeSchema.parse('spacious')).not.toThrow();
-  });
-
-  it('should be the same as deprecated DensityMode alias', () => {
-    expect(DensityModeSchema).toBe(DensityMode);
-  });
-});
-
-describe('WcagContrastLevelSchema (canonical name)', () => {
-  it('should accept AA and AAA', () => {
-    expect(() => WcagContrastLevelSchema.parse('AA')).not.toThrow();
-    expect(() => WcagContrastLevelSchema.parse('AAA')).not.toThrow();
-  });
-
-  it('should be the same as deprecated WcagContrastLevel alias', () => {
-    expect(WcagContrastLevelSchema).toBe(WcagContrastLevel);
   });
 });

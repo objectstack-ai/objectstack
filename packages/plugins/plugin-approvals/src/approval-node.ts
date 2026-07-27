@@ -38,6 +38,12 @@ export interface ApprovalAutomationSurface {
       error?: string;
       suspend?: boolean;
       correlation?: string;
+      /**
+       * #3447 P2: walk this labelled out-edge on normal (non-suspend)
+       * completion — how an `onEmptyApprovers: 'auto_approve'` node continues
+       * down `approve` without a decision. Mirrors NodeExecutionResult.
+       */
+      branchLabel?: string;
     }>;
   }): void;
   resume?(runId: string, signal?: { output?: Record<string, unknown>; branchLabel?: string }): Promise<unknown>;
@@ -49,6 +55,29 @@ interface MinimalLogger {
 }
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/**
+ * Rebuild the nested object the engine's CEL conditions see from the flow's
+ * flat variable Map — dotted keys (`get_rec.record`) become nested paths, so an
+ * `expression` approver's `vars.get_rec.record.owner_id` reads exactly like a
+ * condition's. Mirrors the engine's own evaluateCondition rebuild; kept local
+ * because this plugin deliberately does not depend on service-automation.
+ */
+function nestVariables(variables: Map<string, unknown>): Record<string, unknown> {
+  const vars: Record<string, unknown> = {};
+  for (const [key, value] of variables) {
+    const segs = key.split('.');
+    let cursor = vars;
+    for (let i = 0; i < segs.length - 1; i++) {
+      if (typeof cursor[segs[i]] !== 'object' || cursor[segs[i]] === null) {
+        cursor[segs[i]] = {};
+      }
+      cursor = cursor[segs[i]] as Record<string, unknown>;
+    }
+    cursor[segs[segs.length - 1]] = value;
+  }
+  return vars;
+}
 
 /**
  * Register the `approval` node executor on the automation engine. Idempotent at
@@ -116,12 +145,31 @@ export function registerApprovalNode(
           submitterId: context?.userId ?? null,
           record,
           organizationId: context?.organizationId ?? context?.tenantId ?? null,
+          // #3447 P2: flow variables (nested, as CEL conditions see them) — the
+          // `vars.*` root for `expression` approvers; `record` above doubles as
+          // their `trigger.*` snapshot root.
+          variables: nestVariables(variables),
         }, {
           ...SYSTEM_CTX,
           userId: context?.userId,
           organizationId: context?.organizationId,
           tenantId: context?.tenantId,
         } as unknown as SharingExecutionContext);
+
+        // #3447 P2: empty slate + onEmptyApprovers: 'auto_approve' — nobody to
+        // ask, no request row. Complete (don't suspend) straight down the
+        // `approve` edge; `autoApproved` on the output keeps the waved-through
+        // hop distinguishable from a human decision in the run trace.
+        if ('autoApproved' in request) {
+          logger?.info?.('[approvals] approval node auto-approved (empty approver slate)', {
+            node: node.id, run: String(runId),
+          });
+          return {
+            success: true,
+            branchLabel: 'approve',
+            output: { decision: 'approve', autoApproved: true },
+          };
+        }
 
         logger?.info?.('[approvals] approval node suspended run', {
           node: node.id, request: request.id, run: String(runId),

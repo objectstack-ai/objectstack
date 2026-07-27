@@ -12,7 +12,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, isFileIdToken } from '@objectstack/spec/data';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import { IDataDriver, IDataEngine, Logger, createLogger, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
@@ -2143,14 +2143,6 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
-   * Whether a value is an opaque `sys_file` id token — the minted uuid/nanoid
-   * form (letters, digits, `_`, `-`, bounded length), and crucially NOT a URL:
-   * a `https://…` / `/api/…` / `data:…` / `blob:…` file value carries `:`, `/`
-   * or `.` and is left untouched (it is a legacy/external URL, not a reference).
-   */
-  private static readonly FILE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-
-  /**
    * Resolve file-field id references to their expanded `FileValueSchema` form
    * (ADR-0104 D3 wave 2). A `file`/`image`/`avatar`/`video`/`audio` value
    * stored as an opaque `sys_file` id string is enriched, in place, to
@@ -2190,7 +2182,7 @@ export class ObjectQL implements IDataEngine {
     // what keeps a seeded `data:`/CDN image value from firing a bogus lookup.
     const candidateIds: string[] = [];
     const addCandidate = (v: unknown) => {
-      if (typeof v === 'string' && ObjectQL.FILE_ID_RE.test(v)) candidateIds.push(v);
+      if (isFileIdToken(v)) candidateIds.push(v);
     };
     for (const record of records) {
       for (const fieldName of fileFields) {

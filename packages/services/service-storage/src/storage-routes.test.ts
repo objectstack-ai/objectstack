@@ -320,7 +320,7 @@ describe('Storage REST Routes', () => {
       expect(authorizeFileRead).not.toHaveBeenCalled();
     });
 
-    it('never gates a non-attachments file (avatars / field files stay open)', async () => {
+    it('never gates a file with neither an attachments scope nor a field owner', async () => {
       const { server, store: s, authorizeFileRead } = serverWith('deny');
       await commit(s, { id: 'a5', scope: 'user', key: 'user/a5.png' });
       const res = await hit(server, '/api/v1/storage/files/:fileId', 'a5');
@@ -333,6 +333,75 @@ describe('Storage REST Routes', () => {
       await commit(s, { id: 'a6' });
       const res = await hit(server, '/api/v1/storage/files/:fileId/url', 'a6');
       expect(res._status).toBe(200);
+    });
+
+    // ── Field-owned files (ADR-0104 D3 wave 2) ─────────────────────
+    describe('field-owned files', () => {
+      const owned = (id: string, over: any = {}) => ({
+        id,
+        scope: 'user',
+        key: `user/${id}.png`,
+        ref_object: 'product',
+        ref_id: 'p1',
+        ref_field: 'image',
+        ...over,
+      });
+
+      it('gates a field-owned file even though its scope is not attachments', async () => {
+        const { server, store: s, authorizeFileRead } = serverWith('deny');
+        await commit(s, owned('fo1'));
+        const res = await hit(server, '/api/v1/storage/files/:fileId/url', 'fo1');
+        expect(res._status).toBe(403);
+        // Distinct from the attachments code — this file BELONGS to one
+        // record, it is not attached to several.
+        expect(res._json?.code).toBe('FILE_DOWNLOAD_DENIED');
+        expect(authorizeFileRead).toHaveBeenCalledOnce();
+      });
+
+      it('401s an unauthenticated field-owned download', async () => {
+        const { server, store: s } = serverWith('unauthenticated');
+        await commit(s, owned('fo2'));
+        const res = await hit(server, '/api/v1/storage/files/:fileId', 'fo2');
+        expect(res._status).toBe(401);
+        expect(res._json?.code).toBe('AUTH_REQUIRED');
+      });
+
+      it('allows an authorized field-owned download', async () => {
+        const { server, store: s } = serverWith('allow', { downloadTtl: 120 });
+        await commit(s, owned('fo3'));
+        const res = await hit(server, '/api/v1/storage/files/:fileId/url', 'fo3');
+        expect(res._status).toBe(200);
+      });
+
+      it('opts out via acl: public_read (the embedding escape hatch)', async () => {
+        const { server, store: s, authorizeFileRead } = serverWith('deny');
+        await commit(s, owned('fo4', { acl: 'public_read' }));
+        const res = await hit(server, '/api/v1/storage/files/:fileId/url', 'fo4');
+        expect(res._status).toBe(200);
+        expect(authorizeFileRead).not.toHaveBeenCalled();
+      });
+
+      /**
+       * DUAL-MODE REGRESSION. A pre-cutover field holds an inline blob or an
+       * external URL, never a sys_file id — so no legacy file is ever claimed,
+       * `ref_object` stays unset, and this change gates nothing that used to
+       * be open. An unclaimed upload behaves the same way.
+       */
+      it('does not gate an unclaimed file (no ref_object) — legacy fields keep working', async () => {
+        const { server, store: s, authorizeFileRead } = serverWith('deny');
+        await commit(s, { id: 'fo5', scope: 'user', key: 'user/fo5.png' });
+        const res = await hit(server, '/api/v1/storage/files/:fileId', 'fo5');
+        expect(res._status).toBe(302);
+        expect(authorizeFileRead).not.toHaveBeenCalled();
+      });
+
+      it('does not gate a file whose ownership was released', async () => {
+        const { server, store: s, authorizeFileRead } = serverWith('deny');
+        await commit(s, owned('fo6', { ref_object: null, ref_id: null, ref_field: null }));
+        const res = await hit(server, '/api/v1/storage/files/:fileId', 'fo6');
+        expect(res._status).toBe(302);
+        expect(authorizeFileRead).not.toHaveBeenCalled();
+      });
     });
   });
 

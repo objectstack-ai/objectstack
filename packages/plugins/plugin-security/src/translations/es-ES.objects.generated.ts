@@ -253,5 +253,66 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Actualizado el"
       }
     }
+  },
+  sys_user_position: {
+    label: "Puesto de usuario",
+    pluralLabel: "Puestos de usuario",
+    description: "Asigna un puesto (sys_position.name) a un usuario. Gestionado por la plataforma (ADR-0057 D4, ADR-0090 D3).",
+    fields: {
+      id: {
+        label: "ID de asignación",
+        help: "UUID de la asignación usuario-puesto."
+      },
+      user_id: {
+        label: "Usuario",
+        help: "Clave foránea a sys_user."
+      },
+      position: {
+        label: "Puesto",
+        help: "Nombre de máquina del puesto (referencia a sys_position.name)."
+      },
+      business_unit_id: {
+        label: "Unidad de negocio",
+        help: "[Anexo ADR-0090] Ancla de UN a nivel de asignación: dónde se aplica esta asignación de puesto. Ancla de profundidad para readScope/writeScope, límite de administración delegada (D12) y hecho de auditoría. Nulo = sin anclar (heredado/todo el inquilino); los administradores delegados DEBEN anclar las asignaciones dentro de su subárbol."
+      },
+      organization_id: {
+        label: "Organización",
+        help: "Inquilino propietario de esta asignación; nulo = global (entre inquilinos)."
+      },
+      granted_by: {
+        label: "Otorgado por",
+        help: "Usuario que otorgó esta asignación de puesto (registrado por la puerta de administración delegada en escrituras delegadas)."
+      },
+      valid_from: {
+        label: "Válido desde",
+        help: "[ADR-0091 D1] La concesión está inactiva antes de este instante. Nulo = activa de inmediato. Se aplica en modo fail-closed en el momento de resolución (D2), nunca mediante un trabajo en segundo plano."
+      },
+      valid_until: {
+        label: "Válido hasta",
+        help: "[ADR-0091 D1] La concesión está inactiva EN y DESPUÉS de este instante (intervalo semiabierto [from, until), UTC). Nulo = nunca expira. Obligatorio en filas de delegación (D3). Se aplica en el momento de resolución (D2)."
+      },
+      reason: {
+        label: "Motivo",
+        help: "[ADR-0091 D1] Por qué existe esta concesión. Texto libre; OBLIGATORIO en filas de delegación (D3) y de acceso de emergencia (D4)."
+      },
+      delegated_from: {
+        label: "Delegado desde",
+        help: "[ADR-0091 D3] El delegador cuya autoridad porta esta fila (职务代理). Una fila con delegated_from establecido no es delegable ni autorrenovable: las cadenas se cortan en ambos sentidos."
+      },
+      last_certified_at: {
+        label: "Última certificación",
+        help: "[ADR-0091 D5] Cuándo se atestiguó por última vez esta concesión en una revisión de recertificación. Nulo = nunca certificada."
+      },
+      certified_by: {
+        label: "Certificado por",
+        help: "[ADR-0091 D5] Revisor que atestiguó por última vez esta concesión."
+      },
+      created_at: {
+        label: "Creado el"
+      },
+      updated_at: {
+        label: "Actualizado el"
+      }
+    }
   }
 };

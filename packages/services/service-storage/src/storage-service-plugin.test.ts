@@ -197,12 +197,21 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     const ctx = makeCtx();
 
     const hookEvents: string[] = [];
+    const globalHookEvents: string[] = [];
     const middlewares: Array<{ object?: string }> = [];
     ctx.registerService('objectql', {
       registerHook: (event: string, _fn: unknown, opts: any) => {
+        // File-reference ownership (ADR-0104 D3 wave 2) registers GLOBALLY —
+        // any object may declare a file-class field. Everything else is
+        // scoped to sys_attachment.
+        if (opts?.object === undefined) {
+          globalHookEvents.push(event);
+          return;
+        }
         expect(opts?.object).toBe('sys_attachment');
         hookEvents.push(event);
       },
+      getObject: () => undefined,
       registerMiddleware: (_fn: unknown, opts: any) => {
         middlewares.push({ object: opts?.object });
       },
@@ -228,6 +237,16 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
       'beforeDelete',
       'beforeDelete',
       'beforeInsert',
+    ]);
+    // Field-reference ownership: claim/copy on write, release on delete
+    // (file-reference-lifecycle.ts). Registered without an object filter.
+    expect(globalHookEvents.sort()).toEqual([
+      'afterDelete',
+      'afterInsert',
+      'afterUpdate',
+      'beforeDelete',
+      'beforeInsert',
+      'beforeUpdate',
     ]);
     // Two reap guards: sys_file (#2755) + sys_upload_session multipart-abort (#2970).
     expect(guards.map((g) => g.object).sort()).toEqual(['sys_file', 'sys_upload_session']);

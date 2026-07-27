@@ -56,7 +56,6 @@ export default defineStack({
     defaultLocale: 'en',
     supportedLocales: ['en', 'zh-CN', 'ja-JP'],
     fallbackLocale: 'en',
-    fileOrganization: 'per_locale',
   },
 
   // I18n Translation Bundles (en, zh-CN, ja-JP)

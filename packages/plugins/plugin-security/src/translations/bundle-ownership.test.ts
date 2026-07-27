@@ -11,12 +11,12 @@
 // moved/removed object's keys were left behind — remove them from the bundles
 // (or migrate them to the owning package), then keep this list in sync.
 //
-// NB: this package defines more objects (sys_user_position,
-// sys_audience_binding_suggestion) that the extract config deliberately does NOT
-// translate — absent from both the config and the bundles, correctly out of
-// scope. `sys_capability` IS translated (curated strings live in the bundles),
-// so it must stay in the extract config; this guard is what caught it being
-// dropped from that list.
+// NB: this package also defines sys_audience_binding_suggestion, which the
+// extract config deliberately does NOT translate — an engine-owned suggestion
+// queue with no admin UI surface, absent from both the config and the bundles,
+// correctly out of scope. `sys_capability` and `sys_user_position` ARE translated
+// (curated strings live in the bundles), so they must stay in the extract config;
+// this guard is what caught sys_capability being dropped from that list.
 
 import { describe, it, expect } from 'vitest';
 import { enObjects } from './en.objects.generated.js';
@@ -29,6 +29,7 @@ const OWNED_OBJECTS = new Set([
   'sys_permission_set',
   'sys_user_permission_set',
   'sys_position_permission_set',
+  'sys_user_position',
 ]);
 
 describe('objects translation bundle ownership (ADR-0029 D8)', () => {

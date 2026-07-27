@@ -6,6 +6,7 @@ import {
   canonicalApproverType,
   type ApprovalNodeConfig,
 } from '@objectstack/spec/automation';
+import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
 import {
   ADMIN_FULL_ACCESS,
   ORGANIZATION_ADMIN,
@@ -123,6 +124,43 @@ interface OooSubstitution {
   to: string;
   /** The delegator's declared reason, if any. */
   reason: string | null;
+}
+
+/**
+ * The CLOSED set of namespace roots an `expression` approver may reference
+ * (#3447 P2). Three explicit times/sources, no `record`, no bare field names:
+ * `record` means "the record at event time" everywhere else on the platform
+ * (flow conditions: trigger snapshot; hooks: the write payload), so binding it
+ * here — to either time — would silently alias one meaning to the other. The
+ * runtime CEL env treats unknown roots as `dyn` (→ `null` → an empty slate),
+ * so out-of-contract roots MUST be rejected before evaluation; both this
+ * pre-check and the lint rule read the roots via
+ * {@link collectCelRootIdentifiers} so they can never drift.
+ */
+const APPROVER_EXPRESSION_ROOTS = new Set(['current', 'trigger', 'vars']);
+
+/**
+ * Evaluation context an approval node hands to `expression` approvers
+ * (#3447 P2). `current` (the live record) is supplied by openNodeRequest's
+ * re-read; these two carry the other roots.
+ */
+export interface ApproverExpressionContext {
+  /** Submit-time snapshot (the flow's `$record`) — bound as `trigger.*`. */
+  trigger?: Record<string, unknown> | null;
+  /** Flow variables at node entry (nested by dotted key) — bound as `vars.*`. */
+  vars?: Record<string, unknown> | null;
+}
+
+/**
+ * Non-request outcome of {@link ApprovalService.openNodeRequest}: the node
+ * resolved an empty approver slate and its `onEmptyApprovers: 'auto_approve'`
+ * policy waved it through (#3447 P2). No `sys_approval_request` row exists —
+ * nobody was ever asked — so the node must complete down its `approve` edge
+ * instead of suspending.
+ */
+export interface ApprovalNodeAutoOutcome {
+  autoApproved: true;
+  reason: 'empty_approvers';
 }
 
 function uid(prefix: string): string {
@@ -390,7 +428,19 @@ export class ApprovalService implements IApprovalService {
     step: any,
     record?: any,
     organizationId?: string | null,
-    opts?: { now?: number; substitutions?: OooSubstitution[]; groups?: Record<string, string[]> },
+    opts?: {
+      now?: number;
+      substitutions?: OooSubstitution[];
+      groups?: Record<string, string[]>;
+      /** #3447 P2: `trigger`/`vars` roots for `expression` approvers. */
+      exprCtx?: ApproverExpressionContext;
+      /**
+       * #3447 P2 audit collector: what each dynamic spec resolved FROM (the
+       * live field value / the expression's intermediate values), snapshotted
+       * as `__resolvedFrom` so "why these people" stays answerable later.
+       */
+      resolvedFrom?: Record<string, unknown>;
+    },
   ): Promise<string[]> {
     if (!step || !Array.isArray(step.approvers)) return [];
     const now = opts?.now ?? this.clock.now().getTime();
@@ -399,11 +449,34 @@ export class ApprovalService implements IApprovalService {
     for (let idx = 0; idx < specs.length; idx++) {
       const a = specs[idx];
       if (!a) continue;
-      const ids = await this.resolveApproverSpec(a, record, organizationId, now, opts?.substitutions);
-      // per_group (#3266): tag each resolved id with this spec's group. An
-      // approver without an explicit `group` forms its own group keyed by
-      // position, so a plain per-approver list still behaves predictably.
+      // Approvers without an explicit `group` each form their own group keyed
+      // by position (#3266), so a plain per-approver list behaves predictably.
       const groupKey = a.group != null && String(a.group) !== '' ? String(a.group) : `#${idx}`;
+
+      // #3447 P2: `expression` approvers resolve OUTSIDE resolveApproverSpec —
+      // a graph-expanded expression (resolveAs: department/…) must key each
+      // intermediate value as its own per_group group, which the flat string[]
+      // contract of resolveApproverSpec cannot carry.
+      if (canonicalApproverType(String(a.type)) === 'expression') {
+        const resolved = await this.resolveExpressionApprovers(
+          a, record, organizationId, now, opts?.substitutions, opts?.exprCtx,
+        );
+        if (opts?.resolvedFrom) opts.resolvedFrom[`expression#${idx}`] = resolved.raw;
+        for (const entry of resolved.slots) {
+          if (!entry.id) continue;
+          out.push(entry.id);
+          if (opts?.groups) {
+            (opts.groups[entry.id] ??= []).push(entry.subGroup ? `${groupKey}:${entry.subGroup}` : groupKey);
+          }
+        }
+        continue;
+      }
+
+      if (opts?.resolvedFrom && canonicalApproverType(String(a.type)) === 'field' && a.value != null) {
+        opts.resolvedFrom[`field:${a.value}`] = (record as any)?.[a.value] ?? null;
+      }
+      const ids = await this.resolveApproverSpec(a, record, organizationId, now, opts?.substitutions);
+      // per_group (#3266): tag each resolved id with this spec's group.
       for (const u of ids) {
         if (!u) continue;
         out.push(u);
@@ -475,6 +548,134 @@ export class ApprovalService implements IApprovalService {
       }
     } catch { /* fall through */ }
     return [`${a.type}:${a.value}`];
+  }
+
+  /**
+   * Resolve an `expression` approver (#3447 P2): evaluate its CEL source at
+   * node entry against the three explicit roots — `current` (live record),
+   * `trigger` (submit snapshot), `vars` (flow variables) — then expand the
+   * result into people per `resolveAs`.
+   *
+   * Every failure here THROWS (config/parse errors as `VALIDATION_FAILED`,
+   * evaluation faults as `EXPRESSION_FAILED`) so the approval node fails
+   * loudly instead of opening a request routed to nobody — an approver
+   * expression that cannot run is a routing bug, never "condition not met".
+   * Error messages carry the correct spelling because their primary reader is
+   * the AI author fixing the flow on the next validate pass.
+   *
+   * Returns `slots` (approver id + optional per_group sub-key) and `raw` (the
+   * expression's own values, pre-expansion) for the `__resolvedFrom` audit.
+   */
+  private async resolveExpressionApprovers(
+    a: any,
+    liveRecord: any,
+    organizationId: string | null | undefined,
+    now: number,
+    substitutions?: OooSubstitution[],
+    exprCtx?: ApproverExpressionContext,
+  ): Promise<{ slots: Array<{ id: string; subGroup?: string }>; raw: string[] }> {
+    const source = String(a.value ?? '').trim();
+    if (!source) {
+      throw new Error('VALIDATION_FAILED: expression approver has an empty expression');
+    }
+
+    // Closed-root pre-check. The runtime env resolves ANY unknown root as dyn →
+    // null, so `record.x` / a bare field would silently yield an empty slate;
+    // reject it here with the correct spelling instead.
+    const parsed = collectCelRootIdentifiers(source);
+    if (!parsed.ok) {
+      throw new Error(`VALIDATION_FAILED: expression approver does not parse: ${parsed.error} — source: \`${source}\``);
+    }
+    const illegal = parsed.roots.filter(r => !APPROVER_EXPRESSION_ROOTS.has(r));
+    if (illegal.length) {
+      const hint = illegal.includes('record') || illegal.includes('previous')
+        ? `\`record\`/\`previous\` are not bound here — write \`current.<field>\` for the record's live state `
+          + `at node entry, or \`trigger.<field>\` for the submit-time snapshot (\`vars.previous\` carries the pre-update row)`
+        : `did you mean \`current.<field>\` (live record), \`trigger.<field>\` (submit snapshot), or \`vars.<name>\` (flow variable)?`;
+      throw new Error(
+        `VALIDATION_FAILED: expression approver references \`${illegal.join('`, `')}\` — `
+        + `only \`current.*\`, \`trigger.*\` and \`vars.*\` are available; ${hint}. Source: \`${source}\``,
+      );
+    }
+
+    const result = ExpressionEngine.evaluate(
+      { dialect: 'cel', source },
+      { extra: { current: liveRecord ?? {}, trigger: exprCtx?.trigger ?? {}, vars: exprCtx?.vars ?? {} } },
+    );
+    if (!result.ok) {
+      throw new Error(
+        `EXPRESSION_FAILED: expression approver failed to evaluate (${result.error.kind}): `
+        + `${result.error.message} — source: \`${source}\``,
+      );
+    }
+
+    // Normalize to a string list: a user-id/CSV string, an array of ids, or
+    // null/empty (an EMPTY slate — legal, handled by onEmptyApprovers). Any
+    // other shape is a config bug, rejected loudly.
+    const value = result.value as unknown;
+    let raw: string[];
+    if (value == null || value === '') {
+      raw = [];
+    } else if (typeof value === 'string') {
+      raw = csvSplit(value);
+    } else if (Array.isArray(value)) {
+      const bad = value.find(v => v != null && typeof v !== 'string' && typeof v !== 'number');
+      if (bad !== undefined) {
+        throw new Error(
+          `EXPRESSION_FAILED: expression approver must yield ids (string / CSV / string array), `
+          + `got an array containing ${typeof bad} — source: \`${source}\``,
+        );
+      }
+      raw = value.map(v => String(v ?? '').trim()).filter(Boolean);
+    } else {
+      throw new Error(
+        `EXPRESSION_FAILED: expression approver must yield ids (string / CSV / string array), `
+        + `got ${typeof value} — source: \`${source}\``,
+      );
+    }
+
+    // `resolveAs` expansion. `user` (default): each value IS a person —
+    // individually routed, so OOO delegation applies (#1322). Graph kinds
+    // re-expand each value through the same lookups the static types use; a
+    // group still has its other members, so like the static graph types they
+    // are NOT OOO-substituted, and with per_group each intermediate value
+    // forms its own sub-group (one sign-off per returned department). A value
+    // whose expansion is empty keeps a `<kind>:<value>` literal slot — same
+    // unstaffed-target behaviour (and #3424 admin rescue) as the static types.
+    const resolveAs = String(a.resolveAs ?? 'user');
+    if (resolveAs === 'user') {
+      const slots: Array<{ id: string }> = [];
+      for (const id of raw) {
+        for (const routed of await this.applyOooDelegation(id, now, organizationId, substitutions)) {
+          slots.push({ id: routed });
+        }
+      }
+      return { slots, raw };
+    }
+    const slots: Array<{ id: string; subGroup: string }> = [];
+    for (const key of raw) {
+      let users: string[] = [];
+      try {
+        if (resolveAs === 'department') users = await this.expandBusinessUnitUsers(key, organizationId);
+        else if (resolveAs === 'position') users = await this.expandPositionUsers(key, organizationId);
+        else if (resolveAs === 'team') users = await this.expandTeamUsers(key);
+        else {
+          throw new Error(
+            `VALIDATION_FAILED: expression approver has unknown resolveAs '${resolveAs}' — `
+            + `use 'user', 'department', 'position', or 'team'`,
+          );
+        }
+      } catch (err: any) {
+        if (String(err?.message ?? '').startsWith('VALIDATION_FAILED')) throw err;
+        users = [];
+      }
+      if (!users.length) {
+        slots.push({ id: `${resolveAs}:${key}`, subGroup: key });
+        continue;
+      }
+      for (const u of users) slots.push({ id: u, subGroup: key });
+    }
+    return { slots, raw };
   }
 
   /** Flat team — `sys_team` is better-auth's collaboration grouping (no hierarchy). */
@@ -721,6 +922,10 @@ export class ApprovalService implements IApprovalService {
    * Open a pending approval request on behalf of a flow's Approval node. The
    * node config (approvers / behavior / status field) is snapshotted on the row
    * so a decision can be made without any process to resolve against.
+   *
+   * #3447 P2: may instead return an {@link ApprovalNodeAutoOutcome} — no
+   * request opened — when the slate resolves empty and the node's
+   * `onEmptyApprovers` policy is `auto_approve`.
    */
   async openNodeRequest(
     input: {
@@ -737,9 +942,15 @@ export class ApprovalService implements IApprovalService {
       submitterId?: string | null;
       record?: any;
       organizationId?: string | null;
+      /**
+       * #3447 P2: flow variables at node entry (nested by dotted key, as the
+       * engine's CEL conditions see them) — the `vars.*` root for `expression`
+       * approvers. `input.record` doubles as their `trigger.*` root.
+       */
+      variables?: Record<string, unknown> | null;
     },
     context: SharingExecutionContext,
-  ): Promise<ApprovalRequestRow> {
+  ): Promise<ApprovalRequestRow | ApprovalNodeAutoOutcome> {
     if (!input.object) throw new Error('VALIDATION_FAILED: object is required');
     if (!input.recordId) throw new Error('VALIDATION_FAILED: recordId is required');
     if (!input.runId) throw new Error('VALIDATION_FAILED: runId is required');
@@ -766,17 +977,40 @@ export class ApprovalService implements IApprovalService {
     // the trigger snapshot carried in `input.record`. This is the whole fix — an
     // earlier step may have written the field this node routes on.
     const liveRecord = await this.loadLiveRecord(input.object, input.recordId, input.record);
+    const resolvedFrom: Record<string, unknown> = {};
     const approvers = await this.expandApprovers(
-      { approvers: input.config.approvers }, liveRecord, ctxOrg, { now: nowDate.getTime(), substitutions, groups },
+      { approvers: input.config.approvers }, liveRecord, ctxOrg, {
+        now: nowDate.getTime(), substitutions, groups,
+        exprCtx: { trigger: input.record ?? null, vars: input.variables ?? null },
+        resolvedFrom,
+      },
     );
 
-    // #3424: an approval routed to a target with no holders (e.g. an unstaffed
-    // `position`) resolves to only unresolvable `type:value` literals — no
-    // concrete user can act. The request is still opened (a privileged admin can
-    // override it, and legacy 15.x literal slots stay queryable), but warn
-    // loudly so the misconfiguration surfaces instead of silently locking the
-    // record with no obvious cause.
+    // Empty-slate policy (#3447 P2). "Empty" = no CONCRETE person — an
+    // unstaffed position / empty expression result leaves only `type:value`
+    // literal slots, decidable by nobody.
     if (!approvers.some(a => a && !a.includes(':'))) {
+      const emptyPolicy = (input.config as any).onEmptyApprovers ?? 'admin_rescue';
+      if (emptyPolicy === 'fail') {
+        throw new Error(
+          `NO_APPROVERS: approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
+          + `concrete approver and its onEmptyApprovers policy is 'fail'. Check that the approver target(s) `
+          + `are staffed / the routing field or expression yields user ids at node entry.`,
+        );
+      }
+      if (emptyPolicy === 'auto_approve') {
+        this.logger?.warn?.(
+          `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
+          + `concrete approver — auto-approving per onEmptyApprovers: 'auto_approve' (no request opened).`,
+          { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers },
+        );
+        return { autoApproved: true, reason: 'empty_approvers' };
+      }
+      // #3424 admin_rescue (default): the request is still opened (a privileged
+      // admin can override it, and legacy 15.x literal slots stay queryable) —
+      // the only option that neither waves the record through nor kills the
+      // run — but warn loudly so the misconfiguration surfaces instead of
+      // silently locking the record with no obvious cause.
       this.logger?.warn?.(
         `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete approver`
         + ' — the request is decidable only by a privileged admin. Check that the approver target(s) are staffed.',
@@ -792,9 +1026,22 @@ export class ApprovalService implements IApprovalService {
     const configSnapshot: any = { ...input.config };
     if (input.flowLabel) configSnapshot.__flowLabel = input.flowLabel;
     if (input.nodeLabel) configSnapshot.__nodeLabel = input.nodeLabel;
-    // Snapshot the resolved approver→group map for quorum/per_group tallying.
-    if (input.config.behavior === 'quorum' || input.config.behavior === 'per_group') {
+    // Snapshot the resolved approver→group map for EVERY multi-approver
+    // behavior (was quorum/per_group only). #3447 P2 makes this load-bearing
+    // for unanimous too: an `expression` approver can only resolve at OPEN
+    // time (decide has no flow variables to evaluate against), so the tally
+    // must read the open-time slate — which also pins unanimous+field to the
+    // slate the approvers actually saw, instead of re-reading a field that may
+    // have changed again since.
+    if (input.config.behavior && input.config.behavior !== 'first_response') {
       configSnapshot.__approverGroups = groups;
+    }
+    // #3447 P2: snapshot what the dynamic approver sources resolved FROM (the
+    // live routing-field value / the expression's intermediate values) so the
+    // audit trail answers "why these people" — the resolution INPUT, pairing
+    // the resolution RESULT already persisted as `pending_approvers`.
+    if (Object.keys(resolvedFrom).length) {
+      configSnapshot.__resolvedFrom = resolvedFrom;
     }
     // ADR-0044 round numbering: rounds of a revise loop share the run — count
     // this (run, node)'s prior requests; the new one is round N+1. Stamped on
@@ -925,9 +1172,9 @@ export class ApprovalService implements IApprovalService {
    */
   async decideNode(
     requestId: string,
-    input: { decision: 'approve' | 'reject'; actorId: string; comment?: string; attachments?: string[] },
+    input: { decision: 'approve' | 'reject'; actorId: string; comment?: string; attachments?: string[]; outputs?: Record<string, unknown> },
     context: SharingExecutionContext,
-  ): Promise<{ request: ApprovalRequestRow; runId: string | null; nodeId: string | null; finalized: boolean; decision: 'approve' | 'reject' }> {
+  ): Promise<{ request: ApprovalRequestRow; runId: string | null; nodeId: string | null; finalized: boolean; decision: 'approve' | 'reject'; outputs?: Record<string, unknown> }> {
     if (!requestId) throw new Error('VALIDATION_FAILED: requestId is required');
     if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
     if (input.decision !== 'approve' && input.decision !== 'reject') {
@@ -958,6 +1205,41 @@ export class ApprovalService implements IApprovalService {
     const runId: string | null = raw.flow_run_id ?? null;
     const now = this.clock.now().toISOString();
 
+    // #3447 P2: decision outputs — validated BEFORE any write (audit included)
+    // so an out-of-contract payload rejects atomically. The trust model is a
+    // `screen` node's: the AUTHOR declares the keys (`config.decisionOutputs`),
+    // the approver only fills values. A decision carrying undeclared keys is a
+    // caller bug; `decision`/`requestId` are reserved by the resume envelope.
+    const outputKeys = input.outputs ? Object.keys(input.outputs) : [];
+    let acceptedOutputs: Record<string, unknown> | undefined;
+    if (outputKeys.length) {
+      const declared = Array.isArray((config as any).decisionOutputs)
+        ? ((config as any).decisionOutputs as unknown[]).map(String)
+        : [];
+      if (!declared.length) {
+        throw new Error(
+          `VALIDATION_FAILED: this approval node declares no decisionOutputs — outputs are not accepted. `
+          + `Declare the keys on the node config (decisionOutputs: [${outputKeys.map(k => `'${k}'`).join(', ')}]) `
+          + `to let approvers hand them to the flow.`,
+        );
+      }
+      const reserved = outputKeys.filter(k => k === 'decision' || k === 'requestId');
+      if (reserved.length) {
+        throw new Error(
+          `VALIDATION_FAILED: decision output key(s) \`${reserved.join('`, `')}\` are reserved by the resume `
+          + `envelope — pick different names.`,
+        );
+      }
+      const undeclared = outputKeys.filter(k => !declared.includes(k));
+      if (undeclared.length) {
+        throw new Error(
+          `VALIDATION_FAILED: decision output key(s) \`${undeclared.join('`, `')}\` are not declared on this `
+          + `node — declared keys: ${declared.map(k => `'${k}'`).join(', ') || '(none)'}.`,
+        );
+      }
+      acceptedOutputs = { ...input.outputs };
+    }
+
     // Audit the decision first so the quorum/per_group tally below sees it.
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
@@ -982,13 +1264,16 @@ export class ApprovalService implements IApprovalService {
       });
       const approved = new Set<string>((acts ?? []).map((a: any) => String(a.actor_id ?? '')).filter(Boolean));
 
-      // quorum / per_group tally against the OPEN-time snapshot (already
-      // OOO-substituted). unanimous re-resolves for back-compat with requests
-      // opened before the snapshot existed.
+      // Tally against the OPEN-time snapshot (already OOO-substituted) for
+      // every behavior that carries one. Re-resolution survives ONLY as the
+      // back-compat path for requests opened before the snapshot existed —
+      // it cannot ever run for an `expression` approver (#3447 P2: decide has
+      // no flow variables to evaluate against; open time is the only
+      // resolution point), and those always have a snapshot.
       const snapshotGroups = (config as any).__approverGroups as Record<string, string[]> | undefined;
       let original: string[];
       let groupMap: Record<string, string[]>;
-      if (snapshotGroups && (behavior === 'quorum' || behavior === 'per_group')) {
+      if (snapshotGroups) {
         groupMap = snapshotGroups;
         original = Object.keys(snapshotGroups);
       } else {
@@ -1002,6 +1287,16 @@ export class ApprovalService implements IApprovalService {
         const stillPending = original.filter(a => !approved.has(a));
         await this.engine.update('sys_approval_request', {
           id: requestId, pending_approvers: stillPending.join(','), updated_at: now,
+          // #3447 P2: a mid-tally approval may carry outputs too (unanimous /
+          // per_group co-sign, each approver contributing their declared keys)
+          // — accumulate them on the snapshot so the FINALIZING decision hands
+          // the merged set to the flow.
+          ...(acceptedOutputs ? {
+            node_config_json: JSON.stringify({
+              ...config,
+              __decisionOutputs: { ...((config as any).__decisionOutputs ?? {}), ...acceptedOutputs },
+            }),
+          } : {}),
         }, { context: SYSTEM_CTX });
         await this.syncApproverIndex(requestId, stillPending, org, now);
         const fresh = await this.getRequest(requestId, context);
@@ -1010,15 +1305,25 @@ export class ApprovalService implements IApprovalService {
     }
 
     const finalStatus = input.decision === 'approve' ? 'approved' : 'rejected';
+    // #3447 P2: the full accumulated output set — earlier co-sign votes' plus
+    // this finalizing decision's — resumes the run and stays snapshotted for
+    // the audit trail ("what did the approvers hand the flow").
+    const mergedOutputs: Record<string, unknown> | undefined =
+      acceptedOutputs || (config as any).__decisionOutputs
+        ? { ...((config as any).__decisionOutputs ?? {}), ...(acceptedOutputs ?? {}) }
+        : undefined;
     await this.engine.update('sys_approval_request', {
       id: requestId, status: finalStatus, pending_approvers: null, completed_at: now, updated_at: now,
+      ...(mergedOutputs ? {
+        node_config_json: JSON.stringify({ ...config, __decisionOutputs: mergedOutputs }),
+      } : {}),
     }, { context: SYSTEM_CTX });
     await this.syncApproverIndex(requestId, [], org, now);
     if (config.approvalStatusField) {
       await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, finalStatus);
     }
     const fresh = await this.getRequest(requestId, context);
-    return { request: fresh!, runId, nodeId, finalized: true, decision: input.decision };
+    return { request: fresh!, runId, nodeId, finalized: true, decision: input.decision, outputs: mergedOutputs };
   }
 
   /**
@@ -1041,7 +1346,12 @@ export class ApprovalService implements IApprovalService {
       try {
         await this.automation.resume(result.runId, {
           branchLabel,
-          output: { decision: result.decision, requestId },
+          // #3447 P2: accepted decision outputs ride the resume envelope and
+          // land as `<nodeId>.<key>` flow variables — a later approval node's
+          // `expression` approver reads them as `vars.<nodeId>.<key>`.
+          // Reserved keys are spread LAST so no output can shadow them (the
+          // whitelist already rejects them; this is defense in depth).
+          output: { ...(result.outputs ?? {}), decision: result.decision, requestId },
         });
         resumed = true;
       } catch (err: any) {

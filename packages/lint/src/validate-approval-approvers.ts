@@ -21,6 +21,9 @@
  * | approval-approver-type-unknown             | warning  | contract-first (PD #12)    |
  * | approval-escalation-reassign-no-target     | warning  | silent notify degradation  |
  * | approval-approvers-may-resolve-empty       | info     | empty-position dead-end (#3424) |
+ * | approval-expression-invalid                | error/info | #3447 P2 closed-root expressions |
+ * | approval-expression-no-empty-policy        | info     | #3447 P2 empty-slate policy |
+ * | approval-decision-outputs-reserved         | error    | #3447 P2 resume envelope   |
  *
  * The first two are mutually exclusive by construction — a bad *value* wins,
  * because its fix (`position`) differs from the deprecation's fix
@@ -40,12 +43,28 @@ import {
   DEPRECATED_APPROVER_TYPES,
   canonicalApproverType,
 } from '@objectstack/spec/automation';
+import { collectCelRootIdentifiers } from '@objectstack/formula';
 
 export const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER = 'approval-approver-not-membership-tier';
 export const APPROVAL_APPROVER_TYPE_DEPRECATED = 'approval-approver-type-deprecated';
 export const APPROVAL_APPROVER_TYPE_UNKNOWN = 'approval-approver-type-unknown';
 export const APPROVAL_ESCALATION_REASSIGN_NO_TARGET = 'approval-escalation-reassign-no-target';
 export const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY = 'approval-approvers-may-resolve-empty';
+export const APPROVAL_EXPRESSION_INVALID = 'approval-expression-invalid';
+export const APPROVAL_EXPRESSION_NO_EMPTY_POLICY = 'approval-expression-no-empty-policy';
+export const APPROVAL_DECISION_OUTPUTS_RESERVED = 'approval-decision-outputs-reserved';
+
+/**
+ * The CLOSED root set an `expression` approver may reference (#3447 P2) —
+ * `current` (live record at node entry), `trigger` (submit-time snapshot),
+ * `vars` (flow variables). Mirrors APPROVER_EXPRESSION_ROOTS in
+ * plugin-approvals; both sides extract roots via the same
+ * {@link collectCelRootIdentifiers}, so what lints clean is what runs.
+ */
+const EXPRESSION_ROOTS = new Set(['current', 'trigger', 'vars']);
+
+/** Resume-envelope keys a decision output may never use (#3447 P2). */
+const RESERVED_OUTPUT_KEYS = new Set(['decision', 'requestId']);
 
 /**
  * Approver types that route to a GROUP whose membership is runtime data and can
@@ -150,6 +169,74 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
 
         const canonical = canonicalApproverType(type);
 
+        // Expression approvers (#3447 P2): the runtime REJECTS an expression
+        // that doesn't parse or references a root outside `current`/`trigger`/
+        // `vars` (the CEL env would resolve an unknown root as dyn → null → a
+        // silently-empty slate, so the pre-check fails the node loudly). Catch
+        // both at author time — `error`, because the node cannot run.
+        if (canonical === 'expression') {
+          const source = value.trim();
+          if (!source) {
+            findings.push({
+              severity: 'error',
+              rule: APPROVAL_EXPRESSION_INVALID,
+              where,
+              path: `${path}.value`,
+              message: `expression approver has an empty expression — the node fails at entry.`,
+              hint:
+                `Write a CEL expression over current.* (the record's live state at node entry), ` +
+                `trigger.* (the submit-time snapshot) or vars.* (flow variables), ` +
+                `e.g. current.approvers_dynamic or vars.approval_lead.picked_departments.`,
+            });
+          } else {
+            const parsed = collectCelRootIdentifiers(source);
+            if (!parsed.ok) {
+              findings.push({
+                severity: 'error',
+                rule: APPROVAL_EXPRESSION_INVALID,
+                where,
+                path: `${path}.value`,
+                message: `expression approver does not parse as CEL: ${parsed.error}.`,
+                hint:
+                  `Approver expressions are bare CEL (no {…} template braces), e.g. ` +
+                  `current.approvers_dynamic or vars.get_reviewers.record.owner_id.`,
+              });
+            } else {
+              const illegal = parsed.roots.filter((r) => !EXPRESSION_ROOTS.has(r));
+              if (illegal.length) {
+                const wantsRecord = illegal.includes('record') || illegal.includes('previous');
+                findings.push({
+                  severity: 'error',
+                  rule: APPROVAL_EXPRESSION_INVALID,
+                  where,
+                  path: `${path}.value`,
+                  message:
+                    `expression approver references \`${illegal.join('`, `')}\` — only current.*, ` +
+                    `trigger.* and vars.* are available, and the node fails at entry on any other root.`,
+                  hint: wantsRecord
+                    ? `\`record\`/\`previous\` are not bound here (on this platform \`record\` always means ` +
+                      `"the record at event time", which is ambiguous at an approval node). Write ` +
+                      `current.<field> for the live value at node entry, trigger.<field> for the ` +
+                      `submit-time snapshot (vars.previous carries the pre-update row).`
+                    : `Did you mean current.<field> (live record), trigger.<field> (submit snapshot), ` +
+                      `or vars.<name> (flow variable)?`,
+                });
+              }
+            }
+          }
+        } else if (a.resolveAs != null) {
+          // resolveAs only means something on an expression approver; on any
+          // other type it silently does nothing — surface the dead config.
+          findings.push({
+            severity: 'info',
+            rule: APPROVAL_EXPRESSION_INVALID,
+            where,
+            path: `${path}.resolveAs`,
+            message: `resolveAs has no effect on a '${type}' approver — it only applies to type 'expression'.`,
+            hint: `Remove it, or switch this approver to { type: 'expression', value: '<CEL>', resolveAs: '${String(a.resolveAs)}' }.`,
+          });
+        }
+
         // Exactly one of the two below fires. Order matters: a bad VALUE is
         // the more serious (and differently-fixed) defect, so it wins. Telling
         // an author to rewrite { type: 'role', value: 'sales_manager' } as
@@ -214,6 +301,51 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             `Make sure at least one target is always staffed, or add a guaranteed-staffed ` +
             `fallback approver, e.g. { type: 'org_membership_level', value: 'owner' }. A request ` +
             `that still lands empty is recoverable only by a platform/tenant admin override (#3424).`,
+        });
+      }
+
+      // #3447 P2: a node with an `expression` approver resolves people from
+      // runtime data — an empty result is far likelier than for static types
+      // (a mid-flow field nobody wrote yet, an upstream output that came back
+      // empty). Nudge the author to SAY what an empty slate should do rather
+      // than inherit the default silently.
+      const hasExpression = approvers.some(
+        (a) => a && typeof a === 'object' && canonicalApproverType(String((a as AnyRec).type ?? '')) === 'expression',
+      );
+      if (hasExpression && (cfg as AnyRec).onEmptyApprovers == null) {
+        findings.push({
+          severity: 'info',
+          rule: APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
+          where,
+          path: `flows[${fi}].nodes[${ni}].config`,
+          message:
+            `this node resolves approvers from an expression but declares no onEmptyApprovers — ` +
+            `an empty result falls back to the default ('admin_rescue': request opens, only a ` +
+            `privileged admin can act).`,
+          hint:
+            `Declare the empty-slate policy explicitly: onEmptyApprovers: 'admin_rescue' (hold for ` +
+            `admin takeover), 'fail' (fail the node — config bug), or 'auto_approve' (wave through, ` +
+            `output.autoApproved = true).`,
+        });
+      }
+
+      // #3447 P2: `decision`/`requestId` ride the resume envelope; a declared
+      // decision output with either name is rejected at runtime on every
+      // decide — the node can never accept the output it declares.
+      const declaredOutputs = Array.isArray((cfg as AnyRec).decisionOutputs)
+        ? ((cfg as AnyRec).decisionOutputs as unknown[]).map(String)
+        : [];
+      const reserved = declaredOutputs.filter((k) => RESERVED_OUTPUT_KEYS.has(k));
+      if (reserved.length) {
+        findings.push({
+          severity: 'error',
+          rule: APPROVAL_DECISION_OUTPUTS_RESERVED,
+          where,
+          path: `flows[${fi}].nodes[${ni}].config.decisionOutputs`,
+          message:
+            `decisionOutputs declares reserved key(s) \`${reserved.join('`, `')}\` — the resume ` +
+            `envelope owns them, so every decide carrying them is rejected.`,
+          hint: `Rename the output key(s); any name other than 'decision'/'requestId' works.`,
         });
       }
 

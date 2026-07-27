@@ -5,9 +5,7 @@ import {
   LocaleSchema,
   FieldTranslationSchema,
   ObjectTranslationDataSchema,
-  TranslationFileOrganizationSchema,
   TranslationConfigSchema,
-  MessageFormatSchema,
   ObjectTranslationNodeSchema,
   AppTranslationBundleSchema,
   TranslationDiffStatusSchema,
@@ -567,33 +565,11 @@ describe('ObjectTranslationDataSchema', () => {
 });
 
 // ============================================================================
-// TranslationFileOrganizationSchema
-// ============================================================================
-
-describe('TranslationFileOrganizationSchema', () => {
-  it('should accept bundled', () => {
-    expect(TranslationFileOrganizationSchema.parse('bundled')).toBe('bundled');
-  });
-
-  it('should accept per_locale', () => {
-    expect(TranslationFileOrganizationSchema.parse('per_locale')).toBe('per_locale');
-  });
-
-  it('should accept per_namespace', () => {
-    expect(TranslationFileOrganizationSchema.parse('per_namespace')).toBe('per_namespace');
-  });
-
-  it('should reject invalid value', () => {
-    expect(() => TranslationFileOrganizationSchema.parse('flat')).toThrow();
-  });
-});
-
-// ============================================================================
 // TranslationConfigSchema
 // ============================================================================
 
 describe('TranslationConfigSchema', () => {
-  it('should accept minimal config with defaults', () => {
+  it('should accept minimal config', () => {
     const config: TranslationConfig = TranslationConfigSchema.parse({
       defaultLocale: 'en',
       supportedLocales: ['en'],
@@ -601,9 +577,6 @@ describe('TranslationConfigSchema', () => {
     expect(config.defaultLocale).toBe('en');
     expect(config.supportedLocales).toEqual(['en']);
     expect(config.fallbackLocale).toBeUndefined();
-    expect(config.fileOrganization).toBe('per_locale');
-    expect(config.lazyLoad).toBe(false);
-    expect(config.cache).toBe(true);
   });
 
   it('should accept full multi-language config', () => {
@@ -611,22 +584,9 @@ describe('TranslationConfigSchema', () => {
       defaultLocale: 'en',
       supportedLocales: ['en', 'zh-CN', 'ja-JP', 'es-ES'],
       fallbackLocale: 'en',
-      fileOrganization: 'per_namespace',
-      lazyLoad: true,
-      cache: true,
     });
     expect(config.supportedLocales).toHaveLength(4);
-    expect(config.fileOrganization).toBe('per_namespace');
-    expect(config.lazyLoad).toBe(true);
-  });
-
-  it('should accept bundled organization for small projects', () => {
-    const config = TranslationConfigSchema.parse({
-      defaultLocale: 'en',
-      supportedLocales: ['en', 'zh-CN'],
-      fileOrganization: 'bundled',
-    });
-    expect(config.fileOrganization).toBe('bundled');
+    expect(config.fallbackLocale).toBe('en');
   });
 
   it('should reject config without defaultLocale', () => {
@@ -643,38 +603,6 @@ describe('TranslationConfigSchema', () => {
         defaultLocale: 'en',
       }),
     ).toThrow();
-  });
-
-  it('should default messageFormat to simple', () => {
-    const config = TranslationConfigSchema.parse({
-      defaultLocale: 'en',
-      supportedLocales: ['en'],
-    });
-    expect(config.messageFormat).toBe('simple');
-  });
-
-  it('should accept ICU message format config', () => {
-    const config = TranslationConfigSchema.parse({
-      defaultLocale: 'en',
-      supportedLocales: ['en', 'ar-SA'],
-      messageFormat: 'icu',
-    });
-    expect(config.messageFormat).toBe('icu');
-  });
-});
-
-// ============================================================================
-// MessageFormatSchema
-// ============================================================================
-
-describe('MessageFormatSchema', () => {
-  it('should accept icu and simple', () => {
-    expect(MessageFormatSchema.parse('icu')).toBe('icu');
-    expect(MessageFormatSchema.parse('simple')).toBe('simple');
-  });
-
-  it('should reject invalid format', () => {
-    expect(() => MessageFormatSchema.parse('mf2')).toThrow();
   });
 });
 

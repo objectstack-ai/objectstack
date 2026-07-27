@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { celEngine, rewriteTemporalEquality } from './cel-engine';
+import { celEngine, rewriteTemporalEquality, collectCelRootIdentifiers } from './cel-engine';
 import { CEL_STDLIB_FUNCTIONS } from './validate';
 import type { Expression } from '@objectstack/spec';
 
@@ -638,5 +638,50 @@ describe('celEngine', () => {
       expect(celEngine.evaluate(cel('true ? "a" : "b"'), {})).toEqual({ ok: true, value: 'a' });
       expect(celEngine.evaluate(cel('false ? 1 : 2'), {})).toEqual({ ok: true, value: 2 });
     });
+  });
+});
+
+// ── collectCelRootIdentifiers (#3447 P2) ────────────────────────────────────
+//
+// Root extraction for closed-root evaluation sites (approval `expression`
+// approvers). Lint and the runtime pre-check both consume this helper, so its
+// contract IS the contract of what those sites accept.
+
+describe('collectCelRootIdentifiers', () => {
+  const roots = (src: string) => {
+    const r = collectCelRootIdentifiers(src);
+    if (!r.ok) throw new Error(`expected parse ok: ${r.error}`);
+    return r.roots.sort();
+  };
+
+  it('collects distinct namespace roots from member chains', () => {
+    expect(roots('current.approvers_dynamic')).toEqual(['current']);
+    expect(roots('current.a.b.c == trigger.a && vars.step.result')).toEqual(['current', 'trigger', 'vars']);
+  });
+
+  it('reports a bare identifier as a root (the closed-site smoking gun)', () => {
+    expect(roots('approvers_dynamic')).toEqual(['approvers_dynamic']);
+    expect(roots('record.x')).toEqual(['record']);
+  });
+
+  it('never reports member names or function names', () => {
+    expect(roots('size(vars.picked) > 0 ? vars.picked : trigger.fallback')).toEqual(['trigger', 'vars']);
+    expect(roots('current.owner_id.startsWith("u")')).toEqual(['current']);
+  });
+
+  it('walks indexes, lists and nested calls', () => {
+    expect(roots('vars.picked[0] == current.ids[trigger.idx]')).toEqual(['current', 'trigger', 'vars']);
+    expect(roots('[current.a, vars.b]')).toEqual(['current', 'vars']);
+  });
+
+  it('accepts the #3306 null-guard ternary the same way compile does', () => {
+    expect(roots('current.n > 0 ? current.who : null')).toEqual(['current']);
+  });
+
+  it('reports a parse failure instead of an empty root set', () => {
+    const bad = collectCelRootIdentifiers('current..');
+    expect(bad.ok).toBe(false);
+    const empty = collectCelRootIdentifiers('   ');
+    expect(empty.ok).toBe(false);
   });
 });

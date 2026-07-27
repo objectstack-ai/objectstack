@@ -348,53 +348,6 @@ export function defineTranslationBundle(config: z.input<typeof TranslationBundle
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// File Organization Convention
-// ────────────────────────────────────────────────────────────────────────────
-
-/**
- * Translation File Organization Strategy
- *
- * Defines how translation files are organized on disk.
- *
- * - `bundled` — All locales in a single `TranslationBundle` file.
- *   Best for small projects with few objects.
- *   ```
- *   src/translations/
- *     crm.translation.ts        # { en: {...}, "zh-CN": {...} }
- *   ```
- *
- * - `per_locale` — One file per locale containing all namespaces.
- *   Recommended when a single locale file stays under ~500 lines.
- *   ```
- *   src/translations/
- *     en.ts                     # TranslationData for English
- *     zh-CN.ts                  # TranslationData for Chinese
- *   ```
- *
- * - `per_namespace` — One file per namespace (object) per locale.
- *   Recommended for large projects with many objects/languages.
- *   Aligns with Salesforce DX and ServiceNow conventions.
- *   ```
- *   i18n/
- *     en/
- *       account.json            # ObjectTranslationData
- *       contact.json
- *       common.json             # messages + app labels
- *     zh-CN/
- *       account.json
- *       contact.json
- *       common.json
- *   ```
- */
-export const TranslationFileOrganizationSchema = lazySchema(() => z.enum([
-  'bundled',
-  'per_locale',
-  'per_namespace',
-]).describe('Translation file organization strategy'));
-
-export type TranslationFileOrganization = z.infer<typeof TranslationFileOrganizationSchema>;
-
-// ────────────────────────────────────────────────────────────────────────────
 // Translation Configuration
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -403,6 +356,11 @@ export type TranslationFileOrganization = z.infer<typeof TranslationFileOrganiza
  *
  * Defines internationalization settings for the stack.
  *
+ * #3494: the aspirational knobs `fileOrganization`, `messageFormat`, `lazyLoad`
+ * and `cache` were removed — no runtime ever read them (there is no ICU engine;
+ * interpolation is always simple `{variable}` substitution), so authoring them
+ * was a silent no-op (liveness audit #1878/#1893).
+ *
  * @example
  * ```typescript
  * export default defineStack({
@@ -410,27 +368,11 @@ export type TranslationFileOrganization = z.infer<typeof TranslationFileOrganiza
  *     defaultLocale: 'en',
  *     supportedLocales: ['en', 'zh-CN', 'ja-JP'],
  *     fallbackLocale: 'en',
- *     fileOrganization: 'per_locale',
  *   },
  *   translations: [...],
  * });
  * ```
  */
-/**
- * Message format standard used for interpolation, pluralization, and
- * gender-aware translations.
- *
- * - `icu` — ICU MessageFormat (recommended for complex plurals, gender, select).
- *   Strings may contain `{count, plural, one {# item} other {# items}}` patterns.
- * - `simple` — Simple `{variable}` interpolation only (default).
- */
-export const MessageFormatSchema = lazySchema(() => z.enum([
-  'icu',
-  'simple',
-]).describe('Message interpolation format: ICU MessageFormat or simple {variable} replacement'));
-
-export type MessageFormat = z.infer<typeof MessageFormatSchema>;
-
 export const TranslationConfigSchema = lazySchema(() => z.object({
   /** Default locale for the application */
   defaultLocale: LocaleSchema.describe('Default locale (e.g., "en")'),
@@ -438,21 +380,6 @@ export const TranslationConfigSchema = lazySchema(() => z.object({
   supportedLocales: z.array(LocaleSchema).describe('Supported BCP-47 locale codes'),
   /** Fallback locale when translation is not found */
   fallbackLocale: LocaleSchema.optional().describe('Fallback locale code'),
-  /** How translation files are organized on disk */
-  fileOrganization: TranslationFileOrganizationSchema.default('per_locale')
-    .describe('File organization strategy'),
-  /**
-   * Message interpolation format.
-   * When set to `'icu'`, messages and validationMessages are expected to use
-   * ICU MessageFormat syntax (plurals, select, number/date skeletons).
-   * @default 'simple'
-   */
-  messageFormat: MessageFormatSchema.default('simple')
-    .describe("Message interpolation format (ICU MessageFormat or simple). [EXPERIMENTAL — 'icu' not enforced] No ICU MessageFormat engine is wired; messageFormat:'icu' is accepted but interpolation falls back to simple substitution (liveness audit #1878/#1893)."),
-  /** Load translations on demand instead of eagerly */
-  lazyLoad: z.boolean().default(false).describe('Load translations on demand'),
-  /** Cache loaded translations in memory */
-  cache: z.boolean().default(true).describe('Cache loaded translations. [EXPERIMENTAL — not enforced] No runtime consumer reads this cache flag yet (liveness audit #1878/#1893).'),
 }).describe('Internationalization configuration'));
 
 export type TranslationConfig = z.infer<typeof TranslationConfigSchema>;

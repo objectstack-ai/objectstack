@@ -143,8 +143,50 @@ one node, no parallel branches needed:
 A single **rejection** always finalizes the node as `rejected` (one veto), in
 every mode. `minApprovals` is clamped to the resolvable approver count / group
 size, so it can never deadlock. A decision may also carry `attachments` (file
-references) recorded on its audit row — e.g. a signed contract. Weighted voting
-and approval-matrix governance are enterprise, not here.
+references) recorded on its audit row — e.g. a signed contract — and, when the
+node declares `decisionOutputs`, structured `outputs` the flow receives as
+`<nodeId>.<key>` variables (see [Dynamic approvers](#dynamic-approvers-3447)
+below). Weighted voting and approval-matrix governance are enterprise, not here.
+
+## Dynamic approvers (#3447) [#dynamic-approvers-3447]
+
+Two approver kinds bind to **live** data at the moment the node is entered —
+not the submit-time snapshot — so a step can route on data produced after
+submit:
+
+- **`field`** reads the record's live field value at node entry. An earlier
+  step (or an earlier step's approver) can write the routing field mid-flow and
+  the next approval node sees it; a multi-select user field fans out into one
+  approver slot per user.
+- **`expression`** computes the slate with a CEL expression over exactly three
+  roots: **`current.*`** (the record's live state at node entry), **`trigger.*`**
+  (the submit-time snapshot — what a flow condition calls `record`), and
+  **`vars.*`** (flow variables, including node outputs and `vars.previous`).
+  `record` and bare field names are deliberately unavailable — at an approval
+  node "the record" is ambiguous between two times, so the expression must say
+  which one; referencing anything else fails the node loudly at entry rather
+  than resolving a silently-empty slate. The optional
+  `resolveAs: 'user' (default) | 'department' | 'position' | 'team'` re-expands
+  each resolved id through the same graph lookups the static types use — and
+  with `behavior: 'per_group'`, each intermediate value (e.g. each returned
+  department) forms its own sign-off group.
+
+A result may legitimately be **empty** (a present-but-empty field or variable);
+the node-level `onEmptyApprovers` policy decides what that means —
+`admin_rescue` (default: the request opens, a privileged admin takes over via
+Reassign), `fail` (the node fails: an empty slate is a config bug), or
+`auto_approve` (skip the request and continue down `approve` with
+`output.autoApproved = true`; opt-in, since it waves the record through). A
+**missing** key (`vars.never_written`) is a loud error instead — guard
+genuinely-optional inputs with `has(vars.x) ? vars.x : []`.
+
+The "previous approver picks the next step's approvers" loop needs no record
+field at all: declare `decisionOutputs: ['next_reviewers']` on node A, have the
+approver decide with `{ outputs: { next_reviewers: ['u2', 'u3'] } }`, and let
+node B's approver be
+`{ type: 'expression', value: 'vars.<nodeA-id>.next_reviewers' }`. The author
+declares output keys, approvers only fill values; undeclared keys reject the
+decision, and `decision` / `requestId` are reserved.
 
 ## The full lifecycle — submit to field change
 
@@ -165,9 +207,12 @@ Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 
 Approver entries resolve by kind — `position`, `user`, `field`, `manager`,
-`team`, `department`, `queue`, and `org_membership_level`, described in the
-[callout above](#3-the-approval-node), which is the one that silently resolves
-to nobody when it's mistaken for a business hierarchy. An entry that resolves
+`team`, `department`, `queue`, `org_membership_level`, and `expression`
+(described in the [callout above](#3-the-approval-node) and in
+[Dynamic approvers](#dynamic-approvers-3447)); `org_membership_level` is the
+one that silently resolves to nobody when it's mistaken for a business
+hierarchy. `field`, `manager`, and `expression` resolve against the record's
+**live** state at node entry (#3447). An entry that resolves
 to nobody is not an error: the request opens with an empty `pending_approvers`
 and nothing can move it, so the run parks forever.
 
@@ -246,7 +291,7 @@ continuity levers on the same request. All are `POST
 
 | Verb | Route | Who | Effect |
 |:---|:---|:---|:---|
-| `approve` / `reject` | `/approve` `/reject` | pending approver | Records the decision (finalizes per `behavior`). Accepts `comment`, `attachments`. |
+| `approve` / `reject` | `/approve` `/reject` | pending approver | Records the decision (finalizes per `behavior`). Accepts `comment`, `attachments`, and — when the node declares `decisionOutputs` — structured `outputs` handed to the flow as `<nodeId>.<key>` variables. |
 | `reassign` | `/reassign` | pending approver | Hands one slot to another user (`to`); the request stays pending. |
 | `revise` (send back) | `/revise` | pending approver | Ends this round as **`returned`**, unlocks the record for rework (ADR-0044). |
 | `request-info` | `/request-info` | pending approver | Asks the submitter for more info; the request **stays pending**. `comment` required. |

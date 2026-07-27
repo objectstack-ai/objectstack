@@ -49,7 +49,12 @@ export async function handleNotificationRequest(
     }
 
     const m = method.toUpperCase();
-    const subPath = path.replace(/^\/+/, '').replace(/\/+$/, '');
+    // split+filter drops leading/trailing/duplicate slashes without a regex
+    // over request-controlled input (CodeQL js/polynomial-redos) — same
+    // treatment the security domain got for the identical latent pattern.
+    // Surfaced when the extraction (#3507) made this line "changed code":
+    // the legacy `.replace(/\/+$/, '')` had carried the trap since ADR-0030.
+    const subPath = path.split('/').filter(Boolean).join('/');
 
     // GET /notifications — list the user's inbox joined with read-state.
     if (subPath === '' && m === 'GET') {

@@ -127,6 +127,9 @@ export {
   APPROVAL_APPROVER_TYPE_UNKNOWN,
   APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
   APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
+  APPROVAL_EXPRESSION_INVALID,
+  APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
+  APPROVAL_DECISION_OUTPUTS_RESERVED,
 } from './validate-approval-approvers.js';
 export type { ApprovalApproverFinding, ApprovalApproverSeverity } from './validate-approval-approvers.js';
 

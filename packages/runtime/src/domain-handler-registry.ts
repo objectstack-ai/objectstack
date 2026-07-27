@@ -80,10 +80,28 @@ export interface DomainHandlerDeps {
     resolveService(name: string, environmentId?: string): any;
     /** Unscoped service lookup on the current kernel (may return a Promise). */
     getService(name: string): any;
+    /**
+     * Environment-scoped ObjectQL lookup with a registry-shape check
+     * (resolves the `objectql` service and returns it only when it exposes
+     * `.registry`; null otherwise). The data-plane domains (/keys today,
+     * /data /meta when they migrate) depend on this.
+     */
+    getObjectQL(environmentId?: string): Promise<any>;
+    /**
+     * Service lookup on the request's RESOLVED (per-environment) kernel —
+     * NOT the default kernel and NOT the scoped-factory path. Domains whose
+     * data must live in the same store as their service bindings (e.g.
+     * share-links: the token row and the shared record sit next to the
+     * `shareLinks` service's engine) read through this and fall back to
+     * `resolveService` themselves.
+     */
+    getRequestKernelService(name: string): Promise<any>;
     /** Standard success envelope. */
     success(data: any, meta?: any): { status: number; body: any };
     /** Standard error envelope. */
     error(message: string, code?: number, details?: any): { status: number; body: any };
+    /** Standard ROUTE_NOT_FOUND envelope (404 + discovery hint). */
+    routeNotFound(route: string): { status: number; body: any };
 }
 
 /**

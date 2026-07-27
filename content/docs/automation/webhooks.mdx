@@ -514,7 +514,7 @@ Four phases. Each phase delivers visible user value.
 > `system/*` Zod schemas. There is no `system/webhook-delivery.zod.ts` and no
 > `SysWebhookSchema` / `SysWebhookDeliverySchema` /
 > `WebhookSignatureHeaderSchema` / `WebhookEventPayloadSchema`. Instead it
-> reused the existing `WebhookSchema` (and `WebhookReceiverSchema`) in
+> reused the existing `WebhookSchema` in
 > `automation/webhook.zod.ts`, defined `sys_webhook` as an
 > `ObjectSchema.create()` in the plugin, and reused
 > service-messaging's `sys_http_delivery` outbox for deliveries (ADR-0018 M3).
@@ -555,8 +555,9 @@ Four phases. Each phase delivers visible user value.
 ## 16. Non-goals (v1)
 
 - **Inbound webhooks.** Receiving HTTP from third parties is a separate
-  protocol (`WebhookReceiverSchema` already exists). The two systems
-  share no runtime.
+  protocol (the aspirational `WebhookReceiverSchema` was removed unbuilt in
+  #3494 — reintroduce it only alongside a real inbound runtime). The two
+  systems share no runtime.
 - **Webhook chaining / fan-in.** No "if receiver returns a payload,
   emit a new event". Out of scope.
 - **GraphQL subscriptions / WebSocket fan-out.** Different transport,

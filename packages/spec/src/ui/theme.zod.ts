@@ -2,8 +2,6 @@
 
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { TouchTargetConfigSchema } from './touch.zod';
-import { FocusManagementSchema } from './keyboard.zod';
 
 /**
  * Color Palette Schema
@@ -81,26 +79,6 @@ export const TypographySchema = lazySchema(() => z.object({
 }));
 
 /**
- * Spacing Units Schema
- * Defines spacing scale for margins, padding, gaps.
- */
-export const SpacingSchema = lazySchema(() => z.object({
-  '0': z.string().optional().describe('0 spacing (0)'),
-  '1': z.string().optional().describe('Spacing unit 1 (e.g., 0.25rem)'),
-  '2': z.string().optional().describe('Spacing unit 2 (e.g., 0.5rem)'),
-  '3': z.string().optional().describe('Spacing unit 3 (e.g., 0.75rem)'),
-  '4': z.string().optional().describe('Spacing unit 4 (e.g., 1rem)'),
-  '5': z.string().optional().describe('Spacing unit 5 (e.g., 1.25rem)'),
-  '6': z.string().optional().describe('Spacing unit 6 (e.g., 1.5rem)'),
-  '8': z.string().optional().describe('Spacing unit 8 (e.g., 2rem)'),
-  '10': z.string().optional().describe('Spacing unit 10 (e.g., 2.5rem)'),
-  '12': z.string().optional().describe('Spacing unit 12 (e.g., 3rem)'),
-  '16': z.string().optional().describe('Spacing unit 16 (e.g., 4rem)'),
-  '20': z.string().optional().describe('Spacing unit 20 (e.g., 5rem)'),
-  '24': z.string().optional().describe('Spacing unit 24 (e.g., 6rem)'),
-}));
-
-/**
  * Border Radius Schema
  * Rounded corners configuration.
  */
@@ -128,19 +106,6 @@ export const ShadowSchema = lazySchema(() => z.object({
   xl: z.string().optional().describe('Extra large shadow'),
   '2xl': z.string().optional().describe('2X large shadow'),
   inner: z.string().optional().describe('Inner shadow (inset)'),
-}));
-
-/**
- * Breakpoints Schema
- * Responsive design breakpoints.
- */
-export const BreakpointsSchema = lazySchema(() => z.object({
-  xs: z.string().optional().describe('Extra small breakpoint (e.g., 480px)'),
-  sm: z.string().optional().describe('Small breakpoint (e.g., 640px)'),
-  md: z.string().optional().describe('Medium breakpoint (e.g., 768px)'),
-  lg: z.string().optional().describe('Large breakpoint (e.g., 1024px)'),
-  xl: z.string().optional().describe('Extra large breakpoint (e.g., 1280px)'),
-  '2xl': z.string().optional().describe('2X large breakpoint (e.g., 1536px)'),
 }));
 
 /**
@@ -187,26 +152,13 @@ export const ThemeModeSchema = lazySchema(() => z.enum(['light', 'dark', 'auto']
 export const ThemeMode = ThemeModeSchema;
 
 /**
- * Density Mode Schema
- * Controls spacing and sizing for different use cases.
- */
-export const DensityModeSchema = lazySchema(() => z.enum(['compact', 'regular', 'spacious']));
-
-/** @deprecated Use DensityModeSchema instead */
-export const DensityMode = DensityModeSchema;
-
-/**
- * WCAG Contrast Level Schema
- * Web Content Accessibility Guidelines color contrast requirements.
- */
-export const WcagContrastLevelSchema = lazySchema(() => z.enum(['AA', 'AAA']));
-
-/** @deprecated Use WcagContrastLevelSchema instead */
-export const WcagContrastLevel = WcagContrastLevelSchema;
-
-/**
  * Theme Configuration Schema
  * Complete theme definition for brand customization.
+ *
+ * #3494: the aspirational props `spacing`, `breakpoints`, `logo`, `density`,
+ * `wcagContrast`, `rtl`, `touchTarget` and `keyboardNavigation` were removed —
+ * the theme engine (objectui generateThemeVars) never consumed them, so
+ * authoring them was a silent no-op (liveness audit #1878/#1893).
  */
 export const ThemeSchema = lazySchema(() => z.object({
   name: SnakeCaseIdentifierSchema.describe('Unique theme identifier (snake_case)'),
@@ -221,19 +173,13 @@ export const ThemeSchema = lazySchema(() => z.object({
   
   /** Typography */
   typography: TypographySchema.optional().describe('Typography settings'),
-  
-  /** Spacing */
-  spacing: SpacingSchema.optional().describe('Spacing scale. [EXPERIMENTAL — not enforced] generateThemeVars does not emit spacing tokens yet (liveness audit #1878/#1893).'),
-  
+
   /** Border radius */
   borderRadius: BorderRadiusSchema.optional().describe('Border radius scale'),
   
   /** Shadows */
   shadows: ShadowSchema.optional().describe('Box shadow effects'),
-  
-  /** Breakpoints */
-  breakpoints: BreakpointsSchema.optional().describe('Responsive breakpoints. [EXPERIMENTAL — not enforced] generateThemeVars does not emit breakpoint tokens yet (liveness audit #1878/#1893).'),
-  
+
   /** Animation */
   animation: AnimationSchema.optional().describe('Animation settings'),
   
@@ -242,31 +188,9 @@ export const ThemeSchema = lazySchema(() => z.object({
   
   /** Custom CSS variables */
   customVars: z.record(z.string(), z.string()).optional().describe('Custom CSS variables (key-value pairs)'),
-  
-  /** Logo */
-  logo: z.object({
-    light: z.string().optional().describe('Logo URL for light mode'),
-    dark: z.string().optional().describe('Logo URL for dark mode'),
-    favicon: z.string().optional().describe('Favicon URL'),
-  }).optional().describe('Logo assets'),
-  
+
   /** Extends another theme */
   extends: z.string().optional().describe('Base theme to extend from'),
-
-  /** Display density mode */
-  density: DensityModeSchema.optional().describe('Display density: compact, regular, or spacious. [EXPERIMENTAL — not enforced] The theme engine does not consume theme-level density yet; view-level densityMode is a separate live setting (liveness audit #1878/#1893).'),
-
-  /** WCAG contrast level requirement */
-  wcagContrast: WcagContrastLevelSchema.optional().describe('WCAG color contrast level (AA or AAA)'),
-
-  /** Right-to-left language support */
-  rtl: z.boolean().optional().describe('Enable right-to-left layout direction. [EXPERIMENTAL — not enforced] No renderer reads theme.rtl yet (liveness audit #1878/#1893).'),
-
-  /** Touch target accessibility configuration */
-  touchTarget: TouchTargetConfigSchema.optional().describe('Touch target sizing defaults. [EXPERIMENTAL — not enforced] No renderer consumes touchTarget yet (liveness audit #1878/#1893).'),
-
-  /** Keyboard navigation and focus management */
-  keyboardNavigation: FocusManagementSchema.optional().describe('Keyboard focus management settings'),
 }));
 
 export type Theme = z.infer<typeof ThemeSchema>;
@@ -283,12 +207,8 @@ export function defineTheme(config: z.input<typeof ThemeSchema>): Theme {
 }
 export type ColorPalette = z.infer<typeof ColorPaletteSchema>;
 export type Typography = z.infer<typeof TypographySchema>;
-export type Spacing = z.infer<typeof SpacingSchema>;
 export type BorderRadius = z.infer<typeof BorderRadiusSchema>;
 export type Shadow = z.infer<typeof ShadowSchema>;
-export type Breakpoints = z.infer<typeof BreakpointsSchema>;
 export type Animation = z.infer<typeof AnimationSchema>;
 export type ZIndex = z.infer<typeof ZIndexSchema>;
 export type ThemeMode = z.infer<typeof ThemeModeSchema>;
-export type DensityMode = z.infer<typeof DensityModeSchema>;
-export type WcagContrastLevel = z.infer<typeof WcagContrastLevelSchema>;

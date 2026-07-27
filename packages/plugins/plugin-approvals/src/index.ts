@@ -20,6 +20,9 @@ export {
   type ApprovalClock,
   type ApprovalServiceOptions,
   type ApprovalResumeSurface,
+  // #3447 P2 — expression approvers + empty-slate auto-approve outcome.
+  type ApproverExpressionContext,
+  type ApprovalNodeAutoOutcome,
 } from './approval-service.js';
 export {
   ApprovalsServicePlugin,

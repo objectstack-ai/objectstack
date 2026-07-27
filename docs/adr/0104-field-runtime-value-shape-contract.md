@@ -1,8 +1,9 @@
 # ADR-0104: Field runtime value-shape as a first-class contract — spec-owned value schemas, typed action handlers, file-as-reference
 
 - **Status**: Accepted (2026-07-22) — staged per D4. D1 landed (#3429), D2
-  landed (#3432); D3 refined into two waves by the 2026-07-24 addendum below.
-  Strict-default flip of D1/D2 tracked in #3438.
+  landed (#3432); D3 refined into two waves by the 2026-07-24 addendum below,
+  and wave 2's ownership model settled by the 2026-07-27 addendum.
+  Strict-default flip of D1/D2 tracked in #3438; wave 2 sequence in #3459.
 - **Date**: 2026-07-22
 - **Issue**: design follow-up generalizing #3405 / #3406 (inline lookup param
   silently stripped); relates #3407 (silently dropped writes), #1878 / #1891
@@ -481,12 +482,119 @@ rode v16/v17) to amortise the migration cost:
   under AI authoring this is *desirable*: it disambiguates "managed file" from
   "external link" so the AI cannot conflate them.
 
+## Addendum (2026-07-27) — wave 2's ownership model: field references are exclusive
+
+The 2026-07-24 addendum left one thing open, and it turned out to be the
+decision the rest of wave 2 hangs off: **when a field holds a `sys_file` id,
+what is the relationship between file and record?** Implementing the reference
+rows forced the answer.
+
+### Two lineages, and why we take one of each
+
+Enterprise platforms solve file lifecycle two ways:
+
+- **Junction-for-everything** (Salesforce `ContentDocumentLink`, SAP GOS): every
+  reference is a row in one polymorphic link table; a file is shared, and dies
+  when the last link does. Sharing is the feature.
+- **Column-as-reference** (Dataverse File/Image columns): the column *is* the
+  reference; lifecycle follows the row; no sharing.
+
+ObjectStack already runs the first for its attachments surface (`sys_attachment`
++ the ADR-0057 tombstone/reap), and that is right — attaching one document to
+several records is exactly what that surface is for, and the user performs the
+attach explicitly.
+
+**Field references take the second model.** A `product.image` is a *property of
+that product*, and properties are copied, not shared. Concretely: at most one
+`(object, record, field)` slot owns a given `sys_file`; the owner is recorded on
+`sys_file.ref_object` / `ref_id` / `ref_field`; writing an already-owned id into
+a second slot **copies the bytes into a fresh `sys_file`** rather than sharing
+the row.
+
+### Why exclusivity, decided on failure modes rather than elegance
+
+Sharing is more storage-efficient and matches the better-known lineage. We take
+exclusivity anyway, because under AI-authored metadata the two models fail
+differently and the difference is not symmetric.
+
+The naive generated clone — `insert({...src, id: undefined})` — spreads a file
+id into a second record. Every model must let that code *work*; rejecting it
+would force AI authors to learn a bespoke file API, which is precisely the kind
+of special case that produces mistakes. So the real question is what happens
+*after* it works:
+
+| | worst case | recoverable? |
+|---|---|---|
+| Shared + reference-counted | file's readable-by set becomes the **union of every referrer's** — copying a private record's id into a world-readable record silently widens access; and a single miscount authorises an **irreversible byte delete** | no |
+| Exclusive + copy-on-claim | duplicated bytes | yes — it costs money, not data |
+
+Read authorisation for attachment files already derives from the parent record.
+Under sharing, "the parent record" is ambiguous, and the safe reading of an
+ambiguous ACL is the union — which means generated code can leak data while
+containing no visible error. Exclusivity removes the ambiguity by construction:
+one file, one parent, one ACL.
+
+The storage cost this concedes belongs at a different layer anyway: **dedup the
+bytes, not the rows.** Content-hash dedup behind the storage adapter (`etag` is
+already carried on `sys_file`) recovers the savings while leaving every row its
+own owner and its own ACL — the lifecycle never has to reason about sharing.
+A genuinely shared library asset should be modelled as its own object with a
+lookup, or attached through the attachments surface; steering AI authors there
+is the correct outcome, not a limitation.
+
+### The safety principle this buys: observed transition, never inferred absence
+
+> A file becomes collectable only because the platform **observed its one owner
+> let go** — never because a scan **inferred** that nobody references it.
+
+The existing attachment path already obeys this (the tombstone is set by the
+hook that watched the join row die, not by a sweep that found none). Exclusive
+ownership extends the same discipline to fields, and eliminates counting
+entirely: with no count, no miscount can authorise a delete. It also defuses the
+cold-start hazard a new ledger would otherwise carry — a freshly-built reference
+table knows nothing of references that predate it, so trusting its zeroes would
+mass-delete history.
+
+### Consequent resequencing of wave 2
+
+The 2026-07-24 plan packaged the write cutover and the GC enable together, and
+placed the backfill after. That order is wrong: **a ledger may not authorise
+deletion until it has been backfilled and reconciled.** Wave 2 therefore
+sequences as:
+
+1. **Ownership bookkeeping** — `ref_*` columns, claim/release on the write path,
+   copy-on-claim. Records ownership; deletes nothing. Dormant until a field
+   actually holds an id, so it lands safely ahead of the cutover.
+2. **Governed download** — read authorisation derived from the one owning
+   record; anonymous capability URL demoted to opt-in `acl: 'public_read'`.
+3. **Write cutover** (protocol major) — stored form narrows to an id;
+   `accept` / `maxSize` enforced. Still deletes nothing.
+4. **Backfill** — `os migrate` converts legacy inline blobs to `sys_file` rows
+   and claims them; external URLs reported, not converted.
+5. **Reconciliation soak** — `os storage verify-references` compares what
+   records actually hold against recorded ownership, reporting *over-claim*
+   (safe: file retained longer than needed), *under-claim* (**blocking**: a held
+   file with no owner would be treated as free), and unclaimed orphans.
+6. **GC enable** — *gated, irreversible*. Relaxing the `scope === 'attachments'`
+   tombstone guardrail and extending the `sys_file` reap guard's sweep-time
+   re-verify to the ownership columns **must ship in the same change**. Half of
+   it is worse than none: tombstoning released files while the guard still
+   re-verifies only `sys_attachment` — always empty for a field file — turns
+   every release into a guaranteed byte delete rather than a risky one.
+
+R4's acceptance gate is now executable rather than aspirational: step 6 may not
+merge until step 5 reports **zero under-claims for ≥7 consecutive days** on real
+tenant data. R5 (public-posture inventory) and R6 (sub-key read scan) stand.
+
 ### Why this stays inside ADR-0104 rather than a new ADR
 
 D3 is already this ADR's third phase; the two-wave split and the
 enforcement-point principle are a **refinement of the D4 rollout**, not a new
 decision, so they live here. Wave 2's migration mechanics (dual-read window,
 `os migrate` backfill, the R4/R5/R6 gates) are specified in §D3 above and need
-no separate record. Should wave 2's implementation surface a genuinely new
-decision (e.g. the reference-table shape, or a chunked-migration protocol), that
-specific choice — not file-as-reference as a whole — would earn its own ADR.
+no separate record. Wave 2's implementation did surface one genuinely new
+decision — the exclusive-ownership model — and it is recorded as the 2026-07-27
+addendum above rather than a separate ADR, because it settles *how* D3's
+already-accepted "field values point into `sys_file`" behaves rather than
+revisiting whether to do it. A future choice that stands on its own (say, a
+chunked-migration protocol, or byte-layer content dedup) would earn its own ADR.

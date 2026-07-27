@@ -253,5 +253,66 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "更新时间"
       }
     }
+  },
+  sys_user_position: {
+    label: "用户岗位",
+    pluralLabel: "用户岗位",
+    description: "将岗位（sys_position.name）分配给用户。由平台管理（ADR-0057 D4、ADR-0090 D3）。",
+    fields: {
+      id: {
+        label: "分配 ID",
+        help: "用户-岗位分配的 UUID。"
+      },
+      user_id: {
+        label: "用户",
+        help: "指向 sys_user 的外键。"
+      },
+      position: {
+        label: "岗位",
+        help: "岗位机器名（引用 sys_position.name）。"
+      },
+      business_unit_id: {
+        label: "业务单元",
+        help: "[ADR-0090 附录] 分配级 BU 锚点：此岗位分配适用的范围。作为 readScope/writeScope 的深度锚点、委派管理边界（D12）和审计事实。为空 = 未锚定（遗留/租户级）；委派管理员必须将分配锚定在其子树内。"
+      },
+      organization_id: {
+        label: "组织",
+        help: "拥有此分配的租户；为空 = 全局（跨租户）。"
+      },
+      granted_by: {
+        label: "授予人",
+        help: "授予此岗位分配的用户（委派写入时由委派管理门标记）。"
+      },
+      valid_from: {
+        label: "生效时间",
+        help: "[ADR-0091 D1] 在此时刻之前授予无效。为空 = 立即生效。在解析时以 fail-closed 方式强制执行（D2）——绝不依赖后台任务。"
+      },
+      valid_until: {
+        label: "失效时间",
+        help: "[ADR-0091 D1] 在此时刻及之后授予无效（半开区间 [from, until)，UTC）。为空 = 永不过期。委派行必填（D3）。在解析时强制执行（D2）。"
+      },
+      reason: {
+        label: "原因",
+        help: "[ADR-0091 D1] 此授予存在的原因。自由文本；委派（D3）和紧急破窗（D4）行必填。"
+      },
+      delegated_from: {
+        label: "委派自",
+        help: "[ADR-0091 D3] 此行所承载权限的委派人（职务代理）。设置了 delegated_from 的行本身不可再委派、不可自续期——双向切断链条。"
+      },
+      last_certified_at: {
+        label: "最近认证时间",
+        help: "[ADR-0091 D5] 此授予在重新认证复核中最近一次被认证的时间。为空 = 从未认证。"
+      },
+      certified_by: {
+        label: "认证人",
+        help: "[ADR-0091 D5] 最近一次认证此授予的复核人。"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      }
+    }
   }
 };

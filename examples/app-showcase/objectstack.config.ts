@@ -172,9 +172,6 @@ export default defineStack({
     defaultLocale: 'en',
     supportedLocales: ['en', 'zh-CN'],
     fallbackLocale: 'en',
-    messageFormat: 'simple',
-    lazyLoad: false,
-    cache: true,
   },
 
   // Data

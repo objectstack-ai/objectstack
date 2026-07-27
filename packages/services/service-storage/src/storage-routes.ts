@@ -27,17 +27,20 @@ export interface StorageRoutesOptions {
    * is a tracked follow-up needing cookie sessions or signed links).
    */
   resolveSession?: (req: IHttpRequest) => Promise<{ userId?: string } | null | undefined>;
-  /**
-   * Authorize a DOWNLOAD of an `attachments`-scope file (#2970 item 2). When
-   * wired, the download endpoints (`/files/:fileId` and `/files/:fileId/url`)
-   * consult this for `scope==='attachments'`, non-`public_read` files only:
+   /**
+   * Authorize a DOWNLOAD of a parent-governed file (#2970 item 2, extended by
+   * ADR-0104 D3 wave 2). When wired, the download endpoints
+   * (`/files/:fileId` and `/files/:fileId/url`) consult this for
+   * `scope==='attachments'` files AND for field-owned files (`ref_object` set),
+   * excluding `public_read` ones:
    *   - `unauthenticated` → 401 (no session)
-   *   - `deny` → 403 (session, but cannot read a parent record the file is
-   *     attached to and is not the owner)
+   *   - `deny` → 403 (session, but cannot read the parent record the file
+   *     belongs to / is attached to, and is not the owner)
    *   - `allow` → a short-lived signed URL is issued
-   * Non-attachments files (field files, avatars, org logos) keep the stable
-   * anonymous capability URL — they are embedded in `<img src>` which cannot
-   * carry a bearer token, and are out of scope for the attachments leak.
+   * A file with neither an attachments scope nor a field owner — an unclaimed
+   * upload, an org logo — keeps the stable anonymous capability URL, as does
+   * any file explicitly marked `acl: 'public_read'` (the opt-in for genuinely
+   * public embedding, since `<img src>` cannot carry a bearer token).
    * When absent (bare kernels, tests), all downloads stay open (back-compat).
    */
   authorizeFileRead?: (file: FileRecord, req: IHttpRequest) => Promise<FileReadVerdict>;
@@ -80,9 +83,20 @@ export function registerStorageRoutes(
   const sessionTtl = opts.sessionTtl ?? 86400;
   const downloadTtl = opts.downloadTtl ?? 300;
 
-  // ── Download authorization gate (#2970 item 2) ───────────────────────
-  // Only `attachments`-scope, non-public files are gated; everything else
-  // keeps the stable anonymous capability URL (image/avatar embedding).
+  // ── Download authorization gate (#2970 item 2, ADR-0104 D3 wave 2) ───
+  // Two kinds of file are gated, both deriving access from a PARENT record:
+  //   - `attachments`-scope files, via their sys_attachment join rows;
+  //   - field-owned files, via the single record whose field owns them
+  //     (`ref_object`/`ref_id`, ADR-0104 D3 wave 2).
+  // `acl: 'public_read'` opts a file back out to the stable anonymous
+  // capability URL — needed for genuinely public embedding (`<img src>`
+  // cannot carry a bearer token), and now an explicit declaration rather
+  // than the silent default it used to be for every field file.
+  //
+  // Dual-mode safe: a legacy field holds an inline blob or an external URL,
+  // never a `sys_file` id, so no legacy file has `ref_object` set and none of
+  // them start being gated by this change.
+  //
   // Returns the signed-URL TTL to use, or `false` if a response was already
   // sent (401/403) and the handler must stop.
   const authorizeDownload = async (
@@ -90,7 +104,9 @@ export function registerStorageRoutes(
     req: IHttpRequest,
     res: IHttpResponse,
   ): Promise<number | false> => {
-    if (file.scope !== 'attachments' || file.acl === 'public_read' || !opts.authorizeFileRead) {
+    const fieldOwned = !!file.ref_object && file.ref_id != null && file.ref_id !== '';
+    const gated = file.scope === 'attachments' || fieldOwned;
+    if (!gated || file.acl === 'public_read' || !opts.authorizeFileRead) {
       return presignedTtl;
     }
     let verdict: FileReadVerdict;
@@ -104,10 +120,17 @@ export function registerStorageRoutes(
       return false;
     }
     if (verdict === 'deny') {
-      res.status(403).json({
-        error: 'You do not have access to a record this file is attached to',
-        code: 'ATTACHMENT_DOWNLOAD_DENIED',
-      });
+      res.status(403).json(
+        fieldOwned
+          ? {
+              error: 'You do not have access to the record this file belongs to',
+              code: 'FILE_DOWNLOAD_DENIED',
+            }
+          : {
+              error: 'You do not have access to a record this file is attached to',
+              code: 'ATTACHMENT_DOWNLOAD_DENIED',
+            },
+      );
       return false;
     }
     return downloadTtl;
