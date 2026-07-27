@@ -318,6 +318,121 @@ describe('Record shares namespace (#3587 gap closure)', () => {
     });
 });
 
+describe('Sharing rules namespace (#3587 gap closure)', () => {
+    it('shares.rules.list pins GET /sharing/rules with filters', async () => {
+        const { client, fetchMock } = createMockClient({ data: [{ name: 'team_leads' }] });
+        const rows = await client.shares.rules.list({ object: 'lead', activeOnly: true });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/sharing/rules?object=lead&activeOnly=true',
+        );
+        expect(rows).toEqual([{ name: 'team_leads' }]);
+    });
+
+    it('shares.rules.save pins POST /sharing/rules', async () => {
+        const { client, fetchMock } = createMockClient({ name: 'team_leads' });
+        await client.shares.rules.save({ name: 'team_leads', object: 'lead', accessLevel: 'read' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/sharing/rules');
+        expect(init.method).toBe('POST');
+    });
+
+    it('shares.rules.get / delete / evaluate pin the :idOrName routes', async () => {
+        const { client, fetchMock } = createMockClient({ name: 'team_leads' });
+        await client.shares.rules.get('team_leads');
+        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/sharing/rules/team_leads');
+        await client.shares.rules.evaluate('team_leads');
+        expect(String(fetchMock.mock.calls[1][0])).toBe('http://localhost:3000/api/v1/sharing/rules/team_leads/evaluate');
+        expect(fetchMock.mock.calls[1][1].method).toBe('POST');
+
+        const del = createMockClient(undefined, 204);
+        del.fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', json: async () => { throw new Error('no body'); }, headers: new Headers() });
+        const out = await del.client.shares.rules.delete('team_leads');
+        expect(String(del.fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/sharing/rules/team_leads');
+        expect(out).toEqual({ deleted: true });
+    });
+});
+
+describe('Security explain & global search (#3587 gap closure)', () => {
+    it('security.explain pins POST /security/explain with the request body', async () => {
+        const { client, fetchMock } = createMockClient({ allowed: true });
+        await client.security.explain({ object: 'lead', operation: 'update', userId: 'u1', recordId: 'r1' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/security/explain');
+        expect(init.method).toBe('POST');
+        expect(JSON.parse(init.body)).toEqual({ object: 'lead', operation: 'update', userId: 'u1', recordId: 'r1' });
+    });
+
+    it('search pins GET /search with q/objects/limit/perObject', async () => {
+        const { client, fetchMock } = createMockClient({ results: [] });
+        await client.search('acme', { objects: ['lead', 'account'], limit: 20, perObject: 5 });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/search?q=acme&objects=lead%2Caccount&limit=20&perObject=5',
+        );
+    });
+});
+
+describe('Data actions, email, dataset query, external datasources (#3587 gap closure)', () => {
+    it('data.clone pins POST /data/:object/:id/clone and nests overrides', async () => {
+        const { client, fetchMock } = createMockClient({ id: 'new1' });
+        await client.data.clone('lead', 'rec1', { name: 'Copy of Acme' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/data/lead/rec1/clone');
+        expect(init.method).toBe('POST');
+        expect(JSON.parse(init.body)).toEqual({ overrides: { name: 'Copy of Acme' } });
+    });
+
+    it('data.export pins GET /data/:object/export and returns the raw Response', async () => {
+        const { client, fetchMock } = createMockClient({});
+        const res = await client.data.export('lead', { format: 'xlsx', limit: 100, filter: { status: 'open' }, orderby: 'name:asc', header: false });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/data/lead/export?format=xlsx&limit=100&filter=%7B%22status%22%3A%22open%22%7D&orderby=name%3Aasc&header=false',
+        );
+        // A file stream, not a JSON envelope — the raw Response comes back.
+        expect(typeof (res as any).json).toBe('function');
+    });
+
+    it('email.send pins POST /email/send', async () => {
+        const { client, fetchMock } = createMockClient({ status: 'sent', id: 'm1' });
+        await client.email.send({ to: 'a@example.com', subject: 'Hello', text: 'hi' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/email/send');
+        expect(init.method).toBe('POST');
+    });
+
+    it('analytics.queryDataset pins POST /analytics/dataset/query', async () => {
+        const { client, fetchMock } = createMockClient({ rows: [] });
+        await client.analytics.queryDataset({ datasetName: 'sales', selection: { measures: ['amount_sum'] } });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/analytics/dataset/query');
+        expect(JSON.parse(init.body)).toEqual({ datasetName: 'sales', selection: { measures: ['amount_sum'] } });
+    });
+
+    it('datasources.external.* pin the five federation-admin routes', async () => {
+        const { client, fetchMock } = createMockClient({ tables: [] });
+        await client.datasources.external.listTables('pg_main', { schema: 'public' });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/datasources/pg_main/external/tables?schema=public',
+        );
+        await client.datasources.external.draft('pg_main', 'customers');
+        expect(String(fetchMock.mock.calls[1][0])).toBe(
+            'http://localhost:3000/api/v1/datasources/pg_main/external/tables/customers/draft',
+        );
+        await client.datasources.external.import('pg_main', 'customers', { namespace: 'crm' });
+        expect(String(fetchMock.mock.calls[2][0])).toBe(
+            'http://localhost:3000/api/v1/datasources/pg_main/external/tables/customers/import',
+        );
+        await client.datasources.external.refreshCatalog('pg_main');
+        expect(String(fetchMock.mock.calls[3][0])).toBe(
+            'http://localhost:3000/api/v1/datasources/pg_main/external/refresh-catalog',
+        );
+        await client.datasources.external.validate('pg_main');
+        expect(String(fetchMock.mock.calls[4][0])).toBe(
+            'http://localhost:3000/api/v1/datasources/pg_main/external/validate',
+        );
+        for (let i = 1; i <= 4; i++) expect(fetchMock.mock.calls[i][1].method).toBe('POST');
+    });
+});
+
 describe('Approvals namespace (ADR-0019)', () => {
     it('should list approval requests with filters', async () => {
         const { client, fetchMock } = createMockClient({

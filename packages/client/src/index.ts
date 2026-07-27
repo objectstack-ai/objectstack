@@ -674,7 +674,117 @@ export class ObjectStackClient {
             body: JSON.stringify(payload)
          });
          return res.json();
+    },
+    /**
+     * ADR-0021 semantic-layer dataset query — the REST dialect
+     * (`POST /analytics/dataset/query`), distinct from `query`'s dispatcher
+     * dialect. Provide `dataset` (inline definition, Studio preview) or
+     * `datasetName` (saved), plus `selection.measures`; `previewDrafts`
+     * runs over draft-overlaid definitions (ADR-0037 P3). (#3587 gap closure)
+     */
+    queryDataset: async (payload: {
+        dataset?: any;
+        datasetName?: string;
+        selection: { measures: string[]; [k: string]: any };
+        previewDrafts?: boolean;
+    }) => {
+        const route = this.getRoute('analytics');
+        const res = await this.fetch(`${this.baseUrl}${route}/dataset/query`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+        return res.json();
     }
+  };
+
+  /**
+   * Transactional email (M11.B1) — `IEmailService` behind the REST surface.
+   * 501s cleanly on deployments without an email provider. (#3587 gap closure)
+   */
+  email = {
+    /**
+     * Send a message. Returns the service outcome verbatim — branch on
+     * `status` (`sent` / `queued` / `failed`); the route answers 200 for all
+     * three so failures carry their diagnostic body. `sentBy` defaults
+     * server-side to the authenticated user.
+     */
+    send: async (message: {
+        to: string | Array<string | { name?: string; address: string }>;
+        subject: string;
+        text?: string;
+        html?: string;
+        from?: any;
+        cc?: any;
+        bcc?: any;
+        replyTo?: any;
+        sentBy?: string;
+        [k: string]: any;
+    }): Promise<any> => {
+        const res = await this.fetch(`${this.baseUrl}/api/v1/email/send`, {
+            method: 'POST',
+            body: JSON.stringify(message),
+        });
+        return this.unwrapResponse<any>(res);
+    },
+  };
+
+  /**
+   * External-datasource federation admin (ADR-0015 Addendum) — the
+   * direct-mount routes `@objectstack/rest` registers for browsing a remote
+   * catalog and importing tables as federated objects. 503
+   * [external_service_unavailable] without the `external-datasource`
+   * service. (#3587 gap closure)
+   */
+  datasources = {
+    external: {
+        /** List remote tables on a datasource, optionally by `schema`. */
+        listTables: async (name: string, opts?: { schema?: string }): Promise<any> => {
+            const qs = opts?.schema ? `?schema=${encodeURIComponent(opts.schema)}` : '';
+            const res = await this.fetch(
+                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/tables${qs}`,
+            );
+            return this.unwrapResponse<any>(res);
+        },
+
+        /** Generate an Object draft (structured + `*.object.ts` source) from a remote table. */
+        draft: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<any> => {
+            const res = await this.fetch(
+                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/draft`,
+                { method: 'POST', body: JSON.stringify(opts ?? {}) },
+            );
+            return this.unwrapResponse<any>(res);
+        },
+
+        /**
+         * Import a remote table as a live federated object ("Import as
+         * Object"). 400 [external_import_error] when refused.
+         */
+        import: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<any> => {
+            const res = await this.fetch(
+                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/import`,
+                { method: 'POST', body: JSON.stringify(opts ?? {}) },
+            );
+            return this.unwrapResponse<any>(res);
+        },
+
+        /** Refresh and return the cached remote-catalog snapshot. */
+        refreshCatalog: async (name: string): Promise<any> => {
+            const res = await this.fetch(
+                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/refresh-catalog`,
+                { method: 'POST', body: JSON.stringify({}) },
+            );
+            return this.unwrapResponse<any>(res);
+        },
+
+        /** Validate this datasource's federated objects against the remote schema. */
+        validate: async (name: string): Promise<any> => {
+            const res = await this.fetch(
+                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/validate`,
+                { method: 'POST', body: JSON.stringify({}) },
+            );
+            return this.unwrapResponse<any>(res);
+        },
+    },
   };
 
   /**
@@ -2801,6 +2911,27 @@ export class ObjectStackClient {
    * `security` is not in `ApiRoutesSchema`.
    */
   security = {
+      /**
+       * ADR-0090 D6 access explanation: why a principal can (or cannot)
+       * perform `operation` on `object` — the same code paths enforcement
+       * runs, so the report is explained by construction. Explaining ANOTHER
+       * user requires `manage_users` (403 otherwise); `recordId` narrows to
+       * one concrete row (ADR-0095). Sent via the POST transport; the GET
+       * query form is the same contract. (#3587 gap closure)
+       */
+      explain: async (request: {
+          object: string;
+          operation?: 'read' | 'create' | 'update' | 'delete' | 'transfer' | 'restore' | 'purge';
+          userId?: string;
+          recordId?: string;
+      }): Promise<any> => {
+          const res = await this.fetch(`${this.baseUrl}/api/v1/security/explain`, {
+              method: 'POST',
+              body: JSON.stringify(request),
+          });
+          return this.unwrapResponse<any>(res);
+      },
+
       suggestedBindings: {
           /** List suggestions, optionally by `status` / `packageId` (reconciles first). */
           list: async (opts?: { status?: string; packageId?: string }): Promise<any> => {
@@ -3074,6 +3205,85 @@ export class ObjectStackClient {
         if (res.status === 204) return { deleted: true };
         return this.unwrapResponse<{ deleted: boolean }>(res);
     },
+
+    /**
+     * Tenant-wide sharing RULES (M10.17) — criteria-based grants that
+     * materialise into per-record shares. Top-of-surface admin routes
+     * (`/api/v1/sharing/rules`), distinct from the per-record grants above.
+     */
+    rules: {
+        /** List sharing rules, optionally by object / active-only. */
+        list: async (opts?: { object?: string; activeOnly?: boolean }): Promise<any[]> => {
+            const params = new URLSearchParams();
+            if (opts?.object) params.set('object', opts.object);
+            if (opts?.activeOnly !== undefined) params.set('activeOnly', String(opts.activeOnly));
+            const qs = params.toString();
+            const res = await this.fetch(`${this.baseUrl}/api/v1/sharing/rules${qs ? `?${qs}` : ''}`);
+            const body = await this.unwrapResponse<{ data?: any[] } | any[]>(res);
+            return Array.isArray(body) ? body : (body?.data ?? []);
+        },
+
+        /** Create or upsert a sharing rule. 400 [VALIDATION_FAILED] on a bad definition. */
+        save: async (rule: {
+            name: string;
+            object: string;
+            criteria?: any;
+            recipientType?: string;
+            recipientId?: string;
+            accessLevel?: string;
+            label?: string;
+            description?: string;
+            active?: boolean;
+        }): Promise<any> => {
+            const res = await this.fetch(`${this.baseUrl}/api/v1/sharing/rules`, {
+                method: 'POST',
+                body: JSON.stringify(rule),
+            });
+            return this.unwrapResponse<any>(res);
+        },
+
+        /** Get a sharing rule by id or name. 404 [RULE_NOT_FOUND] when absent. */
+        get: async (idOrName: string): Promise<any> => {
+            const res = await this.fetch(`${this.baseUrl}/api/v1/sharing/rules/${encodeURIComponent(idOrName)}`);
+            return this.unwrapResponse<any>(res);
+        },
+
+        /** Delete a sharing rule; its materialised grants cascade. */
+        delete: async (idOrName: string): Promise<{ deleted: boolean }> => {
+            const res = await this.fetch(`${this.baseUrl}/api/v1/sharing/rules/${encodeURIComponent(idOrName)}`, {
+                method: 'DELETE',
+            });
+            if (res.status === 204) return { deleted: true };
+            return this.unwrapResponse<{ deleted: boolean }>(res);
+        },
+
+        /** Re-evaluate a rule against current data and reconcile its grants. */
+        evaluate: async (idOrName: string): Promise<any> => {
+            const res = await this.fetch(`${this.baseUrl}/api/v1/sharing/rules/${encodeURIComponent(idOrName)}/evaluate`, {
+                method: 'POST',
+                body: JSON.stringify({}),
+            });
+            return this.unwrapResponse<any>(res);
+        },
+    },
+  };
+
+  /**
+   * Global cross-object search (M10.5): one query across every searchable
+   * object the caller can read. 501s on kernels without `searchAll`.
+   * (#3587 gap closure)
+   */
+  search = async (
+      q: string,
+      opts?: { objects?: string[]; limit?: number; perObject?: number },
+  ): Promise<any> => {
+      const params = new URLSearchParams();
+      params.set('q', q);
+      if (opts?.objects?.length) params.set('objects', opts.objects.join(','));
+      if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+      if (opts?.perObject !== undefined) params.set('perObject', String(opts.perObject));
+      const res = await this.fetch(`${this.baseUrl}/api/v1/search?${params.toString()}`);
+      return this.unwrapResponse<any>(res);
   };
 
   /**
@@ -3642,6 +3852,52 @@ export class ObjectStackClient {
              body: JSON.stringify(request)
         });
         return this.unwrapResponse<BatchUpdateResponse>(res);
+    },
+
+    /**
+     * Duplicate a record (gated by the object's `enable.clone` capability).
+     * `overrides` are applied on top of the copied values — e.g. a new name
+     * or a cleared unique field. (#3587 gap closure)
+     */
+    clone: async (object: string, id: string, overrides?: Record<string, any>): Promise<any> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/clone`,
+            { method: 'POST', body: JSON.stringify(overrides ? { overrides } : {}) },
+        );
+        return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * Streaming export (M10.9): CSV / JSON / XLSX file download. Returns the
+     * raw `Response` — the body is a file stream (`Content-Disposition`
+     * attachment), not a JSON envelope; call `.blob()` / `.text()` yourself.
+     * `filter` is JSON-encoded into the query; `orderby` accepts the
+     * `field:dir,field2:dir` shorthand or an object. (#3587 gap closure)
+     */
+    export: async (
+        object: string,
+        opts?: {
+            format?: 'csv' | 'json' | 'xlsx';
+            limit?: number;
+            filter?: any;
+            orderby?: string | Record<string, 'asc' | 'desc'>;
+            header?: boolean;
+        },
+    ): Promise<Response> => {
+        const route = this.getRoute('data');
+        const params = new URLSearchParams();
+        if (opts?.format) params.set('format', opts.format);
+        if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+        if (opts?.filter !== undefined) {
+            params.set('filter', typeof opts.filter === 'string' ? opts.filter : JSON.stringify(opts.filter));
+        }
+        if (opts?.orderby !== undefined) {
+            params.set('orderby', typeof opts.orderby === 'string' ? opts.orderby : JSON.stringify(opts.orderby));
+        }
+        if (opts?.header !== undefined) params.set('header', String(opts.header));
+        const qs = params.toString();
+        return this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}/export${qs ? `?${qs}` : ''}`);
     }
   };
 
