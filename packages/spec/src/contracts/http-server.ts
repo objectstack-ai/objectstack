@@ -66,6 +66,24 @@ export interface IHttpResponse {
      * @param value - Header value (string or array of strings for multi-value headers)
      */
     header(name: string, value: string | string[]): IHttpResponse;
+
+    /**
+     * Stream a chunk to the client without ending the response (SSE / chunked
+     * transfer). CONTRACT (#3607, ADR-0076 OQ#10): consumers that emit
+     * streaming results (the dispatcher's `type: 'stream'` result for AI
+     * routes, SSE endpoints) feature-detect this member and fall back to
+     * buffered `send()` when absent. Implementations that provide `write`
+     * MUST also provide `end`, MUST flush headers on first write, and MUST
+     * NOT buffer chunks until `end`. Cross-adapter behavior is locked by
+     * `@objectstack/http-conformance` (SSE assertions).
+     */
+    write?(chunk: string | Uint8Array): void | Promise<void>;
+
+    /**
+     * End a streaming response started with {@link write}. Required whenever
+     * `write` is provided — see the streaming contract on `write`.
+     */
+    end?(): void | Promise<void>;
 }
 
 /**
@@ -87,9 +105,21 @@ export type Middleware = (
 
 /**
  * IHttpServer - HTTP Server capability interface
- * 
+ *
  * Defines the contract for HTTP server implementations.
  * Concrete implementations (Express, Fastify, Hono) should implement this interface.
+ *
+ * ## Unmatched-request semantics (CONTRACT, #3607 / ADR-0076 OQ#10)
+ *
+ * Validated identically across adapters by `@objectstack/http-conformance`
+ * (packages/qa/http-conformance) — new adapters MUST pass that suite:
+ *
+ * - A request whose PATH matches no registered route answers **404** with the
+ *   shared not-found error body (the `errors.zod` envelope), never an
+ *   adapter-native error page.
+ * - A request whose path matches a route but whose METHOD does not answers
+ *   **405** and MUST include an `Allow` header listing the methods registered
+ *   for that path.
  */
 export interface IHttpServer {
     /**
@@ -146,4 +176,14 @@ export interface IHttpServer {
      * @returns Promise that resolves when server is stopped
      */
     close?(): Promise<void>;
+
+    /**
+     * The port the server is actually bound to. CONTRACT (#3607, ADR-0076
+     * OQ#10): after `listen()` resolves, implementations that provide this
+     * member MUST return the real bound port — in particular when `listen(0)`
+     * requested an ephemeral port (test harnesses and the conformance suite
+     * depend on this to address the server). Before `listen()` the return
+     * value is unspecified.
+     */
+    getPort?(): number;
 }

@@ -112,6 +112,9 @@ describe('NodeHttpServer (live socket)', () => {
         expect((await res.json()).error).toBe('No response from handler');
     });
 
+    // Locks the formal streaming contract on `IHttpResponse.write`/`end`
+    // (spec/src/contracts/http-server.ts, #3607): headers flush on first
+    // write, chunks are not buffered until end.
     it('streams SSE via the res.write/res.end extension', async () => {
         const res = await fetch(`${base}/sse`);
         expect(res.status).toBe(200);
