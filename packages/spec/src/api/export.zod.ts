@@ -320,7 +320,7 @@ export const ImportRequestSchema = lazySchema(() => z.object({
   runAutomations: z.boolean().default(false)
     .describe('Fire triggers/hooks for each imported row (off by default for bulk)'),
   treatAsHistorical: z.boolean().default(false)
-    .describe('Import as established historical facts: skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479). Off by default so a normal import still walks the FSM.'),
+    .describe('Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479); and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them (#3493). Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped (#3556).'),
   trimWhitespace: z.boolean().default(true)
     .describe('Trim leading/trailing whitespace from string cells'),
   nullValues: z.array(z.string()).optional()

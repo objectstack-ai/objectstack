@@ -82,7 +82,7 @@ const result = CreateExportJobRequest.parse(data);
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | insert / update / upsert semantics |
 | **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
 | **runAutomations** | `boolean` | ✅ | Fire triggers/hooks for each imported row (off by default for bulk) |
-| **treatAsHistorical** | `boolean` | ✅ | Import as established historical facts: skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479). Off by default so a normal import still walks the FSM. |
+| **treatAsHistorical** | `boolean` | ✅ | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479); and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them (#3493). Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped (#3556). |
 | **trimWhitespace** | `boolean` | ✅ | Trim leading/trailing whitespace from string cells |
 | **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
 | **createMissingOptions** | `boolean` | ✅ | Keep unmatched select values instead of failing the row |
@@ -371,7 +371,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | ✅ | insert / update / upsert semantics |
 | **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
 | **runAutomations** | `boolean` | ✅ | Fire triggers/hooks for each imported row (off by default for bulk) |
-| **treatAsHistorical** | `boolean` | ✅ | Import as established historical facts: skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479). Off by default so a normal import still walks the FSM. |
+| **treatAsHistorical** | `boolean` | ✅ | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479); and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them (#3493). Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped (#3556). |
 | **trimWhitespace** | `boolean` | ✅ | Trim leading/trailing whitespace from string cells |
 | **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
 | **createMissingOptions** | `boolean` | ✅ | Keep unmatched select values instead of failing the row |
