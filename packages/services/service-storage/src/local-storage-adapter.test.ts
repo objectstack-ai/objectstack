@@ -151,6 +151,21 @@ describe('LocalStorageAdapter', () => {
       expect(desc.downloadUrl).toContain('/_local/raw/');
       expect(desc.expiresIn).toBe(60);
     });
+
+    it('carries filename + content-type into the download token (so the browser saves the real name)', async () => {
+      await createTempDir();
+      await adapter.upload('attachments/abc.pdf', Buffer.from('%PDF-'));
+      const desc = await adapter.getPresignedDownload!('attachments/abc.pdf', 60, {
+        filename: 'signed-contract.pdf',
+        contentType: 'application/pdf',
+        disposition: 'inline',
+      });
+      const token = desc.downloadUrl.split('/_local/raw/')[1];
+      const payload = adapter.verifyToken(token, 'get');
+      expect(payload.n).toBe('signed-contract.pdf');
+      expect(payload.ct).toBe('application/pdf');
+      expect(payload.d).toBe('inline');
+    });
   });
 
   // =========================================================================

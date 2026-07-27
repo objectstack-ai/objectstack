@@ -1,0 +1,111 @@
+---
+title: Context Tokens
+description: Context Tokens protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Context Tokens — the declarative placeholders that resolve against the
+
+**caller's session** (who am I, which org am I in) rather than the clock.
+
+# Why this lives in `spec`
+
+These are the sibling vocabulary to `\{date-macros\}`. Filter values in
+
+dashboards, views, reports and pages travel as JSON, so a user-scoped
+
+slice cannot call `currentUser().id` inline — it writes a placeholder:
+
+\{ owner_id: '\{current_user_id\}' \}
+
+[\{ field: 'owner', operator: 'equals', value: '\{current_user_id\}' \}]
+
+Like date macros, the placeholders are expanded **client-side** by
+
+`resolveContextTokens()` in `@object-ui/core` immediately before the
+
+filter is handed to the data source. The data engine only ever sees
+
+concrete ids, never `\{tokens\}`.
+
+# Presentation scope, NOT a security boundary
+
+This is the single most important thing to understand about these
+
+tokens. `\{current_user_id\}` scopes what a surface *shows*; it does not
+
+decide what a caller is *allowed* to read. Enforcement is RLS, which
+
+uses a different and genuinely server-side vocabulary rooted at
+
+`current_user` (`owner_id = current_user.id`, compiled by
+
+`@objectstack/plugin-security`'s RLS compiler).
+
+The two look alike and are easy to confuse, so keep them straight:
+
+| | `\{current_user_id\}` | `current_user.id` |
+
+|---|---|---|
+
+| Where | filter values (JSON) | RLS `using` expressions |
+
+| Resolved | client-side, before the query | server-side, during the query |
+
+| Purpose | presentation scope | access enforcement |
+
+| Bypassable | yes — it's just a filter | no |
+
+Never reach for a context token to keep a user away from data. Removing
+
+a `\{current_user_id\}` filter widens a *view*; it must never widen
+
+*access*.
+
+# Where the tokens are honoured
+
+Filter values on every surface that resolves placeholders — object list
+
+views, dashboard widgets, reports, SDUI page components. Navigation
+
+(`recordId` / `params`) additionally resolves `AppContextSelector` ids
+
+such as `\{active_package\}`; those are nav-only and are NOT valid inside
+
+filter values, because filters are not evaluated with the sidebar's
+
+selector state.
+
+# Out of scope
+
+- `current_user.*` RLS expressions — see `@objectstack/plugin-security`.
+
+- `\{date-macros\}` — the clock-based sibling; see `./date-macros.zod.ts`.
+
+- `titleFormat` field interpolation (`\{user_id\}` etc.) — that substitutes
+
+*record fields*, an unrelated mechanism that happens to share braces.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/context-tokens.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { ContextToken, ContextTokenPlaceholder } from '@objectstack/spec/data';
+import type { ContextToken, ContextTokenPlaceholder } from '@objectstack/spec/data';
+
+// Validate data
+const result = ContextToken.parse(data);
+```
+
+---
+
+
+---
+
+
+---
+

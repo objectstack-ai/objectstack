@@ -13,6 +13,7 @@ import { validateListViewMode } from '@objectstack/lint';
 import { validateViewContainers } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateDashboardActionRefs } from '@objectstack/lint';
+import { validateFilterTokens } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
@@ -248,6 +249,36 @@ export default class Validate extends Command {
           console.log(chalk.yellow(`  ⚠ ${w.where}: ${w.message}`));
           console.log(chalk.dim(`      ${w.hint}`));
         }
+      }
+
+      // 3a-ter. Filter placeholder resolvability (#3574) — a filter value like
+      //     `{current_user}` resolves in no vocabulary, reaches the data engine
+      //     as a literal, matches nothing, and the surface renders empty with
+      //     no error anywhere. Silent-zero is indistinguishable from a genuine
+      //     zero, so it survives human review; and an AI author reads the 0 as
+      //     a successful query. Caught here because authoring time is the only
+      //     place the diagnostic can still reach the author.
+      if (!flags.json) printStep('Checking filter placeholders (#3574)...');
+      const filterTokenFindings = validateFilterTokens(result.data as Record<string, unknown>);
+      const filterTokenErrors = filterTokenFindings.filter((f) => f.severity === 'error');
+      if (filterTokenErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({
+            valid: false,
+            errors: filterTokenErrors,
+            warnings: [...widgetWarnings, ...actionRefWarnings],
+            duration: timer.elapsed(),
+          }, null, 2));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Filter placeholder check failed (${filterTokenErrors.length} issue${filterTokenErrors.length > 1 ? 's' : ''})`);
+        for (const f of filterTokenErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
       }
 
       // 3b. SDUI scoped-styling correctness (ADR-0065) — a styled node's

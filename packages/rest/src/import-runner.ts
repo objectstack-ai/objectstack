@@ -144,9 +144,60 @@ function extractRecordId(rec: any): string | undefined {
   return id != null ? String(id) : undefined;
 }
 
+/** Does this text begin with a SQL statement? (leaked driver query builder output) */
+function looksLikeSql(text: string): boolean {
+  return /^\s*(insert|update|delete|select|with|replace)\s/i.test(text);
+}
+
+/** Strip a `table.column` (or quoted) constraint target down to a bare column name. */
+function bareColumn(raw: string): string {
+  const col = raw.trim().replace(/[`"']/g, '');
+  const dot = col.lastIndexOf('.');
+  return dot >= 0 ? col.slice(dot + 1) : col;
+}
+
+/**
+ * Turn a raw write error into a message safe to hand back to the importer.
+ *
+ * Driver / query-builder errors (knex et al.) embed the *entire* failing SQL
+ * statement in `err.message` — e.g. ``insert into `sys_user` (...) values
+ * (...) - UNIQUE constraint failed: sys_user.phone_number``. Surfacing that
+ * verbatim is both unreadable and an information disclosure of the schema
+ * (framework#3566). This maps the common constraint failures to human wording
+ * and, as a backstop, never lets a raw SQL statement escape to the client.
+ */
+export function sanitizeRowError(raw: unknown): string {
+  const msg = typeof raw === 'string' ? raw.trim() : '';
+  if (!msg) return 'Row failed';
+
+  // UNIQUE — surface the offending column (it maps to a user-facing import
+  // column, so naming it is helpful, not a schema leak).
+  const unique =
+    /unique constraint failed:\s*([^\s,)]+)/i.exec(msg) ??          // sqlite
+    /duplicate entry .* for key '([^']+)'/i.exec(msg) ??            // mysql
+    /duplicate key value violates unique constraint.*?[Kk]ey \(([^)]+)\)/is.exec(msg); // postgres
+  if (unique) return `A record with this ${bareColumn(unique[1])} already exists.`;
+
+  // NOT NULL — a required value is missing.
+  const notNull = /not null constraint failed:\s*([^\s,)]+)/i.exec(msg);
+  if (notNull) return `${bareColumn(notNull[1])} is required.`;
+
+  // Backstop: anything that still reads as a SQL statement must not reach the
+  // client. Prefer the driver's trailing reason (after `... - <reason>`) when
+  // it is itself not SQL; otherwise fall back to a generic message.
+  if (looksLikeSql(msg)) {
+    const sep = msg.lastIndexOf(' - ');
+    const reason = sep >= 0 ? msg.slice(sep + 3).trim() : '';
+    if (reason && !looksLikeSql(reason)) return reason.slice(0, 300);
+    return 'The database rejected this row (a value may be invalid or already in use).';
+  }
+
+  return msg.slice(0, 300);
+}
+
 function toFailedResult(rowNo: number, err: unknown): ImportRowResult {
   const code = (err as any)?.code ?? 'IMPORT_ROW_FAILED';
-  const message = typeof (err as any)?.message === 'string' ? (err as any).message.slice(0, 300) : 'Row failed';
+  const message = sanitizeRowError((err as any)?.message);
   return { row: rowNo, ok: false, action: 'failed', error: message, code };
 }
 

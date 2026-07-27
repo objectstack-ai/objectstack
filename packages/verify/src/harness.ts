@@ -81,6 +81,10 @@ export interface BootOptions {
    * `collectRLSPolicies`). This exercises the org-scoped isolation real apps
    * rely on, rather than the single-tenant default where every tenant policy is
    * stripped and a member sees every row. Default `false`.
+   *
+   * Also REQUESTS the `isolated` tenancy posture (ADR-0105 D1) for the boot,
+   * unless the caller already set `OS_TENANCY_POSTURE` — mounting the plugin
+   * entitles a walled posture but no longer activates one by itself.
    */
   multiTenant?: boolean;
   /**
@@ -116,6 +120,25 @@ export async function bootStack(
   opts: BootOptions = {},
 ): Promise<VerifyStack> {
   process.env.NODE_ENV = 'development';
+
+  // [ADR-0105 D1] `multiTenant: true` REQUESTS the hard organization wall —
+  // posture `isolated`, what `OS_MULTI_ORG_ENABLED=true` historically meant.
+  // Since #3559 a walled posture is an explicit operator request resolved from
+  // env when AuthPlugin registers the `tenancy` service; mounting the
+  // enterprise plugin only ENTITLES it. Without the request the fixture
+  // silently boots `single` — no wall, default-org write stamping — and every
+  // multi-org proof asserts against the wrong posture. Must be set BEFORE
+  // AuthPlugin snapshots the requested posture; an explicit caller-provided
+  // OS_TENANCY_POSTURE wins; restored on stop() (and on a failed multi-tenant
+  // boot) so later single-tenant boots in the same worker are unaffected.
+  const prevTenancyPosture = process.env.OS_TENANCY_POSTURE;
+  const requestIsolatedPosture = !!opts.multiTenant && !prevTenancyPosture;
+  if (requestIsolatedPosture) process.env.OS_TENANCY_POSTURE = 'isolated';
+  const restoreTenancyPosture = () => {
+    if (!requestIsolatedPosture) return;
+    if (prevTenancyPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+    else process.env.OS_TENANCY_POSTURE = prevTenancyPosture;
+  };
 
   const kernel = new ObjectKernel();
 
@@ -181,6 +204,7 @@ export async function bootStack(
     try {
       mod = await import(/* webpackIgnore: true */ organizationsPkg);
     } catch (e) {
+      restoreTenancyPosture();
       throw new Error(
         'verify: multiTenant=true requires the enterprise @objectstack/organizations package (migrated from plugin-org-scoping, ADR-0081 D2). ' +
           `Install/link it in this workspace to run multi-org fixtures. (${(e as Error).message})`,
@@ -309,6 +333,7 @@ export async function bootStack(
     } catch {
       /* best-effort */
     }
+    restoreTenancyPosture();
   };
 
   return { kernel, api, raw, signIn, signUp, apiAs, stop };

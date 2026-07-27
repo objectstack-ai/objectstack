@@ -18,6 +18,24 @@
         "file:/tmp/showcase-dogfood-3777/data.db"
       ],
       "port": 3777
+    },
+    {
+      "name": "pr3505-attach-3477",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "-C",
+        "/home/user/objectstack-pr3505/examples/app-showcase",
+        "exec",
+        "objectstack",
+        "dev",
+        "--ui",
+        "--seed-admin",
+        "-p",
+        "3477",
+        "-d",
+        "file:/tmp/pr3505-attach/data.db"
+      ],
+      "port": 3477
     }
   ]
 }

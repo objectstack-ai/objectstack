@@ -580,14 +580,25 @@ export class ObjectStackClient {
       });
       return res.json();
     },
-    meta: async (cube: string) => {
+    /**
+     * Cube metadata listing. Pass `cube` to filter to a single cube
+     * (`?cube=` — [#3584] the dispatcher shape; the old `/meta/:cube` path
+     * segment was served by nothing and 404ed everywhere).
+     */
+    meta: async (cube?: string) => {
         const route = this.getRoute('analytics');
-        const res = await this.fetch(`${this.baseUrl}${route}/meta/${cube}`);
+        const qs = cube ? `?cube=${encodeURIComponent(cube)}` : '';
+        const res = await this.fetch(`${this.baseUrl}${route}/meta${qs}`);
         return res.json();
     },
+    /**
+     * Dry-run a query to its generated SQL (`POST /analytics/sql` — [#3584]
+     * the dispatcher route; the old `/explain` route name was served by
+     * nothing and 404ed everywhere).
+     */
     explain: async (payload: any) => {
         const route = this.getRoute('analytics');
-        const res = await this.fetch(`${this.baseUrl}${route}/explain`, {
+        const res = await this.fetch(`${this.baseUrl}${route}/sql`, {
             method: 'POST',
             body: JSON.stringify(payload)
          });

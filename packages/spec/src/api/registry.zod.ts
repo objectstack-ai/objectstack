@@ -680,7 +680,7 @@ export type ConflictResolutionStrategy = z.infer<typeof ConflictResolutionStrate
  *   "conflictResolution": "priority",
  *   "apis": [
  *     { "id": "customer_api", "type": "rest", ... },
- *     { "id": "graphql_api", "type": "graphql", ... },
+ *     { "id": "odata_api", "type": "odata", ... },
  *     { "id": "file_upload_api", "type": "file", ... }
  *   ],
  *   "totalApis": 3,

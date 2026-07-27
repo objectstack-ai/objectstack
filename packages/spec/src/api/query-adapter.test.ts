@@ -144,7 +144,6 @@ describe('QueryAdapterConfigSchema', () => {
     const config = QueryAdapterConfigSchema.parse({});
 
     expect(config.rest).toBeUndefined();
-    expect(config.graphql).toBeUndefined();
     expect(config.odata).toBeUndefined();
   });
 
@@ -177,7 +176,6 @@ describe('QueryAdapterConfigSchema', () => {
     });
 
     expect(config.rest?.filterStyle).toBe('rsql');
-    expect(config.graphql).toBeUndefined();
     expect(config.odata).toBeUndefined();
   });
 });

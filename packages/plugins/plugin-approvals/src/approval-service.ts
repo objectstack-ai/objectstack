@@ -19,6 +19,7 @@ import type {
   IApprovalService,
   ApprovalRequestRow,
   ApprovalActionRow,
+  ApprovalActionAttachment,
   ApprovalDecisionInput,
   ApprovalDecisionResult,
   ApprovalRecallInput,
@@ -30,6 +31,7 @@ import type {
   ApprovalStatus,
   SharingExecutionContext,
 } from '@objectstack/spec/contracts';
+import { isFileIdToken } from '@objectstack/spec/data';
 import { isGrantActive } from '@objectstack/core';
 
 /**
@@ -255,7 +257,58 @@ function slaDueAt(createdAt: unknown, cfg: any): string | undefined {
   return new Date(t + hours * 3600_000).toISOString();
 }
 
+/**
+ * Normalize one raw `attachments` entry into an {@link ApprovalActionAttachment}.
+ *
+ * `sys_approval_action.attachments` is a `Field.file` (multiple), so the column
+ * **stores opaque `sys_file` ids** — that is the stored form of every media
+ * field (ADR-0104 D3). What arrives here is whichever of three forms the read
+ * path produced:
+ *
+ *  1. the **expanded** `{ id, name, size, mimeType, url }` the ObjectQL read
+ *     path resolves a stored id into — the normal case;
+ *  2. a **bare id**, when there was nothing to expand it into (storage service
+ *     absent, file not committed);
+ *  3. a **legacy inline blob** (`{ file_id, name, mime_type, url, … }`) written
+ *     before file-as-reference, until the backfill converts it.
+ *
+ * The original mapping did `String(entry)`, which turned form 1 into the
+ * literal `"[object Object]"` — so the inbox timeline showed a nameless,
+ * un-openable attachment chip (#3266 follow-up; caught by browser verification).
+ *
+ * Note the casing: the expanded form carries `mimeType`, the legacy blob
+ * `mime_type`. Both are accepted for the duration of the migration window.
+ */
+function normalizeActionAttachment(entry: any): ApprovalActionAttachment | undefined {
+  if (entry == null) return undefined;
+  // Form 2 — a bare reference. `isFileIdToken` is the platform's single arbiter
+  // of "is this string an opaque file id, or a URL?", shared with the engine's
+  // read resolver, so the two cannot disagree about what counts as an id.
+  if (typeof entry === 'string') {
+    const id = entry.trim();
+    if (!id) return undefined;
+    return isFileIdToken(id) ? { id } : { id, url: id };
+  }
+  if (typeof entry === 'object') {
+    // Forms 1 and 3 — `file_id` is the legacy blob's key for the same thing.
+    const id = entry.id ?? entry.file_id;
+    if (id == null || String(id) === '') return undefined;
+    const mimeType = entry.mimeType ?? entry.mime_type;
+    return {
+      id: String(id),
+      name: typeof entry.name === 'string' ? entry.name : undefined,
+      url: typeof entry.url === 'string' ? entry.url : undefined,
+      mimeType: typeof mimeType === 'string' ? mimeType : undefined,
+      size: typeof entry.size === 'number' ? entry.size : undefined,
+    };
+  }
+  return undefined;
+}
+
 function rowFromAction(row: any): ApprovalActionRow {
+  const attachments = Array.isArray(row.attachments)
+    ? row.attachments.map(normalizeActionAttachment).filter((a: ApprovalActionAttachment | undefined): a is ApprovalActionAttachment => !!a)
+    : [];
   return {
     id: String(row.id),
     request_id: String(row.request_id),
@@ -264,10 +317,9 @@ function rowFromAction(row: any): ApprovalActionRow {
     action: row.action,
     actor_id: row.actor_id ?? undefined,
     comment: row.comment ?? undefined,
-    // Decision attachments (#3266). The column shipped in #3268 but this
-    // contract mapping didn't — the raw engine row carried the fileIds while
-    // every consumer of listActions saw none (caught by browser verification).
-    attachments: Array.isArray(row.attachments) && row.attachments.length ? row.attachments.map(String) : undefined,
+    // Decision attachments (#3266): rich descriptors carrying the display name +
+    // download URL, so consumers label/open them without reading `sys_file`.
+    attachments: attachments.length ? attachments : undefined,
     created_at: row.created_at ?? undefined,
   };
 }
@@ -2886,5 +2938,37 @@ export class ApprovalService implements IApprovalService {
       if (n) a.actor_name = n;
     }
     return actions;
+  }
+
+  /**
+   * `IFileAccessDelegate` — may this caller download a decision attachment?
+   * (ADR-0104 D3 wave 2; declared by `sys_approval_action.fileAccessDelegate`.)
+   *
+   * A file referenced by `sys_approval_action.attachments` is owned by that
+   * audit row, so the storage service would otherwise authorize the download by
+   * testing whether the caller can READ the row. It cannot: `sys_approval_action`
+   * is deliberately closed to ordinary approver positions, so that test denies
+   * the very approver the attachment was filed for.
+   *
+   * The rule that actually governs seeing a decision is the one `listActions`
+   * applies — can the caller see the PARENT REQUEST? — so this reuses it
+   * exactly, rather than inventing a second, looser rule for the bytes. Fails
+   * closed on any error.
+   */
+  async authorizeFileRead(actionId: string, context: SharingExecutionContext): Promise<boolean> {
+    if (!actionId) return false;
+    try {
+      const rows = await this.engine.find('sys_approval_action', {
+        where: { id: actionId },
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+      const requestId = (Array.isArray(rows) ? rows[0] : undefined)?.request_id;
+      if (!requestId) return false;
+      // Same gate as listActions: visibility of the decision's parent request.
+      return !!(await this.getRequest(String(requestId), context));
+    } catch {
+      return false;
+    }
   }
 }

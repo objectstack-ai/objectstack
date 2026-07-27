@@ -954,6 +954,31 @@ const ObjectSchemaBase = z.object({
   lifecycle: LifecycleSchema.optional().describe('Data lifecycle contract (ADR-0057): class + retention/ttl/rotation/archive policies enforced by the platform LifecycleService.'),
 
   /**
+   * Who answers "may this caller download a file owned by this object's media
+   * fields?" (ADR-0104 D3 wave 2).
+   *
+   * By default the storage service asks the question directly — can the caller
+   * READ the owning row? That is right for ordinary business objects, where
+   * row readability *is* the access rule. It is wrong for an object whose
+   * access is **mediated by a service** rather than by row permissions: a
+   * system audit table like `sys_approval_action` is deliberately unreadable
+   * to ordinary positions, yet a legitimate approver must still be able to
+   * open a decision attachment. Testing raw readability there asks the wrong
+   * authority and denies the very people the record is for.
+   *
+   * Naming a kernel service here delegates the question to it. The service
+   * must implement `authorizeFileRead(recordId, context) => boolean` (see
+   * `IFileAccessDelegate`). Fails CLOSED: a declared service that is missing
+   * or does not implement the method denies the download rather than falling
+   * back to the raw read.
+   */
+  fileAccessDelegate: z.string().optional().describe(
+    'Kernel service that authorizes downloads of files owned by this object\'s media fields, '
+    + 'instead of testing whether the caller can read the owning row. For objects whose access '
+    + 'is mediated by a service (e.g. sys_approval_action → approvals). Fails closed.',
+  ),
+
+  /**
    * Logic & Validation (Co-located)
    * Best Practice: Define rules close to data.
    */

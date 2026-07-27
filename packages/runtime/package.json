@@ -26,6 +26,7 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/metadata": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/observability": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",

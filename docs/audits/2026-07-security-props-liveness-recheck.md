@@ -53,12 +53,20 @@ enterprise/cloud-enforced (agent `access`).
 
 ## Genuine remaining loose ends (actionable)
 
-1. **Prune `AuditRetentionPolicySchema`** (`packages/spec/src/system/audit.zod.ts`)
-   — a real parsed-only/dead spec schema with no runtime consumer; retention is
-   enforced on the `lifecycle` surface. Prune (or wire-rename to `lifecycle`).
-2. **SharingRule dead recipient types** — `owner`-type rules and `group`/`guest`
-   recipients are skipped by the bootstrap while criteria-type rules enforce.
-   Enforce-or-prune the dead subset so authored rules don't silently no-op.
+1. ~~**Prune `AuditRetentionPolicySchema`**~~ — **✅ Done (2026-07-27)**, and the
+   verified scope was larger: the **entire `audit.zod.ts` module** (AuditConfig /
+   AuditStorageConfig / AuditRetentionPolicy / AuditEventFilter /
+   SuspiciousActivityRule + the AuditEvent* shape schemas) had zero consumers —
+   the live audit path (plugin-audit) captures unconditionally via engine hooks
+   and defines its own `sys_audit_log` row shape, and `AuditConfigSchema.enabled`
+   contradicted the always-on compliance-ledger contract. Whole module removed;
+   the enforced authoring surface is object/field `trackHistory` + the object
+   `lifecycle` `audit` category, with per-org overrides in settings.
+2. ~~**SharingRule dead recipient types**~~ — **✅ Done (#3557)**: recipients
+   reconciled against the live identity model — `group` wired as `team`,
+   `business_unit` added, and the unenforceable `guest` recipient + `owner`-type
+   rules removed from the authoring surface (authored rules no longer silently
+   no-op).
 3. **Per-org / per-user IP allow-list** — global-only today; per-org
    `sys_organization.allowed_ip_ranges` is unimplemented (tracked **#2571**).
 4. **Doc / ledger drift** (non-code-behavior):

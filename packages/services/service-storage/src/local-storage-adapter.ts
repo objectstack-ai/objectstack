@@ -14,6 +14,7 @@ import type {
   StorageFileInfo,
   PresignedUploadDescriptor,
   PresignedDownloadDescriptor,
+  PresignedDownloadOptions,
 } from '@objectstack/spec/contracts';
 
 /**
@@ -48,6 +49,8 @@ export interface LocalStorageAdapterOptions {
 interface PresignTokenPayload {
   k: string;       // storage key
   ct?: string;     // content-type
+  n?: string;      // download filename (Content-Disposition)
+  d?: 'inline' | 'attachment'; // disposition type (default 'inline')
   exp: number;     // expiry epoch seconds
   op: 'put' | 'get';
 }
@@ -268,17 +271,31 @@ export class LocalStorageAdapter implements IStorageService {
     };
   }
 
-  async getPresignedDownload(key: string, expiresIn: number): Promise<PresignedDownloadDescriptor> {
+  async getPresignedDownload(
+    key: string,
+    expiresIn: number,
+    options?: PresignedDownloadOptions,
+  ): Promise<PresignedDownloadDescriptor> {
     const exp = Math.floor(Date.now() / 1000) + Math.max(1, expiresIn);
-    const token = this.signToken({ k: key, exp, op: 'get' });
+    // Carry filename + content-type in the token so the `_local/raw` route can
+    // emit a real Content-Disposition / Content-Type (else the browser saves
+    // the file under the opaque token, as `application/octet-stream`).
+    const token = this.signToken({
+      k: key,
+      exp,
+      op: 'get',
+      ct: options?.contentType,
+      n: options?.filename,
+      d: options?.disposition,
+    });
     return {
       downloadUrl: `${this.baseUrl}${this.basePath}/_local/raw/${token}`,
       expiresIn,
     };
   }
 
-  async getSignedUrl(key: string, expiresIn: number): Promise<string> {
-    const desc = await this.getPresignedDownload(key, expiresIn);
+  async getSignedUrl(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string> {
+    const desc = await this.getPresignedDownload(key, expiresIn, options);
     return desc.downloadUrl;
   }
 

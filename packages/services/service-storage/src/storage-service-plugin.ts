@@ -2,7 +2,12 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveAuthzContext } from '@objectstack/core';
-import type { IHttpServer, IDataEngine, IStorageService } from '@objectstack/spec/contracts';
+import type {
+  IHttpServer,
+  IDataEngine,
+  IStorageService,
+  IFileAccessDelegate,
+} from '@objectstack/spec/contracts';
 import {
   OBSERVABILITY_METRICS_SERVICE,
   NoopMetricsRegistry,
@@ -498,8 +503,29 @@ function buildFileReadAuthorizer(
       // Field-owned (ADR-0104 D3 wave 2): exactly ONE record's field holds
       // this file, so access is that record's READ access — never a union.
       if (file.ref_object && file.ref_id != null && file.ref_id !== '') {
+        const ownerObject = String(file.ref_object);
+        const ownerId = String(file.ref_id);
+
+        // An object whose access is MEDIATED BY A SERVICE rather than by row
+        // permissions names that service in `fileAccessDelegate`. Asking the
+        // row directly would be asking the wrong authority: `sys_approval_action`
+        // is deliberately unreadable to ordinary approver positions, so a raw
+        // read denies the very approver the attachment is for. Fails closed —
+        // a declared delegate that is missing or incomplete denies rather than
+        // silently reverting to the raw read it was declared to replace.
+        const delegateName = (engine as any).getObject?.(ownerObject)?.fileAccessDelegate;
+        if (typeof delegateName === 'string' && delegateName) {
+          try {
+            const delegate = ctx.getService<IFileAccessDelegate>(delegateName);
+            if (!delegate || typeof delegate.authorizeFileRead !== 'function') return 'deny';
+            return (await delegate.authorizeFileRead(ownerId, authz)) ? 'allow' : 'deny';
+          } catch {
+            return 'deny';
+          }
+        }
+
         try {
-          const visible = (await (engine as any).find(String(file.ref_object), {
+          const visible = (await (engine as any).find(ownerObject, {
             where: { id: file.ref_id },
             fields: ['id'],
             limit: 1,

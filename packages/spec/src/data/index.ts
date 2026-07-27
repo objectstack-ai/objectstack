@@ -3,6 +3,10 @@
 export * from './query.zod';
 export * from './filter.zod';
 export * from './date-macros.zod';
+// Session-scoped filter placeholders ({current_user_id} / {current_org_id}) —
+// the sibling vocabulary to date macros. Presentation scope only; RLS is the
+// enforcement boundary. See context-tokens.zod.ts.
+export * from './context-tokens.zod';
 export * from './object.zod';
 // API-method derivation — the single source of truth turning an object's
 // `enable.apiMethods` whitelist into its effective operation set (#3391).

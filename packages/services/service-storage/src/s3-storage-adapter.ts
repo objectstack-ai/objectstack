@@ -11,7 +11,9 @@ import type {
   StorageFileInfo,
   PresignedUploadDescriptor,
   PresignedDownloadDescriptor,
+  PresignedDownloadOptions,
 } from '@objectstack/spec/contracts';
+import { contentDispositionValue } from './content-disposition.js';
 
 /**
  * Configuration for the S3 storage adapter.
@@ -227,8 +229,8 @@ export class S3StorageAdapter implements IStorageService {
   // Presigned URLs
   // ---------------------------------------------------------------------------
 
-  async getSignedUrl(key: string, expiresIn: number): Promise<string> {
-    const desc = await this.getPresignedDownload(key, expiresIn);
+  async getSignedUrl(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string> {
+    const desc = await this.getPresignedDownload(key, expiresIn, options);
     return desc.downloadUrl;
   }
 
@@ -256,11 +258,24 @@ export class S3StorageAdapter implements IStorageService {
     };
   }
 
-  async getPresignedDownload(key: string, expiresIn: number): Promise<PresignedDownloadDescriptor> {
+  async getPresignedDownload(
+    key: string,
+    expiresIn: number,
+    options?: PresignedDownloadOptions,
+  ): Promise<PresignedDownloadDescriptor> {
     const client = await this.getClient();
     const s3 = await this.s3Mod();
     const { getSignedUrl } = await this.presignerMod();
-    const cmd = new s3.GetObjectCommand({ Bucket: this.bucket, Key: key });
+    // S3 bakes these response overrides into the signed URL, so the download
+    // carries the real filename + type instead of the object key + octet-stream.
+    const cmd = new s3.GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ...(options?.contentType ? { ResponseContentType: options.contentType } : {}),
+      ...(options?.filename
+        ? { ResponseContentDisposition: contentDispositionValue(options.filename, options.disposition ?? 'inline') }
+        : {}),
+    });
     const url = await getSignedUrl(client, cmd, { expiresIn });
     return { downloadUrl: url, expiresIn };
   }

@@ -1096,7 +1096,7 @@ export const ObjectListViewSchema = lazySchema(() =>
  *   form: { type: "simple", fields: ["name"] },
  *   listViews: {
  *     "all": { label: "All", filter: [] },
- *     "my": { label: "Mine", filter: [["owner", "=", "{user_id}"]] }
+ *     "my": { label: "Mine", filter: [["owner", "=", "{current_user_id}"]] }
  *   }
  * }
  */

@@ -29,7 +29,7 @@ export interface IStorageService {
   list?(prefix: string): Promise<StorageFileInfo[]>;
 
   // Signed URL (optional)
-  getSignedUrl?(key: string, expiresIn: number): Promise<string>;
+  getSignedUrl?(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string>;
 
   // Presigned browser-direct upload / download (optional)
   getPresignedUpload?(
@@ -37,7 +37,11 @@ export interface IStorageService {
     expiresIn: number,
     options?: StorageUploadOptions,
   ): Promise<PresignedUploadDescriptor>;
-  getPresignedDownload?(key: string, expiresIn: number): Promise<PresignedDownloadDescriptor>;
+  getPresignedDownload?(
+    key: string,
+    expiresIn: number,
+    options?: PresignedDownloadOptions,
+  ): Promise<PresignedDownloadDescriptor>;
 
   // Chunked / multipart upload (optional)
   initiateChunkedUpload?(key: string, options?: StorageUploadOptions): Promise<string>;

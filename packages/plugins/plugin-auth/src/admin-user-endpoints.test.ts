@@ -83,6 +83,16 @@ describe('isLikelyEmail (linear-time, no regex backtracking)', () => {
     expect(isLikelyEmail('has space@b.co')).toBe(false);
   });
 
+  it('rejects non-ASCII addresses (framework#3566)', async () => {
+    const { isLikelyEmail } = await import('./admin-user-endpoints.js');
+    // Chinese domain — passes the structural checks but better-auth's strict
+    // ASCII validator would reject it, so reject it here (and in the dry-run).
+    expect(isLikelyEmail('735431496@柴仟.com')).toBe(false);
+    // Full-width / invisible characters anywhere in the address.
+    expect(isLikelyEmail('ａｂｃ@b.com')).toBe(false);
+    expect(isLikelyEmail('a@b​.com')).toBe(false);
+  });
+
   it('is fast on the CodeQL adversarial inputs', async () => {
     const { isLikelyEmail } = await import('./admin-user-endpoints.js');
     const attack = '!@'.repeat(100_000);

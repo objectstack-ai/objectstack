@@ -16,7 +16,8 @@
   "scripts": {
     "build": "tsup --config ../../tsup.config.ts",
     "dev": "tsc -w",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "test": "vitest run"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
@@ -36,7 +37,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "objectstack",

@@ -178,4 +178,7 @@ export type {
   DashboardActionRefSeverity,
 } from './validate-dashboard-action-refs.js';
 
+export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
+export type { FilterTokenFinding, FilterTokenSeverity } from './validate-filter-tokens.js';
+
 export { buildAccessMatrix, diffAccessMatrix } from './build-access-matrix.js';

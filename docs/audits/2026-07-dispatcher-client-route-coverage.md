@@ -84,6 +84,33 @@ These are ledgered as `mismatch`, not `sdk`: the method exists but does not
 speak the dispatcher's dialect. Reconciliation (pick one shape, alias the
 other) is its own follow-up.
 
+### Resolution (#3584) — split decision, not one letter for all four
+
+Re-verification for #3584 corrected one premise of this table: the two
+analytics shapes the client spoke (`GET /analytics/meta/:cube`,
+`POST /analytics/explain`) were served by **nothing** — not the dispatcher,
+not `@objectstack/rest` (which only mounts `/analytics/dataset/query`), not
+`service-analytics` (which registers no HTTP routes). "Only REST understands"
+was wrong; those two client methods 404ed against every server in the repo and
+had zero call sites in `objectstack` and `objectui`.
+
+- **Analytics ×2 → client aligned to the dispatcher** (the "Option B"
+  direction, but not breaking in practice — a universally-404ing method has no
+  working consumers). `analytics.meta(cube?)` now calls `GET /analytics/meta`
+  with an optional `?cube=` filter (honored server-side —
+  `AnalyticsService.getMeta(cubeName?)` always supported it; the dispatcher
+  now threads it through). `analytics.explain(payload)` keeps its name and
+  calls `POST /analytics/sql`. Both ledger rows are now `sdk`.
+- **Storage ×2 → documented deliberate disposition** (`server-only`). The
+  presigned/chunked protocol is **not** REST-only: `service-storage` registers
+  it autonomously on any `http-server` service
+  (`storage-service-plugin.ts:283`, `storage-routes.ts`). Rewriting the client
+  to the dispatcher's bare `POST /storage/upload` would regress
+  direct-to-cloud upload, chunked/resumable transfer, upload auth (#2755) and
+  download authorization (#2970 / ADR-0104). The protocol is canonical; the
+  dispatcher's two plain routes remain a low-level redirect/stream compat
+  surface, deliberately outside the SDK.
+
 ## 5. Client-internal findings
 
 - **`trigger` vs `execute`** hit different URLs for the same intent
@@ -136,7 +163,7 @@ three-column method is the next tranche of #3563.
 2. **`keys` / `share-links` / `security`** surfaces — 7 gaps, small and mechanical.
 3. **Packages lifecycle** (11 gaps) — publish/drafts/commits/revert/export.
 4. **Meta drafts/published/FSM + automation descriptors** (6 gaps).
-5. **Mismatch reconciliation** (§4) — server-side aliases or client-side fixes.
+5. **Mismatch reconciliation** (§4) — done in #3584: analytics client aligned to the dispatcher, storage protocol documented as canonical (see §4 Resolution).
 6. **Docs**: delete or regenerate README surface table + CLIENT_SPEC_COMPLIANCE.md; extend client-sdk.mdx.
 7. **Deprecate `DEFAULT_DISPATCHER_ROUTES`**; point at the ledger.
 8. **REST-surface tranche** (§8) with the same ledger+guard treatment.

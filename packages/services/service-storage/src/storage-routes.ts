@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '@objectstack/spec/contracts';
 import type { StorageMetadataStore, FileRecord } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
+import { contentDispositionValue } from './content-disposition.js';
 
 /** Authorization verdict for an attachments-scope download (#2970 item 2). */
 export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
@@ -518,12 +519,13 @@ export function registerStorageRoutes(
       const ttl = await authorizeDownload(file, req, res);
       if (ttl === false) return;
 
+      const downloadOpts = { filename: file.name, contentType: file.mime_type };
       let url: string;
       if (storage.getPresignedDownload) {
-        const desc = await storage.getPresignedDownload(file.key, ttl);
+        const desc = await storage.getPresignedDownload(file.key, ttl, downloadOpts);
         url = desc.downloadUrl;
       } else if (storage.getSignedUrl) {
-        url = await storage.getSignedUrl(file.key, ttl);
+        url = await storage.getSignedUrl(file.key, ttl, downloadOpts);
       } else {
         url = `${basePath}/_local/file/${encodeURIComponent(file.key)}`;
       }
@@ -557,12 +559,13 @@ export function registerStorageRoutes(
       const ttl = await authorizeDownload(file, req, res);
       if (ttl === false) return;
 
+      const downloadOpts = { filename: file.name, contentType: file.mime_type };
       let url: string;
       if (storage.getPresignedDownload) {
-        const desc = await storage.getPresignedDownload(file.key, ttl);
+        const desc = await storage.getPresignedDownload(file.key, ttl, downloadOpts);
         url = desc.downloadUrl;
       } else if (storage.getSignedUrl) {
-        url = await storage.getSignedUrl(file.key, ttl);
+        url = await storage.getSignedUrl(file.key, ttl, downloadOpts);
       } else {
         url = `${basePath}/_local/file/${encodeURIComponent(file.key)}`;
       }
@@ -621,6 +624,11 @@ export function registerStorageRoutes(
 
       res.header('content-type', payload.ct ?? 'application/octet-stream');
       res.header('content-length', String(data.byteLength));
+      // When the token carries the original filename, advertise it so the
+      // browser saves the file under its real name (not the opaque URL token).
+      if (payload.n) {
+        res.header('content-disposition', contentDispositionValue(payload.n, payload.d ?? 'inline'));
+      }
       res.send(data);
     } catch (err: any) {
       const statusCode = err.message?.includes('expired') || err.message?.includes('signature') ? 403 : 500;

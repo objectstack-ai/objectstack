@@ -66,6 +66,27 @@ export function createMetadataProtocolPlugin(options: MetadataProtocolPluginOpti
                 );
             }
 
+            assembleMetadataProtocol(ctx, ql, environmentId);
+        },
+    };
+}
+
+/**
+ * The ONE protocol assembly (ADR-0076 Step 2 PR-C): metadata-storage platform
+ * objects + `ObjectStackProtocolImplementation` as the `protocol` service +
+ * the D12 `degraded` analytics fallback. Called by
+ * {@link createMetadataProtocolPlugin} (delegated mode) AND by
+ * `ObjectQLPlugin`'s built-in convenience mode (`registerProtocol !== false`)
+ * — single source, two mounts, identical result.
+ *
+ * @returns the protocol shim, so the engine-side caller can arm its
+ * mutation-rebind subscription synchronously.
+ */
+export function assembleMetadataProtocol(
+    ctx: PluginContext,
+    ql: any,
+    environmentId?: string,
+): ObjectStackProtocolImplementation {
             // Metadata-storage platform objects (sys_metadata + history/audit
             // siblings + sys_view_definition). Same `environmentId === undefined`
             // gate as the historical assembly: platform / standalone kernels own
@@ -134,6 +155,6 @@ export function createMetadataProtocolPlugin(options: MetadataProtocolPluginOpti
                     message: 'Analytics SQL generation not implemented by ObjectQL adapter',
                 }),
             });
-        },
-    };
+
+    return protocolShim;
 }

@@ -197,6 +197,11 @@
       "status": "planned",
       "authorWarn": true,
       "note": "[ADR-0090 D11] P1 lands the SPEC SHAPE only (validated external<=internal at authoring; Studio surfaces the Ext badge). Runtime consumption (audience-aware evaluator branch substituting the external dial for external principals) is scheduled with the principal-taxonomy semantics phase; tracked on #2696. `planned` + authorWarn per enforce-or-mark: authors get told the dial does not evaluate yet. Was a bespoke 'authorable' status outside the documented vocabulary."
+    },
+    "fileAccessDelegate": {
+      "status": "live",
+      "evidence": "packages/services/service-storage/src/storage-service-plugin.ts (buildFileReadAuthorizer)",
+      "note": "ADR-0104 D3 wave 2. Named service answers 'may this caller download a file owned by this object's media fields?' instead of the storage service testing raw readability of the owning row — which asks the wrong authority for an object whose access is mediated by a service. sys_approval_action declares 'approvals'; the service reuses the same parent-request visibility gate listActions applies. Fails closed: a declared-but-missing delegate denies."
     }
   }
 }
