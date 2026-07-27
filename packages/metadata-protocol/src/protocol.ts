@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ObjectStackProtocol } from '@objectstack/spec/api';
+import type {
+    DataProtocol, MetadataProtocol, AnalyticsProtocol, PackageProtocol,
+} from '@objectstack/spec/api';
 import { IDataEngine } from '@objectstack/core';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type { MetadataHostEngine } from './host-engine.js';
@@ -1028,7 +1030,14 @@ export interface MetadataAuthoringGateContext {
 }
 export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void | Promise<void>;
 
-export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
+/**
+ * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
+ * D10 — the facade never implemented the other domains; those live in their
+ * owning services and are reached through the discovery `services` registry,
+ * never through this class).
+ */
+export class ObjectStackProtocolImplementation implements
+    DataProtocol, MetadataProtocol, AnalyticsProtocol, PackageProtocol {
     private engine: MetadataHostEngine;
     private getServicesRegistry?: () => Map<string, any>;
     /**

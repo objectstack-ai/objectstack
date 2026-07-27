@@ -984,177 +984,6 @@ export const GetFieldLabelsResponseSchema = lazySchema(() => z.object({
 // Protocol Interface Schema
 // ==========================================
 
-/**
- * ObjectStack Protocol Contract
- * 
- * This schema defines the complete API contract as a Zod schema.
- * Unlike the old TypeScript interface, this provides runtime validation
- * and can be used for:
- * - API Gateway validation
- * - RPC call validation
- * - Client SDK generation
- * - API documentation generation
- * 
- * Each method is defined with its request and response schemas.
- */
-export const ObjectStackProtocolSchema = lazySchema(() => z.object({
-  // Discovery & Metadata
-  getDiscovery: z.function()
-    .describe('Get API discovery information'),
-
-  getMetaTypes: z.function()
-    .describe('Get available metadata types'),
-
-  getMetaItems: z.function()
-    .describe('Get all items of a metadata type'),
-
-  getMetaItem: z.function()
-    .describe('Get a specific metadata item'),
-  saveMetaItem: z.function()
-    .describe('Save metadata item'),
-  deleteMetaItem: z.function()
-    .describe('Delete a customization overlay row (reset to artifact default — ADR-0005)'),
-  getMetaItemCached: z.function()
-    .describe('Get a metadata item with cache validation'),
-
-  getUiView: z.function()
-    .describe('Get UI view definition'),
-
-  // Analytics Operations
-  analyticsQuery: z.function()
-    .describe('Execute analytics query'),
-
-  getAnalyticsMeta: z.function()
-    .describe('Get analytics metadata (cubes)'),
-
-  // Automation Operations
-  triggerAutomation: z.function()
-    .describe('Trigger an automation flow or script'),
-
-  // Package Management Operations
-  listPackages: z.function()
-    .describe('List installed packages with optional filters'),
-
-  getPackage: z.function()
-    .describe('Get a specific installed package by ID'),
-
-  installPackage: z.function()
-    .describe('Install a new package from manifest'),
-
-  uninstallPackage: z.function()
-    .describe('Uninstall a package by ID'),
-
-  enablePackage: z.function()
-    .describe('Enable a disabled package'),
-
-  disablePackage: z.function()
-    .describe('Disable an installed package'),
-
-  // Data Operations
-  findData: z.function()
-    .describe('Find data records'),
-
-  getData: z.function()
-    .describe('Get single data record'),
-
-  createData: z.function()
-    .describe('Create a data record'),
-
-  updateData: z.function()
-    .describe('Update a data record'),
-
-  deleteData: z.function()
-    .describe('Delete a data record'),
-
-  // Batch Operations
-  batchData: z.function()
-    .describe('Perform batch operations'),
-
-  createManyData: z.function()
-    .describe('Create multiple records'),
-
-  updateManyData: z.function()
-    .describe('Update multiple records'),
-
-  deleteManyData: z.function()
-    .describe('Delete multiple records'),
-
-  // View Management Operations
-  listViews: z.function()
-    .describe('List views for an object'),
-  getView: z.function()
-    .describe('Get a specific view'),
-  createView: z.function()
-    .describe('Create a new view'),
-  updateView: z.function()
-    .describe('Update an existing view'),
-  deleteView: z.function()
-    .describe('Delete a view'),
-
-  // Permission Operations
-  checkPermission: z.function()
-    .describe('Check if an action is permitted'),
-  getObjectPermissions: z.function()
-    .describe('Get permissions for an object'),
-  getEffectivePermissions: z.function()
-    .describe('Get effective permissions for current user'),
-
-  // Workflow Operations
-  getWorkflowConfig: z.function()
-    .describe('Get workflow configuration for an object'),
-  getWorkflowState: z.function()
-    .describe('Get workflow state for a record'),
-  workflowTransition: z.function()
-    .describe('Execute a workflow state transition'),
-
-  // Realtime Operations
-  realtimeConnect: z.function()
-    .describe('Establish realtime connection'),
-  realtimeDisconnect: z.function()
-    .describe('Close realtime connection'),
-  realtimeSubscribe: z.function()
-    .describe('Subscribe to a realtime channel'),
-  realtimeUnsubscribe: z.function()
-    .describe('Unsubscribe from a realtime channel'),
-  setPresence: z.function()
-    .describe('Set user presence state'),
-  getPresence: z.function()
-    .describe('Get channel presence information'),
-
-  // Notification Operations
-  registerDevice: z.function()
-    .describe('Register a device for push notifications'),
-  unregisterDevice: z.function()
-    .describe('Unregister a device'),
-  getNotificationPreferences: z.function()
-    .describe('Get notification preferences'),
-  updateNotificationPreferences: z.function()
-    .describe('Update notification preferences'),
-  listNotifications: z.function()
-    .describe('List notifications'),
-  markNotificationsRead: z.function()
-    .describe('Mark specific notifications as read'),
-  markAllNotificationsRead: z.function()
-    .describe('Mark all notifications as read'),
-
-  // AI Operations
-  aiNlq: z.function()
-    .describe('Natural language query'),
-  aiChat: z.function()
-    .describe('AI chat interaction'),
-  aiSuggest: z.function()
-    .describe('Get AI-powered suggestions'),
-  aiInsights: z.function()
-    .describe('Get AI-generated insights'),
-
-  // i18n Operations
-  getLocales: z.function()
-    .describe('Get available locales'),
-  getTranslations: z.function()
-    .describe('Get translations for a locale'),
-  getFieldLabels: z.function()
-    .describe('Get translated field labels for an object'),
-}));
 
 /**
  * TypeScript Types
@@ -1305,21 +1134,20 @@ export type {
 
 /**
  * Zod-inferred protocol type (for runtime validation only).
- * Use ObjectStackProtocol interface for implementation contracts.
+ * Depend on the narrowest per-domain contract (e.g. `DataProtocol`).
  */
-export type ObjectStackProtocolZod = z.infer<typeof ObjectStackProtocolSchema>;
 
 /**
  * ObjectStack Protocol Interface
  * 
  * Properly typed interface for implementing the ObjectStack API protocol.
- * The Zod schema (ObjectStackProtocolSchema) is used for runtime validation,
+ * Per-domain Zod schemas are used for runtime validation,
  * while this interface provides compile-time type safety for implementations.
  */
 // ─────────────────────────────────────────────────────────────────────────────
 // Protocol contracts, segmented per domain (ADR-0076 D9).
 //
-// `ObjectStackProtocol` (below) is the composition of these per-domain contracts
+// The historical `ObjectStackProtocol` union of these per-domain contracts was
 // and is shape-identical to the historical flat interface — a back-compat alias.
 // New code should depend on the narrowest slice it needs (e.g. `DataProtocol`).
 // Per ADR-0076 D9 (rev.7) the union is transitional; the end-state dissolves it
@@ -1440,24 +1268,3 @@ export interface I18nProtocol {
   getFieldLabels?(request: GetFieldLabelsRequest): Promise<GetFieldLabelsResponse>;
 }
 
-/**
- * ObjectStackProtocol — composition of the per-domain contracts above
- * (ADR-0076 D9). Shape-identical to the historical flat interface, so every
- * existing implementation/consumer is unaffected. Prefer depending on the
- * narrowest slice (e.g. `DataProtocol`). Per ADR-0076 D9 (rev.7) this union is
- * transitional; the end-state dissolves it (capability availability comes from
- * the discovery `services` registry, not a static union).
- */
-export interface ObjectStackProtocol extends
-  DataProtocol,
-  MetadataProtocol,
-  AnalyticsProtocol,
-  AutomationProtocol,
-  PackageProtocol,
-  ViewProtocol,
-  PermissionProtocol,
-  WorkflowProtocol,
-  RealtimeProtocol,
-  NotificationProtocol,
-  AiProtocol,
-  I18nProtocol {}
