@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IJobService, JobSchedule, JobHandler, JobExecution, JobScheduleOptions } from '@objectstack/spec/contracts';
-import { runWithPolicy, JobTimeoutError } from './run-with-policy';
+import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
 
 /**
  * Internal record for a scheduled job.

@@ -8,7 +8,7 @@ import type {
   JobExecution,
   JobScheduleOptions,
 } from '@objectstack/spec/contracts';
-import { runWithPolicy, JobTimeoutError } from './run-with-policy';
+import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
 
 /** Minimal cluster lock surface for scheduler leader-election (structural — no hard dep on the cluster contract). */
 interface SchedulerCluster {
