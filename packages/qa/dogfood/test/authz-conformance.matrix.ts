@@ -65,11 +65,6 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'rest/rest-server.ts registerMetadataEndpoints guarded registrar (enforceAuth → shouldDenyAnonymous) — every /meta route inherits the gate; runtime/http-dispatcher.ts handleMetadata mirrors it for the dispatcher metadata catch-all',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     covers: ['meta:rest-server.ts:registerMetadataEndpoints', 'meta:http-dispatcher.ts:handleMetadata'] },
-  { id: 'anonymous-deny-graphql', summary: 'anonymous-deny on the dispatcher GraphQL endpoint (#2567 surface 2)', state: 'enforced',
-    enforcement: 'runtime/http-dispatcher.ts handleGraphQL (shouldDenyAnonymous, resolves identity for the direct /graphql route) + runtime/dispatcher-plugin.ts requireAuth default(true), mirroring rest-server.ts',
-    proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
-    covers: ['graphql:http-dispatcher.ts:handleGraphQL', 'graphql:dispatcher-plugin.ts:POST /api/v1/graphql'],
-    note: 'GraphQL reaches the same object data as /data through kernel.graphql, whose security middleware falls OPEN for an anonymous context. Unit-proven in runtime/http-dispatcher.requireauth.test.ts (GraphQL block); e2e on the platform default in the surfaces proof.' },
   { id: 'anonymous-deny-hono-data', summary: 'anonymous-deny on the raw-hono standard /data routes (#2567 surface 3)', state: 'enforced',
     enforcement: 'plugin-hono-server/hono-plugin.ts denyAnonymous gate (shouldDenyAnonymous) on the standard /data routes (requireAuth ?? true, mirroring rest-server.ts)',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
@@ -82,10 +77,6 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // transport tripwires in authz-conformance.test.ts) blocks wiring a client
   // transport without the identity story — in CI, not in an adversarial
   // review after the fact.
-  { id: 'graphql-identity-thread', summary: 'GraphQL entry point threads the caller identity to the engine (#2992 surface 1, ADR-0096 D1)', state: 'enforced',
-    enforcement: 'runtime/http-dispatcher.ts handleGraphQL — resolves the caller ExecutionContext (also on the direct dispatcher-plugin route, requireAuth on or off) and threads it as options.context on every kernel.graphql call; spec IGraphQLService.execute documents that implementations MUST forward it to ObjectQL as options.context',
-    covers: ['graphql:http-dispatcher.ts:kernel.graphql(context-threaded)'],
-    note: 'Surface posture: user (caller identity), latent — kernel.graphql is never assigned in the monorepo, so every POST /graphql 501s before an engine call; the only IGraphQLService is the plugin-dev stub. The threading exists so the FIRST real engine runs caller-scoped instead of context-less (the security middleware falls OPEN on a missing principal = full authority). Threading unit-proven in runtime/http-dispatcher.requireauth.test.ts (identity threading block); removing it goes STALE here and fails CI.' },
   { id: 'realtime-delivery-authz', summary: 'realtime delivery fan-out has NO per-recipient authorization — trusted server-internal subscribers only (#2992 surface 2)', state: 'experimental',
     covers: ['realtime:in-memory-realtime-adapter.ts:publish(trusted-fan-out)'],
     note: 'Surface posture: system (trusted-implicit), pre-wiring — no end-user transport exists (handleUpgrade unimplemented, no REST subscribe route, client RealtimeAPI is a placeholder); the only subscribers are server-internal plugins (webhook auto-enqueuer, knowledge sync). Structural defect: Subscription carries no principal, matchesSubscription filters only by object+eventTypes (RealtimeSubscriptionOptions.filter is declared but never read), and the engine publishes the FULL after-row — so any future external subscriber would receive record bodies cross-tenant that its own find would hide. ADMISSION REQUIREMENT before any WebSocket/SSE/subscribe transport ships: per-recipient RLS/FLS/tenant re-check on delivery (subscription carries the subscriber ExecutionContext) OR id-only payload + client re-fetch. The transport tripwire probes in authz-conformance.test.ts turn a wired transport into an UNCLASSIFIED surface → red CI until this row is upgraded with the enforcement site.' },

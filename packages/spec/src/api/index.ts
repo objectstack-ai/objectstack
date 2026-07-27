@@ -22,7 +22,6 @@ export * from './realtime.zod';
 export * from './websocket.zod';
 export * from './router.zod';
 export * from './odata.zod';
-export * from './graphql.zod';
 export * from './batch.zod';
 export * from './http-cache.zod';
 export * from './errors.zod';

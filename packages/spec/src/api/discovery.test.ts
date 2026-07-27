@@ -36,12 +36,10 @@ describe('ApiRoutesSchema', () => {
       auth: '/api/v1/auth',
       actions: '/api/v1/p',
       storage: '/api/v1/storage',
-      graphql: '/api/v1/graphql',
       discovery: '/api/v1/discovery',
     });
 
     expect(routes.data).toBe('/api/v1/data');
-    expect(routes.graphql).toBe('/api/v1/graphql');
     expect(routes.discovery).toBe('/api/v1/discovery');
   });
 
@@ -129,11 +127,9 @@ describe('DiscoverySchema', () => {
         auth: '/api/v1/auth',
         actions: '/api/v1/p',
         storage: '/api/v1/storage',
-        graphql: '/api/v1/graphql',
       },
       services: {
         ...minimalServices,
-        graphql: { enabled: true, status: 'available' as const, route: '/api/v1/graphql', provider: 'plugin-graphql' },
         search: { enabled: true, status: 'available' as const, route: '/api/v1/search', provider: 'plugin-search' },
       },
       locale: {
@@ -202,7 +198,6 @@ describe('DiscoverySchema', () => {
       },
       services: {
         ...minimalServices,
-        graphql: { enabled: true, status: 'available' as const, route: '/graphql', provider: 'plugin-graphql' },
         search: { enabled: true, status: 'available' as const, route: '/api/v1/search', provider: 'plugin-search' },
       },
       locale: {
@@ -341,32 +336,6 @@ describe('DiscoverySchema', () => {
     });
 
     expect(discovery.locale.supported).toHaveLength(10);
-  });
-
-  it('should handle GraphQL-enabled instance via services', () => {
-    const discovery = DiscoverySchema.parse({
-      name: 'ObjectStack',
-      version: '1.0.0',
-      environment: 'production',
-      routes: {
-        data: '/api/v1/data',
-        metadata: '/api/v1/meta',
-        auth: '/api/v1/auth',
-        graphql: '/api/v1/graphql',
-      },
-      services: {
-        ...minimalServices,
-        graphql: { enabled: true, status: 'available' as const, route: '/api/v1/graphql', provider: 'plugin-graphql' },
-      },
-      locale: {
-        default: 'en-US',
-        supported: ['en-US'],
-        timezone: 'UTC',
-      },
-    });
-
-    expect(discovery.services['graphql'].enabled).toBe(true);
-    expect(discovery.routes.graphql).toBe('/api/v1/graphql');
   });
 
   it('should reject discovery without required fields', () => {
@@ -538,13 +507,11 @@ describe('DiscoverySchema with services', () => {
       ...baseDiscovery,
       services: {
         ...minimalServices,
-        graphql: { enabled: true, status: 'available', route: '/graphql', provider: 'plugin-graphql' },
         ai: { enabled: false, status: 'unavailable', message: 'Not installed' },
       },
     });
 
     // Capability can be derived from service.enabled
-    expect(discovery.services['graphql'].enabled).toBe(true);
     expect(discovery.services['ai'].enabled).toBe(false);
   });
 });
@@ -670,12 +637,10 @@ describe('DiscoverySchema (schemaDiscovery field)', () => {
       ...fixture,
       schemaDiscovery: {
         openapi: '/api/v1/openapi.json',
-        graphql: '/graphql',
         jsonSchema: '/api/v1/schemas',
       },
     });
     expect(discovery.schemaDiscovery?.openapi).toBe('/api/v1/openapi.json');
-    expect(discovery.schemaDiscovery?.graphql).toBe('/graphql');
     expect(discovery.schemaDiscovery?.jsonSchema).toBe('/api/v1/schemas');
   });
 
@@ -692,7 +657,6 @@ describe('DiscoverySchema (schemaDiscovery field)', () => {
       },
     });
     expect(discovery.schemaDiscovery?.openapi).toBe('/api/v1/openapi.json');
-    expect(discovery.schemaDiscovery?.graphql).toBeUndefined();
   });
 });
 

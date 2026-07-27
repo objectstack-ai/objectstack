@@ -469,11 +469,11 @@ describe('ApiRegistry', () => {
       });
 
       registry.registerApi({
-        id: 'graphql_api',
-        name: 'GraphQL API',
-        type: 'graphql',
+        id: 'odata_api',
+        name: 'OData API',
+        type: 'odata',
         version: 'v1',
-        basePath: '/graphql',
+        basePath: '/odata',
         endpoints: [],
         metadata: {
           status: 'active',
@@ -525,9 +525,9 @@ describe('ApiRegistry', () => {
     });
 
     it('should search in name and description', () => {
-      const result = registry.findApis({ search: 'graphql' });
+      const result = registry.findApis({ search: 'odata' });
       expect(result.total).toBe(1);
-      expect(result.apis[0].id).toBe('graphql_api');
+      expect(result.apis[0].id).toBe('odata_api');
     });
 
     it('should combine multiple filters', () => {
@@ -650,15 +650,15 @@ describe('ApiRegistry', () => {
       registry.registerApi({
         id: 'graphql1',
         name: 'GraphQL 1',
-        type: 'graphql',
+        type: 'odata',
         version: 'v1',
-        basePath: '/graphql',
+        basePath: '/odata',
         endpoints: [],
       });
 
       const snapshot = registry.getRegistry();
       expect(snapshot.byType?.rest?.length).toBe(2);
-      expect(snapshot.byType?.graphql?.length).toBe(1);
+      expect(snapshot.byType?.odata?.length).toBe(1);
     });
   });
 
@@ -700,11 +700,11 @@ describe('ApiRegistry', () => {
       registry.registerApi({
         id: 'api2',
         name: 'API 2',
-        type: 'graphql',
+        type: 'odata',
         version: 'v1',
-        basePath: '/graphql',
+        basePath: '/odata',
         endpoints: [
-          { id: 'query', path: '/graphql', responses: [] },
+          { id: 'query', path: '/odata', responses: [] },
         ],
       });
 
@@ -713,24 +713,24 @@ describe('ApiRegistry', () => {
       expect(stats.totalEndpoints).toBe(3);
       expect(stats.totalRoutes).toBe(3);
       expect(stats.apisByType.rest).toBe(1);
-      expect(stats.apisByType.graphql).toBe(1);
+      expect(stats.apisByType.odata).toBe(1);
       expect(stats.endpointsByApi.api1).toBe(2);
       expect(stats.endpointsByApi.api2).toBe(1);
     });
   });
 
   describe('Multi-protocol Support', () => {
-    it('should register GraphQL API', () => {
+    it('should register OData API', () => {
       const api: ApiRegistryEntryInput = {
-        id: 'graphql',
-        name: 'GraphQL API',
-        type: 'graphql',
+        id: 'odata',
+        name: 'OData API',
+        type: 'odata',
         version: 'v1',
-        basePath: '/graphql',
+        basePath: '/odata',
         endpoints: [
           {
             id: 'query',
-            path: '/graphql',
+            path: '/odata',
             summary: 'GraphQL Query',
             responses: [],
           },
@@ -738,7 +738,7 @@ describe('ApiRegistry', () => {
       };
 
       registry.registerApi(api);
-      expect(registry.getApi('graphql')?.type).toBe('graphql');
+      expect(registry.getApi('odata')?.type).toBe('odata');
     });
 
     it('should register WebSocket API', () => {
@@ -818,12 +818,12 @@ describe('ApiRegistry', () => {
       });
 
       registry.registerApi({
-        id: 'graphql_api',
-        name: 'GraphQL API',
-        type: 'graphql',
+        id: 'odata_api',
+        name: 'OData API',
+        type: 'odata',
         version: 'v1',
-        basePath: '/graphql',
-        endpoints: [{ id: 'e3', path: '/graphql', responses: [] }],
+        basePath: '/odata',
+        endpoints: [{ id: 'e3', path: '/odata', responses: [] }],
       });
 
       // Should efficiently find all REST APIs
@@ -831,10 +831,10 @@ describe('ApiRegistry', () => {
       expect(restApis.total).toBe(2);
       expect(restApis.apis.every(api => api.type === 'rest')).toBe(true);
 
-      // Should efficiently find GraphQL APIs
-      const graphqlApis = registry.findApis({ type: 'graphql' });
+      // Should efficiently find OData APIs
+      const graphqlApis = registry.findApis({ type: 'odata' });
       expect(graphqlApis.total).toBe(1);
-      expect(graphqlApis.apis[0].id).toBe('graphql_api');
+      expect(graphqlApis.apis[0].id).toBe('odata_api');
     });
 
     it('should use indices for fast tag-based lookups', () => {
@@ -942,10 +942,10 @@ describe('ApiRegistry', () => {
       registry.registerApi({
         id: 'graphql_crm_active',
         name: 'GraphQL CRM Active',
-        type: 'graphql',
+        type: 'odata',
         version: 'v1',
-        basePath: '/graphql',
-        endpoints: [{ id: 'e3', path: '/graphql', responses: [] }],
+        basePath: '/odata',
+        endpoints: [{ id: 'e3', path: '/odata', responses: [] }],
         metadata: { status: 'active', tags: ['crm'] },
       });
 

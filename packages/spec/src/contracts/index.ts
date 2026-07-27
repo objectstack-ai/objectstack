@@ -24,7 +24,6 @@ export * from './storage-service.js';
 export * from './metadata-service.js';
 export * from './auth-service.js';
 export * from './automation-service.js';
-export * from './graphql-service.js';
 export * from './analytics-service.js';
 export * from './realtime-service.js';
 export * from './job-service.js';

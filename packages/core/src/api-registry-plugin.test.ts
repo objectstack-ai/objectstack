@@ -121,13 +121,13 @@ describe('API Registry Plugin', () => {
           registry.registerApi({
             id: 'api2',
             name: 'API 2',
-            type: 'graphql',
+            type: 'odata',
             version: 'v1',
-            basePath: '/graphql',
+            basePath: '/odata',
             endpoints: [
               {
                 id: 'query',
-                path: '/graphql',
+                path: '/odata',
                 responses: [],
               },
             ],
@@ -143,7 +143,7 @@ describe('API Registry Plugin', () => {
       const stats = registry.getStats();
       expect(stats.totalApis).toBe(2);
       expect(stats.apisByType.rest).toBe(1);
-      expect(stats.apisByType.graphql).toBe(1);
+      expect(stats.apisByType.odata).toBe(1);
 
       await kernel.shutdown();
     });

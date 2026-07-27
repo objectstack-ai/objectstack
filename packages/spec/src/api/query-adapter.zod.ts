@@ -7,14 +7,13 @@ import { z } from 'zod';
  * 
  * Defines mapping rules between the internal unified query DSL
  * (defined in `data/query.zod.ts`) and external API protocol formats:
- * REST, GraphQL, and OData.
+ * REST and OData.
  * 
  * This enables ObjectStack to expose a single internal query representation
  * while supporting multiple API standards for external consumers.
  * 
  * @see data/query.zod.ts - Unified internal query DSL
  * @see api/rest-server.zod.ts - REST API configuration
- * @see api/graphql.zod.ts - GraphQL API configuration
  * @see api/odata.zod.ts - OData API configuration
  */
 
@@ -28,7 +27,6 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 export const QueryAdapterTargetSchema = lazySchema(() => z.enum([
   'rest',       // REST API (?filter[field][op]=value)
-  'graphql',    // GraphQL (where: \{ field: \{ op: value \}\})
   'odata',      // OData ($filter=field op value)
 ]));
 
@@ -46,8 +44,6 @@ export const OperatorMappingSchema = lazySchema(() => z.object({
   /** REST query parameter format (e.g., 'filter[{field}][{op}]') */
   rest: z.string().optional().describe('REST query parameter template'),
 
-  /** GraphQL where clause format (e.g., '{field}: { {op}: $value }') */
-  graphql: z.string().optional().describe('GraphQL where clause template'),
 
   /** OData $filter expression format (e.g., '{field} {op} {value}') */
   odata: z.string().optional().describe('OData $filter expression template'),
@@ -113,51 +109,6 @@ export type RestQueryAdapter = z.infer<typeof RestQueryAdapterSchema>;
 export type RestQueryAdapterInput = z.input<typeof RestQueryAdapterSchema>;
 
 // ==========================================
-// 3. GraphQL Adapter Configuration
-// ==========================================
-
-/**
- * GraphQL Query Adapter Configuration
- * 
- * Defines how unified query DSL maps to GraphQL arguments.
- * 
- * @example
- * Unified: { filters: [['status', '=', 'active']], top: 10, sort: [{ field: 'name', order: 'asc' }] }
- * GraphQL: query { items(where: { status: { eq: "active" } }, limit: 10, orderBy: { name: ASC }) { ... } }
- */
-export const GraphQLQueryAdapterSchema = lazySchema(() => z.object({
-  /** Filter argument name in GraphQL queries */
-  filterArgName: z.string().default('where').describe('GraphQL filter argument name'),
-
-  /** Filter nesting style */
-  filterStyle: z.enum([
-    'nested',        // where: { field: { op: value } }  (Prisma style)
-    'flat',          // where: { field_op: value }         (Hasura style)
-    'array',         // where: [{ field, op, value }]      (Array of conditions)
-  ]).default('nested').describe('GraphQL filter nesting style'),
-
-  /** Pagination argument names */
-  pagination: z.object({
-    limitArg: z.string().default('limit').describe('Page size argument name'),
-    offsetArg: z.string().default('offset').describe('Offset argument name'),
-    firstArg: z.string().default('first').describe('Relay "first" argument name'),
-    afterArg: z.string().default('after').describe('Relay "after" cursor argument name'),
-  }).optional().describe('Pagination argument name mappings'),
-
-  /** Sort argument configuration */
-  sorting: z.object({
-    argName: z.string().default('orderBy').describe('Sort argument name'),
-    format: z.enum([
-      'enum',         // orderBy: { field: ASC }
-      'array',        // orderBy: [{ field: "name", direction: "ASC" }]
-    ]).default('enum').describe('Sort argument format'),
-  }).optional().describe('Sort argument mapping'),
-}));
-
-export type GraphQLQueryAdapter = z.infer<typeof GraphQLQueryAdapterSchema>;
-export type GraphQLQueryAdapterInput = z.input<typeof GraphQLQueryAdapterSchema>;
-
-// ==========================================
 // 4. OData Adapter Configuration
 // ==========================================
 
@@ -217,8 +168,6 @@ export const QueryAdapterConfigSchema = lazySchema(() => z.object({
   /** REST adapter configuration */
   rest: RestQueryAdapterSchema.optional().describe('REST query adapter configuration'),
 
-  /** GraphQL adapter configuration */
-  graphql: GraphQLQueryAdapterSchema.optional().describe('GraphQL query adapter configuration'),
 
   /** OData adapter configuration */
   odata: ODataQueryAdapterSchema.optional().describe('OData query adapter configuration'),

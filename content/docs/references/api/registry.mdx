@@ -9,7 +9,7 @@ Unified API Registry Protocol
 
 Provides a centralized registry for managing all API endpoints across different
 
-API types (REST, GraphQL, OData, WebSocket, Auth, File, Plugin-registered).
+API types (REST, OData, WebSocket, Auth, File, Plugin-registered).
 
 This enables:
 
@@ -83,7 +83,7 @@ const result = ApiDiscoveryQuery.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>` | optional | Filter by API protocol type |
+| **type** | `Enum<'rest' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>` | optional | Filter by API protocol type |
 | **tags** | `string[]` | optional | Filter by tags (ANY match) |
 | **status** | `Enum<'active' \| 'deprecated' \| 'experimental' \| 'beta'>` | optional | Filter by lifecycle status |
 | **pluginSource** | `string` | optional | Filter by plugin name |
@@ -99,9 +99,9 @@ const result = ApiDiscoveryQuery.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **apis** | `{ id: string; name: string; type: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]` | ✅ | Matching API entries |
+| **apis** | `{ id: string; name: string; type: Enum<'rest' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]` | ✅ | Matching API entries |
 | **total** | `integer` | ✅ | Total matching APIs |
-| **filters** | `{ type?: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; tags?: string[]; status?: Enum<'active' \| 'deprecated' \| 'experimental' \| 'beta'>; pluginSource?: string; … }` | optional | Applied query filters |
+| **filters** | `{ type?: Enum<'rest' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; tags?: string[]; status?: Enum<'active' \| 'deprecated' \| 'experimental' \| 'beta'>; pluginSource?: string; … }` | optional | Applied query filters |
 
 
 ---
@@ -169,7 +169,6 @@ const result = ApiDiscoveryQuery.parse(data);
 ### Allowed Values
 
 * `rest`
-* `graphql`
 * `odata`
 * `websocket`
 * `file`
@@ -190,11 +189,11 @@ const result = ApiDiscoveryQuery.parse(data);
 | :--- | :--- | :--- | :--- |
 | **version** | `string` | ✅ | Registry version |
 | **conflictResolution** | `Enum<'error' \| 'priority' \| 'first-wins' \| 'last-wins'>` | ✅ | Strategy for handling route conflicts |
-| **apis** | `{ id: string; name: string; type: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]` | ✅ | All registered APIs |
+| **apis** | `{ id: string; name: string; type: Enum<'rest' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]` | ✅ | All registered APIs |
 | **totalApis** | `integer` | ✅ | Total number of registered APIs |
 | **totalEndpoints** | `integer` | ✅ | Total number of endpoints |
-| **byType** | `Record<string, { id: string; name: string; type: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]>` | optional | APIs grouped by protocol type |
-| **byStatus** | `Record<string, { id: string; name: string; type: Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]>` | optional | APIs grouped by status |
+| **byType** | `Record<string, { id: string; name: string; type: Enum<'rest' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]>` | optional | APIs grouped by protocol type |
+| **byStatus** | `Record<string, { id: string; name: string; type: Enum<'rest' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>; version: string; … }[]>` | optional | APIs grouped by status |
 | **updatedAt** | `string` | optional | Last registry update time |
 
 
@@ -208,7 +207,7 @@ const result = ApiDiscoveryQuery.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique API identifier (snake_case) |
 | **name** | `string` | ✅ | API display name |
-| **type** | `Enum<'rest' \| 'graphql' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>` | ✅ | API protocol type |
+| **type** | `Enum<'rest' \| 'odata' \| 'websocket' \| 'file' \| 'auth' \| 'metadata' \| 'plugin' \| 'webhook' \| 'rpc'>` | ✅ | API protocol type |
 | **version** | `string` | ✅ | API version (e.g., v1, 2024-01) |
 | **basePath** | `string` | ✅ | Base URL path for this API |
 | **description** | `string` | optional | API description |

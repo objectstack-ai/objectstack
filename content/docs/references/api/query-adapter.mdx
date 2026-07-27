@@ -11,7 +11,7 @@ Defines mapping rules between the internal unified query DSL
 
 (defined in `[data/query.zod.ts](/docs/references/data/query)`) and external API protocol formats:
 
-REST, GraphQL, and OData.
+REST and OData.
 
 This enables ObjectStack to expose a single internal query representation
 
@@ -20,8 +20,6 @@ while supporting multiple API standards for external consumers.
 See also: [data/query.zod.ts](/docs/references/data/query) - Unified internal query DSL
 
 See also: [api/rest-server.zod.ts](/docs/references/api/rest-server) - REST API configuration
-
-See also: [api/graphql.zod.ts](/docs/references/api/graphql) - GraphQL API configuration
 
 See also: [api/odata.zod.ts](/docs/references/api/odata) - OData API configuration
 
@@ -32,26 +30,12 @@ See also: [api/odata.zod.ts](/docs/references/api/odata) - OData API configurati
 ## TypeScript Usage
 
 ```typescript
-import { GraphQLQueryAdapter, ODataQueryAdapter, OperatorMapping, QueryAdapterConfig, QueryAdapterTarget, RestQueryAdapter } from '@objectstack/spec/api';
-import type { GraphQLQueryAdapter, ODataQueryAdapter, OperatorMapping, QueryAdapterConfig, QueryAdapterTarget, RestQueryAdapter } from '@objectstack/spec/api';
+import { ODataQueryAdapter, OperatorMapping, QueryAdapterConfig, QueryAdapterTarget, RestQueryAdapter } from '@objectstack/spec/api';
+import type { ODataQueryAdapter, OperatorMapping, QueryAdapterConfig, QueryAdapterTarget, RestQueryAdapter } from '@objectstack/spec/api';
 
 // Validate data
-const result = GraphQLQueryAdapter.parse(data);
+const result = ODataQueryAdapter.parse(data);
 ```
-
----
-
-## GraphQLQueryAdapter
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **filterArgName** | `string` | ✅ | GraphQL filter argument name |
-| **filterStyle** | `Enum<'nested' \| 'flat' \| 'array'>` | ✅ | GraphQL filter nesting style |
-| **pagination** | `{ limitArg: string; offsetArg: string; firstArg: string; afterArg: string }` | optional | Pagination argument name mappings |
-| **sorting** | `{ argName: string; format: Enum<'enum' \| 'array'> }` | optional | Sort argument mapping |
-
 
 ---
 
@@ -77,7 +61,6 @@ const result = GraphQLQueryAdapter.parse(data);
 | :--- | :--- | :--- | :--- |
 | **operator** | `string` | ✅ | Unified DSL operator |
 | **rest** | `string` | optional | REST query parameter template |
-| **graphql** | `string` | optional | GraphQL where clause template |
 | **odata** | `string` | optional | OData $filter expression template |
 
 
@@ -89,9 +72,8 @@ const result = GraphQLQueryAdapter.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **operatorMappings** | `{ operator: string; rest?: string; graphql?: string; odata?: string }[]` | optional | Custom operator mappings |
+| **operatorMappings** | `{ operator: string; rest?: string; odata?: string }[]` | optional | Custom operator mappings |
 | **rest** | `{ filterStyle: Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>; pagination?: object; sorting?: object; fieldsParam: string }` | optional | REST query adapter configuration |
-| **graphql** | `{ filterArgName: string; filterStyle: Enum<'nested' \| 'flat' \| 'array'>; pagination?: object; sorting?: object }` | optional | GraphQL query adapter configuration |
 | **odata** | `{ version: Enum<'v2' \| 'v4'>; usePrefix: boolean; stringFunctions?: Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| 'concat' \| 'substring' \| 'length'>[]; expand?: object }` | optional | OData query adapter configuration |
 
 
@@ -102,7 +84,6 @@ const result = GraphQLQueryAdapter.parse(data);
 ### Allowed Values
 
 * `rest`
-* `graphql`
 * `odata`
 
 

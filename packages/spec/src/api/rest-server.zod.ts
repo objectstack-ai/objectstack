@@ -122,8 +122,7 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
    * **Applies to every HTTP surface, not just REST `/data`** (#2567). The same
    * `requireAuth` value is threaded to every entry point that reaches object
    * data, so the anonymous-deny posture is UNIFORM by surface: REST `/data`
-   * CRUD + batch, the metadata endpoints (`/meta`), the dispatcher's GraphQL
-   * endpoint (`/graphql`), and the raw-hono standard `/data` routes. All share
+   * CRUD + batch, the metadata endpoints (`/meta`), and the raw-hono standard `/data` routes. All share
    * one decision (`shouldDenyAnonymous` in `@objectstack/core`). Before #2567 a
    * caller denied on `/data` could read the same rows through a sibling door.
    *
@@ -139,7 +138,7 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
    * plugins) log a boot warning when they do.
    */
   requireAuth: z.boolean().default(true)
-    .describe('Reject anonymous requests on ALL HTTP surfaces that reach object data (REST /data, /meta, GraphQL, raw-hono /data) with HTTP 401 (secure-by-default; set false to serve them publicly)'),
+    .describe('Reject anonymous requests on ALL HTTP surfaces that reach object data (REST /data, /meta, raw-hono /data) with HTTP 401 (secure-by-default; set false to serve them publicly)'),
 
   /**
    * API documentation configuration

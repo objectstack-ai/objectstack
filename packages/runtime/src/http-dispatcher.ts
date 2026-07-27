@@ -164,7 +164,7 @@ export interface HttpDispatcherOptions {
  * is intentionally NOT marked `@deprecated` while no working replacement exists.
  */
 export class HttpDispatcher {
-    private kernel: any; // Casting to any to access dynamic props like services, graphql
+    private kernel: any; // Casting to any to access dynamic props like services
     private defaultKernel: ObjectKernel;
     private defaultProject?: { environmentId: string; orgId?: string };
     private kernelResolver?: KernelResolver;
@@ -1563,7 +1563,7 @@ export class HttpDispatcher {
      * ADR-0069 — returns a 403 response when the resolved session is blocked by
      * an auth-policy gate (expired password / required MFA) on a non-allow-listed
      * path, else null. Mirrors the REST `enforceAuth` seam so REST + dispatcher
-     * (MCP, GraphQL) enforce consistently. Fails open on any lookup error.
+     * (MCP) enforce consistently. Fails open on any lookup error.
      */
     private async enforceAuthGate(context: any, cleanPath: string): Promise<any | null> {
         try {
@@ -1693,12 +1693,11 @@ export class HttpDispatcher {
         // Resolve all services through the same async fallback chain
         // that request handlers (handleI18n, handleAuth, …) use.
         const [
-            authSvc, graphqlSvc, searchSvc, realtimeSvc, filesSvc,
+            authSvc, searchSvc, realtimeSvc, filesSvc,
             analyticsSvc, workflowSvc, aiSvc, notificationSvc, i18nSvc,
             uiSvc, automationSvc, cacheSvc, queueSvc, jobSvc,
         ] = await Promise.all([
             this.resolveService(CoreServiceName.enum.auth),
-            this.resolveService(CoreServiceName.enum.graphql),
             this.resolveService(CoreServiceName.enum.search),
             this.resolveService(CoreServiceName.enum.realtime),
             this.resolveService(CoreServiceName.enum['file-storage']),
@@ -1715,7 +1714,6 @@ export class HttpDispatcher {
         ]);
 
         const hasAuth         = !!authSvc;
-        const hasGraphQL      = !!(graphqlSvc || this.kernel.graphql);
         const hasSearch       = !!searchSvc;
         const hasFiles        = !!filesSvc;
         const hasAnalytics    = !!analyticsSvc;
@@ -1736,7 +1734,6 @@ export class HttpDispatcher {
                 packages:      `${prefix}/packages`,
                 auth:          hasAuth ? `${prefix}/auth` : undefined,
                 ui:            hasUi ? `${prefix}/ui` : undefined,
-                graphql:       hasGraphQL ? `${prefix}/graphql` : undefined,
                 storage:       hasFiles ? `${prefix}/storage` : undefined,
                 analytics:     hasAnalytics ? `${prefix}/analytics` : undefined,
                 automation:    hasAutomation ? `${prefix}/automation` : undefined,
@@ -1817,7 +1814,6 @@ export class HttpDispatcher {
             routes,
             endpoints: routes, // Alias for backward compatibility with some clients
             features: {
-                graphql: hasGraphQL,
                 search: hasSearch,
                 // No WS/HTTP realtime surface is mounted anywhere — a mere
                 // in-process realtime service must not advertise websockets
@@ -1858,7 +1854,6 @@ export class HttpDispatcher {
                 notification:   hasNotification ? svcAvailable(routes.notifications, undefined, notificationSvc) : svcUnavailable('notification'),
                 ai:             hasAi ? svcAvailable(routes.ai, undefined, aiSvc) : svcUnavailable('ai'),
                 i18n:           hasI18n ? svcAvailable(routes.i18n, undefined, i18nSvc) : svcUnavailable('i18n'),
-                graphql:        hasGraphQL ? svcAvailable(routes.graphql, undefined, graphqlSvc) : svcUnavailable('graphql'),
                 'file-storage': hasFiles ? svcAvailable(routes.storage, undefined, filesSvc) : svcUnavailable('file-storage'),
                 search:         hasSearch ? svcAvailable(undefined, undefined, searchSvc) : svcUnavailable('search'),
             },
@@ -1866,97 +1861,7 @@ export class HttpDispatcher {
         };
     }
 
-    /**
-     * Handles GraphQL requests
-     */
-    async handleGraphQL(body: { query: string; variables?: any }, context: HttpProtocolContext) {
-        if (!body || !body.query) {
-             throw { statusCode: 400, message: 'Missing query in request body' };
-        }
 
-        // Anonymous-deny gate — the same `requireAuth` posture the REST `/data`
-        // and `/meta` surfaces enforce. GraphQL reaches ObjectQL through
-        // `kernel.graphql`, whose security middleware falls OPEN for an
-        // anonymous context (no userId/roles → next()), so without this gate an
-        // anonymous query could read exactly the object data the sibling
-        // `/data/*` 401 denies (#2567). Mirrors {@link handleMetadata}: no-op
-        // when `requireAuth` is off (demo / single-tenant), an authenticated or
-        // system caller passes exactly as on `/data`.
-        //
-        // The dispatcher-plugin's direct `/graphql` route calls us WITHOUT
-        // resolving identity first (unlike `dispatch()`, which populates
-        // `context.executionContext`), so resolve it here when absent —
-        // REGARDLESS of `requireAuth`: the resolved identity is also what we
-        // thread to the engine below (#2992), and an authenticated caller on a
-        // `requireAuth: false` deployment must still run under their own
-        // authority, not context-less.
-        let ec: any = context.executionContext;
-        if (!ec) {
-            ec = await this.resolveRequestExecutionContext(context);
-            if (ec) context.executionContext = ec;
-        }
-        // Body-routed seam: no meaningful request path, so pass none — the
-        // shared decision then denies anonymous unconditionally (see the
-        // `undefined`-path trap guard in `shouldDenyAnonymous`).
-        if (shouldDenyAnonymous({ requireAuth: this.requireAuth, userId: ec?.userId, isSystem: ec?.isSystem })) {
-            throw {
-                statusCode: ANONYMOUS_DENY_STATUS,
-                message: ANONYMOUS_DENY_MESSAGE,
-                code: ANONYMOUS_DENY_CODE,
-            };
-        }
-
-        if (typeof this.kernel.graphql !== 'function') {
-            throw { statusCode: 501, message: 'GraphQL service not available' };
-        }
-
-        // ADR-0096 D1 / #2992 — thread the caller's identity to the engine.
-        // `kernel.graphql` is still unassigned everywhere (this call 501s
-        // above), but the moment a real engine lands it resolves objects
-        // through ObjectQL, whose security middleware falls OPEN on a missing
-        // principal — so the entry point must already carry the caller as
-        // `options.context` (the same key the REST `callData` path threads).
-        // An implementation MUST forward it to every data-engine call.
-        return this.kernel.graphql(body.query, body.variables, {
-            request: context.request,
-            context: ec,
-        });
-    }
-
-    /**
-     * Resolve the RBAC/RLS execution context for a request that did NOT flow
-     * through {@link dispatch} (which resolves and caches it on
-     * `context.executionContext`). The dispatcher-plugin's direct `/graphql`
-     * route is the current caller. Mirrors the identity resolution `dispatch()`
-     * performs so an anonymous-deny gate can tell an authenticated caller from
-     * an anonymous one, and so the caller's identity can be THREADED to the
-     * engine (#2992 / ADR-0096 D1) instead of dropped. Best-effort: returns
-     * `undefined` on failure (treated as anonymous, i.e. denied under
-     * `requireAuth`).
-     */
-    private async resolveRequestExecutionContext(
-        context: HttpProtocolContext,
-    ): Promise<ExecutionContext | undefined> {
-        try {
-            return await this.timedResolveExecutionContext({
-                getService: (n: string) => this.resolveService(n, context.environmentId),
-                getQl: async () => {
-                    const k: any = this.kernel;
-                    if (k && typeof k.getServiceAsync === 'function') {
-                        const ql = await k.getServiceAsync('objectql').catch(() => undefined);
-                        if (ql && (ql.registry || typeof ql.find === 'function')) return ql;
-                    }
-                    return this.getObjectQLService(context.environmentId);
-                },
-                request: context.request,
-                // OAuth access tokens are honoured only on the MCP surface
-                // (#2698); GraphQL enforces no per-scope tool gating.
-                acceptOAuthAccessToken: false,
-            });
-        } catch {
-            return undefined;
-        }
-    }
 
     /** Thin delegate — body extracted to `./domains/auth.ts` (D11③ PR-7). */
     async handleAuth(path: string, method: string, body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
@@ -2942,7 +2847,7 @@ export class HttpDispatcher {
 
         // ── ADR-0069 Authentication-policy gate ──
         // Block a gated session (expired password / required MFA) from
-        // protected MCP/GraphQL/data routes, mirroring the REST seam. The core
+        // protected MCP/data routes, mirroring the REST seam. The core
         // allow-list keeps auth + remediation reachable. Skipped (no session
         // lookup) when no gate feature is active.
         const authGated = await this.enforceAuthGate(context, cleanPath);
@@ -3018,10 +2923,7 @@ export class HttpDispatcher {
 
         // /keys moved to the domain registry (D11 step ③).
 
-        if (cleanPath.startsWith('/graphql')) {
-             if (method === 'POST') return this.handleGraphQL(body, context);
-             // GraphQL usually GET for Playground is handled by middleware but we can return 405 or handle it
-        }
+        // /graphql removed — GraphQL is not in the product plan (#2462 follow-on).
 
         // /storage and /ui moved to the domain registry (D11 step ③).
 

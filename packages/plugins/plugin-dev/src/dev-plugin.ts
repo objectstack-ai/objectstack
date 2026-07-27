@@ -10,7 +10,7 @@ import { resolveMultiOrgEnabled } from '@objectstack/types';
 const CORE_SERVICE_NAMES = [
   'metadata', 'data', 'auth',
   'file-storage', 'search', 'cache', 'queue',
-  'automation', 'graphql', 'analytics', 'realtime',
+  'automation', 'analytics', 'realtime',
   'job', 'notification', 'ai', 'i18n', 'ui', 'workflow',
 ] as const;
 
@@ -96,14 +96,6 @@ function createAutomationStub() {
   };
 }
 
-/** IGraphQLService — dev stub returning empty data */
-function createGraphQLStub() {
-  return {
-    _dev: true, _serviceName: 'graphql',
-    async execute() { return { data: null, errors: [{ message: 'GraphQL not available in dev stub mode' }] }; },
-    getSchema() { return 'type Query { _dev: Boolean }'; },
-  };
-}
 
 /** IAnalyticsService — dev stub returning empty results */
 function createAnalyticsStub() {
@@ -274,7 +266,6 @@ const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
   'file-storage': createStorageStub,
   'search':      createSearchStub,
   'automation':  createAutomationStub,
-  'graphql':     createGraphQLStub,
   'analytics':   createAnalyticsStub,
   'realtime':    createRealtimeStub,
   'notification': createNotificationStub,
@@ -412,7 +403,7 @@ export interface DevPluginOptions {
  *
  * `cache` (Map-backed), `queue` (in-memory pub/sub), `job` (no-op scheduler),
  * `file-storage` (Map-backed), `search` (in-memory text search),
- * `automation` (no-op flows), `graphql` (placeholder), `analytics` (empty results),
+ * `automation` (no-op flows), `analytics` (empty results),
  * `realtime` (in-memory pub/sub), `notification` (log), `ai` (placeholder),
  * `i18n` (Map-backed translations), `ui` (Map-backed views/dashboards),
  * `workflow` (Map-backed state machine)

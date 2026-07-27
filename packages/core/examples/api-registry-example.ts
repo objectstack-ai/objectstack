@@ -208,33 +208,6 @@ async function example2_MultiPluginDiscovery() {
     },
   };
 
-  // GraphQL Plugin
-  const graphqlPlugin: Plugin = {
-    name: 'graphql-plugin',
-    init: async (ctx) => {
-      const registry = ctx.getService<ApiRegistry>('api-registry');
-
-      registry.registerApi({
-        id: 'graphql_api',
-        name: 'GraphQL API',
-        type: 'graphql',
-        version: 'v1',
-        basePath: '/graphql',
-        endpoints: [
-          {
-            id: 'query',
-            path: '/graphql',
-            summary: 'GraphQL Query Endpoint',
-            responses: [],
-          },
-        ],
-        metadata: {
-          status: 'active',
-          tags: ['query', 'flexible'],
-        },
-      });
-    },
-  };
 
   // Analytics Plugin - Beta API
   const analyticsPlugin: Plugin = {
@@ -265,7 +238,6 @@ async function example2_MultiPluginDiscovery() {
   };
 
   kernel.use(dataPlugin);
-  kernel.use(graphqlPlugin);
   kernel.use(analyticsPlugin);
   await kernel.bootstrap();
 

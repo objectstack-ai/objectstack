@@ -1427,7 +1427,6 @@ export const KernelCapabilitiesSchema = lazySchema(() => z.object({
   
   /** API Surface */
   restApi: z.boolean().default(true).describe('REST API available'),
-  graphqlApi: z.boolean().default(false).describe('GraphQL API available'),
   odataApi: z.boolean().default(false).describe('OData API available'),
   
   /** Real-time & Events */
@@ -1477,7 +1476,6 @@ export const KernelCapabilitiesSchema = lazySchema(() => z.object({
   /** Available APIs */
   apis: z.array(ApiEndpointSchema).optional().describe('Available System & Business APIs'),
   network: z.object({
-    graphql: z.boolean().default(false),
     search: z.boolean().default(false),
     websockets: z.boolean().default(false),
     files: z.boolean().default(true),
@@ -1486,7 +1484,7 @@ export const KernelCapabilitiesSchema = lazySchema(() => z.object({
     workflow: z.boolean().default(false).describe('Is the Workflow engine enabled?'),
     notifications: z.boolean().default(false).describe('Is the Notification service enabled?'),
     i18n: z.boolean().default(false).describe('Is the i18n service enabled?'),
-  }).optional().describe('Network Capabilities (GraphQL, WS, etc.)'),
+  }).optional().describe('Network Capabilities (WS, etc.)'),
 
   /** Introspection */
   systemObjects: z.array(z.string()).optional().describe('List of globally available System Objects'),

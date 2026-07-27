@@ -31,7 +31,6 @@ export const CoreServiceName = z.enum([
   
   // Advanced Capabilities
   'automation',     // Flow & Script Engine
-  'graphql',        // GraphQL API Engine
   'analytics',      // BI & Semantic Layer
   'realtime',       // WebSocket & PubSub
   'job',            // Background Job Manager
@@ -75,7 +74,6 @@ export const ServiceRequirementDef = {
   'file-storage': 'optional',
   search: 'optional',
   automation: 'optional',
-  graphql: 'optional',
   analytics: 'optional',
   realtime: 'optional',
   notification: 'optional',

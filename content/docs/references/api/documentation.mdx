@@ -9,7 +9,7 @@ API Documentation & Testing Interface Protocol
 
 Provides schemas for generating interactive API documentation and testing
 
-interfaces similar to Swagger UI, GraphQL Playground, Postman, etc.
+interfaces similar to Swagger UI, Postman, etc.
 
 Features:
 
@@ -28,8 +28,6 @@ Architecture Alignment:
 - Swagger UI: Interactive API documentation
 
 - Postman: API testing collections
-
-- GraphQL Playground: GraphQL-specific testing
 
 - Redoc: Documentation rendering
 
@@ -102,7 +100,7 @@ const result = ApiChangelogEntry.parse(data);
 | **version** | `string` | ✅ | API version |
 | **description** | `string` | optional | API description |
 | **servers** | `{ url: string; description?: string; variables?: Record<string, { default: string; description?: string; enum?: string[] }> }[]` | ✅ | API server URLs |
-| **ui** | `{ type: Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphql-playground' \| 'graphiql' \| 'postman' \| 'custom'>; path: string; theme: Enum<'light' \| 'dark' \| 'auto'>; enableTryItOut: boolean; … }` | optional | Testing UI configuration |
+| **ui** | `{ type: Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>; path: string; theme: Enum<'light' \| 'dark' \| 'auto'>; enableTryItOut: boolean; … }` | optional | Testing UI configuration |
 | **generateOpenApi** | `boolean` | ✅ | Generate OpenAPI 3.0 specification |
 | **generateTestCollections** | `boolean` | ✅ | Generate API test collections |
 | **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: { name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]; … }[]` | ✅ | Predefined test collections |
@@ -158,7 +156,7 @@ const result = ApiChangelogEntry.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphql-playground' \| 'graphiql' \| 'postman' \| 'custom'>` | ✅ | Testing UI implementation |
+| **type** | `Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>` | ✅ | Testing UI implementation |
 | **path** | `string` | ✅ | URL path for documentation UI |
 | **theme** | `Enum<'light' \| 'dark' \| 'auto'>` | ✅ | UI color theme |
 | **enableTryItOut** | `boolean` | ✅ | Enable interactive API testing |
@@ -183,7 +181,6 @@ const result = ApiChangelogEntry.parse(data);
 * `rapidoc`
 * `stoplight`
 * `scalar`
-* `graphql-playground`
 * `graphiql`
 * `postman`
 * `custom`

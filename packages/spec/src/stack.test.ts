@@ -159,7 +159,6 @@ describe('KernelCapabilitiesSchema', () => {
       version: '1.0.0',
       environment: 'production',
       restApi: true,
-      graphqlApi: true,
       odataApi: true,
       websockets: true,
       serverSentEvents: true,
@@ -236,7 +235,6 @@ describe('KernelCapabilitiesSchema', () => {
     expect(result.restApi).toBe(true);
     expect(result.authentication).toBe(true);
     expect(result.fileStorage).toBe(true);
-    expect(result.graphqlApi).toBe(false);
     expect(result.multiTenant).toBe(false);
   });
 
@@ -309,8 +307,7 @@ describe('ObjectStackCapabilitiesSchema', () => {
         version: '1.0.0',
         environment: 'production',
         restApi: true,
-        graphqlApi: true,
-        odataApi: false,
+          odataApi: false,
         websockets: true,
         serverSentEvents: false,
         eventBus: true,

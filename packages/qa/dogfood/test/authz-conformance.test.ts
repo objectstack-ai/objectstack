@@ -39,19 +39,12 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
     re: /private\s+registerMetadataEndpoints\s*\(/g,
     key: () => 'meta:rest-server.ts:registerMetadataEndpoints',
   },
-  // Dispatcher meta + graphql handlers — curated NAMES only (NOT handleAI /
+  // Dispatcher meta handler — curated NAME only (NOT handleAI /
   // handleData / handleSecurity, which are separate surfaces/rows).
   {
     file: 'packages/runtime/src/http-dispatcher.ts',
-    re: /async\s+(handleMetadata|handleGraphQL)\s*\(/g,
-    key: (m) => `${m[1] === 'handleGraphQL' ? 'graphql' : 'meta'}:http-dispatcher.ts:${m[1]}`,
-  },
-  // Dispatcher-plugin direct GraphQL route (other server.post routes are
-  // control-plane / feature endpoints, deliberately not enumerated here).
-  {
-    file: 'packages/runtime/src/dispatcher-plugin.ts',
-    re: /server\.post\(\s*`\$\{prefix\}\/graphql`/g,
-    key: () => 'graphql:dispatcher-plugin.ts:POST /api/v1/graphql',
+    re: /async\s+(handleMetadata)\s*\(/g,
+    key: (m) => `meta:http-dispatcher.ts:${m[1]}`,
   },
   // Raw-hono standard /data routes — genuinely pattern-based: ANY new
   // `rawApp.<verb>(`${prefix}/data...`)` → a new key → CI fails until a row covers it.
@@ -62,14 +55,6 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   },
 
   // ── #2992 / ADR-0096 D4 — latent-surface identity pins ─────────────────
-  // GraphQL identity threading: the ONLY kernel.graphql(...) call site must
-  // carry `context:` in its options. If a refactor drops the threading the key
-  // vanishes → the `graphql-identity-thread` row's covers goes STALE → red CI.
-  {
-    file: 'packages/runtime/src/http-dispatcher.ts',
-    re: /kernel\.graphql\([^)]*\bcontext:/g,
-    key: () => 'graphql:http-dispatcher.ts:kernel.graphql(context-threaded)',
-  },
   // Realtime delivery fan-out: pins the trusted-internal-only posture of the
   // in-memory adapter's publish loop (`realtime-delivery-authz` row).
   {
@@ -160,7 +145,7 @@ const HIGH_RISK = [
   'owd-private', 'owd-public-read', 'controlled-by-parent', 'anonymous-deny', 'default-profile',
   // #2567 — every anonymous-deny HTTP surface is high-risk: it guards the
   // same object data as REST `/data` through a sibling entry point.
-  'anonymous-deny-meta', 'anonymous-deny-graphql', 'anonymous-deny-hono-data',
+  'anonymous-deny-meta', 'anonymous-deny-hono-data',
   // #2948/#3003 — write-integrity face: without the strip, `readonly: true`
   // is false compliance (declared ≠ enforced) and approval/status columns are
   // one direct PATCH away from self-approval.
@@ -216,8 +201,8 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
 
   it('(c) a covers key no longer in source → STALE covers failure', () => {
     const m = clone();
-    const row = m.find((r) => r.id === 'anonymous-deny-graphql')!;
-    row.covers = [...(row.covers ?? []), 'graphql:http-dispatcher.ts:handleRemovedThing'];
+    const row = m.find((r) => r.id === 'anonymous-deny-meta')!;
+    row.covers = [...(row.covers ?? []), 'meta:http-dispatcher.ts:handleRemovedThing'];
     const problems = checkLedger(m, opts(() => discoverAnonymousDenySurfaces()));
     expect(problems.some((p) => /STALE covers/.test(p) && /handleRemovedThing/.test(p))).toBe(true);
   });
@@ -230,17 +215,6 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
       opts(() => new Set([...discoverAnonymousDenySurfaces(), fake])),
     );
     expect(problems.some((p) => p.includes('UNCLASSIFIED surface') && p.includes(fake))).toBe(true);
-  });
-
-  it('(e) dropping the GraphQL context-thread → STALE covers failure (#2992)', () => {
-    const threaded = 'graphql:http-dispatcher.ts:kernel.graphql(context-threaded)';
-    // Baseline sanity: the threading is discovered from source today.
-    expect(discoverAnonymousDenySurfaces().has(threaded)).toBe(true);
-    const problems = checkLedger(
-      AUTHZ_CONFORMANCE,
-      opts(() => new Set([...discoverAnonymousDenySurfaces()].filter((k) => k !== threaded))),
-    );
-    expect(problems.some((p) => /STALE covers/.test(p) && p.includes(threaded))).toBe(true);
   });
 
   // ── ADR-0096 / #3167 — the MCP identity pins bite too ──────────────────

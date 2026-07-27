@@ -5,7 +5,6 @@
 // this fix, on a `requireAuth` deployment `/data/*` denied anonymous callers
 // while three sibling surfaces reached ObjectQL without the gate:
 //   - the metadata endpoints (`/meta`)
-//   - the dispatcher GraphQL endpoint (`/graphql`)
 //   - the raw-hono standard `/data` routes (order-dependent shadowing)
 //
 // This proof boots the real showcase HTTP stack ON THE PLATFORM DEFAULT (the
@@ -42,22 +41,6 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'authenticated metadata read must clear the auth gate').not.toBe(401);
   });
 
-  // ── /graphql ─────────────────────────────────────────────────────────────
-  it('anonymous POST /graphql is denied (401)', async () => {
-    const r = await stack.api('/graphql', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: '{ __typename }' }),
-    });
-    expect(r.status, 'anonymous GraphQL query must be 401').toBe(401);
-  });
-
-  it('an authenticated member clears the /graphql gate (not 401)', async () => {
-    // Past the gate the query may 200 or 501 (depending on whether a GraphQL
-    // service is wired) — the point is it is NOT the anonymous 401.
-    const r = await stack.apiAs(memberToken, 'POST', '/graphql', { query: '{ __typename }' });
-    expect(r.status, 'authenticated GraphQL must clear the auth gate').not.toBe(401);
-  });
 
   // ── /data (surface-level; raw-hono handler proven in plugin-hono-server) ──
   it('anonymous READ of the data surface is denied (401)', async () => {

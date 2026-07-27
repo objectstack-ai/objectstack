@@ -8,7 +8,7 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
  * Unified API Registry Protocol
  * 
  * Provides a centralized registry for managing all API endpoints across different
- * API types (REST, GraphQL, OData, WebSocket, Auth, File, Plugin-registered).
+ * API types (REST, OData, WebSocket, Auth, File, Plugin-registered).
  * 
  * This enables:
  * - Unified API discovery and documentation (similar to Swagger/OpenAPI)
@@ -51,7 +51,6 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { lazySchema } from '../shared/lazy-schema';
 export const ApiProtocolType = z.enum([
   'rest',      // RESTful API (CRUD operations)
-  'graphql',   // GraphQL API (flexible queries)
   'odata',     // OData v4 API (enterprise integration)
   'websocket', // WebSocket API (real-time)
   'file',      // File/Storage API (uploads/downloads)
@@ -95,7 +94,6 @@ export type HttpStatusCode = z.infer<typeof HttpStatusCode>;
  * Schema resolution (expanding references into actual JSON Schema) is performed by:
  * - **API Gateway**: For runtime request/response validation
  * - **OpenAPI Generator**: For Swagger/OpenAPI documentation
- * - **GraphQL Schema Builder**: For GraphQL type generation
  * - **Documentation Tools**: For developer documentation
  * 
  * This separation allows the Registry to remain lightweight and focused on
@@ -621,7 +619,7 @@ export const ApiRegistryEntrySchema = lazySchema(() => z.object({
   /** Endpoints in this API */
   endpoints: z.array(ApiEndpointRegistrationSchema).describe('Registered endpoints'),
   
-  /** OpenAPI/GraphQL/OData specific configuration */
+  /** OpenAPI/OData specific configuration */
   config: z.record(z.string(), z.unknown()).optional().describe('Protocol-specific configuration'),
   
   /** API metadata */

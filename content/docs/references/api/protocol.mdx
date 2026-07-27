@@ -459,7 +459,7 @@ const result = AiInsightsRequest.parse(data);
 | **locale** | `{ default: string; supported: string[]; timezone: string }` | optional |  |
 | **services** | `Record<string, { enabled: boolean; status: Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>; handlerReady?: boolean; route?: string; … }>` | optional | Per-service availability map keyed by CoreServiceName |
 | **capabilities** | `Record<string, { enabled: boolean; features?: Record<string, boolean>; description?: string }>` | optional | Hierarchical capability descriptors for frontend intelligent adaptation |
-| **schemaDiscovery** | `{ openapi?: string; graphql?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
+| **schemaDiscovery** | `{ openapi?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
 | **apiName** | `string` | optional | API name (deprecated — use name) |
 

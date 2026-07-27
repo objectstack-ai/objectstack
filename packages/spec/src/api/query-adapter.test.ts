@@ -3,14 +3,13 @@ import {
   QueryAdapterTargetSchema,
   OperatorMappingSchema,
   RestQueryAdapterSchema,
-  GraphQLQueryAdapterSchema,
   ODataQueryAdapterSchema,
   QueryAdapterConfigSchema,
 } from './query-adapter.zod';
 
 describe('QueryAdapterTargetSchema', () => {
   it('should accept all target protocols', () => {
-    const targets = ['rest', 'graphql', 'odata'] as const;
+    const targets = ['rest', 'odata'] as const;
 
     targets.forEach(target => {
       expect(() => QueryAdapterTargetSchema.parse(target)).not.toThrow();
@@ -35,13 +34,11 @@ describe('OperatorMappingSchema', () => {
     const mapping = OperatorMappingSchema.parse({
       operator: 'contains',
       rest: 'filter[{field}][contains]',
-      graphql: '{field}: { contains: $value }',
       odata: "contains({field}, '{value}')",
     });
 
     expect(mapping.operator).toBe('contains');
     expect(mapping.rest).toBeDefined();
-    expect(mapping.graphql).toBeDefined();
     expect(mapping.odata).toBeDefined();
   });
 });
@@ -101,48 +98,6 @@ describe('RestQueryAdapterSchema', () => {
   });
 });
 
-describe('GraphQLQueryAdapterSchema', () => {
-  it('should apply default values', () => {
-    const adapter = GraphQLQueryAdapterSchema.parse({});
-
-    expect(adapter.filterArgName).toBe('where');
-    expect(adapter.filterStyle).toBe('nested');
-  });
-
-  it('should accept all filter styles', () => {
-    const styles = ['nested', 'flat', 'array'] as const;
-
-    styles.forEach(style => {
-      const adapter = GraphQLQueryAdapterSchema.parse({ filterStyle: style });
-      expect(adapter.filterStyle).toBe(style);
-    });
-  });
-
-  it('should accept custom pagination arguments', () => {
-    const adapter = GraphQLQueryAdapterSchema.parse({
-      pagination: {
-        limitArg: 'take',
-        offsetArg: 'skip',
-        firstArg: 'first',
-        afterArg: 'after',
-      },
-    });
-
-    expect(adapter.pagination?.limitArg).toBe('take');
-  });
-
-  it('should accept custom sort configuration', () => {
-    const adapter = GraphQLQueryAdapterSchema.parse({
-      sorting: {
-        argName: 'sortBy',
-        format: 'array',
-      },
-    });
-
-    expect(adapter.sorting?.argName).toBe('sortBy');
-    expect(adapter.sorting?.format).toBe('array');
-  });
-});
 
 describe('ODataQueryAdapterSchema', () => {
   it('should apply default values', () => {
@@ -196,18 +151,13 @@ describe('QueryAdapterConfigSchema', () => {
   it('should accept complete configuration', () => {
     const config = QueryAdapterConfigSchema.parse({
       operatorMappings: [
-        { operator: 'eq', rest: 'filter[{field}][eq]', graphql: '{field}: { eq: $value }', odata: '{field} eq {value}' },
+        { operator: 'eq', rest: 'filter[{field}][eq]', odata: '{field} eq {value}' },
         { operator: 'contains', rest: 'filter[{field}][contains]', odata: "contains({field}, '{value}')" },
       ],
       rest: {
         filterStyle: 'bracket',
         pagination: { limitParam: 'limit', offsetParam: 'offset' },
         sorting: { param: 'sort', format: 'comma' },
-      },
-      graphql: {
-        filterArgName: 'where',
-        filterStyle: 'nested',
-        pagination: { limitArg: 'first', afterArg: 'after' },
       },
       odata: {
         version: 'v4',
@@ -218,7 +168,6 @@ describe('QueryAdapterConfigSchema', () => {
 
     expect(config.operatorMappings).toHaveLength(2);
     expect(config.rest?.filterStyle).toBe('bracket');
-    expect(config.graphql?.filterArgName).toBe('where');
     expect(config.odata?.version).toBe('v4');
   });
 

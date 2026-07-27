@@ -13,7 +13,7 @@ describe('CoreServiceName', () => {
     const services = [
       'metadata', 'data', 'auth',
       'file-storage', 'search', 'cache', 'queue',
-      'automation', 'graphql', 'analytics', 'realtime',
+      'automation', 'analytics', 'realtime',
       'job', 'notification', 'ai', 'i18n', 'ui', 'workflow',
     ];
 
@@ -62,7 +62,6 @@ describe('ServiceRequirementDef', () => {
     expect(ServiceRequirementDef['file-storage']).toBe('optional');
     expect(ServiceRequirementDef.search).toBe('optional');
     expect(ServiceRequirementDef.automation).toBe('optional');
-    expect(ServiceRequirementDef.graphql).toBe('optional');
     expect(ServiceRequirementDef.analytics).toBe('optional');
     expect(ServiceRequirementDef.realtime).toBe('optional');
     expect(ServiceRequirementDef.notification).toBe('optional');

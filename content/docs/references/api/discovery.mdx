@@ -51,7 +51,6 @@ const result = ApiRoutes.parse(data);
 | **automation** | `string` | optional | e.g. /api/v1/automation |
 | **storage** | `string` | optional | e.g. /api/v1/storage |
 | **analytics** | `string` | optional | e.g. /api/v1/analytics |
-| **graphql** | `string` | optional | e.g. /graphql |
 | **packages** | `string` | optional | e.g. /api/v1/packages |
 | **workflow** | `string` | optional | e.g. /api/v1/workflow |
 | **approvals** | `string` | optional | e.g. /api/v1/approvals |
@@ -76,7 +75,7 @@ const result = ApiRoutes.parse(data);
 | **locale** | `{ default: string; supported: string[]; timezone: string }` | ✅ |  |
 | **services** | `Record<string, { enabled: boolean; status: Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>; handlerReady?: boolean; route?: string; … }>` | ✅ | Per-service availability map keyed by CoreServiceName |
 | **capabilities** | `Record<string, { enabled: boolean; features?: Record<string, boolean>; description?: string }>` | optional | Hierarchical capability descriptors for frontend intelligent adaptation |
-| **schemaDiscovery** | `{ openapi?: string; graphql?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
+| **schemaDiscovery** | `{ openapi?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
 
 

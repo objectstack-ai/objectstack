@@ -328,7 +328,6 @@ describe('RouterConfigSchema', () => {
       expect(config.mounts.auth).toBe('/auth');
       expect(config.mounts.automation).toBe('/automation');
       expect(config.mounts.storage).toBe('/storage');
-      expect(config.mounts.graphql).toBe('/graphql');
     });
 
     it('should accept custom mounts', () => {
@@ -339,7 +338,6 @@ describe('RouterConfigSchema', () => {
           auth: '/api/auth',
           automation: '/api/automation',
           storage: '/api/storage',
-          graphql: '/api/graphql',
         },
       });
 
@@ -432,7 +430,6 @@ describe('RouterConfigSchema', () => {
           auth: '/auth',
           automation: '/flows',
           storage: '/files',
-          graphql: '/gql',
         },
         cors: {
           enabled: true,
@@ -452,7 +449,6 @@ describe('RouterConfigSchema', () => {
 
       const result = RouterConfigSchema.parse(config);
       expect(result.basePath).toBe('/api/v1');
-      expect(result.mounts.graphql).toBe('/gql');
       expect(result.cors?.enabled).toBe(true);
       expect(result.staticMounts).toHaveLength(1);
     });

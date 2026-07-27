@@ -3289,7 +3289,6 @@ export class ObjectStackClient {
       notifications: '/api/v1/notifications',
       ai: '/api/v1/ai',
       i18n: '/api/v1/i18n',
-      graphql: '/graphql',
     };
     
     return routeMap[type] || `/api/v1/${type}`;

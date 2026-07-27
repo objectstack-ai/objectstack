@@ -6,7 +6,7 @@ import { z } from 'zod';
  * API Documentation & Testing Interface Protocol
  * 
  * Provides schemas for generating interactive API documentation and testing
- * interfaces similar to Swagger UI, GraphQL Playground, Postman, etc.
+ * interfaces similar to Swagger UI, Postman, etc.
  * 
  * Features:
  * - OpenAPI/Swagger specification generation
@@ -18,7 +18,6 @@ import { z } from 'zod';
  * Architecture Alignment:
  * - Swagger UI: Interactive API documentation
  * - Postman: API testing collections
- * - GraphQL Playground: GraphQL-specific testing
  * - Redoc: Documentation rendering
  * 
  * @example Documentation Config
@@ -202,7 +201,6 @@ export const ApiTestingUiType = z.enum([
   'rapidoc',         // RapiDoc
   'stoplight',       // Stoplight Elements
   'scalar',          // Scalar API Reference
-  'graphql-playground', // GraphQL Playground
   'graphiql',        // GraphiQL
   'postman',         // Postman-like interface
   'custom',          // Custom implementation

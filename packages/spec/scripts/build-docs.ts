@@ -453,7 +453,7 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
   ],
   api: [
     { section: 'Contract & Routing', pages: ['protocol', 'contract', 'endpoint', 'router', 'registry', 'discovery', 'documentation', 'versioning', 'errors', 'batch'] },
-    { section: 'Transport & Realtime', pages: ['http', 'http-cache', 'rest-server', 'websocket', 'realtime', 'realtime-shared', 'graphql', 'odata', 'query-adapter', 'dispatcher'] },
+    { section: 'Transport & Realtime', pages: ['http', 'http-cache', 'rest-server', 'websocket', 'realtime', 'realtime-shared', 'odata', 'query-adapter', 'dispatcher'] },
     { section: 'Service APIs', pages: ['core-services', 'auth', 'auth-endpoints', 'identity', 'metadata', 'metadata-plugin', 'automation-api', 'analytics', 'export', 'storage', 'notification', 'events', 'connector', 'package-api', 'package-registry', 'plugin-rest-api'] },
   ],
   automation: [

@@ -195,8 +195,7 @@ describe('API Documentation Protocol', () => {
       expect(ApiTestingUiType.parse('rapidoc')).toBe('rapidoc');
       expect(ApiTestingUiType.parse('stoplight')).toBe('stoplight');
       expect(ApiTestingUiType.parse('scalar')).toBe('scalar');
-      expect(ApiTestingUiType.parse('graphql-playground')).toBe('graphql-playground');
-      expect(ApiTestingUiType.parse('graphiql')).toBe('graphiql');
+        expect(ApiTestingUiType.parse('graphiql')).toBe('graphiql');
       expect(ApiTestingUiType.parse('postman')).toBe('postman');
       expect(ApiTestingUiType.parse('custom')).toBe('custom');
     });

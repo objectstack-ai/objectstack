@@ -337,17 +337,6 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
     }
   });
 
-  // --- GraphQL (returns raw result, not HttpDispatcherResult) ---
-  app.post(`${prefix}/graphql`, async (c) => {
-    try {
-      const body = await c.req.json();
-      const result = await dispatcher.handleGraphQL(body, { request: c.req.raw });
-      return c.json(result);
-    } catch (err: any) {
-      return errorJson(c, err.message || 'Internal Server Error', err.statusCode || 500);
-    }
-  });
-
   // --- Storage (needs formData parsing) ---
   app.all(`${prefix}/storage/*`, async (c) => {
     try {

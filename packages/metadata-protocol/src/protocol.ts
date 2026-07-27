@@ -1436,7 +1436,6 @@ export class ObjectStackProtocolImplementation implements ObjectStackProtocol {
             notification: 'notifications',
             ai: 'ai',
             i18n: 'i18n',
-            graphql: 'graphql',
             'file-storage': 'storage',
         };
 

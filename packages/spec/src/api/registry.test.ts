@@ -21,8 +21,7 @@ describe('API Registry Protocol', () => {
   describe('ApiProtocolType', () => {
     it('should accept valid API protocol types', () => {
       expect(ApiProtocolType.parse('rest')).toBe('rest');
-      expect(ApiProtocolType.parse('graphql')).toBe('graphql');
-      expect(ApiProtocolType.parse('odata')).toBe('odata');
+        expect(ApiProtocolType.parse('odata')).toBe('odata');
       expect(ApiProtocolType.parse('websocket')).toBe('websocket');
       expect(ApiProtocolType.parse('file')).toBe('file');
       expect(ApiProtocolType.parse('auth')).toBe('auth');
@@ -417,7 +416,7 @@ describe('API Registry Protocol', () => {
           {
             id: 'graphql_api',
             name: 'GraphQL API',
-            type: 'graphql',
+            type: 'odata',
             version: 'v1',
             basePath: '/graphql',
             endpoints: [
@@ -462,7 +461,7 @@ describe('API Registry Protocol', () => {
           {
             id: 'graphql_api',
             name: 'GraphQL API',
-            type: 'graphql' as const,
+            type: 'odata' as const,
             version: 'v1',
             basePath: '/graphql',
             endpoints: [],

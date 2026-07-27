@@ -512,7 +512,7 @@ export const ConnectorTypeSchema = lazySchema(() => z.enum([
   'database',       // Database connector
   'file_storage',   // File storage connector
   'message_queue',  // Message queue connector
-  'api',            // Generic REST/GraphQL API
+  'api',            // Generic REST API
   'custom',         // Custom connector
 ]).describe('Connector type'));
 

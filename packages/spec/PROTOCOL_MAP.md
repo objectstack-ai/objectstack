@@ -165,7 +165,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`dispatcher.zod.ts`](src/api/dispatcher.zod.ts) | ⭐ | **HttpDispatcher**. Route-to-service mapping for API routing. |
 | [`discovery.zod.ts`](src/api/discovery.zod.ts) | ⭐ | **Service Discovery**. Service registration and API routes discovery. |
 | [`endpoint.zod.ts`](src/api/endpoint.zod.ts) | | **API Endpoints**. REST API route definitions. |
-| [`graphql.zod.ts`](src/api/graphql.zod.ts) | | **GraphQL**. Schema and resolver configuration. |
 | [`rest-server.zod.ts`](src/api/rest-server.zod.ts) | | **REST Server**. REST-specific server settings. |
 | [`auth.zod.ts`](src/api/auth.zod.ts) | | **API Auth**. Authentication schemes for APIs. |
 | [`analytics.zod.ts`](src/api/analytics.zod.ts) | | **API Analytics**. Usage tracking for APIs. |

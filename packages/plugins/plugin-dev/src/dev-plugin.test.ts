@@ -159,12 +159,6 @@ describe('DevPlugin', () => {
     expect(execResult.success).toBe(true);
     expect(Array.isArray(await automation.listFlows())).toBe(true);
 
-    // ── Verify IGraphQLService contract ──
-    const gql = registeredServices.get('graphql');
-    const gqlResult = await gql.execute({ query: '{ _dev }' });
-    expect('data' in gqlResult || 'errors' in gqlResult).toBe(true);
-    expect(typeof gql.getSchema()).toBe('string');
-
     // ── Verify IAnalyticsService contract ──
     const analytics = registeredServices.get('analytics');
     const analyticsResult = await analytics.query({ cube: 'test' });

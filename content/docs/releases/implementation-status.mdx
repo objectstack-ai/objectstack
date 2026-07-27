@@ -192,7 +192,6 @@ The data (`/data`), metadata (`/meta`), and batch endpoints are implemented in `
 |:---------|:-------------:|:------:|:------|
 | **Analytics** | ✅ | ✅ | ObjectQL aggregation plus `@objectstack/service-analytics` dataset execution; analytics read scope auto-bridges to `security.getReadFilter` for RLS-aware dashboards/reports |
 | **OData** | ❌ | 📋 | Protocol defined, not implemented |
-| **GraphQL** | ❌ | 📋 | Protocol defined, not implemented |
 | **Realtime** | @objectstack/service-realtime | ⚠️ | Realtime service with in-memory adapter shipped; production adapters in progress |
 | **WebSocket** | @objectstack/service-realtime | ⚠️ | Transport provided via the realtime service in-memory adapter |
 
@@ -393,7 +392,6 @@ describe that separate runtime.
 
 ### Phase 6: Advanced Features 🚧 **IN PROGRESS**
 - [x] Production Database Drivers — `@objectstack/driver-sql` (PostgreSQL/MySQL dialects), `@objectstack/driver-mongodb`, and `@objectstack/driver-sqlite-wasm` ship; additional dialect coverage ongoing
-- [ ] GraphQL API
 - [ ] OData Support
 - [ ] Realtime Subscriptions
 - [ ] WebSocket Support
@@ -450,7 +448,7 @@ describe that separate runtime.
 |:---------|:---------------:|:-------|
 | **Data** | 16 | Core modeling, hooks, and query engine fully implemented; document/mapping/external-lookup still pending |
 | **UI** | 10 | Studio/ObjectUI render most authored surfaces (🟡); full cross-surface renderer parity in progress |
-| **API** | 14 | REST/HTTP/discovery/batch fully implemented; OData/GraphQL pending |
+| **API** | 14 | REST/HTTP/discovery/batch fully implemented; OData pending; GraphQL removed from the plan |
 | **System** | 39 | Logging, audit, job, translation, metrics, notification implemented; several governance services pending |
 | **Auth** (plugin) | 10 | Permission + RLS live (`plugin-security`); identity/sharing/territory still plugin-pending |
 | **Automation** (plugin) | 7 | Flow, workflow, approval, webhook, and triggers implemented; ETL/Sync pending |
@@ -460,7 +458,7 @@ describe that separate runtime.
 
 ### Implementation Coverage
 
-Implementation spans every layer of the platform. Core infrastructure, data modeling, the REST API, client SDKs, security (Phase-1), automation, AI, and integration all have shipping implementations. Remaining gaps are concentrated in specific protocols (OData/GraphQL, cross-surface UI renderer parity, sharing/territory authorization, ETL/Sync, and a handful of governance and AI-cost services) rather than entire layers. Refer to the per-layer tables above for protocol-level status.
+Implementation spans every layer of the platform. Core infrastructure, data modeling, the REST API, client SDKs, security (Phase-1), automation, AI, and integration all have shipping implementations. Remaining gaps are concentrated in specific protocols (OData, cross-surface UI renderer parity, sharing/territory authorization, ETL/Sync, and a handful of governance and AI-cost services) rather than entire layers. Refer to the per-layer tables above for protocol-level status.
 
 ### Core Functionality Status
 

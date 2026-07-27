@@ -178,8 +178,6 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
   /** Base URL for Analytics/BI operations */
   analytics: z.string().optional().describe('e.g. /api/v1/analytics'),
   
-  /** GraphQL Endpoint (if enabled) */
-  graphql: z.string().optional().describe('e.g. /graphql'),
 
   /** Base URL for Package Management */
   packages: z.string().optional().describe('e.g. /api/v1/packages'),
@@ -260,7 +258,6 @@ export const DiscoverySchema = lazySchema(() => z.object({
    */
   schemaDiscovery: z.object({
     openapi: z.string().optional().describe('URL to OpenAPI (Swagger) specification (e.g., "/api/v1/openapi.json")'),
-    graphql: z.string().optional().describe('URL to GraphQL schema endpoint (e.g., "/graphql")'),
     jsonSchema: z.string().optional().describe('URL to JSON Schema definitions'),
   }).optional().describe('Schema discovery endpoints for API toolchain integration'),
 

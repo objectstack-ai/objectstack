@@ -253,36 +253,6 @@ describe('createHonoApp', () => {
     });
   });
 
-  describe('GraphQL Endpoint', () => {
-    it('POST /api/graphql calls handleGraphQL', async () => {
-      const body = { query: '{ objects { name } }' };
-      const res = await app.request('/api/graphql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.data).toBeDefined();
-      expect(mockDispatcher.handleGraphQL).toHaveBeenCalledWith(
-        body,
-        expect.objectContaining({ request: expect.anything() }),
-      );
-    });
-
-    it('returns error on handleGraphQL exception', async () => {
-      mockDispatcher.handleGraphQL.mockRejectedValueOnce(new Error('Parse error'));
-      const res = await app.request('/api/graphql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: 'bad' }),
-      });
-      expect(res.status).toBe(500);
-      const json = await res.json();
-      expect(json.success).toBe(false);
-      expect(json.error.message).toBe('Parse error');
-    });
-  });
 
   describe('Catch-all Dispatch', () => {
     it('GET /api/meta/objects delegates to dispatch()', async () => {
