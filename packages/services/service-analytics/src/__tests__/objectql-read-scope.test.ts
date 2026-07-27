@@ -218,7 +218,7 @@ describe('ObjectQLStrategy — read scope (ADR-0021 D-C, #3597)', () => {
   });
 });
 
-describe('ObjectQLStrategy — joined-object scope is fail-closed (#3597)', () => {
+describe('ObjectQLStrategy — cross-object references are fail-closed (#3654, subsumes #3597)', () => {
   const joined = DatasetSchema.parse({
     name: 'sales_by_account',
     label: 'Sales by account',
@@ -228,32 +228,42 @@ describe('ObjectQLStrategy — joined-object scope is fail-closed (#3597)', () =
     measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
   });
 
-  function makeJoinedService(scopeFor: (o: string) => FilterCondition | undefined) {
+  function makeJoinedService(scopeFor?: (o: string) => FilterCondition | undefined) {
     const compiled = compileDataset(joined);
-    return new AnalyticsService({
+    // A stub that would happily "succeed" with a garbage single-(null) bucket if
+    // the guard didn't fire — so a passing test proves the REJECTION, not luck.
+    let called = false;
+    const svc = new AnalyticsService({
       cubes: [compiled.cube],
       queryCapabilities: objectqlOnly,
-      executeAggregate: async () => [],
-      getReadScope: (o: string) => scopeFor(o),
+      executeAggregate: async () => { called = true; return [{ 'account.region': null, revenue: 999 }]; },
+      getReadScope: scopeFor ? (o: string) => scopeFor(o) : undefined,
       getAllowedRelationships: () => compiled.allowedRelationships,
     });
+    return { svc, wasExecuted: () => called };
   }
 
-  it('denies the query when a referenced joined object carries a scope', async () => {
-    const service = makeJoinedService(() => ({ organization_id: 'org_A' }));
+  const q = { cube: 'sales_by_account', dimensions: ['region'], measures: ['revenue'] };
 
-    await expect(
-      service.query({ cube: 'sales_by_account', dimensions: ['region'], measures: ['revenue'] }, ctxA),
-    ).rejects.toThrow(/cannot enforce the read scope of joined object\(s\) "account"/);
+  it('rejects a cross-object grouping the engine cannot join — even with a joined-object scope', async () => {
+    const { svc, wasExecuted } = makeJoinedService(() => ({ organization_id: 'org_A' }));
+    await expect(svc.query(q, ctxA)).rejects.toThrow(
+      /cannot group or aggregate across a relationship .*"account\.region"/,
+    );
+    expect(wasExecuted()).toBe(false); // never reached the engine
   });
 
-  it('allows the query when only the base object carries a scope', async () => {
-    const service = makeJoinedService((o) =>
-      o === 'opportunity' ? { organization_id: 'org_A' } : undefined,
-    );
+  it('rejects when only the base object carries a scope (the query is still unjoinable)', async () => {
+    const { svc } = makeJoinedService((o) => (o === 'opportunity' ? { organization_id: 'org_A' } : undefined));
+    await expect(svc.query(q, ctxA)).rejects.toThrow(/cannot group or aggregate across a relationship/);
+  });
 
-    await expect(
-      service.query({ cube: 'sales_by_account', dimensions: ['region'], measures: ['revenue'] }, ctxA),
-    ).resolves.toBeDefined();
+  it('rejects with NO read-scope provider at all — the #3654 silent-(null) case (security off)', async () => {
+    // Before #3654 this path ran unguarded (the guard early-returned without a
+    // getReadScope), and the member got a single mislabelled `(null)` bucket
+    // summing the whole table. Now it fails loud.
+    const { svc, wasExecuted } = makeJoinedService(/* no provider */);
+    await expect(svc.query(q)).rejects.toThrow(/cannot group or aggregate across a relationship/);
+    expect(wasExecuted()).toBe(false);
   });
 });
