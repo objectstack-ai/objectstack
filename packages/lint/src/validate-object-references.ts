@@ -102,9 +102,21 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** A target the author cannot have meant literally — resolved at render time. */
+/**
+ * A target the author cannot have meant literally — `${…}` or `{…}` resolved at
+ * render time.
+ *
+ * Scanned rather than matched with `/\{[^}]+\}/`: that pattern backtracks
+ * quadratically on a long run of `{` with no closing brace (CodeQL
+ * polynomial-ReDoS), and the question here is simply "is there a `{` with a
+ * later `}` and something in between", which one pass answers.
+ */
 function isInterpolated(target: string): boolean {
-  return target.includes('${') || /\{[^}]+\}/.test(target);
+  if (target.includes('${')) return true;
+  const open = target.indexOf('{');
+  // `+ 2` keeps the original "at least one character between the braces"
+  // semantics, so a literal `{}` is not treated as a placeholder.
+  return open !== -1 && target.indexOf('}', open + 2) !== -1;
 }
 
 /** Levenshtein-bounded "did you mean?" over the known names. */

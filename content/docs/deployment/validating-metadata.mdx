@@ -83,6 +83,39 @@ header: {
 whose `objects/reports/dashboards/pages/views` route is unregistered is **warned**
 (external, interpolated, and opaque routes are skipped).
 
+### 4. Dangling object and action names
+
+The same gate covers the reference sites that are plain strings in the schema:
+an action param's record-picker target, a dashboard filter's options source, a
+navigation capability gate, and every surface that binds an action **by name**
+(`bulkActions` / `rowActions`, a page's `record:quick_actions`, a nav action item).
+
+```ts
+// ✗ the platform user object is `sys_user` — `user` resolves to nothing → error
+{ name: 'owner', type: 'lookup', reference: 'user' }
+
+// ✗ no action named `mass_update` is defined anywhere → error
+defineView({ /* … */ bulkActions: ['mass_update', 'mass_delete'] })
+
+// ⚠ platform-shaped, but no known package registers it → warning
+{ id: 'nav_approvals', type: 'object', objectName: 'sys_approval_process',
+  requiresObject: 'sys_approval_process' }
+```
+
+Severity follows **resolvability**, because "this might be provided by another
+installed package" is a real possibility that must not be guessed at:
+
+| The name… | Result |
+|---|---|
+| resolves to one of your own objects | ✓ |
+| is unresolved and carries no platform prefix | **error** — your objects are namespace-prefixed and present in the stack, so there is no legitimate elsewhere. This is the typo class (`user` for `sys_user`). |
+| resolves to a known platform / plugin / cloud object | ✓ |
+| carries a platform prefix but no known package registers it | **warning** — a third-party package may still provide it, so this stays advisory |
+
+Interpolated targets (`${…}`, `{…}`) are skipped — they resolve at render time.
+Action names get no third-party softening: the runtime ships no built-in action
+names, so a name resolving nowhere is always an **error**.
+
 ## The one gate, two entry points
 
 `os validate` and `os build` (alias of `os compile`) run the **same** validator:
@@ -93,6 +126,7 @@ whose `objects/reports/dashboards/pages/views` route is unregistered is **warned
 | CEL / predicate validation | ✓ | ✓ |
 | Widget-binding integrity | ✓ | ✓ |
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ |
+| Object & action name references (#3583) | ✓ | ✓ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ |
 | Emits `dist/objectstack.json` | — | ✓ |
 

@@ -13,6 +13,7 @@ import { validateVisibilityPredicates } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateFilterTokens } from '@objectstack/lint';
+import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateSecurityPosture, validateOrgAxisRedLines, buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
@@ -317,6 +318,43 @@ export default class Compile extends Command {
           console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
         }
         this.exit(1);
+      }
+
+      // 3b-bis. Object & action name references (#3583) — the reference sites
+      //     `defineStack` does not cover: action-param `reference` /
+      //     `objectOverride`, dashboard filter `optionsFrom.object`, nav
+      //     `requiresObject` gates, and the name-bound action surfaces
+      //     (`bulkActions`/`rowActions`, page quick-actions, nav action items).
+      //     All plain strings in the schema, so a name resolving to nothing
+      //     ships and fails silently. Errors fail the build; the
+      //     platform-prefixed-but-unregistered case is advisory (a third-party
+      //     package may still provide it).
+      if (!flags.json) printStep('Checking object & action references (#3583)...');
+      const refFindings = [
+        ...validateObjectReferences(result.data as Record<string, unknown>),
+        ...validateActionNameRefs(result.data as Record<string, unknown>),
+      ];
+      const refErrors = refFindings.filter((f) => f.severity === 'error');
+      const refWarnings = refFindings.filter((f) => f.severity === 'warning');
+      if (refErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({ success: false, error: 'reference integrity validation failed', issues: refErrors }));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Reference integrity check failed (${refErrors.length} issue${refErrors.length > 1 ? 's' : ''})`);
+        for (const f of refErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
+      }
+      if (!flags.json) {
+        for (const w of refWarnings.slice(0, 50)) {
+          console.log(chalk.yellow(`  ⚠ ${w.where}: ${w.message}`));
+          console.log(chalk.dim(`      ${w.hint}`));
+        }
       }
 
       // 3c. SDUI scoped-styling correctness (ADR-0065) — a styled node without

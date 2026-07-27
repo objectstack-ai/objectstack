@@ -287,7 +287,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       check(`hook '${hookName}' (${target}) condition`, hook.condition, target, 'record');
       for (let i = mark; i < issues.length; i++) {
         const issue = issues[i];
-        const key = `${issue.message} ${issue.source ?? ''}`;
+        const key = `${issue.message}\u0000${issue.source ?? ''}`;
         // Keep the first occurrence of each distinct diagnostic. A field-unknown
         // finding differs per target (it names the object), so each survives;
         // a syntax error is identical across targets and collapses to one.
