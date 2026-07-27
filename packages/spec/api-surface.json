@@ -539,6 +539,7 @@
     "hookForm (const)",
     "isCompatible (function)",
     "isDateMacroToken (function)",
+    "isFileIdToken (function)",
     "isFilterAST (function)",
     "isIncoherentAggregate (function)",
     "isMultiValueField (function)",

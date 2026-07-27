@@ -23,6 +23,12 @@ export interface FileRecord {
   /** Orphan tombstone (#2755) — set when the last sys_attachment reference
    * is removed; the sys_file lifecycle TTL reaps after the grace window. */
   deleted_at?: string | null;
+  /** Exclusive field-reference owner (ADR-0104 D3 wave 2) — the single
+   * (object, record, field) slot whose value is this file's id. NULL while
+   * unclaimed and for every attachments-surface file. */
+  ref_object?: string | null;
+  ref_id?: string | null;
+  ref_field?: string | null;
 }
 
 /**

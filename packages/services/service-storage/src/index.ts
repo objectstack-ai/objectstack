@@ -14,5 +14,7 @@ export type { StorageRoutesOptions, FileReadVerdict } from './storage-routes.js'
 export { SystemFile, SystemUploadSession } from './objects/index.js';
 export { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard } from './attachment-lifecycle.js';
 export type { AttachmentLifecycleEngine, AttachmentLifecycleLogger } from './attachment-lifecycle.js';
+export { installFileReferenceHooks, FileReferenceCopyError } from './file-reference-lifecycle.js';
+export type { FileReferenceEngine, FileReferenceLogger } from './file-reference-lifecycle.js';
 export { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 export type { AttachmentSharingLike } from './attachment-access-hooks.js';

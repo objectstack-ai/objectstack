@@ -17,6 +17,7 @@ import type { FileRecord } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
 import type { FileReadVerdict } from './storage-routes.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard } from './attachment-lifecycle.js';
+import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
@@ -238,6 +239,13 @@ export class StorageServicePlugin implements Plugin {
         if (typeof (engine as any).registerMiddleware === 'function') {
           installAttachmentReadVisibility(engine as any, ctx.logger);
         }
+        // Field-reference ownership (ADR-0104 D3 wave 2) — keeps
+        // sys_file.ref_object/ref_id/ref_field in step with what records hold,
+        // and copies bytes rather than sharing a row when a second field slot
+        // writes an already-owned id. Records ownership only: it never
+        // tombstones, so the `scope==='attachments'` reap guardrail above
+        // still keeps field-referenced files out of collection entirely.
+        installFileReferenceHooks(engine as any, () => this.storage, ctx.logger);
         try {
           const lifecycle = ctx.getService<any>('lifecycle');
           if (lifecycle && typeof lifecycle.registerReapGuard === 'function') {
