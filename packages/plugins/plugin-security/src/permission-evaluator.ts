@@ -102,6 +102,41 @@ function resolveObjectPermission(
 }
 
 /**
+ * [#3544] Fold the user-level EXPORT axis across the resolved permission sets.
+ *
+ * `allowExport` is deliberately absent from {@link OPERATION_TO_PERMISSION}:
+ * that map's semantics are "the bit must be truthy", which would deny export to
+ * every permission set authored before the axis existed. The bit is a TRI-state
+ * instead, and this is its merge rule:
+ *
+ *   - any set `true`   → `true`  (an explicit grant outranks another set's deny)
+ *   - else any `false` → `false` (an explicit opt-out outranks silence)
+ *   - else all unset   → `undefined` (inherit read — the pre-#3544
+ *     "can-list ⇒ can-export" behaviour, so existing sets are unaffected)
+ *
+ * This is the same answer the `/me/permissions` per-object merge produces
+ * (`if (v === true) acc[k] = true; else if (acc[k] === undefined) acc[k] = v`,
+ * read back as `acc.allowExport !== false`). That equality is load-bearing, not
+ * incidental: the client hides its Export button on the merged map while this
+ * decides the server's 403, and the two disagreeing is exactly the
+ * `declared ≠ enforced` gap the axis exists to close.
+ */
+export function resolveUserExportAllowed(
+  objectName: string,
+  permissionSets: PermissionSet[],
+  opts: { isPrivate?: boolean } = {},
+): boolean | undefined {
+  let denied = false;
+  for (const ps of permissionSets) {
+    const objPerm = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
+    const bit = objPerm?.allowExport;
+    if (bit === true) return true;
+    if (bit === false) denied = true;
+  }
+  return denied ? false : undefined;
+}
+
+/**
  * PermissionEvaluator
  * 
  * Runtime evaluator for PermissionSet definitions.
@@ -119,6 +154,17 @@ export class PermissionEvaluator {
     /** [ADR-0066 D2] When the object is `private`, the `'*'` wildcard only covers it if it is a super-user grant. */
     opts: { isPrivate?: boolean } = {},
   ): boolean {
+    // [#3544] User-level export axis. `export` is NOT a bit lookup: per the
+    // spec's derivation table (`API_METHOD_DERIVATION`) it is `list ∧
+    // userExportAllowed`, so it requires READ and is then vetoed by an explicit
+    // `allowExport: false`. Handled here rather than in OPERATION_TO_PERMISSION
+    // so an UNSET bit keeps inheriting read — otherwise every permission set
+    // written before the axis existed would silently lose export.
+    if (operation === 'export') {
+      if (resolveUserExportAllowed(objectName, permissionSets, opts) === false) return false;
+      return this.checkObjectPermission('find', objectName, permissionSets, opts);
+    }
+
     const permKey = OPERATION_TO_PERMISSION[operation];
     if (!permKey) {
       // Fail CLOSED for the destructive operation class (ADR-0049): an

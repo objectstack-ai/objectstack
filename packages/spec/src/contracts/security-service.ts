@@ -193,6 +193,31 @@ export interface ISecurityService {
   resolvePermissionSetNames(context?: SecurityContext): Promise<string[]>;
 
   /**
+   * [#3544] Whether `context` may EXPORT `object` — the user-level export axis
+   * (`ObjectPermissionSchema.allowExport`).
+   *
+   * Export is a READ-DERIVED operation (`export ⊆ list` in the spec's
+   * `API_METHOD_DERIVATION`), so it reaches the engine middleware as an ordinary
+   * `find` and is gated by `allowRead` alone. That makes the export axis
+   * invisible to the middleware: without this method a caller holding
+   * `allowExport: false` still streams the whole table out of the REST export
+   * route, and the bit only ever hid a button. Bulk-egress doors must ask this
+   * BEFORE they read.
+   *
+   * The answer folds the tri-state bit across the caller's resolved sets exactly
+   * as the `/me/permissions` merge does — `true` beats `false` beats unset, and
+   * unset inherits read — so the button the client hides and the request the
+   * server refuses are the same decision.
+   *
+   * **Fails CLOSED.** This is an access-narrowing answer: implementations return
+   * `false` (and callers must treat a throw as `false`) rather than degrading to
+   * "allowed". A system context bypasses and returns `true`; so does a caller
+   * with no resolved permission sets, mirroring the middleware, whose CRUD gate
+   * is skipped entirely when set resolution comes back empty.
+   */
+  canExport(object: string, context?: SecurityContext): Promise<boolean>;
+
+  /**
    * Explain WHY access is granted or denied — the decision plus the layers that
    * produced it (permission sets, object permissions, RLS, sharing, field mask).
    *

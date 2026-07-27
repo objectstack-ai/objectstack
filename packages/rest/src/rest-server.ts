@@ -1148,6 +1148,53 @@ export class RestServer {
     }
 
     /**
+     * [#3544] Enforce the USER-LEVEL export axis on a bulk-egress route, after
+     * {@link enforceApiAccess} has cleared the object-level one. Returns `true`
+     * when a response was sent (the caller must return).
+     *
+     * The two gates answer different questions and so carry different statuses:
+     * `enforceApiAccess` is about the OBJECT ("does this object expose export at
+     * all" → 405), this one is about the CALLER ("may YOU export it" → 403).
+     *
+     * It has to exist as its own check because `export ⊆ list`: the export route
+     * streams through `findData`, which the engine middleware sees as a plain
+     * `find` and gates on `allowRead`. Nothing downstream ever looks at
+     * `allowExport`, so without this the bit would only hide the client's Export
+     * button while `curl` still drained the table — declared, not enforced
+     * (AGENTS.md Prime Directive #10).
+     *
+     * Fail stance mirrors the deployment's own posture. No security service (no
+     * `plugin-security`, so no permission sets exist anywhere) → allow, matching
+     * every other permission gate here and `/me/permissions`' documented
+     * fail-open. Service PRESENT but unable to answer → fail CLOSED: it resolves
+     * permission sets to decide, and a resolution failure must never read as a
+     * grant (ADR-0049).
+     */
+    private async enforceExportPermission(
+        req: any,
+        res: any,
+        environmentId: string | undefined,
+        objectName: string,
+        context: any,
+    ): Promise<boolean> {
+        const security = await this.resolveSecurityService(environmentId, req);
+        if (!security || typeof security.canExport !== 'function') return false;
+        let allowed: boolean;
+        try {
+            allowed = await security.canExport(objectName, context);
+        } catch {
+            allowed = false; // access-narrowing answer → a throw is a denial
+        }
+        if (allowed) return false;
+        res.status(403).json({
+            code: 'EXPORT_NOT_PERMITTED',
+            error: `Export is not permitted on object '${objectName}' for this user`,
+            object: objectName,
+        });
+        return true;
+    }
+
+    /**
      * Load the object metadata items for the current protocol/environment,
      * coerced to a plain array. Returns `[]` when metadata is unavailable so
      * callers fail OPEN (the data call itself needs the same metadata and will
@@ -4250,6 +4297,9 @@ export class RestServer {
                         return;
                     }
                     if (await this.enforceApiAccess(req, res, p, environmentId, 'export')) return;
+                    // [#3544] …then the USER-level one. The object may expose
+                    // export while THIS caller's permission sets deny it.
+                    if (await this.enforceExportPermission(req, res, environmentId, objectName, context)) return;
                     const q = req.query ?? {};
                     const fmtRaw = String(q.format ?? 'csv').toLowerCase();
                     const format: 'csv' | 'json' | 'xlsx' =

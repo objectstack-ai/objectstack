@@ -108,6 +108,47 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
       }));
       expect(objects.deal.apiOperations).toContain('export');
     });
+
+    // The merge keeps `'*'` and named objects as independent keys, but the
+    // SERVER evaluator does not — `resolveObjectPermission` falls back to the
+    // wildcard for any object a set has no explicit entry for. Reading it here
+    // too is what keeps the hidden button and the refused request the same
+    // decision; without it a `'*': {allowExport:false}` set would still be
+    // offered an Export button that then 403s.
+    it("inherits the '*' export bit when the object entry declares none", () => {
+      const objects: Record<string, any> = {
+        '*': { allowRead: true, allowExport: false },
+        deal: { allowRead: true }, // no allowExport of its own
+      };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        deal: { name: 'deal', enable: {} }, // unrestricted
+      }));
+      expect(objects.deal.apiOperations).toBeDefined();
+      expect(objects.deal.apiOperations).not.toContain('export');
+      expect(objects.deal.apiOperations).toContain('list');
+    });
+
+    it("an explicit per-object allowExport:true overrides a '*' deny", () => {
+      const objects: Record<string, any> = {
+        '*': { allowRead: true, allowExport: false },
+        deal: { allowRead: true, allowExport: true },
+      };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        deal: { name: 'deal', enable: { apiMethods: ['get', 'list'] } },
+      }));
+      expect(objects.deal.apiOperations).toContain('export');
+    });
+
+    it("a '*' carrying no export bit changes nothing", () => {
+      const objects: Record<string, any> = {
+        '*': { modifyAllRecords: true },
+        deal: { allowRead: true },
+      };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        deal: { name: 'deal', enable: {} },
+      }));
+      expect('apiOperations' in objects.deal).toBe(false);
+    });
   });
 });
 

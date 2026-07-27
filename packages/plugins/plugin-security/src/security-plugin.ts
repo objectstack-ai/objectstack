@@ -643,6 +643,10 @@ export class SecurityPlugin implements Plugin {
         // route uses it to project columns instead of inferring readability
         // from already-masked data rows. See getReadableFields.
         getReadableFields: (object: string, context?: any) => this.getReadableFields(object, context),
+        // [#3544] User-level export axis. `export ⊆ list`, so a bulk export
+        // reaches the middleware as a plain `find` and `allowExport` would never
+        // be consulted — the REST export route asks HERE before it streams.
+        canExport: (object: string, context?: any) => this.canExport(object, context),
         // [ADR-0046 §6.7] Effective permission-set NAMES for a caller — the
         // primitive the REST read layer needs to evaluate a permission-set-
         // gated book/doc audience ({ permissionSet: '…' }). Same resolution
@@ -692,7 +696,7 @@ export class SecurityPlugin implements Plugin {
           dismissAudienceBindingSuggestion(suggestionDeps, callerContext, id),
       };
       ctx.registerService('security', securityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / #3547');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, canExport, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / #3544 / #3547');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -2252,6 +2256,61 @@ export class SecurityPlugin implements Plugin {
     // enumerates fields it names) — the exact complement of maskResults' delete
     // set, so the export header matches list's readable columns by construction.
     return allFields.filter((f) => fieldPerms[f]?.readable !== false);
+  }
+
+  /**
+   * [#3544] Whether `context` may EXPORT `object` — the user-level export axis.
+   *
+   * Export is READ-DERIVED (`export ⊆ list`), so a bulk export reaches the
+   * engine middleware as an ordinary `find` and is gated by `allowRead` alone.
+   * The `allowExport` bit is therefore invisible to the middleware, and a door
+   * that streams a whole table out (the REST `GET /data/:object/export` route)
+   * has to ask this question itself, BEFORE it reads. Same resolution as the
+   * middleware — {@link resolvePermissionSetsForContext} → the evaluator's
+   * `export` branch — so the axis cannot drift from data-plane enforcement.
+   *
+   * Fails CLOSED (an access-narrowing answer): a dangling on-behalf-of delegator
+   * denies, and callers must treat a throw as a denial. `isSystem` bypasses, and
+   * so does an empty set resolution — the middleware skips its CRUD gate
+   * entirely for a caller with no permission sets, and reporting a denial the
+   * data path would not enforce is its own kind of drift.
+   */
+  async canExport(object: string, context?: any): Promise<boolean> {
+    const objectName = String(object ?? '');
+    if (!objectName) return false;
+    // System operations bypass (mirrors the middleware's isSystem skip).
+    if (context?.isSystem) return true;
+
+    const permissionSets = await this.resolvePermissionSetsForContext(context);
+    // No sets resolved (e.g. unauthenticated, or a deployment with no sets) →
+    // no permission-set restriction applies, exactly as the middleware treats it
+    // (`if (permissionSets.length > 0)` guards its whole CRUD gate).
+    if (permissionSets.length === 0) return true;
+
+    const { isPrivate } = await this.getObjectSecurityMeta(objectName);
+    if (!this.permissionEvaluator.checkObjectPermission('export', objectName, permissionSets, { isPrivate })) {
+      return false;
+    }
+
+    // [ADR-0090 D10] An on-behalf-of caller may never export past what the
+    // DELEGATOR could have exported themselves — intersect the delegator's own
+    // answer. A dangling delegator fails CLOSED, the same stance the CRUD
+    // middleware and {@link getReadableFields} take.
+    if (context?.onBehalfOf?.userId) {
+      const del = await resolveDelegatorContext(this.ql, context);
+      if (del.kind === 'missing') return false;
+      if (del.kind === 'resolved') {
+        const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+        if (
+          delegatorSets.length > 0 &&
+          !this.permissionEvaluator.checkObjectPermission('export', objectName, delegatorSets, { isPrivate })
+        ) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
   /**
