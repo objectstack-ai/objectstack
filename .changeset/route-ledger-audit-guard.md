@@ -1,5 +1,6 @@
 ---
 "@objectstack/runtime": patch
+"@objectstack/client": patch
 ---
 
 Route ledger + conformance guard for the dispatcher↔client surface (#3563)
@@ -8,8 +9,10 @@ Route ledger + conformance guard for the dispatcher↔client surface (#3563)
 `@objectstack/client` has no way to express it — now has an inventory and a
 ratchet. `route-ledger.ts` records the audited disposition of every dispatcher
 route (sdk / gap / server-only / public / dynamic / mismatch);
-`route-ledger.conformance.test.ts` fails when a dispatcher domain lands with no
-ledger entry, when an entry claims a client method that doesn't exist, and when
-the audited gap count (27 at PR-1) grows. Findings and follow-up slicing live
+The guard is split along the package boundary (a runtime→client edge is a
+build cycle): runtime's `route-ledger.conformance.test.ts` fails when a
+dispatcher domain lands with no ledger entry and ratchets the audited gap
+count (27 at PR-1); client's `route-ledger-coverage.test.ts` fails when a
+ledger entry claims a client method that doesn't exist. Findings and follow-up slicing live
 in `docs/audits/2026-07-dispatcher-client-route-coverage.md`. No runtime
 behavior change.

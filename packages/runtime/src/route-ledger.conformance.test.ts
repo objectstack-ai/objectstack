@@ -21,14 +21,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-// Relative import of the BUILT client, NOT a package dependency:
-// @objectstack/client's own devDependencies already point back at runtime
-// (its Hono tests boot a real server), so a runtime→client package edge would
-// close a turbo build cycle. Importing the dist keeps the graph acyclic — and
-// CI's Test job always runs after Build, so the dist is present. (The client
-// SOURCE can't be imported here: its module graph resolves through runtime's
-// vitest aliases and breaks on subpath imports like @objectstack/core/logger.)
-import { ObjectStackClient } from '../../client/dist/index.mjs';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { ROUTE_LEDGER, LEGACY_CHAIN_PREFIXES } from './route-ledger.js';
 
@@ -73,22 +65,13 @@ describe('route ledger ↔ dispatcher domain registry', () => {
   });
 });
 
-describe('route ledger ↔ @objectstack/client surface', () => {
-  const client = new ObjectStackClient({ baseUrl: 'http://localhost:9' });
-
-  const resolve = (path: string): unknown =>
-    path.split('.').reduce<unknown>((o, k) => (o == null ? o : (o as Record<string, unknown>)[k]), client);
-
-  it('every `sdk`/`mismatch` entry names a client method that actually exists', () => {
-    const broken = ROUTE_LEDGER.filter((e) => e.client != null)
-      .filter((e) => typeof resolve(e.client!) !== 'function')
-      .map((e) => `${e.route} → client.${e.client}`);
-    expect(
-      broken,
-      `Ledger entries claiming a client method that does not exist: ${broken.join('; ')}`,
-    ).toEqual([]);
-  });
-
+// The client-instance direction — "every named client method actually exists"
+// — lives in packages/client/src/route-ledger-coverage.test.ts, next to the
+// SDK it introspects. It cannot live here: a runtime→client edge (package OR
+// dist import) is unbuildable — client's own devDeps point back at runtime
+// (turbo rejects the cycle), and CI's per-package test tasks build only their
+// own dependency closure, so the client dist does not exist for this suite.
+describe('route ledger hygiene', () => {
   it('every `sdk` entry names its client method; every non-sdk entry carries a rationale', () => {
     const sdkWithout = ROUTE_LEDGER.filter((e) => e.disposition === 'sdk' && !e.client).map((e) => e.route);
     expect(sdkWithout, 'sdk-disposition entries missing a client method name').toEqual([]);
