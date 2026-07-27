@@ -49,6 +49,11 @@
           "status": "live",
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:8"
         },
+        "allowExport": {
+          "status": "live",
+          "evidence": "packages/plugins/plugin-hono-server/src/hono-plugin.ts (annotateEffectiveApiOperations: userExportAllowed = allowExport !== false) + packages/spec/src/data/api-derivation.ts (export derives from list ∧ userExportAllowed)",
+          "note": "#3544 — user-level export axis over read. Enforced end-to-end: the bit drives userExportAllowed, which removes `export` from the object's effective apiOperations on /me/permissions; the frontend hides Export and the REST export gate 405s. Optional/no-default = backward-compatible opt-out (unset inherits read); `false` denies export while keeping read."
+        },
         "allowTransfer": {
           "status": "live",
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (OPERATION_TO_PERMISSION transfer→allowTransfer + modifyAllRecords bypass)",
