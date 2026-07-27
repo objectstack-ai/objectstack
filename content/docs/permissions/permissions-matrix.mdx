@@ -23,6 +23,7 @@ ObjectStack's `ObjectPermission` schema defines these boolean flags for object a
 | **Create** | `allowCreate` | Create new records | Insert records |
 | **Edit** | `allowEdit` | Modify records owned by the user or shared with them | Edit own records |
 | **Delete** | `allowDelete` | Remove records owned by the user or shared with them | Delete own records |
+| **Export** | `allowExport` | Take a bulk machine-readable copy of the records the user can read | Export / bulk egress ([details](/docs/permissions/permission-sets#allowexport--the-export-axis)) |
 | **Transfer** | `allowTransfer` | Change record ownership | Reassign owner |
 | **Restore** | `allowRestore` | Undelete from trash | Recover soft-deleted records |
 | **Purge** | `allowPurge` | Permanently (hard) delete | GDPR / compliance erase |
@@ -31,6 +32,14 @@ ObjectStack's `ObjectPermission` schema defines these boolean flags for object a
 
 <Callout type="tip">
 **Super-user bypass:** When `modifyAllRecords` is set it satisfies write checks (`allowEdit`/`allowDelete`, and the lifecycle class `allowTransfer`/`allowRestore`/`allowPurge`) on any record; `viewAllRecords` (or `modifyAllRecords`) satisfies `allowRead` on any record — both bypass ownership and sharing. See `packages/plugins/plugin-security/src/permission-evaluator.ts`.
+
+**The one exception is `allowExport`.** Neither super-user bit confers it: a
+principal with View/Modify All Data may read every record and still be refused a
+bulk copy of them. Export is an opt-in grant that must be stated explicitly —
+separating "may see all data" from "may take a bulk copy of it" is the
+segregation-of-duties case the axis exists for. The built-in
+`admin_full_access` / `organization_admin` sets therefore carry
+`allowExport: true` alongside their super-user bits.
 
 The bypass is **posture-gated for row-level security** (ADR-0066 D2 ①): RLS
 policies are short-circuited only on objects whose posture permits it —
