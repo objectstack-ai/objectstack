@@ -407,3 +407,37 @@ describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
         expect(result.response?.status).toBe(400);
     });
 });
+
+// ---------------------------------------------------------------------------
+// PR-6 — automation extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
+    it('GET /automation lists flows via the automation service', async () => {
+        const automation = { listFlows: vi.fn().mockResolvedValue(['flow-a', 'flow-b']) };
+        const result = await makeDispatcher({ automation }).dispatch('GET', '/automation', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.total).toBe(2);
+    });
+
+    it('GET /automation/actions keeps its guard position before the /:name catch-all and applies filters', async () => {
+        const automation = {
+            listFlows: vi.fn(),
+            getFlow: vi.fn(),
+            getActionDescriptors: vi.fn().mockReturnValue([
+                { name: 'a1', source: 'builtin', paradigms: ['flow'] },
+                { name: 'a2', source: 'plugin', paradigms: ['workflow'] },
+            ]),
+        };
+        const result = await makeDispatcher({ automation }).dispatch('GET', '/automation/actions', undefined, { source: 'plugin' }, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.actions).toHaveLength(1);
+        // The /:name→getFlow catch-all must NOT have shadowed the guard route.
+        expect(automation.getFlow).not.toHaveBeenCalled();
+    });
+
+    it('falls through unhandled when no automation service is registered', async () => {
+        const result = await makeDispatcher().dispatch('GET', '/automation', undefined, {}, {} as any);
+        expect(result.response?.status ?? 404).not.toBe(200);
+    });
+});
