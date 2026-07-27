@@ -197,6 +197,9 @@ or the analytics service's `cubes` config) — a cube referenced by a query that
 yet registered is lazily auto-inferred from that query's shape, but metadata isn't
 proactively generated for every object.
 
+Pass `?cube=<name>` to filter the listing to a single cube (this is what
+`client.analytics.meta(cube)` sends).
+
 **Response**: `{ success: true, data: [...] }` where `data` is an array of cube
 definitions with measures and dimensions (time-based dimensions are `dimensions`
 entries with `type: "time"`).
