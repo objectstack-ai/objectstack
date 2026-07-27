@@ -42,6 +42,7 @@ import {
   APPROVAL_NODE_TYPE,
   DEPRECATED_APPROVER_TYPES,
   canonicalApproverType,
+  normalizeDecisionOutputs,
 } from '@objectstack/spec/automation';
 import { collectCelRootIdentifiers } from '@objectstack/formula';
 
@@ -332,9 +333,9 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
       // #3447 P2: `decision`/`requestId` ride the resume envelope; a declared
       // decision output with either name is rejected at runtime on every
       // decide — the node can never accept the output it declares.
-      const declaredOutputs = Array.isArray((cfg as AnyRec).decisionOutputs)
-        ? ((cfg as AnyRec).decisionOutputs as unknown[]).map(String)
-        : [];
+      // Bare keys and typed { key, … } declarations whitelist identically —
+      // the spec normalizer is the one reader of the union shape.
+      const declaredOutputs = normalizeDecisionOutputs((cfg as AnyRec).decisionOutputs).map((d) => d.key);
       const reserved = declaredOutputs.filter((k) => RESERVED_OUTPUT_KEYS.has(k));
       if (reserved.length) {
         findings.push({

@@ -441,6 +441,28 @@ describe('ApprovalService (node era)', () => {
     }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*reserved/s);
   });
 
+  it('decision outputs: typed declarations normalize — whitelist by key, defs surfaced for the UI', async () => {
+    const req = await svc.openNodeRequest(
+      openInput(['u9'], {}, {
+        decisionOutputs: [
+          { key: 'next_reviewers', label: 'Next Reviewers', type: 'user', multiple: true },
+          'note',
+        ],
+      }), CTX,
+    ) as any;
+    // Key list stays the version-skew-safe shape; defs carry the typed form.
+    expect(req.decision_outputs).toEqual(['next_reviewers', 'note']);
+    expect(req.decision_output_defs).toEqual([
+      { key: 'next_reviewers', label: 'Next Reviewers', type: 'user', multiple: true },
+      { key: 'note' },
+    ]);
+    // A typed declaration whitelists exactly like a bare key.
+    const out = await svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u9', outputs: { next_reviewers: ['u2', 'u3'] },
+    }, SYS);
+    expect(out.outputs).toEqual({ next_reviewers: ['u2', 'u3'] });
+  });
+
   it('decision outputs: declared keys surface on the request row as decision_outputs (#3447 P2 UI)', async () => {
     // The decision UI renders one input per declared key — the keys ride the
     // request read (per-request; the static action params can't carry them).

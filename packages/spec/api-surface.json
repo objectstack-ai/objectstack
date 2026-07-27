@@ -2040,6 +2040,8 @@
     "DataSourceConfigSchema (const)",
     "DataSyncConfig (type)",
     "DataSyncConfigSchema (const)",
+    "DecisionOutputDef (type)",
+    "DecisionOutputDefSchema (const)",
     "ETL (const)",
     "ETLDestination (type)",
     "ETLDestinationSchema (const)",
@@ -2165,6 +2167,7 @@
     "flowForm (const)",
     "getApprovalNodeConfigJsonSchema (function)",
     "importBpmnToConstructs (function)",
+    "normalizeDecisionOutputs (function)",
     "validateControlFlow (function)"
   ],
   "./api": [

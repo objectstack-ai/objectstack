@@ -538,6 +538,7 @@
     "automation/DataDestinationConfig",
     "automation/DataSourceConfig",
     "automation/DataSyncConfig",
+    "automation/DecisionOutputDef",
     "automation/ETLDestination",
     "automation/ETLEndpointType",
     "automation/ETLPipeline",

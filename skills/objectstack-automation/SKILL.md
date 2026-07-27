@@ -486,17 +486,54 @@ slate — guard genuinely-optional inputs explicitly, e.g.
 }
 ```
 
-The full "previous approver picks the next step's approvers" loop, end to end:
+The full "previous approver picks the next step's approvers" loop, end to end
+(the shipped `showcase_dynamic_approval` flow in the showcase app is this shape):
 
+<!-- os:check -->
 ```typescript
-// Node A declares what a decision may hand to the flow:
-{ id: 'lead_review', type: 'approval',
-  config: { approvers: [{ type: 'user', value: 'lead' }], decisionOutputs: ['next_reviewers'] } },
-// The lead approves with outputs: POST …/approve { outputs: { next_reviewers: ['u2','u3'] } }
-// Node B resolves them at entry:
-{ id: 'co_sign', type: 'approval',
-  config: { approvers: [{ type: 'expression', value: cel`vars.lead_review.next_reviewers` }],
-            behavior: 'unanimous', onEmptyApprovers: 'fail' } },
+import { defineFlow } from '@objectstack/spec';
+
+export const DynamicApprovalFlow = defineFlow({
+  name: 'dynamic_approval',
+  label: 'Dynamic Approval',
+  type: 'autolaunched',
+  status: 'active',
+  nodes: [
+    {
+      id: 'start', type: 'start', label: 'On Submit',
+      config: { objectName: 'expense', triggerType: 'record-after-update', condition: "status == 'submitted'" },
+    },
+    {
+      // Node A declares what a decision may hand to the flow. The TYPED
+      // declaration renders a multi-select sys_user picker in the decision
+      // dialog; the lead approves with outputs:
+      //   POST …/approve { outputs: { next_reviewers: ['u2', 'u3'] } }
+      id: 'lead_review', type: 'approval', label: 'Lead Review',
+      config: {
+        approvers: [{ type: 'org_membership_level', value: 'owner' }],
+        decisionOutputs: [{ key: 'next_reviewers', label: 'Next Reviewers', type: 'user', multiple: true }],
+      },
+    },
+    {
+      // Node B resolves them at entry from the lead's decision outputs.
+      id: 'co_sign', type: 'approval', label: 'Co-sign',
+      config: {
+        approvers: [{ type: 'expression', value: 'vars.lead_review.next_reviewers' }],
+        behavior: 'unanimous',
+        onEmptyApprovers: 'fail',
+      },
+    },
+    { id: 'approved', type: 'end', label: 'Approved' },
+    { id: 'rejected', type: 'end', label: 'Rejected' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'lead_review' },
+    { id: 'e2', source: 'lead_review', target: 'co_sign', label: 'approve' },
+    { id: 'e3', source: 'lead_review', target: 'rejected', label: 'reject' },
+    { id: 'e4', source: 'co_sign', target: 'approved', label: 'approve' },
+    { id: 'e5', source: 'co_sign', target: 'rejected', label: 'reject' },
+  ],
+});
 ```
 
 Time-word cheat sheet across surfaces (do not mix them up):
@@ -517,7 +554,7 @@ Time-word cheat sheet across surfaces (do not mix them up):
 | `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
 | `onEmptyApprovers` | #3447 — what an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through). Declare it explicitly on any node with an `expression` approver (linted) |
-| `decisionOutputs` | #3447 — keys a decision may carry as structured outputs (author declares keys, approvers fill values). Accepted outputs resume the run as `<nodeId>.<key>` variables for downstream nodes; undeclared keys reject the decision; `decision`/`requestId` reserved |
+| `decisionOutputs` | #3447 — decision outputs a decision may carry (author declares, approvers fill values). Entries are bare keys (free-text input) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple? }` — a typed entry renders the matching record picker in the decision dialog (`multiple` collects an id array). Accepted outputs resume the run as `<nodeId>.<key>` variables; undeclared keys reject the decision; `decision`/`requestId` reserved |
 | `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
 | `maxRevisions` | ADR-0044 — max **send-backs-for-revision** per run before auto-reject. Default `3`; `0` disables send-back. Only meaningful when the node has a `revise` out-edge |
 

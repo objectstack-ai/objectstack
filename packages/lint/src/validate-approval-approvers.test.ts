@@ -289,6 +289,15 @@ describe('expression approvers (#3447 P2)', () => {
     expect(findings[0].message).toContain('decision');
   });
 
+  it('errors on reserved keys inside TYPED decisionOutputs declarations too', () => {
+    const findings = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'user', value: 'u1' }],
+      decisionOutputs: [{ key: 'decision', type: 'user' }, { key: 'ok' }],
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_DECISION_OUTPUTS_RESERVED);
+  });
+
   it('accepts declared non-reserved decisionOutputs', () => {
     expect(validateApprovalApprovers(stackWithConfig({
       approvers: [{ type: 'user', value: 'u1' }],

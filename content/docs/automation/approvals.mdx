@@ -188,6 +188,13 @@ node B's approver be
 declares output keys, approvers only fill values; undeclared keys reject the
 decision, and `decision` / `requestId` are reserved.
 
+A declaration can also be **typed** — `{ key: 'next_reviewers', type: 'user',
+multiple: true }` — which renders a multi-select user picker in the decision
+dialog instead of free text (`department` / `position` / `team` render the
+matching system-object picker; picker values are record ids, `multiple`
+collects an id array). The type shapes only the input widget; the whitelist
+still works by `key`, so bare strings and typed declarations mix freely.
+
 ## The full lifecycle — submit to field change
 
 What actually happens between "the flow hits the approval node" and "the record

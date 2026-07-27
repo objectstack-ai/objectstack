@@ -52,9 +52,24 @@ export interface ApprovalRequestRow {
    * #3447 P2: the node's author-declared decision-output keys
    * (`config.decisionOutputs`), surfaced from the config snapshot so a
    * decision UI can render one input per key and POST `outputs` with the
-   * decision. Absent when the node declares none.
+   * decision. Absent when the node declares none. Kept as the bare KEY list
+   * for version skew — an older console renders these as text inputs.
    */
   decision_outputs?: string[];
+  /**
+   * #3447 P2 follow-up: the normalized TYPED declarations behind
+   * `decision_outputs` — `{ key, label?, type?, multiple? }` — so a
+   * picker-aware decision UI renders a sys_user / department / position /
+   * team record picker (id values; `multiple` → id array) instead of free
+   * text. Always parallel to `decision_outputs`; consumers prefer this and
+   * fall back to the key list.
+   */
+  decision_output_defs?: Array<{
+    key: string;
+    label?: string;
+    type?: 'text' | 'user' | 'department' | 'position' | 'team';
+    multiple?: boolean;
+  }>;
   completed_at?: string;
   created_at?: string;
   updated_at?: string;

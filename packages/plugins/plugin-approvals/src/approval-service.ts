@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import {
   APPROVAL_BRANCH_LABELS,
   canonicalApproverType,
+  normalizeDecisionOutputs,
   type ApprovalNodeConfig,
 } from '@objectstack/spec/automation';
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
@@ -229,13 +230,19 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     sla_due_at: slaDueAt(row.created_at, cfg),
     // ADR-0044 revision round (rides the config snapshot; absent ⇒ round 1).
     round: typeof cfg?.__round === 'number' ? cfg.__round : undefined,
-    // #3447 P2: the node's author-declared decision-output keys, surfaced so a
+    // #3447 P2: the node's author-declared decision outputs, surfaced so a
     // decision UI can render input fields for them and POST `outputs` on
     // approve/reject. Per-request (each node declares its own), which is why
-    // this rides the row instead of the static action params.
-    decision_outputs: Array.isArray(cfg?.decisionOutputs) && cfg.decisionOutputs.length
-      ? cfg.decisionOutputs.map(String)
-      : undefined,
+    // this rides the row instead of the static action params. Two shapes for
+    // version skew: `decision_outputs` stays the bare KEY list an older
+    // console renders as text inputs; `decision_output_defs` carries the
+    // normalized typed declarations a picker-aware console prefers.
+    ...(() => {
+      const defs = normalizeDecisionOutputs(cfg?.decisionOutputs);
+      return defs.length
+        ? { decision_outputs: defs.map(d => d.key), decision_output_defs: defs }
+        : {};
+    })(),
   } as any;
 }
 
@@ -1220,9 +1227,9 @@ export class ApprovalService implements IApprovalService {
     const outputKeys = input.outputs ? Object.keys(input.outputs) : [];
     let acceptedOutputs: Record<string, unknown> | undefined;
     if (outputKeys.length) {
-      const declared = Array.isArray((config as any).decisionOutputs)
-        ? ((config as any).decisionOutputs as unknown[]).map(String)
-        : [];
+      // Typed declarations and bare keys whitelist identically — one
+      // normalizer (spec) is the single reader of the union shape.
+      const declared = normalizeDecisionOutputs((config as any).decisionOutputs).map(d => d.key);
       if (!declared.length) {
         throw new Error(
           `VALIDATION_FAILED: this approval node declares no decisionOutputs — outputs are not accepted. `

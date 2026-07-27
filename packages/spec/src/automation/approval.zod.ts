@@ -181,6 +181,58 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
 export type ApprovalNodeApprover = z.infer<typeof ApprovalNodeApproverSchema>;
 
 /**
+ * A TYPED decision-output declaration (#3447 P2 follow-up). The bare-string
+ * form of a `decisionOutputs` entry renders as free text; this form tells the
+ * decision UI which picker to render and whether to collect one id or many.
+ * The runtime treats `key` as the whitelist entry either way — `type` and
+ * `multiple` only shape the INPUT WIDGET, never the accepted value.
+ */
+export const DecisionOutputDefSchema = lazySchema(() => z.object({
+  /** The output key — what the flow receives as `<nodeId>.<key>`. */
+  key: z.string().min(1).describe('Output key (the flow variable name under the node id)'),
+  /** Display label for the decision-dialog field; defaults to a title-cased key. */
+  label: z.string().optional().describe('Field label in the decision dialog'),
+  /**
+   * Input widget: `text` (default — free text), or a record picker —
+   * `user` (sys_user), `department` (sys_business_unit), `position`
+   * (sys_position), `team` (sys_team). Picker values are record ids.
+   */
+  type: z.enum(['text', 'user', 'department', 'position', 'team']).optional()
+    .describe("Decision-dialog input widget (default 'text')"),
+  /** Collect an id array instead of a single value (multi-select picker). */
+  multiple: z.boolean().optional().describe('Collect multiple values (id array)'),
+}));
+export type DecisionOutputDef = z.infer<typeof DecisionOutputDefSchema>;
+
+/**
+ * Normalize a `decisionOutputs` array (bare keys and typed declarations mixed)
+ * into the typed form. The ONE place both sides read the union: the runtime
+ * whitelists `normalizeDecisionOutputs(...).map(d => d.key)`, the request read
+ * surfaces the normalized defs for the decision UI — so a bare key and
+ * `{ key }` can never behave differently.
+ */
+export function normalizeDecisionOutputs(
+  declared: unknown,
+): DecisionOutputDef[] {
+  if (!Array.isArray(declared)) return [];
+  const out: DecisionOutputDef[] = [];
+  for (const entry of declared) {
+    if (typeof entry === 'string') {
+      if (entry) out.push({ key: entry });
+    } else if (entry && typeof entry === 'object' && typeof (entry as any).key === 'string' && (entry as any).key) {
+      const e = entry as Record<string, unknown>;
+      out.push({
+        key: String(e.key),
+        ...(typeof e.label === 'string' && e.label ? { label: e.label } : {}),
+        ...(typeof e.type === 'string' && e.type !== 'text' ? { type: e.type as DecisionOutputDef['type'] } : {}),
+        ...(e.multiple === true ? { multiple: true } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Per-node SLA escalation — carried on the Approval node itself, so each
  * Approval step on the canvas defines its own SLA.
  */
@@ -291,9 +343,21 @@ export const ApprovalNodeConfigSchema = lazySchema(() => z.object({
    * (`vars.<nodeId>.picked_departments`) — "the previous approver picks the
    * next step's approvers" without a record-field detour. A decision carrying
    * undeclared keys is rejected; `decision` / `requestId` are reserved.
+   *
+   * An entry is either a bare key (a plain text input in the decision UI) or a
+   * TYPED declaration — `{ key, type, multiple }` — that tells the decision UI
+   * to render a record picker instead of free text: `user` → a sys_user
+   * picker, `department`/`position`/`team` → the matching system-object
+   * picker. `multiple: true` collects an id ARRAY (the natural fan-out shape
+   * for an `expression` approver downstream). The type describes the INPUT
+   * WIDGET only — the runtime accepts whatever value shape arrives (single id,
+   * id[], CSV) and hands it to the flow verbatim.
    */
-  decisionOutputs: z.array(z.string()).optional()
-    .describe('Author-declared output keys a decision may carry (approvers fill values only)'),
+  decisionOutputs: z.array(z.union([
+    z.string(),
+    DecisionOutputDefSchema,
+  ])).optional()
+    .describe('Author-declared decision outputs — bare keys or typed { key, type, multiple } declarations'),
 
   /** Optional per-node SLA escalation. */
   escalation: ApprovalEscalationSchema.optional().describe('Per-node SLA escalation'),

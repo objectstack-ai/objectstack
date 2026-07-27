@@ -39,8 +39,10 @@ export const DynamicApprovalFlow = defineFlow({
         approvers: [{ type: 'org_membership_level', value: 'owner' }],
         behavior: 'first_response',
         lockRecord: true,
-        // The lead hands the co-signers to the flow with their decision.
-        decisionOutputs: ['next_reviewers'],
+        // The lead hands the co-signers to the flow with their decision. The
+        // TYPED declaration renders a multi-select sys_user picker in the
+        // decision dialog (bare string keys render free text).
+        decisionOutputs: [{ key: 'next_reviewers', label: 'Next Reviewers', type: 'user', multiple: true }],
       },
     },
     {
