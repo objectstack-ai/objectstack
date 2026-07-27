@@ -14,8 +14,8 @@ Field Type Enum
 ## TypeScript Usage
 
 ```typescript
-import { Address, ComputedFieldCache, CurrencyConfig, CurrencyValue, DataQualityRules, Field, FieldType, LocationCoordinates, SelectOption } from '@objectstack/spec/data';
-import type { Address, ComputedFieldCache, CurrencyConfig, CurrencyValue, DataQualityRules, Field, FieldType, LocationCoordinates, SelectOption } from '@objectstack/spec/data';
+import { Address, ComputedFieldCache, CurrencyConfig, CurrencyValue, DataQualityRules, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
+import type { Address, ComputedFieldCache, CurrencyConfig, CurrencyValue, DataQualityRules, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
 
 // Validate data
 const result = Address.parse(data);
@@ -105,7 +105,7 @@ const result = Address.parse(data);
 | **required** | `boolean` | optional | Is required |
 | **searchable** | `boolean` | optional | Is searchable |
 | **multiple** | `boolean` | optional | Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. |
-| **unique** | `boolean` | optional | Is unique constraint |
+| **unique** | `boolean \| 'global'` | optional | Unique constraint. true = unique within the tenant (composite with the tenant column on tenant-scoped objects); 'global' = unique platform-wide across all tenants |
 | **defaultValue** | `any` | optional | Default value |
 | **maxLength** | `number` | optional | Max character length |
 | **minLength** | `number` | optional | Min character length |
@@ -241,6 +241,27 @@ const result = Address.parse(data);
 | **color** | `string` | optional | Color code for badges/charts |
 | **default** | `boolean` | optional | Is default option |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as field visibleWhen (record + current_user). e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
+
+
+---
+
+## UniqueScope
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Type: `boolean`
+
+---
+
+#### Option 2
+
+Type: `'global'`
+
+---
 
 
 ---

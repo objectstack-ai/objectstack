@@ -278,7 +278,7 @@ fields:
 | `type` | `string` | All | **Required.** Field type (see [Types](/docs/protocol/objectql/types)). |
 | `label` | `string` | All | **Required.** Display label in UI. |
 | `required` | `boolean` | All | Validation: Field must have a value. |
-| `unique` | `boolean` | All | Enforce uniqueness at database level. |
+| `unique` | `boolean \| 'global'` | All | Enforce uniqueness at database level. `true` = unique **within the tenant**; `'global'` = unique platform-wide. See [Uniqueness and tenancy](#uniqueness-and-tenancy). |
 | `searchable` | `boolean` | All | Is searchable. |
 | `defaultValue` | `any` | All | Default value when creating new records. |
 | `description` | `string` | All | Tooltip/Help text. |
@@ -565,6 +565,54 @@ Supported index `type` values: `btree` (default), `hash`, `gin`, `gist`, `fullte
   - Low-cardinality fields (boolean, status with 2-3 values)
   - Fields that change frequently
   - Large text fields (use full-text search instead)
+
+### Uniqueness and tenancy
+
+On a tenant-scoped object, **field-level `unique: true` means unique *within* the
+tenant**, not platform-wide. The driver materializes it as a composite index
+`(tenantField, field)`:
+
+```yaml
+fields:
+  code:
+    type: autonumber
+    autonumberFormat: 'PROD-{00000}'
+    unique: true      # each tenant may hold its own PROD-00001
+```
+
+This matches every other tenant-aware part of the platform: reads are filtered by
+the tenant predicate, writes stamp the tenant column, and the auto-number sequence
+gives each tenant a counter starting at 1. A platform-wide index would contradict
+the sequence outright — the second tenant's `PROD-00001` would be rejected by an
+index it cannot see, and the rejection itself would reveal that *some other tenant*
+holds the value.
+
+For the identifiers that genuinely are platform-wide — a DNS hostname, a reserved
+slug, an external provider id, a device identity — say so explicitly:
+
+```yaml
+fields:
+  hostname:
+    type: text
+    unique: global    # no two tenants may claim the same hostname
+```
+
+On an object with no tenant column (`tenancy: { enabled: false }`, or simply no
+tenant field) both spellings behave identically. **Single-tenant deployments are
+unaffected** — the tenant column is constant, so the composite index degenerates
+to the single-column one.
+
+**Declared `indexes` are different:** they are materialized over exactly the
+columns you list, with no tenant column injected. Write the tenant column yourself
+when you want a per-tenant index:
+
+```yaml
+indexes:
+  - fields: [organization_id, code]   # unique per tenant
+    unique: true
+  - fields: [hostname]                # unique platform-wide
+    unique: true
+```
 
 ## Lifecycle Hooks
 
