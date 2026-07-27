@@ -322,10 +322,8 @@ const label = i18n.t('account.fields.unknown', 'en');
 <Callout type="warn">
 **Design intent.** Automatic CLDR plural selection (the `key` / `key_plural`
 convention) is not yet implemented by the file adapter — `t()` performs only
-`{{param}}` interpolation. To pluralize today, set `messageFormat: 'icu'` and
-author ICU MessageFormat strings (see
-[Use ICU MessageFormat](#4-use-icu-messageformat-for-complex-messages) below),
-or select the form in application code.
+`{{param}}` interpolation. To pluralize today, select the plural form in
+application code before calling `t()`.
 </Callout>
 
 ```typescript
@@ -855,15 +853,7 @@ export default defineStack({
 }
 ```
 
-### 4. Use ICU MessageFormat for Complex Messages
-
-```json
-{
-  "accountStatus": "{count, plural, =0 {No accounts} =1 {One account} other {# accounts}}"
-}
-```
-
-### 5. Test All Locales
+### 4. Test All Locales
 
 ```typescript
 // ✓ GOOD: Test with actual locales
@@ -890,18 +880,6 @@ export default defineStack({
     
     // Fallback chain
     fallbackLocale: 'en',
-
-    // File organization: 'bundled' | 'per_locale' | 'per_namespace' (default 'per_locale')
-    fileOrganization: 'per_locale',
-
-    // Message format: 'simple' {variable} interpolation (default) | 'icu' MessageFormat
-    messageFormat: 'simple',
-
-    // Load translations on demand? (default false)
-    lazyLoad: true,
-
-    // Cache translations? (default true)
-    cache: true,
 
     // Translation service — design intent, not yet a recognized config key
     // translationService: {

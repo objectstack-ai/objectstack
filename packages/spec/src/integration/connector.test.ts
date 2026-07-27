@@ -252,22 +252,6 @@ describe('WebhookConfigSchema', () => {
     expect(() => WebhookConfigSchema.parse(webhook)).not.toThrow();
   });
   
-  it('should accept webhook with retry configuration', () => {
-    const webhook = {
-      name: 'retry_webhook',
-      url: 'https://api.example.com/webhooks',
-      events: ['sync.completed'],
-      retryPolicy: {
-        maxRetries: 3,
-        backoffStrategy: 'exponential' as const,
-        initialDelayMs: 1000,
-      },
-    };
-    
-    const parsed = WebhookConfigSchema.parse(webhook);
-    expect(parsed.retryPolicy?.maxRetries).toBe(3);
-  });
-  
   it('should use default values', () => {
     const webhook = {
       name: 'default_webhook',

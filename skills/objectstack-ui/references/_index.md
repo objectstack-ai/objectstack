@@ -35,10 +35,8 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — I18n Object Schema
-- `node_modules/@objectstack/spec/src/ui/keyboard.zod.ts` — Focus Trap Configuration Schema
 - `node_modules/@objectstack/spec/src/ui/responsive.zod.ts` — Breakpoint Name Enum
 - `node_modules/@objectstack/spec/src/ui/sharing.zod.ts` — Sharing & Embedding Protocol
-- `node_modules/@objectstack/spec/src/ui/touch.zod.ts` — Touch Target Configuration Schema
 
 ## How to read these
 

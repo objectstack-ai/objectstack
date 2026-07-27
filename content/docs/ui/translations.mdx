@@ -112,13 +112,15 @@ metadata without doing lookups themselves.
 
 ## Organizing the files
 
-`i18n.fileOrganization` picks the layout:
+How you lay out translation source files is an authoring convention — your
+import graph assembles whichever layout you choose into the bundles you
+register. Common layouts:
 
-- **`per_locale`** (default) — one file per language, combined in the bundle.
+- **per locale** — one file per language, combined in the bundle.
   This is what the Todo example does (`en`, `zh-CN`, `ja-JP`).
-- **`bundled`** — every locale in one file, like the CRM example above. Fine
+- **bundled** — every locale in one file, like the CRM example above. Fine
   for two locales; unwieldy past that.
-- **`per_namespace`** — split by module.
+- **per namespace** — split by module.
 
 ## Draft with the CLI, gate in CI
 
@@ -142,8 +144,8 @@ Honest limits worth knowing before you plan around them:
 - **`validationMessages` has no runtime consumer today.** The schema accepts it
   and the coverage tooling counts it, but nothing reads it back — validation
   errors are not translated through bundles yet.
-- **`messageFormat: 'icu'` is declared but not implemented** — plural/gender
-  formatting isn't available; `simple` is what runs.
+- **No ICU MessageFormat** — plural/gender formatting isn't available;
+  interpolation is always simple `{variable}` substitution.
 - **Two bundle shapes exist.** File-authored bundles use the `objects.<name>`
   shape documented here, which is what the resolver reads. The `translation`
   metadata type authored at runtime uses an object-first (`o.<object>`) shape,

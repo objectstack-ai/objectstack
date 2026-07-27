@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 /**
  * Breakpoint Name Enum
- * Matches the breakpoint names defined in theme.zod.ts BreakpointsSchema.
+ * Standard Tailwind-style breakpoint names (xs–2xl).
  */
 import { lazySchema } from '../shared/lazy-schema';
 export const BreakpointName = z.enum(['xs', 'sm', 'md', 'lg', 'xl', '2xl']);
@@ -16,8 +16,6 @@ export type BreakpointName = z.infer<typeof BreakpointName>;
  *
  * Provides responsive layout configuration for UI components.
  * Maps breakpoint names to layout behavior (columns, visibility, order).
- *
- * Aligned with theme.zod.ts BreakpointsSchema for a unified responsive system.
  *
  * @example
  * ```typescript

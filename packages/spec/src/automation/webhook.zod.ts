@@ -73,16 +73,17 @@ export const WebhookTriggerType = z.enum([
  *   url: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXX',
  *   method: 'POST',
  *   headers: { 'Content-Type': 'application/json' },
- *   authentication: {
- *     type: 'bearer',
- *     credentials: { token: process.env.SLACK_TOKEN }
- *   },
- *   retryPolicy: {
- *     maxRetries: 3,
- *     backoffStrategy: 'exponential'
- *   }
+ *   secret: process.env.WEBHOOK_SIGNING_SECRET,
  * }
  * ```
+ *
+ * #3494: the aspirational props `body`, `payloadFields`, `includeSession`,
+ * `authentication` and `tags` were removed — the delivery path always sends its
+ * own fixed envelope, only HMAC signing via `secret` is applied, and none of
+ * them had a sink anywhere (liveness audit #1878/#1893). `retryPolicy` was
+ * removed too: delivery retries are owned by the messaging outbox's fixed
+ * schedule, which never read the authored policy. The inbound
+ * `WebhookReceiverSchema` (never consumed by any runtime) was removed as well.
  */
 export const WebhookSchema = lazySchema(() => z.object({
   name: SnakeCaseIdentifierSchema.describe('Webhook unique name (lowercase snake_case)'),
@@ -98,28 +99,7 @@ export const WebhookSchema = lazySchema(() => z.object({
   
   /** Headers */
   headers: z.record(z.string(), z.string()).optional().describe('Custom HTTP headers'),
-  
-  /** Body/Payload */
-  body: z.unknown().optional().describe('Request body payload (if not using default record data)'),
-  
-  /** Payload Configuration */
-  payloadFields: z.array(z.string()).optional().describe('Fields to include. Empty = All'),
-  includeSession: z.boolean().default(false).describe('Include user session info'),
-  
-  /** Authentication */
-  authentication: z.object({
-    type: z.enum(['none', 'bearer', 'basic', 'api-key']).describe('Authentication type'),
-    credentials: z.record(z.string(), z.string()).optional().describe('Authentication credentials'),
-  }).optional().describe("Authentication configuration. [EXPERIMENTAL — not enforced] The webhook delivery path only applies HMAC signing via `secret`; bearer/basic/api-key credentials are not attached to outbound requests yet (liveness audit #1878/#1893)."),
-  
-  /** Retry Policy */
-  retryPolicy: z.object({
-    maxRetries: z.number().int().min(0).max(10).default(3).describe('Maximum retry attempts'),
-    backoffStrategy: z.enum(['exponential', 'linear', 'fixed']).default('exponential').describe('Backoff strategy'),
-    initialDelayMs: z.number().int().min(100).default(1000).describe('Initial retry delay in milliseconds'),
-    maxDelayMs: z.number().int().min(1000).default(60000).describe('Maximum retry delay in milliseconds'),
-  }).optional().describe('Retry policy configuration'),
-  
+
   /** Timeout */
   timeoutMs: z.number().int().min(1000).max(300000).default(30000).describe('Request timeout in milliseconds'),
   
@@ -131,45 +111,11 @@ export const WebhookSchema = lazySchema(() => z.object({
   
   /** Metadata */
   description: z.string().optional().describe('Webhook description'),
-  tags: z.array(z.string()).optional().describe('Tags for organization'),
-}));
-
-/**
- * Webhook Receiver Schema (Inbound)
- * Handling incoming HTTP hooks from Stripe, Slack, etc.
- * 
- * **NAMING CONVENTION:**
- * Webhook receiver names are machine identifiers and must be lowercase snake_case.
- * 
- * @example Good names
- * - 'stripe_webhook_handler'
- * - 'github_events'
- * - 'twilio_status_callback'
- * 
- * @example Bad names (will be rejected)
- * - 'StripeWebhookHandler' (PascalCase)
- */
-export const WebhookReceiverSchema = lazySchema(() => z.object({
-  name: SnakeCaseIdentifierSchema.describe('Webhook receiver unique name (lowercase snake_case)'),
-  path: z.string().describe('URL Path (e.g. /webhooks/stripe)'),
-  
-  /** Verification */
-  verificationType: z.enum(['none', 'header_token', 'hmac', 'ip_whitelist']).default('none'),
-  verificationParams: z.object({
-    header: z.string().optional(),
-    secret: z.string().optional(),
-    ips: z.array(z.string()).optional()
-  }).optional(),
-  
-  /** Action */
-  action: z.enum(['trigger_flow', 'script', 'upsert_record']).default('trigger_flow'),
-  target: z.string().describe('Flow ID or Script name'),
 }));
 
 export type Webhook = z.infer<typeof WebhookSchema>;
 /** Authoring input for {@link Webhook} — defaulted fields are optional. */
 export type WebhookInput = z.input<typeof WebhookSchema>;
-export type WebhookReceiver = z.infer<typeof WebhookReceiverSchema>;
 
 /**
  * Type-safe factory for an outbound webhook. Validates at authoring time via

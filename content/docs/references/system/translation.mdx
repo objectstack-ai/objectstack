@@ -16,8 +16,8 @@ Translation data for a single field.
 ## TypeScript Usage
 
 ```typescript
-import { ActionResultDialogTranslation, AppTranslationBundle, CoverageBreakdownEntry, FieldTranslation, Locale, MessageFormat, ObjectTranslationData, ObjectTranslationNode, TranslationBundle, TranslationConfig, TranslationCoverageResult, TranslationData, TranslationDiffItem, TranslationDiffStatus, TranslationFileOrganization } from '@objectstack/spec/system';
-import type { ActionResultDialogTranslation, AppTranslationBundle, CoverageBreakdownEntry, FieldTranslation, Locale, MessageFormat, ObjectTranslationData, ObjectTranslationNode, TranslationBundle, TranslationConfig, TranslationCoverageResult, TranslationData, TranslationDiffItem, TranslationDiffStatus, TranslationFileOrganization } from '@objectstack/spec/system';
+import { ActionResultDialogTranslation, AppTranslationBundle, CoverageBreakdownEntry, FieldTranslation, Locale, ObjectTranslationData, ObjectTranslationNode, TranslationBundle, TranslationConfig, TranslationCoverageResult, TranslationData, TranslationDiffItem, TranslationDiffStatus } from '@objectstack/spec/system';
+import type { ActionResultDialogTranslation, AppTranslationBundle, CoverageBreakdownEntry, FieldTranslation, Locale, ObjectTranslationData, ObjectTranslationNode, TranslationBundle, TranslationConfig, TranslationCoverageResult, TranslationData, TranslationDiffItem, TranslationDiffStatus } from '@objectstack/spec/system';
 
 // Validate data
 const result = ActionResultDialogTranslation.parse(data);
@@ -101,18 +101,6 @@ Translation data for a single field
 
 ---
 
-## MessageFormat
-
-Message interpolation format: ICU MessageFormat or simple `{variable}` replacement
-
-### Allowed Values
-
-* `icu`
-* `simple`
-
-
----
-
 ## ObjectTranslationData
 
 Translation data for a single object
@@ -169,10 +157,6 @@ Internationalization configuration
 | **defaultLocale** | `string` | ✅ | Default locale (e.g., "en") |
 | **supportedLocales** | `string[]` | ✅ | Supported BCP-47 locale codes |
 | **fallbackLocale** | `string` | optional | Fallback locale code |
-| **fileOrganization** | `Enum<'bundled' \| 'per_locale' \| 'per_namespace'>` | ✅ | File organization strategy |
-| **messageFormat** | `Enum<'icu' \| 'simple'>` | ✅ | Message interpolation format (ICU MessageFormat or simple). [EXPERIMENTAL — 'icu' not enforced] No ICU MessageFormat engine is wired; messageFormat:'icu' is accepted but interpolation falls back to simple substitution (liveness audit #1878/#1893). |
-| **lazyLoad** | `boolean` | ✅ | Load translations on demand |
-| **cache** | `boolean` | ✅ | Cache loaded translations. [EXPERIMENTAL — not enforced] No runtime consumer reads this cache flag yet (liveness audit #1878/#1893). |
 
 
 ---
@@ -248,19 +232,6 @@ Translation diff status: missing from bundle, redundant (no matching metadata), 
 * `missing`
 * `redundant`
 * `stale`
-
-
----
-
-## TranslationFileOrganization
-
-Translation file organization strategy
-
-### Allowed Values
-
-* `bundled`
-* `per_locale`
-* `per_namespace`
 
 
 ---

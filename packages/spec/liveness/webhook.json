@@ -32,27 +32,6 @@
       "status": "dead",
       "note": "Authored value never materialized. No first-class sys_webhook column — the dispatcher reads headers only from the `definition_json` textarea of a hand-created row (auto-enqueuer.ts:275). A materializer would fold this into definition_json."
     },
-    "body": {
-      "status": "dead",
-      "note": "No sink anywhere. The dispatcher always sends its own fixed envelope (object/recordId/action/timestamp + full record, auto-enqueuer.ts:336-342); a custom body is never read. Vestigial even for a future materializer."
-    },
-    "payloadFields": {
-      "status": "dead",
-      "note": "No sink anywhere. No field projection — the full record is always sent (auto-enqueuer.ts:341). Never read."
-    },
-    "includeSession": {
-      "status": "dead",
-      "note": "No sink anywhere. No session is injected into the enqueue payload. Never read."
-    },
-    "authentication": {
-      "status": "experimental",
-      "authorHint": "Only HMAC signing via `secret` is applied to deliveries; bearer/basic/api-key credentials are never attached to outbound requests (liveness audit #1878/#1893).",
-      "note": "Self-marked [EXPERIMENTAL — not enforced] on the schema (webhook.zod.ts:102); pinned here so the compile lint warns on it (marker-only classifications aren't read by the lint). At runtime the delivery path applies HMAC via `secret` only (auto-enqueuer.ts:276) — bearer/basic/api-key are inert."
-    },
-    "retryPolicy": {
-      "status": "dead",
-      "note": "No sink anywhere. Not present in EnqueueHttpInput (service-messaging/src/http-outbox.ts:87-98); the enqueuer passes no retry fields and the messaging HttpDispatcher owns a fixed retry schedule. Authored maxRetries/backoffStrategy/initialDelayMs/maxDelayMs are all ignored. (The showcase's TaskChangedWebhook authors a retryPolicy that does nothing — the canonical no-op.)"
-    },
     "timeoutMs": {
       "status": "dead",
       "note": "Authored value never materialized. Honored only from the `definition_json` textarea of a hand-created row (auto-enqueuer.ts:277 → http-outbox.ts:96), never from this top-level prop."
@@ -69,10 +48,6 @@
     "description": {
       "status": "dead",
       "note": "Authored value never materialized. Runtime col sys-webhook.object.ts:160 (Studio-editable; inert in dispatch). Salvageable 1:1."
-    },
-    "tags": {
-      "status": "dead",
-      "note": "No sink anywhere. No sys_webhook column, never read. Vestigial."
     }
   }
 }

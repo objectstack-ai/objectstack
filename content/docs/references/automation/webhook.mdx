@@ -46,8 +46,8 @@ value that silently never fires.
 ## TypeScript Usage
 
 ```typescript
-import { Webhook, WebhookReceiver, WebhookTriggerType } from '@objectstack/spec/automation';
-import type { Webhook, WebhookReceiver, WebhookTriggerType } from '@objectstack/spec/automation';
+import { Webhook, WebhookTriggerType } from '@objectstack/spec/automation';
+import type { Webhook, WebhookTriggerType } from '@objectstack/spec/automation';
 
 // Validate data
 const result = Webhook.parse(data);
@@ -68,32 +68,10 @@ const result = Webhook.parse(data);
 | **url** | `string` | ✅ | External webhook endpoint URL |
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | ✅ | HTTP method |
 | **headers** | `Record<string, string>` | optional | Custom HTTP headers |
-| **body** | `any` | optional | Request body payload (if not using default record data) |
-| **payloadFields** | `string[]` | optional | Fields to include. Empty = All |
-| **includeSession** | `boolean` | ✅ | Include user session info |
-| **authentication** | `{ type: Enum<'none' \| 'bearer' \| 'basic' \| 'api-key'>; credentials?: Record<string, string> }` | optional | Authentication configuration. [EXPERIMENTAL — not enforced] The webhook delivery path only applies HMAC signing via `secret`; bearer/basic/api-key credentials are not attached to outbound requests yet (liveness audit #1878/#1893). |
-| **retryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'exponential' \| 'linear' \| 'fixed'>; initialDelayMs: integer; maxDelayMs: integer }` | optional | Retry policy configuration |
 | **timeoutMs** | `integer` | ✅ | Request timeout in milliseconds |
 | **secret** | `string` | optional | Signing secret for HMAC signature verification |
 | **isActive** | `boolean` | ✅ | Whether webhook is active |
 | **description** | `string` | optional | Webhook description |
-| **tags** | `string[]` | optional | Tags for organization |
-
-
----
-
-## WebhookReceiver
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Webhook receiver unique name (lowercase snake_case) |
-| **path** | `string` | ✅ | URL Path (e.g. /webhooks/stripe) |
-| **verificationType** | `Enum<'none' \| 'header_token' \| 'hmac' \| 'ip_whitelist'>` | ✅ |  |
-| **verificationParams** | `{ header?: string; secret?: string; ips?: string[] }` | optional |  |
-| **action** | `Enum<'trigger_flow' \| 'script' \| 'upsert_record'>` | ✅ |  |
-| **target** | `string` | ✅ | Flow ID or Script name |
 
 
 ---
