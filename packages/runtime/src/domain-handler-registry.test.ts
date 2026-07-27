@@ -38,6 +38,12 @@ function makeKernel(services: Record<string, any> = {}, state = 'running') {
     return kernel;
 }
 
+function makeDispatcherWithKernelExtras(services: Record<string, any>, extras: Record<string, any>) {
+    const kernel = makeKernel(services, 'running');
+    Object.assign(kernel, extras);
+    return new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+}
+
 function makeDispatcher(services: Record<string, any> = {}, state = 'running') {
     return new HttpDispatcher(makeKernel(services, state), undefined, {
         enforceProjectMembership: false,
@@ -439,5 +445,45 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
     it('falls through unhandled when no automation service is registered', async () => {
         const result = await makeDispatcher().dispatch('GET', '/automation', undefined, {}, {} as any);
         expect(result.response?.status ?? 404).not.toBe(200);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PR-7 — auth + ai extraction
+// ---------------------------------------------------------------------------
+
+describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
+    it('/auth delegates to the auth service handler when registered', async () => {
+        const handler = vi.fn().mockResolvedValue({ ok: true });
+        const result = await makeDispatcher({ auth: { handler } }).dispatch('POST', '/auth/sign-in/email', { email: 'x@y.z' }, {}, {} as any);
+        expect(result.handled).toBe(true);
+        expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it('/auth mock fallback serves sign-up when no auth service is registered', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/auth/sign-up/email', { email: 'a@b.c', name: 'A' }, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.user?.email).toBe('a@b.c');
+        expect(result.response?.body?.session?.token).toMatch(/^mock_token_/);
+    });
+
+    it('/ai/agents returns an empty list (not 404) when no AI service is configured', async () => {
+        const result = await makeDispatcher().dispatch('GET', '/ai/agents', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.agents).toEqual([]);
+    });
+
+    it('/ai routes 404 (service missing) for non-agents paths', async () => {
+        const result = await makeDispatcher().dispatch('POST', '/ai/chat', { q: 'hi' }, {}, {} as any);
+        expect(result.response?.status).toBe(404);
+    });
+
+    it('/ai dispatches to a matching cached kernel route with params + user threading', async () => {
+        const routeHandler = vi.fn().mockResolvedValue({ status: 200, body: { answer: 42 } });
+        const kernelExtras = { __aiRoutes: [{ method: 'GET', path: '/api/v1/ai/conversations/:id', handler: routeHandler, auth: false }] };
+        const dispatcher = makeDispatcherWithKernelExtras({ ai: { name: 'ai' } }, kernelExtras);
+        const result = await dispatcher.dispatch('GET', '/ai/conversations/c-1', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(routeHandler.mock.calls[0][0].params).toMatchObject({ id: 'c-1' });
     });
 });

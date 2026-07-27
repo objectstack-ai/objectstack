@@ -119,6 +119,13 @@ export interface DomainHandlerDeps {
     announceKernelEvent(event: string, payload: unknown): Promise<void>;
     /** Host logger when one is attached to the dispatcher; domains fall back to console. */
     logger?: any;
+    /** The deployment's `requireAuth` posture (lazily read — construction-order safe). */
+    isAuthRequired(): boolean;
+    /**
+     * The AI route table the AI plugin caches on the request kernel
+     * (`__aiRoutes`); undefined until the plugin initializes it.
+     */
+    getRegisteredAiRoutes(): Array<{ method: string; path: string; handler: (req: any) => Promise<any>; auth?: boolean }> | undefined;
 }
 
 /**
