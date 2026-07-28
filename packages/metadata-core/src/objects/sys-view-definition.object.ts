@@ -138,8 +138,11 @@ export const SysViewDefinitionObject = ObjectSchema.create({
     trackHistory: true,
     searchable: false,
     apiEnabled: true,
-    // `bulk` = the batch shape of the verbs above; the gate is `bulk ∧ child`
-    // (#3391 P1), so omitting it 405s /batch and the *Many routes (#3026).
-    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk'],
+    // No `apiMethods` — default-open (#3543 audit). #3745 completed this
+    // object's whitelist to all six primitives, which is equivalent to no
+    // whitelist while NOT tracking future primitives. Unlike the RBAC objects
+    // reclaimed alongside it, this one has no `managedBy`, so there is no
+    // ADR-0103 D3 managed-write backstop that an explicit array keeps alive —
+    // nothing argues for keeping the declaration, so it goes.
   },
 });
