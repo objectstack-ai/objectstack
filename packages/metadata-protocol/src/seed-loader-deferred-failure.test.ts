@@ -122,6 +122,32 @@ const SEEDS = [
   },
 ] as any[];
 
+/**
+ * #3760 — the pass-2 back-fill is still SEEDING, so it must carry `skipTriggers`
+ * like every other seed write. It used to inline a bare `{ isSystem: true }`,
+ * and `isSystem` does NOT suppress record-change dispatch — only `skipTriggers`
+ * does. So the forward-reference patch pass re-fired "on update" automation over
+ * freshly seeded business rows: the exact self-trigger vector SEED_OPTIONS
+ * exists to prevent, on the one write that skipped it.
+ */
+describe('the deferred back-fill seeds with automation suppressed (#3760)', () => {
+  it("pass-2's reference update carries skipTriggers, like every other seed write", async () => {
+    const { engine } = createFaithfulEngine();
+    const metadata = createMetadata();
+
+    await new SeedLoaderService(engine, metadata, createLogger()).load({ seeds: SEEDS, config: CONFIG });
+
+    const deferredUpdates = (engine.update as any).mock.calls.filter(
+      ([obj]: [string]) => obj === 'audit_department',
+    );
+    expect(deferredUpdates.length, 'the pass-2 back-fill did not run').toBeGreaterThan(0);
+    for (const [, , opts] of deferredUpdates) {
+      expect(opts?.context?.skipTriggers, 'a seed write fired record-change automation').toBe(true);
+      expect(opts?.context?.isSystem).toBe(true);
+    }
+  });
+});
+
 describe('seed deferred back-fill failure is reported, not swallowed (framework#2805)', () => {
   it('a failing pass-2 reference update flips success=false and counts an error', async () => {
     const { engine, store } = createFaithfulEngine();

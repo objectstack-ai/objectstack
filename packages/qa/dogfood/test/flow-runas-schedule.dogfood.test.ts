@@ -1,29 +1,37 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// FLOW runAs — the SCHEDULE (user-less) fail-open, exercised end-to-end through
-// the real automation + security + data stack (#1888 follow-up, ADR-0049).
+// FLOW runAs — the user-less run is REFUSED, exercised end-to-end through the
+// real automation + security + data stack (#1888 → #3760, ADR-0049/ADR-0073).
 //
 // @proof: flow-runas-schedule
 // Sibling of flow-runas.dogfood.test.ts. That gate proves runAs switches identity
-// for a USER-triggered run; this one pins the boundary case #1888 deliberately
-// left open: a SCHEDULE-triggered run has NO trigger user, so an effective
-// `runAs:'user'` (the default) resolves no identity → CRUD nodes pass no ObjectQL
-// context → the security middleware SKIPS (it delegates auth to the auth layer)
-// → the run executes UNSCOPED (effectively elevated), not restricted.
+// for a USER-triggered run; this one pins the boundary case: a run with NO
+// trigger user under an effective `runAs:'user'` (the default) resolves no
+// identity, so its CRUD nodes would present no ObjectQL context → the security
+// middleware SKIPS (it delegates auth to the auth layer) → the run would execute
+// UNSCOPED (effectively elevated), not restricted.
+//
+// Until #3760 that is exactly what happened, and THIS FILE PINNED IT — asserting
+// that a user-less run read and wrote an admin-owned record a member cannot
+// touch. Its own note said a fail-closed change must turn these assertions RED
+// and "force the product decision to be revisited deliberately". That is what
+// #3760 did: `runAs:'user'` is an access-NARROWING declaration, so failing to
+// resolve it must never resolve to a grant, and the operation is refused.
+//
+// A schedule was never the boundary — it is simply the most obvious user-less
+// trigger. The commonest is a record-change flow fired by a write that carried
+// no user (`isSystem` does not suppress trigger dispatch). The assertions below
+// hold for every one of them; the schedule-shaped context is just the cheapest
+// to drive here.
 //
 // We reuse the owner-isolated runas_note fixture and drive the flows directly
 // through the automation service with a USER-LESS context — exactly the shape the
 // schedule trigger builds ({ event:'schedule', params }, no userId) — proving:
-//   • runAs:'user'  (user-less) → UNSCOPED: reads + writes the admin's note a
-//     member cannot touch, and the engine emits the [runAs] warning (the
-//     fail-open is now AUDIBLE, not silent);
-//   • runAs:'system'(user-less) → the explicit, attributable elevation (same
-//     access) with NO warning — the fix authors should declare.
-//
-// This is the live, revert-provable form of "passes static checks / silently
-// elevated at runtime": if a future change makes the user-less case fail-closed
-// (deny) or auto-elevate, the behavioral assertions here go RED and force the
-// product decision to be revisited deliberately.
+//   • runAs:'user'  (user-less) → REFUSED: the run fails and the admin's note is
+//     neither read nor written, with the engine's [runAs] warning emitted at run
+//     setup so the refusal is diagnosable;
+//   • runAs:'system'(user-less) → the explicit, attributable elevation, still
+//     working, with NO warning — the declaration authors should make.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -57,7 +65,7 @@ function captureRunAsWarnings() {
   };
 }
 
-describe('objectstack verify FLOW: schedule/user-less runAs fail-open (#flow-runas-schedule)', () => {
+describe('objectstack verify FLOW: user-less runAs is refused (#flow-runas-schedule)', () => {
   let stack: VerifyStack;
   let adminToken: string;
   let memberToken: string;
@@ -107,28 +115,38 @@ describe('objectstack verify FLOW: schedule/user-less runAs fail-open (#flow-run
     }
   });
 
-  it("FAIL-OPEN (pinned): a user-less runAs:'user' run executes UNSCOPED — reads + writes the admin note, audibly", async () => {
+  it("FAIL-CLOSED (pinned): a user-less runAs:'user' run is REFUSED — never reads or writes the admin note", async () => {
     const id = await adminCreateNote('sched-user');
     const warns = captureRunAsWarnings();
     try {
-      // READ: user mode + no user → unscoped → finds the admin's note (a member can't).
+      // READ: user mode + no user → refused. Before #3760 this returned the
+      // admin's note, which a member cannot read.
       const read = await automation.execute('runas_user_read', scheduleContext(id));
-      expect(read.success, `read run not successful: ${JSON.stringify(read)}`).toBe(true);
+      expect(
+        read.success,
+        'a user-less user-mode run READ successfully — the #3760 fail-open is back (ADR-0049/#1888)',
+      ).toBe(false);
       const found = read.output?.found;
       expect(
         found && typeof found === 'object' ? (found as any).id : found,
-        'a user-less user-mode run did NOT read unscoped — the fail-open behavior changed; revisit the product decision (ADR-0049/#1888)',
-      ).toBeTruthy();
+        'a user-less user-mode run read a record unscoped',
+      ).toBeFalsy();
 
-      // WRITE: user mode + no user → unscoped → stamps the admin's note.
+      // WRITE: user mode + no user → refused, and — the assertion that actually
+      // matters — the admin's record is UNCHANGED. Before #3760 it read
+      // 'touched-user' here.
       const write = await automation.execute('runas_user_touch', scheduleContext(id));
-      expect(write.success, `write run not successful: ${JSON.stringify(write)}`).toBe(true);
-      expect(await adminStatusOf(id)).toBe('touched-user');
+      expect(write.success, 'a user-less user-mode run WROTE successfully — the fail-open is back').toBe(false);
+      expect(
+        await adminStatusOf(id),
+        "a user-less run stamped the admin's note — it wrote unscoped",
+      ).toBe('new');
 
-      // ...and the fail-open is AUDIBLE — the engine warned (≥1 across the two runs).
+      // ...and the refusal is DIAGNOSABLE — the engine warned at run setup,
+      // before any node executed (≥1 across the two runs).
       expect(
         warns.count(),
-        'expected the engine to warn that a user-less user-mode run executes unscoped',
+        'expected the engine to warn that a user-less user-mode run will be refused',
       ).toBeGreaterThanOrEqual(1);
     } finally {
       warns.restore();

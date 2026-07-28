@@ -85,7 +85,7 @@ describe('record-change context hydrates multi-lookup from input (#1872)', () =>
       edges: [ { id: 'e1', source: 'start', target: 'stamp' }, { id: 'e2', source: 'stamp', target: 'end' } ],
     } as any);
 
-    const created = await data.insert('piece', { title: 'X', target_channels: ['ch_1', 'ch_2'] });
+    const created = await data.insert('piece', { title: 'X', target_channels: ['ch_1', 'ch_2'] }, { context: { userId: 'u_trigger' } });
     const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
     await sleep(200);
     const row = await data.findOne('piece', { where: { id } });

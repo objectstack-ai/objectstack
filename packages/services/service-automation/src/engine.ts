@@ -1577,15 +1577,16 @@ export class AutomationEngine implements IAutomationService {
      * (ADR-0049 / #1888). The single construction point shared by `execute()` and
      * `executeWithoutRetry()`.
      *
-     * Also surfaces the user-less **fail-open** footgun (#1888 follow-up): a flow
-     * whose effective `runAs` is `'user'` but whose trigger carries no user — e.g.
-     * a schedule-triggered run — has no user to scope to, so its data nodes run
-     * UNSCOPED (the data security middleware skips when there is no identity).
-     * Denying would break legitimate scheduled CRUD and silently elevating would
-     * hide the author's intent, so the run proceeds — but we log a clear warning so
-     * the elevation is *audible* rather than silent. Authors should declare
-     * `runAs:'system'` to make scheduled elevation explicit (the build-time lint
-     * `flow-schedule-runas-unscoped` flags the same shape earlier).
+     * Also warns about the user-less case (#1888 follow-up, closed by #3760): a
+     * flow whose effective `runAs` is `'user'` but whose trigger resolved no user
+     * has no identity to scope to, so its data nodes would run UNSCOPED (the data
+     * security middleware skips when there is no identity). Those data ops are now
+     * REFUSED at `resolveRunDataContext`; the warning here fires at run SETUP,
+     * before any node executes, so the refusal is diagnosable rather than a
+     * surprise mid-flow. Authors declare `runAs:'system'` to make the elevation
+     * explicit (the build-time lint `flow-runas-unscoped` rejects the
+     * statically-decidable shapes earlier — but NOT the record-change shape, which
+     * is only knowable at run time).
      */
     private async resolveRunContext(flow: FlowParsed, context?: AutomationContext, runId?: string): Promise<AutomationContext> {
         // `flowRunId` is stamped alongside `runAs` because it shares that field's
@@ -1641,10 +1642,12 @@ export class AutomationEngine implements IAutomationService {
 
         if (runIsUnscopedUserMode(runContext) && flowTouchesData(flow)) {
             this.logger.warn(
-                `[runAs] flow '${flow.name}' executes with runAs:'user' but its trigger carries no user ` +
-                `(e.g. a schedule) — its data operations run UNSCOPED (elevated, RLS-bypassing), not ` +
-                `restricted. Declare runAs:'system' to make the elevation explicit and intended ` +
-                `(ADR-0049, #1888).`,
+                `[runAs] flow '${flow.name}' executes with runAs:'user' but its trigger resolved no user ` +
+                `— its data operations will be REFUSED (#3760). Running them would execute UNSCOPED ` +
+                `(elevated, RLS-bypassing) rather than restricted, which is the fail-open ADR-0049 ` +
+                `forbids. Declare runAs:'system' to make the elevation explicit and intended, or arrange ` +
+                `for the trigger to supply a user. Note a user-less trigger is NOT only a schedule: a ` +
+                `record-change flow fired by a system write carries no user either (ADR-0049, #1888).`,
             );
         }
 

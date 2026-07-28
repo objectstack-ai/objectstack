@@ -50,8 +50,11 @@ export type { AutomationServicePluginOptions } from './plugin.js';
 
 // Run identity (ADR-0049 / #1888). Maps a flow run's effective `runAs` to the
 // ObjectQL `context` its data nodes pass — `system` → elevated/RLS-bypassing,
-// `user` → the triggering user. Exported for hosts building custom data nodes.
-export { resolveRunDataContext } from './runtime-identity.js';
+// `user` → the triggering user. A run that resolves NO principal is refused
+// outright (#3760). Exported for hosts building custom data nodes: call
+// `resolveRunDataContext` and let the error propagate, so a custom node inherits
+// the same posture as the built-ins instead of re-opening the fail-open.
+export { resolveRunDataContext, UnscopedRunDataAccessError } from './runtime-identity.js';
 export type { RunDataContext, RunIdentityContext, RunProvenanceContext } from './runtime-identity.js';
 
 // Built-in node executors (ADR-0018). These are seeded by AutomationServicePlugin

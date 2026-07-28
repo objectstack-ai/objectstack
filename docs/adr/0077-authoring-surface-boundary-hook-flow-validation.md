@@ -89,7 +89,7 @@ The genuine overlap is `after-*` side effects (write succeeded → notify / audi
 
 ### 4. Loud-not-silent — the two new `os build` lints (the only code in v1)
 
-Authored alongside the existing flow lints in `packages/cli/src/utils/lint-flow-patterns.ts` (which already ships `flow-schedule-runas-unscoped`, `flow-double-brace-interpolation`, etc.):
+Authored alongside the existing flow lints in `packages/cli/src/utils/lint-flow-patterns.ts` (which already ships `flow-runas-unscoped`, `flow-double-brace-interpolation`, etc.):
 
 - **`flow-record-before-cannot-mutate`** — *error*. A flow bound to `record-before-*` that contains a `create_record`/`update_record` node targeting the **triggering object/record**, or otherwise reads as expecting to change the in-flight record. Message points to **hook** (rewrite) or **validation rule** (veto).
 - **`flow-record-before-cannot-veto`** — *error*. A `record-before-*` flow whose shape implies it intends to stop the write (e.g. a decision branch ending in an error/`end` node presented as rejection). Message: *"record-change flows cannot abort the triggering write — its errors are isolated by design; use a validation rule to reject, or a hook to throw."*

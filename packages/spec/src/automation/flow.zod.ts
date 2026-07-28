@@ -265,15 +265,22 @@ export const FlowSchema = lazySchema(() => z.object({
   // declared identity for the run's data operations and restores the caller's
   // context afterward: `system` runs elevated (a full-access, RLS-bypassing
   // system principal); `user` (default) runs as the triggering user, so CRUD
-  // nodes' ObjectQL reads/writes respect that user's row-level security. A
-  // schedule-triggered run with no user stays unscoped under `user` (there is no
-  // identity to scope to) — declare `system` to make elevation explicit.
+  // nodes' ObjectQL reads/writes respect that user's row-level security.
+  //
+  // A run under `user` that resolves NO trigger user has nothing to scope to, so
+  // its data operations are REFUSED (#3760). This is NOT a schedule-only case —
+  // it is any run whose trigger supplied no user, and the commonest by far is a
+  // record-change flow fired by a write that carried none (any `isSystem`
+  // plugin/service write; `isSystem` does not suppress trigger dispatch, only
+  // `skipTriggers` does). Declare `system` to make the elevation explicit.
   runAs: z
     .enum(['system', 'user'])
     .default('user')
     .describe(
       'Execution identity for the run: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting). ' +
-        'A schedule-triggered run has no trigger user, so under user it runs UNSCOPED (elevated) — declare system to make that explicit.',
+        'A run with no trigger user has no identity to scope to, so under user its data operations are REFUSED — ' +
+        'declare system to make the elevation explicit. This covers schedule/time-relative/api triggers AND any ' +
+        'record-change flow fired by a write that carried no user.',
     ),
 
   /** Error Handling Strategy */

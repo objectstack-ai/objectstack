@@ -180,6 +180,83 @@ const objectDef = (name: string) => ({
   },
 });
 
+/**
+ * #3760 — the fail-open this trigger was the dominant carrier of.
+ *
+ * `isSystem` does NOT suppress trigger dispatch (only `skipTriggers` does), and
+ * the trigger forwards `session.userId` with no fallback. So a write made with a
+ * system context — any plugin/service write, the approvals status mirror, a
+ * `runAs:'system'` flow's own data node — fires the record-change flows bound to
+ * that object with `userId: undefined`. A flow left at the spec default
+ * `runAs:'user'` then presented NO principal to ObjectQL, and the data security
+ * middleware skips when there is no principal: the flow read and wrote every row.
+ *
+ * Nothing flags this at authoring time and nothing can — whether a given write
+ * carries a user is only knowable at run time — so the runtime refusal is the
+ * only net. This test drives the real kernel end-to-end rather than the seam, so
+ * it fails if ANY link is re-opened: dispatch suppression, identity forwarding,
+ * or the refusal itself.
+ */
+describe('a system write must not fire a record-change flow UNSCOPED (#3760)', () => {
+  it("refuses the flow's data op when the triggering write carried isSystem and no user", async () => {
+    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+
+    const objectql = kernel.getService('objectql') as any;
+    const data = kernel.getService('data') as any;
+    const automation = kernel.getService<AutomationEngine>('automation');
+
+    objectql.registerDriver(makeMemoryDriver(), true);
+    objectql.registry.registerObject(objectDef('sysw'), 'test', 'test');
+    // No `runAs` — the spec default 'user'. This is the shape an author (very
+    // often an AI) writes without realising it can run without a user.
+    automation.registerFlow('sysw_stamp', stampFlow('sysw_stamp', 'sysw') as any);
+
+    // A SYSTEM write: elevated, no userId, and NOT skipTriggers — so it still
+    // dispatches. This is the approvals-status-mirror shape.
+    const created = await data.insert(
+      'sysw',
+      { status: 'new' },
+      { context: { isSystem: true, positions: [], permissions: [] } },
+    );
+    const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
+    await sleep(200);
+
+    // The flow's update_record must NOT have landed. Before #3760 `stamp` was
+    // 'done' here — written by a run with no principal at all.
+    const row = await data.findOne('sysw', { where: { id } });
+    expect(row?.stamp, 'a user-less run wrote to the record — the fail-open is back').toBeUndefined();
+  }, 15000);
+
+  it('the same flow still works normally when a real user made the write', async () => {
+    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+
+    const objectql = kernel.getService('objectql') as any;
+    const data = kernel.getService('data') as any;
+    const automation = kernel.getService<AutomationEngine>('automation');
+
+    objectql.registerDriver(makeMemoryDriver(), true);
+    objectql.registry.registerObject(objectDef('sysw2'), 'test', 'test');
+    automation.registerFlow('sysw2_stamp', stampFlow('sysw2_stamp', 'sysw2') as any);
+
+    const created = await data.insert('sysw2', { status: 'new' }, { context: { userId: 'u_trigger' } });
+    const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
+    await sleep(200);
+
+    // The refusal is scoped to the user-less case — it must not break the
+    // ordinary record-change flow, which is the overwhelming majority.
+    const row = await data.findOne('sysw2', { where: { id } });
+    expect(row?.stamp).toBe('done');
+  }, 15000);
+});
+
 describe('record-change trigger — end-to-end (#1491)', () => {
   it('fires a record-after-create flow registered AFTER the trigger (engine.registerFlow path)', async () => {
     const kernel = new ObjectKernel({ logLevel: 'silent' });
@@ -202,7 +279,7 @@ describe('record-change trigger — end-to-end (#1491)', () => {
       triggerType: 'record_change',
     });
 
-    const created = await data.insert('wid', { status: 'new' });
+    const created = await data.insert('wid', { status: 'new' }, { context: { userId: 'u_trigger' } });
     const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
     await sleep(200);
 
@@ -247,7 +324,7 @@ describe('record-change trigger — end-to-end (#1491)', () => {
       triggerType: 'record_change',
     });
 
-    const created = await data.insert('wid2', { status: 'new' });
+    const created = await data.insert('wid2', { status: 'new' }, { context: { userId: 'u_trigger' } });
     const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
     await sleep(200);
 
@@ -276,14 +353,14 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     });
 
     // Create — the afterInsert leg fires; the flow mirrors status → mirror.
-    const created = await data.insert('wid3', { status: 'a' });
+    const created = await data.insert('wid3', { status: 'a' }, { context: { userId: 'u_trigger' } });
     const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
     await sleep(200);
     expect((await data.findOne('wid3', { where: { id } }))?.mirror).toBe('a');
 
     // Update — the afterUpdate leg of the SAME flow fires; mirror re-syncs. (The
     // flow's own write-back does not loop: the re-entrancy guard suppresses it.)
-    await data.update('wid3', { id, status: 'b' });
+    await data.update('wid3', { id, status: 'b' }, { context: { userId: 'u_trigger' } });
     await sleep(200);
     expect((await data.findOne('wid3', { where: { id } }))?.mirror).toBe('b');
   }, 15000);
@@ -306,20 +383,20 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     // Create leg — a brand-new URGENT record: `previous == null` makes the
     // condition true, so the flow fires on afterInsert (the create-discrimination
     // pattern the docs/showcase advertise).
-    const urgent = await data.insert('wid5', { priority: 'urgent' });
+    const urgent = await data.insert('wid5', { priority: 'urgent' }, { context: { userId: 'u_trigger' } });
     const urgentId = Array.isArray(urgent) ? urgent[0]?.id : urgent?.id ?? urgent;
     await sleep(200);
     expect((await data.findOne('wid5', { where: { id: urgentId } }))?.alerted).toBe('yes');
 
     // Create leg — a NON-urgent record: the condition is false, no fire.
-    const low = await data.insert('wid5', { priority: 'low' });
+    const low = await data.insert('wid5', { priority: 'low' }, { context: { userId: 'u_trigger' } });
     const lowId = Array.isArray(low) ? low[0]?.id : low?.id ?? low;
     await sleep(200);
     expect((await data.findOne('wid5', { where: { id: lowId } }))?.alerted).toBeFalsy();
 
     // Update leg — escalate that low record to urgent: `previous.priority` was
     // 'low', so the transition guard fires the flow on afterUpdate.
-    await data.update('wid5', { id: lowId, priority: 'urgent' });
+    await data.update('wid5', { id: lowId, priority: 'urgent' }, { context: { userId: 'u_trigger' } });
     await sleep(200);
     expect((await data.findOne('wid5', { where: { id: lowId } }))?.alerted).toBe('yes');
   }, 15000);

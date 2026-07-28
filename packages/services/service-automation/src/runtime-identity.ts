@@ -31,9 +31,7 @@ export interface RunIdentityContext {
 }
 
 /**
- * The PROVENANCE-ONLY envelope, for a run that resolves NO principal — an
- * effective `runAs:'user'` run with no trigger user, a schedule being the
- * canonical case (#3712).
+ * The PROVENANCE-ONLY envelope, for a run that resolves NO principal.
  *
  * It names the run that made the write and carries nothing else: no `userId`,
  * no `positions`, no `permissions`, not even `isSystem: false`. That absence is
@@ -43,13 +41,56 @@ export interface RunIdentityContext {
  * `context.userId`, the empty-principal fall-open on
  * `positions`/`permissions`/`userId` (and the delegated-admin gate normalizes a
  * missing context to `{}` before testing it) — so this envelope is
- * indistinguishable from passing no context at all. The run's authorization
- * stays EXACTLY the documented #1888 unscoped fail-open it was before; only
- * provenance rides along.
+ * indistinguishable from passing no context at all.
+ *
+ * Since #3760 a principal-less run may no longer reach a DATA node at all
+ * ({@link resolveRunDataContext} refuses), so this envelope is no longer the
+ * carrier of the old #1888 fail-open. It survives for the non-data provenance
+ * uses that motivated #3712 — a run id is still attributable without presenting
+ * an identity it does not have.
  */
 export interface RunProvenanceContext {
   /** The run performing this operation. The whole envelope (#3712). */
   flowRunId: string;
+}
+
+/**
+ * Thrown when a run whose effective identity is the #1888 *unscoped* case tries
+ * to perform a data operation (#3760).
+ *
+ * The refusal is the point: an effective `runAs:'user'` with no resolvable
+ * trigger user used to execute its data nodes UNSCOPED — the data security
+ * middleware skips when there is no principal, so the run read and wrote EVERY
+ * row of EVERY tenant. `runAs:'user'` is an access-NARROWING declaration, and
+ * ADR-0049's standing rule is that failing to resolve a narrowing declaration
+ * must never resolve to a grant. So the operation is refused instead.
+ *
+ * Note this is strictly narrower than elevating to `isSystem`: the security
+ * middleware's `isSystem` short-circuit fires BEFORE the package-managed-row,
+ * system-row, audience-anchor and delegated-admin gates, so "unscoped" was
+ * never equivalent to "system" and quietly re-badging these runs as system
+ * would have WIDENED them.
+ */
+export class UnscopedRunDataAccessError extends Error {
+  readonly code = 'AUTOMATION_UNSCOPED_RUN_DATA_ACCESS';
+
+  constructor(context?: AutomationContext) {
+    const where = [
+      context?.object ? `object '${context.object}'` : undefined,
+      context?.event ? `event '${context.event}'` : undefined,
+      context?.flowRunId ? `run '${context.flowRunId}'` : undefined,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    super(
+      `[runAs] refusing a data operation${where ? ` (${where})` : ''}: this run's effective runAs is ` +
+        `'user' but no trigger user could be resolved, so the operation would execute UNSCOPED ` +
+        `(elevated, RLS-bypassing) rather than restricted to a user. Declare \`runAs: 'system'\` on the ` +
+        `flow to make the elevation explicit and intended, or arrange for the trigger to supply a user ` +
+        `(a write made with a system context carries none). (ADR-0049, #1888, #3760)`,
+    );
+    this.name = 'UnscopedRunDataAccessError';
+  }
 }
 
 /** What a flow's data nodes pass to ObjectQL as `options.context`. */
@@ -66,15 +107,22 @@ export type RunDataContext = RunIdentityContext | RunProvenanceContext;
  *    enforces that user's row-level security. The run can never exceed the
  *    triggering user's grants. Empty `positions` falls back to the platform's
  *    baseline permission set, exactly like a fresh member's own REST request.
- *  - neither (an effective `runAs:'user'` run with no trigger user — a
- *    schedule) → a {@link RunProvenanceContext}: the run id and nothing else,
- *    so the middleware still sees no principal and the run still executes under
- *    the documented #1888 unscoped fail-open, while hooks can tell whose run
- *    made the write (#3712). `undefined` only when there is no run id either.
+ *  - neither (an effective `runAs:'user'` run with no trigger user) → **throws**
+ *    {@link UnscopedRunDataAccessError} (#3760). This used to return a
+ *    provenance-only envelope and let the run proceed UNSCOPED — the #1888
+ *    fail-open. A schedule is only the most obvious source of a user-less run;
+ *    the commonest is a record-change flow fired by a write that carried no
+ *    user (any `isSystem` plugin/service write, the approvals status mirror, or
+ *    a `runAs:'system'` flow's own data node — `isSystem` does NOT suppress
+ *    trigger dispatch, only `skipTriggers` does). None of those are decidable at
+ *    authoring time, which is why the refusal has to live here.
  *
  * The engine sets {@link AutomationContext.runAs} on the run context at setup;
  * this function is the single place that maps it to an ObjectQL context, shared
- * by every data-touching node so the policy can't drift between node types.
+ * by every data-touching node so the policy can't drift between node types —
+ * which is exactly why the refusal belongs here and not in each executor.
+ *
+ * @throws {UnscopedRunDataAccessError} when the run resolves no principal.
  */
 export function resolveRunDataContext(context: AutomationContext | undefined): RunDataContext | undefined {
   const flowRunId = context?.flowRunId;
@@ -82,15 +130,18 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
     return { isSystem: true, positions: [], permissions: [], ...(flowRunId ? { flowRunId } : {}) };
   }
   if (!context?.userId) {
-    // #3712 — no identity to present, but there IS a run. Carry the run id
-    // ALONE (see {@link RunProvenanceContext}): provenance without a principal,
-    // so the approvals record lock can recognise the owning run's write to its
-    // own target record (#3456) while the security middleware sees exactly what
-    // it saw before — nothing to key on. Manufacturing a *principal* here (even
-    // `{ isSystem: false, positions: [], permissions: [] }`) would be the wrong
-    // tool: it would tie this fix to the #1888 fail-open's fate instead of
-    // leaving that decision open.
-    return flowRunId ? { flowRunId } : undefined;
+    // #3760 — FAIL CLOSED. There is no identity to present, and presenting none
+    // means the data security middleware skips every principal gate and runs the
+    // operation unscoped. `runAs:'user'` asked for restriction; silently
+    // delivering elevation is the fail-open ADR-0049 forbids. Refuse instead.
+    //
+    // Deliberately NOT `{ isSystem: true }`: the middleware's isSystem
+    // short-circuit precedes the package-managed-row / system-row /
+    // audience-anchor / delegated-admin gates that a principal-less context
+    // still has to clear, so re-badging these runs as system would GRANT them
+    // powers they never had (e.g. writing sys_user_position) rather than
+    // preserving the status quo.
+    throw new UnscopedRunDataAccessError(context);
   }
   // `context` is now narrowed to a defined AutomationContext with a userId.
   const out: RunIdentityContext = {
@@ -124,21 +175,24 @@ export function flowTouchesData(flow: { nodes?: ReadonlyArray<{ type?: string }>
 }
 
 /**
- * True when a run's effective identity is the fail-open *unscoped* case: an
- * effective `runAs:'user'` (explicit or defaulted) with NO resolvable trigger
- * user — e.g. a schedule-triggered run, which has no user to scope to (#1888).
+ * True when a run has NO resolvable principal: an effective `runAs:'user'`
+ * (explicit or defaulted) with no trigger user (#1888).
  *
- * {@link resolveRunDataContext} resolves no principal for this case — the CRUD
- * node passes either no `options.context` at all or a provenance-only one
- * (#3712), neither of which presents an identity — and the data security
- * middleware, which *skips* when there is no identity (delegating auth to the
- * auth layer), runs the operation UNSCOPED (effectively elevated). An author
- * who left `runAs` at the
- * `'user'` default expecting a restricted run instead gets an unscoped one. The
- * engine uses this predicate to surface the footgun at run time (a loud warning,
- * not a silent elevation); the build-time lint `flow-schedule-runas-unscoped`
- * catches it earlier, and declaring `runAs:'system'` makes the elevation
- * explicit and intended (ADR-0049).
+ * A schedule is the shape the docs have always led with, but it is not the
+ * common one. ANY run whose trigger resolved no user lands here — most often a
+ * record-change flow fired by a write that carried no user, since `isSystem`
+ * does not suppress trigger dispatch (only `skipTriggers` does). `time_relative`
+ * and `api` triggers likewise supply no user.
+ *
+ * Since #3760 such a run may not touch data at all: {@link resolveRunDataContext}
+ * throws {@link UnscopedRunDataAccessError} rather than handing the data engine
+ * a principal-less context that the security middleware would wave straight
+ * through. The engine uses this predicate to warn at run SETUP — before any node
+ * executes — that a data-touching run is going to be refused, so the failure is
+ * diagnosable rather than a surprise mid-flow. The build-time lint
+ * `flow-runas-unscoped` rejects the statically-decidable shapes at
+ * publish time. Declaring `runAs:'system'` makes the elevation explicit and
+ * intended (ADR-0049).
  */
 export function runIsUnscopedUserMode(context: AutomationContext | undefined): boolean {
   return context?.runAs !== 'system' && !context?.userId;

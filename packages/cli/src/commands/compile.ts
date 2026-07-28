@@ -397,19 +397,41 @@ export default class Compile extends Command {
         }
       }
 
-      // 3d. Flow authoring anti-pattern lint (#1874) — advisory warnings for
-      //     valid-but-fragile flow metadata (e.g. a record-change trigger using a
-      //     date-EQUALITY time condition that only fires on the exact day). Guides
-      //     the author — very often an AI generating templates — toward the robust
-      //     pattern; NEVER fails the build.
+      // 3d. Flow authoring anti-pattern lint (#1874) — for valid-but-fragile flow
+      //     metadata (e.g. a record-change trigger using a date-EQUALITY time
+      //     condition that only fires on the exact day). Guides the author — very
+      //     often an AI generating templates — toward the robust pattern.
+      //
+      //     Findings are advisory by DEFAULT, but a finding marked
+      //     `severity: 'error'` FAILS the build (#3760). Before that, this gate
+      //     read as a gate and behaved as a comment: `flow-runas-unscoped` flags
+      //     metadata the runtime now REFUSES to execute, and for the audience the
+      //     rule exists to protect — very often an AI generating flows in bulk —
+      //     an advisory line is close to no net at all.
       const flowLint = lintFlowPatterns(result.data as Record<string, unknown>);
-      if (flowLint.length > 0 && !flags.json) {
+      const flowLintErrors = flowLint.filter((f) => f.severity === 'error');
+      const flowLintWarnings = flowLint.filter((f) => f.severity !== 'error');
+      if (flowLintWarnings.length > 0 && !flags.json) {
         console.log('');
-        for (const fnd of flowLint) {
+        for (const fnd of flowLintWarnings) {
           printWarning(`${fnd.where}: ${fnd.message}`);
           console.log(chalk.dim(`    ${fnd.hint}`));
           console.log(chalk.dim(`    rule: ${fnd.rule}`));
         }
+      }
+      if (flowLintErrors.length > 0) {
+        if (flags.json) {
+          this.log(JSON.stringify({ success: false, flowLintErrors }, null, 2));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Flow authoring check failed (${flowLintErrors.length} error${flowLintErrors.length > 1 ? 's' : ''})`);
+        for (const fnd of flowLintErrors) {
+          console.log(`  • ${fnd.where}: ${fnd.message}`);
+          console.log(chalk.dim(`      ${fnd.hint}`));
+          console.log(chalk.dim(`      rule: ${fnd.rule}`));
+        }
+        this.exit(1);
       }
 
       // 3d-bis. Liveness author-warning lint — close the spec-liveness loop on

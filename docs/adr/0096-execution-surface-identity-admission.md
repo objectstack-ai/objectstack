@@ -123,7 +123,7 @@ find(object: string, identity: CallIdentity, options?: QueryOptions): Promise<Ro
 Staging (this is a wide but mechanical change):
 
 - **Additive first**: introduce the identity-required signatures alongside the existing ones (new names or overloads), migrate first-party call sites package-by-package, with the D5 strict-mode CI proving each package clean as it converts.
-- **Lint bridge**: until the old signatures are removed, an ESLint rule flags context-less calls to the legacy entry points (same idiom as the #2308 `flow-schedule-runas-unscoped` lint).
+- **Lint bridge**: until the old signatures are removed, an ESLint rule flags context-less calls to the legacy entry points (same idiom as the #2308 `flow-runas-unscoped` lint).
 - **Major**: remove the legacy signatures. From then on the #2849 facade bug is *unwritable* — `buildActionEngineFacade` could not have compiled without deciding, visibly, whose authority it was using.
 
 D3 is what turns D1 from a policy into a property. Reviews catch instances; types remove the class.

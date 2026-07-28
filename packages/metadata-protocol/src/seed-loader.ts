@@ -785,10 +785,16 @@ export class SeedLoaderService implements ISeedLoaderService {
 
         if (recordId) {
           try {
+            // Use SEED_OPTIONS like every other seed write: this pass is still
+            // seeding, so it must carry `skipTriggers` too. Inlining a bare
+            // `{ isSystem: true }` here re-fired record-change automation on
+            // freshly seeded rows — `isSystem` does NOT suppress trigger
+            // dispatch, only `skipTriggers` does — which is exactly the
+            // self-trigger vector SEED_OPTIONS exists to prevent (#3760).
             await withTransientRetry(() => this.engine.update(deferred.objectName, {
               id: recordId,
               [deferred.field]: resolvedId,
-            }, { context: { isSystem: true } } as any));
+            }, SeedLoaderService.SEED_OPTIONS as any));
 
             // Update result stats
             const resultEntry = allResults.find(r => r.object === deferred.objectName);

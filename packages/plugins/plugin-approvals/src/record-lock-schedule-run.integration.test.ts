@@ -1,17 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #3712 — a schedule-triggered run may write its own locked record.
+ * #3703 / #3712 / #3760 — the run that opened a pending approval may write its
+ * own locked record.
  *
  * #3703 exempted "the run that opened the pending request" from the approvals
- * record lock, keyed on `flowRunId`. It worked for every run that resolved an
- * identity and silently missed the one that doesn't: an effective
- * `runAs:'user'` run with no trigger user — a schedule — passed NO ObjectQL
- * context at all, so nothing carried the run id and the run still died on its
- * own `RECORD_LOCKED`.
+ * record lock, keyed on `flowRunId`. #3712 extended that to the run that
+ * resolved no identity — an effective `runAs:'user'` run with no trigger user —
+ * by giving it a provenance-only ObjectQL context carrying just the run id.
  *
- * That miss was a HAND-OFF gap, not a logic gap: every hop worked in isolation.
- * So this test refuses to stub any hop. It runs the real
+ * #3760 then closed the fail-open that path depended on: a run with no trigger
+ * user may no longer perform a data operation at all, because presenting no
+ * principal is precisely what made the write UNSCOPED. So the user-less variant
+ * is now REFUSED rather than exempted, and a schedule reaches its own record the
+ * explicit way — `runAs:'system'`, which the hook exempts on its own
+ * `isSystem` branch. The `flowRunId` exemption remains live and load-bearing for
+ * what it was built for: a `runAs:'user'` run that DOES have a user.
+ *
+ * The original miss was a HAND-OFF gap, not a logic gap: every hop worked in
+ * isolation. So this test still refuses to stub any hop. It runs the real
  * `resolveRunDataContext` from the automation runtime, feeds its output to a
  * real {@link ObjectQL} engine, and lets the real lock hook decide — the same
  * three layers, in the same order, as a live deployment.
@@ -99,10 +106,20 @@ function makeMemoryDriver() {
   return driver;
 }
 
-/** The run context a schedule trigger produces: an event, and no user. */
-const SCHEDULE_RUN = (flowRunId: string) => ({ runAs: 'user' as const, flowRunId });
+/**
+ * A `runAs:'user'` run that HAS a trigger user — the live consumer of the
+ * `flowRunId` exemption, and the shape #3703 built it for (a record-change or
+ * screen flow that opened the approval and now writes its own target record).
+ */
+const OWNING_RUN = (flowRunId: string) => ({ runAs: 'user' as const, userId: 'u1', flowRunId });
 
-describe('a schedule-triggered run and the approvals record lock (#3712)', () => {
+/** What a schedule trigger produces: an event, and NO user. Refused since #3760. */
+const USER_LESS_RUN = (flowRunId: string) => ({ runAs: 'user' as const, flowRunId });
+
+/** The supported shape for a schedule that must write records (ADR-0049). */
+const SYSTEM_RUN = (flowRunId: string) => ({ runAs: 'system' as const, flowRunId });
+
+describe('an owning run and the approvals record lock (#3703 / #3712 / #3760)', () => {
   let engine: ObjectQL;
   let oppId: string;
 
@@ -128,22 +145,20 @@ describe('a schedule-triggered run and the approvals record lock (#3712)', () =>
   const writeAs = (context: unknown) =>
     engine.update('opportunity', { id: oppId, amount: 200 }, { context } as any);
 
-  it('lets the OWNING schedule run write its own target record', async () => {
+  it('lets the OWNING run write its own target record', async () => {
     // The full hand-off, unstubbed: the automation runtime resolves the run's
     // ObjectQL context, the engine turns it into hook provenance, the lock hook
     // matches it against the pending request it opened.
-    const dataCtx = resolveRunDataContext(SCHEDULE_RUN('run_1'));
-    expect(dataCtx, 'the run resolved no context — nothing could carry the run id').toEqual({
-      flowRunId: 'run_1',
-    });
+    const dataCtx = resolveRunDataContext(OWNING_RUN('run_1'));
+    expect(dataCtx, 'nothing could carry the run id').toMatchObject({ flowRunId: 'run_1' });
 
     await expect(writeAs(dataCtx)).resolves.toBeDefined();
     const row = await engine.findOne('opportunity', { where: { id: oppId } });
     expect(row.amount).toBe(200);
   });
 
-  it('still blocks a DIFFERENT schedule run', async () => {
-    await expect(writeAs(resolveRunDataContext(SCHEDULE_RUN('run_other'))))
+  it('still blocks a DIFFERENT run', async () => {
+    await expect(writeAs(resolveRunDataContext(OWNING_RUN('run_other'))))
       .rejects.toThrow(/RECORD_LOCKED/);
   });
 
@@ -156,13 +171,36 @@ describe('a schedule-triggered run and the approvals record lock (#3712)', () =>
     await expect(writeAs(undefined)).rejects.toThrow(/RECORD_LOCKED/);
   });
 
-  it('the exempted write presents NO principal — the lock was opened by provenance, not privilege', async () => {
-    // The exemption must not have been bought with elevation. Nothing the
-    // security middleware keys on is present, so the run's authorization is the
-    // same unscoped #1888 posture it had before this fix.
-    const dataCtx = resolveRunDataContext(SCHEDULE_RUN('run_1')) as Record<string, unknown>;
-    for (const key of ['isSystem', 'userId', 'positions', 'permissions', 'tenantId']) {
-      expect(dataCtx, `the exemption rode in on '${key}'`).not.toHaveProperty(key);
-    }
+  it('the exemption is PROVENANCE, not privilege — the exempted write is not elevated', async () => {
+    // The exemption must not have been bought with elevation: the run that
+    // writes its own locked record is still a plain `runAs:'user'` principal,
+    // subject to the same RLS as the user who triggered it. Only `flowRunId`
+    // distinguishes it, and `flowRunId` grants nothing on its own.
+    const dataCtx = resolveRunDataContext(OWNING_RUN('run_1')) as Record<string, unknown>;
+    expect(dataCtx.isSystem, 'the exemption rode in on isSystem').toBe(false);
+    expect(dataCtx.flowRunId).toBe('run_1');
+    expect(dataCtx.userId).toBe('u1');
+  });
+
+  // #3760 — the case #3712 solved by handing the lock a provenance-only context
+  // is gone at the root: such a run may not perform a data operation at all,
+  // because presenting no principal is exactly what made the write unscoped. It
+  // is refused BEFORE the lock is ever consulted.
+  it('a USER-LESS run never reaches the lock — it cannot perform a data op at all', async () => {
+    expect(() => resolveRunDataContext(USER_LESS_RUN('run_1')))
+      .toThrow(/no trigger user could be resolved/);
+  });
+
+  // ...and the capability itself survives, via the explicit route: a schedule
+  // that must write records declares `runAs:'system'`, which the lock hook
+  // exempts on its own isSystem branch. Elevation is now declared rather than
+  // acquired by having no identity.
+  it("a schedule that declares runAs:'system' still writes its own target record", async () => {
+    const dataCtx = resolveRunDataContext(SYSTEM_RUN('run_1'));
+    expect(dataCtx).toMatchObject({ isSystem: true, flowRunId: 'run_1' });
+
+    await expect(writeAs(dataCtx)).resolves.toBeDefined();
+    const row = await engine.findOne('opportunity', { where: { id: oppId } });
+    expect(row.amount).toBe(200);
   });
 });

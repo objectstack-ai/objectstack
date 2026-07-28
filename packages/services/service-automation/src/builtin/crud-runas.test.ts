@@ -14,7 +14,12 @@
 import { describe, it, expect } from 'vitest';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
-import { resolveRunDataContext, runIsUnscopedUserMode, flowTouchesData } from '../runtime-identity.js';
+import {
+  resolveRunDataContext,
+  runIsUnscopedUserMode,
+  flowTouchesData,
+  UnscopedRunDataAccessError,
+} from '../runtime-identity.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 
 function makeLogger(): any {
@@ -188,48 +193,66 @@ describe('resolveRunDataContext (#1888 unit)', () => {
     });
   });
 
-  it('returns undefined for a user-mode run with no user AND no run id', () => {
-    expect(resolveRunDataContext({ runAs: 'user' })).toBeUndefined();
-    expect(resolveRunDataContext(undefined)).toBeUndefined();
+  // #3760 — a user-mode run with NO user is REFUSED, not resolved. Previously
+  // this returned `undefined` (or, after #3712, a provenance-only envelope) and
+  // let the op proceed with no principal — which the data security middleware
+  // waves straight through, running it UNSCOPED. That was the #1888 fail-open.
+  it('THROWS for a user-mode run with no user (with or without a run id)', () => {
+    for (const ctx of [{ runAs: 'user' as const }, { runAs: 'user' as const, flowRunId: 'run_1' }, undefined]) {
+      expect(() => resolveRunDataContext(ctx)).toThrow(UnscopedRunDataAccessError);
+    }
   });
 
-  // #3712 — a user-mode run with no user still HAS a run. It carries the run id
-  // and nothing else, so it becomes attributable without acquiring a principal.
-  it('maps a user-less run WITH a run id to a provenance-only context', () => {
-    const ctx = resolveRunDataContext({ runAs: 'user', flowRunId: 'run_1' });
-    expect(ctx).toEqual({ flowRunId: 'run_1' });
-    // Exhaustive on purpose: every field below is one the security middleware
-    // keys on. Any of them appearing here would change the run's authorization,
-    // which this fix must not do — the #1888 unscoped posture is unchanged.
-    expect(Object.keys(ctx!)).toEqual(['flowRunId']);
-    for (const key of ['isSystem', 'userId', 'positions', 'permissions', 'tenantId']) {
-      expect(ctx, `provenance-only context leaked '${key}' — it now presents a principal`)
-        .not.toHaveProperty(key);
+  it('the refusal names the fix, so the author can act on it without reading the source', () => {
+    let err: Error | undefined;
+    try {
+      resolveRunDataContext({ runAs: 'user', object: 'invoice', event: 'record-after-update', flowRunId: 'run_1' });
+    } catch (e) {
+      err = e as Error;
     }
+    expect(err).toBeInstanceOf(UnscopedRunDataAccessError);
+    expect((err as UnscopedRunDataAccessError & { code: string }).code).toBe('AUTOMATION_UNSCOPED_RUN_DATA_ACCESS');
+    expect(err!.message).toMatch(/runAs: 'system'/);
+    expect(err!.message).toMatch(/UNSCOPED/);
+    // Names WHERE, so a refusal in a busy log is traceable to a flow + record.
+    expect(err!.message).toContain("object 'invoice'");
+    expect(err!.message).toContain("run 'run_1'");
+  });
+
+  // The refusal is deliberately NOT an elevation to isSystem. The security
+  // middleware's isSystem short-circuit fires BEFORE its package-managed-row,
+  // system-row, audience-anchor and delegated-admin gates, so re-badging these
+  // runs as system would GRANT them powers a principal-less run never had.
+  it("refuses rather than elevating — runAs:'system' stays the only route to isSystem", () => {
+    expect(() => resolveRunDataContext({ runAs: 'user', flowRunId: 'r' })).toThrow();
+    expect(resolveRunDataContext({ runAs: 'system', flowRunId: 'r' })).toEqual({
+      isSystem: true, positions: [], permissions: [], flowRunId: 'r',
+    });
   });
 });
 
 /**
- * #1888 FOLLOW-UP — the user-less fail-open. A schedule-triggered run carries no
- * trigger user, so an effective `runAs:'user'` (the default) resolves no identity
- * → CRUD nodes present no principal → the data security middleware skips → the
- * run executes UNSCOPED (effectively elevated). Denying would break legitimate
- * scheduled CRUD and silently elevating would hide the author's intent, so the
- * engine keeps the run working but makes the fail-open AUDIBLE: one clear warning
- * per run, recommending `runAs:'system'` (ADR-0049). These tests pin both the
- * (unchanged, non-breaking) data behavior AND the new warning.
+ * #1888 FOLLOW-UP, CLOSED BY #3760 — the user-less fail-open. A run with no
+ * trigger user and an effective `runAs:'user'` (the default) resolves no
+ * identity → CRUD nodes present no principal → the data security middleware
+ * skips → the run used to execute UNSCOPED (effectively elevated).
+ *
+ * #2308 made that AUDIBLE (a warning) but left it working, on the grounds that
+ * denying would break legitimate scheduled CRUD. That rationale expired: the
+ * example flows it protected now declare `runAs:'system'`, and #3760 showed the
+ * dominant shape is not a schedule at all but a record-change flow fired by a
+ * system write — reachable by ordinary users and not decidable at authoring
+ * time. So the run is now REFUSED. These tests pin the refusal, the warning that
+ * precedes it, and the fact that refusing is NOT elevating.
  */
 
 /**
- * The op ran with NO principal — the #1888 unscoped posture. Since #3712 such a
- * run DOES carry a context, but a provenance-only one: the run id and nothing
- * the security middleware keys on. Asserting "no context at all" would pin the
- * transport instead of the property that matters.
+ * The op must never have reached the data engine at all. A refused run produces
+ * NO calls — asserting on a captured context would be vacuously true once the
+ * throw lands, so the meaningful assertion is that nothing was dispatched.
  */
-function expectUnscoped(ctx: any, op: string): void {
-  for (const key of ['isSystem', 'userId', 'positions', 'permissions', 'tenantId']) {
-    expect(ctx?.[key], `${op} should be unscoped — it presented '${key}'`).toBeUndefined();
-  }
+function expectNoDataOps(calls: Array<{ op: string }>, why: string): void {
+  expect(calls.map((c) => c.op), why).toEqual([]);
 }
 
 function recordingLogger(): { logger: any; warns: string[] } {
@@ -240,32 +263,52 @@ function recordingLogger(): { logger: any; warns: string[] } {
 }
 const runAsWarns = (warns: string[]) => warns.filter((w) => w.includes('[runAs]'));
 
-describe('schedule/user-less runs surface the unscoped fail-open (#1888 follow-up)', () => {
-  it('warns ONCE when a user-mode run has no trigger user and the flow touches data', async () => {
+describe('user-less runs are refused, not run unscoped (#1888 / #3760)', () => {
+  it('REFUSES every data op when a user-mode run has no trigger user, and warns once first', async () => {
     const { logger, warns } = recordingLogger();
     const engine = new AutomationEngine(logger);
     const { data, calls } = fakeData();
     registerCrudNodes(engine, ctxWith(data));
     engine.registerFlow('sched', allOpsFlow('sched')); // no runAs → default 'user'
 
-    // Simulate a schedule trigger's context: an event, but NO userId.
+    // Simulate a user-less trigger's context: an event, but NO userId.
     const res = await engine.execute('sched', { event: 'schedule', params: { jobId: 'j1' } });
-    expect(res.success).toBe(true);
 
-    // Non-breaking: the run still executes, and every data op is UNSCOPED — it
-    // presents no principal, only its own run id (#3712).
-    expect(calls.length).toBeGreaterThan(0);
-    for (const c of calls) {
-      expectUnscoped(c.ctx, c.op);
-      expect(c.ctx?.flowRunId, `${c.op} carried no run provenance`).toBeTruthy();
-    }
+    // The whole point: NOTHING reached the data engine. Before #3760 every op
+    // here ran, each one unscoped.
+    expectNoDataOps(calls, 'a user-less run must not reach the data engine at all');
+    expect(res.success, 'the run must fail rather than silently do nothing').toBe(false);
 
-    // ...and the fail-open is AUDIBLE: exactly one runAs warning, naming the flow + the fix.
+    // ...and it was diagnosable BEFORE the failure: exactly one runAs warning at
+    // run setup, naming the flow + the fix.
     const w = runAsWarns(warns);
     expect(w).toHaveLength(1);
     expect(w[0]).toContain("flow 'sched'");
-    expect(w[0]).toMatch(/UNSCOPED/);
+    expect(w[0]).toMatch(/REFUSED/);
     expect(w[0]).toMatch(/runAs:'system'/);
+  });
+
+  // The regression that motivated #3760: this is NOT a schedule. It is the
+  // ordinary record-change shape, fired by a write that carried no user (any
+  // isSystem plugin/service write — `isSystem` does not suppress dispatch).
+  // Nothing flags it at authoring time, so the runtime refusal is the only net.
+  it('refuses a RECORD-CHANGE run fired by a user-less write, exactly like a schedule', async () => {
+    const { logger, warns } = recordingLogger();
+    const engine = new AutomationEngine(logger);
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data));
+    engine.registerFlow('on_change', allOpsFlow('on_change')); // default runAs:'user'
+
+    const res = await engine.execute('on_change', {
+      event: 'record-after-update',
+      object: 'invoice',
+      record: { id: 'inv_1' },
+      // no userId — the triggering write was a system write
+    });
+
+    expectNoDataOps(calls, 'a record-change run with no trigger user must be refused too');
+    expect(res.success).toBe(false);
+    expect(runAsWarns(warns)).toHaveLength(1);
   });
 
   it("does NOT warn when a user-less run declares runAs:'system' (explicit elevation)", async () => {
@@ -397,16 +440,21 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
     for (const c of calls) expect(c.ctx.isSystem).toBe(true);
   });
 
-  it('does NOT resolve when there is no trigger user (stays the unscoped fail-open)', async () => {
+  it('does NOT resolve when there is no trigger user — the run is refused instead (#3760)', async () => {
     const engine = new AutomationEngine(makeLogger());
     const { data, calls } = fakeData();
     registerCrudNodes(engine, ctxWith(data));
     engine.registerFlow('sched', allOpsFlow('sched')); // default user, no userId
     let called = 0;
     engine.setUserGrantsResolver(() => { called++; return { positions: [], permissions: [] }; });
-    await engine.execute('sched', { event: 'schedule' });
+    const res = await engine.execute('sched', { event: 'schedule' });
+    // There is no user to resolve grants FOR, so the resolver is never consulted…
     expect(called).toBe(0);
-    for (const c of calls) expectUnscoped(c.ctx, c.op);
+    // …and the run does not fall through to an unscoped op. (Asserting over
+    // `calls` alone would pass vacuously now that the list is empty, so pin the
+    // emptiness AND the failure explicitly.)
+    expect(calls).toHaveLength(0);
+    expect(res.success).toBe(false);
   });
 
   it('fail-safe: a resolver error warns and keeps the bare user — never elevates', async () => {

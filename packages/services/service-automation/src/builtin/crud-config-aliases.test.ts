@@ -12,6 +12,10 @@
  *    raw `filters` key reaching the executor directly (a flow that skipped the
  *    load seam) is no longer honored, and the executor emits no alias warning
  *    for it. This test documents that split — the PD #12 retirement path.
+ *
+ * Each run below passes a `userId`: a data-touching flow left at the spec
+ * default `runAs:'user'` is refused without a trigger user (#3760). Incidental
+ * to what these tests assert — supplied so the run reaches the CRUD node.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { normalizeStackInput } from '@objectstack/spec';
@@ -74,7 +78,7 @@ describe('CRUD config-key aliases: object→objectName (executor shim) + filters
 
     // Canonical `filter`; deprecated `object`.
     engine.registerFlow('gr', getRecordFlow({ object: 'crm_lead', filter: { id: 'L1' }, outputVariable: 'lead' }));
-    const res = await engine.execute('gr');
+    const res = await engine.execute('gr', { userId: 'u1' });
 
     expect(res.success).toBe(true);
     expect(calls).toHaveLength(1);
@@ -86,7 +90,7 @@ describe('CRUD config-key aliases: object→objectName (executor shim) + filters
 
     // One-time per alias: a second run does not warn again.
     const before = warns.length;
-    await engine.execute('gr');
+    await engine.execute('gr', { userId: 'u1' });
     expect(warns.length).toBe(before);
   });
 
@@ -102,7 +106,7 @@ describe('CRUD config-key aliases: object→objectName (executor shim) + filters
     registerCrudNodes(engine, ctxWith(data, silentLogger()));
 
     engine.registerFlow('gr', getRecordFlow({ objectName: 'crm_lead', filters: { id: 'L1' } }));
-    await engine.execute('gr');
+    await engine.execute('gr', { userId: 'u1' });
 
     expect(calls[0].opts.where).toEqual({ id: 'L1' }); // filter preserved, not dropped
   });
@@ -115,7 +119,7 @@ describe('CRUD config-key aliases: object→objectName (executor shim) + filters
     const raw = getRecordFlow({ objectName: 'crm_lead', filters: { id: 'L1' }, outputVariable: 'lead' });
     const converted = (normalizeStackInput({ flows: [raw] }).flows as any[])[0];
     engine.registerFlow('gr', converted);
-    await engine.execute('gr');
+    await engine.execute('gr', { userId: 'u1' });
 
     expect(calls[0].opts.where).toEqual({ id: 'L1' });
   });
@@ -127,7 +131,7 @@ describe('CRUD config-key aliases: object→objectName (executor shim) + filters
     registerCrudNodes(engine, ctxWith(data, collectingLogger(warns)));
 
     engine.registerFlow('gr', getRecordFlow({ objectName: 'crm_lead', filter: { id: 'L1' }, outputVariable: 'lead' }));
-    const res = await engine.execute('gr');
+    const res = await engine.execute('gr', { userId: 'u1' });
 
     expect(res.success).toBe(true);
     expect(warns).toHaveLength(0);

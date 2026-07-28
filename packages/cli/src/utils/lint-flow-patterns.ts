@@ -3,9 +3,15 @@
 /**
  * Build-time lint for flow authoring ANTI-PATTERNS — metadata that is valid
  * (passes schema + expression checks) but is semantically a footgun at runtime.
- * These are emitted as WARNINGS: they guide the author (very often an AI
+ * Most are emitted as WARNINGS: they guide the author (very often an AI
  * generating templates) toward the robust pattern without failing the build on
  * a technically-legal construct.
+ *
+ * A finding carrying `severity: 'error'` FAILS the build. That is reserved for
+ * shapes that are a *guaranteed* runtime failure rather than a risk — currently
+ * only {@link FLOW_RUNAS_UNSCOPED}, where the runtime refuses the data
+ * operation outright (#3760), so warning about it would just be a slower way of
+ * finding out.
  *
  * #1874 — time-relative rules via record-change date-EQUALITY. A start-node
  * trigger condition like `end_date == daysFromNow(60)` on a `record-*` trigger
@@ -20,6 +26,14 @@ export interface FlowLintFinding {
   message: string;
   hint: string;
   rule: string;
+  /**
+   * `'error'` FAILS the build; `'warning'` (the default when absent) prints and
+   * continues. Most rules here flag a technically-legal footgun and stay
+   * advisory. A rule is only promoted to `'error'` when the shape it flags is a
+   * *guaranteed* runtime failure — then a warning would just be a slower way of
+   * finding out (#3760).
+   */
+  severity?: 'error' | 'warning';
 }
 
 type AnyRec = Record<string, unknown>;
@@ -53,7 +67,12 @@ export const FLOW_BARE_DOLLAR_REF = 'flow-bare-dollar-reference';
 export const FLOW_APPROVAL_REVISE_DEAD_END = 'flow-approval-revise-dead-end';
 export const FLOW_APPROVAL_REVISE_UNMARKED_BACKEDGE = 'flow-approval-revise-unmarked-backedge';
 export const FLOW_APPROVAL_REVISE_DISABLED = 'flow-approval-revise-disabled';
-export const FLOW_SCHEDULE_RUNAS_UNSCOPED = 'flow-schedule-runas-unscoped';
+/**
+ * #3760 — renamed from `flow-schedule-runas-unscoped`. The old id named the
+ * *schedule*, which was never the boundary: the rule is about a trigger that
+ * resolves NO USER, and a schedule is only the most obvious such trigger.
+ */
+export const FLOW_RUNAS_UNSCOPED = 'flow-runas-unscoped';
 
 /** Node types that perform a data operation — the ones `flow.runAs` governs (#1888). */
 const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
@@ -67,6 +86,28 @@ function isScheduleTriggered(flow: AnyRec, startCfg: AnyRec): boolean {
   if (flow.type === 'schedule') return true;
   if (typeof startCfg.triggerType === 'string' && startCfg.triggerType === 'schedule') return true;
   return startCfg.schedule != null;
+}
+
+/**
+ * The trigger shapes that PROVABLY resolve no trigger user, with a human label
+ * for the diagnostic (ADR-0073 D5, #3760). `null` when the flow's trigger either
+ * supplies a user (`screen`) or may or may not, depending on who made the
+ * triggering write (`record_change`, `autolaunched`) — those are not decidable
+ * here and are caught at run time instead.
+ *
+ * Each entry is grounded in the trigger's own dispatch code, all of which build
+ * an `AutomationContext` with no `userId` field at all:
+ *   - schedule       — `trigger-schedule/src/schedule-trigger.ts`
+ *   - time_relative  — `trigger-schedule/src/time-relative-trigger.ts`
+ *   - api            — `trigger-api/src/api-trigger.ts` (webhook / queue)
+ */
+function userLessTriggerKind(flow: AnyRec, startCfg: AnyRec): string | null {
+  if (isScheduleTriggered(flow, startCfg)) return 'schedule';
+  if (startCfg.timeRelative != null) return 'time-relative';
+  if (typeof startCfg.triggerType === 'string' && startCfg.triggerType === 'time_relative') return 'time-relative';
+  if (flow.type === 'api') return 'api';
+  if (typeof startCfg.triggerType === 'string' && startCfg.triggerType === 'api') return 'api';
+  return null;
 }
 
 /**
@@ -297,31 +338,38 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       }
     }
 
-    // (a4) #1888 / ADR-0049 — a SCHEDULE-triggered flow has no trigger user at
-    //      runtime, so an effective `runAs:'user'` (explicit, or unset → the spec
-    //      default 'user') run executes its data nodes UNSCOPED (elevated,
-    //      RLS-bypassing) rather than restricted — the data security middleware
-    //      skips when there is no identity. An author who left `runAs` at the
-    //      default expecting a restricted run gets a fail-open one. Only flagged
-    //      when the flow actually performs a data operation (otherwise runAs is
-    //      moot). The robust shape is an explicit `runAs:'system'`, which makes
-    //      the elevation intentional + audit-attributable; a schedule cannot scope
-    //      to a user because there is none.
+    // (a4) #1888 / ADR-0049 / ADR-0073 D5 — a trigger that resolves NO USER at
+    //      runtime (schedule, time-relative, api/webhook/queue) combined with an
+    //      effective `runAs:'user'` (explicit, or unset → the spec default) is a
+    //      CONFIGURATION ERROR: there is no user to scope to. Since #3760 the
+    //      runtime REFUSES the data operation rather than running it unscoped, so
+    //      this shape is a guaranteed run-time failure — which is why it fails the
+    //      build instead of warning. Only flagged when the flow actually performs
+    //      a data operation (otherwise `runAs` is moot and the run is fine).
+    //
+    //      This rule is necessary but NOT sufficient, and deliberately so: a
+    //      record-change flow fired by a write that carried no user hits exactly
+    //      the same refusal, but whether a given write carries a user is not
+    //      knowable at authoring time. That case is caught at run time only
+    //      (#3760) — do not try to approximate it here.
     const runAs = typeof flow.runAs === 'string' ? flow.runAs : 'user';
-    if (isScheduleTriggered(flow, startCfg) && runAs !== 'system') {
+    const userLessKind = userLessTriggerKind(flow, startCfg);
+    if (userLessKind && runAs !== 'system') {
       const dataNode = nodes.find((n) => DATA_NODE_TYPES.has(typeof n.type === 'string' ? (n.type as string) : ''));
       if (dataNode) {
         const declared = typeof flow.runAs === 'string' ? `\`runAs:'${runAs}'\`` : `the default \`runAs:'user'\``;
         findings.push({
           where: `flow '${flowName}' · runAs`,
           message:
-            `schedule-triggered flow runs as ${declared}, but a scheduled run has no trigger user — so its ` +
-            `data node '${dataNode.id}' (${dataNode.type}) executes UNSCOPED (elevated, RLS-bypassing), not ` +
-            `restricted to a user.`,
+            `${userLessKind}-triggered flow runs as ${declared}, but a ${userLessKind} run has no trigger ` +
+            `user — so its data node '${dataNode.id}' (${dataNode.type}) has no identity to scope to and ` +
+            `will be REFUSED at run time.`,
           hint:
             `Declare \`runAs:'system'\` to make the elevation explicit and intended (the run reads/writes ` +
-            `every record). A scheduled flow cannot scope to a user — there is none. (ADR-0049, #1888)`,
-          rule: FLOW_SCHEDULE_RUNAS_UNSCOPED,
+            `every record). A ${userLessKind} flow cannot scope to a user — there is none. ` +
+            `(ADR-0049, ADR-0073 D5, #1888, #3760)`,
+          rule: FLOW_RUNAS_UNSCOPED,
+          severity: 'error',
         });
       }
     }

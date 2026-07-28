@@ -13,6 +13,18 @@ import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-r
 import { countServerTiming } from '@objectstack/observability';
 
 /**
+ * The write options every seed insert must use — mirrors
+ * `SeedLoaderService.SEED_OPTIONS`. `skipTriggers` is the load-bearing part:
+ * seed rows are pre-existing end-state data, not user events, so firing
+ * "on create" automation for them is semantically wrong and was the vector for
+ * a self-trigger loop that wedged first boot. `isSystem` alone does NOT suppress
+ * dispatch — only `skipTriggers` does — so the two basic-insert fallbacks below
+ * used to seed with automation live while the main path had it suppressed
+ * (#3760).
+ */
+const SEED_WRITE_OPTIONS = { context: { isSystem: true, skipTriggers: true, seedReplay: true } } as const;
+
+/**
  * Optional per-project context attached when AppPlugin is instantiated by the
  * project kernel factory. Required for the `app:registered` / `app:unregistered`
  * hooks that drive the org-scoped `sys_app` catalog. Standalone (single-tenant)
@@ -901,7 +913,7 @@ export class AppPlugin implements Plugin {
                           ctx.logger.info(`[Seeder] Seeding ${dataset.records.length} records for ${dataset.object}`);
                           for (const record of dataset.records) {
                               try {
-                                  await ql.insert(dataset.object, record, { context: { isSystem: true } } as any);
+                                  await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
                               } catch (err: any) {
                                   ctx.logger.warn(`[Seeder] Failed to insert ${dataset.object} record:`, { error: err.message });
                               }
@@ -915,7 +927,7 @@ export class AppPlugin implements Plugin {
                   for (const dataset of normalizedDatasets) {
                       for (const record of dataset.records) {
                           try {
-                              await ql.insert(dataset.object, record, { context: { isSystem: true } } as any);
+                              await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
                           } catch (insertErr: any) {
                               ctx.logger.warn(`[Seeder] Failed to insert ${dataset.object} record:`, { error: insertErr.message });
                           }

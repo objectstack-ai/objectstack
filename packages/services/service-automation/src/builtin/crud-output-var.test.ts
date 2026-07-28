@@ -51,7 +51,10 @@ describe('create_record outputVariable (#1873)', () => {
       ],
     } as any);
 
-    const res = await engine.execute('promote');
+    // A trigger user is required for a data-touching run left at the default
+    // `runAs:'user'` — a user-less one is refused (#3760). Unrelated to what this
+    // test asserts; supplied so the run reaches the CRUD node at all.
+    const res = await engine.execute('promote', { userId: 'u1' });
     expect(res.success).toBe(true);
     expect(updates).toHaveLength(1);
     expect(updates[0].fields.promoted_topic).toBe('topic_1');
@@ -75,7 +78,7 @@ describe('create_record outputVariable (#1873)', () => {
         { id: 'e3', source: 'upd', target: 'end' },
       ],
     } as any);
-    const res = await engine.execute('promote2');
+    const res = await engine.execute('promote2', { userId: 'u1' });
     expect(res.success).toBe(true);
     expect(updates[0].fields.ref).toBe('X');
   });

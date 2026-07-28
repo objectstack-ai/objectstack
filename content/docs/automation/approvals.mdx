@@ -24,7 +24,9 @@ A flow declares `runAs` (ADR-0049), and for approvals this is the decision that 
 - `runAs: 'user'` (default) — the flow's data operations run as the **submitter**, respecting their RLS. Good when the flow only touches records the submitter can already see.
 - `runAs: 'system'` — **elevated**, bypasses RLS. Needed when the flow must read/write records the submitter can't (e.g. post to a ledger, notify an approver who owns rows the submitter can't see). Declare it **explicitly** so the elevation is visible, not accidental.
 
-A schedule-triggered escalation has no triggering user, so under the default `runAs: 'user'` its data operations run **unscoped** (elevated, RLS-bypassing) anyway — declare `system` to make that elevation explicit and intended rather than an implicit fail-open (the engine warns, and `os lint` flags the bare shape as `flow-schedule-runas-unscoped`).
+A run that resolves **no** triggering user has nothing to scope to, so under the default `runAs: 'user'` its data operations are **refused** — declare `system` to make the elevation explicit and intended. `os lint` rejects the shapes it can prove at authoring time (`flow-runas-unscoped`, covering schedule / time-relative / api triggers), and the engine warns at run setup before refusing.
+
+This is **not** a schedule-only concern, and for approvals it is the common case: the approvals service mirrors a decision back onto the target record with a **system** write, which carries no user. Any record-change flow bound to that object then runs with no triggering user — so a flow left at the default `runAs: 'user'` is refused. Nothing can flag that at authoring time (whether a given write carries a user is only knowable at run time), so declare `runAs: 'system'` on record-change flows that react to approval outcomes.
 
 ### 3. The approval node
 

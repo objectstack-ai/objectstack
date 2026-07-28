@@ -11,14 +11,14 @@ import {
   FLOW_APPROVAL_REVISE_DEAD_END,
   FLOW_APPROVAL_REVISE_UNMARKED_BACKEDGE,
   FLOW_APPROVAL_REVISE_DISABLED,
-  FLOW_SCHEDULE_RUNAS_UNSCOPED,
+  FLOW_RUNAS_UNSCOPED,
 } from './lint-flow-patterns.js';
 
 const CEL = (source: string) => ({ dialect: 'cel', source });
 /**
  * A scheduled flow with a get_record node carrying `filter`. Declares
  * `runAs: 'system'` so it is the correct shape for a scheduled data flow and
- * does not also trip the schedule-runAs lint (FLOW_SCHEDULE_RUNAS_UNSCOPED) —
+ * does not also trip the user-less runAs lint (FLOW_RUNAS_UNSCOPED) —
  * keeping these date-equality cases focused on the filter rule.
  */
 const filterFlow = (filter: unknown) => ({
@@ -260,7 +260,7 @@ describe('lintFlowPatterns — approval revise loop (ADR-0044)', () => {
   });
 });
 
-describe('lintFlowPatterns — schedule runAs unscoped (#1888 / ADR-0049)', () => {
+describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-0073 D5 / #3760)', () => {
   /** A schedule-triggered flow that performs a data op, parameterized by runAs / detection signal. */
   const scheduledDataFlow = (opts: {
     runAs?: 'system' | 'user';
@@ -283,17 +283,17 @@ describe('lintFlowPatterns — schedule runAs unscoped (#1888 / ADR-0049)', () =
   it('flags a schedule flow whose runAs is unset (defaults to user → unscoped)', () => {
     const fnds = lintFlowPatterns(scheduledDataFlow());
     expect(fnds).toHaveLength(1);
-    expect(fnds[0].rule).toBe(FLOW_SCHEDULE_RUNAS_UNSCOPED);
+    expect(fnds[0].rule).toBe(FLOW_RUNAS_UNSCOPED);
     expect(fnds[0].where).toContain('nightly_sweep');
     expect(fnds[0].message).toMatch(/default .*runAs:'user'/);
-    expect(fnds[0].message).toMatch(/UNSCOPED/);
+    expect(fnds[0].message).toMatch(/REFUSED/);
     expect(fnds[0].hint).toMatch(/runAs:'system'/);
   });
 
   it("flags an EXPLICIT runAs:'user' on a schedule (incoherent — no user to scope to)", () => {
     const fnds = lintFlowPatterns(scheduledDataFlow({ runAs: 'user' }));
     expect(fnds).toHaveLength(1);
-    expect(fnds[0].rule).toBe(FLOW_SCHEDULE_RUNAS_UNSCOPED);
+    expect(fnds[0].rule).toBe(FLOW_RUNAS_UNSCOPED);
     expect(fnds[0].message).toMatch(/runAs:'user'/);
   });
 
@@ -309,8 +309,49 @@ describe('lintFlowPatterns — schedule runAs unscoped (#1888 / ADR-0049)', () =
   it('flags each data-op node type (get/create/update/delete)', () => {
     for (const t of ['get_record', 'create_record', 'update_record', 'delete_record']) {
       const fnds = lintFlowPatterns(scheduledDataFlow({ nodeType: t }));
-      expect(fnds.map((f) => f.rule), `node ${t}`).toContain(FLOW_SCHEDULE_RUNAS_UNSCOPED);
+      expect(fnds.map((f) => f.rule), `node ${t}`).toContain(FLOW_RUNAS_UNSCOPED);
     }
+  });
+
+  // #3760 — this rule FAILS the build. Every other rule in this file is
+  // advisory; this one flags metadata the runtime refuses to execute, so a
+  // warning would just be a slower way of finding out. If this assertion is ever
+  // relaxed the gate silently becomes a comment again — which is exactly the
+  // state #3760 found it in.
+  it('is a BLOCKING finding (severity: error), unlike every advisory rule here', () => {
+    const fnds = lintFlowPatterns(scheduledDataFlow());
+    expect(fnds[0].severity).toBe('error');
+  });
+
+  // ADR-0073 D5 — the rule was scoped to `schedule`, but a schedule is not the
+  // boundary: these triggers build an AutomationContext with no `userId` at all,
+  // so they hit the identical refusal.
+  it('flags the OTHER provably user-less triggers too — time-relative and api', () => {
+    const timeRelative = lintFlowPatterns(
+      scheduledDataFlow({ flowType: 'autolaunched', startConfig: { timeRelative: { object: 'task', field: 'due_at', offsetDays: -1 } } }),
+    );
+    expect(timeRelative.map((f) => f.rule)).toContain(FLOW_RUNAS_UNSCOPED);
+    expect(timeRelative[0].message).toMatch(/time-relative/);
+
+    const api = lintFlowPatterns(scheduledDataFlow({ flowType: 'api', startConfig: {} }));
+    expect(api.map((f) => f.rule)).toContain(FLOW_RUNAS_UNSCOPED);
+    expect(api[0].message).toMatch(/api/);
+
+    const apiByTriggerType = lintFlowPatterns(
+      scheduledDataFlow({ flowType: 'autolaunched', startConfig: { triggerType: 'api' } }),
+    );
+    expect(apiByTriggerType.map((f) => f.rule)).toContain(FLOW_RUNAS_UNSCOPED);
+  });
+
+  // The deliberate limit of this rule. A record-change flow hits the same
+  // refusal when its triggering write carried no user, but that is a RUNTIME
+  // property — approximating it here would fire on every record-change flow in
+  // existence. Pinned so nobody "fixes" the gap by guessing.
+  it('does NOT flag record_change — undecidable at authoring time, caught at run time', () => {
+    const fnds = lintFlowPatterns(
+      scheduledDataFlow({ flowType: 'record_change', startConfig: { triggerType: 'record_change', objectName: 'invoice' } }),
+    );
+    expect(fnds.map((f) => f.rule)).not.toContain(FLOW_RUNAS_UNSCOPED);
   });
 
   describe('does NOT flag (false-positive guards)', () => {

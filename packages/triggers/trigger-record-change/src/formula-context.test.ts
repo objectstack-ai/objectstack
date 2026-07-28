@@ -97,7 +97,7 @@ describe('record-change context hydrates read-time formula fields (#3426)', () =
       edges: [ { id: 'e1', source: 'start', target: 'stamp' }, { id: 'e2', source: 'stamp', target: 'end' } ],
     } as any);
 
-    const created = await data.insert('crm_lead', { first_name: 'Ada', last_name: 'Lovelace' });
+    const created = await data.insert('crm_lead', { first_name: 'Ada', last_name: 'Lovelace' }, { context: { userId: 'u_trigger' } });
     const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
     await sleep(200);
     const row = await data.findOne('crm_lead', { where: { id } });

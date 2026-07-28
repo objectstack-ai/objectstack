@@ -11,6 +11,22 @@
 
 ---
 
+## Amendment: user-less data ops are now REFUSED (2026-07-28, #3760)
+
+Two load-bearing claims below turned out to be wrong. Both were about *severity*, not about the model — D1–D5 stand unchanged, and D5 shipped in full.
+
+**1. "There is no untrusted-input path to the fail-open" — false.** The Severity section argues the risk is acute-mitigated because schedules are admin/AI-authored and "an unprivileged user cannot trigger a schedule". That is true of schedules and irrelevant to the actual exposure. The fail-open predicate is `runAs !== 'system' && !userId` — *any* run that resolves no user — while the lint only ever covered the schedule shape. The dominant real-world shape is a **record-change flow fired by a write that carried no user**: `isSystem` does **not** suppress trigger dispatch (only `skipTriggers` does, and exactly three first-party paths set it), so every plugin/service system write, the approvals status mirror, and a `runAs:'system'` flow's own data node all dispatch record-change flows with `userId: undefined`. Ordinary users reach those writes routinely — submitting for approval mirrors a status onto the target record. So the fail-open was reachable by unprivileged input, and was the common case rather than the rare one.
+
+**2. "Fail-closed … Rejected in #2308: breaks legitimate scheduled CRUD (2/3 example flows relied on the default)" — expired.** Those example flows were fixed as part of #2308 itself; every first-party schedule-triggered flow now declares `runAs: 'system'`. The stated cost of fail-closed no longer exists.
+
+**Consequently `runAs:'user'` + no trigger user now REFUSES the data operation** (`UnscopedRunDataAccessError`, thrown from `resolveRunDataContext` — the single place every data node resolves its context). This implements D5's ruling ("user-less `runAs:'user'` is a configuration error") at the only layer that can see the record-change case, since whether a triggering write carries a user is not knowable at authoring time.
+
+Note what this deliberately is **not**: it does not re-badge these runs as `isSystem`. The security middleware's `isSystem` short-circuit precedes its package-managed-row / system-row / audience-anchor / delegated-admin gates, all of which a principal-less context still has to clear — so "unscoped" was never equivalent to "system", and elevating would have *widened* these runs (e.g. letting them write `sys_user_position`) rather than preserving the status quo.
+
+This is an **interim** posture, not a replacement for D2. Refusal is strictly safer than today and forward-compatible: when the `automation` principal lands, the refusal point becomes the place that resolves it, and these runs go from *refused* to *RLS-enforced* with no third state. Ordering is unchanged — D2 still waits for a real consumer.
+
+---
+
 ## TL;DR
 
 1. **[model] Automation is a first-class non-human identity, expressed as a built-in role** (the ADR-0068 idiom): the **environment's `automation` principal** — a Data-Plane identity living in that environment's own kernel/DB. A user-less run resolves to an `EvalUser` whose `id` is the env's stable automation principal and whose `roles` carry the `automation` role. There is **no anonymous run**. (Cross-environment, platform-wide automation is a **Control-Plane** concern — ADR-0002/0004 — out of scope; see D4.)
@@ -52,7 +68,7 @@ Two findings sharpen the problem:
 
 This is a **footgun / hardening** issue, not an actively exploited hole, and the acute risk is **already mitigated**:
 
-- Scheduled flows are **admin/AI-authored metadata**; an unprivileged user **cannot trigger a schedule**, so there is no untrusted-input path to the fail-open.
+- ~~Scheduled flows are **admin/AI-authored metadata**; an unprivileged user **cannot trigger a schedule**, so there is no untrusted-input path to the fail-open.~~ **Falsified (#3760)** — see the Amendment. True of schedules, but schedules were never the boundary: a record-change flow fired by a user-less system write hits the identical fail-open, and unprivileged users reach those writes routinely.
 - **#2308 already shipped** the cheap mitigations: a build-time lint, a runtime warning, and fixing the example flows to explicit `runAs:'system'`. The bleeding is stopped.
 - Tenant isolation is **physical — environment-per-database** (ADR-0002): each tenant environment is its own kernel + DB. So the hard problem (cross-tenant RLS for an automation principal) **does not exist in this architecture** — the automation principal is a purely *intra-environment* Data-Plane identity with no cross-tenant data reach to scope. (The platform is also pre-launch / single-operator.)
 - The live automation surface is **tiny**, and — decisively — the existing scheduled flows (`stale_opportunity_sweep`, the app-todo sweeps) all want **full `system` elevation**, not the RLS-respecting middle. **The `automation` mode this ADR introduces has zero consumers in the current app set.**
@@ -128,7 +144,7 @@ A scheduled / unauthenticated-webhook trigger has no user; `runAs:'user'` there 
 
 **v1 — land now (no runtime machinery):**
 1. **This decision record** — pins the model (D1–D4) + `runAs` posture semantics, so the AI authors flows against the right target and M2 has a contract. (Cheapest to land pre-scale, exactly the ADR-0068 v1 argument.)
-2. **Author-time guardrail (D5)** — extend the #2308 `flow-schedule-runas-unscoped` lint to every user-less trigger type (api/webhook/queue), and make user-less `runAs:'user'` a **validation error** at compile. Small, non-breaking, and the real present value: it stops the AI from generating the wrong pattern before there is a large body of it.
+2. **Author-time guardrail (D5)** — extend the #2308 `flow-runas-unscoped` lint to every user-less trigger type (api/webhook/queue), and make user-less `runAs:'user'` a **validation error** at compile. Small, non-breaking, and the real present value: it stops the AI from generating the wrong pattern before there is a large body of it.
 
 Runtime behavior is otherwise **unchanged** from #2308 (the audible warning stays). **We do not seed the roles, mint the principal, or touch `runAs` resolution in v1** — there is no consumer, so doing so would be inert/speculative (unlike ADR-0068 v1, whose seeded roles had a live `current_user` consumer).
 
@@ -163,14 +179,14 @@ Runtime behavior is otherwise **unchanged** from #2308 (the audible warning stay
 - **Build the whole model now (seed roles + principal + runtime).** Rejected: zero current consumer, single-operator, acute risk already mitigated → the speculative over-build ADR-0049 warns against.
 - **Keep NULL-then-claim for automation.** Rejected: no claim event for perpetual automation, so attribution never converges; does nothing for authorization.
 - **Stop at the #2308 runtime warning.** Necessary but insufficient as the *end-state*: makes the fail-open audible without eliminating it, and leaves writes unattributed — hence this ADR fixes the *model* even though the *build* waits.
-- **Fail-closed (deny user-less data ops).** Rejected in #2308: breaks legitimate scheduled CRUD (2/3 example flows relied on the default) and gives no attribution.
+- **Fail-closed (deny user-less data ops).** ~~Rejected in #2308: breaks legitimate scheduled CRUD (2/3 example flows relied on the default) and gives no attribution.~~ **ADOPTED 2026-07-28 (#3760)** — see the Amendment above. The example flows this protected now declare `runAs:'system'`, so the stated cost expired; and the attribution objection does not apply, since refusing an operation attributes nothing either way (attribution remains D3's job, unchanged).
 - **Reuse `runAs:'system'` for scheduled (silent elevation).** Rejected: hides author intent; the ambient god-mode the four invariants warn against.
 
 ## Conformance checklist
 
 **v1 (now):**
 1. **`@objectstack/spec`** — document the automation identity as an `EvalUser` (D1) and the three-posture `runAs` semantics (D2) in `FlowSchema.runAs` describe, **marked target-state** for `automation`.
-2. **`@objectstack/cli`** — extend `flow-schedule-runas-unscoped` to all user-less trigger types; make user-less `runAs:'user'` a hard validation error (D5).
+2. **`@objectstack/cli`** — extend `flow-runas-unscoped` to all user-less trigger types; make user-less `runAs:'user'` a hard validation error (D5).
 
 **M2 (gated on first consumer):**
 3. **`plugin-security`** — seed the per-environment `automation` `sys_role` row (sibling to `bootstrap-declared-roles`); extend the non-human exclusion guards.
