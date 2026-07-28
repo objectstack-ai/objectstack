@@ -1618,10 +1618,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Skills",
         helpText: "Skill names (Agent→Skill→Tool architecture)"
       },
-      tools: {
-        label: "Tools",
-        helpText: "Direct tool references (legacy mode)"
-      },
       knowledge: {
         label: "Knowledge",
         helpText: "RAG knowledge access configuration"

@@ -1618,10 +1618,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "技能",
         helpText: "技能名称（Agent→Skill→Tool 架构）"
       },
-      tools: {
-        label: "工具",
-        helpText: "直接引用的工具（旧版模式）"
-      },
       knowledge: {
         label: "知识",
         helpText: "RAG 知识访问配置"

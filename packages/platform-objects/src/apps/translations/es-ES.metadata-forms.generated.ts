@@ -1618,10 +1618,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Habilidades",
         helpText: "Nombres de skill (arquitectura Agent→Skill→Tool)"
       },
-      tools: {
-        label: "Herramientas",
-        helpText: "Referencias directas a herramientas (modo heredado)"
-      },
       knowledge: {
         label: "Conocimiento",
         helpText: "Configuración de acceso a conocimiento RAG"

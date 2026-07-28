@@ -1618,10 +1618,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "スキル",
         helpText: "スキル名（Agent→Skill→Tool アーキテクチャ）"
       },
-      tools: {
-        label: "ツール",
-        helpText: "直接ツール参照（レガシーモード）"
-      },
       knowledge: {
         label: "ナレッジ",
         helpText: "RAG ナレッジアクセス設定"
