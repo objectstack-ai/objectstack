@@ -1,5 +1,1586 @@
 # @objectstack/runtime
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- af5a224: feat: enforce declared action-param contract at dispatch — ADR-0104 phase 2 (D2)
+
+  An action's declared `params[]` (`type` / `required` / `multiple` / `options` /
+  `reference`) was a complete value contract that only ever informed the client
+  dialog — the server passed `reqBody.params` straight to the handler unvalidated
+  (REST `handleActions` and the MCP `invokeBusinessAction` path), and handlers
+  read an untyped bag. D2 makes the declaration enforced and typed.
+
+  - **`@objectstack/spec/ui`** now exports `validateActionParams` (+
+    `ResolvedActionParam`, `ActionParamIssue`, `ACTION_PARAM_BUILTIN_KEYS`): a
+    pure check that validates a params bag against resolved param declarations,
+    reusing the D1 `valueSchemaFor` so option membership, `multiple` arrays and
+    reference-id shape all ride the one value contract. Also exports the typed
+    authoring surface `ActionHandler` / `ActionHandlerContext` /
+    `ActionEngineFacade` — annotate a handler with `ActionHandler` instead of
+    `(ctx: any)`.
+  - **Dispatch (runtime)**: both the REST and MCP action paths resolve the
+    action's declared params (field-backed params resolved through the referenced
+    object field) and validate the request bag **before the handler runs** —
+    required presence, per-type value shape, and unknown keys (the dispatcher's
+    own `recordId` / `objectName` are allowlisted).
+
+  **Warn-first rollout (ADR-0104 R3).** A violation is **logged and passes** by
+  default — params that were silently wrong before keep working while the drift
+  becomes visible. Set `OS_ACTION_PARAMS_STRICT_ENABLED=1` to reject with a
+  `400 VALIDATION` (REST) / an error (MCP). Actions that declare no `params` are
+  untouched (nothing to validate against). The flip to strict-by-default rides a
+  later minor once telemetry is quiet.
+
+  Not included: file/image params becoming `sys_file` references — that depends
+  on file-as-reference (ADR-0104 D3). Per-name static typing of `ctx.params` from
+  the literal `params` array is a deferred DX nicety; the runtime guarantee holds
+  regardless.
+
+- 840ee4b: fix(analytics,runtime,types): gate cube auto-inference on object existence; stop the dispatcher boundary returning raw SQL (#3867)
+
+  Two independent defects on the `/analytics` surface, found while verifying #3770
+  against a real server. On an authenticated CRM dev server, before this change:
+
+  ```
+  POST /api/v1/analytics/query {"cube":"sqlite_master","measures":["count"],"dimensions":["type"]}
+  → 200 {"rows":[{"type":"index","count":262},{"type":"table","count":71},{"type":"view","count":1}],
+         "sql":"SELECT type AS \"type\", COUNT(*) AS \"count\" FROM \"sqlite_master\" GROUP BY type"}
+  ```
+
+  That is SQLite's internal schema table — never a registered object — read
+  successfully through the analytics endpoint. Not merely "the name reaches the
+  driver and errors": **any table the connection can see was readable.**
+
+  **① The cube name reached the driver as a table name.** `AnalyticsService.ensureCube`
+  auto-infers a minimal Cube when none is registered, with `cube.sql = <the queried
+name>`. That is the intended "metric over an object" path — an `object-metric` KPI
+  widget queries `crm_account` with no authored Cube — but it accepted _any_ string,
+  so the endpoint could aggregate over an arbitrary physical table. The
+  analytics-side twin of the data-path gap #3770 closed, and it was not covered by
+  that fix: #3770 gated the protocol's `analyticsQuery`, which is the _degraded
+  fallback_; a deployment with `@objectstack/service-analytics` installed runs the
+  real engine instead (`ctx.replaceService`).
+
+  Inference is now gated on the same schema registry the data path consults, via a
+  new optional `AnalyticsServiceConfig.isRegisteredObject` that `plugin.ts` wires
+  from the `data` engine's `getObject`. Three-way rule: a registered Cube runs
+  untouched (its `sql` is whatever it declares); an unregistered name that IS an
+  object still auto-infers exactly as before; neither → `CUBE_NOT_FOUND` / 404
+  raised before any SQL exists, naming both ways to make the request valid. With no
+  probe configured the gate stands down and warns once — the same tiering #3770
+  took for a missing registry. `generateSql` (`/analytics/sql`) is gated too.
+
+  **② The dispatcher boundary returned `err.message` verbatim.** `errorResponseBase`
+  is the single error exit for _every_ route the dispatcher plugin mounts —
+  `/analytics`, `/packages`, `/i18n`, `/storage`, `/automation`, `/auth`,
+  `/notifications`, `/mcp`. `@objectstack/rest` has guarded its data routes against
+  driver dumps forever (`mapDataError`); this boundary guarded nothing, so any
+  driver error on any of those routes shipped its SQL to the client. Unlike ①, this
+  half is unconditional — it does not depend on the cube being invalid.
+
+  The leak heuristic moved out of `rest-server.ts` into `@objectstack/types` as
+  `looksLikeInternalErrorLeak` (both packages already depend on it) and is now
+  applied at both boundaries — one predicate, one place to widen when a new
+  dialect's phrasing shows up. `mapDataError`'s behaviour is unchanged. At the
+  dispatcher it applies **only to 5xx**: a 4xx message is a deliberate
+  business/validation answer and must reach the caller intact. Sanitising costs no
+  diagnostics — the untouched error still reaches `errorReporter` through the
+  existing `__obsRecordedError` side-channel.
+
+  **Also fixed in the same function:** `errorResponseBase` read only
+  `err.statusCode`, while domain errors across this codebase carry `status` (and
+  `HttpDispatcher.errorFromThrown` already reads `status` first). Every deliberate
+  4xx thrown through a dispatcher route — including #3770's `OBJECT_NOT_FOUND` on
+  the analytics fallback path — was rendered as a **500**. It now reads `status`
+  then `statusCode`.
+
+  **Behaviour change.** `/analytics/query` and `/analytics/sql` return 404
+  `CUBE_NOT_FOUND` for a cube that is neither registered nor a registered object;
+  previously the name was passed to the driver. Dashboards and KPI widgets pointed
+  at real objects or authored cubes are unaffected. A 5xx on a dispatcher route
+  whose message looks like a driver dump now reads `Internal server error` — check
+  server logs or your error reporter for the original.
+
+- ad4af62: feat: single-source API-method derivation — the server is the only adjudicator (#3391)
+
+  An object's effective API surface is now resolved from **six primitives**
+  (`get/list/create/update/delete/bulk`) by ONE derivation table in
+  `@objectstack/spec/data` (`resolveEffectiveApiMethods` / `isApiOperationAllowed`
+  / `effectiveOperationsArray` / `API_METHOD_DERIVATION`). Every gate consumes it:
+  the REST data surface, the runtime HTTP/MCP dispatcher, and the
+  `/me/permissions` annotation. The `apiMethods` whitelist is three-state —
+  `undefined` = unrestricted, `[]` = deny-all, a subset = the derived closure — and
+  the legacy 8 verbs (`upsert/aggregate/history/search/restore/purge/import/
+export`) are DERIVED from the primitives, never declared standalone. (This
+  release also ships the enum shrink — see the `#3543` changeset: the authored
+  enum IS the six primitives, and a stored legacy value is stripped at parse
+  with a warning rather than honored.)
+
+  **Derivation:** `import` ⊆ create∨update (writeMode-precise: insert→create,
+  update→update, upsert→create∧update); `export` ⊆ list (reserved user-export slot,
+  always on this phase); `aggregate`/`search` ⊆ list (search also needs
+  `searchable`); `history` ⊆ get ∧ `trackHistory`; `upsert` ⊆ create∧update;
+  bulk sub-ops ⊆ bulk ∧ derived(child). `restore`/`purge` do not derive (the
+  `enable.trash` flag was retired, #2377).
+
+  **New response-side contract:** `EffectiveObjectPermissionSchema` extends
+  `ObjectPermissionSchema` with an optional `apiOperations` array;
+  `GetEffectivePermissionsResponse.objects` uses it, and `/me/permissions` now
+  hands down the per-object effective operation set. The authoring
+  `ObjectPermissionSchema` is deliberately NOT extended — the frontend consumes
+  the effective set the server resolves, never the raw whitelist.
+
+  **Behavior changes (tightening — a `declared ≠ enforced` gap closed):**
+
+  1. `apiMethods: []` + `apiEnabled: true` now denies every operation (405),
+     matching the documented three-state contract instead of the prior fail-open
+     "no restriction". In-repo impact is zero (every `[]` object also sets
+     `apiEnabled: false`, so 404 precedes 405).
+  2. The runtime dispatcher / MCP whitelist is now live. It previously read the
+     flat shape while `getObject()` returns the flags nested under `.enable`, so
+     the gate never fired — a silent dead gate now enforced (nested-first,
+     flat-compatible).
+  3. `import`/`export` reverse-derive: an object with a plain CRUD whitelist (no
+     explicit `import`/`export`) now admits import (⊆ create∨update) and export
+     (⊆ list). Row-level FLS is shared with list; the export column header is now
+     projected to the FLS-readable set so it can never expose a wider column set
+     than list (previously a masked column leaked its name as an empty column).
+  4. The bulk surfaces (`createMany`/`updateMany`/`deleteMany`, per-object
+     `/batch`, cross-object `/batch`) now require the `bulk` primitive AND the
+     child write (`bulk ∧ child`). The four in-repo explicit-whitelist objects
+     (`sys_user`, `sys_user_preference`, `sys_business_unit`,
+     `sys_business_unit_member`) gained `bulk`; a third-party object with an
+     explicit write whitelist that omits `bulk` will now 405 on the Many/batch
+     routes.
+  5. The 405 body's `allowed` array is now the derived EFFECTIVE operation set
+     (enum-ordered), not the raw whitelist.
+
+- 57a3bb3: fix(automation,approvals): the run-resume route is gated by the node the run is parked on (#3801)
+
+  `POST /api/v1/automation/:name/runs/:runId/resume` forwarded a caller-supplied
+  `{ inputs, output, branchLabel }` straight into `AutomationEngine.resume`, and
+  `resumeInternal` validated **machine state only** — the concurrent-resume latch,
+  the run exists, the flow exists, the suspended node still exists. Nothing asked
+  _who was calling_.
+
+  Approval nodes suspend and resume through exactly that mechanism. So a resume
+  carrying `branchLabel: 'approve'` walked the approve edge with **no approver
+  check, no `sys_approval_action` row and no status mirror** — the
+  `sys_approval_request` row and the run then disagreed permanently. The only
+  thing standing between the route and the approvals rules was convention; the
+  showcase spelled it out in a comment ("decide via the approvals API, never a raw
+  engine `resume`"), and a comment in an example is not an access control.
+
+  Removing the route was not the fix: it is load-bearing for **screen flows** —
+  the UI flow-runner posts `{ inputs }` there to advance a paused `screen` node.
+  The gate therefore keys on **what the run is parked on**:
+
+  - `ActionDescriptor.resumeAuthority` (`'any'` | `'service'`, default `'any'`) —
+    a pausing node declares who may continue it. `approval` declares `'service'`.
+  - The engine refuses a `'service'` suspension unless the signal carries
+    `RESUME_AUTHORITY_SERVICE` (`@objectstack/spec/contracts`), a **symbol** the
+    owning service stamps in-process — a JSON body can never produce one, so the
+    transport cannot forge it. `ApprovalService` stamps it on the tail of a
+    decision it has already authorized and recorded.
+  - The gate follows a **subflow** pause down to the child the signal would
+    actually reach, so resuming the parent is not a way around it.
+  - Refusal returns `{ success: false, code: 'forbidden' }` and the route answers
+    **403**. Nothing is consumed — the request stays pending and the run stays
+    parked, so the real decision still lands.
+
+  `screen` and `wait` pauses are unchanged, as is every path that already went
+  through the approvals API. What changes for consumers:
+
+  - **FROM:** finishing an approval with
+    `client.automation.resume(flow, runId, { branchLabel: 'approve' })`
+    **TO:** `client.approvals.approve(requestId, …)` (or `.reject` / `.recall`).
+    The old call now answers 403 and changes nothing.
+  - Registering your own pausing node whose continuation belongs to a service
+    rather than to whoever holds the run id? Declare `resumeAuthority: 'service'`
+    on its descriptor and stamp `RESUME_AUTHORITY_SERVICE` on the signal from that
+    service.
+
+  A suspension now records the node type that produced it
+  (`SuspendedRun.nodeType` / `sys_automation_run.node_type`), captured at suspend
+  time so a flow republished mid-pause cannot re-type the node out from under the
+  gate; rows written before this fall back to the flow definition.
+
+- 19e3e6e: feat(runtime)!: the standalone `default` datasource is a declaration, connected through the one datasource path (#3826)
+
+  ADR-0062 D1 asked for exactly one "definition → live driver" path. Construction
+  converged earlier; the _connect + failure verdict_ half did not — the standalone
+  `default` driver was pre-built and smuggled into the engine as a `driver.*`
+  kernel service, so "what if it cannot connect" lived in `ObjectQLEngine.init()`,
+  a second implementation of the policy `DatasourceConnectionService` owns for
+  every other datasource. #3741 → #3758 showed what two copies cost: a fix to one
+  missed the other for three months.
+
+  - **`createStandaloneStack` now emits a datasource DEFINITION**, not a driver.
+    URL→config translation and `mkdir` stay host concerns; the new
+    **`DefaultDatasourcePlugin`** (exported from `@objectstack/runtime`) connects
+    the definition at boot through the shared `DatasourceConnectionService` —
+    same driver factory, same failure verdict, same retained state. It must be
+    registered before `ObjectQLPlugin` (boot schema-sync needs the driver);
+    `createStandaloneStack` orders it correctly.
+  - **`sqlite-wasm` joined the shared driver factory** (`sqlite-wasm` /
+    `wasm-sqlite` ids) — it was the last bespoke construction site.
+  - **`bootCritical` on `ConnectableDatasource`**: the host declares a datasource
+    the platform cannot run without; a boot connect failure is then fatal
+    regardless of object bindings, sharing `OS_ALLOW_DRIVER_CONNECT_FAILURE` and
+    the `DEGRADED BOOT` banner with the engine-level guard. A connect policy that
+    denies a boot-critical datasource fails the boot loudly — the #3828 "denial is
+    not a failure" boundary was drawn for optional datasources.
+  - **`connect(record, { asDefault: true })`**: registers the built driver as the
+    engine's default under its natural name (no `'default'` stamping — routing to
+    `default` goes through the engine's default-driver fallback, and the natural
+    name keeps logs/lookups byte-for-byte with the previous boot).
+  - **`default` is a host-reserved name**: an app bundle declaring a datasource
+    named `default` is rejected at load (`AppPlugin`), and the runtime-admin
+    create rejects it too. It would shadow the host's primary datasource and, if
+    it passed the auto-connect gate, silently divert every unbound object.
+  - The primary DB now shows a REAL `status` in Setup → Datasources (#3827) —
+    `ok` when connected, `error` + reason when the operator boots degraded.
+  - `ObjectQLEngine.init()` is unchanged and keeps its fail-fast: it re-connects
+    the already-connected default (every open-core driver's `connect()` is
+    idempotent), which is exactly the boot verification #3741 wants.
+  - `DriverPlugin` remains the escape hatch for tests and pre-built/proxy drivers
+    (e.g. the CLI's `telemetry` datasource) — no longer how the standalone
+    default boots. The CLI serve config-load fallback (`createStorageDriver`,
+    incl. mysql/turso) still constructs directly; tracked in #3826.
+
+  **Migration.** Boots through `createStandaloneStack` (CLI `serve`/`dev`
+  artifact path, quickstarts, embedders using the stack factory) change shape but
+  not behavior: same driver kinds, same URLs, same fail-fast semantics, same
+  escape hatch. Embedders that composed `DriverPlugin` manually are unaffected.
+  An app that declared a datasource literally named `default` now fails to load
+  with a rename instruction — that name never routed correctly to begin with.
+
+- 394b7a1: feat(job): honor the authored `retryPolicy` / `timeout` in the job scheduler (#3494)
+
+  `JobSchema.retryPolicy` and `JobSchema.timeout` used to be parsed-but-ignored
+  (the 2026-06 liveness audit's aspirational-config cluster). They are now
+  enforced end to end — built rather than pruned, since retry/backoff and
+  per-run time limits are semantics job authors reasonably expect:
+
+  - **spec**: `IJobService.schedule` gains an optional 4th `options` argument
+    (`JobScheduleOptions` with `retryPolicy` / `timeout`, mirroring the
+    authorable schema); new `JobRetryPolicy` type. Backward compatible —
+    existing 3-arg implementations and callers are unaffected.
+  - **service-job**: new `runWithPolicy` helper (exported, with
+    `JobTimeoutError`) wraps every handler invocation in `CronJobAdapter` and
+    `IntervalJobAdapter`; `DbJobAdapter` threads options through to its inner
+    adapters. Failed attempts (including timeouts) retry with exponential
+    backoff `backoffMs * backoffMultiplier^(retry-1)` up to `maxRetries`;
+    an attempt exceeding `timeout` is recorded with execution status
+    `'timeout'`. No `options` → exactly the legacy single-attempt behavior.
+  - **runtime**: declarative-jobs registration in AppPlugin forwards the
+    authored `retryPolicy` / `timeout` to the scheduler.
+
+  Note: JavaScript cannot forcibly cancel an in-flight handler — a timed-out
+  attempt is abandoned, not killed. The retry delay caps only via the
+  multiplier arithmetic (no maxDelay knob yet).
+
+  Refs #3494, #1878, #1893.
+
+- 8e08bc3: feat(runtime): `/ready` reports 503 when a data driver stops answering (#3756)
+
+  `/health` returned `{status: 'ok'}` unconditionally and `/ready` only checked
+  whether the kernel state was `running` — a flag set once when bootstrap finishes
+  and never revisited. Neither probe touched the data layer. So a database that
+  went away _after_ boot (restart, failover, network policy change, pool exhausted,
+  credentials rotated) left both probes green: the load balancer kept routing to a
+  replica that failed 100% of its requests, and the orchestrator saw nothing wrong.
+  The driver's `checkHealth()` already existed and was cheap (`SELECT 1` /
+  `db.command({ping:1})`) but was only consumed by `datasource-admin`'s
+  `testConnection` — no probe path called it, and `ObjectQL` exposed no way to ask
+  (`drivers` is private with no accessor).
+
+  This is the runtime-side half of #3741, which fixed only the boot-time version
+  of the same defect.
+
+  - New `ObjectQL.checkDriversHealth({ timeoutMs })` pings every registered driver
+    and returns a `DriverHealth[]` verdict. Each probe is settled independently and
+    bounded (default 2s) — `checkHealth()` swallows its own errors, but on a dead
+    knex pool it does not return at all, waiting out `acquireConnectionTimeout`
+    (60s by default), and a probe that hangs is as useless as one that lies. A
+    driver implementing no `checkHealth()` is reported healthy: absence of a probe
+    is not evidence of failure.
+  - `GET /ready` now returns 503 with the failing driver names when the kernel is
+    running but a driver is down, on top of the existing booting/shutting-down
+    cases. The result is memoized for ~1s so Kubernetes' few-second polling does
+    not become one database round-trip per probe per replica.
+  - `GET /health` deliberately still checks nothing, and now says why in the code.
+    A failing _liveness_ probe restarts the pod, which cannot fix an unreachable
+    database but would put every replica into a restart storm for the length of the
+    outage. Readiness — leave the rotation — is the failure mode that helps.
+
+  The readiness check **fails open**: a kernel with no data engine (lite kernels,
+  edge, metadata-only hosts), an engine predating `checkDriversHealth`, or a probe
+  that itself throws all read as ready, exactly as before. Readiness gates whether
+  a replica receives any traffic at all, so an inconclusive answer must not
+  black-hole a working deployment. Only a driver that positively reports itself
+  unhealthy takes the replica out.
+
+  **Migration.** None. Deployments already wiring `/api/v1/ready` as their
+  readiness probe get the stricter check automatically; deployments that pointed a
+  _liveness_ probe at `/ready` should move it to `/health`, which is the endpoint
+  that never fails on a dependency.
+
+- 3216344: feat(runtime): extract the action-execution subsystem from the dispatcher — ADR-0076 D11 step ③, PR-8 (#2462)
+
+  The 16-helper machinery behind server-registered business actions
+  (declaration collection/resolution, ADR-0104 param enforcement, the
+  permission/AI-exposure gates, the engine facade + session shape, invocation,
+  and the `callData` protocol/ObjectQL bridge — ~560 lines) moves to
+  `action-execution.ts`, depending only on the narrow `ActionExecutionDeps`
+  slice (resolveService + getObjectQL; NO env-resolution state). The
+  ADR-0104 warn-once statics ride along as module functions. The dispatcher
+  keeps four thin delegates with in-class callers; twelve internal-only
+  helpers are called directly on the module. This is the pre-cut that turns
+  the `/actions` and `/mcp` domain extractions into mechanical moves (PR-9).
+  Zero behavior change — runtime 649, http-conformance 41, dogfood 351 green.
+
+- f5bfac8: feat(runtime): extract the /actions and /mcp dispatcher domain bodies — ADR-0076 D11 step ③, PR-9 (#2462)
+
+  The two deep-coupled domains ride the PR-8 action-execution subsystem out
+  of the dispatcher: `domains/actions.ts` (ADR-0066 D4 permission gate +
+  ADR-0104 param contract) and `domains/mcp.ts` (JSON-RPC transport,
+  `/mcp/skill` download, OAuth resource-metadata, the principal-bound tool
+  bridge). Env-resolution state stays behind two new deps seams —
+  `getDefaultEnvironmentId` and `resolveProjectKernelObjectQL` (the ADR-0006
+  direct-caller kernel swap, side effect dispatcher-owned). The legacy
+  `/mcp/skill`-before-`/mcp` precedence is reproduced with ordered registry
+  entries incl. the `?` forms; the actions redundant trailing-slash regex
+  (the CodeQL polynomial-redos twin) is dropped for split+filter. The authz
+  identity pin for `buildMcpBridge(context)` follows the body to
+  `domains/mcp.ts`. Zero behavior change — runtime 649, http-conformance 41,
+  dogfood 351 green.
+
+- 6163393: feat(runtime): extract the /auth and /ai dispatcher domain bodies — ADR-0076 D11 step ③, PR-7 (#2462)
+
+  `/auth` (better-auth service bridge + the browser-safe mock fallback for
+  MSW/test environments, with the local `randomUUID` wrapper moving alongside
+  its only consumer) and `/ai` (dispatch to the AI plugin's kernel-cached
+  route table with per-route auth-contract enforcement and actor threading)
+  move to `domains/`. `DomainHandlerDeps` grows two lazily-read members:
+  `isAuthRequired()` (the deployment's requireAuth posture —
+  construction-order safe) and `getRegisteredAiRoutes()`. `/mcp` was
+  deliberately excluded: `buildMcpBridge` couples to the action-execution
+  family (callData / actionPermissionError / invokeBusinessAction), so it
+  goes with the /actions /meta /data deep-coupling batch. Zero behavior
+  change — http-conformance (41) plus 5 new seam tests.
+
+- 688e9df: feat(runtime): extract the /automation dispatcher domain body — ADR-0076 D11 step ③, PR-6 (#2462)
+
+  The automation bridge (flow CRUD, trigger/execute, runs history,
+  pause/resume — the ADR-0018/0019/0022 surfaces, ~260 lines) moves to
+  `domains/automation.ts` with zero new deps-contract growth. The route-order
+  subtlety is preserved verbatim: `/actions`, `/connectors` and `/_status`
+  keep their guard positions before the `/:name → getFlow` catch-all. Zero
+  behavior change — http-conformance (41) plus 3 new seam tests.
+
+- 8f124a7: feat(runtime): extract the first four dispatcher domain bodies into `domains/` modules — ADR-0076 D11 step ③, PR-2 (#2462)
+
+  The `/analytics`, `/i18n`, `/notifications` and `/security` handler bodies
+  move out of the `HttpDispatcher` god class into per-domain modules under
+  `packages/runtime/src/domains/`, running against an explicit
+  `DomainHandlerDeps` contract (resolveService / getService / success / error —
+  the WHOLE dispatcher surface a domain may touch). The dispatcher keeps thin
+  `handleXxx` delegates for direct callers, and `/notifications` + `/security`
+  leave the legacy if-chain for the domain registry (new `match: 'segment'`
+  preserves their `=== p || startsWith(p + '/')` branch shape exactly).
+
+  Route registration stays dispatcher-owned on purpose: most service slots are
+  multi-provider (i18n = I18nServicePlugin OR the AppPlugin in-memory fallback;
+  analytics = service-analytics OR the ObjectQLPlugin fallback), so a route is
+  the bridge to a SLOT, not the property of any one providing package. Zero
+  behavior change — http-conformance (41 cross-adapter assertions) and the
+  seam suite (18 tests) lock it.
+
+- 21ca1d5: feat(runtime): extract /keys, /storage and /ui dispatcher domain bodies — ADR-0076 D11 step ③, PR-3 (#2462)
+
+  Continues the per-domain decomposition: three more handler bodies move out
+  of `HttpDispatcher` into `domains/keys.ts` (incl. the zero-tolerance
+  API-key-mint security contract), `domains/storage.ts` and `domains/ui.ts`,
+  running on the explicit `DomainHandlerDeps` contract (extended with
+  `getObjectQL` for the data-plane domains). The `/keys` legacy branch's
+  `'/keys?'` query-string form is reproduced with a second registry entry;
+  storage drops its strictly-redundant `kernel.services` index-access fallback
+  (dead under Map-shaped services, duplicate under object-shaped ones). Thin
+  `handleXxx` delegates remain for direct callers. Zero behavior change —
+  locked by the 41-assertion http-conformance suite and 6 new seam tests.
+
+- 03b11e8: feat(runtime): thin domain-handler registry seam in the HTTP dispatcher — ADR-0076 D11 step ③, PR-1 (#2462)
+
+  `dispatch()` routed every domain through one hand-written
+  `if (cleanPath.startsWith('/xxx'))` chain — the "god implementation on a clean
+  port" shape ADR-0076 D11 calls out. This lands the decomposition seam: a
+  first-match `DomainHandlerRegistry` consulted before the legacy chain, plus a
+  public `HttpDispatcher.registerDomainHandler()` so follow-up PRs can hand each
+  domain's normalized handler to its owning service package.
+
+  Migration discipline is "registry first, code moves later, ownership last":
+  this PR only wraps four existing branches (`/health`, `/ready`, `/analytics`,
+  `/i18n` — three shapes: no-service probe, service bridge, optional-service 501) into registry entries with faithful legacy matching semantics. Zero
+  behavior change, locked by the 41-assertion http-conformance cross-adapter
+  suite and 11 new seam tests.
+
+- 8891f93: feat(runtime): extract the /meta and /data dispatcher domain bodies — ADR-0076 D11 step ③, PR-10, the terminal cut (#2462)
+
+  The last two domains leave the dispatcher: `domains/meta.ts` (metadata
+  read/write incl. ADR-0033 draft-aware protocol paths, ADR-0046 doc slimming
+  riding along with its exclusive `slimDocList` helper) and `domains/data.ts`
+  (CRUD/query over the action-execution `callData` bridge; the multi-tenant
+  unresolved-environment 428 now keys off a semantic `isMultiTenantHost()`
+  deps member instead of poking `kernelResolver`). **The dispatch() if-chain
+  is now EMPTY of domains** — 18 domains resolve through the registry, and
+  `createHonoApp`'s catch-all is ready for retirement (step ① of #2462).
+  Zero behavior change — runtime 649, http-conformance 41, dogfood 351 green.
+
+- d729a31: feat(runtime): extract the /packages dispatcher domain body — ADR-0076 D11 step ③, PR-5 (#2462)
+
+  The largest domain so far (~680 lines: the handler plus its two exclusive
+  helpers `assemblePackageManifest` and `applyPublishedSeeds`) moves to
+  `domains/packages.ts` — list/install/enable/disable, ADR-0033 draft
+  publish/discard, ADR-0067 commit history & rollback, ADR-0070 export /
+  orphan adoption / duplicate, delete. `DomainHandlerDeps` grows the shared
+  facilities the body needs: `errorFromThrown` (field-anchored 422s),
+  `resolveActiveOrganizationId` (session org), `announceKernelEvent`
+  (`metadata:reloaded` after publish), and an optional `logger`. The step-②
+  (#3142) single-pipeline behavior is preserved. Zero behavior change —
+  http-conformance (41) plus 4 new seam tests (incl. the 409
+  duplicate-install guard).
+
+- cb8322e: feat(runtime): extract the /share-links dispatcher domain body — ADR-0076 D11 step ③, PR-4 (#2462)
+
+  The share-link capability-token surface (ADR-0047) moves out of
+  `HttpDispatcher` into `domains/share-links.ts`. This is cloud's designed
+  primary surface for per-env kernels (`registerShareLinkRoutes: false`, host
+  dispatcher serves after kernel swap — the #2462 step-① re-scope finding), so
+  the handler keeps working from the registry exactly as from the if-chain.
+  `DomainHandlerDeps` grows `getRequestKernelService` (reads off the
+  per-request RESOLVED kernel — the engine the shareLinks service is bound to)
+  and `routeNotFound` (the shared 404 envelope). Zero behavior change — locked
+  by http-conformance (41) and 5 new seam tests incl. token-resolve redaction.
+
+### Patch Changes
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 6877e9a: test(client,runtime): the last wildcard was wrong evidence, not weak — AI ratchet 3 → 0 (#3718)
+
+  The capstone (#3642) ratcheted "matched only by a `**` family" as weaker
+  evidence, to be driven down by enumerating each dynamic family. 60 → 3 after
+  #3656. The last 3 were `ai.nlq` / `ai.suggest` / `ai.insights` on `* /ai/**`.
+
+  Enumerating that family (in `cloud`, where `service-ai` lives) showed the
+  wildcard had not been weak evidence but **wrong** evidence. `buildAIRoutes()`
+  mounts 12 routes — `chat`, `chat/stream`, `complete`, `models`, `status`,
+  `effective-model`, six `conversations` — and **none** is `/nlq`, `/suggest` or
+  `/insights`. The SDK's entire AI namespace is dead, the entire real AI surface
+  is unexpressed by the SDK, and the two sets are disjoint (#3718).
+
+  The old row's note even claimed the client "expresses nlq/suggest/insights
+  against the REST AI routes". That was never verified and is false:
+  `DEFAULT_AI_ROUTES` declares them but has no runtime consumer (only the spec's
+  own test reads it), and `aiNlq?`/`aiSuggest?`/`aiInsights?` are optional
+  protocol methods nothing implements.
+
+  `/api/v1/ai/` becomes a bounded prefix exemption alongside the control plane —
+  two cross-repo surfaces, both ledgered in `cloud` — and the wildcard-only
+  assertion becomes `toBe(0)`, not a ratchet: every matched call now rests on an
+  exact enumerated route. Mutation-checked in both directions (removing the
+  exemption re-exposes exactly the 3, and the pre-change count was verified to be
+  exactly those 3 and nothing else).
+
+  Test-and-comment changes only; no runtime behaviour is affected.
+
+- 0bab8bb: fix(client,runtime): analytics.meta/explain now call routes that actually exist (#3584)
+
+  The route audit (#3563) ledgered four dispatcher↔client shape mismatches.
+  Re-verification showed the two analytics shapes the client spoke —
+  `GET /analytics/meta/:cube` and `POST /analytics/explain` — were served by
+  **nothing**: not the dispatcher, not `@objectstack/rest`, not
+  `service-analytics`. Both methods 404ed against every deployment.
+
+  - `analytics.meta(cube?)` — FROM `GET /analytics/meta/:cube` TO
+    `GET /analytics/meta[?cube=<name>]`. The cube argument is now optional; when
+    given, the dispatcher threads it into `AnalyticsService.getMeta(cubeName?)`,
+    which always supported the filter. Responses now use the dispatcher envelope
+    (`{ success, data }`).
+  - `analytics.explain(payload)` — FROM `POST /analytics/explain` TO
+    `POST /analytics/sql` (the dispatcher's SQL dry-run route, backed by
+    `generateSql`). Method name unchanged.
+
+  No migration is expected in practice: a method that unconditionally 404ed can
+  have no working callers (none exist in objectstack or objectui). Anyone who
+  had hand-rolled fetches against the imaginary shapes should switch to the
+  routes above.
+
+  The two storage rows from the same audit are deliberately NOT reshaped: the
+  presigned/chunked protocol the SDK speaks is registered autonomously by
+  `service-storage` on any http-server and stays canonical; the dispatcher's
+  bare `POST /storage/upload` / `GET /storage/file/:id` are reclassified in the
+  route ledger as a `server-only` low-level compat surface.
+
+- 3c8cfd1: fix(rest): make the API-exposure gate's metadata fail-open observable (#3545, #3391 follow-up)
+
+  The object API-exposure gate (`apiEnabled` / `apiMethods`) fails OPEN when object
+  metadata can't be resolved, so a transient metadata outage doesn't 405 every
+  request. #3545 evaluated the residual risk of that path and confirmed it is
+  acceptable — the gate is a **surface-area control, not the authorization
+  boundary**: every request still passes auth and the ObjectQL security middleware
+  (CRUD / FLS / RLS) on the data call regardless of the gate's outcome, so a
+  fail-open can never bypass data authorization.
+
+  The one gap was that the fail-open was **silent** — a persistent metadata fault
+  (store down / corrupt schema doc), during which the gate allows every operation
+  unchecked, looked identical to healthy operation.
+
+  - **rest** `loadObjectItems` now LOGS a _thrown_ metadata read (a real fault)
+    while leaving a legitimately-empty registry (a cold-start `[]`) silent — so a
+    genuine outage is diagnosable without false alarms during normal startup. The
+    behavior is unchanged (still returns `[]` → gate abstains → data path + security
+    enforce).
+  - **runtime** `api-exposure.ts` records the #3545 tiered decision in its
+    contract doc: keep fail-open when the whole metadata service is unavailable
+    (failing closed would break the cold-start window for no security gain); the
+    narrow "object resolvable but its `enable` policy is present-yet-unreadable"
+    widen (unreachable through Zod-validated registration) is deferred to the
+    exposure-semantics window (#3543).
+
+  No contract or behavior change to the gate itself — observability + decision
+  record only.
+
+- d3f2ff6: feat(client): `actions` surface — the SDK path to server-registered actions (#3563 PR-2)
+
+  `client.actions.invoke(object, action, { recordId, params })` and
+  `client.actions.invokeGlobal(action, opts)` dispatch handlers registered via
+  `engine.registerAction` (`POST /api/v1/actions/...`). This closes the largest
+  gap in the #3563 route audit: the whole `/actions` domain — the documented way
+  to expose custom server-side operations — was unreachable from the SDK, and
+  every console hand-rolled `fetch` for it. The record id travels in the body,
+  which both server URL shapes honor; the handler's own business failure comes
+  back as `{ success: false, error }` rather than a thrown exception.
+
+  The route ledger flips all three `/actions` rows to `sdk` and the gap ratchet
+  drops 27 → 24. Also takes the documentation-drift findings from the audit:
+  the client README no longer documents six methods that do not exist,
+  `CLIENT_SPEC_COMPLIANCE.md` is retired to a tombstone pointing at the
+  CI-enforced ledger (its "FULLY COMPLIANT" verdict was measured against a
+  route table nothing consumes), and the docs-site SDK page documents the new
+  surface.
+
+- b7550d6: feat(client): `keys`, `shareLinks`, and `security` surfaces (#3563 PR-3)
+
+  Three more domains the route audit found with zero SDK expression:
+
+  - `client.keys.create({ name?, expiresAt? })` — mints a `sys_api_key`
+    (`POST /api/v1/keys`). The raw secret comes back exactly once; `user_id`
+    is pinned server-side. There was previously no SDK path to create an API
+    key at all.
+  - `client.shareLinks.create / list / revoke` — authenticated management of
+    record share links. Listing is server-constrained to the caller's own
+    links; the public token-consumption routes stay browser-only by design.
+  - `client.security.suggestedBindings.list / confirm / dismiss` — the
+    ADR-0090 admin surface for package audience-binding suggestions.
+
+  The route ledger flips all seven rows to `sdk` and the gap ratchet drops
+  24 → 17.
+
+- 0164f40: feat(client): the final six route-audit gaps — meta drafts/published/FSM + automation descriptors (#3563 PR-5)
+
+  - `meta.getPublished(type, name)` — the published version of a metadata item
+    (ADR-0033; compound names pass through unencoded, matching `getItem`).
+  - `meta.listDrafts({ packageId?, type? })` — pending drafts the active-only
+    lists hide.
+  - `meta.getLegalNextStates(object, field, from?)` — ADR-0020 FSM
+    introspection ("from here, where can this record go?").
+  - `automation.listActions({ paradigm?, source?, category? })` /
+    `automation.listConnectors({ type? })` — the ADR-0018/0022 descriptor
+    registries backing the Studio designer's pickers.
+  - `automation.getRuntimeStatus()` — per-flow enabled/bound engine state.
+
+  With these, the #3563 gap ratchet reaches **0** (from 27): every dispatcher
+  route that should be SDK-expressible is, and the conformance guard keeps it
+  that way.
+
+- e295ad1: feat(client): the eleven package-lifecycle methods (#3563 PR-4)
+
+  `client.packages` grows from install/enable to the full lifecycle the server
+  has shipped for three ADR generations: `update` (manifest edit),
+  `publish`, `publishDrafts` / `discardDrafts` (ADR-0033 whole-app draft
+  promotion), `listCommits` / `revertCommit` / `rollback` (ADR-0067 commit
+  timeline), `revert`, `export`, `adoptOrphans`, `duplicate` (ADR-0070
+  portability). All eleven routes existed with no SDK expression — Studio
+  reached them via raw fetch.
+
+  The route ledger flips all eleven rows to `sdk` and the gap ratchet drops
+  17 → 6 (from 27 at the start of the audit).
+
+- 48c110e: feat(datasource): a datasource that is down is visible, and says why when queried (#3827, #3828)
+
+  #3816 made an explicitly-bound datasource that cannot connect refuse the boot. Two
+  gaps survived that fix, both in the cases that still boot — a policy denial, an
+  `autoConnect` datasource, or any failure the operator waved through with
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE`:
+
+  - **It was invisible.** `DatasourceSummary.status` was the literal `'unvalidated'`
+    for every row — the contract declared three states and the implementation only
+    ever emitted one — so a dead datasource looked exactly like a healthy-untested
+    one. `checkDriversHealth()` could not help either: it iterates registered
+    drivers, and a datasource that never connected was never registered, so it is
+    _absent_ from the probe rather than unhealthy. The only trace was a warning
+    that scrolled past at boot, which made the diagnostic procedure "restart the
+    server and re-read the logs".
+  - **The query-time error said nothing.** `getDriver()` answered four different
+    situations with one sentence, `Datasource 'x' is not registered.`: refused by
+    policy, failed to connect under the escape hatch, a misspelled name, and
+    `active: false`. Only the third is an authoring bug, so the other three sent
+    the reader hunting for a typo that does not exist.
+
+  Both come from the same root: `connect()` already produced a `ConnectResult` for
+  every attempt and every caller threw it away.
+
+  - **`DatasourceConnectionService` retains the last verdict per datasource**, with a
+    coarse `availability` (`available` / `blocked` / `failed` / `unattempted`) beside
+    the raw status. New `getConnectionState(name)` / `listConnectionStates()`.
+    `disconnect()` drops it, so a removed pool stops explaining itself.
+  - **`DatasourceSummary.status` tells the truth**: `ok` | `error` | `blocked` |
+    `unvalidated`, with a new operator-facing `statusReason`. `blocked` is new and
+    deliberate — a policy denial is a decision, not a fault, and will not clear on
+    its own. Reported in **Setup → Datasources**, `GET /api/v1/datasources`, and the
+    summary returned from create/update, so a "Save" whose pool failed to open is no
+    longer presented as success.
+  - **`ERR_DATASOURCE_UNAVAILABLE` (HTTP 503)**: new `DatasourceUnavailableError`
+    from `@objectstack/objectql`, thrown by `getDriver()` when the connection layer
+    recorded _why_ a declared datasource has no driver. An undeclared name keeps the
+    original message — there is genuinely nothing to add. 503 rather than 500/400:
+    nothing about the request is wrong, and the state may clear.
+  - **A privileged/public split for the reason.** The error **never** carries the
+    underlying cause — connect failures routinely contain hosts, ports and DSNs, and
+    a policy's `reason` is written for operators. Those stay in the logs and the
+    (admin-gated) datasource list. `DatasourceConnectDecision` gains an opt-in
+    `publicReason` for hosts that want to tell tenants something specific
+    (e.g. `'External datasources require the Scale plan.'`); it is the only string
+    that reaches an end user.
+  - **Readiness is deliberately not gated on this.** `/ready` still reflects
+    registered-driver health only: an optional datasource being down must not pull an
+    otherwise-working replica out of the load balancer.
+
+  Also lands a drift guard for **#3826**, and corrects ADR-0062's status while doing
+  it. The ADR claimed D1 ("exactly one definition → live driver path") as
+  implemented; only the _construction_ half converged. The `default` driver is still
+  registered as a `driver.*` kernel service and connected by `ObjectQLEngine.init()`,
+  with its own failure verdict, pool teardown, and no connect policy. What blocks the
+  merge is an input-shape mismatch, not ordering: `connect()` takes a datasource
+  _definition_ and builds the driver, while `default` arrives pre-built, and routing
+  it through the service would make `ObjectQLPlugin`'s boot depend on an optional
+  higher-layer service. Until that is designed, `degraded-boot-parity.test.ts` pins
+  both paths to the same operator-visible contract (fail-fast by default, identical
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE` parsing, `DEGRADED BOOT` on stderr) so a change
+  to one that forgets the other fails CI — #3741 → #3758 was exactly that miss, and
+  it cost three months and a second bug report.
+
+  **Migration.** Additive. `DatasourceSummary.status` gains a `'blocked'` member: a
+  consumer exhaustively switching on it needs a case (the admin UI shows it as a
+  distinct state). Nothing that was `'ok'` or `'error'` changes meaning; rows that
+  were reported `'unvalidated'` now report their real state. Query-time errors for a
+  datasource the connection layer recorded change from a generic `Error` to
+  `DatasourceUnavailableError` (503 instead of the previous catch-all status);
+  matching on the old `is not registered` text still works for the undeclared-name
+  case, which is the only one that was ever accurate.
+
+- cbedd62: fix(runtime,hono): close the remaining raw-driver-message exits on the HTTP boundary (#3867 follow-up)
+
+  #3867 sanitised `dispatcher-plugin`'s `errorResponseBase`. That covers errors
+  **thrown** out of `dispatch()` — but not the ones it **returns**. A
+  `{handled: true, response}` result goes to `sendResult`, never through that
+  catch, and those bodies are built by `HttpDispatcher.error()`, which passed the
+  message through verbatim. Sweeping the boundary for the same defect class (the
+  follow-up #3867 called for) turned up two more live exits:
+
+  **`HttpDispatcher.error()`** — the single construction point for every returned
+  error response. Reachable with a raw driver message today through
+  `errorFromThrown` (`/meta` save, `/packages` install) and the MCP transport's
+  `deps.error(err?.message, 500)`. Pinned by a test that drives
+  `PUT /meta/:type/:name` with a throwing `protocol.saveMetaItem`: without the
+  guard the response body is the driver's `insert into \`sys_team\` … UNIQUE
+  constraint failed: sys_team.id`, naming a physical table and column.
+
+  **`@objectstack/hono`'s auth-config route** — a 500 built from a caught
+  error with `message: err.message`. The auth service reads from the database, so
+  that message can carry a driver dump.
+
+  Both apply the same `looksLikeInternalErrorLeak` predicate #3867 put in
+  `@objectstack/types`, and both are scoped to **5xx** for the same reason: a 4xx
+  message is a deliberate business/validation answer (`Path must be
+/actions/:object/:action`, a hook's own `throw`, a `saveMetaItem` field error)
+  and must reach the caller intact. Structured `details` — the semantic `code` and
+  per-field `issues` the Studio maps back to inputs — is never touched, so a
+  sanitised 500 still carries everything a client can act on.
+
+  Diagnostics are unaffected: callers that threw still hand the original error to
+  `errorReporter` via `__obsRecordedError`, and every 5xx is logged server-side.
+
+  Audited in the same pass and deliberately left alone: the inline error bodies in
+  the `ai` / `mcp` domains (static literal strings, no interpolated error text) and
+  `plugin-hono-server`'s 403s (4xx, deliberate messages). With this change every
+  dynamic message on both dispatcher exits and the REST data routes goes through
+  one predicate.
+
+- 1d4756e: fix(i18n)!: `/i18n/labels/:object/:locale` emits the entry shape it declares —
+  and stops discarding `help`/`options` (#3847)
+
+  `GetFieldLabelsResponseSchema` has always declared each label as an object:
+
+  ```ts
+  labels: z.record(
+    z.string(),
+    z.object({
+      label: z.string(),
+      help: z.string().optional(),
+      options: z.record(z.string(), z.string()).optional(),
+    })
+  );
+  ```
+
+  Both serving surfaces emitted `Record<string, string>` — a bare label per field.
+  A client typed against `GetFieldLabelsResponse` read `labels[field].label` and
+  got `undefined`, because the value was the string itself. The SDK's type was
+  right the whole time; the servers were wrong.
+
+  The cost is not only the type mismatch. `FieldTranslationSchema` carries `help`
+  and `options`, bundles populate them, and the endpoint threw them away. objectui
+  needs exactly those — its `spec-translations.ts` transform reads `label` **and**
+  `options` (as `fieldOptions.<obj>.<fld>.<value>`) — and gets them by pulling the
+  whole bundle from `/i18n/translations/:locale` and resolving client-side. The
+  per-object endpoint could not have served it even if it wanted to: the data was
+  being dropped at the emit site.
+
+  Fixed at that emit site, `resolveObjectFieldLabels`, which both surfaces already
+  share as of #3833 — so one change covers both. `help` and `options` are attached
+  only when non-empty: an `options: {}` would claim a field has translated options
+  and hand back none, and a `help: ''` would erase a caller's source help text.
+  Fields with no non-empty `label` are still omitted entirely, which is what lets
+  `ResolvedFieldLabel.label` be a required string.
+
+  **The response schema is unchanged** — this moves the implementation onto the
+  contract, not the contract onto the implementation. Generated docs are
+  byte-identical for that reason.
+
+  `placeholder` is deliberately left out. `FieldTranslationSchema` has it and the
+  response schema does not, so emitting it would be widening the contract rather
+  than satisfying it — and adding an optional response field later is additive and
+  non-breaking, whereas guessing now is not.
+
+  The regression guard is the part worth keeping: a test that builds the response
+  body from the shared helper and parses it with `GetFieldLabelsResponseSchema`.
+  Nothing had ever put the emitted value and the declared contract in one
+  assertion, which is precisely why a bare string could sit under an object schema
+  unnoticed. Third and last of the declared ≠ enforced gaps on this endpoint
+  family, after #3676 (request filters no server read) and #3833 (a derivation
+  scanning a retired dialect).
+
+  BREAKING: `labels[field]` is now `{ label, help?, options? }` rather than a
+  string. No consumer in this repo or objectui read it — objectui never calls this
+  route, and in-repo use is the SDK method plus URL-shape tests — so the practical
+  blast radius is nil, and this is the cheap moment to align it.
+
+- 720c5ad: fix(runtime,i18n): the dispatcher's field-labels route reads the bundle shape
+  producers actually write — one shared derivation (#3833)
+
+  `GET /i18n/labels/:object/:locale` served through the dispatcher returned
+  `{ labels: {} }` for every provider. Its derivation scanned for flat
+  `o.<object>.fields.<field>` keys:
+
+  ```ts
+  const prefix = `o.${objectName}.fields.`;
+  for (const [key, value] of Object.entries(translations)) { … }
+  ```
+
+  That dialect was retired by #3778 — no producer has ever written it, and a real
+  bundle's top-level keys are the `TranslationData` groups (`objects`, `apps`,
+  `messages`, …), so the prefix could not match anything. 4cca74c fixed the
+  identical derivation in `service-i18n` and did not reach the dispatcher's copy.
+
+  This is not a rare fallback. `getFieldLabels` is optional on `II18nService` and
+  **nothing implements it** — not `memory-i18n`, not `file-i18n-adapter` — so the
+  dedicated-method branch both surfaces check first is dead in production and this
+  derivation is the only path there is. Any stack served by the dispatcher (the
+  AppPlugin in-memory provider auto-registered for stacks declaring translation
+  bundles) got an empty map, indistinguishable from "this object has no translated
+  labels": nothing errored, nothing warned.
+
+  Worse than the class it was found next to. #3676, which prompted the check,
+  ignored a declared filter and returned the full bundle — a correct superset. This
+  returned nothing and said it was fine.
+
+  The derivation now lives once, as `resolveObjectFieldLabels` in
+  `packages/spec/src/system/i18n-resolver.ts`, alongside the other resolvers that
+  read `TranslationData`. Both surfaces call it. Keeping a copy each is precisely
+  how one got fixed and the other did not; the next bundle-shape change now has one
+  place to land. Fields carrying no non-empty `label` stay omitted rather than
+  emitted blank — partial translation is the normal state, and callers merge this
+  map over their source labels, where a `''` would erase them.
+
+  ### The tests were fiction on both sides
+
+  The dispatcher's fallback test fed flat `o.contact.fields.first_name` keys and
+  asserted labels came back, so it passed on data that cannot occur while
+  production returned `{}` — the same failure mode as the client test retired in
+  #3676, which asserted a query string was built that no server read. It now feeds
+  the nested shape, and was confirmed to fail against the pre-fix code (`expected
+{} to deeply equal { first_name: 'First Name', … }`) rather than merely passing
+  after it. The shared helper carries its own unit tests, including one pinning
+  that the retired flat dialect resolves to `{}`.
+
+  The same suite's mock also declared a `getFieldLabels` no shipped provider has,
+  and returned flat-dialect data from `getTranslations`; both now reflect what a
+  real provider does, with the divergence noted where it remains deliberate.
+
+  Not addressed here, filed separately: `GetFieldLabelsResponseSchema` declares
+  `labels` as `Record<string, { label, help?, options? }>`, but both surfaces emit
+  `Record<string, string>` — a third declared ≠ enforced gap in the same endpoint,
+  and a wire-shape change too breaking to fold into a correctness fix.
+
+- 41642b0: fix(runtime,i18n)!: `/i18n/locales` answers in one shape — plus the
+  success-envelope conformance gate that found it
+
+  Follow-up to #3676 / #3833 / #3847. Those three were each a body that did not
+  match the schema declaring it, and each survived a green suite because **every
+  test asserted the emitted body against a hand-written literal**. Comparing
+  output to a literal proves the code does what the test author believed; it
+  cannot prove the code does what the contract declares. Nothing had ever put the
+  emitted value and the declared schema in the same assertion.
+
+  This adds that assertion as a suite — `i18n-success-envelope.conformance.test.ts`
+  in `runtime`, the missing success-path twin of service-i18n's
+  `error-envelope.conformance.test.ts` and the same pairing storage got in #3689.
+  Every `/i18n` success body is parsed against `BaseResponseSchema` and against
+  the schema `plugin-rest-api` names for that route (`responseSchema:
+'GetLocalesResponseSchema'`, …), imported rather than restated.
+
+  **It found a fourth gap on its first run.** `GET /i18n/locales` passed
+  `getLocales()`'s raw `string[]` straight through the dispatcher, while
+  `GetLocalesResponseSchema` declares `{ code, label, isDefault }[]` — and
+  service-i18n, the _other_ provider of this identical route, already emitted
+  descriptors. One endpoint, two shapes, decided by which plugin mounted it, with
+  the dispatcher's form contradicting the SDK's own `GetLocalesResponse` type.
+
+  That is the same split #3833 found in the field-labels derivation, one route
+  over, and it happened for the same reason: two surfaces, one mapping, kept
+  twice. So the mapping is now shared as `toLocaleDescriptors` in
+  `packages/spec/src/system/i18n-resolver.ts`, next to `resolveObjectFieldLabels`,
+  and both surfaces call it. `label` is the locale code — no display-name source
+  exists in the tree and the schema requires the field; inventing an ICU
+  display-name table here would be a product decision, not an implementation
+  detail.
+
+  The gate was verified the same way #3833's was: the fix was reverted and the
+  suite confirmed to fail on it —
+
+  ```
+  locales body does not match its declared schema:
+    [{"expected":"object","code":"invalid_type","path":["locales",0],
+      "message":"Invalid input: expected object, received string"}, …]
+  ```
+
+  — rather than merely passing once written. Five existing tests pinned the bare
+  `string[]`; they now assert on `.map(l => l.code)`, so the codes stay pinned
+  while the shape is owned by the schema.
+
+  BREAKING: `GET /i18n/locales` served by the dispatcher now returns
+  `[{ code, label, isDefault }]` instead of `['en', …]`. Callers on the
+  service-i18n mount already received this shape, and the SDK's published
+  `GetLocalesResponse` type has always described it, so this ends a divergence
+  rather than starting one.
+
+  Worth generalizing beyond `/i18n`: `plugin-rest-api.zod.ts` already carries a
+  `responseSchema` name on essentially every route (29 declarations across 28
+  handlers), so the route → declaring-schema mapping needed to run this check
+  repo-wide exists today and is unused.
+
+- 0045682: feat(auth)!: membership grade is not a capability channel — the `sys_member.role`
+  vocabulary is closed (ADR-0108, #3723)
+
+  `sys_member.role` answers "what is your standing in this organization". It does
+  not answer "what may you do" — that is what positions are for. One column was
+  answering both.
+
+  `resolve-authz-context` projects EVERY value stored in `sys_member.role` into
+  `current_user.positions`, alongside the rows read from `sys_user_position`. So a
+  business role handed out through the membership role _was_ capability — granted
+  with none of the position system's controls: no `granted_by`, no ADR-0091
+  validity window, no BU-subtree check, no `assignablePermissionSets` allowlist.
+  That is what ADR-0057 D4 ruled out ("feed the names to better-auth **only** so
+  invitations are accepted — **never as the authority for RBAC**"), what
+  ADR-0090 D3's word ban restates (distribution = `position`), and what
+  ADR-0095 D3 keeps out of the enforcement path.
+
+  The vocabulary is therefore closed to the four framework-owned names:
+  `owner` / `admin` / `delegated_admin` / `member`.
+
+  **BREAKING — `additionalOrgRoles` is removed** from `AuthManagerOptions` and
+  `AuthPluginOptions`, together with `plugin-auth/src/org-roles.ts` in full
+  (`collectStackOrgRoles`, `collectRegisteredOrgRoles`,
+  `normalizeAdditionalOrgRoles`, `membershipRoleOptions`,
+  `withMembershipRoleOptions`, `membershipRoleLabel`, `orgRoleNames`,
+  `MEMBERSHIP_ROLE_OBJECTS`, `OrgRoleDescriptor`, `OrgRoleInput`,
+  `OrgRoleLogger`) and the `kernel:ready` derivation hook that fed them. From
+  `@objectstack/spec`, `MEMBERSHIP_ROLE_NAME_PATTERN` and
+  `MEMBERSHIP_ROLE_NAME_MIN_LENGTH` are removed — they existed only to validate
+  app-supplied names. A TypeScript error is the intended failure: an option that
+  is silently ignored is `declared ≠ enforced` one more time.
+
+  FROM → TO:
+
+  ```diff
+  - new AuthPlugin({ additionalOrgRoles: ['sales_rep'] })
+  + new AuthPlugin({ /* nothing — declare `sales_rep` as a position */ })
+
+  - POST /organization/invite-member { email, role: 'sales_rep' }
+  + POST /organization/invite-member { email, role: 'member',
+  +                                    businessUnitId, positions: ['sales_rep'] }
+  ```
+
+  For an existing member, assign the position through `sys_user_position` (the
+  governed write path). Invitation placement (ADR-0105 D8) is the one-step
+  admission flow: issuance is authorized against the issuer's `adminScope` by
+  dry-running `DelegatedAdminGate`, and acceptance writes real
+  `sys_user_position` rows with a `granted_by` stamp. It reaches **further** than
+  what it replaces — a delegated admin may use it within their subtree, where the
+  membership-role route was open to org admins only (the invitation role cap holds
+  anyone below admin grade to plain `member`).
+
+  An invitation naming an app role now fails at better-auth's door with
+  `ROLE_NOT_FOUND`, before any row is written.
+
+  This reverses two changesets that were never consumed into a release
+  (`app-org-roles-storable`, `auth-org-roles-self-derived`), so no published
+  version ever offered the behaviour; both are removed rather than shipped and
+  retracted in the same changelog. A pre-existing deployment could only have
+  stored a custom value by direct DB write.
+
+  Also derived rather than transcribed: `@objectstack/lint`'s `MEMBERSHIP_TIERS`
+  now reads `BUILTIN_MEMBERSHIP_ROLES` from `@objectstack/spec`. The hand-kept
+  copy carried `guest`, which the `sys_member.role` select has never offered — an
+  approver authored as `{ type: 'org_membership_level', value: 'guest' }`
+  resolved to nobody and the lint whose whole job is to catch that stayed silent.
+
+- 7180ed5: fix(security): fail closed when an object's security posture can't be resolved
+  (#3545)
+
+  #3545 accepted the API-exposure gate's fail-open on unresolvable metadata on one
+  load-bearing premise: that gate is a SURFACE-AREA control, while the real
+  authorization boundary — auth + the ObjectQL security middleware (CRUD/FLS/RLS)
+  — enforces unconditionally on the data call whatever the gate answers.
+
+  Verifying that premise rather than assuming it shows it did not hold. The
+  middleware does run unconditionally, but two of its INPUTS were read from the
+  same object metadata and defaulted permissively when it could not be resolved,
+  so the very trigger the issue is about reached one layer PAST the gate, into the
+  boundary itself: an unresolved `access.default` read as PUBLIC (so a plain `'*'`
+  wildcard covered an object ADR-0066 D2 excludes from it) and an unresolved
+  `requiredPermissions` read as NO CONTRACT (so the D3 capability AND-gate was
+  skipped entirely).
+
+  `getObjectSecurityMeta` now flags `unresolved`, and the three consumers that turn
+  posture into an access decision fail closed on it: the middleware denies (with an
+  error log, so a persistent metadata outage is observable rather than a silent
+  blanket-allow), `canExport` denies, and `getReadableFields` exposes no columns —
+  the same stance already taken for a permission-resolution failure and a dangling
+  delegator. `computeLayeredRlsFilter` keeps consuming the defaults deliberately:
+  there the permissive value WITHHOLDS the cross-tenant exemption, so it is already
+  the closed direction.
+
+  Blast radius is bounded to the risky case. System/boot writes (`isSystem`) and
+  principal-less/anonymous contexts short-circuit earlier in the middleware, so
+  reaching the new check means an authenticated principal with resolved grants
+  asking for an object whose declaration is missing; the cold-start window is
+  served by those short-circuits, not by the permissive default. The exposure
+  gate's own tiered decision (transient unavailability → fail open) is therefore
+  unchanged — it now rests on a boundary that actually holds.
+
+  The explain engine reports the denial on its existing `object_crud` layer naming
+  the real cause, so the "why am I denied?" surface cannot drift from enforcement.
+
+- 083c414: fix(runtime): replace the polynomial-redos trailing-slash regex in the notifications domain with split+filter (CodeQL high, surfaced by #3507)
+
+  The legacy `path.replace(/\/+$/, '')` in the notifications handler had
+  carried a polynomial-backtracking regex over request-controlled input since
+  ADR-0030; the domain extraction (#3507) made the line "changed code" and
+  CodeQL flagged it. Same split+filter treatment the security domain already
+  uses for the identical pattern. Redundant slashes in the sub-path now
+  collapse (`//read//` → `read`), matching the security domain's semantics.
+
+- 3d5f726: feat(rest): route audit tranche 2 — the REST surface gets its own ledger +
+  conformance guard (#3587, follow-up to #3563)
+
+  The dispatcher tranche closed its 27 gaps and guards them (#3569…#3579), but
+  `@objectstack/rest` mounts a second, larger surface the client also reaches —
+  89 routes, never audited. `rest-route-ledger.ts` now records a reviewed
+  disposition for every one of them (38 sdk, 43 gap, 3 server-only, 3 public,
+  2 mismatch), and the guard is real enumeration on both sources: RouteManager
+  routes via the `getRoutes()` introspection seam, and the two
+  RouteManager-bypassing registrars (`package-routes.ts`,
+  `external-datasource-routes.ts`) via captured mock-server registrations — no
+  pinned-by-hand list. The client half
+  (`rest-route-ledger-coverage.test.ts`) verifies every claimed method exists;
+  a 43-gap ratchet is wired into CI. Every guard direction was negative-tested.
+
+  Notable dispositions the audit surfaced: `POST /api/v1/packages` is a
+  publish/install shape collision between REST and the dispatcher (REST
+  registers first and wins) — ledgered `mismatch`; the REST
+  `GET /ui/view/:object/:type` path dialect is unreachable by the SDK's
+  query-param dialect — ledgered `mismatch`; `service-storage` /
+  `service-i18n` mount a third route surface outside `@objectstack/rest`,
+  explicitly out of scope here and tracked under #3587.
+
+  No behavior change — data + tests only, plus a scope-note refresh in the
+  runtime ledger pointing at the new REST ledger.
+
+- 70a1ce1: fix(automation): the resume gate follows `map:` too, and the route stops accepting engine-internal variables (#3853)
+
+  Two holes in the #3801 resume gate, both demonstrated with a repro.
+
+  **1. The chain walk missed `map:`.** `resumeInternal` handles the two linked-run
+  correlations oppositely — a `subflow:` pause _delegates_ the signal to the child,
+  a `map:` pause _re-runs_ the map node — and the gate followed only the first. So
+  a run parked on a `map` node was judged on `map` itself (`resumeAuthority: 'any'`)
+  and let through even while the item it was waiting on sat on an `approval`.
+
+  `map` is the batch-approval shape, and the map parent's run id is the one a
+  launcher holds. Since `$mapState.started` is advanced past the in-flight item
+  before the suspend, an empty-body resume of the parent **skipped that item's
+  approval outright**, orphaning its still-pending request; a later real decision
+  then bubbled into a parent already waiting on the next item, cascading the
+  misalignment.
+
+  The walk now follows both prefixes: a linked-run pause is waiting on a CHILD, so
+  the child's node carries the authority — the gate reads _the item, not the loop_.
+
+  **2. Resume `inputs` could write the engine's `$` namespace.** They are applied
+  as bare flow variables, so a caller could set the exact handoff keys the engine's
+  map bubble uses (`<nodeId>.$mapItemDone` / `$mapItemOutput`) and have the map
+  record a per-item result for a decision nobody made — the node id is readable
+  from `GET /automation/:name`. The same reached `$runId`, which `approval` /
+  `wait` nodes use to correlate external state back to a run.
+
+  `POST /automation/:name/runs/:runId/resume` now answers **400** when `inputs`
+  names anything in the engine namespace (`$…`, or a `.$` segment). Enforced at the
+  transport, not in the engine, so the in-process bubble keeps working — the same
+  trust split the gate itself uses.
+
+  Nothing changes for author-declared variables: `{ new_assignee: 'ada' }` and
+  dotted names like `collect.note` are unaffected. If you were driving a batch-
+  approval `map` by resuming the map's own run id, resume the **item's** run
+  through its owning service instead (e.g. `client.approvals.approve`) — the map
+  advances itself when the item completes.
+
+- 93f267f: fix(automation): one chokepoint for the resume signal — `output` reopened the hole `inputs` had just closed (#3879)
+
+  #3853 guarded `signal.variables` at the route. That closed one of **two**
+  equivalent paths into the same variable map and left the other open:
+  `signal.output` keys are merged under `${run.nodeId}.${key}`, and for a run
+  parked on a `map` node `run.nodeId` **is** the map node — so
+
+  ```jsonc
+  {
+    "output": { "$mapItemDone": true, "$mapItemOutput": { "result": "FORGED" } }
+  }
+  ```
+
+  writes exactly the `<mapNodeId>.$mapItemDone` the `inputs` guard had refused,
+  making the map record a result for an item nobody decided. Demonstrated with a
+  repro, then fixed.
+
+  Scope: the #3853 map gate still held, so a batch whose pending item sits on an
+  `approval` was refused before any of this — the **approval bypass stayed
+  closed**. The residual was forging the recorded result of an item on an
+  _ungated_ pause.
+
+  Two escapes with one shape is a design signal, not two bugs, so the fix is
+  structural rather than a third patch:
+
+  - **`applyResumeSignal` is the one place a resume signal reaches the variable
+    map.** Both fields are collected into a single write list (already in final,
+    prefixed form), checked, then applied — a new signal field is covered by
+    construction rather than by remembering.
+  - **All-or-nothing**, and checked _before_ the suspension is consumed: a
+    rejected signal applies nothing (not even legitimate keys sent alongside) and
+    the run stays parked, so the real continuation still lands.
+  - **The engine owns the rule; the transport maps the verdict.** `resume` returns
+    `{ success: false, code: 'invalid_signal' }`; the route answers **400**. The
+    SDK and any future adapter inherit it — implemented in one transport it
+    protected exactly one transport, and one field of it.
+  - Engine-built signals (the subflow output mapping, the map item handoff) are
+    exempt via a module-private symbol. Deliberately _not_
+    `RESUME_AUTHORITY_SERVICE`: that marker means "the owning service authorized
+    this decision", and a service still has no business writing engine internals.
+
+  `AutomationResult.code` gains `'invalid_signal'` alongside `'forbidden'` — a
+  `switch` over it needs a new arm; a plain read does not.
+
+  Nothing changes for authoring: ordinary variables pass, `$` mid-name (`price$`)
+  and dotted names (`collect.note`) included. Only names the engine reserves —
+  `$…` or a `.$` segment — are refused.
+
+- 48d5a1c: Route ledger + conformance guard for the dispatcher↔client surface (#3563)
+
+  #3528's root-cause class — a route that exists and works while
+  `@objectstack/client` has no way to express it — now has an inventory and a
+  ratchet. `route-ledger.ts` records the audited disposition of every dispatcher
+  route (sdk / gap / server-only / public / dynamic / mismatch);
+  The guard is split along the package boundary (a runtime→client edge is a
+  build cycle): runtime's `route-ledger.conformance.test.ts` fails when a
+  dispatcher domain lands with no ledger entry and ratchets the audited gap
+  count (27 at PR-1); client's `route-ledger-coverage.test.ts` fails when a
+  ledger entry claims a client method that doesn't exist. Findings and follow-up slicing live
+  in `docs/audits/2026-07-dispatcher-client-route-coverage.md`. No runtime
+  behavior change.
+
+- 810a3a2: fix(runtime,cloud-connection): multi-tenant seed replay covers every source, not just the first (#3453)
+
+  In multi-tenant deployments (enterprise `@objectstack/organizations`) a brand-new org
+  gets its own private copy of demo data by replaying the kernel's `seed-datasets` list
+  on the `sys_organization` insert. That list is meant to hold the union of every seed
+  source — every config-declared app AND every marketplace package — but two framework
+  traps (the same pair #3444 fixed for seed-summary) shrank it to just the first source:
+
+  - The standard `PluginContext` exposes `getService`/`registerService` but has NO
+    `.kernel` handle, so `(ctx as any).kernel?.getService('seed-datasets')` always read
+    `undefined`. Each source then saw "nothing registered" and overwrote the list with
+    only its own datasets instead of extending it.
+  - `registerService` throws on a duplicate name, so the second source's re-register was
+    swallowed by the surrounding try/catch — its datasets (and, for a config app, its
+    replayer) silently lost.
+
+  Net effect: with two config apps, or a config app plus marketplace packages, a new org
+  replayed only the first app's seeds.
+
+  The fix mirrors #3444's seed-summary hardening: `seed-datasets` is now a single shared
+  array, registered once and mutated in place by every source through a new
+  `mergeSeedDatasets` helper that reads via the context's own resolver first. AppPlugin's
+  per-org replayer reads that live list at invoke time instead of a captured snapshot, so
+  it replays the full union — including datasets merged after its closure was built — and
+  the replayer itself is registered once and reused by later config apps.
+
+  Covered by seam-level unit tests (accumulation across app + marketplace sources; the
+  replayer reads the live union). True multi-tenant end-to-end coverage requires the
+  enterprise `@objectstack/organizations` plugin, which lives in the cloud repo.
+
+- 9981c1d: Surface seed outcomes in the `os dev` / `os serve` boot banner (#3415). Seeds run inside the boot-quiet stdout window and SeedLoader's logs sit under the default warn level, so a fixture could silently lose most of its rows — the showcase shipped 1 of 5 projects with zero terminal signal. AppPlugin now stashes the per-boot seed counters on the kernel (`seed-summary` service) and the banner prints `Seeds: X inserted · Y updated · Z skipped`, escalating to a yellow `⚠ … N REJECTED` line when records were dropped.
+- d60968c: Surface marketplace rehydrate/heal seed outcomes in the `os dev` / `os serve` boot banner (#3430), extending the config-app Seeds line from #3415.
+
+  The seed pipeline's most useful result lines are all `logger.info`, but `os dev` forwards a default `warn` level and the serve boot-quiet window swallows stdout — so "marketplace package rehydrated onto a fresh DB with 0 rows", a fresh-DB self-heal, and row-level seed failures were all invisible unless you queried the database directly.
+
+  The `seed-summary` kernel service is now a per-source list. AppPlugin (config apps) and the marketplace rehydrate/heal path each contribute a labelled entry, and the banner prints one combined line that ignores the log level:
+
+  ```
+  Seeds:   showcase 162 rows · hotcrm(marketplace) 157 ok / 5 errors ⚠
+  ```
+
+  Fresh-DB heals are marked `(healed on fresh db)`; a marketplace package that installed with seed datasets but landed 0 rows, and any run that dropped records, escalate to a yellow `⚠` line instead of passing silently.
+
+- e231abb: feat(objectql,metadata-protocol)!: single-source the protocol assembly; drop objectql's protocol re-exports — ADR-0076 Step 2 PR-C (#2462)
+
+  The ONE assembly now lives in `@objectstack/metadata-protocol` as
+  `assembleMetadataProtocol()` — `createMetadataProtocolPlugin()` (delegated
+  mode, cloud) and `ObjectQLPlugin`'s built-in convenience mode
+  (`registerProtocol !== false`, single-kernel/dev boots) both mount the same
+  code path (~112 inline lines deleted from the engine plugin). objectql's six
+  protocol re-exports (`ObjectStackProtocolImplementation`,
+  `SysMetadataRepository`, `SeedLoaderService`, `runBuildProbes` + types) are
+  removed — import them from `@objectstack/metadata-protocol` directly
+  (breaking, shipped as minor per the launch-window convention; the only known
+  importers were five test files, repointed). Scope note vs the original Step-2
+  recipe: the objectql→metadata-protocol dependency is deliberately KEPT for
+  the convenience mount — `@objectstack/objectql/core` was already
+  protocol-free, and forcing 20 framework boot sites to mount two plugins buys
+  no runtime win. "Zero protocol dependency" lands as "zero assembly ownership,
+  single source".
+
+- 83c161f: feat(automation)!: a flow run with no trigger user may no longer touch data (#3760)
+
+  An effective `runAs:'user'` run that resolves **no trigger user** used to execute
+  its data nodes **UNSCOPED** — it presented no principal, and the data security
+  middleware skips when there is no principal, so the run read and wrote every row.
+  `runAs:'user'` is an access-_narrowing_ declaration; failing to resolve it must
+  never resolve to a grant (ADR-0049). It now **refuses** the operation
+  (`UnscopedRunDataAccessError`), naming `runAs:'system'` as the fix.
+
+  **This was never really about schedules.** The docs, the spec, the runtime
+  warning and the lint all described a schedule-shaped problem, and the lint only
+  ever matched that shape. But the runtime predicate is "no user", and the
+  commonest way to have no user is a **record-change flow fired by a write that
+  carried none**: `isSystem` does _not_ suppress trigger dispatch — only
+  `skipTriggers` does, and exactly three first-party paths set it — so every
+  plugin/service system write, the approvals status mirror, and a `runAs:'system'`
+  flow's own data node dispatched record-change flows with `userId: undefined`.
+  Ordinary users reach those writes routinely (submitting for approval mirrors a
+  status onto the target record), so the fail-open was reachable by unprivileged
+  input and was the common case, not the rare one.
+
+  Deliberately **not** implemented as "inherit the triggering write's posture and
+  run as `isSystem`". That reads like a relabel but is a privilege escalation: the
+  security middleware's `isSystem` short-circuit fires _before_ its
+  package-managed-row, system-row, audience-anchor and delegated-admin gates, all
+  of which a principal-less context still has to clear. Such a run cannot write
+  `sys_user_position` today; as `isSystem` it could. "Unscoped" was never
+  equivalent to "system".
+
+  **Breaking — how to migrate.** A flow that reacts to system writes and needs to
+  act beyond one user's grants declares `runAs: 'system'`, making the elevation
+  explicit and audit-attributable. Otherwise ensure the trigger supplies a user.
+  Flows that touch no data are unaffected (`runAs` is moot), and the failure is
+  isolated: the trigger already swallows flow errors, so the originating write
+  still succeeds. The engine warns at run _setup_, before any node executes.
+
+  **#3712's user-less provenance path is subsumed, not broken.** That fix let a
+  run with no trigger user write its own approval-locked record by carrying a
+  provenance-only ObjectQL context (the run id, nothing else). Such a run can no
+  longer perform a data operation at all — presenting no principal is exactly what
+  made the write unscoped — so it is refused before the lock is consulted. The
+  capability survives via the explicit route: a schedule that must write records
+  declares `runAs:'system'`, which the lock hook exempts on its own `isSystem`
+  branch. The `flowRunId` exemption itself stays live and load-bearing for what
+  #3703 built it for — a `runAs:'user'` run that _does_ have a user — where the
+  exemption is still provenance rather than privilege.
+
+  Also in this change:
+
+  - **`flow-schedule-runas-unscoped` → `flow-runas-unscoped`, and it now fails the
+    build.** It read as a gate and behaved as a comment — `os compile` documented
+    that the flow lint "NEVER fails the build" — which is close to no net at all
+    for the audience it protects, very often an AI generating flows in bulk. It now
+    also covers the other provably user-less triggers (`time_relative`, `api`), per
+    ADR-0073 D5. It still cannot cover `record_change`, which is undecidable at
+    authoring time — that is exactly why the runtime refusal exists.
+  - **Three seed writes stopped firing automation.** The seed loader's pass-2
+    deferred-reference back-fill and both of `AppPlugin`'s basic-insert fallbacks
+    inlined a bare `{ isSystem: true }` instead of the shared seed options, so they
+    seeded with record-change automation live — the self-trigger vector
+    `skipTriggers` exists to prevent, on the writes that skipped it.
+  - **ADR-0073 amended.** Its severity rationale ("an unprivileged user cannot
+    trigger a schedule, so there is no untrusted-input path") is falsified, and its
+    rejection of fail-closed ("breaks legitimate scheduled CRUD — 2/3 example flows
+    relied on the default") expired when those flows were fixed to declare
+    `runAs:'system'`. Refusal is an interim posture, forward-compatible with the
+    ADR's `automation` principal: when that lands, the refusal point becomes the
+    place that resolves it.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [6169615]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [a749273]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [735f850]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [c7f4417]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [840ee4b]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [3c8cfd1]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [f92096b]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [984396b]
+- Updated dependencies [d0fea33]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [5f9a987]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [db02d47]
+- Updated dependencies [1003125]
+- Updated dependencies [6e62a93]
+- Updated dependencies [ecda20c]
+- Updated dependencies [6e62a93]
+- Updated dependencies [fc968af]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [3949a43]
+- Updated dependencies [48c110e]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [19e3e6e]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [cf5e033]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [ce1f100]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [307e0fe]
+- Updated dependencies [189854c]
+- Updated dependencies [5d4de37]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [aff9e56]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [65ac468]
+- Updated dependencies [ef5e72d]
+- Updated dependencies [dac6a08]
+- Updated dependencies [313d7be]
+- Updated dependencies [5faeac6]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [e1fa8d5]
+- Updated dependencies [402f534]
+- Updated dependencies [0045682]
+- Updated dependencies [7180ed5]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [4e9e184]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [db48ad5]
+- Updated dependencies [8e08bc3]
+- Updated dependencies [16adb3c]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [bbd902d]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [3d5f726]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [f1a8114]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [d318b24]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [4c5a584]
+- Updated dependencies [0c302a7]
+- Updated dependencies [5cfd4d5]
+- Updated dependencies [bd68f08]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [647ec8b]
+- Updated dependencies [7457a09]
+- Updated dependencies [5f0852f]
+- Updated dependencies [cde1975]
+- Updated dependencies [20cb232]
+- Updated dependencies [e231abb]
+- Updated dependencies [0bc685a]
+- Updated dependencies [c073b8c]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [a629074]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [54f479a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/objectql@17.0.0-rc.0
+  - @objectstack/rest@17.0.0-rc.0
+  - @objectstack/driver-sql@17.0.0-rc.0
+  - @objectstack/plugin-auth@17.0.0-rc.0
+  - @objectstack/plugin-security@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+  - @objectstack/metadata-protocol@17.0.0-rc.0
+  - @objectstack/service-datasource@17.0.0-rc.0
+  - @objectstack/formula@17.0.0-rc.0
+  - @objectstack/service-i18n@17.0.0-rc.0
+  - @objectstack/metadata@17.0.0-rc.0
+  - @objectstack/metadata-core@17.0.0-rc.0
+  - @objectstack/observability@17.0.0-rc.0
+  - @objectstack/driver-memory@17.0.0-rc.0
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.0
+  - @objectstack/service-cluster@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

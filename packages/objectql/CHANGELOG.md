@@ -1,5 +1,1359 @@
 # @objectstack/objectql
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 6169615: feat(objectql)!: media value shapes enforce once THIS deployment has verified its file migration (#3438 D1 media half, gated by #3617)
+
+  A `file` / `image` / `avatar` / `video` / `audio` value that does not match the
+  stored contract (an opaque `sys_file` id) now **rejects with `invalid_type`**
+  instead of warning — but only on a deployment that has run
+  `os migrate files-to-references --apply` and passed its self-check.
+
+  **Why this is not a version-wide flip.** The legacy media values this rejects —
+  inline `{url, name, …}` blobs, bare URLs — are exactly what that migration
+  converts. A deployment that has run it has been _shown_ to hold none; a
+  deployment that has not would have every media-field update start failing the
+  moment it upgraded. So the enforcement follows the evidence, per deployment,
+  rather than the release. Nothing changes for a deployment until it migrates.
+
+  **Upgrading:**
+
+  ```bash
+  os migrate files-to-references          # dry run: reports what would convert
+  os migrate files-to-references --apply  # convert, verify, record the flag
+  ```
+
+  If a write starts failing after you migrate, the value genuinely does not match
+  the contract — the error names the field. `OS_ALLOW_LAX_MEDIA_VALUES=1` re-opens
+  media leniency while you diagnose.
+
+  **Scope — deliberately only media.** `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` is
+  unchanged and still opts every class into strict (and still forces media strict
+  on a deployment that has not migrated). Reference types (`lookup`, `user`, …)
+  and structured JSON (`location`, `address`, `repeater`, …) stay warn-first: the
+  file migration is evidence about file values and says nothing about whether a
+  `location` is well formed, so gating them on its flag would be borrowing
+  evidence for a fact it does not cover. They flip when something can vouch for
+  them — see #3438.
+
+  **Cost.** Dormant unless the written object declares a media field, and the
+  flag read is memoized, so this is one query per process for apps that store
+  files and zero for those that do not. A running server picks up a
+  newly-recorded migration on restart, or via `engine.invalidateDataMigrationFlags()`.
+
+- fa3d0cf: feat(spec): field runtime value-shape contract — ADR-0104 phase 1 (D1)
+
+  `@objectstack/spec/data` now owns the runtime VALUE shape of every field type
+  (`field-value.zod.ts`): semantic type classes (`STRING_VALUE_TYPES`,
+  `NUMERIC_VALUE_TYPES`, `REFERENCE_VALUE_TYPES`, `FILE_REFERENCE_TYPES`,
+  `STRUCTURED_JSON_TYPES`, `MULTI_CAPABLE_TYPES`, …), the shared
+  `isMultiValueField`, and `valueSchemaFor(field, 'stored' | 'expanded')`. The
+  four consumers that each hand-copied this knowledge (objectql record-validator,
+  rest import-coerce, driver-sql column classification, qa conformance) now
+  derive from the spec, and the field-zoo round-trip MATRIX is asserted against
+  the contract so the two cannot drift.
+
+  **Write-path change (objectql, warn-first):** previously-unvalidated types —
+  single `lookup`/`master_detail`/`user`/`tree`, `file`/`image`/`avatar`/
+  `video`/`audio`, `location`, `address`, `composite`, `repeater`, `record`,
+  `vector` — are now checked against the contract. A violation **logs a warning
+  and passes** in this release (legacy rows must not strand their records);
+  set `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` to enforce as a
+  `400 VALIDATION_FAILED`. The flip to strict-by-default rides a later minor
+  (ADR-0104 R1/R2).
+
+  **Deprecations (removal rides the next spec major), FROM → TO:**
+
+  - `CurrencyValueSchema` (`{value, currency}`) → none. A `currency` field's
+    value is a **bare number** everywhere in the runtime (validator, SQL `float`
+    column, import coercion, field-zoo oracle); the currency code lives in field
+    config. Use `valueSchemaFor({type: 'currency'})`.
+  - `LocationCoordinatesSchema` (`{latitude, longitude}`) → `LocationValueSchema`
+    (`{lat, lng}`) — the shape the platform actually stores.
+  - `AddressSchema` is **adopted** (unchanged) as the enforced `address` value
+    contract via `AddressValueSchema`.
+
+  No stored data changes shape; the contract codifies deployed reality
+  ("reality wins", ADR-0104 D1).
+
+- a749273: feat(objectql): resolve file-field id references on read — ADR-0104 D3 wave 2 (PR-2)
+
+  The engine read path now resolves a `file`/`image`/`avatar`/`video`/`audio`
+  value stored as an opaque `sys_file` id string into its expanded
+  `FileValueSchema` form — `{ id, name, size, mimeType, url }`, with `url` derived
+  from the stable `/api/v1/storage/files/:fileId` resolver (never stored). One
+  batched `sys_file` `id $in […]` read per query (no N+1), mirroring the
+  lookup-`$expand` batch pattern.
+
+  **Dual-mode safe.** An inline-blob value (an object) passes through unchanged,
+  and only an **opaque id token** (uuid/nanoid-shaped) is treated as a reference —
+  a URL-shaped value (`https://…`, `/api/…`, `data:…`, `blob:…`), which a file
+  field legitimately holds in the legacy world, is never looked up. The step
+  fires zero reads unless a file field actually holds an id token (the blob/URL
+  case is free), and it no-ops entirely when `sys_file` is not registered.
+
+  This makes a stored `fileId` (surfaced by PR-1) actually usable on read, ahead
+  of the v17 cutover that narrows the stored form to an id.
+
+- fdb4f50: feat(migrate): `os migrate files-to-references` — a data migration with a self-check, gated per deployment (#3617)
+
+  The ADR-0104 file-as-reference migration ships as a command a deployment runs
+  against its own database, and the deployment-level flag it records is what may
+  later authorise irreversible behaviour — never the platform version.
+
+  ```bash
+  os migrate files-to-references           # dry run: reports, writes nothing
+  os migrate files-to-references --apply   # converts, verifies, records the flag
+  ```
+
+  The run backfills legacy file-field values (inline metadata blobs, own-resolver
+  URLs, `data:` URIs) into owned `sys_file` references, reconciles the ownership
+  ledger against what records actually hold, and — only on an `--apply` run whose
+  reconciliation reports **zero blocking discrepancies** — records
+  `sys_migration { id: 'adr-0104-file-references', verified_at, blocking: 0 }`.
+
+  **Why a flag rather than a release note.** ObjectStack is a development
+  platform: third-party deployments upgrade on their own schedule and their data
+  is not observable by anyone else, so no release-side soak can vouch for them.
+  The evidence has to be produced where the data is. Consequences:
+
+  - Installing a new version never starts deleting bytes. Running the migration
+    and passing its self-check is the consent.
+  - Not run, or not passed → files are retained forever. Wasted storage, zero
+    data loss.
+  - A later failing run **clears** `verified_at`: a deployment whose data has
+    drifted closes its own gate.
+  - A dry run writes nothing at all — not the conversions, and not the flag,
+    even when the self-check would pass.
+  - External URLs stay advisory. They are not `sys_file`s, so they can never
+    enter collection; whether to remodel them as a `url` field is the app
+    author's decision (ADR-0104 R7), not a gate.
+
+  Ships alongside:
+
+  - `@objectstack/spec` — `DataMigrationFlagSchema`, `FILE_REFERENCES_MIGRATION_ID`,
+    and the single `isDataMigrationFlagVerified` predicate both future consumers
+    (collection #3459, strict value-shape #3438) read, so the two gates cannot
+    disagree about the same fact.
+  - `@objectstack/platform-objects` — the `sys_migration` object plus
+    `readDataMigrationFlag` / `isDataMigrationVerified` / `recordDataMigrationRun`.
+    Reads fail toward "not verified": a gate that cannot read its evidence stays
+    closed.
+  - `@objectstack/objectql` — a read may now opt out of file-reference expansion
+    via the spec's `RAW_FILE_VALUES_CONTEXT_KEY`, and the storage service's
+    bookkeeping/scan reads do. Without it the read resolver rewrites stored ids to
+    their expanded form before the reconciliation sees them, which reports held
+    references as absent — noisy `stale_owner` findings, and a missed
+    `unowned_reference` would have been a false pass of the collection gate.
+
+- 48c110e: feat(datasource): a datasource that is down is visible, and says why when queried (#3827, #3828)
+
+  #3816 made an explicitly-bound datasource that cannot connect refuse the boot. Two
+  gaps survived that fix, both in the cases that still boot — a policy denial, an
+  `autoConnect` datasource, or any failure the operator waved through with
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE`:
+
+  - **It was invisible.** `DatasourceSummary.status` was the literal `'unvalidated'`
+    for every row — the contract declared three states and the implementation only
+    ever emitted one — so a dead datasource looked exactly like a healthy-untested
+    one. `checkDriversHealth()` could not help either: it iterates registered
+    drivers, and a datasource that never connected was never registered, so it is
+    _absent_ from the probe rather than unhealthy. The only trace was a warning
+    that scrolled past at boot, which made the diagnostic procedure "restart the
+    server and re-read the logs".
+  - **The query-time error said nothing.** `getDriver()` answered four different
+    situations with one sentence, `Datasource 'x' is not registered.`: refused by
+    policy, failed to connect under the escape hatch, a misspelled name, and
+    `active: false`. Only the third is an authoring bug, so the other three sent
+    the reader hunting for a typo that does not exist.
+
+  Both come from the same root: `connect()` already produced a `ConnectResult` for
+  every attempt and every caller threw it away.
+
+  - **`DatasourceConnectionService` retains the last verdict per datasource**, with a
+    coarse `availability` (`available` / `blocked` / `failed` / `unattempted`) beside
+    the raw status. New `getConnectionState(name)` / `listConnectionStates()`.
+    `disconnect()` drops it, so a removed pool stops explaining itself.
+  - **`DatasourceSummary.status` tells the truth**: `ok` | `error` | `blocked` |
+    `unvalidated`, with a new operator-facing `statusReason`. `blocked` is new and
+    deliberate — a policy denial is a decision, not a fault, and will not clear on
+    its own. Reported in **Setup → Datasources**, `GET /api/v1/datasources`, and the
+    summary returned from create/update, so a "Save" whose pool failed to open is no
+    longer presented as success.
+  - **`ERR_DATASOURCE_UNAVAILABLE` (HTTP 503)**: new `DatasourceUnavailableError`
+    from `@objectstack/objectql`, thrown by `getDriver()` when the connection layer
+    recorded _why_ a declared datasource has no driver. An undeclared name keeps the
+    original message — there is genuinely nothing to add. 503 rather than 500/400:
+    nothing about the request is wrong, and the state may clear.
+  - **A privileged/public split for the reason.** The error **never** carries the
+    underlying cause — connect failures routinely contain hosts, ports and DSNs, and
+    a policy's `reason` is written for operators. Those stay in the logs and the
+    (admin-gated) datasource list. `DatasourceConnectDecision` gains an opt-in
+    `publicReason` for hosts that want to tell tenants something specific
+    (e.g. `'External datasources require the Scale plan.'`); it is the only string
+    that reaches an end user.
+  - **Readiness is deliberately not gated on this.** `/ready` still reflects
+    registered-driver health only: an optional datasource being down must not pull an
+    otherwise-working replica out of the load balancer.
+
+  Also lands a drift guard for **#3826**, and corrects ADR-0062's status while doing
+  it. The ADR claimed D1 ("exactly one definition → live driver path") as
+  implemented; only the _construction_ half converged. The `default` driver is still
+  registered as a `driver.*` kernel service and connected by `ObjectQLEngine.init()`,
+  with its own failure verdict, pool teardown, and no connect policy. What blocks the
+  merge is an input-shape mismatch, not ordering: `connect()` takes a datasource
+  _definition_ and builds the driver, while `default` arrives pre-built, and routing
+  it through the service would make `ObjectQLPlugin`'s boot depend on an optional
+  higher-layer service. Until that is designed, `degraded-boot-parity.test.ts` pins
+  both paths to the same operator-visible contract (fail-fast by default, identical
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE` parsing, `DEGRADED BOOT` on stderr) so a change
+  to one that forgets the other fails CI — #3741 → #3758 was exactly that miss, and
+  it cost three months and a second bug report.
+
+  **Migration.** Additive. `DatasourceSummary.status` gains a `'blocked'` member: a
+  consumer exhaustively switching on it needs a case (the admin UI shows it as a
+  distinct state). Nothing that was `'ok'` or `'error'` changes meaning; rows that
+  were reported `'unvalidated'` now report their real state. Query-time errors for a
+  datasource the connection layer recorded change from a generic `Error` to
+  `DatasourceUnavailableError` (503 instead of the previous catch-all status);
+  matching on the old `is not registered` text still works for the undeclared-name
+  case, which is the only one that was ever accurate.
+
+- a227ed7: fix(objectql)!: one key for the empty group bucket — real `null`, on both aggregation paths (#3839)
+
+  A grouped row whose dimension value is empty now carries `null` for that
+  dimension no matter which way the aggregate ran. Downstream code can test the
+  empty bucket with a plain `value == null` again: charts render their own empty
+  label, drill-through on that bucket builds `field = null` and returns the rows
+  it should, and a dashboard no longer changes shape when the driver, the
+  granularity or the reference timezone changes.
+
+  ### What was wrong
+
+  `engine.aggregate` has two implementations of one feature. It pushes the
+  aggregate down as SQL when the driver advertises every requested granularity and
+  the reference timezone is UTC; otherwise it fetches rows and buckets them in JS.
+  The two disagreed about how to spell "empty":
+
+  ```
+  --- same dataset, same query, one row with a NULL value ---
+    pushed-down SQL : [{ "key": null,     "type": "null",   "total": 2 }, …]
+    in-memory       : [{ "key": "(null)", "type": "string", "total": 2 }, …]
+  ```
+
+  The measures were always right — only the key's type and literal differed —
+  which is why this went unnoticed for so long: every total reconciled. But the
+  engine picks a path per query, so the same data produced a different bucket key
+  on SQLite-plus-UTC-plus-`month` than on `week` (which SQLite does not advertise),
+  a non-UTC timezone, or `driver-rest` / `driver-memory` / a remote Turso, all of
+  which bucket in memory unconditionally.
+
+  It was never date-specific either. A plain `groupBy: ['stage']` over a NULL
+  column diverged the same way.
+
+  Consumers are written against `null` — they check `== null` and supply their own
+  empty label ('—', '(empty)', a localized "Uncategorized"). The sentinel defeated
+  every one of them: it rendered a raw English debug string in the UI, and a drill
+  on the empty bucket compiled to `field = '(null)'` and matched nothing.
+
+  The in-memory path's comment justified the string as staying "consistent with
+  the client `useReportData` hook". That hook was removed with ADR-0021, and the
+  literal never appeared in it.
+
+  ### What changed
+
+  - `applyInMemoryAggregation` and `bucketDateValue` (`@objectstack/objectql`) key
+    the empty bucket as `null`. `bucketDateValue` now returns `string | null`. A
+    null instant and an unparseable one still share one bucket, because SQL cannot
+    tell them apart either (`strftime('%Y-%m', 'not-a-date')` is NULL).
+  - The internal composite bucket id is JSON-encoded, so the empty bucket stays
+    distinct from a row whose value is the literal string `"null"`.
+  - `bucketKeyToCalendarRange` (`@objectstack/core`) accepts `string | null`. The
+    empty bucket has no calendar span, so a drill on it opens the unscoped
+    superset instead of an invented bound — unchanged behavior, honest signature.
+  - The driver output contract in `@objectstack/spec` now states the rule: a row
+    with no value keys as `null`, never a sentinel. Propagating NULL through the
+    bucket expression is the whole of it; a driver only breaks it by adding a
+    `COALESCE`.
+
+  ### Gates
+
+  `checkDateBucketParity` (`@objectstack/verify`) deliberately carried no null
+  instant, because the divergence would have failed it for a reason it was not
+  about. Its fixture now has one, so the convergence is held in place — including
+  for out-of-tree drivers that run the check against themselves.
+
+  Two fixes were needed to make that fixture meaningful:
+
+  - The check folded bucket labels through `String(value)`, which turns SQL NULL
+    into `'null'` — a label a TEXT column can genuinely hold. A driver spelling
+    "empty" as a string could compare equal to one returning real NULL. The empty
+    bucket is now keyed out of band.
+  - Label sets were compared with `JSON.stringify`, which is sensitive to key
+    insertion order. Row order is not part of this contract and the two paths
+    naturally differ (SQL sorts its groups; the in-memory path emits first-seen
+    order), so a driver with entirely correct buckets could be reported as
+    disagreeing — with an empty diff message, since nothing actually differed.
+    The comparison is now order-insensitive.
+
+  A new dogfood check covers the non-date half against real drivers: same dataset,
+  plain and date-bucketed `groupBy`, both paths, one key.
+
+- 763931e: feat(filters): evaluate `{filter-token}` placeholders server-side (#3582)
+
+  Filter values travel as JSON, so a time- or user-scoped slice writes a
+  placeholder instead of code:
+
+  ```ts
+  filter: { close_date: { $gte: '{current_year_start}' }, owner: '{current_user_id}' }
+  ```
+
+  The vocabulary has been in `@objectstack/spec` for a while (`date-macros.zod.ts`,
+  `context-tokens.zod.ts`) and `objectstack build` rejects tokens outside it
+  (#3574). What was missing is the half that _substitutes a value_: **nothing on
+  the server ever did**. A placeholder reached the driver as the literal string
+  `'{current_year_start}'`, compared as text, and matched nothing.
+
+  That failure is invisible — an empty widget looks exactly like a metric that is
+  legitimately zero — so apps worked around it by computing dates at module load,
+  which freezes "this year" into the built artifact and quietly goes stale.
+
+  **New: `resolveFilterTokens()` in `@objectstack/core`**, wired into the two
+  server-side seams every filter passes through:
+
+  - **ObjectQL read path** — `find` / `findOne` / `count` / `aggregate`, so REST
+    queries, related lists, saved-view filters and flow `find_records` all resolve.
+    It runs before the middleware chain, so only author-supplied filters are
+    inspected; RLS/sharing filters are injected downstream from concrete values.
+  - **Analytics dataset executor** — a dataset's intrinsic `filter`, a widget's
+    `runtimeFilter`, measure-scoped filters, and time-dimension `dateRange`s.
+    This path needs its own call: `NativeSQLStrategy` compiles raw SQL and binds
+    comparands directly, so a dashboard widget never passes through `engine.find()`.
+
+  Behavioural notes:
+
+  - Date tokens resolve to ISO strings (`YYYY-MM-DD`, or a full timestamp for
+    `{now}` / `{N_hours_ago}` / `{N_minutes_ago}`). Turning that into a column's
+    on-disk form stays the driver's job (`SqlDriver.temporalFilterValue`), so
+    there is still exactly one source of truth for the storage convention.
+  - Calendar boundaries follow `ExecutionContext.timezone`; one instant is pinned
+    per filter tree, so a `>= {current_month_start}` / `< {next_month_start}` pair
+    can never straddle a boundary.
+  - `{current_org_id}` reads `ExecutionContext.tenantId`; `{current_user_id}` reads
+    `userId`. A request carrying neither now **throws** instead of resolving to
+    `null` — a null comparand degrades to `IS NULL` on most drivers and would hand
+    back the rows the filter was written to exclude.
+  - An unrecognised placeholder **throws**, carrying the near-miss fix
+    (`{current_user}` → `{current_user_id}`, `{this_quarter_start}` →
+    `{current_quarter_start}`). This matches what `objectstack build` already
+    enforces. Consequence, previously implicit and now load-bearing: a filter value
+    that is _entirely_ `{...}` is always read as a placeholder, so a literal value
+    of that shape is not expressible — rename the value.
+
+  Also in this change: `notify` no longer sends the six-character string
+  `"undefined"` as an audience member. `to: ['{record.owner.manager}']` walks
+  `.manager` on a scalar foreign-key id, resolves to nothing, and `String(undefined)`
+  turned that into a phantom recipient — the emit "succeeded", addressed nobody,
+  and said nothing. Unresolved recipients are now dropped, and a node with no
+  recipient left fails naming the offending template and pointing at the start
+  node's `config.expand` (#3475), which does hydrate the relation.
+
+- de9af8a: fix(automation,objectql): a filter that loses a condition must not run (#3810)
+
+  Three related holes, all of which end in "the query matched rows the author
+  excluded".
+
+  **1. A flow filter could silently widen to match everything.**
+
+  The flow template interpolator expresses "this token did not resolve" as
+  `undefined`. In a message that renders as empty text — harmless. In a FILTER it
+  removes the condition, and a removed condition matches MORE rows. When it was
+  the only condition, `{ owner: '{record.ownr}' }` became `{}`, and `{}` handed to
+  `deleteMany` is every row in the table.
+
+  So one mistyped field name in a `delete_record` node silently emptied the
+  object. Reproduced with all four causes: a typo (`{record.ownr}`), an input the
+  run never received, a lookup hop (`{record.account.name}` — the trigger record
+  carries a scalar id), and a filter placeholder.
+
+  `get_record` / `update_record` / `delete_record` now refuse to execute when
+  interpolation erased any authored condition, naming the offending template. The
+  guard keys on LOSS, not emptiness: an author who deliberately wrote no filter is
+  unaffected, and losing one of two conditions still fails, because widening from
+  "my open records" to "all open records" is the same class of bug.
+
+  **2. Filter placeholders never reached the engine that resolves them.**
+
+  `config.filter` is where two `{…}` dialects meet — the flow template dialect
+  (`{record.owner}`) and the filter placeholder dialect (`{current_year_start}`,
+  `{current_user_id}`, resolved by `resolveFilterTokens()`). Evaluation order
+  picked the winner by accident: the flow interpolator ran first, found no flow
+  variable by that name, and erased it.
+
+  `interpolateFilter()` hands that position back to the dialect that owns it — a
+  whole-string token that no flow variable resolves and that IS a recognised
+  placeholder passes through verbatim for the engine to expand. Flow variables
+  keep precedence, so a template that works today cannot change meaning.
+
+  **3. The engine resolved placeholders on reads but not on writes.**
+
+  `resolveFilterTokens()` reached `find`/`findOne`/`count`/`aggregate` only. So
+  the SAME filter selected different rows depending on the verb: `find({ owner:
+'{current_user_id}' })` matched the signed-in user's rows, while
+  `update`/`delete` compared the literal token text and matched none — a flow that
+  previewed with one and acted with the other operated on two different row sets.
+  This is the #3106 shape one layer down: the evaluator existed, only some call
+  sites reached it.
+
+  `update` and `delete` now resolve too, BEFORE the by-id fast path claims a
+  scalar `where.id` (otherwise an unresolved `{current_user_id}` would be bound as
+  the primary key itself). Caller options are never mutated.
+
+- 5d4de37: fix(objectql,driver-sql)!: a group key is the column's value, in the shape `find()` presents it (#3849)
+
+  `groupBy: ['qty']` now returns `3`, not `'3'`. `groupBy: ['won']` returns `true` /
+  `false`, not `'true'` / `'false'` on one path and `1` / `0` on the other. A bucket
+  key is a column value, so there is one right answer for what it looks like —
+  whatever that column looks like on a `find()` row — and all three paths that
+  produce one now give it.
+
+  ### What was wrong
+
+  Three code paths produce a group key, and no two of them agreed:
+
+  |                           | `qty` (number)   | `won` (boolean)                 |
+  | ------------------------- | ---------------- | ------------------------------- |
+  | `find()`                  | `3` number       | `true` boolean                  |
+  | `aggregate()` pushed down | `3` number       | `0` / `1` **number**            |
+  | in-memory fallback        | `'3'` **string** | `'false'` / `'true'` **string** |
+
+  Two independent causes:
+
+  - `applyInMemoryAggregation` ran every key through `String()`. The pushed-down
+    path never did.
+  - The pushed-down path returns raw builder output. #3797 taught it to present
+    temporal columns the way `formatOutput` does on a `find()` row, but not the
+    boolean and numeric repairs — so a SQLite boolean, which has no native type and
+    is stored as `0`/`1`, surfaced as an integer from `aggregate()` and as a real
+    boolean from `find()`.
+
+  `engine.aggregate` chooses between the two aggregate paths per query — by whether
+  the driver aggregates natively, whether it advertises the requested granularity,
+  and whether the reference timezone is UTC — so the same column changed shape with
+  no change to the data or the query.
+
+  ### Why it mattered
+
+  The measures were always right, which is why this went unnoticed. What broke was
+  downstream code that probes a raw `Map` keyed by the value's own type. `Map`
+  lookup is SameValueZero, so `'1'` never finds `1`:
+
+  - **Select-option labels** (`dimension-labels.ts`) — the label table is keyed by
+    the option's own `value`. A numeric option value never matched a stringified
+    key, so the chart rendered the raw stored value instead of its label.
+  - **Lookup / master-detail labels** — the id → record-name table is built by an
+    inner query that always pushes down (raw ids), then probed with the outer
+    query's keys, which may be in-memory (stringified). With a numeric primary key
+    — routine for external/federated objects — every label missed.
+  - **Cross-object rebucketing** (`cross-object-rebucket.ts`) — the FK → attribute
+    map is built and probed the same way, and a miss is not a fallback but
+    `RESTRICTED_BUCKET`. A numeric FK filed **every row** under `'(restricted)'`:
+    one bar, correct grand total, no error.
+  - **Drill-through** — the raw dimension value goes into the drill filter
+    verbatim, so a boolean dimension drilled from the in-memory path sent
+    `{ won: 'true' }` to SQLite, whose INTEGER column cannot equal the text
+    `'true'`. Zero rows.
+
+  ### What changed
+
+  - `applyInMemoryAggregation` (`@objectstack/objectql`) emits the value verbatim.
+    Its rows come straight from `driver.find()`, so passing the value through is
+    what makes the key equal the column's own read shape.
+  - The internal composite bucket id is now type-preserving, so `1` and `'1'`,
+    `true` and `'true'` stay distinct groups rather than merging on the way in.
+    BigInt is encoded explicitly — `JSON.stringify` throws on it, and a value that
+    used to bucket under `String()` must not start crashing the aggregate.
+  - `SqlDriver.aggregate` / `.distinct` (`@objectstack/driver-sql`) present group
+    keys and `min`/`max` results with the same rules `formatOutput` applies on a
+    `find()` row, generalizing the #3797 temporal fix to boolean and numeric
+    columns. The `protected` helpers behind it are renamed accordingly
+    (`temporalFieldKind` → `readPresentationKind`, `presentTemporalValue` →
+    `presentReadValue`, `presentTemporalColumns` → `presentReadColumns`) and the
+    kind union is exported as `ReadPresentationKind`.
+
+  Date-bucketed `groupBy` items are unaffected: `bucketDateValue` and the dialect
+  bucket expressions both produce canonical string labels, and #3839 already pinned
+  their empty bucket.
+
+  ### Gate
+
+  `packages/qa/dogfood/test/group-key-read-shape-parity.test.ts` measures both
+  aggregate paths against `find()` for a number, boolean and text column, on
+  `driver-sql` and `driver-sqlite-wasm`. It asserts the runtime TYPE, not just the
+  value — folding both sides through `String()` is the reflex that hid this in the
+  first place and would make the check pass against the bug it exists to catch.
+
+  Each half was confirmed to fail the gate on its own: reverting only the
+  in-memory change reddens the number and boolean cases, reverting only the driver
+  change reddens the boolean cases with `0<number>` against `false<boolean>`.
+
+- 030125b: feat(objectql)!: `init()` refuses to boot when a data driver fails to connect (#3741)
+
+  `ObjectQLEngine.init()` wrapped every driver's `connect()` in a try/catch, logged
+  one error line, and carried on. A server whose database was unreachable therefore
+  "started successfully" — health endpoints could even stay green — and then failed
+  every request with an error that reads nothing like _the database is down_. The
+  warning it printed (`Operations may recover via lazy reconnection or fail at query
+time`) was half fiction: grep the repo and no reconnection exists in `driver-sql`
+  or `driver-mongodb`, so only the "fail at query time" half was ever real. The
+  caller made it worse — `ObjectQLPlugin.start()` runs `syncRegisteredSchemas()`
+  immediately after `init()`, issuing DDL against a driver that isn't there.
+
+  The structural half of the bug was worse than the operational one: the catch
+  removed a driver's ability to **refuse startup at all**. Any fatal startup check —
+  licence, server version, incompatible configuration, missing capability, not just
+  an unreachable socket — is expressed by throwing from `connect()`, and every one
+  of them was silently downgraded to a runtime error. That is why driver-mongodb's
+  multi-tenancy guard (#3724 / #3734) had to be hoisted into its constructor.
+
+  - `init()` now **throws** `DriverConnectError` (`code: 'ERR_DRIVER_CONNECT'`)
+    when any boot-registered driver's `connect()` rejects, aborting kernel
+    bootstrap. It still attempts every driver first, so one failed boot names all
+    of them. The message is self-contained — each failed driver and its cause —
+    because the CLI prints `error.message` alone; the first cause is also attached
+    as `error.cause`. Exported from both `@objectstack/objectql` and
+    `@objectstack/objectql/core`.
+  - `connect()` is now a supported place for a driver to veto boot. Startup
+    validation that needs a live connection (server version, capability probes)
+    no longer has to be forced into a constructor.
+  - The misleading "lazy reconnection" warning is gone.
+  - New escape hatch `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`
+    (`resolveAllowDriverConnectFailure()` in `@objectstack/types`) restores the old
+    lenient boot, but loudly: a `DEGRADED BOOT` banner names the failed drivers and
+    states that they are never retried or reconnected and that every query and
+    schema sync routed to them will fail for the process lifetime. The banner goes
+    to stderr as well as the logger, because `os serve` swallows all of stdout
+    during boot and `Logger` routes `warn` there — logger-only, the one message
+    that matters would be invisible in exactly the deployment the flag is for.
+    Defaults off.
+
+  **Migration.** No code or config change is needed for a correctly configured
+  deployment — a driver that connected before still connects. A deployment that was
+  _silently_ booting without its database now fails the boot instead, with the
+  driver name and cause in the error; fix the datasource configuration (typically
+  `OS_DATABASE_URL`, credentials, or network reachability). To keep booting without
+  it — deliberately, and knowing every request that touches it will fail — set
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`.
+
+- 8e08bc3: feat(runtime): `/ready` reports 503 when a data driver stops answering (#3756)
+
+  `/health` returned `{status: 'ok'}` unconditionally and `/ready` only checked
+  whether the kernel state was `running` — a flag set once when bootstrap finishes
+  and never revisited. Neither probe touched the data layer. So a database that
+  went away _after_ boot (restart, failover, network policy change, pool exhausted,
+  credentials rotated) left both probes green: the load balancer kept routing to a
+  replica that failed 100% of its requests, and the orchestrator saw nothing wrong.
+  The driver's `checkHealth()` already existed and was cheap (`SELECT 1` /
+  `db.command({ping:1})`) but was only consumed by `datasource-admin`'s
+  `testConnection` — no probe path called it, and `ObjectQL` exposed no way to ask
+  (`drivers` is private with no accessor).
+
+  This is the runtime-side half of #3741, which fixed only the boot-time version
+  of the same defect.
+
+  - New `ObjectQL.checkDriversHealth({ timeoutMs })` pings every registered driver
+    and returns a `DriverHealth[]` verdict. Each probe is settled independently and
+    bounded (default 2s) — `checkHealth()` swallows its own errors, but on a dead
+    knex pool it does not return at all, waiting out `acquireConnectionTimeout`
+    (60s by default), and a probe that hangs is as useless as one that lies. A
+    driver implementing no `checkHealth()` is reported healthy: absence of a probe
+    is not evidence of failure.
+  - `GET /ready` now returns 503 with the failing driver names when the kernel is
+    running but a driver is down, on top of the existing booting/shutting-down
+    cases. The result is memoized for ~1s so Kubernetes' few-second polling does
+    not become one database round-trip per probe per replica.
+  - `GET /health` deliberately still checks nothing, and now says why in the code.
+    A failing _liveness_ probe restarts the pod, which cannot fix an unreachable
+    database but would put every replica into a restart storm for the length of the
+    outage. Readiness — leave the rotation — is the failure mode that helps.
+
+  The readiness check **fails open**: a kernel with no data engine (lite kernels,
+  edge, metadata-only hosts), an engine predating `checkDriversHealth`, or a probe
+  that itself throws all read as ready, exactly as before. Readiness gates whether
+  a replica receives any traffic at all, so an inconclusive answer must not
+  black-hole a working deployment. Only a driver that positively reports itself
+  unhealthy takes the replica out.
+
+  **Migration.** None. Deployments already wiring `/api/v1/ready` as their
+  readiness probe get the stricter check automatically; deployments that pointed a
+  _liveness_ probe at `/ready` should move it to `/health`, which is the endpoint
+  that never fails on a dependency.
+
+- 20cb232: feat(metadata-protocol,objectql): MetadataProtocolPlugin + `registerProtocol` opt-out — ADR-0076 Step 2 PR-A (#2462)
+
+  `createMetadataProtocolPlugin()` now owns what `ObjectQLPlugin` historically
+  assembled inline: the `ObjectStackProtocolImplementation` construction +
+  `protocol` registration, the metadata-storage platform objects, and the D12
+  `degraded` analytics fallback (pattern: plugin-security — named plugin,
+  `dependencies` on the engine, `ctx.getService('objectql')`). `ObjectQLPlugin`
+  grows `registerProtocol?: boolean` (default `true`, fully backward
+  compatible): pass `false` when mounting the new plugin. Protocol CONSUMERS
+  stay on the engine plugin either way — DB hydration and the authored
+  hook/action rebind resolve `protocol` lazily (the rebind arms from `start()`
+  in delegated mode) and degrade gracefully. Mixing both assemblies fails fast
+  with the fix in the message. This is the additive first leg of the
+  cross-repo sequence; cloud's 3 boot sites flip in PR-B, the built-in
+  assembly + re-exports retire in PR-C.
+
+- e231abb: feat(objectql,metadata-protocol)!: single-source the protocol assembly; drop objectql's protocol re-exports — ADR-0076 Step 2 PR-C (#2462)
+
+  The ONE assembly now lives in `@objectstack/metadata-protocol` as
+  `assembleMetadataProtocol()` — `createMetadataProtocolPlugin()` (delegated
+  mode, cloud) and `ObjectQLPlugin`'s built-in convenience mode
+  (`registerProtocol !== false`, single-kernel/dev boots) both mount the same
+  code path (~112 inline lines deleted from the engine plugin). objectql's six
+  protocol re-exports (`ObjectStackProtocolImplementation`,
+  `SysMetadataRepository`, `SeedLoaderService`, `runBuildProbes` + types) are
+  removed — import them from `@objectstack/metadata-protocol` directly
+  (breaking, shipped as minor per the launch-window convention; the only known
+  importers were five test files, repointed). Scope note vs the original Step-2
+  recipe: the objectql→metadata-protocol dependency is deliberately KEPT for
+  the convenience mount — `@objectstack/objectql/core` was already
+  protocol-free, and forcing 20 framework boot sites to mount two plugins buys
+  no runtime win. "Zero protocol dependency" lands as "zero assembly ownership,
+  single source".
+
+- b95577a: feat(automation): surface silently-stripped write fields as step warnings (#3407)
+
+  `update_record` used to report an unconditional `success` even when the data
+  layer legally stripped the requested write fields — static `readonly` (#2948)
+  or a TRUE `readonlyWhen` predicate (#3042). The only trace was a server-side
+  logger warn, invisible in the flow run trace: an author saw a clean 3ms
+  `success` while the DB truth never changed (how #3356's approval stage
+  write-backs failed unnoticed).
+
+  - **spec**: new `DroppedFieldsEventSchema` / `DroppedFieldsEvent`
+    (`{ object, fields, reason: 'readonly' | 'readonly_when' }`) in
+    `data/data-engine.zod.ts`, and a `WriteObservabilityOptions`
+    (`onFieldsDropped` listener) mixin on `IDataEngine.insert/update` option
+    params in `contracts/data-engine.ts`. The listener is a TS-contract-level,
+    in-process-only channel — deliberately NOT part of the serializable Zod
+    options schemas or the RPC boundary.
+  - **objectql**: `engine.update()` reports each strip pass's dropped keys +
+    reason through `options.onFieldsDropped` (all four strip sites: single-id +
+    bulk × readonly + readonlyWhen). A throwing listener never breaks the write.
+    System-context writes skip the readonly strip and therefore report nothing,
+    as before. `insert()` accepts the option for symmetry but strips nothing
+    today (INSERT is readonly-exempt; FLS write denial throws).
+  - **service-automation**: `NodeExecutionResult` and `StepLogEntry` gain
+    advisory `warnings?: string[]`; `update_record` / `create_record` attach one
+    warning per strip event naming the dropped fields, plus a structured
+    `droppedFields` output (`{<nodeId>.droppedFields}`) for downstream nodes.
+    `success` semantics are unchanged — stripping stays legal, it just is no
+    longer silent.
+
+### Patch Changes
+
+- ad4af62: feat: single-source API-method derivation — the server is the only adjudicator (#3391)
+
+  An object's effective API surface is now resolved from **six primitives**
+  (`get/list/create/update/delete/bulk`) by ONE derivation table in
+  `@objectstack/spec/data` (`resolveEffectiveApiMethods` / `isApiOperationAllowed`
+  / `effectiveOperationsArray` / `API_METHOD_DERIVATION`). Every gate consumes it:
+  the REST data surface, the runtime HTTP/MCP dispatcher, and the
+  `/me/permissions` annotation. The `apiMethods` whitelist is three-state —
+  `undefined` = unrestricted, `[]` = deny-all, a subset = the derived closure — and
+  the legacy 8 verbs (`upsert/aggregate/history/search/restore/purge/import/
+export`) are DERIVED from the primitives, never declared standalone. (This
+  release also ships the enum shrink — see the `#3543` changeset: the authored
+  enum IS the six primitives, and a stored legacy value is stripped at parse
+  with a warning rather than honored.)
+
+  **Derivation:** `import` ⊆ create∨update (writeMode-precise: insert→create,
+  update→update, upsert→create∧update); `export` ⊆ list (reserved user-export slot,
+  always on this phase); `aggregate`/`search` ⊆ list (search also needs
+  `searchable`); `history` ⊆ get ∧ `trackHistory`; `upsert` ⊆ create∧update;
+  bulk sub-ops ⊆ bulk ∧ derived(child). `restore`/`purge` do not derive (the
+  `enable.trash` flag was retired, #2377).
+
+  **New response-side contract:** `EffectiveObjectPermissionSchema` extends
+  `ObjectPermissionSchema` with an optional `apiOperations` array;
+  `GetEffectivePermissionsResponse.objects` uses it, and `/me/permissions` now
+  hands down the per-object effective operation set. The authoring
+  `ObjectPermissionSchema` is deliberately NOT extended — the frontend consumes
+  the effective set the server resolves, never the raw whitelist.
+
+  **Behavior changes (tightening — a `declared ≠ enforced` gap closed):**
+
+  1. `apiMethods: []` + `apiEnabled: true` now denies every operation (405),
+     matching the documented three-state contract instead of the prior fail-open
+     "no restriction". In-repo impact is zero (every `[]` object also sets
+     `apiEnabled: false`, so 404 precedes 405).
+  2. The runtime dispatcher / MCP whitelist is now live. It previously read the
+     flat shape while `getObject()` returns the flags nested under `.enable`, so
+     the gate never fired — a silent dead gate now enforced (nested-first,
+     flat-compatible).
+  3. `import`/`export` reverse-derive: an object with a plain CRUD whitelist (no
+     explicit `import`/`export`) now admits import (⊆ create∨update) and export
+     (⊆ list). Row-level FLS is shared with list; the export column header is now
+     projected to the FLS-readable set so it can never expose a wider column set
+     than list (previously a masked column leaked its name as an empty column).
+  4. The bulk surfaces (`createMany`/`updateMany`/`deleteMany`, per-object
+     `/batch`, cross-object `/batch`) now require the `bulk` primitive AND the
+     child write (`bulk ∧ child`). The four in-repo explicit-whitelist objects
+     (`sys_user`, `sys_user_preference`, `sys_business_unit`,
+     `sys_business_unit_member`) gained `bulk`; a third-party object with an
+     explicit write whitelist that omits `bulk` will now 405 on the Many/batch
+     routes.
+  5. The 405 body's `allowed` array is now the derived EFFECTIVE operation set
+     (enum-ordered), not the raw whitelist.
+
+- d44dbfa: feat(spec)!: shrink the `ApiMethod` enum to the six primitives — legacy values are stripped at parse, never honored (#3543, P2 of #3391)
+
+  **BREAKING** (the `!` marker and this changeset are the breaking-change
+  record; the train ships as the v17 major — see the `v17-rc-anchor` changeset):
+  the authored `enable.apiMethods` enum is now exactly the six
+  primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`). The eight
+  legacy values (`upsert`, `aggregate`, `history`, `search`, `restore`, `purge`,
+  `import`, `export`) are no longer authorable — they are DERIVED effective
+  operations, resolved by the server's single derivation table.
+
+  **Migration (FROM → TO).** Replace each legacy value with the primitives it
+  derives from, then de-duplicate; if the result names all six primitives, delete
+  the `apiMethods` key entirely (equivalent to default-open, and it tracks future
+  primitives):
+
+  | FROM (legacy) | TO (primitives)      | why                                            |
+  | ------------- | -------------------- | ---------------------------------------------- |
+  | `upsert`      | `create`, `update`   | upsert ⊆ create ∧ update                       |
+  | `import`      | `create`, `update`   | import ⊆ create ∨ update (writeMode-precise)   |
+  | `export`      | `list`               | export ⊆ list                                  |
+  | `aggregate`   | `list`               | aggregate ⊆ list                               |
+  | `search`      | `list`               | search ⊆ list ∧ `searchable`                   |
+  | `history`     | `get`                | history ⊆ get ∧ `trackHistory`                 |
+  | `restore`     | _(delete the value)_ | never derives — `enable.trash` retired (#2377) |
+  | `purge`       | _(delete the value)_ | never derives — `enable.trash` retired (#2377) |
+
+  Reporter codemod: `node scripts/codemod/apimethods-legacy-to-primitives.mjs`
+  (scans, reports the exact replacement per site, and flags whitelists the
+  mapping would WIDEN so the edit stays reviewable).
+
+  **Stored metadata keeps parsing — permanent tolerance, narrowing only.** Real
+  metadata does not upgrade in lockstep with the spec, so a stored legacy value
+  is NOT a parse error: `stripLegacyApiMethods` (new export) strips it with a
+  FROM→TO warning (canonicalize-and-warn). Stripping only ever NARROWS exposure —
+  the derivation table still grants every legacy verb that derives from the
+  primitives you declared. Two cliffs to know:
+
+  1. A whitelist of ONLY legacy values (e.g. `['upsert']`) strips to `[]` =
+     **deny-all** — the object's API closes instead of widening. The strip
+     warning and the objectql registration diagnostic both call this out.
+  2. A legacy value NOT derivable from your declared primitives (e.g.
+     `['get', 'export']` — export needs `list`) was honored by the P1
+     "explicit wins" path and is now denied. Declare the underlying primitive.
+
+  **Type split — authored vs effective vocabulary.** `ApiMethod` (authored) is
+  now six values; the NEW `ApiOperation` type / `ApiOperationSchema` /
+  `API_OPERATION_ORDER` (fourteen values, byte-stable pre-shrink wire order)
+  carry the EFFECTIVE vocabulary. The wire contract is unchanged: the 405
+  `allowed` array and `/me/permissions` `apiOperations` still serialize derived
+  verbs (`export`, `search`, …), and `EffectiveObjectPermissionSchema.apiOperations`
+  now validates against `ApiOperationSchema`. `EffectiveApiMethods.explicitLegacy`
+  is removed (nothing is honored verbatim anymore); `API_METHOD_ORDER` remains as
+  a deprecated alias of `API_OPERATION_ORDER`.
+
+  **Fail-closed tightening (#3545):** a PRESENT but non-array `apiMethods` (only
+  producible by a raw/out-of-band metadata write) now resolves to `deny-all`
+  instead of unrestricted — a policy that exists but cannot be read fails CLOSED.
+
+  **Published JSON Schema diverges deliberately:** `data/ApiMethod.json` is the
+  strict six-value enum (a `z.preprocess` is not representable in JSON Schema),
+  so external JSON-Schema validators reject legacy values that the zod parse
+  would strip-and-warn. Treat the JSON Schema as the authored contract; the zod
+  tolerance exists for stored metadata.
+
+  **objectql:** the P1 "explicit wins" transition is reclaimed —
+  `warnDeprecatedExplicitApiMethods` is replaced by `warnStrippedLegacyApiMethods`
+  (a permanent per-object diagnostic for schemas that reach the registry without
+  passing through Zod; the parse-time strip warning carries no object name).
+
+  **platform-objects:** whitelist audit — `sys_business_unit`,
+  `sys_business_unit_member` (P1's explicit `import`/`export` reclaimed) and
+  `sys_user_preference` dropped their `apiMethods` entirely (each named all six
+  primitives = default-open). Read-only and deny-all whitelists are unchanged;
+  the seven `[]` declarations are deliberately KEPT as defense-in-depth alongside
+  `apiEnabled: false`.
+
+- b949059: fix(approvals): a dead approval run no longer leaves the record RECORD_LOCKED (#3456)
+
+  The record lock is keyed on a **pending** `sys_approval_request`, and it could
+  not tell _the run that owns that request_ from _an unrelated user editing the
+  record_. So a flow that touched its own target record while its own approval was
+  still pending — a manual `resume` with no decision, or a node that writes the
+  record between opening the approval and the decision — died on its own
+  `RECORD_LOCKED`, and the record stayed locked behind the dead run. Recovery
+  existed (#3424 lets an admin `recall`/`reject` to release it) but nothing made it
+  self-healing.
+
+  Both halves are now closed.
+
+  **Prevention — the owning run may write its own record.** The automation engine
+  stamps `flowRunId` onto the run context at setup, alongside `runAs`, and it
+  travels with every data node's ObjectQL context into `ctx.provenance`. The lock
+  hook exempts a write whose `flowRunId` matches the pending request's `flow_run_id`.
+  It is keyed on run identity rather than elevation on purpose: a `runAs:'user'`
+  run stays fully RLS-scoped while it writes. `flowRunId` is pure provenance —
+  server-constructed like `isSystem`, never client-supplied, evaluated by no
+  security middleware, and the only write it permits is to the one record its own
+  run already holds a pending request against.
+
+  **Recovery — a sweep releases records held by runs that died anyway.** A pending
+  request whose owning run has reached a terminal state (`completed`, `failed`,
+  `cancelled`, `timed_out`) can never be decided, so it is finalised as `recalled`
+  — releasing the lock — and audited under the reserved actor `system:dead-run`
+  with the run and its status in the comment, so it is never mistaken for a
+  submitter's withdrawal. It runs on the existing approvals sweep clock, which also
+  covers the case no in-band handler can: a run killed by a process crash.
+
+  The sweep is fail-safe by construction. It acts only on an explicit terminal
+  status from a closed set; `paused` (the normal state of a live approval),
+  `running`, an unrecognised status, an unknown run, a `getRun` that throws, and a
+  deployment with no automation engine are all read as "still alive". The failure
+  mode is "a dead run's lock survives until an admin recalls it" — today's
+  behaviour — never "a live approval is destroyed".
+
+  Also fixes `AutomationEngine.getRun`, which returned the **first** log entry for
+  a run id rather than the latest. A run that pauses and later finishes records two
+  entries under one id, so every suspend-then-finish run — every approval, screen
+  and wait flow — reported itself as `paused` forever, both on the Runs
+  observability surface and to this sweep.
+
+  One shape was left out here and closed separately in #3712: a `runAs:'user'` run
+  with no trigger user (a schedule) resolved no ObjectQL context at all, so it
+  carried no `flowRunId` and stayed subject to the lock. It now passes a
+  provenance-only context — the run id and nothing the security middleware keys on
+  — so it is attributable without acquiring a principal, and its documented
+  unscoped posture (#1888) is unchanged.
+
+- c5ff96d: fix(approvals): a schedule-triggered run can write its own locked record (#3712)
+
+  #3456 let the run that opened a pending approval write its own target record,
+  keyed on `flowRunId`. It worked for every run that resolves an identity and
+  missed the one that doesn't: an effective `runAs:'user'` run with **no trigger
+  user** — a schedule being the canonical case — passed no ObjectQL context at
+  all, so nothing carried the run id and the run still died on its own
+  `RECORD_LOCKED`.
+
+  The blocker was never the lock. It was that "no identity" and "no context" were
+  the same thing on the wire, so a run could not say _who it was_ without also
+  claiming _what it was allowed to do_.
+
+  **A run with no principal now passes provenance alone.**
+  `resolveRunDataContext` returns `{ flowRunId }` — no `userId`, no `positions`,
+  no `permissions`, not even `isSystem: false`. Every principal gate keys on one
+  of those fields (the elevation short-circuit on `isSystem`, the ADR-0103
+  engine-owned write guard and the ADR-0090 D12 delegated-admin gate on `userId`,
+  the empty-principal fall-open on all three), so this context authorizes
+  **identically to no context at all**. The run keeps the documented #1888
+  unscoped posture, its loud `[runAs]` warning, and the
+  `flow-schedule-runas-unscoped` build-time lint. Nothing about what it may touch
+  changed — only that it can now be attributed.
+
+  **Provenance moved out of the hook session, into `ctx.provenance`.** `session`
+  answers _who is calling_ and is absent when no identity envelope was supplied —
+  a distinction real gates depend on (the attachment access gate skips bare-kernel
+  writes on exactly that test). Folding a run id into `session` would have forced
+  an identity-less run to present an empty session, silently turning "no caller"
+  into "an anonymous caller" and narrowing the #1888 fail-open for attachments
+  alone. `HookContext.provenance.flowRunId` says what produced the write; the
+  approvals lock reads it there.
+
+  Also relaxes `BaseEngineOptionsSchema.context` to a partial envelope
+  (`ExecutionContextInput`). `positions`/`permissions`/`isSystem` carry parse-time
+  defaults, which made them _required_ on a caller-supplied option and asserted
+  something untrue — that every data-engine context carries a principal. Callers
+  have always passed slices (`{ isSystem: true }` for a system read); the type now
+  says so.
+
+  Migration: nothing to change unless you read the run id inside a hook. If you
+  wrote `ctx.session.flowRunId`, read `ctx.provenance.flowRunId` instead — the
+  field never shipped under the old name.
+
+- 87aca93: fix(datasource)!: a declared datasource that objects bind to must connect, or the boot fails (#3758)
+
+  `DatasourceConnectionService.handleFailure()` fail-fasted only for an `external`
+  datasource with `validation.onMismatch: 'fail'`. Everything else degraded to one
+  `warn` line — including the case the D2 auto-connect gate itself flags as having
+  **no fallback path**: a datasource that objects bind to explicitly via
+  `object.datasource`. Those objects never fall through to the `default` driver;
+  `engine.getDriver` throws `Datasource 'x' is not registered` for them.
+
+  So an app declaring `datasource: 'analytics'` with 20 objects bound to it, booted
+  against a wrong `ANALYTICS_URL`, started clean and exited zero — and then failed
+  every read and write of those 20 objects with an error that reads nothing like
+  _the analytics database is unreachable_. The rest of the app worked, which made it
+  **harder** to locate than a total outage: it looks like "some pages are broken",
+  not like a misconfigured datasource. This is the same decision #3741/#3751 fixed
+  one layer up in `ObjectQLEngine.init()`; the boundary here was still drawn in the
+  old place.
+
+  - **Fail-fast is now keyed on "no fallback path", not on `onMismatch` alone.** At
+    the `declared-auto` (boot) trigger, a connect failure aborts the boot when the
+    datasource is `external` + `onMismatch: 'fail'` **or** when ≥1 object binds to
+    it explicitly. `autoConnect: true` with nothing bound stays lenient — that is
+    "connect it if you can", and nothing declares a dependency on it. The
+    runtime-admin create/update and boot-rehydration triggers are unchanged and
+    still always degrade: a UI action must never brick a running server.
+  - **Every failure mode counts**, not just an unreachable socket: an unresolvable
+    `external.credentialsRef` (D3) and an unsupported `driver` leave the bound
+    objects exactly as dead, so they take the same verdict.
+  - **The error names the bound objects** (up to 10, then `+N more`) alongside the
+    underlying cause, so the message points at the real problem instead of just the
+    datasource name. The service already receives the list for post-connect
+    `syncObjectSchema`.
+  - **`connectDeclared()` attempts every gated datasource before throwing**, and
+    aggregates, so one failed boot reports all the misconfigured ones rather than
+    one per restart — the same shape as `ObjectQLEngine.init()`'s
+    `DriverConnectError`.
+  - **The escape hatch is shared with the engine guard**:
+    `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` now also covers this path (and covers
+    `onMismatch: 'fail'`, which previously had no opt-out). The operator intent is
+    identical — "I know the database is unreachable, boot anyway" — and two flags
+    would only guarantee one of them gets missed. When set, boot continues and a
+    `DEGRADED BOOT` banner goes to stderr as well as the logger, because `os serve`
+    swallows stdout during boot. `emitDegradedBootBanner` moved to
+    `@objectstack/types` so both call sites share one implementation;
+    `@objectstack/objectql` re-exports it unchanged.
+
+  ADR-0062 D5 is amended with the new criterion and the shared flag.
+
+  **Migration.** No change for a correctly configured deployment — a datasource that
+  connected before still connects. A deployment that was _silently_ booting with a
+  dead, explicitly-bound datasource now fails the boot instead, naming the
+  datasource, the cause, and the objects that depend on it; fix the datasource
+  configuration. To keep booting without it — deliberately, knowing every request
+  touching those objects will fail — set `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`.
+
+- 32d3800: fix(driver-sql): bound a connection attempt at 10s, and correct the "no reconnection" claim (#3769, #3759)
+
+  Two related corrections, both from measuring what #3741/#3751/#3765 had only asserted.
+
+  **The claim was wrong.** #3751 and #3765 shipped several statements that drivers
+  never reconnect — "there is no lazy reconnection", "NOT retried and NOT
+  reconnected", "stays disconnected for the process lifetime". Measured, both
+  drivers recover on their own:
+
+  - driver-mongodb: killing a real `mongod` and restarting it on the same port,
+    the _same_ driver instance served the next write successfully (13ms), with no
+    reconnect call from us — the official driver's topology monitor handles it.
+  - driver-sql: a knex/pg pool is not poisoned by an outage. Its error tracks live
+    server state (`ECONNREFUSED` while down → a handshake error once a listener is
+    back → `ECONNREFUSED` again), i.e. every acquire opens a fresh connection.
+    `storage-driver.ts` also configures `pool.min: 0`, so no stale idle
+    connections are held.
+
+  The original reasoning grepped this repo for `reconnect`, found nothing, and
+  concluded recovery does not happen — but the recovery lives in the client
+  libraries, not in our code. The claims are now corrected in `DriverConnectError`,
+  the `DEGRADED BOOT` banner, `resolveAllowDriverConnectFailure`'s docs, and the
+  drivers / self-hosting pages.
+
+  **Fail-fast at boot is unchanged and still correct** — the reason is just
+  different. It is not that the connection can never return; it is that the _boot
+  sequence_ never re-runs. A driver that missed `init()` also missed
+  `syncRegisteredSchemas()`, so its tables can simply not exist even after the
+  database comes back. The banner now says that.
+
+  **The real defect underneath.** `SqlDriver` passed its config to knex untouched,
+  so a database endpoint that accepts TCP but never completes the handshake — an
+  overloaded instance, a half-open firewall, a load balancer mid-failover — made
+  every query wait out tarn's 30s default, then fail with `Timeout acquiring a
+connection. The pool is probably full`, pointing an operator at pool sizing
+  instead of the network. With a small `pool.max` a few such queries saturate the
+  pool and everything else queues.
+
+  `SqlDriver` now defaults `pool.createTimeoutMillis` to **10s**, matching
+  driver-mongodb's existing `connectTimeoutMS ?? 10_000` so both drivers give up on
+  an unreachable server at the same point. A host that sets its own
+  `createTimeoutMillis` is left alone.
+
+  **Migration.** None for a healthy datasource. A deployment that deliberately
+  relies on connection establishment taking longer than 10s (a slow cross-region
+  replica) should set `pool.createTimeoutMillis` explicitly on its `SqlDriver`
+  config.
+
+  Not fixed here, tracked in #3769: knex still reports the bounded wait as "the
+  pool is probably full". An accurate message needs a dialect-specific connect
+  timeout (pg's `connectionTimeoutMillis`), which changes the shape of `connection`
+  and would regress the startup banner's URL display.
+
+- 0e3a226: fix(authz): widen the driver's native tenant scope to the membership union
+  under the `group` posture — ADR-0105 D2 finally reaches the wire (#3623)
+
+  The Layer 0 wall correctly compiled `organization_id IN accessible_org_ids`
+  under `group`, but the ObjectQL engine also propagated the active-org
+  `tenantId` into `DriverOptions` unconditionally, and the SQL driver's native
+  scoping ANDed `organization_id = tenantId` under the union — collapsing every
+  group read back to active-org (isolated) reach. Found by the cloud-side
+  `ee-group-showcase` dogfood (cloud#880), the first end-to-end boot of `group`
+  against a real driver.
+
+  - `DriverOptions.tenantIds` (spec): the union tenant access set. Drivers with
+    native scoping widen reads/updates/deletes/aggregates to `IN (...)`,
+    keeping the NULL-tenant global-row carve-out; inserts still stamp from
+    `tenantId` (the active organization is the write target, D5). Absent or
+    empty ⇒ equality fallback — fail toward isolation, never toward exposure.
+  - ObjectQL engine threads `ExecutionContext.accessible_org_ids` as
+    `tenantIds` when the tenancy posture is `group`, reported by a new
+    `setTenancyPostureProvider` seam.
+  - SecurityPlugin wires that provider at start — deliberately from the
+    enforcement layer, so the driver wall only widens while the Layer 0 union
+    wall enforces above it. Embeddings without plugin-security keep active-org
+    equality.
+
+- 81ce41a: feat(rest): `treatAsHistorical` import also preserves the original audit timeline (#3493)
+
+  Follow-up to #3479/#3483. `treatAsHistorical` solved the FSM half — mid-lifecycle
+  rows are no longer rejected by `initialStates` — but the OTHER half of a historical
+  migration, preserving the original timeline, still didn't hold: an imported ticket
+  that closed in 2021 stored `updated_at` = the import day (and `updated_by` = the
+  importer), and a `writeMode: 'upsert'` refresh silently dropped business `readonly`
+  fields (`closed_at`, `resolved_by`). Reports, audit, and "recently modified"
+  sorting all came out wrong.
+
+  Three layers were force-overwriting the timeline; all three now respect a single
+  new opt-in flag, `ExecutionContext.preserveAudit`, which `treatAsHistorical` sets
+  alongside `skipStateMachine`:
+
+  - **spec**: `ExecutionContext.preserveAudit` (server-set only, never client-supplied)
+    and `DriverOptions.preserveAudit` (threaded to the driver's update stamp).
+  - **objectql** — the built-in audit hook (`plugin.ts`) now treats `updated_at` /
+    `updated_by` as CLIENT-PREFERRED (`?? now` / `?? userId`) under `preserveAudit`,
+    symmetric with how `created_at` / `created_by` already behave on insert; and the
+    static-`readonly` write strip (`stripReadonlyFields`) admits a WHITELIST — the
+    audit/timestamp family plus author-declared business `readonly` fields — so an
+    upsert refresh no longer drops them.
+  - **driver-sql** — the SQL `update` path keeps a supplied `updated_at` instead of
+    force-advancing it to `now` when `DriverOptions.preserveAudit` is set (fills-only-
+    empty, mirroring the insert stamp).
+  - **rest** — the import runner sets `preserveAudit` on the write context iff the
+    request opts into `treatAsHistorical`.
+
+  Deliberately a WHITELIST, not the blanket `isSystem` exemption: platform-managed
+  `system` columns OUTSIDE the audit family (`organization_id` / tenancy, generated
+  columns) STAY stripped, so a historical import reinstates established facts without
+  becoming a backdoor to forge tenancy. Permissions / RLS / field-level security are
+  unaffected — this changes only which audit/readonly values the runtime overwrites,
+  never who may write the record. Fully opt-in: a normal write still auto-stamps
+  `updated_at`/`updated_by` and strips `readonly` exactly as before. The objectui
+  "Import as historical data" checkbox (objectui#2815) now drives both halves — no new
+  UI.
+
+- 85e1e4e: feat(rest): `treatAsHistorical` import option — skip the state machine for historical-data migration (#3479)
+
+  Sibling of #3433 (seed exemption), one entry point over. #3165's `initialStates` enforced
+  the FSM entry point on every INSERT, so importing established historical facts —
+  a batch of already-`closed` tickets, `closed_won` deals, `completed` projects —
+  was rejected row-by-row with `invalid_initial_state`, blocking the core
+  data-migration path. Unlike the seed case it was visible (per-row errors), but it
+  still functionally blocked a legitimate use.
+
+  - **spec**: `ExecutionContext.skipStateMachine` — a general, server-set flag (the
+    seed-specific `seedReplay`'s sibling) that skips the `state_machine` rule for a
+    write; `ImportRequestSchema.treatAsHistorical` (default `false`) — the user-facing
+    import option.
+  - **objectql**: the engine now skips the state machine for `seedReplay` OR
+    `skipStateMachine` (one helper), covering both seed replay and historical import.
+  - **rest**: the import runner sets `skipStateMachine` on the write context iff the
+    request opts into `treatAsHistorical`; default off, so a normal import still walks
+    the FSM (the strict behavior is the default). Import **undo** now also carries
+    `skipStateMachine`, since restoring a prior snapshot re-writes an earlier state
+    that need not be a legal transition from where the row is now.
+  - **platform-objects**: `sys_import_job.treat_as_historical` audit column (additive).
+
+  Scope is identical to the seed exemption: ONLY the `state_machine` rule is skipped;
+  field shape, `format`, `cross_field`, `script` all still run. The objectui import
+  wizard checkbox is a separate follow-up.
+
+- e1fa8d5: fix(objectql): arm the late-manifest metadata bridge on project kernels too
+
+  The per-manifest bridge added for marketplace installs (#3428) armed itself
+  inside the same `environmentId === undefined` gate as the one-shot startup
+  bridge — but `os dev` boots the kernel project-scoped (environmentId
+  'env_local'), which is marketplace install-local's primary home, so the fix
+  was inert exactly where it matters. Caught by browser-dogfooding the install
+  flow.
+
+  The gate is correct for the one-shot bridge (it copies the entire
+  process-wide SchemaRegistry, which would leak sibling-project objects on
+  multi-environment servers) but does not apply to the per-manifest bridge: it
+  only copies the objects of the one package this kernel just registered.
+  Arming now happens unconditionally at the end of `start()`; boot-time
+  behavior on every kernel shape is unchanged (the flag still flips only after
+  the startup path has run), and the one-shot bridge keeps its gate.
+
+- 402f534: fix(objectql): bridge late-registered manifest objects into the metadata service
+
+  Marketplace-installed template packages register through the `manifest`
+  service on `kernel:ready` (install) or later (HTTP install), but the one-shot
+  SchemaRegistry→metadata bridge runs once during `ObjectQLPlugin.start()` —
+  so their objects only ever reached the ObjectQL registry. Every
+  IMetadataService consumer (AI `describe_object`, Studio object lists,
+  `metadata.listObjects`) missed them; only the seed loader had grown an
+  engine-side fallback (#3422).
+
+  The manifest service's `register` now bridges the manifest's own objects into
+  the metadata service after registering them with the engine, resolving the
+  service at call time and mirroring the startup bridge's contract:
+  `register('object', name, obj, { notify: false })` (#3112), skip entries it
+  did not bridge itself, refresh its own copy on same-package re-install (hot
+  upgrade). Armed only after `start()` has run the one-shot bridge, and never
+  on project kernels — boot-time behavior is unchanged. `register` now returns
+  a promise; the marketplace install/rehydrate paths await it so metadata reads
+  right after an install are deterministic.
+
+- 0c302a7: Exempt curated seed writes from `state_machine` validation (#3433).
+
+  A seed is a snapshot of established facts — a project already `completed`, an
+  opportunity already `closed_won` — not a record walking its lifecycle. But once
+  an object declared `state_machine.initialStates` (#3165), the write path enforced
+  the FSM entry point on **every** insert, so seed replay silently rejected every
+  mid-lifecycle row and cascaded its master-detail children. That is the "installed
+  but no data" failure for the showcase board (1 of 5 projects), and it would hit
+  every marketplace template (a `closed_won` opportunity, a `closed` case) plus the
+  rehydrate-heal and per-org replay paths.
+
+  `SeedLoaderService` now marks its writes with a server-set `ExecutionContext.seedReplay`
+  flag; the engine passes `skipStateMachine` to the rule evaluator for those writes,
+  which skips the `state_machine` rule on both insert (`initialStates`) and update
+  (transitions). The exemption is scoped to `state_machine` only — a seed must still
+  satisfy every other validation (`format`, `cross_field`, `script`, `json_schema`,
+  `conditional`). Because all seed paths funnel through `SeedLoaderService.SEED_OPTIONS`,
+  the fix covers boot inline seed, marketplace install/heal, and per-org replay at once.
+
+  The showcase project seed drops its three-phase FSM-walk workaround (#3415) and
+  seeds each project directly at its real status again.
+
+- 5f0852f: fix(driver-sql): bucket a SQLite `Field.datetime` by its stored instant instead of collapsing every row into one `(null)` (#3773)
+
+  On SQLite, any trend chart bucketed by day/week/month/year over a
+  `Field.datetime` column put **every record in a single `(null)` bucket** — one
+  bar, carrying the whole total. The measure was right; only the bucket key was
+  wrong. `Field.date` (ISO TEXT storage) was unaffected, so the same dashboard
+  could show one column working and the next one flat.
+
+  better-sqlite3 stores a `Field.datetime` as INTEGER epoch **milliseconds** (knex
+  binds a JS `Date` as `.getTime()`), and `buildDateBucketExpr` emitted a flat
+  `strftime('%Y-%m', col)`. SQLite reads a bare integer as a **Julian day
+  number**; an epoch-ms value is far outside the legal range, so `strftime`
+  returned NULL for every row. Nothing downstream noticed: SQLite advertises
+  `queryDateGranularity.month`, so `engine.aggregate` pushes the bucketing down,
+  and its in-memory fallback only engages for an _unsupported_ granularity or a
+  non-UTC timezone.
+
+  The SQLite expression is now storage-aware, sharing one `isEpochStoredDatetime`
+  predicate with the filter-comparand coercion added for the same root cause in
+  \#2034 — a window and a bucket that disagree about storage is exactly how an
+  epoch column ended up correctly filtered and then entirely bucketed as NULL.
+  Postgres and MySQL are untouched: `defineColumn` maps `Field.datetime` to a
+  native timestamp there, which is also why their comparands are left alone.
+
+  Two details are load-bearing and pinned by tests:
+
+  - The conversion dispatches on each **stored value's** type, not just the
+    declared one. A SQLite `Field.datetime` column is genuinely mixed-form —
+    `formatInput` passes datetime values through, so a `Date` lands as INTEGER
+    while an ISO string (including an unresolved `defaultValue: 'NOW()'`) lands as
+    TEXT. Dividing TEXT by 1000 coerces it to its leading year, filing live rows
+    under 1970 — worse than the NULL it replaced.
+  - Division is `/1000.0`, not `/1000`. Integer division truncates toward zero, so
+    a pre-1970 instant (`-1` ms) would surface as 1970-01-01.
+
+  `bucketDateValue` (the in-memory fallback in `@objectstack/objectql`) now reads a
+  finite **number** as epoch milliseconds. `new Date(String(1767225600000))` is an
+  Invalid Date, so a driver handing back raw storage values bucketed as `'(null)'`
+  there while the pushed-down SQL bucketed correctly — fixing only the driver would
+  have traded one wrong answer for two different ones, and the two paths have to
+  label the same instant identically for a drill-down to survive crossing them.
+
+  `SqliteWasmDriver` inherits `buildDateBucketExpr`, so it carried the bug and gets
+  the fix.
+
+- cde1975: fix(dev): eliminate three fixed startup log warnings so official examples boot clean (#3420)
+
+  `os dev` on the stock showcase printed three fixed noise sources on every boot,
+  with zero example-side changes — training users to ignore warnings.
+
+  - **spec** — add a field-level `ackPlaintextMasking: true` opt-out for the
+    generic `password` author-time warning (ADR-0100). A deliberately-masked
+    field (like field-zoo's `f_password`) can now affirm intent instead of
+    printing an un-actionable "safe to ignore" on every boot; the warning text
+    points authors at the flag.
+  - **plugin-auth** — pass better-auth's documented
+    `silenceWarnings.oauthAuthServerConfig` to `oauthProvider(...)`. We already
+    mount the `/.well-known/oauth-authorization-server` documents ourselves at
+    the issuer root, so the plugin's "please ensure it exists" reminder was a
+    false positive (printed twice); silencing it removes both.
+  - **objectql** — route the Registry's re-register / package-overwrite lines
+    (normal rebuild / HMR / seed-replay paths) through a new debug-only
+    `SchemaRegistry.debug()` so they stay out of the default `info` boot log. Adds
+    a `logLevel` construction option (and matching `OS_REGISTRY_LOG` env var) so
+    the debug-gated housekeeping is discoverable for troubleshooting.
+
+- 54f479a: fix(objectql): accept relative and inline URLs on `url` fields
+
+  The record-validator's `url`-type check required an absolute `scheme://` URL,
+  so it rejected the **root-relative** value the platform's own storage service
+  returns for an uploaded file. The console avatar uploader
+  (`createObjectStackUploadAdapter`) PUTs the image to storage and then writes
+  `sys_user.image` (a `Field.url`) = `/api/v1/storage/files/<id>`; that failed
+  `invalid_url` and — on the better-auth `update-user` path — surfaced as a
+  failed profile save (the "上传用户头像报错" avatar-upload bug).
+
+  `URL_RE` now also accepts root-/protocol-relative refs (`/path`, `//host/path`)
+  and the `data:` / `blob:` inline forms, in addition to `scheme://…`. A bare
+  scheme-less string with no leading `/` (e.g. `"notaurl"`) is still rejected.
+  Verified end-to-end in the running Console: avatar upload → display → replace →
+  remove all succeed.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [840ee4b]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [3949a43]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [db48ad5]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [4c5a584]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [20cb232]
+- Updated dependencies [e231abb]
+- Updated dependencies [0bc685a]
+- Updated dependencies [c073b8c]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+  - @objectstack/metadata-protocol@17.0.0-rc.0
+  - @objectstack/formula@17.0.0-rc.0
+  - @objectstack/metadata-core@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

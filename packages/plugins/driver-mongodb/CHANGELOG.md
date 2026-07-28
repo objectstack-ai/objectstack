@@ -1,5 +1,296 @@
 # @objectstack/driver-mongodb
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- d1557d9: feat(driver-mongodb)!: declare the driver single-tenant and refuse to boot multi-tenant (#3724)
+
+  `MongoDBDriver` implements **no row-level tenant isolation** — it never reads
+  `DriverOptions.tenantId`, so reads carry no tenant predicate and writes are not
+  stamped with a tenant column. The layer the SQL driver has (`resolveTenantField`
+
+  - `applyTenantScope`) simply does not exist here, while everything above the
+    driver — object metadata's `tenancy` block, `applySystemFields` injecting
+    `organization_id`, the engine threading `tenantId` into every driver call —
+    operates on the assumption that tenant isolation is a platform guarantee. Point
+    a multi-tenant deployment's datasource at Mongo and every query read, updated
+    and deleted other tenants' documents, silently.
+
+  Rather than serve unisolated, the driver now fails fast at startup:
+
+  - The **constructor** and `connect()` call `assertSingleTenantPosture()`, which
+    refuses any tenancy posture other than `single` (`OS_TENANCY_POSTURE=group` /
+    `isolated`, including the posture derived from `OS_MULTI_ORG_ENABLED=true`),
+    resolved through the shared `resolveTenancyPosture()` so the driver can never
+    disagree with auth / the registry / the CLI about the mode. The check sits in
+    the constructor because that is the earliest seam — it fails before a host can
+    hand the driver anywhere — and `connect()` re-checks in case a host flips the
+    posture in between. (It originally had to live in the constructor because
+    `ObjectQLEngine.init()` _caught_ a driver's connect rejection and booted
+    anyway; that is fixed in the same release, #3741, so both seams abort boot.)
+  - `syncSchema()` / `syncSchemasBatch()` call `assertObjectsNotTenantScoped()` and
+    refuse objects declaring `tenancy.enabled: true`, naming every offender in one
+    message.
+  - `objectstack serve` / `dev` (CLI) now re-throw this error out of the
+    auto-driver-registration block instead of swallowing it, so boot exits 1 with
+    the actionable message — the same treatment `UnsupportedDriverError` already
+    gets. Matched duck-typed by `code`, so the CLI takes no dependency on the
+    driver package.
+
+  Both throw `MongoDBMultiTenantUnsupportedError` with
+  `code === 'MONGODB_MULTI_TENANT_UNSUPPORTED'`, a message that names the detected
+  signal, the remedy, and `@objectstack/driver-sql` as the multi-tenant option.
+
+  There is deliberately **no override env var**: an escape hatch would restore
+  exactly the silent non-isolation this guard removes. Single-tenant deployments —
+  every currently-working Mongo deployment — are unaffected.
+
+  This is option B of #3724. Implementing real row-level isolation (option A)
+  remains open; the `unique` index shape stays single-field until then, which is
+  now correct by construction rather than by omission.
+
+- b90086a: fix(driver-sql)!: `unique` materializes per tenant, ending its contradiction with the per-tenant autonumber sequence (#3696)
+
+  `unique: true` became a **single-column global index that ignored `tenancy`
+  entirely**, while the autonumber sequence table is keyed by
+  `(object, tenant_id, field, scope)` and hands every tenant its own counter
+  starting at 1. Two subsystems of the same platform contradicted each other:
+  tenant B's `PROD-00001` was rejected by an index it could not see — **no user
+  did anything wrong**, the platform's left hand refused what its right hand
+  issued.
+
+  The rejection also doubled as a **cross-tenant existence oracle**: a UNIQUE
+  violation told tenant B that some _other_ tenant held the value, enumerable by
+  probing emails / codes / names.
+
+  **The contract now:**
+
+  | Declaration                      | Materializes as                                                 |
+  | -------------------------------- | --------------------------------------------------------------- |
+  | `unique: true` + tenant column   | composite `(tenantField, field)` — unique **within** the tenant |
+  | `unique: true`, no tenant column | single-column — single-tenant DDL is byte-identical to before   |
+  | `unique: 'global'`               | single-column, always platform-wide                             |
+
+  The tenant column comes first in the composite, so the index also serves the
+  `WHERE tenant = ?` prefix scans every tenant-scoped read issues.
+
+  **Declared `indexes[]` are deliberately unchanged.** They are materialized over
+  exactly the columns listed — no tenant column is injected. The author already
+  spells them out, per-tenant ones have always been written explicitly
+  (`fields: ['organization_id', 'code']`), and many are legitimately platform-wide
+  (a DNS hostname, a reserved slug, an external provider id). `'global'` is
+  accepted there as a synonym of `true` so one vocabulary covers both spellings.
+
+  **Migration is automatic and cannot fail.** Legacy indexes
+  (`<table>_<col>_unique` from knex, `uniq_<table>_<col>` from the drift-rebuild
+  path) are retired inline at schema-sync time. The old global constraint is
+  strictly stronger than the new per-tenant one, so existing rows satisfy the
+  replacement by construction — no dedup, no cleanup, no data touched. It
+  converges at sync rather than waiting for a deliberate `os migrate` run because
+  a deployment that never ran migrate would otherwise stay broken.
+
+  **Upgrading — audit your `unique: true` fields.** On a tenant-scoped object the
+  constraint is now per tenant. Anything that must stay platform-wide has to say
+  so:
+
+  ```ts
+  hostname: Field.text({ unique: "global" }); // no two tenants may claim it
+  ```
+
+  Note the reach: `applySystemFields` injects `organization_id` into every
+  registered object unless it opts out, and the driver falls back to that column
+  when no `tenancy.tenantField` is declared — so most objects are tenant-scoped.
+  Typical candidates for `'global'`: DNS hostnames, reserved slugs, external
+  provider ids (Stripe customer/subscription), device identities.
+
+  Postgres materializes `col.unique()` as a table CONSTRAINT rather than a bare
+  index, so the retirement tries `DROP CONSTRAINT` before `DROP INDEX` —
+  `DROP INDEX` alone would have made the migration a no-op on exactly the
+  deployments that matter most.
+
+  `@objectstack/driver-mongodb` accepts the new declaration but keeps single-field
+  indexes: it implements no row-level tenancy at all (no tenant predicate on read,
+  no tenant stamp on write), so a `(tenant, field)` index would advertise an
+  isolation it does not deliver. Tracked separately.
+
+### Patch Changes
+
+- 030125b: feat(objectql)!: `init()` refuses to boot when a data driver fails to connect (#3741)
+
+  `ObjectQLEngine.init()` wrapped every driver's `connect()` in a try/catch, logged
+  one error line, and carried on. A server whose database was unreachable therefore
+  "started successfully" — health endpoints could even stay green — and then failed
+  every request with an error that reads nothing like _the database is down_. The
+  warning it printed (`Operations may recover via lazy reconnection or fail at query
+time`) was half fiction: grep the repo and no reconnection exists in `driver-sql`
+  or `driver-mongodb`, so only the "fail at query time" half was ever real. The
+  caller made it worse — `ObjectQLPlugin.start()` runs `syncRegisteredSchemas()`
+  immediately after `init()`, issuing DDL against a driver that isn't there.
+
+  The structural half of the bug was worse than the operational one: the catch
+  removed a driver's ability to **refuse startup at all**. Any fatal startup check —
+  licence, server version, incompatible configuration, missing capability, not just
+  an unreachable socket — is expressed by throwing from `connect()`, and every one
+  of them was silently downgraded to a runtime error. That is why driver-mongodb's
+  multi-tenancy guard (#3724 / #3734) had to be hoisted into its constructor.
+
+  - `init()` now **throws** `DriverConnectError` (`code: 'ERR_DRIVER_CONNECT'`)
+    when any boot-registered driver's `connect()` rejects, aborting kernel
+    bootstrap. It still attempts every driver first, so one failed boot names all
+    of them. The message is self-contained — each failed driver and its cause —
+    because the CLI prints `error.message` alone; the first cause is also attached
+    as `error.cause`. Exported from both `@objectstack/objectql` and
+    `@objectstack/objectql/core`.
+  - `connect()` is now a supported place for a driver to veto boot. Startup
+    validation that needs a live connection (server version, capability probes)
+    no longer has to be forced into a constructor.
+  - The misleading "lazy reconnection" warning is gone.
+  - New escape hatch `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`
+    (`resolveAllowDriverConnectFailure()` in `@objectstack/types`) restores the old
+    lenient boot, but loudly: a `DEGRADED BOOT` banner names the failed drivers and
+    states that they are never retried or reconnected and that every query and
+    schema sync routed to them will fail for the process lifetime. The banner goes
+    to stderr as well as the logger, because `os serve` swallows all of stdout
+    during boot and `Logger` routes `warn` there — logger-only, the one message
+    that matters would be invisible in exactly the deployment the flag is for.
+    Defaults off.
+
+  **Migration.** No code or config change is needed for a correctly configured
+  deployment — a driver that connected before still connects. A deployment that was
+  _silently_ booting without its database now fails the boot instead, with the
+  driver name and cause in the error; fix the datasource configuration (typically
+  `OS_DATABASE_URL`, credentials, or network reachability). To keep booting without
+  it — deliberately, and knowing every request that touches it will fail — set
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [840ee4b]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

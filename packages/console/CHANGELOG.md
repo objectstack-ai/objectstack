@@ -1,5 +1,113 @@
 # @objectstack/console
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 8607a55: Console (objectui) refreshed to `1bb77aa24514`. Frontend changes in this range:
+
+  - fix(flow-runner): honor a screen field's `visibleWhen` — render and validation (framework#3528) (#2899)
+  - fix(i18n): unconditional Chinese in the chatbot confirm card and field inspector (#2884, #2885) (#2900)
+  - fix(actions): one precedence for `target`/`execute`, and stop mislabeling server-side `body` (#2896) (#2895)
+  - fix(i18n): close the last three zh-branch gaps (#2871, part 3) (#2898)
+  - feat(grid): compute all eleven spec column summary aggregations (#2890)
+  - feat(console): make `delegated_admin` reachable and narrow both role pickers (framework#3697) (#2891)
+  - fix(app-shell): localize the two DeclaredActionsBar strings that bypassed i18n (#2762 P0-3) (#2894)
+  - fix(i18n): delete the four `pick({en,zh})` clones (#2871, part 2) (#2893)
+  - fix(views): the five per-view-type configs speak the spec vocabulary (#2231 phase 3) (#2892)
+  - feat(grid): gate list row Edit/Delete and bulk delete on the effective operation set (objectstack#3720) (#2889)
+  - feat(charts): honor `ChartAxis.stepSize`, `ChartConfig.description` and `.height` (framework#3752) (#2888)
+  - fix(i18n): retire four hand-rolled zh/en branches (#2871, part 1) (#2887)
+  - feat(charts): ObjectChart honors the spec `ChartConfig` author shape (#2880) (#2883)
+  - fix(hooks): stop calling translation hooks inside try/catch (#2879) (#2881)
+  - fix(charts): a fieldless `count` aggregate keyed its value column `undefined` (framework#3701) (#2878)
+  - fix(i18n): make `en` the complete source of truth for grid import and set-password (#2872 b/c) (#2877)
+  - fix(auth): localize the ADR-0069 remediation gate and the auth split-panel (#2870) (#2875)
+  - fix(metadata-admin): drop the SkillPreview "Required Permissions" panel (framework#3686) (#2874)
+  - feat(console): scoped-invitation placement — invite straight into a unit and positions (framework ADR-0105 D8) (#2868)
+  - fix(attachments): read the storage service's new error envelope so gated downloads keep their friendly copy (objectstack#3675) (#2869)
+  - fix(fls): wire real per-caller FLS into import targets and grid columns, drop dead field.permissions shape (objectstack#3661) (#2866)
+  - fix(page,field): consume the spec's type/label/maxLength keys (framework#1878 §3 recheck) (#2867)
+  - fix(cloud-connection): localize the Cloud Connection panel (objectstack#3589 follow-up) (#2865)
+  - fix(dashboard,charts): send widget query options to the server, order funnel stages by the pipeline (#2864)
+  - fix(action): honor the spec disabled predicate on every action-rendering surface (#1885 follow-through) (#2863)
+
+  objectui range: `09c6a177bb4a...1bb77aa24514`
+
+- b96c11b: Console (objectui) refreshed to `2cb8d78e24ad`. Frontend changes in this range:
+
+  - fix(console): dispatch flow actions from every surface + cover the screen-flow round trip (framework#3528) (#2833)
+  - feat(approvals): typed output pickers, quick-path guard, expression completion (framework#3447, #2829) (#2831)
+  - fix(console): make a paused screen flow completable, and stop the runner from tearing down its host (framework#3528) (#2830)
+  - feat(fields): adopt the file-as-reference value shape — ObjectStack ADR-0104 D3 wave 2 (PR-7) (#2828)
+  - fix(console): resolve a modal action's `target` as a page, not an object (#3530) (#2826)
+  - feat(approvals): dynamic decision-output fields + expression approver editing (framework#3447 P2) (#2827)
+  - feat: render the server's effective API operation set (#3391 PR-4) (#2823)
+  - fix(console): approval timeline attachment chip shows its name and opens (#2820) (#2821)
+  - fix(i18n): localize FileField upload widget + approvals snapshot field labels (#2819)
+  - feat(report)!: drop SpecReportColumn/SpecReportGrouping re-exports + retire the legacy ReportViewer chart fallback (#3463) (#2816)
+  - feat(plugin-grid): "Import as historical data" option in the Import Wizard (framework #3479) (#2815)
+  - feat(app-shell): toast when a save silently dropped read-only fields (framework #3431/#3455) (#2814)
+  - fix(app-shell): remove never-firing `record-change` option from the flow trigger picker (#3427) (#2812)
+  - fix(form): scroll+focus the first errored field on invalid submit (#2793) (#2813)
+  - feat(approvals): label pending-approver chips with their group (objectui#2807) (#2811)
+  - feat(approvals): label pending-approver chips with their group (objectui#2807) (#2811)
+  - fix(approvals): surface the admin override for a stuck request in the inbox (#3424) (#2810)
+  - feat(studio): first-class notify flow node in the Studio palette + inspector (#2808)
+  - feat(app-shell): Studio flow start node offers a "Record created or updated" trigger (#3427) (#2809)
+  - fix: read spec-canonical keys for dashboard header title and field length rules (#2806)
+  - fix(kanban): surface off-column records in an Uncategorized lane (#2792) (#2804)
+  - fix(approvals): Approval Center density + amount emphasis (#2762 P2) (#2805)
+  - fix(i18n): 补齐记录详情审批按钮与弹窗的国际化文案 (#2791)
+  - fix(approvals): Approval Center triage + drawer readability pass (#2762 P1-2/3/4/5, P2) (#2803)
+  - feat(app-shell): surface step warnings in the Flow Runs panel (#3407) (#2802)
+  - feat(studio): surface the enable.searchable toggle in ObjectSettingsPanel (#2800) (#2801)
+  - feat(app-shell): localize the automations flow designer & inspector (en-US + zh-CN) (#2796)
+  - feat(form): consume spec-aligned FormView buttons/defaults in ObjectForm (#2790)
+  - fix(approvals): Approval Center UX pass — badge nowrap, approve confirm, progress bar, localized declared actions (#2762) (#2789)
+  - feat(app-shell): group/coalesce repeat notifications in the message center (#2765) (#2788)
+  - fix(app-shell): 首页与消息中心的未国际化文案 (#2787)
+  - fix(app-shell): give inline `lookup` action params a real record picker (#3405) (#2786)
+  - fix(app-shell): map raw sys_activity rows in the inbox Activity tab (#2781) (#2782)
+  - fix(app-shell): i18n the "Switch Object" breadcrumb dropdown label (#2783)
+  - fix(data-table): keep right-pinned action column header sticky on horizontal scroll (#2785)
+  - fix(app-shell): keep list-origin back link when switching detail tabs (#2775)
+
+  objectui range: `cf2d56e32a11...2cb8d78e24ad`
+
+- d69918d: Console (objectui) refreshed to `4a4829d0ef39`. Frontend changes in this range:
+
+  - fix(fields): emit the spec's `$notContains`, and keep `secret` out of inline edit (#2901) (#2940)
+  - fix(detail): distinguish "in approval (editable)" from locked, and stop losing write warnings (#2914)
+  - fix(types): zod example teaches the Zod 4 `.issues` accessor, and `examples/` is type-checked (#2919) (#2939)
+  - fix(plugin-grid,plugin-form,cli,+2): type-check the last five unchecked packages, and fix the two runtime bugs hiding there (#2919) (#2936)
+  - fix(views): ListView reads the spec-canonical `filter` (#2890) (#2935)
+  - fix(console,runner): render the approvals inbox against one ticking clock, and lint both packages (#2927) (#2930)
+  - feat(lint): run ESLint on PRs, and cover every package (#2923) (#2928)
+  - feat(setup): the datasource list shows the real connect verdict, with the operator-facing reason (framework#3827) (#2926)
+  - fix(fields,core,detail): make the sharing-rule dialog usable — i18n, a picker that lists people, and permission-aware CTAs (#2920)
+  - fix(detail): the approval band honors the node's `lockRecord` instead of assuming every approval locks (#2902) (#2906)
+  - fix(console): the API console lists the whole AI family, and the tool preview stops linking to a 404 (framework#3718) (#2925)
+  - fix(runner): type-check the package at all, fix the hidden DataSource violation (#2917) (#2922)
+  - fix(console): the API console's AI group lists the routes that exist (framework#3718) (#2921)
+  - fix(plugin-map): drop the `maplibre-gl@6` default import + gate type-check in CI (#2911) (#2915)
+  - fix(i18n): compose the AI-model diagnostics summary client-side (#2886) (#2912)
+  - fix(flow-designer): read approver value sources off the schema instead of mirroring them (framework#3508 follow-up) (#2910)
+  - feat(i18n): complete the locale backfill — all ten packs reach full key parity (#2872) (#2909)
+  - fix(list): show real match total in record-count bar under server pagination (#2873)
+  - fix(i18n): the change card's Confirm button sent text the cloud gate rejects, + parity ratchet (#2905)
+  - feat(i18n): translate the four highest-traffic namespaces into the eight trailing locales (#2872 part a) (#2903)
+
+  objectui range: `1bb77aa24514...4a4829d0ef39`
+
+### Patch Changes
+
+- 6ba3788: Console (objectui) refreshed to `09c6a177bb4a`. Frontend changes in this range:
+
+  - fix(grid): localize import result errors (objectstack#3566) (#2861)
+
+  objectui range: `c6cfdf1288b6...09c6a177bb4a`
+
 ## 16.1.0
 
 ### Minor Changes

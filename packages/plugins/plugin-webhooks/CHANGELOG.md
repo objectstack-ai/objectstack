@@ -1,5 +1,252 @@
 # @objectstack/plugin-webhooks
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 69f1dfd: fix(webhooks): materialize stack-declared webhooks into the dispatcher (#3461)
+
+  A webhook authored declaratively — `defineStack({ webhooks })` / `defineWebhook()`,
+  validated against the spec `WebhookSchema` — was a **silent no-op**. The runtime
+  dispatcher (`AutoEnqueuer`) fans out off `sys_webhook` DATA rows (`object_name` /
+  `active`), which until now were only ever written by hand through the object's
+  CRUD UI. Nothing turned a declared webhook (`object` / `isActive`) into a
+  dispatchable row, so authoring `webhooks:` on a stack produced `webhook` metadata
+  that never fired (ADR-0078). The showcase app itself shipped a `webhooks:` entry
+  that did nothing.
+
+  `@objectstack/plugin-webhooks` now bridges the two on boot:
+
+  - **`bootstrapDeclaredWebhooks`** reads declared `webhook` metadata from the
+    ObjectQL registry (where the manifest decomposition already parks
+    `stack.webhooks`), validates each through `WebhookSchema.parse()` — the spec
+    schema finally has a real consumer — and materializes it into a `sys_webhook`
+    row, mapping `object → object_name`, `isActive → active`, and stashing the full
+    envelope (headers / secret / retry / timeout) in `definition_json`. The
+    auto-enqueuer's first cache refresh then picks the row up and dispatches it.
+  - **Seed-not-clobber provenance** (mirrors `sys_sharing_rule`, #2909): `sys_webhook`
+    gains `managed_by` / `customized` columns. Declared webhooks re-seed every boot
+    as `managed_by: 'package'`, but a row an admin created (`managed_by: 'admin'`) or
+    edited in Setup (`customized: true`, stamped by a `beforeUpdate` hook) is never
+    overwritten — a deactivated noisy webhook survives redeploys.
+
+  Connector-declared `webhooks` remain not-yet-enforced (that is a separate seam,
+  #3197). Registering `webhook` as a first-class metadata type + enrolling it in the
+  liveness `GOVERNED` set is a tracked follow-up.
+
+  Migration: none required. Existing hand-authored `sys_webhook` rows default to
+  `managed_by: 'admin'` and are never touched by the seeder. Anyone who authored
+  `webhooks:` on a stack expecting it to fire will find it now does — review those
+  declarations (especially `url` / `isActive`) before upgrading.
+
+### Patch Changes
+
+- aff9e56: fix(i18n): translate the platform packages' declared surface, and gate all nine bundles instead of one (#3762)
+
+  Only `platform-objects` was wired into a translation-drift check. The other
+  **eight** packages shipped a `scripts/i18n-extract.config.ts` that nothing ever
+  ran — and four of them had already drifted out of sync with the schema, exactly
+  the rot `pnpm check:i18n` exists to catch, one directory over.
+
+  **Translated.** `plugin-security` (45 strings per locale), `plugin-webhooks`
+  (15), `plugin-audit` (8), `plugin-sharing` (7) and `service-storage` (7) are now
+  at **zero** untranslated declared strings in zh-CN / ja-JP / es-ES — 246
+  translations. Most were newly _visible_ rather than newly missing: #3753 taught
+  the coverage detector to walk action `params`, `resultDialog`, `listViews` and
+  the rest of the declared surface, and these are what it found.
+
+  Wording was harvested from the repo's own bundles wherever a string was already
+  translated somewhere (1382 unambiguous source strings), so `Created At` reads
+  `创建时间` here because that is what it reads everywhere else, rather than a
+  fresh invention. Protocol tokens are deliberately left identical across locales:
+  `GET` / `POST` / `PUT` / `PATCH` / `DELETE`, `ETag`, `ACL`, `URL`.
+
+  **Gated.** `scripts/check-i18n-bundles.mjs` replaces the single-package
+  `pnpm check:i18n` and checks all nine. It does not restate each package's
+  command — it parses the one already documented in that config's own docstring
+  and runs it, so the documented regenerate command and the gate cannot diverge.
+  The coverage ratchet grows the same way, from `examples/*` to twelve configs;
+  eight of them sit at zero, which makes it the strict gate there.
+
+  **Fixed a real truncation bug it exposed.** `os lint --json` on a large config
+  came out of a pipe cut off at exactly 65536 bytes — `console.log(big)` followed
+  by `process.exit(1)` tears the process down before an async pipe write drains,
+  while an interactive run (stdout is a TTY, written synchronously) looks perfect.
+  Every scripted consumer silently got invalid JSON. `emitJson` in
+  `packages/cli/src/utils/format.ts` waits for the write to drain and sets
+  `process.exitCode` instead; `lint`, `i18n check` and `i18n extract` use it.
+  Roughly 30 other CLI commands share the pattern and are not touched here.
+
+  The nine documented regenerate commands also gain `--no-metadata-forms` (added
+  in #3768), since the Studio metadata-form baseline belongs to `platform-objects`
+  alone, not to a copy in every plugin.
+
+  Not fixed here: `platform-objects`' own 77-per-locale gap is `apps.*` /
+  `dashboards.*` navigation and widget labels, which live outside the `objects`
+  subtree and cannot be scaffolded while the package extracts with
+  `--objects-only`. That needs an emit decision first — tracked in #3762.
+
+- 52281b0: chore(i18n): purge the dead sys_webhook_delivery translation block and guard against recurrence
+
+  `sys_webhook_delivery` was removed when webhook delivery moved to
+  `@objectstack/service-messaging` (`sys_http_delivery`, ADR-0018 M3), but a full
+  translation block for it lingered in the four generated plugin-webhooks i18n
+  bundles (en/zh-CN/ja-JP/es-ES) — dead weight bound to an object that no longer
+  exists, and destined to be dropped silently (with any curated strings) on the
+  next `os i18n extract`.
+
+  - Removed the stale `sys_webhook_delivery` block from all four locale bundles
+    (surgical; the `sys_webhook` block is untouched).
+  - Corrected three stale `sys_webhook_delivery` doc comments (platform-objects
+    `integration/index.ts` + `setup.app.ts`, plugin-webhooks `sys-webhook.object.ts`)
+    that still named it as a plugin-webhooks-owned object.
+  - Rolled out the platform-objects `bundle-ownership` test guard (#2834 ⑤ /
+    ADR-0029 D8) to the eight packages that own i18n bundles, so a stray object
+    block in a generated bundle now fails the build instead of dying silently.
+  - That guard immediately surfaced a live-object omission: `sys_capability` was
+    present in plugin-security's bundles with curated translations but had been
+    dropped from its extract config — re-added to the config so the strings are
+    preserved, rather than deleted.
+
+- c95ac80: chore(plugin-webhooks): drop the dead sys_webhook_delivery i18n blocks
+
+  `sys_webhook_delivery` was removed from `@objectstack/plugin-webhooks` when
+  outbound delivery moved to `@objectstack/service-messaging` (`sys_http_delivery`,
+  ADR-0018 M3), but its translation blocks lingered in all four generated locale
+  bundles (en / zh-CN / ja-JP / es-ES) — loaded at runtime yet referenced by
+  nothing, since the object no longer exists in this plugin.
+
+  - Removed the `sys_webhook_delivery` node from each `*.objects.generated.ts`
+    bundle; `WebhooksTranslations` now carries only `sys_webhook`.
+  - Corrected the stale ownership comment on `SysWebhook` that still named
+    `sys_webhook_delivery` as a live sibling.
+
+  (The dangling `SysWebhookDelivery` import in `scripts/i18n-extract.config.ts`
+  was fixed independently on `main` by #3489, so it is not part of this change.)
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/service-messaging@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

@@ -11,16 +11,16 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@objectstack/spec": "^16.0.0",
-    "@objectstack/runtime": "^16.0.0",
-    "@objectstack/driver-memory": "^16.0.0",
-    "@objectstack/plugin-hono-server": "^16.0.0",
-    "@objectstack/connector-rest": "^16.0.0",
-    "@objectstack/connector-openapi": "^16.0.0",
-    "@objectstack/connector-mcp": "^16.0.0"
+    "@objectstack/spec": "^17.0.0",
+    "@objectstack/runtime": "^17.0.0",
+    "@objectstack/driver-memory": "^17.0.0",
+    "@objectstack/plugin-hono-server": "^17.0.0",
+    "@objectstack/connector-rest": "^17.0.0",
+    "@objectstack/connector-openapi": "^17.0.0",
+    "@objectstack/connector-mcp": "^17.0.0"
   },
   "devDependencies": {
-    "@objectstack/cli": "^16.0.0",
+    "@objectstack/cli": "^17.0.0",
     "typescript": "^6.0.0"
   }
 }

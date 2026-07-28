@@ -1,5 +1,470 @@
 # @objectstack/types
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 840ee4b: fix(analytics,runtime,types): gate cube auto-inference on object existence; stop the dispatcher boundary returning raw SQL (#3867)
+
+  Two independent defects on the `/analytics` surface, found while verifying #3770
+  against a real server. On an authenticated CRM dev server, before this change:
+
+  ```
+  POST /api/v1/analytics/query {"cube":"sqlite_master","measures":["count"],"dimensions":["type"]}
+  → 200 {"rows":[{"type":"index","count":262},{"type":"table","count":71},{"type":"view","count":1}],
+         "sql":"SELECT type AS \"type\", COUNT(*) AS \"count\" FROM \"sqlite_master\" GROUP BY type"}
+  ```
+
+  That is SQLite's internal schema table — never a registered object — read
+  successfully through the analytics endpoint. Not merely "the name reaches the
+  driver and errors": **any table the connection can see was readable.**
+
+  **① The cube name reached the driver as a table name.** `AnalyticsService.ensureCube`
+  auto-infers a minimal Cube when none is registered, with `cube.sql = <the queried
+name>`. That is the intended "metric over an object" path — an `object-metric` KPI
+  widget queries `crm_account` with no authored Cube — but it accepted _any_ string,
+  so the endpoint could aggregate over an arbitrary physical table. The
+  analytics-side twin of the data-path gap #3770 closed, and it was not covered by
+  that fix: #3770 gated the protocol's `analyticsQuery`, which is the _degraded
+  fallback_; a deployment with `@objectstack/service-analytics` installed runs the
+  real engine instead (`ctx.replaceService`).
+
+  Inference is now gated on the same schema registry the data path consults, via a
+  new optional `AnalyticsServiceConfig.isRegisteredObject` that `plugin.ts` wires
+  from the `data` engine's `getObject`. Three-way rule: a registered Cube runs
+  untouched (its `sql` is whatever it declares); an unregistered name that IS an
+  object still auto-infers exactly as before; neither → `CUBE_NOT_FOUND` / 404
+  raised before any SQL exists, naming both ways to make the request valid. With no
+  probe configured the gate stands down and warns once — the same tiering #3770
+  took for a missing registry. `generateSql` (`/analytics/sql`) is gated too.
+
+  **② The dispatcher boundary returned `err.message` verbatim.** `errorResponseBase`
+  is the single error exit for _every_ route the dispatcher plugin mounts —
+  `/analytics`, `/packages`, `/i18n`, `/storage`, `/automation`, `/auth`,
+  `/notifications`, `/mcp`. `@objectstack/rest` has guarded its data routes against
+  driver dumps forever (`mapDataError`); this boundary guarded nothing, so any
+  driver error on any of those routes shipped its SQL to the client. Unlike ①, this
+  half is unconditional — it does not depend on the cube being invalid.
+
+  The leak heuristic moved out of `rest-server.ts` into `@objectstack/types` as
+  `looksLikeInternalErrorLeak` (both packages already depend on it) and is now
+  applied at both boundaries — one predicate, one place to widen when a new
+  dialect's phrasing shows up. `mapDataError`'s behaviour is unchanged. At the
+  dispatcher it applies **only to 5xx**: a 4xx message is a deliberate
+  business/validation answer and must reach the caller intact. Sanitising costs no
+  diagnostics — the untouched error still reaches `errorReporter` through the
+  existing `__obsRecordedError` side-channel.
+
+  **Also fixed in the same function:** `errorResponseBase` read only
+  `err.statusCode`, while domain errors across this codebase carry `status` (and
+  `HttpDispatcher.errorFromThrown` already reads `status` first). Every deliberate
+  4xx thrown through a dispatcher route — including #3770's `OBJECT_NOT_FOUND` on
+  the analytics fallback path — was rendered as a **500**. It now reads `status`
+  then `statusCode`.
+
+  **Behaviour change.** `/analytics/query` and `/analytics/sql` return 404
+  `CUBE_NOT_FOUND` for a cube that is neither registered nor a registered object;
+  previously the name was passed to the driver. Dashboards and KPI widgets pointed
+  at real objects or authored cubes are unaffected. A 5xx on a dispatcher route
+  whose message looks like a driver dump now reads `Internal server error` — check
+  server logs or your error reporter for the original.
+
+- 030125b: feat(objectql)!: `init()` refuses to boot when a data driver fails to connect (#3741)
+
+  `ObjectQLEngine.init()` wrapped every driver's `connect()` in a try/catch, logged
+  one error line, and carried on. A server whose database was unreachable therefore
+  "started successfully" — health endpoints could even stay green — and then failed
+  every request with an error that reads nothing like _the database is down_. The
+  warning it printed (`Operations may recover via lazy reconnection or fail at query
+time`) was half fiction: grep the repo and no reconnection exists in `driver-sql`
+  or `driver-mongodb`, so only the "fail at query time" half was ever real. The
+  caller made it worse — `ObjectQLPlugin.start()` runs `syncRegisteredSchemas()`
+  immediately after `init()`, issuing DDL against a driver that isn't there.
+
+  The structural half of the bug was worse than the operational one: the catch
+  removed a driver's ability to **refuse startup at all**. Any fatal startup check —
+  licence, server version, incompatible configuration, missing capability, not just
+  an unreachable socket — is expressed by throwing from `connect()`, and every one
+  of them was silently downgraded to a runtime error. That is why driver-mongodb's
+  multi-tenancy guard (#3724 / #3734) had to be hoisted into its constructor.
+
+  - `init()` now **throws** `DriverConnectError` (`code: 'ERR_DRIVER_CONNECT'`)
+    when any boot-registered driver's `connect()` rejects, aborting kernel
+    bootstrap. It still attempts every driver first, so one failed boot names all
+    of them. The message is self-contained — each failed driver and its cause —
+    because the CLI prints `error.message` alone; the first cause is also attached
+    as `error.cause`. Exported from both `@objectstack/objectql` and
+    `@objectstack/objectql/core`.
+  - `connect()` is now a supported place for a driver to veto boot. Startup
+    validation that needs a live connection (server version, capability probes)
+    no longer has to be forced into a constructor.
+  - The misleading "lazy reconnection" warning is gone.
+  - New escape hatch `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`
+    (`resolveAllowDriverConnectFailure()` in `@objectstack/types`) restores the old
+    lenient boot, but loudly: a `DEGRADED BOOT` banner names the failed drivers and
+    states that they are never retried or reconnected and that every query and
+    schema sync routed to them will fail for the process lifetime. The banner goes
+    to stderr as well as the logger, because `os serve` swallows all of stdout
+    during boot and `Logger` routes `warn` there — logger-only, the one message
+    that matters would be invisible in exactly the deployment the flag is for.
+    Defaults off.
+
+  **Migration.** No code or config change is needed for a correctly configured
+  deployment — a driver that connected before still connects. A deployment that was
+  _silently_ booting without its database now fails the boot instead, with the
+  driver name and cause in the error; fix the datasource configuration (typically
+  `OS_DATABASE_URL`, credentials, or network reachability). To keep booting without
+  it — deliberately, and knowing every request that touches it will fail — set
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`.
+
+### Patch Changes
+
+- 87aca93: fix(datasource)!: a declared datasource that objects bind to must connect, or the boot fails (#3758)
+
+  `DatasourceConnectionService.handleFailure()` fail-fasted only for an `external`
+  datasource with `validation.onMismatch: 'fail'`. Everything else degraded to one
+  `warn` line — including the case the D2 auto-connect gate itself flags as having
+  **no fallback path**: a datasource that objects bind to explicitly via
+  `object.datasource`. Those objects never fall through to the `default` driver;
+  `engine.getDriver` throws `Datasource 'x' is not registered` for them.
+
+  So an app declaring `datasource: 'analytics'` with 20 objects bound to it, booted
+  against a wrong `ANALYTICS_URL`, started clean and exited zero — and then failed
+  every read and write of those 20 objects with an error that reads nothing like
+  _the analytics database is unreachable_. The rest of the app worked, which made it
+  **harder** to locate than a total outage: it looks like "some pages are broken",
+  not like a misconfigured datasource. This is the same decision #3741/#3751 fixed
+  one layer up in `ObjectQLEngine.init()`; the boundary here was still drawn in the
+  old place.
+
+  - **Fail-fast is now keyed on "no fallback path", not on `onMismatch` alone.** At
+    the `declared-auto` (boot) trigger, a connect failure aborts the boot when the
+    datasource is `external` + `onMismatch: 'fail'` **or** when ≥1 object binds to
+    it explicitly. `autoConnect: true` with nothing bound stays lenient — that is
+    "connect it if you can", and nothing declares a dependency on it. The
+    runtime-admin create/update and boot-rehydration triggers are unchanged and
+    still always degrade: a UI action must never brick a running server.
+  - **Every failure mode counts**, not just an unreachable socket: an unresolvable
+    `external.credentialsRef` (D3) and an unsupported `driver` leave the bound
+    objects exactly as dead, so they take the same verdict.
+  - **The error names the bound objects** (up to 10, then `+N more`) alongside the
+    underlying cause, so the message points at the real problem instead of just the
+    datasource name. The service already receives the list for post-connect
+    `syncObjectSchema`.
+  - **`connectDeclared()` attempts every gated datasource before throwing**, and
+    aggregates, so one failed boot reports all the misconfigured ones rather than
+    one per restart — the same shape as `ObjectQLEngine.init()`'s
+    `DriverConnectError`.
+  - **The escape hatch is shared with the engine guard**:
+    `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` now also covers this path (and covers
+    `onMismatch: 'fail'`, which previously had no opt-out). The operator intent is
+    identical — "I know the database is unreachable, boot anyway" — and two flags
+    would only guarantee one of them gets missed. When set, boot continues and a
+    `DEGRADED BOOT` banner goes to stderr as well as the logger, because `os serve`
+    swallows stdout during boot. `emitDegradedBootBanner` moved to
+    `@objectstack/types` so both call sites share one implementation;
+    `@objectstack/objectql` re-exports it unchanged.
+
+  ADR-0062 D5 is amended with the new criterion and the shared flag.
+
+  **Migration.** No change for a correctly configured deployment — a datasource that
+  connected before still connects. A deployment that was _silently_ booting with a
+  dead, explicitly-bound datasource now fails the boot instead, naming the
+  datasource, the cause, and the objects that depend on it; fix the datasource
+  configuration. To keep booting without it — deliberately, knowing every request
+  touching those objects will fail — set `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`.
+
+- 32d3800: fix(driver-sql): bound a connection attempt at 10s, and correct the "no reconnection" claim (#3769, #3759)
+
+  Two related corrections, both from measuring what #3741/#3751/#3765 had only asserted.
+
+  **The claim was wrong.** #3751 and #3765 shipped several statements that drivers
+  never reconnect — "there is no lazy reconnection", "NOT retried and NOT
+  reconnected", "stays disconnected for the process lifetime". Measured, both
+  drivers recover on their own:
+
+  - driver-mongodb: killing a real `mongod` and restarting it on the same port,
+    the _same_ driver instance served the next write successfully (13ms), with no
+    reconnect call from us — the official driver's topology monitor handles it.
+  - driver-sql: a knex/pg pool is not poisoned by an outage. Its error tracks live
+    server state (`ECONNREFUSED` while down → a handshake error once a listener is
+    back → `ECONNREFUSED` again), i.e. every acquire opens a fresh connection.
+    `storage-driver.ts` also configures `pool.min: 0`, so no stale idle
+    connections are held.
+
+  The original reasoning grepped this repo for `reconnect`, found nothing, and
+  concluded recovery does not happen — but the recovery lives in the client
+  libraries, not in our code. The claims are now corrected in `DriverConnectError`,
+  the `DEGRADED BOOT` banner, `resolveAllowDriverConnectFailure`'s docs, and the
+  drivers / self-hosting pages.
+
+  **Fail-fast at boot is unchanged and still correct** — the reason is just
+  different. It is not that the connection can never return; it is that the _boot
+  sequence_ never re-runs. A driver that missed `init()` also missed
+  `syncRegisteredSchemas()`, so its tables can simply not exist even after the
+  database comes back. The banner now says that.
+
+  **The real defect underneath.** `SqlDriver` passed its config to knex untouched,
+  so a database endpoint that accepts TCP but never completes the handshake — an
+  overloaded instance, a half-open firewall, a load balancer mid-failover — made
+  every query wait out tarn's 30s default, then fail with `Timeout acquiring a
+connection. The pool is probably full`, pointing an operator at pool sizing
+  instead of the network. With a small `pool.max` a few such queries saturate the
+  pool and everything else queues.
+
+  `SqlDriver` now defaults `pool.createTimeoutMillis` to **10s**, matching
+  driver-mongodb's existing `connectTimeoutMS ?? 10_000` so both drivers give up on
+  an unreachable server at the same point. A host that sets its own
+  `createTimeoutMillis` is left alone.
+
+  **Migration.** None for a healthy datasource. A deployment that deliberately
+  relies on connection establishment taking longer than 10s (a slow cross-region
+  replica) should set `pool.createTimeoutMillis` explicitly on its `SqlDriver`
+  config.
+
+  Not fixed here, tracked in #3769: knex still reports the bounded wait as "the
+  pool is probably full". An accurate message needs a dialect-specific connect
+  timeout (pg's `connectionTimeoutMillis`), which changes the shape of `connection`
+  and would regress the startup banner's URL display.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

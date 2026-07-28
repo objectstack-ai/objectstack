@@ -1,5 +1,637 @@
 # @objectstack/service-storage
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 99736a0: feat(storage): exclusive field-reference file ownership — ADR-0104 D3 wave 2 (PR-3)
+
+  A `file`/`image`/`avatar`/`video`/`audio` field that holds a `sys_file` id now
+  records its owner on the file: `sys_file.ref_object` / `ref_id` / `ref_field`
+  name the single `(object, record, field)` slot that references it, maintained on
+  the engine write path — claimed on insert, reconciled on update, released when
+  the owning record is deleted.
+
+  **Field references are exclusive, unlike attachments.** The attachments surface
+  deliberately shares one file across many `sys_attachment` join rows; a field
+  reference is owned by at most one slot, and writing an already-owned id into a
+  second slot **copies the bytes into a fresh `sys_file`** rather than sharing the
+  row. That keeps a file's read authorisation derived from exactly one parent
+  record instead of the union of every referrer's — so copying a private record's
+  file id into a world-readable one cannot silently widen access — and it removes
+  reference counting from the lifecycle entirely: a file is released because its
+  one owner let go, never because a count came back zero.
+
+  **Deletes nothing.** This records and releases ownership; it never tombstones,
+  and the `scope === 'attachments'` guardrail that keeps field-referenced files
+  out of the reap is untouched. Collection is a separate, gated change that must
+  also extend the reap guard's sweep-time re-verify in the same commit.
+
+  Also exports `isFileIdToken` from `@objectstack/spec/data` as the single arbiter
+  of "is this stored string an opaque file id, or a legacy/external URL?", now
+  shared by the read resolver and the write claimer so the two cannot drift.
+
+  Dormant until a field actually holds an id token: objects without file-class
+  fields, inline-blob values and URL-shaped values all exit before any I/O.
+
+- 134df4f: feat(storage): governed download for field-owned files — ADR-0104 D3 wave 2 (PR-4)
+
+  A file owned by a record's field (`sys_file.ref_object` / `ref_id`, set by
+  PR-3) is now authorized on download the same way an attachment is: the caller
+  must be able to READ the file's parent record, or be its uploader. Previously
+  only `attachments`-scope files were gated and every field file kept an
+  anonymous capability URL.
+
+  **Parent resolution differs by surface, and that asymmetry is the point.** An
+  attachment may hang off many records, so its readable-by set is the union over
+  its `sys_attachment` join rows. A field-owned file belongs to exactly one
+  record, so its readable-by set is that one record's — nothing more. Under a
+  shared reference model the field case would have had to union too, which is
+  what makes copying a file id into a more public record silently widen access.
+
+  Denials are reported as `FILE_DOWNLOAD_DENIED` (403), distinct from the
+  attachments path's `ATTACHMENT_DOWNLOAD_DENIED`, since the file _belongs to_ one
+  record rather than being _attached to_ several.
+
+  **`acl: 'public_read'` is the opt-out**, and now an explicit declaration rather
+  than the silent default every field file used to get. Genuinely public images —
+  anything embedded in an `<img src>`, which cannot carry a bearer token — must
+  declare it.
+
+  **Dual-mode safe, gates nothing that is open today.** A pre-cutover field holds
+  an inline blob or an external URL, never a `sys_file` id, so no existing file
+  has an owner recorded and none of them start being gated. The gate engages only
+  for files a record's field has actually claimed, and disengages again when
+  ownership is released.
+
+  ***
+
+  Also adds `verifyFileReferences()` — the executable form of ADR-0104's R4
+  acceptance gate. It compares ground truth (what records' file fields actually
+  hold) against recorded ownership, and classifies disagreements by whether they
+  could cause data loss once collection is enabled:
+
+  - **blocking** — `unowned_reference` (a held file nothing owns), `foreign_owner`
+    (a record holds a file owned by another slot), `shared_reference` (one file
+    held by two slots, i.e. exclusivity was violated). Each would let a later reap
+    delete bytes a record still points at.
+  - **advisory** — `stale_owner` (owned but no longer held; fails toward
+    retention) and `unreferenced_file` (storage cost, not a correctness problem).
+
+  The scan is read-only — it never writes, tombstones, or deletes. A ledger may
+  not be given authority over irreversible deletes until it has been shown to
+  agree with reality, so this must report zero blocking discrepancies on real
+  tenant data, on consecutive runs, before the gated collection change may merge.
+
+- fe67e34: feat(spec)!: media fields declare accept/maxSize, and the stored form is a file reference — ADR-0104 D3 wave 2 (PR-5a)
+
+  **`accept` and `maxSize` are now declared on `FieldSchema`, and enforced on the
+  server.** Both were already read by the upload widgets — `field.accept`,
+  `field.maxSize` — while the spec did not declare them, so an author who wrote
+  them had the keys silently stripped at parse and the constraint simply never
+  existed. That is exactly the ADR-0104 failure class (a declaration accepted in
+  source, dropped from the contract, with no feedback).
+
+  Now that the platform owns the file, `sys_file` carries the authoritative MIME
+  type and byte size, so a record write is re-checked against the declaration
+  where it actually binds rather than only in the browser — a client-side check is
+  a convenience, not a control, since any caller talking to the API directly
+  bypasses it. Violations raise `FileConstraintError` and fail the write. An entry
+  is only judged against metadata the file actually reports: a file with no
+  recorded MIME type cannot fail an `accept` test, and one with no recorded size
+  cannot fail `maxSize` — "we don't know" must not become "not permitted".
+
+  **The stored form of a media field narrows to an opaque `sys_file` id.**
+  `valueSchemaFor(field, 'stored')` now yields an id for `file`/`image`/`avatar`/
+  `video`/`audio`; the inline `{url, name, size, …}` blob becomes the `'expanded'`
+  read form, which also still admits an unresolved id (storage service absent,
+  file not committed) exactly as an unexpanded lookup id stays valid.
+
+  Two legacy forms therefore stop conforming, both deliberately:
+
+  - the **inline blob**, which is no longer stored but derived;
+  - an **external URL**, which was never a managed file — ADR-0104 R7 retires it
+    toward an explicit `url` field, and under AI authoring that is the point: it
+    stops "managed file" and "external link" being the same declaration.
+
+  **Not a breaking change today.** Value-shape checking is warn-first
+  (ADR-0104 R1/R2): a not-yet-backfilled row still writes and the author gets a
+  warning naming the field. Hard rejection arrives only when a deployment opts
+  into `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` — which it should do after running the
+  backfill and confirming reconciliation. The `!` marks the contract change for
+  the v17 window, not a runtime break on upgrade.
+
+- 3d3fddf: feat(storage): legacy file-value backfill — ADR-0104 D3 wave 2 (PR-6)
+
+  `backfillFileReferences()` converts the pre-reference forms a `file`/`image`/
+  `avatar`/`video`/`audio` field may hold — an inline metadata blob
+  (`{url, name, size, …}`) or a bare URL string — into the reference form: an
+  opaque `sys_file` id, owned by the record's field.
+
+  What it will and will not convert:
+
+  - **A URL naming this platform's own resolver** (`…/storage/files/:id`) already
+    identifies a `sys_file`; the field is rewritten to the bare id and no bytes
+    move.
+  - **A `data:` URI** carries its bytes inline; they are uploaded, a `sys_file` is
+    registered, and the field is rewritten to its id.
+  - **An external URL** is reported, never converted. Re-hosting third-party
+    content is a bandwidth, licensing and privacy decision that is not a
+    migration's to make — ADR-0104 R7 retires these toward an explicit `url`
+    field, which under AI authoring is the point: it stops "managed file" and
+    "external link" being the same declaration.
+
+  **Dry run by default** — nothing is written unless `apply` is set, and the
+  dry-run report has the same shape as the applied one so the plan can be reviewed
+  and diffed. **Idempotent** — a value already in reference form is recorded and
+  left alone, so a partially-completed run is safe to repeat.
+
+  The backfill never writes the ownership columns itself: it rewrites the record,
+  and the claim hooks observe that write and record ownership. One claiming path,
+  so there is nothing that can disagree with itself. Run
+  `verifyFileReferences()` afterwards to confirm the two agree — that
+  reconciliation is the gate the irreversible collection change must pass.
+
+- fdb4f50: feat(migrate): `os migrate files-to-references` — a data migration with a self-check, gated per deployment (#3617)
+
+  The ADR-0104 file-as-reference migration ships as a command a deployment runs
+  against its own database, and the deployment-level flag it records is what may
+  later authorise irreversible behaviour — never the platform version.
+
+  ```bash
+  os migrate files-to-references           # dry run: reports, writes nothing
+  os migrate files-to-references --apply   # converts, verifies, records the flag
+  ```
+
+  The run backfills legacy file-field values (inline metadata blobs, own-resolver
+  URLs, `data:` URIs) into owned `sys_file` references, reconciles the ownership
+  ledger against what records actually hold, and — only on an `--apply` run whose
+  reconciliation reports **zero blocking discrepancies** — records
+  `sys_migration { id: 'adr-0104-file-references', verified_at, blocking: 0 }`.
+
+  **Why a flag rather than a release note.** ObjectStack is a development
+  platform: third-party deployments upgrade on their own schedule and their data
+  is not observable by anyone else, so no release-side soak can vouch for them.
+  The evidence has to be produced where the data is. Consequences:
+
+  - Installing a new version never starts deleting bytes. Running the migration
+    and passing its self-check is the consent.
+  - Not run, or not passed → files are retained forever. Wasted storage, zero
+    data loss.
+  - A later failing run **clears** `verified_at`: a deployment whose data has
+    drifted closes its own gate.
+  - A dry run writes nothing at all — not the conversions, and not the flag,
+    even when the self-check would pass.
+  - External URLs stay advisory. They are not `sys_file`s, so they can never
+    enter collection; whether to remodel them as a `url` field is the app
+    author's decision (ADR-0104 R7), not a gate.
+
+  Ships alongside:
+
+  - `@objectstack/spec` — `DataMigrationFlagSchema`, `FILE_REFERENCES_MIGRATION_ID`,
+    and the single `isDataMigrationFlagVerified` predicate both future consumers
+    (collection #3459, strict value-shape #3438) read, so the two gates cannot
+    disagree about the same fact.
+  - `@objectstack/platform-objects` — the `sys_migration` object plus
+    `readDataMigrationFlag` / `isDataMigrationVerified` / `recordDataMigrationRun`.
+    Reads fail toward "not verified": a gate that cannot read its evidence stays
+    closed.
+  - `@objectstack/objectql` — a read may now opt out of file-reference expansion
+    via the spec's `RAW_FILE_VALUES_CONTEXT_KEY`, and the storage service's
+    bookkeeping/scan reads do. Without it the read resolver rewrites stored ids to
+    their expanded form before the reconciliation sees them, which reports held
+    references as absent — noisy `stale_owner` findings, and a missed
+    `unowned_reference` would have been a false pass of the collection gate.
+
+### Patch Changes
+
+- 37b1346: feat(storage): surface the sys_file id on upload-complete — ADR-0104 D3 wave 2 (PR-1)
+
+  `POST /api/v1/storage/upload/complete` now returns the opaque `sys_file` id
+  (`data.fileId`), and `client.storage.upload()` surfaces it on the returned
+  `FileMetadata`. Previously the commit response omitted the id — the caller
+  could not learn which id to persist after committing an upload, so a file
+  field could never store a reference.
+
+  Additive and non-breaking (new optional `fileId` on `FileMetadataSchema`; the
+  client falls back to the presigned id when talking to an older server). This is
+  the enabling foundation for file-as-reference; the storage model itself is
+  unchanged in this PR.
+
+- deb538f: fix(storage): let an object delegate file-read authorization to its service
+
+  Fixes a regression from the governed-download change (ADR-0104 D3 wave 2): a
+  **legitimate approver could see a decision attachment's filename but got 403
+  opening it**, found by driving app-showcase in a browser as a real non-admin
+  approver.
+
+  Cause: a field-owned file's download was authorized by testing whether the
+  caller can READ the owning row. For an ordinary business object that is right —
+  row readability _is_ the access rule. For `sys_approval_action` it is the wrong
+  authority: the audit table is deliberately closed to ordinary approver
+  positions (`operation 'find' … is not permitted for positions [auditor,
+everyone]`), so the test denied the very approver the attachment was filed for.
+  The approvals _service_ has always had the real rule, which is why the timeline
+  listing the attachment returned 200 while the bytes returned 403.
+
+  An object may now name a service to answer the question instead:
+
+  - `ObjectSchema.fileAccessDelegate` — a kernel service that authorizes
+    downloads of files owned by that object's media fields.
+  - `IFileAccessDelegate.authorizeFileRead(recordId, context)` — the contract.
+  - `sys_approval_action` declares `'approvals'`; `ApprovalService.authorizeFileRead`
+    reuses the _same_ gate `listActions` applies (visibility of the parent
+    request) rather than inventing a second, looser rule for the bytes.
+
+  **Fails closed**: a declared delegate that is missing or does not implement the
+  method denies, rather than silently reverting to the raw read it was declared to
+  replace. Objects without the declaration are unchanged.
+
+  Verified in the browser against app-showcase, both sides of the gate: the
+  approver now downloads the real PDF (200), and an anonymous request is still
+  refused (401) — the anonymous capability URL the original change closed stays
+  closed. A decision attachment ends up exactly as readable as the decision it
+  hangs off: never more, and no longer less.
+
+- 2c19383: fix(service-storage): stop handing out `_local/file/:key`, a URL nothing mounts (#3641)
+
+  Three call sites built `${basePath}/_local/file/<key>`. No registrar has ever
+  mounted it, so anyone who followed one got a 404. Found by the tranche-3
+  storage ledger (#3636), which recorded the URL as deliberately absent and filed
+  this; now nothing builds it either.
+
+  Each site is fixed according to what it could honestly do:
+
+  - **`LocalStorageAdapter.getPresignedUpload()`** simply omits `downloadUrl`
+    (optional on the descriptor). It cannot construct the real capability URL —
+    that is keyed by `sys_file.id`, and an adapter only ever sees the storage
+    key. Nothing read the field anyway, which is how it survived: the
+    presigned-upload route builds its own `downloadUrl`
+    (`${basePath}/files/:fileId/url`) and ignores this one, while all three real
+    readers of `desc.downloadUrl` take it from `getPresignedDownload`, whose URL
+    _is_ mounted (`_local/raw/<token>`).
+
+  - **`GET /files/:fileId/url` and `GET /files/:fileId`** answer **501
+    `NOT_IMPLEMENTED`** when the adapter has neither `getPresignedDownload` nor
+    `getSignedUrl`, instead of returning (or redirecting to) the unmounted URL.
+    The caller now learns the adapter is the limitation rather than chasing a
+    broken link.
+
+  Behaviour change is confined to adapters implementing neither capability —
+  `LocalStorageAdapter` and the S3 adapter both implement `getPresignedDownload`,
+  so no shipped path changes. A 200/302 pointing at a 404 becomes a 501 that says
+  why.
+
+  Two conformance cases added for the new branches, and mutation-checked:
+  restoring either dead URL fails them.
+
+- aff9e56: fix(i18n): translate the platform packages' declared surface, and gate all nine bundles instead of one (#3762)
+
+  Only `platform-objects` was wired into a translation-drift check. The other
+  **eight** packages shipped a `scripts/i18n-extract.config.ts` that nothing ever
+  ran — and four of them had already drifted out of sync with the schema, exactly
+  the rot `pnpm check:i18n` exists to catch, one directory over.
+
+  **Translated.** `plugin-security` (45 strings per locale), `plugin-webhooks`
+  (15), `plugin-audit` (8), `plugin-sharing` (7) and `service-storage` (7) are now
+  at **zero** untranslated declared strings in zh-CN / ja-JP / es-ES — 246
+  translations. Most were newly _visible_ rather than newly missing: #3753 taught
+  the coverage detector to walk action `params`, `resultDialog`, `listViews` and
+  the rest of the declared surface, and these are what it found.
+
+  Wording was harvested from the repo's own bundles wherever a string was already
+  translated somewhere (1382 unambiguous source strings), so `Created At` reads
+  `创建时间` here because that is what it reads everywhere else, rather than a
+  fresh invention. Protocol tokens are deliberately left identical across locales:
+  `GET` / `POST` / `PUT` / `PATCH` / `DELETE`, `ETag`, `ACL`, `URL`.
+
+  **Gated.** `scripts/check-i18n-bundles.mjs` replaces the single-package
+  `pnpm check:i18n` and checks all nine. It does not restate each package's
+  command — it parses the one already documented in that config's own docstring
+  and runs it, so the documented regenerate command and the gate cannot diverge.
+  The coverage ratchet grows the same way, from `examples/*` to twelve configs;
+  eight of them sit at zero, which makes it the strict gate there.
+
+  **Fixed a real truncation bug it exposed.** `os lint --json` on a large config
+  came out of a pipe cut off at exactly 65536 bytes — `console.log(big)` followed
+  by `process.exit(1)` tears the process down before an async pipe write drains,
+  while an interactive run (stdout is a TTY, written synchronously) looks perfect.
+  Every scripted consumer silently got invalid JSON. `emitJson` in
+  `packages/cli/src/utils/format.ts` waits for the write to drain and sets
+  `process.exitCode` instead; `lint`, `i18n check` and `i18n extract` use it.
+  Roughly 30 other CLI commands share the pattern and are not touched here.
+
+  The nine documented regenerate commands also gain `--no-metadata-forms` (added
+  in #3768), since the Studio metadata-form baseline belongs to `platform-objects`
+  alone, not to a copy in every plugin.
+
+  Not fixed here: `platform-objects`' own 77-per-locale gap is `apps.*` /
+  `dashboards.*` navigation and widget labels, which live outside the `objects`
+  subtree and cannot be scaffolded while the package extracts with
+  `--objects-only`. That needs an emit decision first — tracked in #3762.
+
+- f1a8114: fix(client,service-i18n): ledger the autonomously-mounted service routes, and repair the two i18n calls that reached nothing (#3636)
+
+  Tranche 3 of the #3563 route audit — the last un-audited server surface. The
+  dispatcher ledger (#3563) and the REST ledger (#3587) each stop at their own
+  package boundary, and two services mount routes outside both: they reach for
+  the `http-server` service and register straight on `IHttpServer`, so neither
+  `RouteManager` nor `RestServer.getRoutes()` has ever seen them. That left the
+  SDK's entire storage surface, plus all of i18n, in the pre-#3563 posture:
+  expressed, working, guarded by nothing.
+
+  **Ledgers + guards.** `storage-route-ledger.ts` (10 routes) and
+  `i18n-route-ledger.ts` (3) sit next to the registrars that mount them, each
+  enumerated for real — the registrar runs against a capturing mock
+  `IHttpServer` and its registration calls _are_ the route set, so a new route
+  lands with a reviewed disposition or fails CI. The client half is
+  `packages/client/src/service-route-ledger-coverage.test.ts`; ledgers cross the
+  boundary as relative source imports, never a service→client package edge.
+
+  **Two wire-level 404s fixed.** `i18n.getTranslations` sent
+  `/i18n/translations?locale=xx` and `i18n.getFieldLabels` sent
+  `/i18n/labels/:object?locale=xx`, while every serving surface — service-i18n's
+  mounts, the dispatcher's HTTP mounts, and the `plugin-rest-api.zod.ts`
+  contract — mounts only the path form. Neither call could ever be answered.
+  Both had carried a green `sdk` row in the dispatcher ledger since tranche 1,
+  because that guard asks whether the client _method_ exists, not whether it
+  speaks a URL anything mounts. The client now sends the path dialect, the same
+  resolution #3611 gave `meta.getView`, and a new suite drives the real client
+  at a real router so a revert cannot pass quietly.
+
+  **One response-shape fix.** service-i18n's success bodies omitted the
+  `success` flag that `ObjectStackClient.unwrapResponse` keys on, so the SDK
+  returned the raw `{ data: … }` wrapper against that provider while returning
+  the declared unwrapped shape against the dispatcher — one method, two shapes,
+  decided by which plugin mounted the route. Its three handlers now emit the
+  `{ success: true, data }` envelope the `i18n` route group declares. `data` did
+  not move, so direct body readers are unaffected.
+
+  Storage audited clean: 7 routes SDK-expressed, 3 reviewed `server-only` (the
+  browser capability URL objectql stamps into file-field payloads, and the two
+  local-driver loopbacks). The chunked-upload family, flagged for triage, turned
+  out fully expressed. Both ledgers ratchet `gap` and `mismatch` at zero.
+
+  Filed, not fixed: `GET {base}/_local/file/:key` is built by three call sites
+  and mounted by none (#3641); the cross-surface URL conformance guard that would
+  have caught all of the above mechanically is the capstone (#3642).
+
+- bd68f08: fix(service-storage,service-i18n): emit the declared error envelope, not a bare `{ error }` (#3675)
+
+  #3636 aligned the **success** bodies of the autonomously-mounted service
+  routes because those were the ones breaking `ObjectStackClient.unwrapResponse`.
+  The error bodies were left alone and stayed a bare `{ error: '<message>' }` —
+  with the code, where one existed at all, as a _sibling_ of `error` rather than
+  a field of it — against a contract (`BaseResponseSchema` + `ApiErrorSchema`)
+  that declares `{ success: false, error: { code, message } }`.
+
+  So the same SDK method returned two different error shapes depending on which
+  provider mounted the route: a caller reading `body.error.message` got the real
+  message from the dispatcher and `undefined` from these services. All 32 sites
+  (27 in `storage-routes.ts`, 5 in `i18n-service-plugin.ts`) now go through a
+  single `sendError` helper per module — the nested-`error` shape the sibling
+  services already use (`settings-routes.ts`, `share-link-routes.ts`), plus the
+  `success` flag those two still omit and the contract requires.
+
+  **Codes moved, and that is the breaking part.** `AUTH_REQUIRED`,
+  `ATTACHMENT_DOWNLOAD_DENIED` and `FILE_DOWNLOAD_DENIED` used to sit at
+  `body.code`; they now sit at `body.error.code`. The SDK is unaffected — it
+  already reads `errorBody?.code || errorBody?.error?.code`, one of the four
+  shapes its error path sniffs for, which is the consumer-side shim Prime
+  Directive #12 says to cure at the producer. The console's attachment panel
+  was NOT: it read the top level only, so every gated download would have
+  degraded from "You don't have access to download this attachment." to
+  "Download failed (403)". Fixed in objectui to read both dialects, since a
+  console build ships independently of the server it talks to.
+
+  **Guarded both ways.** New `error-envelope.conformance.test.ts` in each
+  service drives every distinct error branch through the real registrar and
+  parses the body against the real `BaseResponseSchema` imported from
+  `packages/spec` — not a local restatement of it — and scans the module source
+  so a new route cannot quietly reintroduce the bare shape. The route ledgers
+  (#3563 → #3656) could never have caught this: they audit which routes exist
+  and whether the SDK can address them, not what comes back.
+
+  Measured and left alone: the dispatcher does not conform either — it puts the
+  HTTP status in `error.code`, where the contract declares a semantic string,
+  and parks the real code in `details` to work around its own occupied field.
+  That deviation is now pinned to exactly one field by a test in
+  `http-dispatcher.test.ts` rather than described in prose. Also unchanged:
+  service-storage's success bodies are still three shapes of their own
+  (`{ data }`, bare `{ url }`, `{ ok, key }`, none with `success: true`) — a
+  non-additive change that needs its own issue, not a quiet ride along with this
+  one.
+
+- 6633337: fix(service-storage): emit the declared success envelope on all eight routes (#3689)
+
+  #3675 moved the **error** bodies of the autonomously-mounted `/api/v1/storage/*`
+  routes into the declared `{ success: false, error: { code, message } }`
+  envelope and deliberately stopped there: unlike the errors, the success bodies
+  were not an additive fix. They were three shapes, none of them carrying the
+  `success` flag `BaseResponseSchema` declares and
+  `ObjectStackClient.unwrapResponse` keys on —
+
+  | Route(s)                                                                                                                     | Was                 | Now                                |
+  | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ---------------------------------- |
+  | the six upload routes (`/upload/presigned`, `/upload/complete`, `/upload/chunked`, `…/chunk/:i`, `…/complete`, `…/progress`) | `{ data: {…} }`     | `{ success: true, data: {…} }`     |
+  | `GET /files/:fileId/url`                                                                                                     | `{ url }`           | `{ success: true, data: { url } }` |
+  | `PUT /_local/raw/:token`                                                                                                     | `{ ok: true, key }` | `{ success: true, data: { key } }` |
+
+  — while `storage.zod.ts` declared every one of them as
+  `BaseResponseSchema.extend({ data })`, and `PresignedUrlResponse` and friends
+  are `z.infer`red from those schemas and published as the SDK's return types.
+  The declaration said `success: boolean`; the wire said nothing. It broke
+  nothing only because the storage SDK methods returned `res.json()` raw —
+  `any`, so TypeScript could not see the gap and nothing relied on the
+  declaration. That is the posture i18n was in before #3636, right up until
+  something did rely on it.
+
+  **The payload moved on two routes, and that is the breaking part.** A direct
+  HTTP caller reading `body.url` from `GET /files/:fileId/url` must now read
+  `body.data.url`; one reading `body.ok`/`body.key` from the local adapter's
+  `PUT /_local/raw/:token` loopback must read `body.success`/`body.data.key`.
+  `ok` is dropped rather than kept beside `success` — it was a second, private
+  word for the same thing. The six upload routes are additive: callers already
+  destructure `.data`, and a new sibling key changes nothing.
+
+  Every in-repo consumer was fixed first, so the two repos are not coupled by
+  merge order:
+
+  - `client.storage.getDownloadUrl()` now reads through `unwrapResponse`, the
+    SDK's one standard envelope seam — which strips the envelope when present
+    and returns the body untouched when not, so a client either side of this
+    server change resolves the same URL. The other storage methods hand back the
+    whole envelope by design and were already correct.
+  - The console's two attachment openers (`RecordAttachmentsPanel`,
+    `ApprovalsInboxPage`) already read `body?.url ?? body?.data?.url`; objectui
+    gains tests pinning that tolerance as deliberate.
+
+  Two schemas that were missing are now declared — `FileDownloadUrlResponse` and
+  `RawUploadResponse` — and `getDownloadUrl` joins `StorageApiContracts`, which
+  it had never been in. That absence is how its shape drifted outside the
+  envelope unnoticed. The two `_local/raw/:token` routes stay out of the
+  registry on purpose: they are the local adapter's own presign loopback,
+  ledgered `server-only` and addressed as an opaque signed URL rather than as an
+  API.
+
+  `success-envelope.conformance.test.ts` holds the new shape in place the way
+  `error-envelope.conformance.test.ts` holds the error one: every route is
+  driven and its body parsed against the **declared schema** it answers to — not
+  a restatement — the retired shapes are asserted dead, and the module source is
+  scanned so a new route cannot bypass the `sendOk` helper. As with #3675, the
+  route ledgers cannot catch this class of drift: they audit which routes exist
+  and whether the SDK can address them, not what comes back.
+
+- 0bc685a: fix(storage): downloads carry the real filename + content-type, not the URL token (#3504)
+
+  A presigned download served the bytes as `application/octet-stream` with no
+  `Content-Disposition`, so a browser saved the file under the opaque URL token
+  (e.g. `eyJrIjoiYXR0YWNo…`) instead of its real name — an approval's
+  `signed-contract.pdf` downloaded as a nameless blob.
+
+  - `IStorageService.getSignedUrl` / `getPresignedDownload` take an optional
+    `PresignedDownloadOptions` (`filename`, `contentType`, `disposition`).
+  - The REST download routes (`GET /storage/files/:id/url` and `/:id`) pass the
+    `sys_file` record's `name` + `mime_type`.
+  - The local adapter carries them in the signed token; the `_local/raw` route
+    emits `Content-Type` + an RFC 5987 `Content-Disposition` (ASCII fallback +
+    `filename*=UTF-8''…` for non-ASCII names). The S3 adapter bakes the same into
+    the signed URL via `ResponseContentType` / `ResponseContentDisposition`.
+  - Default disposition is `inline`, so previewable types (PDF, images) still open
+    in the browser — now with the correct name when saved.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [524151c]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [4921a95]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [5487c20]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [9aa5510]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/platform-objects@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/observability@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

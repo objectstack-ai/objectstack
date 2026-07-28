@@ -16,7 +16,7 @@ export default defineStack({
     // refuse this package at the boundary with the exact migration command,
     // instead of crashing later. Kept in lockstep with releases by
     // scripts/sync-template-versions.mjs.
-    engines: { protocol: '^16' },
+    engines: { protocol: '^17' },
   },
 
   // `automation` backs flow execution and, per ADR-0097, materializes any

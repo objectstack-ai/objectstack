@@ -1,5 +1,118 @@
 # create-objectstack
 
+## 17.0.0-rc.0
+
+### Major Changes
+
+- e47b342: feat!: require Node.js 22 — promise the runtime we actually test (#3825)
+
+  Every published package declared `engines.node: ">=18.0.0"`. **Node 18 reached
+  end-of-life on 2025-04-30 and Node 20 on 2026-04-30**, so the compatibility
+  promise covered two runtimes nobody patches — and, after #3830 moved CI to Node
+  22, two runtimes nothing in this repo verifies.
+
+  That left the promise and the evidence with **no overlap at all**:
+
+  |                                                                                                 | Node version |
+  | ----------------------------------------------------------------------------------------------- | ------------ |
+  | What CI validates every PR on                                                                   | **22**       |
+  | What `release.yml` publishes from                                                               | **22**       |
+  | What every shipped Docker image runs (`docker/Dockerfile`, `blank` template, self-hosting docs) | **22**       |
+  | What `engines.node` promised users                                                              | **>=18**     |
+
+  `engines.node` is now `>=22.0.0` across all 50 manifests. This is the honest
+  floor: it is the only runtime the packages are built, tested and shipped on.
+
+  ## Migration
+
+  **If you are on Node 22 or newer, nothing changes.** Node 24 (Active LTS since
+  2025-10-28) and Node 26 both satisfy the new range.
+
+  If you are on Node 18 or 20, upgrade to Node 22+. Both are past end-of-life and
+  receive no security patches:
+
+  ```bash
+  nvm install 22 && nvm use 22
+  ```
+
+  npm and pnpm surface an unsatisfied `engines` as an **`EBADENGINE` warning**, not
+  a hard failure, so an existing install will not break the moment you upgrade —
+  but the package is no longer tested on that runtime, and the failures are the
+  kind that do not announce themselves. #3812 is the worked example: a native
+  dependency whose `engines` required a newer Node loaded anyway on the older one
+  and then killed the test worker at the process level, with no JS error and a
+  summary that still said "passed".
+
+  If your CI pins Node, pin it to 22 as well — running your gates on a runtime
+  your dependencies no longer support is exactly the split this change closes.
+
+  ## Also updated
+
+  The "Node 18+" prerequisite was restated in ten user-facing places
+  (`README.md`, `CONTRIBUTING.md`, the getting-started and deployment docs, the
+  todo example, and the `objectstack-platform` skill's `compatibility` field).
+  All now say 22. Changelogs and ADRs are historical records and were left alone.
+
+### Patch Changes
+
+- 9f060e5: chore(deps)!: better-auth 1.7.0-rc.2 (account identity restructuring) + the
+  production-dependency batch from #3517
+
+  **better-auth 1.7.0-rc.1 → 1.7.0-rc.2** across the family (`better-auth`,
+  `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/sso`, and the
+  adapter/telemetry overrides). `@better-auth/scim` deliberately stays on
+  1.7.0-rc.1 — rc.2 replaces its whole model (code-defined connections; the
+  `scimProvider` model and the generate-token endpoint are gone), which is a
+  feature migration, not a version bump. Its peer range accepts rc.2 core, and the
+  advisory that forced the original pin (GHSA-j8v8-g9cx-5qf4) is still fixed.
+
+  **BREAKING — account identity.** better-auth renamed `account.accountId` to
+  `account.providerAccountId` and added a REQUIRED `account.issuer`; sign-in now
+  resolves accounts by `(issuer, providerAccountId)`.
+
+  - FROM `fields: { accountId: 'account_id' }` → TO
+    `fields: { issuer: 'issuer', providerAccountId: 'account_id' }`. The provider
+    account id keeps its `account_id` column — only the better-auth-side name
+    moved — and `sys_account` gains an `issuer` column.
+  - FROM `internalAdapter.createAccount({ providerId, accountId, … })` → TO
+    `createAccount({ providerId, issuer, providerAccountId, … })`. A local
+    password account carries the issuer better-auth mints for itself,
+    `local:credential`.
+  - FROM `client.auth.accounts.unlink({ providerId, accountId })` → TO
+    `unlink({ accountId })`, where `accountId` is now the account ROW id (the `id`
+    from `accounts.list()`), matching better-auth's narrowed body.
+    `accounts.list()` returns `issuer` + `providerAccountId` in place of
+    `accountId`.
+
+  **Existing deployments:** rows written before 1.7 have no issuer and are
+  invisible to sign-in until stamped. The auth plugin now runs an idempotent
+  boot-time backfill that stamps what it can derive — `local:credential` for
+  password accounts, `local:oauth:<providerId>` for configured social providers,
+  and the registered IdP's real `iss` from `sys_sso_provider` for federated ones.
+  Accounts from a federated IdP that is no longer registered cannot be derived;
+  they are logged with their provider id and row count rather than guessed, and
+  those users cannot sign in through that provider until the row is stamped with
+  the IdP's issuer or removed so a fresh login re-links it.
+
+  **Also required by 1.7:** `SecondaryStorage` gained two mandatory methods, both
+  now implemented over the kernel cache service — `getAndDelete` (single-use
+  verification values) and `increment` (fixed-window rate-limit counter;
+  `rateLimit.storage: 'secondary-storage'` throws at boot without it).
+
+  The rest of #3517's production-dependency batch rides along: `@oclif/core`
+  4.13.0, `@hono/node-server` 2.0.12, `hono` 4.12.32, `tar` 7.5.22, `jose` 6.2.4,
+  `pinyin-pro` 3.28.2, plus the private docs app's fumadocs/next/react bumps.
+
+- 4e9e184: chore(deps): OSV security batch — bump tar to ^7.5.21 (GHSA-r292-9mhp-454m) and
+  js-yaml to ^5.2.2 (GHSA-pm4m-ph32-ghv5)
+
+  Both are declared-range bumps to the patched releases, so downstream installs
+  resolve the fixed versions from the published manifests, not just this
+  workspace's lockfile. The same batch clears the remaining transitive advisories
+  (next 16.2.11 in apps/docs; workspace overrides for brace-expansion, sharp,
+  react-router, @sveltejs/kit, @hono/node-server) — those live in pnpm-workspace.yaml
+  and the private docs app, which do not ship.
+
 ## 16.1.0
 
 ## 16.0.0

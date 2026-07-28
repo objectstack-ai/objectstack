@@ -1,5 +1,2018 @@
 # @objectstack/cli
 
+## 17.0.0-rc.0
+
+### Major Changes
+
+- e47b342: feat!: require Node.js 22 — promise the runtime we actually test (#3825)
+
+  Every published package declared `engines.node: ">=18.0.0"`. **Node 18 reached
+  end-of-life on 2025-04-30 and Node 20 on 2026-04-30**, so the compatibility
+  promise covered two runtimes nobody patches — and, after #3830 moved CI to Node
+  22, two runtimes nothing in this repo verifies.
+
+  That left the promise and the evidence with **no overlap at all**:
+
+  |                                                                                                 | Node version |
+  | ----------------------------------------------------------------------------------------------- | ------------ |
+  | What CI validates every PR on                                                                   | **22**       |
+  | What `release.yml` publishes from                                                               | **22**       |
+  | What every shipped Docker image runs (`docker/Dockerfile`, `blank` template, self-hosting docs) | **22**       |
+  | What `engines.node` promised users                                                              | **>=18**     |
+
+  `engines.node` is now `>=22.0.0` across all 50 manifests. This is the honest
+  floor: it is the only runtime the packages are built, tested and shipped on.
+
+  ## Migration
+
+  **If you are on Node 22 or newer, nothing changes.** Node 24 (Active LTS since
+  2025-10-28) and Node 26 both satisfy the new range.
+
+  If you are on Node 18 or 20, upgrade to Node 22+. Both are past end-of-life and
+  receive no security patches:
+
+  ```bash
+  nvm install 22 && nvm use 22
+  ```
+
+  npm and pnpm surface an unsatisfied `engines` as an **`EBADENGINE` warning**, not
+  a hard failure, so an existing install will not break the moment you upgrade —
+  but the package is no longer tested on that runtime, and the failures are the
+  kind that do not announce themselves. #3812 is the worked example: a native
+  dependency whose `engines` required a newer Node loaded anyway on the older one
+  and then killed the test worker at the process level, with no JS error and a
+  summary that still said "passed".
+
+  If your CI pins Node, pin it to 22 as well — running your gates on a runtime
+  your dependencies no longer support is exactly the split this change closes.
+
+  ## Also updated
+
+  The "Node 18+" prerequisite was restated in ten user-facing places
+  (`README.md`, `CONTRIBUTING.md`, the getting-started and deployment docs, the
+  todo example, and the `objectstack-platform` skill's `compatibility` field).
+  All now say 22. Changelogs and ADRs are historical records and were left alone.
+
+- 83c161f: feat(automation)!: a flow run with no trigger user may no longer touch data (#3760)
+
+  An effective `runAs:'user'` run that resolves **no trigger user** used to execute
+  its data nodes **UNSCOPED** — it presented no principal, and the data security
+  middleware skips when there is no principal, so the run read and wrote every row.
+  `runAs:'user'` is an access-_narrowing_ declaration; failing to resolve it must
+  never resolve to a grant (ADR-0049). It now **refuses** the operation
+  (`UnscopedRunDataAccessError`), naming `runAs:'system'` as the fix.
+
+  **This was never really about schedules.** The docs, the spec, the runtime
+  warning and the lint all described a schedule-shaped problem, and the lint only
+  ever matched that shape. But the runtime predicate is "no user", and the
+  commonest way to have no user is a **record-change flow fired by a write that
+  carried none**: `isSystem` does _not_ suppress trigger dispatch — only
+  `skipTriggers` does, and exactly three first-party paths set it — so every
+  plugin/service system write, the approvals status mirror, and a `runAs:'system'`
+  flow's own data node dispatched record-change flows with `userId: undefined`.
+  Ordinary users reach those writes routinely (submitting for approval mirrors a
+  status onto the target record), so the fail-open was reachable by unprivileged
+  input and was the common case, not the rare one.
+
+  Deliberately **not** implemented as "inherit the triggering write's posture and
+  run as `isSystem`". That reads like a relabel but is a privilege escalation: the
+  security middleware's `isSystem` short-circuit fires _before_ its
+  package-managed-row, system-row, audience-anchor and delegated-admin gates, all
+  of which a principal-less context still has to clear. Such a run cannot write
+  `sys_user_position` today; as `isSystem` it could. "Unscoped" was never
+  equivalent to "system".
+
+  **Breaking — how to migrate.** A flow that reacts to system writes and needs to
+  act beyond one user's grants declares `runAs: 'system'`, making the elevation
+  explicit and audit-attributable. Otherwise ensure the trigger supplies a user.
+  Flows that touch no data are unaffected (`runAs` is moot), and the failure is
+  isolated: the trigger already swallows flow errors, so the originating write
+  still succeeds. The engine warns at run _setup_, before any node executes.
+
+  **#3712's user-less provenance path is subsumed, not broken.** That fix let a
+  run with no trigger user write its own approval-locked record by carrying a
+  provenance-only ObjectQL context (the run id, nothing else). Such a run can no
+  longer perform a data operation at all — presenting no principal is exactly what
+  made the write unscoped — so it is refused before the lock is consulted. The
+  capability survives via the explicit route: a schedule that must write records
+  declares `runAs:'system'`, which the lock hook exempts on its own `isSystem`
+  branch. The `flowRunId` exemption itself stays live and load-bearing for what
+  #3703 built it for — a `runAs:'user'` run that _does_ have a user — where the
+  exemption is still provenance rather than privilege.
+
+  Also in this change:
+
+  - **`flow-schedule-runas-unscoped` → `flow-runas-unscoped`, and it now fails the
+    build.** It read as a gate and behaved as a comment — `os compile` documented
+    that the flow lint "NEVER fails the build" — which is close to no net at all
+    for the audience it protects, very often an AI generating flows in bulk. It now
+    also covers the other provably user-less triggers (`time_relative`, `api`), per
+    ADR-0073 D5. It still cannot cover `record_change`, which is undecidable at
+    authoring time — that is exactly why the runtime refusal exists.
+  - **Three seed writes stopped firing automation.** The seed loader's pass-2
+    deferred-reference back-fill and both of `AppPlugin`'s basic-insert fallbacks
+    inlined a bare `{ isSystem: true }` instead of the shared seed options, so they
+    seeded with record-change automation live — the self-trigger vector
+    `skipTriggers` exists to prevent, on the writes that skipped it.
+  - **ADR-0073 amended.** Its severity rationale ("an unprivileged user cannot
+    trigger a schedule, so there is no untrusted-input path") is falsified, and its
+    rejection of fail-closed ("breaks legitimate scheduled CRUD — 2/3 example flows
+    relied on the default") expired when those flows were fixed to declare
+    `runAs:'system'`. Refusal is an interim posture, forward-compatible with the
+    ADR's `automation` principal: when that lands, the refusal point becomes the
+    place that resolves it.
+
+### Minor Changes
+
+- fdb4f50: feat(migrate): `os migrate files-to-references` — a data migration with a self-check, gated per deployment (#3617)
+
+  The ADR-0104 file-as-reference migration ships as a command a deployment runs
+  against its own database, and the deployment-level flag it records is what may
+  later authorise irreversible behaviour — never the platform version.
+
+  ```bash
+  os migrate files-to-references           # dry run: reports, writes nothing
+  os migrate files-to-references --apply   # converts, verifies, records the flag
+  ```
+
+  The run backfills legacy file-field values (inline metadata blobs, own-resolver
+  URLs, `data:` URIs) into owned `sys_file` references, reconciles the ownership
+  ledger against what records actually hold, and — only on an `--apply` run whose
+  reconciliation reports **zero blocking discrepancies** — records
+  `sys_migration { id: 'adr-0104-file-references', verified_at, blocking: 0 }`.
+
+  **Why a flag rather than a release note.** ObjectStack is a development
+  platform: third-party deployments upgrade on their own schedule and their data
+  is not observable by anyone else, so no release-side soak can vouch for them.
+  The evidence has to be produced where the data is. Consequences:
+
+  - Installing a new version never starts deleting bytes. Running the migration
+    and passing its self-check is the consent.
+  - Not run, or not passed → files are retained forever. Wasted storage, zero
+    data loss.
+  - A later failing run **clears** `verified_at`: a deployment whose data has
+    drifted closes its own gate.
+  - A dry run writes nothing at all — not the conversions, and not the flag,
+    even when the self-check would pass.
+  - External URLs stay advisory. They are not `sys_file`s, so they can never
+    enter collection; whether to remodel them as a `url` field is the app
+    author's decision (ADR-0104 R7), not a gate.
+
+  Ships alongside:
+
+  - `@objectstack/spec` — `DataMigrationFlagSchema`, `FILE_REFERENCES_MIGRATION_ID`,
+    and the single `isDataMigrationFlagVerified` predicate both future consumers
+    (collection #3459, strict value-shape #3438) read, so the two gates cannot
+    disagree about the same fact.
+  - `@objectstack/platform-objects` — the `sys_migration` object plus
+    `readDataMigrationFlag` / `isDataMigrationVerified` / `recordDataMigrationRun`.
+    Reads fail toward "not verified": a gate that cannot read its evidence stays
+    closed.
+  - `@objectstack/objectql` — a read may now opt out of file-reference expansion
+    via the spec's `RAW_FILE_VALUES_CONTEXT_KEY`, and the storage service's
+    bookkeeping/scan reads do. Without it the read resolver rewrites stored ids to
+    their expanded form before the reconciliation sees them, which reports held
+    references as absent — noisy `stale_owner` findings, and a missed
+    `unowned_reference` would have been a false pass of the collection gate.
+
+- 094fa34: feat(cli,client)!: drop `os environments create --template` and the
+  `template_id` body field — no control plane has ever read them (#3731)
+
+  The CLI advertised `--template` as _"Built-in template id (e.g. crm, todo,
+  blank)"_ and forwarded it as `template_id` on `projects.create()`. Nothing
+  consumes it: `template_id` / `templateId` appears in **zero** non-test files in
+  the `cloud` repo, `sys_environment` has no such column, and the create route
+  whitelists what it reads (`displayName`, `organizationId`, `isDefault`,
+  `hostname`, `metadata`, …) — `template_id` is not in the list. The
+  `blank`/`crm`/`todo` registry the flag named was the `apps/server`
+  `createTemplatesRoutePlugin` snapshot, removed when the control plane moved to
+  `cloud`; the flag outlived it.
+
+  So the flag was accepted, transmitted, and dropped — no seeding, no error, no
+  stored trace. That is worse than the 404 its listing counterpart returned
+  (`projects.listTemplates`, deleted in #3702): a 404 tells the caller something
+  is wrong, a silently ignored flag reports success.
+
+  **Migration.** `os environments create --template <id>` → drop the flag; it
+  never did anything. Starter content comes from the App Marketplace: create the
+  environment, then install the package (`sys_package` rows with
+  `is_starter = true`, i.e. `client.projects.packages.install(envId, { packageId })`).
+  Callers passing `template_id` to `client.projects.create()` should delete the
+  property — TypeScript now rejects it, which is the point: an unknown field was
+  being silently discarded on the wire.
+
+  Note this is **not** the same `--template` as `os init` / `create-objectstack`
+  (`app` / `plugin` / `empty` scaffolds) — those are local scaffolding templates
+  and are untouched.
+
+- 7ef20d0: feat(cli,automation): catch `label: 'error'` written where `type: 'fault'` was meant (#3863)
+
+  Two of the three items left open on #3863. Both are about making the fault-edge
+  contract legible; neither changes routing behaviour.
+
+  **New lint — `flow-error-label-not-fault`.** `type: 'fault'` is what routes a
+  failure; `label` is cosmetic on an ordinary edge. So this, which reads exactly
+  like error handling:
+
+  ```ts
+  { source: 'charge_card', target: 'flag_for_review', label: 'error' }
+  ```
+
+  is an ordinary out-edge — and `traverseNext` runs every unconditional out-edge
+  in parallel. The handler fires on every **successful** run of `charge_card`,
+  concurrently with the real success path, and never on a failure. The run still
+  aborts when the node fails.
+
+  Silent in both directions: the author believes failures are handled, and never
+  notices the handler running when nothing went wrong. The reading is especially
+  natural for an AI author, since the label is precisely what the intent sounds
+  like — which is why this is worth a build-time diagnostic rather than leaving it
+  to a puzzled look at a run trace.
+
+  Deliberately narrow, because a label IS load-bearing on a branching node: a
+  `decision` / `approval` executor returns a `branchLabel` and traversal then
+  prefers the edge carrying it. Edges out of those node types are excluded, as are
+  conditional edges (a guarded path is not the unconditional footgun) and edges
+  already typed `fault`. Matches the obvious synonyms (`error`, `failure`,
+  `catch`, `on_error`, …) case-insensitively. Verified against the shipped
+  showcase: no findings.
+
+  An alias — accepting `label: 'error'` as if it were `type: 'fault'` — was
+  considered and rejected: two spellings for one concept is harder to read than
+  one spelling plus a diagnostic that names the fix.
+
+  **Pinned: a handled failure does not consume a flow-level retry.** The two
+  recovery mechanisms have different scopes and must not compound — a `fault` edge
+  handles one node, while `errorHandling.retry` replays the flow **from the
+  start**, re-running every node that already succeeded (a second notification, a
+  second created record). A failure a fault edge handled is not a flow failure, so
+  it does not consume a retry. That already held by construction (a routed failure
+  never propagates out of `executeNode`); it is now a test, so a refactor of the
+  catch path cannot quietly change it.
+
+  Docs and the automation skill gain both points, plus a note on the edge-property
+  table that `label` does not select a path except on a branching node.
+
+- 31468fc: feat(cli): `os i18n extract --check` — fail instead of writing when translation bundles have drifted
+
+  Generated translation bundles had no freshness gate, so they rotted silently
+  until someone happened to re-run the extractor by hand. #3670 found three
+  distinct drifts sitting in the committed bundles at once: translations left
+  behind for schema keys that had been REMOVED, keys the schema had GAINED with
+  no entry at all, and an object whose labels were committed as empty strings
+  (which renders blank rather than falling back to anything readable).
+
+  `--check` writes nothing and exits non-zero when a fresh extract differs from
+  what is committed in `--out`, listing each stale or missing file and printing
+  the exact regenerate command. It runs the identical render path as a real
+  extract — both branches iterate the same rendered set — so the check can never
+  disagree with what writing would produce.
+
+  It runs in **merge mode** like any other extract, so it never asks anyone to
+  re-translate: an up-to-date bundle re-extracts byte-identically. Requires
+  `--out`, since there is nothing to compare against without it.
+
+  In this repo it is wired up as `pnpm check:i18n` and gated in CI, but the flag
+  is on the CLI, so any consumer shipping generated bundles can gate them the
+  same way.
+
+- a8d1e24: feat(cli,spec): gate the whole declared surface for i18n, and translate inline object actions server-side (#3370)
+
+  In a zh-CN workspace the platform chrome was localized while author-declared
+  labels leaked English — the approval drawer rendered **Approve / Reject /
+  Reassign** right beside the inbox's own 通过 / 拒绝. Two independent holes, both
+  closed here.
+
+  **The lint gate could not see them.** `os lint`'s i18n coverage kept its own
+  walk of the metadata, separate from the one `os i18n extract` uses to scaffold
+  bundles, and the two had drifted: coverage only ever walked the _top-level_
+  `actions` array, while `sys_approval_request` declares its decision actions
+  **inline on the object**. Those labels were extractable but ungated, so an
+  untranslated one could ship and no lint run would notice. Coverage now derives
+  its expected keys from `collectExpectedEntries()` — the extractor's walker — so
+  the gated surface and the scaffolded surface cannot disagree again. Newly gated
+  as a result: inline object actions, action `params` and `resultDialog` copy,
+  object-nested `listViews` (label / description / `emptyState`), object
+  `description`, field `help` / `placeholder`, and the `apps` / `dashboards` /
+  `pages` surfaces. Extract output is byte-identical — verified against the
+  committed plugin bundles.
+
+  **It stays silent for projects that do not translate.** Which locales get
+  checked is the project's declaration, never an assumption: `os lint`,
+  `os i18n check` and `os i18n extract` now read the stack's own
+  `i18n.defaultLocale` / `i18n.supportedLocales`, falling back to the locales a
+  bundle already exists for, and finally to `en`. A project with neither is
+  checked against its default locale alone — which its inline labels already
+  satisfy — so it reports zero i18n issues. That also fixes a monolingual
+  _non-English_ project being told it owed `en` translations it never claimed to
+  speak. Locked by regression tests; the three bundled examples stay at 0 errors.
+
+  **The server sent English regardless of locale.** `translateObject` walked an
+  object's `label` / `pluralLabel` / `description` / `fields` but never its inline
+  `actions`, so `GET /api/v1/meta/object/:name` returned the authored English
+  literals even though `@objectstack/plugin-approvals` ships `_actions`
+  translations for all eight decision actions in zh-CN / ja-JP / es-ES. The
+  Console compensated by re-resolving labels client-side against a separately
+  fetched bundle; every other consumer — mobile, plain HTTP, SDUI — rendered the
+  source language. It now runs inline actions through `translateAction`, without
+  stamping a synthetic `objectName` onto the response.
+
+  Adds `os i18n extract --no-metadata-forms`. Whether the companion
+  `<locale>.metadata-forms.generated.ts` file is written was previously implicit:
+  every run emitted it, so `--check` demanded that file in packages that
+  deliberately do not commit one. The Studio metadata-form baseline is
+  registry-driven and identical for every stack, so exactly one package owns it
+  (`platform-objects`); a plugin translating only its own objects now opts out,
+  and its `--check` stops failing on a tree that is in sync. Defaults to emitting,
+  so `pnpm check:i18n` keeps covering all 8 platform bundles.
+
+- 2343099: feat(lint): translation-bundle reference integrity + option-key validation (#3583)
+
+  The i18n gate only ever ran forward: `os i18n check` asks which keys the
+  metadata expects that no bundle carries. Nothing asked the reverse — which keys
+  a bundle carries that no metadata claims — even though the spec already names
+  the answer (`TranslationDiffStatus 'redundant'`, `TranslationCoverageResult.redundantKeys`,
+  both declared with no producer).
+
+  That direction ships two failure modes, both found in the HotCRM audit: bundles
+  keyed to fields an object no longer declares (a rename that left the translation
+  behind), and select-option translations keyed by the option's **display label**
+  or a variant spelling of its value (`direct-mail` for `direct_mail`, `planned`
+  for `planning`). Neither breaks anything — which is the problem. The resolver
+  finds nothing and renders the source string, so the screen looks translated and
+  one field or one picklist value quietly does not.
+
+  New rule `validateTranslationReferences` walks every bundle in
+  `stack.translations` against the stack it ships with, wired into `os validate`,
+  `os lint`, and `os compile`:
+
+  | Key                                                                           | Must name                                                                          |
+  | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+  | `objects.{object}`                                                            | an object this stack defines, or a platform object                                 |
+  | `objects.{object}.fields.{field}`                                             | a field that object declares                                                       |
+  | `objects.{object}.fields.{field}.options.{key}`                               | an option's stored `value`                                                         |
+  | `objects.{object}._views` / `._actions` / `._sections` / `._actions.*.params` | a view `name` / bound action / `fieldGroups[].key` or named section / param `name` |
+  | `apps.{app}` / `.navigation.{id}`                                             | an app `name` / navigation item `id`                                               |
+  | `dashboards.{dash}` / `.widgets.{id}` / `.actions.{actionUrl}`                | dashboard `name` / widget `id` / header `actionUrl`                                |
+  | `globalActions.{action}`                                                      | an action with no `objectName`                                                     |
+
+  Every finding is a **warning** (`translation-target-unknown`,
+  `translation-option-key-unknown`): an orphan key is inert, not broken, and the
+  severity should say so. Diagnostics carry the declared names to choose from,
+  name the stored value when a key turns out to be the display label, and suggest
+  a namespace-segment match (`task` → `todo_task`) that edit distance alone misses.
+
+  Cross-package objects follow the existing ladder: a registered platform object
+  is skipped wholly (its fields are not visible from a stack lint), a
+  platform-prefixed name no package registers is reported once on the object key,
+  and the subtree is never half-checked. `messages`, `validationMessages`,
+  `settings`, `settingsCommon` and `metadataForms` are deliberately not judged —
+  their keys are owned by application code, plugins, and the platform's own
+  metadata-type registry, so no enumerable universe exists to resolve against.
+
+- f2b8ac9: Navigation reachability vs. granted access (issue #3583, assessment R5)
+
+  `validate-nav-access` joins what an app's navigation exposes against
+  `buildAccessMatrix` — the first lint consumer of the ADR-0090 D6 matrix, which
+  previously only backed `os compile`'s snapshot gate. An object in the menu that
+  no permission set grants read on renders as an entry and then fails
+  permission-denied when opened: it works while you browse as an administrator
+  (the platform's built-in `admin_full_access` carries a wildcard grant) and
+  breaks for exactly the users the app ships permission sets for.
+
+  Advisory severity — a grant can legitimately come from a permission set another
+  installed package ships. Quiet by construction in three cases: platform-provided
+  objects (their own packages grant them), stacks that declare no permission sets
+  at all (permissions managed elsewhere, so flagging every entry says nothing),
+  and any stack where a set carries a wildcard `objects: { '*': … }` grant — the
+  shape `admin_full_access` itself uses, which the access matrix records under the
+  literal key `*`.
+
+  Wired into `os validate`, `os lint`, and `os compile`.
+
+- 17749fc: Page-component field bindings and non-dashboard chart bindings (issue #3583, Phase 2)
+
+  Two more reference-integrity rules from the #3583 assessment, both wired into
+  `os validate`, `os lint`, and `os compile`.
+
+  **`validate-page-field-bindings`** — `PageComponent.properties` is an untyped
+  bag, so a highlights strip, KPI card, or details section can name a field the
+  bound object does not have; the component silently skips it. Which object a
+  component binds follows `dataSource.object` → `properties.object` → the page's
+  `object`, so multi-object pages are checked per element. `record:related_list`
+  resolves its columns/sort/filter against the **related** object and its
+  add-picker against that picker's own object. Advisory (matching
+  `FORM_FIELD_UNKNOWN`). Relationship paths, system fields, cross-package objects,
+  and unregistered component types are skipped.
+
+  **`validate-chart-bindings`** — extends ADR-0021 axis checking past dashboards to
+  report charts (`report.chart` and `report.blocks[].chart`), list-view charts
+  (`views[].list`, `views[].listViews.*`, `objects[].listViews.*`), and
+  dataset-bound page chart components. An axis naming a raw field instead of a
+  declared measure is an **error** (the series comes back empty); an axis naming a
+  declared-but-unselected measure is a **warning**. The report shape needed its own
+  handling: `ReportChartSchema` narrows `xAxis`/`yAxis` to bare strings, which the
+  dashboard rule's array guard skips silently. The react `<ObjectChart>` block is
+  object-bound, not dataset-bound, and is deliberately left out — nothing defines
+  what its aggregate names the result column.
+
+  **Fixes:** the page walk used by `validate-action-name-refs` read a top-level
+  `page.components` array, which `PageSchema` does not have — components live under
+  `regions[].components[]` and `slots`, and sub-trees nest inside the untyped
+  `properties` bag (`children`, `items[].children`, `body`, `footer`) rather than a
+  `children` key on the component. The rule was therefore visiting nothing on a
+  schema-parsed stack. Traversal now lives in one shared, tested module; on the
+  showcase app it reaches 194 components where the previous shape found 46.
+  Source-authored pages (`kind: 'html' | 'react' | 'jsx'`) are skipped — their
+  `regions` hold a derived cache the `source` wins over.
+
+- 67452d1: feat(spec): resolve page metadata i18n — `page:header` title/subtitle (#3589)
+
+  Custom system pages authored as metadata (Installed Apps, Cloud Connection,
+  Connect an Agent) hard-code their `page:header` copy in
+  `properties.title` / `properties.subtitle`. Every other metadata type is
+  localized at the REST boundary, but `page` was not: the `pages` namespace
+  existed only on `AppTranslationBundleSchema` — a schema no runtime reads —
+  with no resolver behind it, so those headers stayed English in every locale
+  while the matching nav labels translated correctly.
+
+  - `TranslationDataSchema` (the shape the i18n service actually serves) gains a
+    `pages` namespace: `pages.<name>.{label,description,title,subtitle}`.
+  - New `translatePage` in `@objectstack/spec/system` translates a page's own
+    `label` / `description` and overlays `title` / `subtitle` onto every
+    `page:header` in the page's regions. Registered in
+    `translateMetadataDocument`, so it rides the existing read path.
+  - `page` added to the REST boundary's `TRANSLATABLE_META_TYPES`. Locale
+    extraction, the locale-keyed ETag, and `Vary: Accept-Language` already
+    covered every metadata type — no new plumbing.
+  - `objectstack i18n extract` now emits page entries, including the
+    `page:header` copy, so the new namespace is not invisible to the tooling.
+  - zh-CN / ja-JP / es-ES translations shipped for the three Setup pages, plus
+    the missing `nav_cloud_connection` / `nav_connect_agent` nav labels (these
+    existed only in zh-CN).
+
+  Header copy is keyed by **page name**, not by component id: `page:header`
+  instances carry no stable id. `title` falls back to `pages.<name>.label`, since
+  a page's header title and its nav label are normally the same string.
+
+  Authoring is unchanged and English literals stay in metadata as the fallback —
+  a page with no `pages` entry renders exactly as before. Consumers of
+  `@object-ui` need no change: pages arrive already localized from the server.
+
+- 4340f13: feat(lint,cli): flag flow `update_record` writes to readonly fields at design time (#3425)
+
+  A flow `update_record` node that writes a field the target object declares
+  `readonly: true`, under the default `runAs: 'user'` identity, is a **silent
+  no-op**: the objectql engine strips static-`readonly` fields from a non-system
+  UPDATE payload (#2948), so the intended write never lands — yet the step still
+  reports `success`. #3407/#3413 surfaced the strip as a run-time step warning;
+  this moves the discovery **left** to `os validate` / `os build` so an author
+  finds the mismatch at design time instead of by reading server WARN logs days
+  later.
+
+  - New `@objectstack/lint` rule `validateReadonlyFlowWrites(stack)` — a pure
+    `(stack) => Finding[]` check (ADR-0019). A static `readonly:true` field
+    written by a literal `update_record` under `runAs !== 'system'` is a
+    100%-certain no-op → **error** (gates the build). A `readonlyWhen` field is
+    per-record-state → **warning** (advisory). Deliberately narrow to stay
+    false-positive-free: `create_record` (INSERT is engine-exempt from the strip),
+    `runAs: 'system'` flows (the intended "automation maintains it" channel),
+    templated object names, and non-literal `fields` maps are all skipped.
+  - Wired into `os validate` and `os compile`/`os build`, mirroring the existing
+    security-posture gate (errors fail; advisories print dimmed).
+
+  The formal contract, unchanged in behavior: `readonly` governs the end-user /
+  API surface (REST/UI and `runAs:'user'` flows strip it); trusted system writers
+  (`runAs:'system'`, system hooks, seeds) maintain it. To let a flow maintain a
+  readonly field, declare `runAs: 'system'`.
+
+- f163028: Reference-integrity validation for object and action names (issue #3583)
+
+  A HotCRM audit found ~20 shipped instances of one bug class — metadata naming
+  something that does not exist — all passing `objectstack validate` / `lint`
+  cleanly and failing silently at runtime. This closes the object-name and
+  action-name half of that class.
+
+  **New — `@objectstack/spec`:** `PLATFORM_PROVIDED_OBJECT_NAMES`, a curated
+  registry of every object name contributed by a platform package, official
+  plugin, or the cloud runtime, plus `isPlatformProvidedObjectName()` and
+  `hasPlatformObjectPrefix()`. This replaces the `startsWith('sys_')` prefix guess
+  that could not tell `sys_user` (real) from `sys_approval_process` (fictional —
+  removed by ADR-0019, registered by nothing), which is why every fictional
+  platform-prefixed reference shipped. A conformance test scans each package's
+  `*.object.ts` declarations and fails if the registry drifts.
+
+  **New lint rules** (wired into both `os validate` and `os lint`):
+
+  - `validate-object-references` — action-param `reference` / `objectOverride`,
+    dashboard `globalFilters[].optionsFrom.object`, and navigation
+    `requiresObject` gates. Severity follows resolvability: an unresolved
+    _unprefixed_ name is a typo (**error** — `object: 'user'` where the platform
+    object is `sys_user`); an unresolved _platform-prefixed_ name is **advisory**,
+    since a third-party package may still provide it.
+  - `validate-action-name-refs` — the surfaces that bind an action BY NAME:
+    list-view `bulkActions` / `rowActions`, page `record:quick_actions`
+    `actionNames`, and nav action items. A name matching no defined action is an
+    **error** (the button renders and does nothing), matching the existing
+    dashboard-action-target rule.
+
+  **Fixes:**
+
+  - `defineStack` cross-reference validation now walks `app.areas[].navigation` —
+    an areas-based app previously got no navigation checking at all — and recurses
+    into `children` on `object` nav items, not only `group` ones.
+  - `os lint` i18n coverage now reads field `options` in the canonical
+    `{value,label}[]` array shape; it only handled the record map, so option-label
+    coverage silently never fired for canonically-shaped select fields.
+  - Hook `condition` expressions are now field-checked when `object` is an ARRAY
+    of targets (previously only a single string target was checked, so a
+    multi-target hook filtering on a nonexistent field passed clean). Per-target
+    diagnostics are de-duplicated.
+  - A dashboard widget binding no `dataset` at all is now reported instead of
+    silently bypassing every binding and chart check on the raw-config
+    (`lint`/`doctor`) paths. `dataset` is schema-required, so this matches what
+    the parsed paths already enforce.
+
+- 5cfd4d5: feat(cli): the serve storage fallback declares the default datasource instead of constructing a driver (#3826)
+
+  The last open-core second site of "definition → live driver": when a host
+  `objectstack.config.ts` supplies objects but no driver plugin, `serve` built a
+  driver via `createStorageDriver` and registered it through `DriverPlugin`, with
+  its connect and failure verdict landing in `ObjectQLEngine.init()` — the same
+  split #3869 removed from the standalone stack.
+
+  - **`createStorageDriver` is gone.** `resolveStorageDefinition` translates the
+    driver kind + URL into `{ driverId, config }` (a pure host-side translation,
+    like `standalone-stack`'s), and serve hands it to the runtime's
+    `DefaultDatasourcePlugin` — same shared factory, same `bootCritical` failure
+    verdict, same `OS_ALLOW_DRIVER_CONNECT_FAILURE` escape hatch, and the primary
+    DB's real status in Setup → Datasources.
+  - **`mysql`/`mysql2` joined the shared driver factory** (SqlDriver over
+    `mysql2`; DSN or discrete fields, secret as password).
+  - **Host-composition passthroughs**: the factory honours `config.autoMigrate`
+    (the #2186 dev loosen-only self-heal, for the SQL kinds) and `config.persist`
+    (the CLI's wasm `on-disconnect` mode). Connection builders ignore both keys.
+  - **`turso`/libSQL fails loud at resolution**, same typed
+    `UnsupportedDriverError`, same actionable message — nothing is constructed to
+    fail later.
+  - **The `telemetry` sibling datasource stays a pre-built `DriverPlugin`** — the
+    documented escape hatch for named auxiliary drivers. Its provisioning now
+    gates on the statically-known sqlite file path; the old coupling to the
+    primary's _resolved_ engine is replaced by the telemetry provision's own
+    step-down check, which already guarded the ABI-broken case.
+
+  Verified end to end: a host-composed config (plugins + objects, no driver)
+  boots through the declared fallback with the same banner labels; the artifact
+  path (`dev:crm --fresh`) is table-for-table unchanged (71 tables, zero
+  `no such table`).
+
+  **Migration.** None for CLI users — same URLs, same env vars, same banner. The
+  removed `createStorageDriver` was CLI-internal; `resolveDriverType`,
+  `inferDriverTypeFromUrl` and `UnsupportedDriverError` are unchanged.
+
+### Patch Changes
+
+- 50616d9: feat(spec,cli): warn the author when a deprecated action alias is discarded (#3743)
+
+  #3742 made `target` beat the deprecated `execute` alias everywhere and had the
+  `ActionSchema` transform **drop** the alias from its output, so "two different
+  scripts for one button" became unrepresentable. What it left behind: an author
+  who declares both slots with different values still loses one of the two
+  handlers they wrote, **silently**. Per Prime Directive #12 that belongs at
+  authoring time, so it is now reported there.
+
+  **New rule — `action-target-execute-conflict` (advisory).** An action declaring
+  both `target` and `execute` with different values gets a warning naming both
+  handlers, stating that `target` wins, and giving the one-line fix (delete
+  `execute`). Identical values in both slots are harmless duplication and stay
+  quiet. It never fails the build: the resulting stack is well-defined — the cost
+  is a handler that never runs, not a broken artifact.
+
+  The rule must run **pre-parse**, because the parse is what consumes the alias:
+  once `ObjectStackDefinitionSchema` has run there is no `execute` key left to
+  report. It therefore lives in `@objectstack/spec`
+  (`lintDeprecatedAliases`, exported from the package root) and is wired into
+  both layers that perform the discard:
+
+  - **`defineStack`** — the dominant authoring path, and the one that consumes the
+    alias earliest: it parses inside your own config module, so by the time
+    `os build` loads that module the alias is already gone. It now warns on the
+    console before parsing (once per distinct conflict per process).
+  - **`os build` / `os validate`** — a new pre-parse pass covering stacks that
+    skip strict `defineStack`: a plain object default-export,
+    `defineStack(…, { strict: false })`, and inline function handlers (`target` is
+    `z.string()`, so those cannot pass strict `defineStack` and are lowered by the
+    CLI instead). Both commands lint the same input, so they agree by construction
+    (#3782).
+
+  Each layer reports only its own discards, so one authored conflict produces
+  exactly one warning however the stack is compiled.
+
+  **Behaviour fix in the same contract.** #3742 fixed compile-time precedence by
+  probing for a _callable_ `target` first, which left one combination still
+  resolving the alias's way: a **string** `target` beside a **function** `execute`
+  bound the alias and then overwrote the canonical ref the author wrote. `target`
+  now wins in every combination of string/function across the two slots, matching
+  the `ActionSchema` transform — so the new warning states one precedence rule
+  that is true everywhere. If you relied on an inline `execute` function winning
+  over a string `target`, move it into `target`; the warning names the action.
+
+  Authoring is otherwise unchanged: `execute` alone is still accepted, still
+  lowered into `target`, and still documented.
+
+- 08b5a3d: fix(action): one precedence for `target` vs the deprecated `execute` — lower the alias, then drop it (#3713)
+
+  `execute` is the deprecated alias of `target`, and three readers resolved "the
+  author declared both" in **two opposite directions**:
+
+  | Reader                                | Preferred |
+  | ------------------------------------- | --------- |
+  | `ActionSchema` transform (spec)       | `target`  |
+  | objectui `ActionRunner.executeScript` | `execute` |
+  | CLI compile step (`lowerCallables`)   | `execute` |
+
+  So `defineAction({ type: 'script', target: 'preferredHandler', execute: 'legacyHandler' })`
+  ran `preferredHandler` server-side and `legacyHandler` client-side — two
+  different scripts for one button, silently, with no error anywhere. Low
+  frequency (it needs an author to set both, which happens mid-migration or by
+  copy-paste), but the failure mode is "the wrong code ran".
+
+  **`target` now wins everywhere, and the alias is removed from the parsed
+  output** — the same "canonical wins, alias disappears" shape as
+  `agent.knowledge.topics` → `sources`. The conflict is now _unrepresentable_
+  rather than merely agreed-upon: no renderer can see a second slot to disagree
+  about. Worth noting the server runtime never read `execute` at all
+  (`isHeadlessInvokableAction` gates on `target || body`; dispatch probes
+  `target`/`name`), so authoring `execute` worked _solely_ because it was lowered
+  at parse time — dropping it costs the server nothing.
+
+  The CLI's inline-handler lowering had the same bug in compile-time form: with a
+  function in both slots it bundled the `execute` one and then overwrote
+  `action.target` with that ref, silently discarding the function the author
+  declared on `target`. It now probes `target` first and drops the alias.
+
+  **Authoring is unchanged** — `execute` is still accepted on input (`ActionInput`),
+  still lowered to `target`, and still listed in the reference docs. Nothing to
+  migrate in your app metadata.
+
+  **Consumers of the parsed metadata**, however, must read the canonical slot:
+
+  - FROM: `parsedAction.execute` → TO: `parsedAction.target`
+  - One-line fix: delete the alias fallback, e.g. `action.execute || action.target`
+    becomes `action.target`.
+
+  `z.infer<typeof ActionSchema>` no longer carries `execute`, so any such reader
+  fails to compile rather than silently reading `undefined`. The objectui
+  `ActionRunner` counterpart ships separately.
+
+- f63cd09: fix(spec): `action.undoable` is `live`, not `experimental` — stop warning on a property that works (#3714)
+
+  The liveness ledger marked `action.undoable` `experimental` on a #1992-era note:
+  _"no runtime reader yet — neither service-automation nor objectui consume the
+  action's `undoable` flag (objectui has an UndoManager but does not key off this
+  field)."_ That was true when written. objectui has since wired **two** readers,
+  both gating real behaviour:
+
+  | Reader                                      | What the flag gates                                                        |
+  | ------------------------------------------- | -------------------------------------------------------------------------- |
+  | app-shell `useConsoleActionRuntime.tsx:409` | builds the undo operation the success toast's Undo button invokes (`:147`) |
+  | app-shell `RecordDetailView.tsx:545`        | restores the record's prior field values (`:404`)                          |
+
+  `components` `action/action-button.tsx:113` forwards the flag for exactly this
+  reason, per its own comment: _"without this the flag is dropped and the handler
+  never builds the undo operation."_
+
+  **Why it mattered.** The CLI liveness lint warns on `experimental` as well as
+  `dead`, so authoring a _working_ property produced a
+  `liveness-experimental-property` warning — "declared but NOT enforced at
+  runtime". An author (or an AI) reading the ledger or that warning concludes
+  `undoable` is aspirational and skips it, losing a shipped feature. Authoring
+  `undoable: true` is now silent, and the protocol reference no longer claims
+  setting it "currently has no effect".
+
+  Nothing to migrate: the schema, the parsed shape, and the runtime are unchanged
+  — only the classification of what they already do.
+
+  This is the _understating_ failure direction, the mirror of the preview-renderer
+  over-claims corrected in #3685/#3711/#3686. Both directions have the same root
+  cause, now written into `packages/spec/liveness/README.md`: **a ledger entry is a
+  claim with a timestamp, and code moves under it in both directions** — entries
+  are worth re-verifying rather than trusting indefinitely.
+
+- 7fb436c: Multi-organization operation is an ENTITLEMENT again: the `group` posture no
+  longer activates without the enterprise runtime (ADR-0105 D12 correction).
+
+  The first ADR-0105 wave read D12 as "the `group` wall ships open" and made the
+  posture self-activating — it never probed for `@objectstack/organizations`. That
+  turned `group` into a free multi-org path around the `isolated` gate (ADR-0081
+  D2), and made the weaker isolation the free one, which is not a boundary anyone
+  would draw on purpose.
+
+  The distinction that was missed: **open code is not free activation.** The wall's
+  implementation has always lived in the open packages — that is equally true of
+  `isolated`, whose Layer 0 wall sits in `plugin-security` and is gated on a
+  service the enterprise package registers. Cloud ADR-0016's 铁律
+  (强制免费、治理收费) guarantees that a deployment RUNNING a multi-org shape is
+  safe; it is satisfied by REFUSING to run one unwalled, not by giving the posture
+  away.
+
+  ## Changes
+
+  - **`tenancy-service`**: `group` probes `org-scoping` exactly like `isolated`.
+    Without it the posture resolves to `single` and reports `degraded`.
+  - **`os serve`**: the ADR-0093 D5 boot guard keys off the resolved POSTURE
+    instead of `OS_MULTI_ORG_ENABLED`. Previously `OS_TENANCY_POSTURE=group` skipped
+    both the enterprise package load AND the fail-fast, silently degrading to an
+    unwalled deployment — the exact ADR-0049 class that guard exists to close. A
+    `group` request without the runtime now refuses to boot unless
+    `OS_ALLOW_DEGRADED_TENANCY=1`.
+  - **New seam — the runtime declares what it entitles.** `org-scoping` may expose
+    `supportedPostures` (`OrgScopingEntitlement`, `@objectstack/spec/security`);
+    the open side honours it and fails closed on anything not listed. Whether
+    `group` and `isolated` are one commercial tier or two is packaging policy, and
+    packaging policy belongs to the commercial runtime rather than hard-coded in
+    open core. Omitting the field entitles every walled posture, so existing
+    runtimes are unaffected.
+  - **`organization_id` stamping returns to the enterprise runtime.** The previous
+    wave moved auto-stamping into the open engine; that removed the closed
+    package's only load-bearing runtime duty, so a five-line forged `org-scoping`
+    registration would have produced a fully working multi-org deployment. With
+    stamping back where it was, a forged registration yields NULL-org rows the wall
+    hides — a broken deployment, not an unlicensed working one.
+
+    **Write-side VALIDATION stays open and is unchanged**, including the
+    bulk-insert coverage: rejecting a forged `organization_id` is a security
+    property, not a packaging one. Only filling an ABSENT value moved back.
+
+  - Default-organization bootstrap returns to `single`-only; every walled posture
+    keeps its existing owner (ADR-0081 D1).
+
+  ## Note for operators
+
+  `OS_TENANCY_POSTURE=group` without `@objectstack/organizations` installed now
+  **refuses to boot** rather than running single-org. This only affects
+  deployments that adopted `group` between the two waves.
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 4c0df37: fix(cli): the startup banner reads a DSN-declared datasource, and stops printing credentials (#3793)
+
+  `OS_DATABASE_URL="postgres://u:p@127.0.0.1:59437/nope" os serve` printed:
+
+  ```
+    Driver:  SqlDriver(pg)  → (unknown)
+  ```
+
+  The driver was identified; the address was not. The banner exists so a
+  developer sees at a glance which database they are on, and it went blank
+  exactly when the database is unreachable and the address is the one thing worth
+  reading.
+
+  `describeRegisteredDriver` knew three of the four shapes a driver's
+  `config.connection` arrives in — a DSN string, `{ filename }` (sqlite), and
+  discrete `{ host, port, database }` — but not `{ connectionString }`, which is
+  what `defaultDatasourceDriverFactory` builds for a pg datasource declared with
+  `config.url` / `config.connectionString`. So _any_ DSN-declared datasource read
+  `(unknown)`, while the same datasource spelled out in discrete fields read
+  fine. (`driver.config` keeps the shape its author passed — pinned by a
+  driver-sql test — so #3791's knex-side `{ connectionString, connectionTimeoutMillis }`
+  rewrite neither caused nor worsened this.)
+
+  Chasing that turned up two more `(unknown)`s with the same cause — the reader
+  returned as soon as a driver had a `config` at all, so it could only ever
+  succeed for a `SqlDriver`:
+
+  - **MongoDB** keeps its DSN in a top-level `config.url`, and `MongoDBDriver`
+    _does_ have a `config`, so the "mongo/turso expose the URL on the instance"
+    arm below it was unreachable — every mongo boot banner read `(unknown)`.
+  - **In-memory** `config` is `{}` when none was passed, which is truthy, so the
+    `(in-memory)` arm was unreachable too — a preset-wired memory driver
+    bannered as `com.objectstack.driver.memory → (unknown)`.
+
+  Both are now read by shape rather than by which arm matched first. A related
+  latent one is fixed alongside: `SqliteWasmDriver` passes knex a dialect _class_
+  as `client`, and the label interpolated it — `SqlDriver(${cfg.client})` would
+  have pasted the class source into the banner. The label only interpolates a
+  string `client` now, and falls back to the driver's constructor name.
+
+  Both halves of the original bug are now one renderer,
+  `utils/connection-display.ts`:
+
+  - **`describeDriverConnection(config)`** knows all four `connection` shapes,
+    plus the `{ uri }` / `{ url }` mongo-family spellings, applies the same field
+    precedence to a top-level address, and returns `undefined` — not a guess —
+    for a function-valued `connection` the host builds per pool checkout.
+  - **`redactConnectionUrl(value)`** drops credentials rather than masking them.
+    The previous `//user:****@` mask left two holes: a password supplied with no
+    username (`postgres://:secret@host/db`) did not match its regex and printed
+    verbatim, and a Turso DSN carries its secret in the query string
+    (`libsql://….turso.io?authToken=…`), which was never touched. Userinfo _and_
+    query are now dropped; non-URL values (`:memory:`, a sqlite path,
+    `(in-memory)`) pass through untouched, and the function is idempotent.
+
+  Three byte-identical copies of the old mask (`serve` / `start` / `dev`) and a
+  fourth variant in `schema-migrate` collapse into that one helper. The
+  `schema-migrate` copy had the same DSN blindness with higher stakes: it feeds
+  the `Apply N change(s) to …?` confirm, where a `{ connectionString }` config
+  rendered as a bare `pg` — an operator was asked to approve a destructive
+  migration against an unnamed database.
+
+  Banner/prompt output changes accordingly — `postgres://admin:hunter2@db:5432/app`
+  was shown as `postgres://admin:****@db:5432/app` and is now
+  `postgres://db:5432/app`. Display only; no configuration or API surface moves.
+
+- 9f060e5: chore(deps)!: better-auth 1.7.0-rc.2 (account identity restructuring) + the
+  production-dependency batch from #3517
+
+  **better-auth 1.7.0-rc.1 → 1.7.0-rc.2** across the family (`better-auth`,
+  `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/sso`, and the
+  adapter/telemetry overrides). `@better-auth/scim` deliberately stays on
+  1.7.0-rc.1 — rc.2 replaces its whole model (code-defined connections; the
+  `scimProvider` model and the generate-token endpoint are gone), which is a
+  feature migration, not a version bump. Its peer range accepts rc.2 core, and the
+  advisory that forced the original pin (GHSA-j8v8-g9cx-5qf4) is still fixed.
+
+  **BREAKING — account identity.** better-auth renamed `account.accountId` to
+  `account.providerAccountId` and added a REQUIRED `account.issuer`; sign-in now
+  resolves accounts by `(issuer, providerAccountId)`.
+
+  - FROM `fields: { accountId: 'account_id' }` → TO
+    `fields: { issuer: 'issuer', providerAccountId: 'account_id' }`. The provider
+    account id keeps its `account_id` column — only the better-auth-side name
+    moved — and `sys_account` gains an `issuer` column.
+  - FROM `internalAdapter.createAccount({ providerId, accountId, … })` → TO
+    `createAccount({ providerId, issuer, providerAccountId, … })`. A local
+    password account carries the issuer better-auth mints for itself,
+    `local:credential`.
+  - FROM `client.auth.accounts.unlink({ providerId, accountId })` → TO
+    `unlink({ accountId })`, where `accountId` is now the account ROW id (the `id`
+    from `accounts.list()`), matching better-auth's narrowed body.
+    `accounts.list()` returns `issuer` + `providerAccountId` in place of
+    `accountId`.
+
+  **Existing deployments:** rows written before 1.7 have no issuer and are
+  invisible to sign-in until stamped. The auth plugin now runs an idempotent
+  boot-time backfill that stamps what it can derive — `local:credential` for
+  password accounts, `local:oauth:<providerId>` for configured social providers,
+  and the registered IdP's real `iss` from `sys_sso_provider` for federated ones.
+  Accounts from a federated IdP that is no longer registered cannot be derived;
+  they are logged with their provider id and row count rather than guessed, and
+  those users cannot sign in through that provider until the row is stamped with
+  the IdP's issuer or removed so a fresh login re-links it.
+
+  **Also required by 1.7:** `SecondaryStorage` gained two mandatory methods, both
+  now implemented over the kernel cache service — `getAndDelete` (single-use
+  verification values) and `increment` (fixed-window rate-limit counter;
+  `rateLimit.storage: 'secondary-storage'` throws at boot without it).
+
+  The rest of #3517's production-dependency batch rides along: `@oclif/core`
+  4.13.0, `@hono/node-server` 2.0.12, `hono` 4.12.32, `tar` 7.5.22, `jose` 6.2.4,
+  `pinyin-pro` 3.28.2, plus the private docs app's fumadocs/next/react bumps.
+
+- 4921a95: fix(cli): finish the `--json` truncation fix — every command, and the second document it was hiding (#3780 follow-up)
+
+  #3780 routed three commands through `emitJson`. The other ~100 emission sites
+  still wrote machine output with `console.log`, which on a **pipe** is cut off
+  at one 64 KiB buffer when the command exits right after: Node buffers pipe
+  writes asynchronously and the exit tears the process down mid-drain. It is
+  invisible to whoever writes it — stdout to a TTY is synchronous, so every
+  interactive run looks perfect while every scripted consumer, the only audience
+  `--json` has, gets invalid JSON.
+
+  The exit does not have to be an explicit `process.exit`. oclif ends failing
+  commands with `handle()` → `Exit.exit()` → `process.exit()` and flushes
+  nothing on that path (`flush()` runs only on `execute()`'s success path), so a
+  plain `this.exit(1)` — or any thrown error — truncates identically. 73 of the
+  104 sites had exactly that shape. Even `lint` was only half fixed: `--eval
+--json` writes a whole corpus report and was still on `console.log`.
+
+  All 104 sites now go through `emitJson`, `formatOutput`'s `json`/`yaml`
+  branches through the same drain-aware write (`--format yaml` truncated too),
+  and an ESLint rule keeps the pattern from growing back one command at a time.
+  Control flow is untouched — a following `this.exit(1)` stays, it is simply
+  safe once the buffer has drained. Output bytes are unchanged: roughly half the
+  sites emitted compact and half indented, and each keeps whichever it had.
+
+  **Draining the write exposed a second defect underneath it.** Because
+  `this.exit(1)` _throws_, a command whose body sits in one `try` unwinds its
+  inner "report and stop" into the outer `catch`, which reports again — so
+  `os validate --json` on a failing config printed **two** JSON documents, which
+  is neither valid JSON nor valid JSONL. Truncation had been hiding the second
+  one. Nine commands had this shape; their catch clauses now re-throw the exit
+  signal (`isExitSignal`) instead of describing it as a failure.
+
+  Measured on `os validate --json` against a config with 900 schema errors,
+  piped:
+
+  |                      |                                        bytes | parses  |
+  | -------------------- | -------------------------------------------: | ------- |
+  | before               | 131072 (exactly two buffers, cut mid-string) | no      |
+  | truncation fix alone |                      1514711 (two documents) | no      |
+  | both fixes           |           1514648 (one document, 900 errors) | **yes** |
+
+  Pinned end to end: a real command, a real pipe, a payload past several
+  buffers — plus a control case asserting the `console.log` pattern it replaced
+  genuinely truncates, so the gate cannot quietly stop testing anything.
+
+  Not covered: the ~30 human-facing `console.log` paths, which are unaffected,
+  and `os serve` / `os dev` logging. This is deliberately not fixed by forcing
+  stdout into blocking mode process-wide, which would be one line and cover
+  everything — the same binary runs the dev server, and a blocking write to a
+  pipe with a slow reader blocks the event loop, trading truncated JSON for a
+  server that stalls on its own logs.
+
+- 0bfdf46: fix(spec,cli): conversion deprecation notices reach the author, not just `os validate` (#3855)
+
+  The ADR-0087 D2 conversion layer rewrites an old-shape key to its canonical
+  spelling at load and emits a structured `ConversionNotice` for each rewrite. The
+  conversion being silent about _fixing_ the shape is the point — zero consumer
+  action. Being silent about having **had** to is not: the notice is the one signal
+  that says _this spelling retires in protocol N, and your metadata stops loading
+  then_.
+
+  Two of the three surfaces that run the conversion pass discarded every notice:
+
+  | Surface                   | Before                                 | After                                                                                                    |
+  | ------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+  | `os validate`             | passed a sink, printed them            | unchanged                                                                                                |
+  | `os build` / `os compile` | **passed no sink — notices discarded** | prints them, and includes a `conversions` array in `--json` under the same key `os validate --json` uses |
+  | `defineStack`             | **passed no sink — notices discarded** | warns on the console, once per distinct conversion site                                                  |
+
+  This is the #3782 parity class one layer down: not "does this command run the
+  gate" but "does it listen to what the gate says". Five conversions are live
+  today (protocol 11 and 15), so an author on any of those shapes was told by one
+  command and not the other two — and `defineStack` is where that author actually
+  is, since it runs inside their own config module.
+
+  `defineStack` surfaces notices in **both** strict and non-strict mode: the
+  conversion happens on the shared `normalizeStackInput` call before the strict
+  branch, and `strict: false` does not make the old shape any less retiring.
+
+  A new assertion in `validate-build-gate-parity.test.ts` fails if either command
+  calls `normalizeStackInput` without a sink, so the gap cannot silently reopen.
+
+  No behaviour change for a stack already on canonical shapes: nothing converts,
+  so nothing warns.
+
+- 19e3e6e: feat(runtime)!: the standalone `default` datasource is a declaration, connected through the one datasource path (#3826)
+
+  ADR-0062 D1 asked for exactly one "definition → live driver" path. Construction
+  converged earlier; the _connect + failure verdict_ half did not — the standalone
+  `default` driver was pre-built and smuggled into the engine as a `driver.*`
+  kernel service, so "what if it cannot connect" lived in `ObjectQLEngine.init()`,
+  a second implementation of the policy `DatasourceConnectionService` owns for
+  every other datasource. #3741 → #3758 showed what two copies cost: a fix to one
+  missed the other for three months.
+
+  - **`createStandaloneStack` now emits a datasource DEFINITION**, not a driver.
+    URL→config translation and `mkdir` stay host concerns; the new
+    **`DefaultDatasourcePlugin`** (exported from `@objectstack/runtime`) connects
+    the definition at boot through the shared `DatasourceConnectionService` —
+    same driver factory, same failure verdict, same retained state. It must be
+    registered before `ObjectQLPlugin` (boot schema-sync needs the driver);
+    `createStandaloneStack` orders it correctly.
+  - **`sqlite-wasm` joined the shared driver factory** (`sqlite-wasm` /
+    `wasm-sqlite` ids) — it was the last bespoke construction site.
+  - **`bootCritical` on `ConnectableDatasource`**: the host declares a datasource
+    the platform cannot run without; a boot connect failure is then fatal
+    regardless of object bindings, sharing `OS_ALLOW_DRIVER_CONNECT_FAILURE` and
+    the `DEGRADED BOOT` banner with the engine-level guard. A connect policy that
+    denies a boot-critical datasource fails the boot loudly — the #3828 "denial is
+    not a failure" boundary was drawn for optional datasources.
+  - **`connect(record, { asDefault: true })`**: registers the built driver as the
+    engine's default under its natural name (no `'default'` stamping — routing to
+    `default` goes through the engine's default-driver fallback, and the natural
+    name keeps logs/lookups byte-for-byte with the previous boot).
+  - **`default` is a host-reserved name**: an app bundle declaring a datasource
+    named `default` is rejected at load (`AppPlugin`), and the runtime-admin
+    create rejects it too. It would shadow the host's primary datasource and, if
+    it passed the auto-connect gate, silently divert every unbound object.
+  - The primary DB now shows a REAL `status` in Setup → Datasources (#3827) —
+    `ok` when connected, `error` + reason when the operator boots degraded.
+  - `ObjectQLEngine.init()` is unchanged and keeps its fail-fast: it re-connects
+    the already-connected default (every open-core driver's `connect()` is
+    idempotent), which is exactly the boot verification #3741 wants.
+  - `DriverPlugin` remains the escape hatch for tests and pre-built/proxy drivers
+    (e.g. the CLI's `telemetry` datasource) — no longer how the standalone
+    default boots. The CLI serve config-load fallback (`createStorageDriver`,
+    incl. mysql/turso) still constructs directly; tracked in #3826.
+
+  **Migration.** Boots through `createStandaloneStack` (CLI `serve`/`dev`
+  artifact path, quickstarts, embedders using the stack factory) change shape but
+  not behavior: same driver kinds, same URLs, same fail-fast semantics, same
+  escape hatch. Embedders that composed `DriverPlugin` manually are unaffected.
+  An app that declared a datasource literally named `default` now fails to load
+  with a rename instruction — that name never routed correctly to begin with.
+
+- 5b89711: feat(spec,lint): freeze the `{current_user_id}` filter vocabulary and fail the build on unresolvable placeholders (#3574)
+
+  A dashboard widget filtered on `{current_user}` rendered `0`. Not an error — a
+  zero, indistinguishable from a metric that is legitimately empty, with nothing
+  in the console or the server log. `service_dashboard.my_open_cases_by_priority`
+  in the HotCRM template had shipped broken this way since the day it was
+  written.
+
+  The token had never been part of the contract. Date macros were frozen in
+  `date-macros.zod.ts` with a spec vocabulary, a lint-usable predicate, and a
+  single client resolver; `{current_user_id}` had only prose in an `app.zod.ts`
+  JSDoc and three ad-hoc client implementations that each handled one surface's
+  filter shape. Nothing could tell an author their token was wrong.
+
+  - **`@objectstack/spec`** — new `data/context-tokens.zod.ts` freezing
+    `CONTEXT_TOKENS` (`current_user_id`, `current_org_id`) as the sibling of
+    `DATE_MACRO_TOKENS`, with `isContextToken` / `isKnownFilterToken` /
+    `classifyFilterToken` and a `CONTEXT_TOKEN_SUGGESTIONS` near-miss table. The
+    module documents what the tokens are _not_: presentation scope, never an
+    access boundary — that is RLS, which uses the unrelated `current_user.id`
+    expression root.
+  - **`@objectstack/lint`** — new `validateFilterTokens` (rule
+    `filter-token-unknown`, severity `error`). It walks `filter` / `filters` /
+    `runtimeFilter` subtrees across dashboards, objects, views, reports,
+    datasets, pages and apps, and reports any placeholder that resolves in
+    neither vocabulary. It scans for filter _keys_ rather than enumerating known
+    surfaces, so a new surface following the convention is covered the day it
+    ships — enumerating surfaces is how the dashboard was missed in the first
+    place. Navigation `recordId` / `params` are deliberately out of scope: they
+    resolve `AppContextSelector` ids, which are meaningless in a filter.
+  - **`@objectstack/cli`** — the gate runs in `os validate` and `os compile`.
+
+  It is an error rather than a warning because of who authors this metadata. An
+  AI reads a query returning `0` as a correct answer and builds on it; its
+  correction loop is author → validate → fix, so a diagnostic only reaches it if
+  it can fail the build. The three spellings the suggestion table covers —
+  `{current_user}`, `{user_id}`, `{organization_id}` — are each correct
+  _somewhere else_ in the platform, which is exactly why authors reach for them.
+
+  Also fixes a `ViewSchema` JSDoc example that documented `{user_id}`, a token
+  that resolves nowhere.
+
+- b0e5a37: fix(lint,cli): a filter reference that cannot resolve fails the build, not the run (#3426, #3810)
+
+  `validateFlowTemplatePaths` reported every `{record.<path>}` miss as **advisory**,
+  on the reasoning that an unresolved token renders a blank and the run still
+  completes. Since #3810 that reasoning no longer holds in one position: inside a
+  CRUD node's `filter`, an unresolved token does not blank a value, it **deletes
+  the condition** — and a removed condition matches MORE rows, not fewer. Those
+  nodes now refuse to execute rather than run a widened query.
+
+  So the rule was warning about metadata whose runtime is already decided: `os
+validate` printed a yellow line, exited 0, and shipped a flow that cannot run.
+  Severity now follows the runtime consequence, by position:
+
+  - **`filter` of `get_record` / `update_record` / `delete_record` → `error`.**
+    These are the three nodes whose filter `resolveNodeFilter` guards. The finding
+    says what the runtime will do ("the node refuses to run at execution time")
+    and why the build gates rather than warns (an absent condition _widens_ the
+    query). `os validate` exits 1.
+  - **Every other position → `warning`, unchanged.** A message body, an `http`
+    url, an `update_record` write payload: the token still renders a blank, the
+    run still completes, and the head object may legitimately come from another
+    installed package. `create_record` is deliberately excluded from the gating
+    set — it writes a payload and has no filter to widen.
+
+  Both rules split this way (`flow-template-unknown-field` and
+  `flow-template-lookup-traversal`), so a typo and a lookup hop are gated wherever
+  the runtime refuses them. A reference used in both positions on one node is
+  reported **once, at error severity**.
+
+  **`os validate` now enforces it.** The command filtered this rule's findings for
+  `severity === 'warning'` and dropped everything else on the floor, so an error
+  from it would have been invisible. It now gates on errors first — printing rule
+  id and config path, and emitting them under `errors` in `--json` — mirroring the
+  `validateReadonlyFlowWrites` step directly below, which makes the same
+  shift-left split (a certain runtime failure gates; a state-dependent one
+  advises).
+
+  Verified against the shipped examples: 33 flows across app-todo, app-crm and
+  app-showcase produce **no new errors**; the four pre-existing lookup-traversal
+  warnings sit in `script` / `notify` / `subflow` / `parallel` positions and keep
+  their advisory severity.
+
+  No authoring change is required for a correct filter. A filter that this rule
+  now fails is one the runtime would have refused anyway — the difference is that
+  you find out at `os validate` instead of at 3am.
+
+- 169b58a: fix(#3426): build-time warning for unresolvable flow template paths + guard the formula re-read
+
+  Two follow-ups to #3426 (the formula/lookup `{record.<path>}` template gap that #3445 began closing).
+
+  **Build-time signal (the issue's fallback ask).** `os validate` now flags a
+  record-change flow node whose `{record.<path>}` template cannot resolve —
+  turning the previous SILENT blank into an advisory warning. Two cases, via the
+  new `@objectstack/lint` rule `validateFlowTemplatePaths`:
+
+  - `flow-template-unknown-field` — `{record.<x>}` where `<x>` is neither a
+    declared field nor a system column (a typo like `{record.full_naem}`).
+  - `flow-template-lookup-traversal` — `{record.<lookup>.<field>}`, a cross-object
+    hop the seeded record carries only as a scalar id (still unsupported; tracked
+    on #3426).
+
+  Deliberately quiet: formula fields, bare lookup ids, numeric indexes into
+  `multiple` lookups (#1872), `json` sub-paths, and system columns are NOT flagged,
+  and flows bound to an object this stack does not define are skipped (no schema to
+  compare against).
+
+  **Hydration re-read guards.** The `trigger-record-change` computed-field re-read
+  (#3445) is now (a) skipped when the object declares no `formula` field — the only
+  thing it adds — via the engine's optional `getObjectConfig`, and (b) memoized per
+  write on the shared HookContext, so N flows on one written record share ONE
+  re-read instead of N. Any uncertainty falls back to the prior unconditional
+  re-read (correctness over the optimization).
+
+- fd7cfde: fix(lint,cli): the flow-template-path rule reaches `os lint` and `os compile`, not just `os validate` (#3583, #3810)
+
+  `validateFlowTemplatePaths` was wired by hand into `os validate` and nowhere
+  else. That is precisely the drift `REFERENCE_INTEGRITY_RULES` exists to end
+  (#3583 §5 D5): the same stack, checked by a different rule subset depending on
+  which command the author happened to run.
+
+  It mattered more after #3861 gave the rule a gating severity. A `{record.<path>}`
+  token in a CRUD node's `filter` that names an unknown field — or hops through an
+  un-expanded relation — makes the runtime **refuse the node** (#3810). `os
+validate` failed on it; `os lint` and `os compile` did not look, so a CI job
+  running either one would build and ship a flow that cannot execute.
+
+  **The rule is now a suite member.** It belongs by the suite's own admission
+  criterion: a `{record.<field>}` token is a name written in metadata, resolved
+  against the bound object's declared fields. One line in
+  `REFERENCE_INTEGRITY_RULES` reaches all three commands, and the hand-wiring in
+  `validate.ts` is deleted rather than duplicated.
+
+  Before landing this, the rule was run against all three stack shapes the suite
+  is handed — raw `config` (`os lint`), `normalizeStackInput` output, and
+  schema-parsed `result.data` (`os validate` / `os compile`) — across `app-todo`,
+  `app-crm` and `app-showcase`. All three agree finding-for-finding, so moving the
+  call site does not change what is reported.
+
+  Verified end-to-end on `app-showcase`: all three commands pass unchanged on the
+  real stack (the four pre-existing lookup-traversal warnings still print, still
+  advisory), and with one filter token corrupted to `{record.idd}` **all three now
+  exit 1** — where previously only `validate` did.
+
+  **Also fixed, in the same file.** On a clean run, `os validate --json` never
+  reported the reference-integrity suite's warnings: `refWarnings` was assembled,
+  printed to the console, and included in the _failure_ payload, but omitted from
+  the success-path `warnings` array. Adding the rule to the suite would have
+  silently dropped its warnings from `--json` for JSON consumers, so `refWarnings`
+  now appears there — which also surfaces the other five rules' warnings that were
+  being discarded. Same shape of bug as the dropped errors #3861 fixed: computed,
+  then thrown away.
+
+- 189854c: chore(spec,cli): enroll `webhook` in the liveness GOVERNED set (#3462)
+
+  Closes the final third of #3462 (umbrella #1878) — `report` and `dashboard`
+  landed in #3474; `webhook` was deferred for two reasons, both handled here.
+
+  - **Not a registered metadata type.** `webhook` is absent from the metadata-type
+    registry, so the gate can't resolve it via `getMetadataTypeSchema`. Registering
+    it would switch on Studio webhook CRUD, `saveMetaItem` overlay acceptance, and
+    diagnostics sweeping — the wrong move while the authoring surface is still
+    disconnected (below). Instead the gate resolves it through a small
+    `SPEC_ONLY_SCHEMAS` override in `check-liveness.mts` (consulted before the
+    registry): the gate only needs to **walk** the schema, not register it.
+  - **The whole authoring surface is dead (#3461).** Nothing materializes an
+    authored `webhooks:` entry (stack/connector) into a `sys_webhook` dispatcher
+    row — the runtime reads only admin-authored `sys_webhook` rows. So
+    `packages/spec/liveness/webhook.json` classifies all 16 authorable props
+    **dead** and `authentication` **experimental** (HMAC-`secret`-only, its
+    existing marker). Per-prop notes record which props a future materializer
+    (#3461 option A) could remap (e.g. `object`→`object_name`, `isActive`→`active`)
+    vs which have no sink anywhere — doubling as that mapping table.
+  - **Author-warning wired (`@objectstack/cli`).** Added
+    `{ type: 'webhook', key: 'webhooks' }` to `TYPE_COLLECTIONS` in
+    `lint-liveness-properties.ts`, so `os compile` now advises authors that
+    `webhooks:` is a silent no-op. The required `url` prop carries the single
+    warning per webhook (one heads-up per artifact, not one per dead prop);
+    `isActive` is left unmarked (default(true) boolean).
+
+  This is enrollment only — it does **not** decide #3461's build-the-bridge vs
+  retire-the-surface question. When that lands, the mapped props flip to live (cite
+  the materializer) or the ledger is removed with the schema. No spec shape/behavior
+  change (ledger + gate/lint config only).
+
+- aff9e56: fix(i18n): translate the platform packages' declared surface, and gate all nine bundles instead of one (#3762)
+
+  Only `platform-objects` was wired into a translation-drift check. The other
+  **eight** packages shipped a `scripts/i18n-extract.config.ts` that nothing ever
+  ran — and four of them had already drifted out of sync with the schema, exactly
+  the rot `pnpm check:i18n` exists to catch, one directory over.
+
+  **Translated.** `plugin-security` (45 strings per locale), `plugin-webhooks`
+  (15), `plugin-audit` (8), `plugin-sharing` (7) and `service-storage` (7) are now
+  at **zero** untranslated declared strings in zh-CN / ja-JP / es-ES — 246
+  translations. Most were newly _visible_ rather than newly missing: #3753 taught
+  the coverage detector to walk action `params`, `resultDialog`, `listViews` and
+  the rest of the declared surface, and these are what it found.
+
+  Wording was harvested from the repo's own bundles wherever a string was already
+  translated somewhere (1382 unambiguous source strings), so `Created At` reads
+  `创建时间` here because that is what it reads everywhere else, rather than a
+  fresh invention. Protocol tokens are deliberately left identical across locales:
+  `GET` / `POST` / `PUT` / `PATCH` / `DELETE`, `ETag`, `ACL`, `URL`.
+
+  **Gated.** `scripts/check-i18n-bundles.mjs` replaces the single-package
+  `pnpm check:i18n` and checks all nine. It does not restate each package's
+  command — it parses the one already documented in that config's own docstring
+  and runs it, so the documented regenerate command and the gate cannot diverge.
+  The coverage ratchet grows the same way, from `examples/*` to twelve configs;
+  eight of them sit at zero, which makes it the strict gate there.
+
+  **Fixed a real truncation bug it exposed.** `os lint --json` on a large config
+  came out of a pipe cut off at exactly 65536 bytes — `console.log(big)` followed
+  by `process.exit(1)` tears the process down before an async pipe write drains,
+  while an interactive run (stdout is a TTY, written synchronously) looks perfect.
+  Every scripted consumer silently got invalid JSON. `emitJson` in
+  `packages/cli/src/utils/format.ts` waits for the write to drain and sets
+  `process.exitCode` instead; `lint`, `i18n check` and `i18n extract` use it.
+  Roughly 30 other CLI commands share the pattern and are not touched here.
+
+  The nine documented regenerate commands also gain `--no-metadata-forms` (added
+  in #3768), since the Studio metadata-form baseline belongs to `platform-objects`
+  alone, not to a copy in every plugin.
+
+  Not fixed here: `platform-objects`' own 77-per-locale gap is `apps.*` /
+  `dashboards.*` navigation and widget labels, which live outside the `objects`
+  subtree and cannot be scaffolded while the package extracts with
+  `--objects-only`. That needs an emit decision first — tracked in #3762.
+
+- dac6a08: feat(driver-sql)!: make index drift visible to `os migrate plan` — no more silent DDL at boot (#3728)
+
+  The #3696 unique-scope migration converged **in place**: `syncTableIndexes` ran a
+  `DROP` + `CREATE UNIQUE INDEX` during `initObjects`, in every environment,
+  leaving one log line behind. `os migrate plan` showed nothing, because
+  `detectManagedDrift` was column-only — `ManagedDriftOp` had no index dimension at
+  all. An operator who wanted to review the DDL before it reached their database
+  had no way to, and a managed schema was being auto-altered in production, which
+  the #2186 contract explicitly forbids.
+
+  Index drift is now a first-class dimension, reconciled through the same path as
+  column drift:
+
+  - **`syncTableIndexes` is additive only.** It creates indexes; it never drops or
+    rewrites one. `dropLegacyGlobalUniques` is gone.
+  - **New `DriftOp` variants** — `replace_unique_index` (safe: retire the legacy
+    platform-wide unique in favour of the tenant composite), `create_index` (safe),
+    `recreate_index` (needs-confirm; destructive when it tightens to `UNIQUE`), and
+    `drop_index` (destructive).
+  - **`detectManagedDrift` reports them**, `os migrate plan` renders them (index
+    ops display as `table [index_name]`), and `os migrate apply` executes them.
+    Index DDL is portable, so it applies directly on every dialect — no SQLite
+    table rebuild.
+  - **`replace_unique_index` creates before it drops**, so uniqueness is never
+    unenforced mid-migration and a failed create leaves the schema untouched.
+  - **Declared `indexes[]` drift is covered too**: an index metadata declares but
+    the database lacks, and one whose definition no longer matches the declaration
+    (the additive sync skips those by name, so they could never self-heal).
+  - **Orphan detection is limited to ObjectStack's own generated naming**
+    (`uniq_…` / `idx_…`, plus the pre-#3696 `<table>_<column>_unique` knex
+    spelling). A hand-rolled operational index is never reported as drift and
+    `--allow-destructive` will not delete it.
+
+  **Behaviour change.** Boot no longer rewrites the index unconditionally. Dev
+  (`autoMigrate: 'safe'`, what `os dev` / `os serve` use) still self-heals on
+  restart, so local workflows are unchanged. Production now **warns** with an
+  actionable `os migrate` hint and leaves the schema alone — the deployment stays
+  on the legacy global unique (multi-tenant inserts still collide) until someone
+  runs `os migrate apply`. That is the deliberate trade: a visible, pre-inspectable
+  migration instead of an invisible one.
+
+  Also fixed: `managedObjectIndexes` was never cleared when an object dropped its
+  `indexes[]`, so drift detection kept expecting an index nobody declared.
+
+  `SchemaDiffEntryKind` gains `index_mismatch` and `unmapped_index`.
+
+- f022c4d: refactor(lint): one entry point for the reference-integrity suite (#3583 D5)
+
+  Six rules that answer the same question — "does this name resolve to anything?"
+  — were wired by hand into three CLI commands, so landing a rule meant editing
+  `validate`, `lint` and `compile`, and forgetting one meant the same stack got a
+  different verdict depending on which command the author ran.
+
+  New public API on `@objectstack/lint`:
+
+  - `validateReferenceIntegrity(stack)` — runs every reference-integrity rule and
+    returns the concatenated findings.
+  - `REFERENCE_INTEGRITY_RULES` — the ordered list behind it (`validateObjectReferences`,
+    `validateActionNameRefs`, `validatePageFieldBindings`, `validateChartBindings`,
+    `validateNavAccess`, `validateTranslationReferences`).
+  - `ReferenceIntegrityFinding` / `ReferenceIntegrityRule` / `ReferenceIntegritySeverity`
+    — one finding type instead of a six-way union.
+
+  Adding a rule to that list reaches `validate`, `lint` and `compile` with no
+  further wiring. The individual rule exports are unchanged, so nothing that
+  imports them directly needs to move.
+
+  Behaviour-preserving: identical findings on the three example apps (zero) and
+  on the HotCRM corpus (24, unchanged per rule). `os doctor` is deliberately not
+  converted — it runs only `validateWidgetBindings` and is an environment health
+  check rather than an authoring gate.
+
+- 0045682: feat(auth)!: membership grade is not a capability channel — the `sys_member.role`
+  vocabulary is closed (ADR-0108, #3723)
+
+  `sys_member.role` answers "what is your standing in this organization". It does
+  not answer "what may you do" — that is what positions are for. One column was
+  answering both.
+
+  `resolve-authz-context` projects EVERY value stored in `sys_member.role` into
+  `current_user.positions`, alongside the rows read from `sys_user_position`. So a
+  business role handed out through the membership role _was_ capability — granted
+  with none of the position system's controls: no `granted_by`, no ADR-0091
+  validity window, no BU-subtree check, no `assignablePermissionSets` allowlist.
+  That is what ADR-0057 D4 ruled out ("feed the names to better-auth **only** so
+  invitations are accepted — **never as the authority for RBAC**"), what
+  ADR-0090 D3's word ban restates (distribution = `position`), and what
+  ADR-0095 D3 keeps out of the enforcement path.
+
+  The vocabulary is therefore closed to the four framework-owned names:
+  `owner` / `admin` / `delegated_admin` / `member`.
+
+  **BREAKING — `additionalOrgRoles` is removed** from `AuthManagerOptions` and
+  `AuthPluginOptions`, together with `plugin-auth/src/org-roles.ts` in full
+  (`collectStackOrgRoles`, `collectRegisteredOrgRoles`,
+  `normalizeAdditionalOrgRoles`, `membershipRoleOptions`,
+  `withMembershipRoleOptions`, `membershipRoleLabel`, `orgRoleNames`,
+  `MEMBERSHIP_ROLE_OBJECTS`, `OrgRoleDescriptor`, `OrgRoleInput`,
+  `OrgRoleLogger`) and the `kernel:ready` derivation hook that fed them. From
+  `@objectstack/spec`, `MEMBERSHIP_ROLE_NAME_PATTERN` and
+  `MEMBERSHIP_ROLE_NAME_MIN_LENGTH` are removed — they existed only to validate
+  app-supplied names. A TypeScript error is the intended failure: an option that
+  is silently ignored is `declared ≠ enforced` one more time.
+
+  FROM → TO:
+
+  ```diff
+  - new AuthPlugin({ additionalOrgRoles: ['sales_rep'] })
+  + new AuthPlugin({ /* nothing — declare `sales_rep` as a position */ })
+
+  - POST /organization/invite-member { email, role: 'sales_rep' }
+  + POST /organization/invite-member { email, role: 'member',
+  +                                    businessUnitId, positions: ['sales_rep'] }
+  ```
+
+  For an existing member, assign the position through `sys_user_position` (the
+  governed write path). Invitation placement (ADR-0105 D8) is the one-step
+  admission flow: issuance is authorized against the issuer's `adminScope` by
+  dry-running `DelegatedAdminGate`, and acceptance writes real
+  `sys_user_position` rows with a `granted_by` stamp. It reaches **further** than
+  what it replaces — a delegated admin may use it within their subtree, where the
+  membership-role route was open to org admins only (the invitation role cap holds
+  anyone below admin grade to plain `member`).
+
+  An invitation naming an app role now fails at better-auth's door with
+  `ROLE_NOT_FOUND`, before any row is written.
+
+  This reverses two changesets that were never consumed into a release
+  (`app-org-roles-storable`, `auth-org-roles-self-derived`), so no published
+  version ever offered the behaviour; both are removed rather than shipped and
+  retracted in the same changelog. A pre-existing deployment could only have
+  stored a custom value by direct DB write.
+
+  Also derived rather than transcribed: `@objectstack/lint`'s `MEMBERSHIP_TIERS`
+  now reads `BUILTIN_MEMBERSHIP_ROLES` from `@objectstack/spec`. The hand-kept
+  copy carried `guest`, which the `sys_member.role` select has never offered — an
+  approver authored as `{ type: 'org_membership_level', value: 'guest' }`
+  resolved to nobody and the lint whose whole job is to catch that stayed silent.
+
+- d1557d9: feat(driver-mongodb)!: declare the driver single-tenant and refuse to boot multi-tenant (#3724)
+
+  `MongoDBDriver` implements **no row-level tenant isolation** — it never reads
+  `DriverOptions.tenantId`, so reads carry no tenant predicate and writes are not
+  stamped with a tenant column. The layer the SQL driver has (`resolveTenantField`
+
+  - `applyTenantScope`) simply does not exist here, while everything above the
+    driver — object metadata's `tenancy` block, `applySystemFields` injecting
+    `organization_id`, the engine threading `tenantId` into every driver call —
+    operates on the assumption that tenant isolation is a platform guarantee. Point
+    a multi-tenant deployment's datasource at Mongo and every query read, updated
+    and deleted other tenants' documents, silently.
+
+  Rather than serve unisolated, the driver now fails fast at startup:
+
+  - The **constructor** and `connect()` call `assertSingleTenantPosture()`, which
+    refuses any tenancy posture other than `single` (`OS_TENANCY_POSTURE=group` /
+    `isolated`, including the posture derived from `OS_MULTI_ORG_ENABLED=true`),
+    resolved through the shared `resolveTenancyPosture()` so the driver can never
+    disagree with auth / the registry / the CLI about the mode. The check sits in
+    the constructor because that is the earliest seam — it fails before a host can
+    hand the driver anywhere — and `connect()` re-checks in case a host flips the
+    posture in between. (It originally had to live in the constructor because
+    `ObjectQLEngine.init()` _caught_ a driver's connect rejection and booted
+    anyway; that is fixed in the same release, #3741, so both seams abort boot.)
+  - `syncSchema()` / `syncSchemasBatch()` call `assertObjectsNotTenantScoped()` and
+    refuse objects declaring `tenancy.enabled: true`, naming every offender in one
+    message.
+  - `objectstack serve` / `dev` (CLI) now re-throw this error out of the
+    auto-driver-registration block instead of swallowing it, so boot exits 1 with
+    the actionable message — the same treatment `UnsupportedDriverError` already
+    gets. Matched duck-typed by `code`, so the CLI takes no dependency on the
+    driver package.
+
+  Both throw `MongoDBMultiTenantUnsupportedError` with
+  `code === 'MONGODB_MULTI_TENANT_UNSUPPORTED'`, a message that names the detected
+  signal, the remedy, and `@objectstack/driver-sql` as the multi-tenant option.
+
+  There is deliberately **no override env var**: an escape hatch would restore
+  exactly the silent non-isolation this guard removes. Single-tenant deployments —
+  every currently-working Mongo deployment — are unaffected.
+
+  This is option B of #3724. Implementing real row-level isolation (option A)
+  remains open; the `unique` index shape stays single-field until then, which is
+  now correct by construction rather than by omission.
+
+- 97e9c30: fix(doctor): point the retired `reference_filters` hint at `lookupFilters` (#1878 §3 recheck)
+
+  `os doctor`'s snake→camel rule table advised "Use `referenceFilters`
+  (camelCase)" — a key REMOVED from `FieldSchema` in #2377/ADR-0049, which the
+  non-strict schema silently strips. The live successor is `lookupFilters` (read
+  by the objectui lookup picker). The rule now matches both spellings and names
+  the right key.
+
+- 7aea626: fix(cli): include readonly flow-write warnings in `os validate --json` output
+
+  The `readonlyWhen` flow-write advisory (`validateReadonlyFlowWrites`, #3465) was
+  printed in human mode but omitted from the `--json` summary's `warnings` array,
+  where every other advisory category is aggregated. `os validate --json`
+  consumers (CI, editors) therefore never saw those warnings. Added
+  `...readonlyWriteWarnings` to the summary array so JSON and human output agree.
+
+- acbf364: feat(spec)!: retire the last three deprecated authorable aliases (#3855)
+
+  Protocol 17 removes the three keys that a schema transform used to fold into a
+  canonical slot and drop from the parsed output. Every slot now has exactly one
+  spelling.
+
+  ## Migration
+
+  | Removed                     | Use instead               | Value shape                            |
+  | --------------------------- | ------------------------- | -------------------------------------- |
+  | `action.execute`            | `action.target`           | unchanged — a handler / flow / URL ref |
+  | `field.conditionalRequired` | `field.requiredWhen`      | unchanged — a CEL predicate            |
+  | `agent.knowledge.topics`    | `agent.knowledge.sources` | unchanged — a list of source tags      |
+
+  All three are **pure key renames**. Nothing about the value changes, and no
+  runtime behaviour changes: each alias was already lowered into its canonical key
+  at parse time and erased before any consumer saw it, so what shrinks is the
+  authorable surface, not the semantics.
+
+  **Run `os migrate meta --from <your current major>`.** It rewrites your source
+  mechanically — these renames are registered as protocol-17 chain steps, so the
+  tool applies all three (and every earlier step you skipped) in one pass. Manual
+  alternative: rename the key. That is the entire fix.
+
+  ```diff
+  - actions: [{ name: 'convert', type: 'script', execute: 'convertHandler' }]
+  + actions: [{ name: 'convert', type: 'script', target: 'convertHandler' }]
+
+  - fields: { due_date: { type: 'date', conditionalRequired: 'record.stage == "closed"' } }
+  + fields: { due_date: { type: 'date', requiredWhen: 'record.stage == "closed"' } }
+
+  - knowledge: { topics: ['faq', 'policies'], indexes: ['docs'] }
+  + knowledge: { sources: ['faq', 'policies'], indexes: ['docs'] }
+  ```
+
+  ## Why these reject instead of being ignored
+
+  None of the three schemas is `.strict()`, so deleting a key outright makes Zod
+  **silently strip** it: the metadata would parse clean and the setting would
+  simply never take effect — a script action bound to nothing, a field that is
+  never required, an agent recruiting no RAG context. `FieldSchema` already
+  carries a comment about the last time that happened (`dataQuality` / `cached`,
+  #3726 / #3733).
+
+  So each removed key is **tombstoned**: it stays declared as `never`, which makes
+  writing it a `tsc` error at the authoring site _and_ a parse error carrying the
+  rename. You cannot lose the setting quietly.
+
+  ## Where to find this if you missed it
+
+  The removal is in the machine-readable change manifest (`spec-changes.json`,
+  ADR-0087 D4) as three protocol-17 conversions. Per-major manifests **compose**,
+  so jumping several majors at once still yields a single answer rather than N
+  changelogs to reconcile — the generated upgrade guide and the `spec_changes` MCP
+  tool are both projections of that record.
+
+  ## Also removed
+
+  `lintDeprecatedAliases` and its rule-id exports (`ACTION_TARGET_EXECUTE_CONFLICT`,
+  `FIELD_REQUIREDWHEN_CONDITIONALREQUIRED_CONFLICT`,
+  `AGENT_KNOWLEDGE_SOURCES_TOPICS_CONFLICT`, `DeprecatedAliasFinding`,
+  `formatDeprecatedAliasFinding`). That pass existed to warn when an author
+  declared both an alias and its canonical key, because the parse resolved the
+  conflict silently. With the aliases gone the parse **rejects** instead, which is
+  strictly louder — the rule has no subject left. If you imported any of these,
+  delete the import; there is no replacement because the condition it reported can
+  no longer occur.
+
+  The CLI's inline-handler lowering also stops binding a function on `execute`. It
+  runs before the parse, so binding it there would have kept the removed alias
+  quietly working for one authoring style while every other style rejected it.
+
+- 29ff3c2: feat(lint): warn on replay-unsafe `mode: 'insert'` seed datasets (#3434 follow-up)
+
+  Seeds are replayed — they re-load on every dev-server boot and every package
+  re-publish, not applied once — so `mode: 'insert'` (the loader's one mode with
+  no existing-row check) duplicates its table on every restart. That footgun
+  shipped undetected until #3434 (showcase memberships grew 3 → 6 → 9).
+
+  Adds `validateSeedReplaySafety` to `@objectstack/lint` (a pure `(stack) => Finding[]`
+  rule, ADR-0019) and wires it into `os validate` / `os lint`. Every `data[]` seed
+  declared with `mode: 'insert'` now gets an advisory warning that points at the
+  idempotent modes (`ignore` / `upsert`) and the `externalId` to match on — a
+  single natural-key field, or a COMPOSITE list of fields for a join / junction
+  table with no single key (`['team', 'project']`, the support #3434 added). It
+  catches the mistake at authoring time instead of on the second boot.
+
+- 95829a0: feat(lint): warn on seed values outside an object's declared state machine (#3433 follow-up)
+
+  #3433 exempts seed writes from the `state_machine` validation rule, so a seeded
+  status the FSM does not declare is no longer rejected at write time. A field-level
+  `select` still catches a value outside its `options`, but a `state_machine` on a
+  free-text field — or a value that is a valid option yet not a declared FSM state —
+  now sails through silently: the exemption is a deliberate but blind back door.
+
+  `validateSeedStateMachine` (a pure `(stack) => Finding[]` rule, run from
+  `os validate` / `os lint`, symmetric with the replay-safety rule from #3434)
+  re-adds that safety net at author time. It flags any seed record whose
+  `state_machine`-governed field carries a value outside the machine's declared
+  states — the union of `initialStates`, the transition-map keys, and the transition
+  targets. Advisory (`warning`): the exemption itself is legitimate, so the fix-it
+  points at either adding the state to the machine or correcting the typo, not a hard
+  build failure. New rule id: `seed-value-outside-state-machine`.
+
+- 9981c1d: Surface seed outcomes in the `os dev` / `os serve` boot banner (#3415). Seeds run inside the boot-quiet stdout window and SeedLoader's logs sit under the default warn level, so a fixture could silently lose most of its rows — the showcase shipped 1 of 5 projects with zero terminal signal. AppPlugin now stashes the per-boot seed counters on the kernel (`seed-summary` service) and the banner prints `Seeds: X inserted · Y updated · Z skipped`, escalating to a yellow `⚠ … N REJECTED` line when records were dropped.
+- d60968c: Surface marketplace rehydrate/heal seed outcomes in the `os dev` / `os serve` boot banner (#3430), extending the config-app Seeds line from #3415.
+
+  The seed pipeline's most useful result lines are all `logger.info`, but `os dev` forwards a default `warn` level and the serve boot-quiet window swallows stdout — so "marketplace package rehydrated onto a fresh DB with 0 rows", a fresh-DB self-heal, and row-level seed failures were all invisible unless you queried the database directly.
+
+  The `seed-summary` kernel service is now a per-source list. AppPlugin (config apps) and the marketplace rehydrate/heal path each contribute a labelled entry, and the banner prints one combined line that ignores the log level:
+
+  ```
+  Seeds:   showcase 162 rows · hotcrm(marketplace) 157 ok / 5 errors ⚠
+  ```
+
+  Fresh-DB heals are marked `(healed on fresh db)`; a marketplace package that installed with seed datasets but landed 0 rows, and any run that dropped records, escalate to a yellow `⚠` line instead of passing silently.
+
+- ce09d4e: fix(cli): `os validate` runs the four authoring lints `os build` runs — "validate clean, build fails" is gone (#3782)
+
+  `os validate` is documented, and used in CI, as the **read-only superset** of the
+  gates `os build` runs: same checks, no artifact. It wasn't. Four authoring lints
+  were wired into `compile.ts` only, and **two of them already fail the build**:
+
+  | Lint                       | Emits `error` | `os build` | `os validate` (before) |
+  | -------------------------- | ------------- | ---------- | ---------------------- |
+  | `lintAutonumberFormats`    | yes           | ✓          | —                      |
+  | `lintViewRefs` (#2554)     | yes           | ✓          | —                      |
+  | `lintFlowPatterns` (#1874) | not yet       | ✓          | —                      |
+  | `lintLivenessProperties`   | no            | ✓          | —                      |
+
+  So an autonumber format naming a field that doesn't exist, or a form action
+  target naming a LIST view, passed `os validate` cleanly and then failed
+  `os build`. Reproduced verbatim on `main` against `examples/app-todo`:
+  `os validate` → "✓ Validation passed"; `os build` → "✗ Autonumber format
+  validation failed". Worst for the CI setups that gate on `validate` and only
+  discover the break at deploy time.
+
+  The drift was invisible for a structural reason worth naming: every _other_ gate
+  on both commands is a shared `@objectstack/lint` import, while these four are
+  CLI-local `../utils/lint-*` modules that only `compile.ts` ever imported. Nothing
+  made adding a gate to the build also add it to validate.
+
+  **The fix is two parts.** `validate.ts` now runs all four, mirroring
+  `compile.ts`'s per-lint severity handling (`error` → exit 1, everything else →
+  advisory, and into the `warnings` array under `--json`). And a new source-level
+  test asserts that every `lintFoo(`/`validateFoo(` call site in `compile.ts` also
+  appears in `validate.ts`, failing with the list of missing gates. That test is
+  the actual fix for the class of bug — the wiring is just today's instance.
+
+  **What you may newly see.** `os validate` now surfaces every rule these lints
+  carry, including the advisory ones, so existing projects can see new warnings.
+  Only `autonumber-*` and view-reference `error` findings change the exit code —
+  and any project they now fail was already failing `os build`.
+
+  `FlowLintFinding` also gains an optional `severity`, honoured by both surfaces.
+  No rule sets it today, so flow findings stay advisory; it is the seam that lets
+  #3760's blocking `flow-runas-unscoped` gate `os validate` and `os build`
+  together the moment it lands, with no further wiring.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [6169615]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [a749273]
+- Updated dependencies [99736a0]
+- Updated dependencies [134df4f]
+- Updated dependencies [fe67e34]
+- Updated dependencies [3d3fddf]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [735f850]
+- Updated dependencies [14252d3]
+- Updated dependencies [d058594]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [c7f4417]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [6877e9a]
+- Updated dependencies [0bab8bb]
+- Updated dependencies [840ee4b]
+- Updated dependencies [7101ca2]
+- Updated dependencies [587fc91]
+- Updated dependencies [415254c]
+- Updated dependencies [1f8390b]
+- Updated dependencies [3167e29]
+- Updated dependencies [0a6fb1e]
+- Updated dependencies [1986594]
+- Updated dependencies [3c8cfd1]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [2ba560a]
+- Updated dependencies [2dda6e7]
+- Updated dependencies [f92096b]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [d2a8695]
+- Updated dependencies [84e7be9]
+- Updated dependencies [fb90784]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [d75edb9]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [9dcc0ae]
+- Updated dependencies [984396b]
+- Updated dependencies [d0fea33]
+- Updated dependencies [8f9689f]
+- Updated dependencies [0cdb57a]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [5f9a987]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [db02d47]
+- Updated dependencies [d3f2ff6]
+- Updated dependencies [b7550d6]
+- Updated dependencies [0164f40]
+- Updated dependencies [e295ad1]
+- Updated dependencies [1b717e5]
+- Updated dependencies [1003125]
+- Updated dependencies [6e62a93]
+- Updated dependencies [ecda20c]
+- Updated dependencies [6e62a93]
+- Updated dependencies [fc968af]
+- Updated dependencies [6ba3788]
+- Updated dependencies [8607a55]
+- Updated dependencies [b96c11b]
+- Updated dependencies [d69918d]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [3949a43]
+- Updated dependencies [48c110e]
+- Updated dependencies [87aca93]
+- Updated dependencies [680e8e8]
+- Updated dependencies [376a061]
+- Updated dependencies [19e3e6e]
+- Updated dependencies [7c7e246]
+- Updated dependencies [3ea7271]
+- Updated dependencies [f243727]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [cbedd62]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [cf5e033]
+- Updated dependencies [094fa34]
+- Updated dependencies [5e55739]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [ce1f100]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [2f47489]
+- Updated dependencies [7ef20d0]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [2c19383]
+- Updated dependencies [c88eeda]
+- Updated dependencies [de9af8a]
+- Updated dependencies [5524f84]
+- Updated dependencies [b0e5a37]
+- Updated dependencies [169b58a]
+- Updated dependencies [fd7cfde]
+- Updated dependencies [9bf4588]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [307e0fe]
+- Updated dependencies [189854c]
+- Updated dependencies [5d4de37]
+- Updated dependencies [0e3a226]
+- Updated dependencies [5602211]
+- Updated dependencies [524151c]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [aff9e56]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [65ac468]
+- Updated dependencies [ef5e72d]
+- Updated dependencies [dac6a08]
+- Updated dependencies [313d7be]
+- Updated dependencies [5faeac6]
+- Updated dependencies [394b7a1]
+- Updated dependencies [7f4a8a1]
+- Updated dependencies [f022c4d]
+- Updated dependencies [2343099]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [e1fa8d5]
+- Updated dependencies [402f534]
+- Updated dependencies [1c8bf4f]
+- Updated dependencies [0045682]
+- Updated dependencies [7180ed5]
+- Updated dependencies [d1557d9]
+- Updated dependencies [f2b8ac9]
+- Updated dependencies [083c414]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [fc5f126]
+- Updated dependencies [adabaa8]
+- Updated dependencies [030125b]
+- Updated dependencies [605c23f]
+- Updated dependencies [4e9e184]
+- Updated dependencies [17749fc]
+- Updated dependencies [67452d1]
+- Updated dependencies [4921a95]
+- Updated dependencies [9bf4588]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [52281b0]
+- Updated dependencies [db48ad5]
+- Updated dependencies [4340f13]
+- Updated dependencies [8e08bc3]
+- Updated dependencies [16adb3c]
+- Updated dependencies [6f55c63]
+- Updated dependencies [1dc94f0]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [a137bbc]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [bbd902d]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [3d5f726]
+- Updated dependencies [70a1ce1]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [f1a8114]
+- Updated dependencies [48d5a1c]
+- Updated dependencies [3216344]
+- Updated dependencies [f5bfac8]
+- Updated dependencies [6163393]
+- Updated dependencies [688e9df]
+- Updated dependencies [8f124a7]
+- Updated dependencies [21ca1d5]
+- Updated dependencies [03b11e8]
+- Updated dependencies [8891f93]
+- Updated dependencies [d729a31]
+- Updated dependencies [cb8322e]
+- Updated dependencies [5487c20]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [d318b24]
+- Updated dependencies [1659072]
+- Updated dependencies [810a3a2]
+- Updated dependencies [29ff3c2]
+- Updated dependencies [abceb0d]
+- Updated dependencies [95829a0]
+- Updated dependencies [9981c1d]
+- Updated dependencies [d60968c]
+- Updated dependencies [0c302a7]
+- Updated dependencies [5cfd4d5]
+- Updated dependencies [bd68f08]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [647ec8b]
+- Updated dependencies [7457a09]
+- Updated dependencies [5f0852f]
+- Updated dependencies [cde1975]
+- Updated dependencies [20cb232]
+- Updated dependencies [e231abb]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [9aa5510]
+- Updated dependencies [a629074]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [54f479a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [e889386]
+- Updated dependencies [69f1dfd]
+- Updated dependencies [c95ac80]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/objectql@17.0.0-rc.0
+  - @objectstack/rest@17.0.0-rc.0
+  - @objectstack/driver-sql@17.0.0-rc.0
+  - @objectstack/runtime@17.0.0-rc.0
+  - @objectstack/service-storage@17.0.0-rc.0
+  - @objectstack/client@17.0.0-rc.0
+  - @objectstack/platform-objects@17.0.0-rc.0
+  - @objectstack/plugin-auth@17.0.0-rc.0
+  - @objectstack/lint@17.0.0-rc.0
+  - @objectstack/plugin-security@17.0.0-rc.0
+  - @objectstack/plugin-approvals@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+  - @objectstack/mcp@17.0.0-rc.0
+  - @objectstack/plugin-hono-server@17.0.0-rc.0
+  - @objectstack/service-analytics@17.0.0-rc.0
+  - @objectstack/verify@17.0.0-rc.0
+  - @objectstack/service-automation@17.0.0-rc.0
+  - @objectstack/trigger-record-change@17.0.0-rc.0
+  - @objectstack/plugin-pinyin-search@17.0.0-rc.0
+  - @objectstack/console@17.0.0-rc.0
+  - @objectstack/service-datasource@17.0.0-rc.0
+  - @objectstack/plugin-audit@17.0.0-rc.0
+  - @objectstack/plugin-reports@17.0.0-rc.0
+  - @objectstack/formula@17.0.0-rc.0
+  - @objectstack/plugin-sharing@17.0.0-rc.0
+  - @objectstack/plugin-webhooks@17.0.0-rc.0
+  - @objectstack/service-job@17.0.0-rc.0
+  - @objectstack/cloud-connection@17.0.0-rc.0
+  - @objectstack/driver-mongodb@17.0.0-rc.0
+  - @objectstack/metadata@17.0.0-rc.0
+  - @objectstack/service-settings@17.0.0-rc.0
+  - @objectstack/account@17.0.0-rc.0
+  - @objectstack/setup@17.0.0-rc.0
+  - @objectstack/observability@17.0.0-rc.0
+  - @objectstack/driver-memory@17.0.0-rc.0
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.0
+  - @objectstack/plugin-email@17.0.0-rc.0
+  - @objectstack/service-cache@17.0.0-rc.0
+  - @objectstack/service-messaging@17.0.0-rc.0
+  - @objectstack/service-package@17.0.0-rc.0
+  - @objectstack/service-queue@17.0.0-rc.0
+  - @objectstack/service-realtime@17.0.0-rc.0
+  - @objectstack/service-sms@17.0.0-rc.0
+  - @objectstack/trigger-api@17.0.0-rc.0
+  - @objectstack/trigger-schedule@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Minor Changes

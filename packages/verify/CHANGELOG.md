@@ -1,5 +1,483 @@
 # @objectstack/verify
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 587fc91: feat(analytics): the executeAggregate bridge carries ExecutionContext — ADR-0021 D-C second belt
+
+  The analytics→engine bridge now forwards the request's `ExecutionContext` to
+  `engine.aggregate`, so the engine's own middleware chain scopes analytics reads
+  independently of the analytics layer's `getReadScope`.
+
+  **Why.** `BaseEngineOptions.context` has always been `.optional()`, so nothing
+  forced the bridge to pass it — and it did not. An authenticated aggregate
+  reached the engine with no principal, plugin-security's principal-less fall-open
+  skipped its RLS injection, and the only thing left scoping the query was the
+  strategy remembering to call `getReadScope`. #3597 was a strategy that did not,
+  and both belts were off at once.
+
+  `getReadScope` stays: the two resolve scope through different paths (engine
+  middleware vs `security.getReadFilter`), and a deployment without
+  plugin-security has only the analytics layer. This is depth, not a replacement.
+
+  - `StrategyContext` gains `context?: ExecutionContext`, bound per call by
+    `AnalyticsService` from `query()` / `generateSql()` / `queryDataset()`.
+  - `StrategyContext.executeAggregate` and the `AnalyticsServicePlugin` /
+    `AnalyticsService` `executeAggregate` config options gain `context?:
+ExecutionContext`. **Custom bridges should forward it** to their engine; the
+    built-in auto-bridge does. Purely additive — an existing bridge that ignores
+    it keeps working exactly as before.
+  - `DimensionLabelDeps.fetchRecordLabels` and `resolveDimensionLabels` each gain
+    an optional trailing `context`, beside the `scope` / `resolveScope` that
+    #3639 added — the same two-belt split as the aggregate path.
+  - `BootOptions.analytics` (`@objectstack/verify`) overrides the
+    AnalyticsServicePlugin instance, so a gate can boot with the analytics belt
+    off and assert the engine-side belt alone still scopes.
+
+  **Also fixed on the same seam:**
+
+  - `fetchRecordLabels` — the dimension display-label lookup — is row-granular
+    (one row per record, real display names). #3639 gave it the analytics-layer
+    belt (the referenced object's own read scope); it now also carries the
+    context, so the engine scopes the same read independently.
+  - `ObjectQLStrategy.generateSql` emitted no `WHERE` at all, so the
+    `/analytics/sql` preview read as an unscoped table scan while the real
+    aggregate was scoped. It now renders the caller's filters and the read scope.
+    The preview never executed, so this was misleading output rather than a leak.
+
+- 680e8e8: feat(verify): `checkDateBucketParity` — pin the seam between pushed-down and in-memory date bucketing
+
+  A driver that advertises `supports.queryDateGranularity[g]` is telling
+  `engine.aggregate` it may push `dateGranularity: g` down as SQL instead of
+  fetching rows and bucketing them in JS. The two are then not two features but
+  one feature with two implementations, and the engine picks between them per
+  query — a granularity the driver advertises goes down as SQL, one it does not
+  goes to `applyInMemoryAggregation`, and a non-UTC timezone forces the in-memory
+  path regardless. A dashboard can cross that seam mid-drill-down.
+
+  Nothing checked that they agree. That is how #3773 shipped: SQLite stores a
+  `Field.datetime` as INTEGER epoch milliseconds, `strftime` read the bare integer
+  as a Julian day number, and every row bucketed as NULL — a trend chart collapsed
+  into a single bar while every gate stayed green. The driver's own bucket suites
+  build their fixtures with `knex.schema.createTable` + `t.string(...)`, which is
+  ISO TEXT — the half `strftime` parses natively — and the engine never
+  second-guesses a granularity a driver claims to support.
+
+  `checkDateBucketParity(driver)` rounds a fixture through the driver and, for
+  every granularity it advertises, compares its pushed-down result against the
+  REAL `applyInMemoryAggregation` over the driver's own `find()` rows. Both
+  temporal storage forms are probed under one object (`Field.datetime` and
+  `Field.date` naming the same calendar days), so a storage-form leak shows up as
+  the two columns bucketing differently even when each is internally consistent.
+  A granularity the driver does not advertise is skipped, never faulted.
+
+  It follows `checkReadCoercion`: human-readable problems (empty = conformant), no
+  test-runner dependency, driver taken structurally — so an out-of-tree driver
+  runs the identical contract against itself. That matters most for cloud's
+  `driver-turso`, which is remote SQLite with exactly the epoch storage that broke
+  here.
+
+  Wired up in `packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts`
+  against driver-sql and driver-sqlite-wasm, with negative controls that pin what
+  the checker can detect. Verified against the real regression, not just fakes:
+  reverting the #3773 fix turns the gate red on both drivers with a diagnostic
+  naming the collapsed bucket.
+
+  The three test files that hand-copy `bucketDateValue` (driver-sql cannot depend
+  on objectql) now say what their `⚠️ Keep in sync` comments cannot enforce — a
+  copy that stops tracking its original leaves the copy and the SQL agreeing with
+  each other while both are wrong — and point at the executable check. The same
+  pointer is on `bucketDateValue` itself, which is where an edit would start the
+  drift.
+
+- a227ed7: fix(objectql)!: one key for the empty group bucket — real `null`, on both aggregation paths (#3839)
+
+  A grouped row whose dimension value is empty now carries `null` for that
+  dimension no matter which way the aggregate ran. Downstream code can test the
+  empty bucket with a plain `value == null` again: charts render their own empty
+  label, drill-through on that bucket builds `field = null` and returns the rows
+  it should, and a dashboard no longer changes shape when the driver, the
+  granularity or the reference timezone changes.
+
+  ### What was wrong
+
+  `engine.aggregate` has two implementations of one feature. It pushes the
+  aggregate down as SQL when the driver advertises every requested granularity and
+  the reference timezone is UTC; otherwise it fetches rows and buckets them in JS.
+  The two disagreed about how to spell "empty":
+
+  ```
+  --- same dataset, same query, one row with a NULL value ---
+    pushed-down SQL : [{ "key": null,     "type": "null",   "total": 2 }, …]
+    in-memory       : [{ "key": "(null)", "type": "string", "total": 2 }, …]
+  ```
+
+  The measures were always right — only the key's type and literal differed —
+  which is why this went unnoticed for so long: every total reconciled. But the
+  engine picks a path per query, so the same data produced a different bucket key
+  on SQLite-plus-UTC-plus-`month` than on `week` (which SQLite does not advertise),
+  a non-UTC timezone, or `driver-rest` / `driver-memory` / a remote Turso, all of
+  which bucket in memory unconditionally.
+
+  It was never date-specific either. A plain `groupBy: ['stage']` over a NULL
+  column diverged the same way.
+
+  Consumers are written against `null` — they check `== null` and supply their own
+  empty label ('—', '(empty)', a localized "Uncategorized"). The sentinel defeated
+  every one of them: it rendered a raw English debug string in the UI, and a drill
+  on the empty bucket compiled to `field = '(null)'` and matched nothing.
+
+  The in-memory path's comment justified the string as staying "consistent with
+  the client `useReportData` hook". That hook was removed with ADR-0021, and the
+  literal never appeared in it.
+
+  ### What changed
+
+  - `applyInMemoryAggregation` and `bucketDateValue` (`@objectstack/objectql`) key
+    the empty bucket as `null`. `bucketDateValue` now returns `string | null`. A
+    null instant and an unparseable one still share one bucket, because SQL cannot
+    tell them apart either (`strftime('%Y-%m', 'not-a-date')` is NULL).
+  - The internal composite bucket id is JSON-encoded, so the empty bucket stays
+    distinct from a row whose value is the literal string `"null"`.
+  - `bucketKeyToCalendarRange` (`@objectstack/core`) accepts `string | null`. The
+    empty bucket has no calendar span, so a drill on it opens the unscoped
+    superset instead of an invented bound — unchanged behavior, honest signature.
+  - The driver output contract in `@objectstack/spec` now states the rule: a row
+    with no value keys as `null`, never a sentinel. Propagating NULL through the
+    bucket expression is the whole of it; a driver only breaks it by adding a
+    `COALESCE`.
+
+  ### Gates
+
+  `checkDateBucketParity` (`@objectstack/verify`) deliberately carried no null
+  instant, because the divergence would have failed it for a reason it was not
+  about. Its fixture now has one, so the convergence is held in place — including
+  for out-of-tree drivers that run the check against themselves.
+
+  Two fixes were needed to make that fixture meaningful:
+
+  - The check folded bucket labels through `String(value)`, which turns SQL NULL
+    into `'null'` — a label a TEXT column can genuinely hold. A driver spelling
+    "empty" as a string could compare equal to one returning real NULL. The empty
+    bucket is now keyed out of band.
+  - Label sets were compared with `JSON.stringify`, which is sensitive to key
+    insertion order. Row order is not part of this contract and the two paths
+    naturally differ (SQL sorts its groups; the in-memory path emits first-seen
+    order), so a driver with entirely correct buckets could be reported as
+    disagreeing — with an empty diff message, since nothing actually differed.
+    The comparison is now order-insensitive.
+
+  A new dogfood check covers the non-date half against real drivers: same dataset,
+  plain and date-bucketed `groupBy`, both paths, one key.
+
+### Patch Changes
+
+- 0045682: feat(auth)!: membership grade is not a capability channel — the `sys_member.role`
+  vocabulary is closed (ADR-0108, #3723)
+
+  `sys_member.role` answers "what is your standing in this organization". It does
+  not answer "what may you do" — that is what positions are for. One column was
+  answering both.
+
+  `resolve-authz-context` projects EVERY value stored in `sys_member.role` into
+  `current_user.positions`, alongside the rows read from `sys_user_position`. So a
+  business role handed out through the membership role _was_ capability — granted
+  with none of the position system's controls: no `granted_by`, no ADR-0091
+  validity window, no BU-subtree check, no `assignablePermissionSets` allowlist.
+  That is what ADR-0057 D4 ruled out ("feed the names to better-auth **only** so
+  invitations are accepted — **never as the authority for RBAC**"), what
+  ADR-0090 D3's word ban restates (distribution = `position`), and what
+  ADR-0095 D3 keeps out of the enforcement path.
+
+  The vocabulary is therefore closed to the four framework-owned names:
+  `owner` / `admin` / `delegated_admin` / `member`.
+
+  **BREAKING — `additionalOrgRoles` is removed** from `AuthManagerOptions` and
+  `AuthPluginOptions`, together with `plugin-auth/src/org-roles.ts` in full
+  (`collectStackOrgRoles`, `collectRegisteredOrgRoles`,
+  `normalizeAdditionalOrgRoles`, `membershipRoleOptions`,
+  `withMembershipRoleOptions`, `membershipRoleLabel`, `orgRoleNames`,
+  `MEMBERSHIP_ROLE_OBJECTS`, `OrgRoleDescriptor`, `OrgRoleInput`,
+  `OrgRoleLogger`) and the `kernel:ready` derivation hook that fed them. From
+  `@objectstack/spec`, `MEMBERSHIP_ROLE_NAME_PATTERN` and
+  `MEMBERSHIP_ROLE_NAME_MIN_LENGTH` are removed — they existed only to validate
+  app-supplied names. A TypeScript error is the intended failure: an option that
+  is silently ignored is `declared ≠ enforced` one more time.
+
+  FROM → TO:
+
+  ```diff
+  - new AuthPlugin({ additionalOrgRoles: ['sales_rep'] })
+  + new AuthPlugin({ /* nothing — declare `sales_rep` as a position */ })
+
+  - POST /organization/invite-member { email, role: 'sales_rep' }
+  + POST /organization/invite-member { email, role: 'member',
+  +                                    businessUnitId, positions: ['sales_rep'] }
+  ```
+
+  For an existing member, assign the position through `sys_user_position` (the
+  governed write path). Invitation placement (ADR-0105 D8) is the one-step
+  admission flow: issuance is authorized against the issuer's `adminScope` by
+  dry-running `DelegatedAdminGate`, and acceptance writes real
+  `sys_user_position` rows with a `granted_by` stamp. It reaches **further** than
+  what it replaces — a delegated admin may use it within their subtree, where the
+  membership-role route was open to org admins only (the invitation role cap holds
+  anyone below admin grade to plain `member`).
+
+  An invitation naming an app role now fails at better-auth's door with
+  `ROLE_NOT_FOUND`, before any row is written.
+
+  This reverses two changesets that were never consumed into a release
+  (`app-org-roles-storable`, `auth-org-roles-self-derived`), so no published
+  version ever offered the behaviour; both are removed rather than shipped and
+  retracted in the same changelog. A pre-existing deployment could only have
+  stored a custom value by direct DB write.
+
+  Also derived rather than transcribed: `@objectstack/lint`'s `MEMBERSHIP_TIERS`
+  now reads `BUILTIN_MEMBERSHIP_ROLES` from `@objectstack/spec`. The hand-kept
+  copy carried `guest`, which the `sys_member.role` select has never offered — an
+  approver authored as `{ type: 'org_membership_level', value: 'guest' }`
+  resolved to nobody and the lint whose whole job is to catch that stayed silent.
+
+- e889386: `bootStack({ multiTenant: true })` now REQUESTS the `isolated` tenancy posture
+  for the boot (ADR-0105 D1), restoring the request on `stop()` and respecting an
+  explicit caller-provided `OS_TENANCY_POSTURE`.
+
+  Since #3559 a walled posture is an explicit operator request resolved from env
+  when AuthPlugin registers the `tenancy` service — mounting the enterprise
+  organizations plugin only ENTITLES it. The harness's multi-tenant opt-in
+  predates that split and only mounted the plugin, so multi-org fixtures silently
+  booted `single`: no Layer 0 wall, D3 default-org write stamping, and every
+  cross-tenant proof asserting against the wrong posture (first surfaced by
+  cloud's security-enterprise multi-org integration test, which runs the licensed
+  path open-core CI cannot).
+
+  The verify package also gains a `test` script so its suite actually runs under
+  `turbo run test`, including the new regression pin for this contract.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [6169615]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [a749273]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [735f850]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [c7f4417]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [6877e9a]
+- Updated dependencies [0bab8bb]
+- Updated dependencies [840ee4b]
+- Updated dependencies [7101ca2]
+- Updated dependencies [587fc91]
+- Updated dependencies [415254c]
+- Updated dependencies [1f8390b]
+- Updated dependencies [3167e29]
+- Updated dependencies [0a6fb1e]
+- Updated dependencies [1986594]
+- Updated dependencies [3c8cfd1]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [f92096b]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [fb90784]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [9dcc0ae]
+- Updated dependencies [984396b]
+- Updated dependencies [d0fea33]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [5f9a987]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [db02d47]
+- Updated dependencies [d3f2ff6]
+- Updated dependencies [b7550d6]
+- Updated dependencies [0164f40]
+- Updated dependencies [e295ad1]
+- Updated dependencies [1003125]
+- Updated dependencies [6e62a93]
+- Updated dependencies [ecda20c]
+- Updated dependencies [6e62a93]
+- Updated dependencies [fc968af]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [3949a43]
+- Updated dependencies [48c110e]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [19e3e6e]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [cbedd62]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [ce1f100]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [2f47489]
+- Updated dependencies [7ef20d0]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [c88eeda]
+- Updated dependencies [de9af8a]
+- Updated dependencies [5524f84]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [307e0fe]
+- Updated dependencies [189854c]
+- Updated dependencies [5d4de37]
+- Updated dependencies [0e3a226]
+- Updated dependencies [5602211]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [aff9e56]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [65ac468]
+- Updated dependencies [ef5e72d]
+- Updated dependencies [dac6a08]
+- Updated dependencies [313d7be]
+- Updated dependencies [5faeac6]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [e1fa8d5]
+- Updated dependencies [402f534]
+- Updated dependencies [0045682]
+- Updated dependencies [7180ed5]
+- Updated dependencies [083c414]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [fc5f126]
+- Updated dependencies [adabaa8]
+- Updated dependencies [030125b]
+- Updated dependencies [605c23f]
+- Updated dependencies [67452d1]
+- Updated dependencies [9bf4588]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [db48ad5]
+- Updated dependencies [8e08bc3]
+- Updated dependencies [16adb3c]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [bbd902d]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [3d5f726]
+- Updated dependencies [70a1ce1]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [48d5a1c]
+- Updated dependencies [3216344]
+- Updated dependencies [f5bfac8]
+- Updated dependencies [6163393]
+- Updated dependencies [688e9df]
+- Updated dependencies [8f124a7]
+- Updated dependencies [21ca1d5]
+- Updated dependencies [03b11e8]
+- Updated dependencies [8891f93]
+- Updated dependencies [d729a31]
+- Updated dependencies [cb8322e]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [d318b24]
+- Updated dependencies [1659072]
+- Updated dependencies [810a3a2]
+- Updated dependencies [abceb0d]
+- Updated dependencies [9981c1d]
+- Updated dependencies [d60968c]
+- Updated dependencies [0c302a7]
+- Updated dependencies [5cfd4d5]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [647ec8b]
+- Updated dependencies [5f0852f]
+- Updated dependencies [cde1975]
+- Updated dependencies [20cb232]
+- Updated dependencies [e231abb]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [a629074]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [54f479a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/objectql@17.0.0-rc.0
+  - @objectstack/rest@17.0.0-rc.0
+  - @objectstack/runtime@17.0.0-rc.0
+  - @objectstack/plugin-auth@17.0.0-rc.0
+  - @objectstack/plugin-security@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/plugin-hono-server@17.0.0-rc.0
+  - @objectstack/service-analytics@17.0.0-rc.0
+  - @objectstack/service-automation@17.0.0-rc.0
+  - @objectstack/service-datasource@17.0.0-rc.0
+  - @objectstack/plugin-sharing@17.0.0-rc.0
+  - @objectstack/service-settings@17.0.0-rc.0
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

@@ -1,5 +1,728 @@
 # @objectstack/driver-sql
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 32d3800: fix(driver-sql): bound a connection attempt at 10s, and correct the "no reconnection" claim (#3769, #3759)
+
+  Two related corrections, both from measuring what #3741/#3751/#3765 had only asserted.
+
+  **The claim was wrong.** #3751 and #3765 shipped several statements that drivers
+  never reconnect — "there is no lazy reconnection", "NOT retried and NOT
+  reconnected", "stays disconnected for the process lifetime". Measured, both
+  drivers recover on their own:
+
+  - driver-mongodb: killing a real `mongod` and restarting it on the same port,
+    the _same_ driver instance served the next write successfully (13ms), with no
+    reconnect call from us — the official driver's topology monitor handles it.
+  - driver-sql: a knex/pg pool is not poisoned by an outage. Its error tracks live
+    server state (`ECONNREFUSED` while down → a handshake error once a listener is
+    back → `ECONNREFUSED` again), i.e. every acquire opens a fresh connection.
+    `storage-driver.ts` also configures `pool.min: 0`, so no stale idle
+    connections are held.
+
+  The original reasoning grepped this repo for `reconnect`, found nothing, and
+  concluded recovery does not happen — but the recovery lives in the client
+  libraries, not in our code. The claims are now corrected in `DriverConnectError`,
+  the `DEGRADED BOOT` banner, `resolveAllowDriverConnectFailure`'s docs, and the
+  drivers / self-hosting pages.
+
+  **Fail-fast at boot is unchanged and still correct** — the reason is just
+  different. It is not that the connection can never return; it is that the _boot
+  sequence_ never re-runs. A driver that missed `init()` also missed
+  `syncRegisteredSchemas()`, so its tables can simply not exist even after the
+  database comes back. The banner now says that.
+
+  **The real defect underneath.** `SqlDriver` passed its config to knex untouched,
+  so a database endpoint that accepts TCP but never completes the handshake — an
+  overloaded instance, a half-open firewall, a load balancer mid-failover — made
+  every query wait out tarn's 30s default, then fail with `Timeout acquiring a
+connection. The pool is probably full`, pointing an operator at pool sizing
+  instead of the network. With a small `pool.max` a few such queries saturate the
+  pool and everything else queues.
+
+  `SqlDriver` now defaults `pool.createTimeoutMillis` to **10s**, matching
+  driver-mongodb's existing `connectTimeoutMS ?? 10_000` so both drivers give up on
+  an unreachable server at the same point. A host that sets its own
+  `createTimeoutMillis` is left alone.
+
+  **Migration.** None for a healthy datasource. A deployment that deliberately
+  relies on connection establishment taking longer than 10s (a slow cross-region
+  replica) should set `pool.createTimeoutMillis` explicitly on its `SqlDriver`
+  config.
+
+  Not fixed here, tracked in #3769: knex still reports the bounded wait as "the
+  pool is probably full". An accurate message needs a dialect-specific connect
+  timeout (pg's `connectionTimeoutMillis`), which changes the shape of `connection`
+  and would regress the startup banner's URL display.
+
+- 5d4de37: fix(objectql,driver-sql)!: a group key is the column's value, in the shape `find()` presents it (#3849)
+
+  `groupBy: ['qty']` now returns `3`, not `'3'`. `groupBy: ['won']` returns `true` /
+  `false`, not `'true'` / `'false'` on one path and `1` / `0` on the other. A bucket
+  key is a column value, so there is one right answer for what it looks like —
+  whatever that column looks like on a `find()` row — and all three paths that
+  produce one now give it.
+
+  ### What was wrong
+
+  Three code paths produce a group key, and no two of them agreed:
+
+  |                           | `qty` (number)   | `won` (boolean)                 |
+  | ------------------------- | ---------------- | ------------------------------- |
+  | `find()`                  | `3` number       | `true` boolean                  |
+  | `aggregate()` pushed down | `3` number       | `0` / `1` **number**            |
+  | in-memory fallback        | `'3'` **string** | `'false'` / `'true'` **string** |
+
+  Two independent causes:
+
+  - `applyInMemoryAggregation` ran every key through `String()`. The pushed-down
+    path never did.
+  - The pushed-down path returns raw builder output. #3797 taught it to present
+    temporal columns the way `formatOutput` does on a `find()` row, but not the
+    boolean and numeric repairs — so a SQLite boolean, which has no native type and
+    is stored as `0`/`1`, surfaced as an integer from `aggregate()` and as a real
+    boolean from `find()`.
+
+  `engine.aggregate` chooses between the two aggregate paths per query — by whether
+  the driver aggregates natively, whether it advertises the requested granularity,
+  and whether the reference timezone is UTC — so the same column changed shape with
+  no change to the data or the query.
+
+  ### Why it mattered
+
+  The measures were always right, which is why this went unnoticed. What broke was
+  downstream code that probes a raw `Map` keyed by the value's own type. `Map`
+  lookup is SameValueZero, so `'1'` never finds `1`:
+
+  - **Select-option labels** (`dimension-labels.ts`) — the label table is keyed by
+    the option's own `value`. A numeric option value never matched a stringified
+    key, so the chart rendered the raw stored value instead of its label.
+  - **Lookup / master-detail labels** — the id → record-name table is built by an
+    inner query that always pushes down (raw ids), then probed with the outer
+    query's keys, which may be in-memory (stringified). With a numeric primary key
+    — routine for external/federated objects — every label missed.
+  - **Cross-object rebucketing** (`cross-object-rebucket.ts`) — the FK → attribute
+    map is built and probed the same way, and a miss is not a fallback but
+    `RESTRICTED_BUCKET`. A numeric FK filed **every row** under `'(restricted)'`:
+    one bar, correct grand total, no error.
+  - **Drill-through** — the raw dimension value goes into the drill filter
+    verbatim, so a boolean dimension drilled from the in-memory path sent
+    `{ won: 'true' }` to SQLite, whose INTEGER column cannot equal the text
+    `'true'`. Zero rows.
+
+  ### What changed
+
+  - `applyInMemoryAggregation` (`@objectstack/objectql`) emits the value verbatim.
+    Its rows come straight from `driver.find()`, so passing the value through is
+    what makes the key equal the column's own read shape.
+  - The internal composite bucket id is now type-preserving, so `1` and `'1'`,
+    `true` and `'true'` stay distinct groups rather than merging on the way in.
+    BigInt is encoded explicitly — `JSON.stringify` throws on it, and a value that
+    used to bucket under `String()` must not start crashing the aggregate.
+  - `SqlDriver.aggregate` / `.distinct` (`@objectstack/driver-sql`) present group
+    keys and `min`/`max` results with the same rules `formatOutput` applies on a
+    `find()` row, generalizing the #3797 temporal fix to boolean and numeric
+    columns. The `protected` helpers behind it are renamed accordingly
+    (`temporalFieldKind` → `readPresentationKind`, `presentTemporalValue` →
+    `presentReadValue`, `presentTemporalColumns` → `presentReadColumns`) and the
+    kind union is exported as `ReadPresentationKind`.
+
+  Date-bucketed `groupBy` items are unaffected: `bucketDateValue` and the dialect
+  bucket expressions both produce canonical string labels, and #3839 already pinned
+  their empty bucket.
+
+  ### Gate
+
+  `packages/qa/dogfood/test/group-key-read-shape-parity.test.ts` measures both
+  aggregate paths against `find()` for a number, boolean and text column, on
+  `driver-sql` and `driver-sqlite-wasm`. It asserts the runtime TYPE, not just the
+  value — folding both sides through `String()` is the reflex that hid this in the
+  first place and would make the check pass against the bug it exists to catch.
+
+  Each half was confirmed to fail the gate on its own: reverting only the
+  in-memory change reddens the number and boolean cases, reverting only the driver
+  change reddens the boolean cases with `0<number>` against `false<boolean>`.
+
+- dac6a08: feat(driver-sql)!: make index drift visible to `os migrate plan` — no more silent DDL at boot (#3728)
+
+  The #3696 unique-scope migration converged **in place**: `syncTableIndexes` ran a
+  `DROP` + `CREATE UNIQUE INDEX` during `initObjects`, in every environment,
+  leaving one log line behind. `os migrate plan` showed nothing, because
+  `detectManagedDrift` was column-only — `ManagedDriftOp` had no index dimension at
+  all. An operator who wanted to review the DDL before it reached their database
+  had no way to, and a managed schema was being auto-altered in production, which
+  the #2186 contract explicitly forbids.
+
+  Index drift is now a first-class dimension, reconciled through the same path as
+  column drift:
+
+  - **`syncTableIndexes` is additive only.** It creates indexes; it never drops or
+    rewrites one. `dropLegacyGlobalUniques` is gone.
+  - **New `DriftOp` variants** — `replace_unique_index` (safe: retire the legacy
+    platform-wide unique in favour of the tenant composite), `create_index` (safe),
+    `recreate_index` (needs-confirm; destructive when it tightens to `UNIQUE`), and
+    `drop_index` (destructive).
+  - **`detectManagedDrift` reports them**, `os migrate plan` renders them (index
+    ops display as `table [index_name]`), and `os migrate apply` executes them.
+    Index DDL is portable, so it applies directly on every dialect — no SQLite
+    table rebuild.
+  - **`replace_unique_index` creates before it drops**, so uniqueness is never
+    unenforced mid-migration and a failed create leaves the schema untouched.
+  - **Declared `indexes[]` drift is covered too**: an index metadata declares but
+    the database lacks, and one whose definition no longer matches the declaration
+    (the additive sync skips those by name, so they could never self-heal).
+  - **Orphan detection is limited to ObjectStack's own generated naming**
+    (`uniq_…` / `idx_…`, plus the pre-#3696 `<table>_<column>_unique` knex
+    spelling). A hand-rolled operational index is never reported as drift and
+    `--allow-destructive` will not delete it.
+
+  **Behaviour change.** Boot no longer rewrites the index unconditionally. Dev
+  (`autoMigrate: 'safe'`, what `os dev` / `os serve` use) still self-heals on
+  restart, so local workflows are unchanged. Production now **warns** with an
+  actionable `os migrate` hint and leaves the schema alone — the deployment stays
+  on the legacy global unique (multi-tenant inserts still collide) until someone
+  runs `os migrate apply`. That is the deliberate trade: a visible, pre-inspectable
+  migration instead of an invisible one.
+
+  Also fixed: `managedObjectIndexes` was never cleared when an object dropped its
+  `indexes[]`, so drift detection kept expecting an index nobody declared.
+
+  `SchemaDiffEntryKind` gains `index_mismatch` and `unmapped_index`.
+
+- 7457a09: fix(driver-sql): give the bounded connection attempt an accurate error message (#3769)
+
+  #3781 bounded a connection attempt at 10s via `pool.createTimeoutMillis`, which
+  stopped the 30s hang but kept knex's own wording: `Timeout acquiring a
+connection. The pool is probably full`. The pool is not full — the server never
+  completed the handshake — so that message sends an operator to tune `pool.max`
+  while the network is what is broken. This is the same defect class the boot
+  guard in #3741 was about: an error that reads nothing like its cause.
+
+  `SqlDriver` now also sets the **dialect's own** connect timeout, which fails with
+  a message that names what happened:
+
+  | client                                           | key                       | message             |
+  | ------------------------------------------------ | ------------------------- | ------------------- |
+  | `pg` / `postgres` / `postgresql` / `cockroachdb` | `connectionTimeoutMillis` | `timeout expired`   |
+  | `mysql` / `mysql2`                               | `connectTimeout`          | `connect ETIMEDOUT` |
+
+  Carrying the timeout requires `connection` to be an object, so a URL string is
+  moved into the dialect's URL slot (`connectionString` for pg, `uri` for mysql2).
+  Verified against a black-holing listener that both forms still reach the URL's
+  own host/port and still honour `?sslmode=require`. SQLite is untouched — opening
+  a file has no handshake to time out.
+
+  **The two bounds are deliberately unequal.** They race and knex wins a tie, so
+  equal values would let the pool timeout fire first and the accurate message would
+  never be seen. The dialect timeout is the effective bound at **10s**; the pool
+  timeout is a strictly looser backstop, raised from 10s to **15s**, reached only
+  by a dialect with no connect-timeout knob or one that ignores the one we set.
+
+  `driver.config` keeps the shape the author passed — the rewrite applies only to
+  what knex receives. Two existing readers depend on that: `serve.ts`'s startup
+  banner and `createDatabase()`, which parses the URL to swap in the maintenance
+  database. A test pins it.
+
+  `createDatabase()`'s own admin connection now gets the same bound; it is opened
+  during boot against the very server we already suspect is unreachable, so it must
+  not be the one place that still waits 30s.
+
+  **Migration.** None for a healthy datasource. A deployment that deliberately
+  needs longer than 10s to establish a connection (a slow cross-region replica)
+  sets `connection.connectionTimeoutMillis` (pg) or `connection.connectTimeout`
+  (mysql2) explicitly, and it is left alone.
+
+- b90086a: fix(driver-sql)!: `unique` materializes per tenant, ending its contradiction with the per-tenant autonumber sequence (#3696)
+
+  `unique: true` became a **single-column global index that ignored `tenancy`
+  entirely**, while the autonumber sequence table is keyed by
+  `(object, tenant_id, field, scope)` and hands every tenant its own counter
+  starting at 1. Two subsystems of the same platform contradicted each other:
+  tenant B's `PROD-00001` was rejected by an index it could not see — **no user
+  did anything wrong**, the platform's left hand refused what its right hand
+  issued.
+
+  The rejection also doubled as a **cross-tenant existence oracle**: a UNIQUE
+  violation told tenant B that some _other_ tenant held the value, enumerable by
+  probing emails / codes / names.
+
+  **The contract now:**
+
+  | Declaration                      | Materializes as                                                 |
+  | -------------------------------- | --------------------------------------------------------------- |
+  | `unique: true` + tenant column   | composite `(tenantField, field)` — unique **within** the tenant |
+  | `unique: true`, no tenant column | single-column — single-tenant DDL is byte-identical to before   |
+  | `unique: 'global'`               | single-column, always platform-wide                             |
+
+  The tenant column comes first in the composite, so the index also serves the
+  `WHERE tenant = ?` prefix scans every tenant-scoped read issues.
+
+  **Declared `indexes[]` are deliberately unchanged.** They are materialized over
+  exactly the columns listed — no tenant column is injected. The author already
+  spells them out, per-tenant ones have always been written explicitly
+  (`fields: ['organization_id', 'code']`), and many are legitimately platform-wide
+  (a DNS hostname, a reserved slug, an external provider id). `'global'` is
+  accepted there as a synonym of `true` so one vocabulary covers both spellings.
+
+  **Migration is automatic and cannot fail.** Legacy indexes
+  (`<table>_<col>_unique` from knex, `uniq_<table>_<col>` from the drift-rebuild
+  path) are retired inline at schema-sync time. The old global constraint is
+  strictly stronger than the new per-tenant one, so existing rows satisfy the
+  replacement by construction — no dedup, no cleanup, no data touched. It
+  converges at sync rather than waiting for a deliberate `os migrate` run because
+  a deployment that never ran migrate would otherwise stay broken.
+
+  **Upgrading — audit your `unique: true` fields.** On a tenant-scoped object the
+  constraint is now per tenant. Anything that must stay platform-wide has to say
+  so:
+
+  ```ts
+  hostname: Field.text({ unique: "global" }); // no two tenants may claim it
+  ```
+
+  Note the reach: `applySystemFields` injects `organization_id` into every
+  registered object unless it opts out, and the driver falls back to that column
+  when no `tenancy.tenantField` is declared — so most objects are tenant-scoped.
+  Typical candidates for `'global'`: DNS hostnames, reserved slugs, external
+  provider ids (Stripe customer/subscription), device identities.
+
+  Postgres materializes `col.unique()` as a table CONSTRAINT rather than a bare
+  index, so the retirement tries `DROP CONSTRAINT` before `DROP INDEX` —
+  `DROP INDEX` alone would have made the migration a no-op on exactly the
+  deployments that matter most.
+
+  `@objectstack/driver-mongodb` accepts the new declaration but keeps single-field
+  indexes: it implements no row-level tenancy at all (no tenant predicate on read,
+  no tenant stamp on write), so a `(tenant, field)` index would advertise an
+  isolation it does not deliver. Tracked separately.
+
+### Patch Changes
+
+- fa3d0cf: feat(spec): field runtime value-shape contract — ADR-0104 phase 1 (D1)
+
+  `@objectstack/spec/data` now owns the runtime VALUE shape of every field type
+  (`field-value.zod.ts`): semantic type classes (`STRING_VALUE_TYPES`,
+  `NUMERIC_VALUE_TYPES`, `REFERENCE_VALUE_TYPES`, `FILE_REFERENCE_TYPES`,
+  `STRUCTURED_JSON_TYPES`, `MULTI_CAPABLE_TYPES`, …), the shared
+  `isMultiValueField`, and `valueSchemaFor(field, 'stored' | 'expanded')`. The
+  four consumers that each hand-copied this knowledge (objectql record-validator,
+  rest import-coerce, driver-sql column classification, qa conformance) now
+  derive from the spec, and the field-zoo round-trip MATRIX is asserted against
+  the contract so the two cannot drift.
+
+  **Write-path change (objectql, warn-first):** previously-unvalidated types —
+  single `lookup`/`master_detail`/`user`/`tree`, `file`/`image`/`avatar`/
+  `video`/`audio`, `location`, `address`, `composite`, `repeater`, `record`,
+  `vector` — are now checked against the contract. A violation **logs a warning
+  and passes** in this release (legacy rows must not strand their records);
+  set `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` to enforce as a
+  `400 VALIDATION_FAILED`. The flip to strict-by-default rides a later minor
+  (ADR-0104 R1/R2).
+
+  **Deprecations (removal rides the next spec major), FROM → TO:**
+
+  - `CurrencyValueSchema` (`{value, currency}`) → none. A `currency` field's
+    value is a **bare number** everywhere in the runtime (validator, SQL `float`
+    column, import coercion, field-zoo oracle); the currency code lives in field
+    config. Use `valueSchemaFor({type: 'currency'})`.
+  - `LocationCoordinatesSchema` (`{latitude, longitude}`) → `LocationValueSchema`
+    (`{lat, lng}`) — the shape the platform actually stores.
+  - `AddressSchema` is **adopted** (unchanged) as the enforced `address` value
+    contract via `AddressValueSchema`.
+
+  No stored data changes shape; the contract codifies deployed reality
+  ("reality wins", ADR-0104 D1).
+
+- c7f4417: fix(driver-sql,analytics): stop `aggregate()` / `distinct()` leaking SQLite's raw epoch storage (#3797)
+
+  Both returned `await builder` directly, without the `formatOutput` pass every
+  `find()` row gets. On SQLite — the one dialect where a `Field.datetime` is
+  stored as INTEGER epoch milliseconds rather than a native timestamp — that raw
+  storage form went straight to the caller:
+
+  | call                                   | before                       | after                            |
+  | -------------------------------------- | ---------------------------- | -------------------------------- |
+  | `find()`                               | `"2026-01-10T09:00:00.000Z"` | unchanged                        |
+  | `distinct('closed_at')`                | `[1768035600000]`            | `["2026-01-10T09:00:00.000Z"]`   |
+  | `aggregate()` `max(closed_at)`         | `1768035600000`              | `"2026-01-10T09:00:00.000Z"`     |
+  | `aggregate()` `groupBy: ['closed_at']` | key `1768035600000`          | key `"2026-01-10T09:00:00.000Z"` |
+
+  Same root cause as #3773, different exit. `Field.date` was never affected — it
+  is ISO TEXT on every dialect, so its storage form already equals its
+  presentation.
+
+  The visible surfaces were a `_max`/`_min` measure over a datetime (a "last
+  closed" KPI tile rendered `1768035600000`) and a `groupBy` on a raw datetime
+  dimension, which also disagreed with the in-memory `applyInMemoryAggregation`
+  fallback — that one consumes already-formatted `find()` rows, so the same
+  dataset changed key type depending on which path served it.
+
+  Which columns hold an instant is now recorded while the statement is built,
+  because that is the only point where a column name and its meaning are both
+  known: a `min()` lands under its alias and never under the field name, while a
+  date-BUCKETED column lands under the field name but holds a label (`'2026-01'`)
+  rather than an instant. Matching on names afterwards gets both backwards.
+
+  `distinct()` additionally re-deduplicates after presenting: SQL `DISTINCT`
+  compares STORED values, and one SQLite datetime column holds both INTEGER and
+  TEXT forms, so two rows recording the same instant survived as two and then
+  presented identically. It has no in-repo callers today; this keeps it honest
+  rather than leaving a second convention in the driver.
+
+  **`cross-object-rebucket` was fixed alongside it, because presenting min/max
+  correctly is what exposed it.** `recombine()` coerced every operand with
+  `Number()`, which silently depended on receiving an epoch: handed the ISO string
+  the driver now returns it produced `NaN`, and on Postgres/MySQL (where knex
+  returns a `Date`) it had always flattened the value back to an epoch integer one
+  layer above the driver. `min`/`max` now order by the instant and return the
+  winning value in the shape it arrived in; `sum`/`count` stay numeric.
+
+- cf5e033: fix(driver-sql): `$or` branches AND their own contents again — every `$or` filter was widened
+
+  `applyFilterCondition` passed `logicalOp='or'` _into_ each `$or` branch's
+  recursive call. That flag is meant to decide only how a branch attaches to its
+  parent builder, but inside the branch it also selected `orWhere` for the
+  branch's own contents. So a branch's field keys — and the operators of a single
+  field — OR-ed each other instead of AND-ing:
+
+  | Filter                        | Compiled to           | Should be                |
+  | ----------------------------- | --------------------- | ------------------------ |
+  | `{$or:[{a:'x', b:'y'}]}`      | `a = 'x' OR b = 'y'`  | `a = 'x' AND b = 'y'`    |
+  | `{$or:[{d:{$gte:X, $lt:Y}}]}` | `d >= X OR d < Y`     | `d >= X AND d < Y`       |
+  | `{$or:[{$and:[A,B]}, {c,d}]}` | `(A AND B) OR c OR d` | `(A AND B) OR (c AND d)` |
+
+  The Filter Protocol rule this breaks is Mongo's: **everything inside one filter
+  object is AND-ed, at every depth.** A `$or` array OR-s its _branches_; it does
+  not change how the contents _within_ a branch combine.
+
+  Every miscompile widens the result set, never narrows it, so affected queries
+  returned **more** rows than the filter allowed. Two shapes to re-check in your
+  own metadata after upgrading:
+
+  - **Scoping filters** that pair a discriminator with an id list per branch —
+    `{$or:[{parent_object, parent_id:{$in:[…]}}, …]}` and similar — were not
+    holding the pairing. Where such a filter decides visibility, it was returning
+    rows outside the intended scope.
+  - **Sharing-rule `criteria_json`** containing a `$or` whose branches carry more
+    than one key (what a "match ANY of these groups" criteria builder emits). That
+    path _writes_ `sys_record_share` grants, so any over-match materialized
+    durable grants that outlive this fix — **re-reconcile those rules after
+    upgrading**; the driver fix alone does not retract grants already written.
+
+  Also affected: the abutting `$gte`/`$lt` window pattern the automation docs and
+  CLI flow linter recommend for scheduled flows. Each tier degenerated to
+  `d >= lo OR d < hi`, which matches every row, so multi-tier reminder flows fired
+  on the whole table instead of one window.
+
+  `driver-sql` was the sole divergent backend — `driver-memory`,
+  `driver-mongodb`, the analytics `read-scope-sql` compiler and the write-side
+  `matchesFilterCondition` evaluator all already AND-ed per node. Conformance
+  tests now pin the same shapes across the three in-repo evaluators so they cannot
+  drift apart again. `driver-sqlite-wasm` inherits the fix (it extends
+  `SqlDriver`); Postgres, MySQL, SQLite and sqlite-wasm were all affected.
+
+  The `$and` arm also now honors `logicalOp`, as `$or`/`$not` already did. Nothing
+  reaches it with `'or'` once the propagation above is fixed, but the two changes
+  are only correct together — leaving one combinator deaf to the flag is how the
+  rules drifted apart in the first place.
+
+- 0e3a226: fix(authz): widen the driver's native tenant scope to the membership union
+  under the `group` posture — ADR-0105 D2 finally reaches the wire (#3623)
+
+  The Layer 0 wall correctly compiled `organization_id IN accessible_org_ids`
+  under `group`, but the ObjectQL engine also propagated the active-org
+  `tenantId` into `DriverOptions` unconditionally, and the SQL driver's native
+  scoping ANDed `organization_id = tenantId` under the union — collapsing every
+  group read back to active-org (isolated) reach. Found by the cloud-side
+  `ee-group-showcase` dogfood (cloud#880), the first end-to-end boot of `group`
+  against a real driver.
+
+  - `DriverOptions.tenantIds` (spec): the union tenant access set. Drivers with
+    native scoping widen reads/updates/deletes/aggregates to `IN (...)`,
+    keeping the NULL-tenant global-row carve-out; inserts still stamp from
+    `tenantId` (the active organization is the write target, D5). Absent or
+    empty ⇒ equality fallback — fail toward isolation, never toward exposure.
+  - ObjectQL engine threads `ExecutionContext.accessible_org_ids` as
+    `tenantIds` when the tenancy posture is `group`, reported by a new
+    `setTenancyPostureProvider` seam.
+  - SecurityPlugin wires that provider at start — deliberately from the
+    enforcement layer, so the driver wall only widens while the Layer 0 union
+    wall enforces above it. Embeddings without plugin-security keep active-org
+    equality.
+
+- 81ce41a: feat(rest): `treatAsHistorical` import also preserves the original audit timeline (#3493)
+
+  Follow-up to #3479/#3483. `treatAsHistorical` solved the FSM half — mid-lifecycle
+  rows are no longer rejected by `initialStates` — but the OTHER half of a historical
+  migration, preserving the original timeline, still didn't hold: an imported ticket
+  that closed in 2021 stored `updated_at` = the import day (and `updated_by` = the
+  importer), and a `writeMode: 'upsert'` refresh silently dropped business `readonly`
+  fields (`closed_at`, `resolved_by`). Reports, audit, and "recently modified"
+  sorting all came out wrong.
+
+  Three layers were force-overwriting the timeline; all three now respect a single
+  new opt-in flag, `ExecutionContext.preserveAudit`, which `treatAsHistorical` sets
+  alongside `skipStateMachine`:
+
+  - **spec**: `ExecutionContext.preserveAudit` (server-set only, never client-supplied)
+    and `DriverOptions.preserveAudit` (threaded to the driver's update stamp).
+  - **objectql** — the built-in audit hook (`plugin.ts`) now treats `updated_at` /
+    `updated_by` as CLIENT-PREFERRED (`?? now` / `?? userId`) under `preserveAudit`,
+    symmetric with how `created_at` / `created_by` already behave on insert; and the
+    static-`readonly` write strip (`stripReadonlyFields`) admits a WHITELIST — the
+    audit/timestamp family plus author-declared business `readonly` fields — so an
+    upsert refresh no longer drops them.
+  - **driver-sql** — the SQL `update` path keeps a supplied `updated_at` instead of
+    force-advancing it to `now` when `DriverOptions.preserveAudit` is set (fills-only-
+    empty, mirroring the insert stamp).
+  - **rest** — the import runner sets `preserveAudit` on the write context iff the
+    request opts into `treatAsHistorical`.
+
+  Deliberately a WHITELIST, not the blanket `isSystem` exemption: platform-managed
+  `system` columns OUTSIDE the audit family (`organization_id` / tenancy, generated
+  columns) STAY stripped, so a historical import reinstates established facts without
+  becoming a backdoor to forge tenancy. Permissions / RLS / field-level security are
+  unaffected — this changes only which audit/readonly values the runtime overwrites,
+  never who may write the record. Fully opt-in: a normal write still auto-stamps
+  `updated_at`/`updated_by` and strips `readonly` exactly as before. The objectui
+  "Import as historical data" checkbox (objectui#2815) now drives both halves — no new
+  UI.
+
+- 647ec8b: fix(driver-sql,sharing): an unsortable query loses its ORDER BY, not its rows (#3821)
+
+  `SqlDriver.find()` already recovered from a SELECT projection naming a column
+  the table lacks (retry with `select('*')`, the unknown field is simply absent
+  from each row). The identical failure one clause over — an **ORDER BY** column
+  the table lacks — fell through to `return []`. Because `count()` is a separate
+  statement, the list endpoint answered `HTTP 200` with `records: []` and
+  `total: 3`: the rows are there, none are shown, nothing is logged. Same family
+  as the `$`-param footgun closed by #2926.
+
+  It surfaced through the Console's sharing-rule **recipient picker**, which
+  never listed a single candidate. The client mangled `'name asc'` into
+  `0 n,1 a,2 m,…` (fixed separately in objectui) and the driver turned that into
+  "no users exist", so no sharing rule could be authored from the UI at all.
+
+  Rows now outrank their order: the retry ladder drops the projection first (the
+  likelier culprit and the cheaper thing to lose), then the sort, then gives up.
+  A query that cannot be sorted comes back **unordered instead of empty**. Errors
+  that are not about an unknown column still propagate untouched.
+
+  **A rule authored in Setup now actually applies — and switching it off actually
+  withdraws access.** Writing a `sys_sharing_rule` rebound the per-record hooks,
+  which only makes the rule reach records written FROM THEN ON. So an admin who
+  created a rule and enabled it saw nothing happen: the recipient's list stayed
+  empty until somebody happened to touch each record. The reverse was worse —
+  switching a rule OFF, or deleting it, left every grant it had already issued in
+  place, and boot backfill only reconciles ACTIVE rules, so those grants outlived
+  restarts while the UI displayed the rule as disabled. The reconcile was reachable
+  only through `POST /sharing/rules/:id/evaluate`, which the Console never calls.
+
+  Each non-system write to `sys_sharing_rule` now also reconciles that rule's
+  grants, chained behind the existing rebind: insert/update run the same
+  diff-based `evaluateRule` the REST endpoint runs (it purges when the rule is
+  inactive), and delete purges directly via the new
+  `SharingRuleService.revokeRuleGrants` — `evaluateRule` can't help there because
+  the row is already gone (`RULE_NOT_FOUND`), which is also why a rule deleted
+  through the plain data API used to orphan its grants. Seeding and package
+  bootstrap write with `isSystem` and are skipped; `kernel:bootstrapped` already
+  backfills those. Reconciliation is best-effort and never fails the write.
+
+  **The dialog's help text was engineering notes, shown to tenant admins.** The
+  field descriptions on `sys_sharing_rule` render under each input in Setup, and
+  they cited ADR numbers, table and column names (`parent_business_unit_id`,
+  `sys_business_unit`), enum machine values the dropdown never shows
+  (`business_unit`, `team`), a third-party library (better-auth), and engine
+  vocabulary ("evaluation", "lifecycle"). Several were also stale: they still told
+  admins to type an id or hand-write a `FilterCondition` after those inputs became
+  a record picker and a visual builder. Rewritten for the reader who actually sees
+  them — the implementation detail was already in the object's doc comment, which
+  is where it stays. `criteria_json`'s LABEL loses its "(FilterCondition JSON)"
+  suffix for the same reason, and `active` can finally say what it now does:
+  turning it off withdraws the access.
+
+  Also refreshes the `sys_sharing_rule` help text in the zh-CN / ja-JP / es-ES
+  translation bundles, which still described `recipient_type` in terms of
+  `department` (the enum value is `business_unit`) and told admins to enter a
+  queue name for `recipient_id` (`queue` was removed in ADR-0078). The es-ES
+  option labels for `position` / `unit_and_subordinates` were translated as
+  "rol" — corrected to "Puesto" / "Unidad de negocio y subordinados".
+
+- 5f0852f: fix(driver-sql): bucket a SQLite `Field.datetime` by its stored instant instead of collapsing every row into one `(null)` (#3773)
+
+  On SQLite, any trend chart bucketed by day/week/month/year over a
+  `Field.datetime` column put **every record in a single `(null)` bucket** — one
+  bar, carrying the whole total. The measure was right; only the bucket key was
+  wrong. `Field.date` (ISO TEXT storage) was unaffected, so the same dashboard
+  could show one column working and the next one flat.
+
+  better-sqlite3 stores a `Field.datetime` as INTEGER epoch **milliseconds** (knex
+  binds a JS `Date` as `.getTime()`), and `buildDateBucketExpr` emitted a flat
+  `strftime('%Y-%m', col)`. SQLite reads a bare integer as a **Julian day
+  number**; an epoch-ms value is far outside the legal range, so `strftime`
+  returned NULL for every row. Nothing downstream noticed: SQLite advertises
+  `queryDateGranularity.month`, so `engine.aggregate` pushes the bucketing down,
+  and its in-memory fallback only engages for an _unsupported_ granularity or a
+  non-UTC timezone.
+
+  The SQLite expression is now storage-aware, sharing one `isEpochStoredDatetime`
+  predicate with the filter-comparand coercion added for the same root cause in
+  \#2034 — a window and a bucket that disagree about storage is exactly how an
+  epoch column ended up correctly filtered and then entirely bucketed as NULL.
+  Postgres and MySQL are untouched: `defineColumn` maps `Field.datetime` to a
+  native timestamp there, which is also why their comparands are left alone.
+
+  Two details are load-bearing and pinned by tests:
+
+  - The conversion dispatches on each **stored value's** type, not just the
+    declared one. A SQLite `Field.datetime` column is genuinely mixed-form —
+    `formatInput` passes datetime values through, so a `Date` lands as INTEGER
+    while an ISO string (including an unresolved `defaultValue: 'NOW()'`) lands as
+    TEXT. Dividing TEXT by 1000 coerces it to its leading year, filing live rows
+    under 1970 — worse than the NULL it replaced.
+  - Division is `/1000.0`, not `/1000`. Integer division truncates toward zero, so
+    a pre-1970 instant (`-1` ms) would surface as 1970-01-01.
+
+  `bucketDateValue` (the in-memory fallback in `@objectstack/objectql`) now reads a
+  finite **number** as epoch milliseconds. `new Date(String(1767225600000))` is an
+  Invalid Date, so a driver handing back raw storage values bucketed as `'(null)'`
+  there while the pushed-down SQL bucketed correctly — fixing only the driver would
+  have traded one wrong answer for two different ones, and the two paths have to
+  label the same instant identically for a drill-down to survive crossing them.
+
+  `SqliteWasmDriver` inherits `buildDateBucketExpr`, so it carried the bug and gets
+  the fix.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [840ee4b]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+  - @objectstack/observability@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

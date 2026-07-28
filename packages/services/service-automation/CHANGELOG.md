@@ -1,5 +1,906 @@
 # @objectstack/service-automation
 
+## 17.0.0-rc.0
+
+### Major Changes
+
+- 83c161f: feat(automation)!: a flow run with no trigger user may no longer touch data (#3760)
+
+  An effective `runAs:'user'` run that resolves **no trigger user** used to execute
+  its data nodes **UNSCOPED** — it presented no principal, and the data security
+  middleware skips when there is no principal, so the run read and wrote every row.
+  `runAs:'user'` is an access-_narrowing_ declaration; failing to resolve it must
+  never resolve to a grant (ADR-0049). It now **refuses** the operation
+  (`UnscopedRunDataAccessError`), naming `runAs:'system'` as the fix.
+
+  **This was never really about schedules.** The docs, the spec, the runtime
+  warning and the lint all described a schedule-shaped problem, and the lint only
+  ever matched that shape. But the runtime predicate is "no user", and the
+  commonest way to have no user is a **record-change flow fired by a write that
+  carried none**: `isSystem` does _not_ suppress trigger dispatch — only
+  `skipTriggers` does, and exactly three first-party paths set it — so every
+  plugin/service system write, the approvals status mirror, and a `runAs:'system'`
+  flow's own data node dispatched record-change flows with `userId: undefined`.
+  Ordinary users reach those writes routinely (submitting for approval mirrors a
+  status onto the target record), so the fail-open was reachable by unprivileged
+  input and was the common case, not the rare one.
+
+  Deliberately **not** implemented as "inherit the triggering write's posture and
+  run as `isSystem`". That reads like a relabel but is a privilege escalation: the
+  security middleware's `isSystem` short-circuit fires _before_ its
+  package-managed-row, system-row, audience-anchor and delegated-admin gates, all
+  of which a principal-less context still has to clear. Such a run cannot write
+  `sys_user_position` today; as `isSystem` it could. "Unscoped" was never
+  equivalent to "system".
+
+  **Breaking — how to migrate.** A flow that reacts to system writes and needs to
+  act beyond one user's grants declares `runAs: 'system'`, making the elevation
+  explicit and audit-attributable. Otherwise ensure the trigger supplies a user.
+  Flows that touch no data are unaffected (`runAs` is moot), and the failure is
+  isolated: the trigger already swallows flow errors, so the originating write
+  still succeeds. The engine warns at run _setup_, before any node executes.
+
+  **#3712's user-less provenance path is subsumed, not broken.** That fix let a
+  run with no trigger user write its own approval-locked record by carrying a
+  provenance-only ObjectQL context (the run id, nothing else). Such a run can no
+  longer perform a data operation at all — presenting no principal is exactly what
+  made the write unscoped — so it is refused before the lock is consulted. The
+  capability survives via the explicit route: a schedule that must write records
+  declares `runAs:'system'`, which the lock hook exempts on its own `isSystem`
+  branch. The `flowRunId` exemption itself stays live and load-bearing for what
+  #3703 built it for — a `runAs:'user'` run that _does_ have a user — where the
+  exemption is still provenance rather than privilege.
+
+  Also in this change:
+
+  - **`flow-schedule-runas-unscoped` → `flow-runas-unscoped`, and it now fails the
+    build.** It read as a gate and behaved as a comment — `os compile` documented
+    that the flow lint "NEVER fails the build" — which is close to no net at all
+    for the audience it protects, very often an AI generating flows in bulk. It now
+    also covers the other provably user-less triggers (`time_relative`, `api`), per
+    ADR-0073 D5. It still cannot cover `record_change`, which is undecidable at
+    authoring time — that is exactly why the runtime refusal exists.
+  - **Three seed writes stopped firing automation.** The seed loader's pass-2
+    deferred-reference back-fill and both of `AppPlugin`'s basic-insert fallbacks
+    inlined a bare `{ isSystem: true }` instead of the shared seed options, so they
+    seeded with record-change automation live — the self-trigger vector
+    `skipTriggers` exists to prevent, on the writes that skipped it.
+  - **ADR-0073 amended.** Its severity rationale ("an unprivileged user cannot
+    trigger a schedule, so there is no untrusted-input path") is falsified, and its
+    rejection of fail-closed ("breaks legitimate scheduled CRUD — 2/3 example flows
+    relied on the default") expired when those flows were fixed to declare
+    `runAs:'system'`. Refusal is an interim posture, forward-compatible with the
+    ADR's `automation` principal: when that lands, the refusal point becomes the
+    place that resolves it.
+
+### Minor Changes
+
+- 57a3bb3: fix(automation,approvals): the run-resume route is gated by the node the run is parked on (#3801)
+
+  `POST /api/v1/automation/:name/runs/:runId/resume` forwarded a caller-supplied
+  `{ inputs, output, branchLabel }` straight into `AutomationEngine.resume`, and
+  `resumeInternal` validated **machine state only** — the concurrent-resume latch,
+  the run exists, the flow exists, the suspended node still exists. Nothing asked
+  _who was calling_.
+
+  Approval nodes suspend and resume through exactly that mechanism. So a resume
+  carrying `branchLabel: 'approve'` walked the approve edge with **no approver
+  check, no `sys_approval_action` row and no status mirror** — the
+  `sys_approval_request` row and the run then disagreed permanently. The only
+  thing standing between the route and the approvals rules was convention; the
+  showcase spelled it out in a comment ("decide via the approvals API, never a raw
+  engine `resume`"), and a comment in an example is not an access control.
+
+  Removing the route was not the fix: it is load-bearing for **screen flows** —
+  the UI flow-runner posts `{ inputs }` there to advance a paused `screen` node.
+  The gate therefore keys on **what the run is parked on**:
+
+  - `ActionDescriptor.resumeAuthority` (`'any'` | `'service'`, default `'any'`) —
+    a pausing node declares who may continue it. `approval` declares `'service'`.
+  - The engine refuses a `'service'` suspension unless the signal carries
+    `RESUME_AUTHORITY_SERVICE` (`@objectstack/spec/contracts`), a **symbol** the
+    owning service stamps in-process — a JSON body can never produce one, so the
+    transport cannot forge it. `ApprovalService` stamps it on the tail of a
+    decision it has already authorized and recorded.
+  - The gate follows a **subflow** pause down to the child the signal would
+    actually reach, so resuming the parent is not a way around it.
+  - Refusal returns `{ success: false, code: 'forbidden' }` and the route answers
+    **403**. Nothing is consumed — the request stays pending and the run stays
+    parked, so the real decision still lands.
+
+  `screen` and `wait` pauses are unchanged, as is every path that already went
+  through the approvals API. What changes for consumers:
+
+  - **FROM:** finishing an approval with
+    `client.automation.resume(flow, runId, { branchLabel: 'approve' })`
+    **TO:** `client.approvals.approve(requestId, …)` (or `.reject` / `.recall`).
+    The old call now answers 403 and changes nothing.
+  - Registering your own pausing node whose continuation belongs to a service
+    rather than to whoever holds the run id? Declare `resumeAuthority: 'service'`
+    on its descriptor and stamp `RESUME_AUTHORITY_SERVICE` on the signal from that
+    service.
+
+  A suspension now records the node type that produced it
+  (`SuspendedRun.nodeType` / `sys_automation_run.node_type`), captured at suspend
+  time so a flow republished mid-pause cannot re-type the node out from under the
+  gate; rows written before this fall back to the flow definition.
+
+- 2fa4ca1: Dynamic approver routing for approval nodes (#3447 P2) — three new declarative capabilities:
+
+  **`expression` approvers.** A new approver type whose CEL expression resolves WHO approves at node entry, over exactly three roots: `current.*` (the record's live state), `trigger.*` (the submit-time snapshot) and `vars.*` (flow variables, incl. upstream node outputs). `record` and bare field names are rejected before evaluation — on this platform `record` always means "the record at event time", which is ambiguous at an approval node — with error messages that prescribe the correct spelling. The optional `resolveAs: 'user' | 'department' | 'position' | 'team'` re-expands each resolved id through the same graph lookups the static types use; with `behavior: 'per_group'` each intermediate value (e.g. each returned department) forms its own sign-off group. A missing key fails the node loudly; only a present-but-empty result counts as an empty slate.
+
+  **`onEmptyApprovers` policy.** What an empty resolved slate does, node-level, for all approver types: `admin_rescue` (default — request opens for privileged takeover, the #3424 behaviour), `fail` (node fails), or `auto_approve` (skip the request, continue down the `approve` edge with `output.autoApproved = true`). To support auto-approve, the automation engine now honours `NodeExecutionResult.branchLabel` on the synchronous completion path — the field existed but was only ever consumed via resume signals.
+
+  **Decision outputs.** `decide(..., { outputs })` hands structured data from the approver to the flow: the author declares allowed keys on the node (`decisionOutputs`), approvers fill values only, and accepted outputs resume the run as `<nodeId>.<key>` variables — a later approval node's expression can read `vars.<nodeId>.picked_departments`, closing "the previous approver picks the next step's approvers" without a record-field detour. Undeclared keys reject the decision; `decision`/`requestId` are reserved. Multi-approver tallies now always pin to the open-time approver snapshot (previously unanimous re-resolved at each decision against the payload snapshot).
+
+  Also: `collectCelRootIdentifiers` is exported from `@objectstack/formula` (shared by the new `os lint` rules and the runtime pre-check, so they can never drift), resolution inputs are audited on the request snapshot as `__resolvedFrom`, and three new lint rules gate expressions, empty-slate policies and reserved output keys at author time.
+
+- 2f47489: fix(automation): a `fault` edge must not switch off a guardrail (#3863)
+
+  A `fault` edge routes a failed node to a handler instead of aborting the run.
+  That is the right primitive for the world not cooperating — an `http` node that
+  404s, a connector that rate-limited, a rejected write.
+
+  It was also, until now, routing the **refuse-to-execute** family. Those guards
+  report that the METADATA is wrong, not that an operation failed: #3810
+  (interpolation erased a filter condition), ADR-0049/#1888 (the run would execute
+  unscoped), a data node naming no object. Because they surfaced as ordinary node
+  failures, one declared edge silently disabled them.
+
+  **The live consequence, reproduced in a test before the fix:** attach a `fault`
+  edge to a `delete_record` whose filter has a typo (`{record.ownr}`), and #3810's
+  protection against emptying the object was gone — the guard fired, the handler
+  swallowed it, and the run reported `success: true`. That is the exact fail-open
+  direction #3810 was opened to close, reachable from a single edge, and it is the
+  kind of suppression an AI authoring loop reaches for first when trying to make a
+  diagnostic go away.
+
+  **Failures now carry a class.** `NodeExecutionResult.errorClass` is `'runtime'`
+  (default — every existing executor keeps its current routing) or `'guard'`.
+  Guard-class failures are never routed: they stay fatal with or without a `fault`
+  edge, and the run fails with the guard's own message. Thrown guards are covered
+  too — `UnscopedRunDataAccessError` is branded via a shared `guard-refusal`
+  module, so the engine's catch path cannot become the bypass the return path no
+  longer is.
+
+  Marked as guard-class: the three `resolveNodeFilter` refusals (#3810), the four
+  `objectName required` refusals, and `UnscopedRunDataAccessError` (ADR-0049).
+  Genuine engine failures (`get_record(x) failed: …`) stay runtime-class and keep
+  routing.
+
+  **Also in this change**
+
+  - `{<nodeId>.error}` now carries a failed node's message alongside the run-wide
+    `{$error}`. `$error` names only the most recent failure, so a handler shared by
+    two fault edges could not tell which node it was handling; `{charge_card.error}`
+    is addressable from any downstream template. Additive — `$error` is unchanged.
+  - Fault edges are **documented** for the first time (`content/docs/automation/flows.mdx`
+    and the automation skill), including the routable/not-routable split. The skill
+    entry says plainly not to add a fault edge to silence a guard error, since that
+    is the misuse the class split now makes impossible.
+
+  A run that takes a fault branch still reports success, and the failed step still
+  carries `status: 'failure'` and its message in the trace — recovery does not
+  erase the record of what failed (#3356/#3407).
+
+- de9af8a: fix(automation,objectql): a filter that loses a condition must not run (#3810)
+
+  Three related holes, all of which end in "the query matched rows the author
+  excluded".
+
+  **1. A flow filter could silently widen to match everything.**
+
+  The flow template interpolator expresses "this token did not resolve" as
+  `undefined`. In a message that renders as empty text — harmless. In a FILTER it
+  removes the condition, and a removed condition matches MORE rows. When it was
+  the only condition, `{ owner: '{record.ownr}' }` became `{}`, and `{}` handed to
+  `deleteMany` is every row in the table.
+
+  So one mistyped field name in a `delete_record` node silently emptied the
+  object. Reproduced with all four causes: a typo (`{record.ownr}`), an input the
+  run never received, a lookup hop (`{record.account.name}` — the trigger record
+  carries a scalar id), and a filter placeholder.
+
+  `get_record` / `update_record` / `delete_record` now refuse to execute when
+  interpolation erased any authored condition, naming the offending template. The
+  guard keys on LOSS, not emptiness: an author who deliberately wrote no filter is
+  unaffected, and losing one of two conditions still fails, because widening from
+  "my open records" to "all open records" is the same class of bug.
+
+  **2. Filter placeholders never reached the engine that resolves them.**
+
+  `config.filter` is where two `{…}` dialects meet — the flow template dialect
+  (`{record.owner}`) and the filter placeholder dialect (`{current_year_start}`,
+  `{current_user_id}`, resolved by `resolveFilterTokens()`). Evaluation order
+  picked the winner by accident: the flow interpolator ran first, found no flow
+  variable by that name, and erased it.
+
+  `interpolateFilter()` hands that position back to the dialect that owns it — a
+  whole-string token that no flow variable resolves and that IS a recognised
+  placeholder passes through verbatim for the engine to expand. Flow variables
+  keep precedence, so a template that works today cannot change meaning.
+
+  **3. The engine resolved placeholders on reads but not on writes.**
+
+  `resolveFilterTokens()` reached `find`/`findOne`/`count`/`aggregate` only. So
+  the SAME filter selected different rows depending on the verb: `find({ owner:
+'{current_user_id}' })` matched the signed-in user's rows, while
+  `update`/`delete` compared the literal token text and matched none — a flow that
+  previewed with one and acted with the other operated on two different row sets.
+  This is the #3106 shape one layer down: the evaluator existed, only some call
+  sites reached it.
+
+  `update` and `delete` now resolve too, BEFORE the by-id fast path claims a
+  scalar `where.id` (otherwise an unresolved `{current_user_id}` would be bound as
+  the primary key itself). Caller options are never mutated.
+
+- 5524f84: feat(automation): opt-in single-hop lookup expansion for record-change flow templates (#3475)
+
+  A record-change flow can now declare `expand: ['<lookup_field>', …]` on its start
+  node config so node templates resolve `{record.<lookup>.<field>}` (e.g.
+  `{record.account.name}` in a notify title, closing the #3426 gap for lookups).
+
+  The engine re-reads the declared relations AFTER identity resolution, as the
+  run's OWN principal — `resolveRunDataContext` honors `runAs`, so a `runAs:'user'`
+  run reads the referenced object as the **triggering user** (its RLS/FLS enforced)
+  rather than system-elevated. This is what made expansion unsafe to do in the
+  trigger's re-read (which has no resolved grants) and is why it lives in the
+  engine (new `AutomationEngine.setRecordExpander`, bridged by the plugin to the
+  same data engine the CRUD nodes use).
+
+  Only the declared relation keys are grafted onto the run record, so bare lookup
+  ids and `multiple` lookup arrays (#1872) on other relations — and the formula
+  fields the trigger already hydrated — are untouched. Opt-in ⇒ zero cost when
+  unused; best-effort ⇒ a re-read failure leaves the record unexpanded and never
+  breaks the flow.
+
+  The `os validate` lint rule `flow-template-lookup-traversal` (#3426/#3472) is now
+  suppressed for a relation once the flow declares it in `config.expand`.
+
+- 7687f7b: fix(automation): a screen field's `visibleWhen` reaches the client (#3528)
+
+  `visibleWhen` has been on the `screen` node's designer form since #3304 —
+  declared as an expression (`xExpression`), documented as bare CEL, offered to
+  authors in Studio. The executor never put it on the wire. `ScreenFieldSpec`
+  carried `name` / `label` / `type` / `required` / `options` / `defaultValue` /
+  `placeholder` and nothing else, so no client could honour a predicate it never
+  received. Authors wrote conditional visibility; every field rendered
+  unconditionally; nothing errored.
+
+  That is worse than a cosmetic miss, because `required` **is** honoured. A field
+  that is optional-by-design but required _when shown_ becomes permanently
+  required once its predicate is dropped — and a runner that validates the full
+  field list then blocks Submit on input the user was never asked for. No resume
+  request is issued and the run sits paused forever. HotCRM's lead-conversion
+  screen is exactly that shape:
+
+  ```ts
+  { name: 'createOpportunity', type: 'boolean', required: true },
+  { name: 'opportunityName',   type: 'text', required: true,
+    visibleWhen: 'createOpportunity == true' },
+  ```
+
+  Leave the checkbox unticked and `opportunityName` — which should not be on
+  screen at all — blocks the whole conversion.
+
+  - `ScreenFieldSpec.visibleWhen` is now part of the contract, documented as
+    client-evaluated bare CEL over the screen's own field names, with the
+    `required`-must-follow-visibility rule stated where implementors will read it.
+  - The `screen` executor forwards it **raw**, deliberately uninterpolated: the
+    predicate is re-evaluated per keystroke against values only the client has, so
+    resolving it server-side against flow variables would freeze the field.
+  - Covered by tests — the screen wire payload had none for this key.
+
+  Clients must evaluate the predicate and skip hidden fields when enforcing
+  `required`. Honouring one without the other reproduces the dead-end above.
+
+- b95577a: feat(automation): surface silently-stripped write fields as step warnings (#3407)
+
+  `update_record` used to report an unconditional `success` even when the data
+  layer legally stripped the requested write fields — static `readonly` (#2948)
+  or a TRUE `readonlyWhen` predicate (#3042). The only trace was a server-side
+  logger warn, invisible in the flow run trace: an author saw a clean 3ms
+  `success` while the DB truth never changed (how #3356's approval stage
+  write-backs failed unnoticed).
+
+  - **spec**: new `DroppedFieldsEventSchema` / `DroppedFieldsEvent`
+    (`{ object, fields, reason: 'readonly' | 'readonly_when' }`) in
+    `data/data-engine.zod.ts`, and a `WriteObservabilityOptions`
+    (`onFieldsDropped` listener) mixin on `IDataEngine.insert/update` option
+    params in `contracts/data-engine.ts`. The listener is a TS-contract-level,
+    in-process-only channel — deliberately NOT part of the serializable Zod
+    options schemas or the RPC boundary.
+  - **objectql**: `engine.update()` reports each strip pass's dropped keys +
+    reason through `options.onFieldsDropped` (all four strip sites: single-id +
+    bulk × readonly + readonlyWhen). A throwing listener never breaks the write.
+    System-context writes skip the readonly strip and therefore report nothing,
+    as before. `insert()` accepts the option for symmetry but strips nothing
+    today (INSERT is readonly-exempt; FLS write denial throws).
+  - **service-automation**: `NodeExecutionResult` and `StepLogEntry` gain
+    advisory `warnings?: string[]`; `update_record` / `create_record` attach one
+    warning per strip event naming the dropped fields, plus a structured
+    `droppedFields` output (`{<nodeId>.droppedFields}`) for downstream nodes.
+    `success` semantics are unchanged — stripping stays legal, it just is no
+    longer silent.
+
+### Patch Changes
+
+- b949059: fix(approvals): a dead approval run no longer leaves the record RECORD_LOCKED (#3456)
+
+  The record lock is keyed on a **pending** `sys_approval_request`, and it could
+  not tell _the run that owns that request_ from _an unrelated user editing the
+  record_. So a flow that touched its own target record while its own approval was
+  still pending — a manual `resume` with no decision, or a node that writes the
+  record between opening the approval and the decision — died on its own
+  `RECORD_LOCKED`, and the record stayed locked behind the dead run. Recovery
+  existed (#3424 lets an admin `recall`/`reject` to release it) but nothing made it
+  self-healing.
+
+  Both halves are now closed.
+
+  **Prevention — the owning run may write its own record.** The automation engine
+  stamps `flowRunId` onto the run context at setup, alongside `runAs`, and it
+  travels with every data node's ObjectQL context into `ctx.provenance`. The lock
+  hook exempts a write whose `flowRunId` matches the pending request's `flow_run_id`.
+  It is keyed on run identity rather than elevation on purpose: a `runAs:'user'`
+  run stays fully RLS-scoped while it writes. `flowRunId` is pure provenance —
+  server-constructed like `isSystem`, never client-supplied, evaluated by no
+  security middleware, and the only write it permits is to the one record its own
+  run already holds a pending request against.
+
+  **Recovery — a sweep releases records held by runs that died anyway.** A pending
+  request whose owning run has reached a terminal state (`completed`, `failed`,
+  `cancelled`, `timed_out`) can never be decided, so it is finalised as `recalled`
+  — releasing the lock — and audited under the reserved actor `system:dead-run`
+  with the run and its status in the comment, so it is never mistaken for a
+  submitter's withdrawal. It runs on the existing approvals sweep clock, which also
+  covers the case no in-band handler can: a run killed by a process crash.
+
+  The sweep is fail-safe by construction. It acts only on an explicit terminal
+  status from a closed set; `paused` (the normal state of a live approval),
+  `running`, an unrecognised status, an unknown run, a `getRun` that throws, and a
+  deployment with no automation engine are all read as "still alive". The failure
+  mode is "a dead run's lock survives until an admin recalls it" — today's
+  behaviour — never "a live approval is destroyed".
+
+  Also fixes `AutomationEngine.getRun`, which returned the **first** log entry for
+  a run id rather than the latest. A run that pauses and later finishes records two
+  entries under one id, so every suspend-then-finish run — every approval, screen
+  and wait flow — reported itself as `paused` forever, both on the Runs
+  observability surface and to this sweep.
+
+  One shape was left out here and closed separately in #3712: a `runAs:'user'` run
+  with no trigger user (a schedule) resolved no ObjectQL context at all, so it
+  carried no `flowRunId` and stayed subject to the lock. It now passes a
+  provenance-only context — the run id and nothing the security middleware keys on
+  — so it is attributable without acquiring a principal, and its documented
+  unscoped posture (#1888) is unchanged.
+
+- c5ff96d: fix(approvals): a schedule-triggered run can write its own locked record (#3712)
+
+  #3456 let the run that opened a pending approval write its own target record,
+  keyed on `flowRunId`. It worked for every run that resolves an identity and
+  missed the one that doesn't: an effective `runAs:'user'` run with **no trigger
+  user** — a schedule being the canonical case — passed no ObjectQL context at
+  all, so nothing carried the run id and the run still died on its own
+  `RECORD_LOCKED`.
+
+  The blocker was never the lock. It was that "no identity" and "no context" were
+  the same thing on the wire, so a run could not say _who it was_ without also
+  claiming _what it was allowed to do_.
+
+  **A run with no principal now passes provenance alone.**
+  `resolveRunDataContext` returns `{ flowRunId }` — no `userId`, no `positions`,
+  no `permissions`, not even `isSystem: false`. Every principal gate keys on one
+  of those fields (the elevation short-circuit on `isSystem`, the ADR-0103
+  engine-owned write guard and the ADR-0090 D12 delegated-admin gate on `userId`,
+  the empty-principal fall-open on all three), so this context authorizes
+  **identically to no context at all**. The run keeps the documented #1888
+  unscoped posture, its loud `[runAs]` warning, and the
+  `flow-schedule-runas-unscoped` build-time lint. Nothing about what it may touch
+  changed — only that it can now be attributed.
+
+  **Provenance moved out of the hook session, into `ctx.provenance`.** `session`
+  answers _who is calling_ and is absent when no identity envelope was supplied —
+  a distinction real gates depend on (the attachment access gate skips bare-kernel
+  writes on exactly that test). Folding a run id into `session` would have forced
+  an identity-less run to present an empty session, silently turning "no caller"
+  into "an anonymous caller" and narrowing the #1888 fail-open for attachments
+  alone. `HookContext.provenance.flowRunId` says what produced the write; the
+  approvals lock reads it there.
+
+  Also relaxes `BaseEngineOptionsSchema.context` to a partial envelope
+  (`ExecutionContextInput`). `positions`/`permissions`/`isSystem` carry parse-time
+  defaults, which made them _required_ on a caller-supplied option and asserted
+  something untrue — that every data-engine context carries a principal. Callers
+  have always passed slices (`{ isSystem: true }` for a system read); the type now
+  says so.
+
+  Migration: nothing to change unless you read the run id inside a hook. If you
+  wrote `ctx.session.flowRunId`, read `ctx.provenance.flowRunId` instead — the
+  field never shipped under the old name.
+
+- fb90784: fix(approvals): the status mirror names the human who caused the transition (#3783)
+
+  When an approval moves, the service writes the new status onto the business
+  record (`approvalStatusField`). That write is what fires the record-change flows
+  bound to that object — so it is the seam "when the invoice is approved, do X"
+  runs through. It presented a bare `{ isSystem: true }` context with **no
+  `userId`**, at six call sites that each know exactly who acted: a submitter
+  submitting, an approver approving, rejecting, sending back, recalling.
+
+  Combined with #3760 — which stopped letting a `runAs:'user'` run with no trigger
+  user touch data — that identity gap made the most natural approvals automation
+  there is unwritable in its obvious form. The cascade inherited no user, so its
+  data nodes were refused, and the author's only way forward was to declare
+  `runAs: 'system'` and take blanket elevation for a case where a perfectly good
+  scoped identity existed at the call site all along.
+
+  The mirror now carries the acting user. It stays `isSystem` — the record is
+  normally locked while its approval is live, so only a platform write can land the
+  status — because elevation and anonymity are separate choices, and this write
+  only ever needed the first. Cascades now run as the deciding user with RLS
+  enforced.
+
+  - **The identity is the authenticated principal, never the request body's
+    `actorId`.** `actorId` arrives from the caller (`body.actorId ?? context.userId`)
+    and is only checked against the pending approver slate, never against the
+    caller. That is tolerable on an audit row; promoting it to the identity of an
+    RLS-scoped write would have turned a mislabelled audit trail into identity
+    spoofing.
+  - **Approval-by-email-link is attributed too.** ADR-0043 action links carry no
+    session, so they used to decide as pure system. The single-use hashed token
+    binds exactly one approver and is re-checked against the live slate at
+    redemption — that is an authentication — so the redeemed decision now presents
+    that approver, and an emailed approval cascades identically to one made in the
+    UI.
+  - **The two machine-driven transitions stay user-less on purpose**: the SLA
+    escalation's auto-decision and the dead-run sweep. `system:sla` and
+    `system:dead-run` are reserved audit actors, not users, and presenting one as a
+    user would put a non-user in `updated_by` and in every downstream flow's
+    identity. A flow that wants to react to those declares `runAs:'system'` — the
+    honest answer, and now a deliberate one rather than an artefact.
+  - **Attribution only — the write is not newly org-scoped.** On an
+    ExecutionContext `tenantId` is a driver-scoping knob, not attribution
+    (ObjectQL turns it into a tenant predicate), so passing the request's org would
+    have silently no-op'd the mirror on a record whose org differs. The automation
+    engine already back-fills a run's `tenantId` from the resolved user's grants.
+
+  **Visible change:** the mirrored record's `updated_by` now names the acting user
+  instead of retaining its previous value — ObjectQL's audit stamping is gated on
+  the write context's `userId` alone, and `isSystem` buys no exemption. That is the
+  attribution this fix is for: the approver who set the record to `approved` is now
+  its last modifier.
+
+- 9dcc0ae: fix(automation): array-form flow `triggerType` fails loudly instead of silently never firing (#3481)
+
+  An array `triggerType` on a flow start node — the shape an author (or an AI
+  authoring pass) naturally reaches for to fire on more than one event, e.g.
+
+  ```ts
+  config: { objectName: 'app_task', triggerType: ['record-after-create', 'record-after-delete'] }
+  ```
+
+  was accepted everywhere and armed nowhere. Multi-event unions are deliberately
+  unsupported (only the single tokens plus the `record-after-write` create-OR-update
+  union exist — see #3457), but nothing said so: `defineFlow` passed the array
+  (start-node `config` is an open record), the engine's `typeof === 'string'` check
+  folded it to no trigger and misclassified the flow as **manual**, so it never
+  entered the trigger-binding audit, and the flow-trigger-readiness lint used the
+  same `typeof` narrowing and produced no finding. The flow bound to nothing and
+  never fired, with zero output at any layer — the same silent-never-fire class as
+  #3427 / #3472, and the last authoring shape still slipping past every guard.
+
+  This is a **defensive** fix — arrays remain unsupported; they now fail loudly:
+
+  - **lint** (`validate-flow-trigger-readiness`): an array `triggerType` containing
+    any `record-*` element now yields a `flow-trigger-unknown-event` warning at
+    `os validate` time, steering to `record-after-write` (for created-or-updated) or
+    one flow per event.
+  - **engine** (`resolveTriggerBinding`): such an array is routed to the
+    `record_change` trigger — exactly as an unmappable single token is — instead of
+    being folded to a manual flow, so it reaches the trigger's bind-time rejection.
+  - **trigger** (`record-change`): the bind-time rejection detects the array shape
+    and emits a targeted warning (naming the flow, pointing at `record-after-write`
+    and #3457) rather than the generic unknown-token line.
+
+- 7ef20d0: feat(cli,automation): catch `label: 'error'` written where `type: 'fault'` was meant (#3863)
+
+  Two of the three items left open on #3863. Both are about making the fault-edge
+  contract legible; neither changes routing behaviour.
+
+  **New lint — `flow-error-label-not-fault`.** `type: 'fault'` is what routes a
+  failure; `label` is cosmetic on an ordinary edge. So this, which reads exactly
+  like error handling:
+
+  ```ts
+  { source: 'charge_card', target: 'flag_for_review', label: 'error' }
+  ```
+
+  is an ordinary out-edge — and `traverseNext` runs every unconditional out-edge
+  in parallel. The handler fires on every **successful** run of `charge_card`,
+  concurrently with the real success path, and never on a failure. The run still
+  aborts when the node fails.
+
+  Silent in both directions: the author believes failures are handled, and never
+  notices the handler running when nothing went wrong. The reading is especially
+  natural for an AI author, since the label is precisely what the intent sounds
+  like — which is why this is worth a build-time diagnostic rather than leaving it
+  to a puzzled look at a run trace.
+
+  Deliberately narrow, because a label IS load-bearing on a branching node: a
+  `decision` / `approval` executor returns a `branchLabel` and traversal then
+  prefers the edge carrying it. Edges out of those node types are excluded, as are
+  conditional edges (a guarded path is not the unconditional footgun) and edges
+  already typed `fault`. Matches the obvious synonyms (`error`, `failure`,
+  `catch`, `on_error`, …) case-insensitively. Verified against the shipped
+  showcase: no findings.
+
+  An alias — accepting `label: 'error'` as if it were `type: 'fault'` — was
+  considered and rejected: two spellings for one concept is harder to read than
+  one spelling plus a diagnostic that names the fix.
+
+  **Pinned: a handled failure does not consume a flow-level retry.** The two
+  recovery mechanisms have different scopes and must not compound — a `fault` edge
+  handles one node, while `errorHandling.retry` replays the flow **from the
+  start**, re-running every node that already succeeded (a second notification, a
+  second created record). A failure a fault edge handled is not a flow failure, so
+  it does not consume a retry. That already held by construction (a routed failure
+  never propagates out of `executeNode`); it is now a test, so a refactor of the
+  catch path cannot quietly change it.
+
+  Docs and the automation skill gain both points, plus a note on the edge-property
+  table that `label` does not select a path except on a branching node.
+
+- 763931e: feat(filters): evaluate `{filter-token}` placeholders server-side (#3582)
+
+  Filter values travel as JSON, so a time- or user-scoped slice writes a
+  placeholder instead of code:
+
+  ```ts
+  filter: { close_date: { $gte: '{current_year_start}' }, owner: '{current_user_id}' }
+  ```
+
+  The vocabulary has been in `@objectstack/spec` for a while (`date-macros.zod.ts`,
+  `context-tokens.zod.ts`) and `objectstack build` rejects tokens outside it
+  (#3574). What was missing is the half that _substitutes a value_: **nothing on
+  the server ever did**. A placeholder reached the driver as the literal string
+  `'{current_year_start}'`, compared as text, and matched nothing.
+
+  That failure is invisible — an empty widget looks exactly like a metric that is
+  legitimately zero — so apps worked around it by computing dates at module load,
+  which freezes "this year" into the built artifact and quietly goes stale.
+
+  **New: `resolveFilterTokens()` in `@objectstack/core`**, wired into the two
+  server-side seams every filter passes through:
+
+  - **ObjectQL read path** — `find` / `findOne` / `count` / `aggregate`, so REST
+    queries, related lists, saved-view filters and flow `find_records` all resolve.
+    It runs before the middleware chain, so only author-supplied filters are
+    inspected; RLS/sharing filters are injected downstream from concrete values.
+  - **Analytics dataset executor** — a dataset's intrinsic `filter`, a widget's
+    `runtimeFilter`, measure-scoped filters, and time-dimension `dateRange`s.
+    This path needs its own call: `NativeSQLStrategy` compiles raw SQL and binds
+    comparands directly, so a dashboard widget never passes through `engine.find()`.
+
+  Behavioural notes:
+
+  - Date tokens resolve to ISO strings (`YYYY-MM-DD`, or a full timestamp for
+    `{now}` / `{N_hours_ago}` / `{N_minutes_ago}`). Turning that into a column's
+    on-disk form stays the driver's job (`SqlDriver.temporalFilterValue`), so
+    there is still exactly one source of truth for the storage convention.
+  - Calendar boundaries follow `ExecutionContext.timezone`; one instant is pinned
+    per filter tree, so a `>= {current_month_start}` / `< {next_month_start}` pair
+    can never straddle a boundary.
+  - `{current_org_id}` reads `ExecutionContext.tenantId`; `{current_user_id}` reads
+    `userId`. A request carrying neither now **throws** instead of resolving to
+    `null` — a null comparand degrades to `IS NULL` on most drivers and would hand
+    back the rows the filter was written to exclude.
+  - An unrecognised placeholder **throws**, carrying the near-miss fix
+    (`{current_user}` → `{current_user_id}`, `{this_quarter_start}` →
+    `{current_quarter_start}`). This matches what `objectstack build` already
+    enforces. Consequence, previously implicit and now load-bearing: a filter value
+    that is _entirely_ `{...}` is always read as a placeholder, so a literal value
+    of that shape is not expressible — rename the value.
+
+  Also in this change: `notify` no longer sends the six-character string
+  `"undefined"` as an audience member. `to: ['{record.owner.manager}']` walks
+  `.manager` on a scalar foreign-key id, resolves to nothing, and `String(undefined)`
+  turned that into a phantom recipient — the emit "succeeded", addressed nobody,
+  and said nothing. Unresolved recipients are now dropped, and a node with no
+  recipient left fails naming the offending template and pointing at the start
+  node's `config.expand` (#3475), which does hydrate the relation.
+
+- c88eeda: fix(automation): flow string templates serialize object tokens readably, never `[object Object]` (#3450)
+
+  A flow string field that embeds an object-valued token — most notably the
+  engine's `$error` (`{nodeId, message, ...}`, set on a failed step) in a fault
+  handler's notify body — rendered as the useless `[object Object]`. The
+  multi-token branch of `interpolateString` coerced every value with `String()`,
+  and `notify-node` did the same for a sole `{$error}` token.
+
+  - New shared `stringifyForTemplate` helper (`builtin/template.ts`): objects and
+    arrays are JSON-serialized (so the text stays legible and still carries the
+    message), primitives pass through, `null`/`undefined` render as ''.
+  - `interpolateString`'s embedded-substitution branch and `notify-node`'s
+    title/body coercion use it. The sole-token branch still returns the raw value
+    (typed config fields keep their type), and `{$error.message}` still resolves
+    to just the message string — the documented, cleanest author form.
+
+  Split from #3425 (the readonly-strip half shipped in #3465).
+
+- 5602211: fix(automation): close the default-routable footgun on refuse-to-execute guards (#3863)
+
+  #3881 stopped a `fault` edge from swallowing a guard refusal, keyed on
+  `NodeExecutionResult.errorClass`. That field defaults to `'runtime'`, which was
+  right for compatibility — every executor written before the split keeps its
+  routing — but it leaves the footgun pointing the other way: **a new guard is
+  routable unless its author remembers to classify it**, and forgetting is silent.
+  Nothing in the type system catches it.
+
+  Three changes close that for the guards that exist and make the next one hard to
+  get wrong.
+
+  **`refuseNode(reason)`** — one call that returns a guard-class failure, so
+  "write a guard" and "mark it un-routable" become the same act. Its doc states
+  the test for using it: re-running unchanged can never succeed AND the fix is to
+  edit metadata. It also states the inverse, because over-marking is not the safe
+  direction — classifying a handleable condition as `guard` turns a recoverable
+  integration into a dead run.
+
+  **Five guards that were never marked** are now un-routable. All are missing
+  required config or a defective graph, none can succeed on a retry:
+
+  - `http` with no `url`
+  - `subflow` with no `config.flowName`, and `subflow` exceeding max nesting depth
+    (a recursive graph nests exactly as deep next run)
+  - `map` with no `config.flowName`
+  - `connector_action` with no `connectorId` / `actionId`
+
+  The seven `crud-nodes` guards from #3881 move to the helper — same behaviour,
+  one spelling.
+
+  **A behavioural inventory test** drives every known guard through the engine
+  with a fault edge attached and asserts it is still fatal, matching on the
+  refusal text so a guard failing for a different reason cannot pass vacuously.
+  Verified to have teeth: un-marking one guard fails its row immediately. The
+  negative half is pinned too — a plain node failure and a thrown error must still
+  route, since that is what fault edges are for.
+
+  Deliberately **not** marked, and why: a degraded connector (#3017 says recovery
+  is automatic), a collection that did not resolve to an array, a collection over
+  the iteration cap, and a subflow that failed on its own. Those are conditions
+  the world caused, and an author must be able to handle them.
+
+  Considered and rejected: making `errorClass` required on the result type. It
+  would enforce classification at compile time, but it breaks every node executor
+  returning a failure — 281 call sites across the repo plus third-party
+  executors — for a type-only gain over the helper.
+
+- 9bf4588: fix(service-automation): bind `previous` (as null) on the create leg so start conditions can discriminate create vs update (#3427)
+
+  The engine bound `previous` into the flow condition scope only when it was
+  truthy, so on a record insert (`record-after-create`, and the create leg of
+  `record-after-write`) `previous` was an **unknown** CEL variable. Any reference to
+  it — including the documented `previous == null` create-discrimination — threw
+  `condition failed to evaluate as CEL: Unknown variable: previous`, failing the
+  whole start condition and dropping the run.
+
+  `previous` is now always bound, to `null` when there is no prior row. So
+  `previous == null` is the create leg and `previous != null` / `previous.<field>`
+  the update leg — the pattern the `record-after-write` docs and the Studio flow
+  designer advertise. Update-triggered flows are unaffected (`previous` was, and
+  stays, the prior row there).
+
+- 70a1ce1: fix(automation): the resume gate follows `map:` too, and the route stops accepting engine-internal variables (#3853)
+
+  Two holes in the #3801 resume gate, both demonstrated with a repro.
+
+  **1. The chain walk missed `map:`.** `resumeInternal` handles the two linked-run
+  correlations oppositely — a `subflow:` pause _delegates_ the signal to the child,
+  a `map:` pause _re-runs_ the map node — and the gate followed only the first. So
+  a run parked on a `map` node was judged on `map` itself (`resumeAuthority: 'any'`)
+  and let through even while the item it was waiting on sat on an `approval`.
+
+  `map` is the batch-approval shape, and the map parent's run id is the one a
+  launcher holds. Since `$mapState.started` is advanced past the in-flight item
+  before the suspend, an empty-body resume of the parent **skipped that item's
+  approval outright**, orphaning its still-pending request; a later real decision
+  then bubbled into a parent already waiting on the next item, cascading the
+  misalignment.
+
+  The walk now follows both prefixes: a linked-run pause is waiting on a CHILD, so
+  the child's node carries the authority — the gate reads _the item, not the loop_.
+
+  **2. Resume `inputs` could write the engine's `$` namespace.** They are applied
+  as bare flow variables, so a caller could set the exact handoff keys the engine's
+  map bubble uses (`<nodeId>.$mapItemDone` / `$mapItemOutput`) and have the map
+  record a per-item result for a decision nobody made — the node id is readable
+  from `GET /automation/:name`. The same reached `$runId`, which `approval` /
+  `wait` nodes use to correlate external state back to a run.
+
+  `POST /automation/:name/runs/:runId/resume` now answers **400** when `inputs`
+  names anything in the engine namespace (`$…`, or a `.$` segment). Enforced at the
+  transport, not in the engine, so the in-process bubble keeps working — the same
+  trust split the gate itself uses.
+
+  Nothing changes for author-declared variables: `{ new_assignee: 'ada' }` and
+  dotted names like `collect.note` are unaffected. If you were driving a batch-
+  approval `map` by resuming the map's own run id, resume the **item's** run
+  through its owning service instead (e.g. `client.approvals.approve`) — the map
+  advances itself when the item completes.
+
+- 93f267f: fix(automation): one chokepoint for the resume signal — `output` reopened the hole `inputs` had just closed (#3879)
+
+  #3853 guarded `signal.variables` at the route. That closed one of **two**
+  equivalent paths into the same variable map and left the other open:
+  `signal.output` keys are merged under `${run.nodeId}.${key}`, and for a run
+  parked on a `map` node `run.nodeId` **is** the map node — so
+
+  ```jsonc
+  {
+    "output": { "$mapItemDone": true, "$mapItemOutput": { "result": "FORGED" } }
+  }
+  ```
+
+  writes exactly the `<mapNodeId>.$mapItemDone` the `inputs` guard had refused,
+  making the map record a result for an item nobody decided. Demonstrated with a
+  repro, then fixed.
+
+  Scope: the #3853 map gate still held, so a batch whose pending item sits on an
+  `approval` was refused before any of this — the **approval bypass stayed
+  closed**. The residual was forging the recorded result of an item on an
+  _ungated_ pause.
+
+  Two escapes with one shape is a design signal, not two bugs, so the fix is
+  structural rather than a third patch:
+
+  - **`applyResumeSignal` is the one place a resume signal reaches the variable
+    map.** Both fields are collected into a single write list (already in final,
+    prefixed form), checked, then applied — a new signal field is covered by
+    construction rather than by remembering.
+  - **All-or-nothing**, and checked _before_ the suspension is consumed: a
+    rejected signal applies nothing (not even legitimate keys sent alongside) and
+    the run stays parked, so the real continuation still lands.
+  - **The engine owns the rule; the transport maps the verdict.** `resume` returns
+    `{ success: false, code: 'invalid_signal' }`; the route answers **400**. The
+    SDK and any future adapter inherit it — implemented in one transport it
+    protected exactly one transport, and one field of it.
+  - Engine-built signals (the subflow output mapping, the map item handoff) are
+    exempt via a module-private symbol. Deliberately _not_
+    `RESUME_AUTHORITY_SERVICE`: that marker means "the owning service authorized
+    this decision", and a service still has no business writing engine internals.
+
+  `AutomationResult.code` gains `'invalid_signal'` alongside `'forbidden'` — a
+  `switch` over it needs a new arm; a plain read does not.
+
+  Nothing changes for authoring: ordinary variables pass, `$` mid-name (`price$`)
+  and dotted names (`collect.note`) included. Only names the engine reserves —
+  `$…` or a `.$` segment — are refused.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/formula@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Minor Changes

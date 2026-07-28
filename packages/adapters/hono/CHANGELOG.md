@@ -1,5 +1,200 @@
 # @objectstack/hono
 
+## 17.0.0-rc.0
+
+### Patch Changes
+
+- 9f060e5: chore(deps)!: better-auth 1.7.0-rc.2 (account identity restructuring) + the
+  production-dependency batch from #3517
+
+  **better-auth 1.7.0-rc.1 → 1.7.0-rc.2** across the family (`better-auth`,
+  `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/sso`, and the
+  adapter/telemetry overrides). `@better-auth/scim` deliberately stays on
+  1.7.0-rc.1 — rc.2 replaces its whole model (code-defined connections; the
+  `scimProvider` model and the generate-token endpoint are gone), which is a
+  feature migration, not a version bump. Its peer range accepts rc.2 core, and the
+  advisory that forced the original pin (GHSA-j8v8-g9cx-5qf4) is still fixed.
+
+  **BREAKING — account identity.** better-auth renamed `account.accountId` to
+  `account.providerAccountId` and added a REQUIRED `account.issuer`; sign-in now
+  resolves accounts by `(issuer, providerAccountId)`.
+
+  - FROM `fields: { accountId: 'account_id' }` → TO
+    `fields: { issuer: 'issuer', providerAccountId: 'account_id' }`. The provider
+    account id keeps its `account_id` column — only the better-auth-side name
+    moved — and `sys_account` gains an `issuer` column.
+  - FROM `internalAdapter.createAccount({ providerId, accountId, … })` → TO
+    `createAccount({ providerId, issuer, providerAccountId, … })`. A local
+    password account carries the issuer better-auth mints for itself,
+    `local:credential`.
+  - FROM `client.auth.accounts.unlink({ providerId, accountId })` → TO
+    `unlink({ accountId })`, where `accountId` is now the account ROW id (the `id`
+    from `accounts.list()`), matching better-auth's narrowed body.
+    `accounts.list()` returns `issuer` + `providerAccountId` in place of
+    `accountId`.
+
+  **Existing deployments:** rows written before 1.7 have no issuer and are
+  invisible to sign-in until stamped. The auth plugin now runs an idempotent
+  boot-time backfill that stamps what it can derive — `local:credential` for
+  password accounts, `local:oauth:<providerId>` for configured social providers,
+  and the registered IdP's real `iss` from `sys_sso_provider` for federated ones.
+  Accounts from a federated IdP that is no longer registered cannot be derived;
+  they are logged with their provider id and row count rather than guessed, and
+  those users cannot sign in through that provider until the row is stamped with
+  the IdP's issuer or removed so a fresh login re-links it.
+
+  **Also required by 1.7:** `SecondaryStorage` gained two mandatory methods, both
+  now implemented over the kernel cache service — `getAndDelete` (single-use
+  verification values) and `increment` (fixed-window rate-limit counter;
+  `rateLimit.storage: 'secondary-storage'` throws at boot without it).
+
+  The rest of #3517's production-dependency batch rides along: `@oclif/core`
+  4.13.0, `@hono/node-server` 2.0.12, `hono` 4.12.32, `tar` 7.5.22, `jose` 6.2.4,
+  `pinyin-pro` 3.28.2, plus the private docs app's fumadocs/next/react bumps.
+
+- cbedd62: fix(runtime,hono): close the remaining raw-driver-message exits on the HTTP boundary (#3867 follow-up)
+
+  #3867 sanitised `dispatcher-plugin`'s `errorResponseBase`. That covers errors
+  **thrown** out of `dispatch()` — but not the ones it **returns**. A
+  `{handled: true, response}` result goes to `sendResult`, never through that
+  catch, and those bodies are built by `HttpDispatcher.error()`, which passed the
+  message through verbatim. Sweeping the boundary for the same defect class (the
+  follow-up #3867 called for) turned up two more live exits:
+
+  **`HttpDispatcher.error()`** — the single construction point for every returned
+  error response. Reachable with a raw driver message today through
+  `errorFromThrown` (`/meta` save, `/packages` install) and the MCP transport's
+  `deps.error(err?.message, 500)`. Pinned by a test that drives
+  `PUT /meta/:type/:name` with a throwing `protocol.saveMetaItem`: without the
+  guard the response body is the driver's `insert into \`sys_team\` … UNIQUE
+  constraint failed: sys_team.id`, naming a physical table and column.
+
+  **`@objectstack/hono`'s auth-config route** — a 500 built from a caught
+  error with `message: err.message`. The auth service reads from the database, so
+  that message can carry a driver dump.
+
+  Both apply the same `looksLikeInternalErrorLeak` predicate #3867 put in
+  `@objectstack/types`, and both are scoped to **5xx** for the same reason: a 4xx
+  message is a deliberate business/validation answer (`Path must be
+/actions/:object/:action`, a hook's own `throw`, a `saveMetaItem` field error)
+  and must reach the caller intact. Structured `details` — the semantic `code` and
+  per-field `issues` the Studio maps back to inputs — is never touched, so a
+  sanitised 500 still carries everything a client can act on.
+
+  Diagnostics are unaffected: callers that threw still hand the original error to
+  `errorReporter` via `__obsRecordedError`, and every 5xx is logged server-side.
+
+  Audited in the same pass and deliberately left alone: the inline error bodies in
+  the `ai` / `mcp` domains (static literal strings, no interpolated error text) and
+  `plugin-hono-server`'s 403s (4xx, deliberate messages). With this change every
+  dynamic message on both dispatcher exits and the REST data routes goes through
+  one predicate.
+
+- c2d9098: feat(rest/protocol): extend droppedFields write-observability to the bulk paths + client SDK (#3455)
+
+  Follow-up to #3448 (#3431 D2): the single-write PATCH/POST `/data` paths already
+  surface LEGALLY-stripped write fields (static `readonly` #2948 / `readonlyWhen`
+  #3042 / #3043 create ingress) as `droppedFields`. The **bulk** write paths did
+  not — the same strips happened silently on every batched row — and the typed
+  client warning + CORS mirror were deferred. This closes those out.
+
+  **Bulk passthrough (metadata-protocol).**
+
+  - `updateManyData` and `batchData` (update/upsert rows) now register a per-row
+    `onFieldsDropped` collector and attach the events to that row's result.
+  - `createManyData` diffs each supplied row against its #3043-stripped form and
+    returns an **aggregated** top-level `droppedFields` (one event per
+    object/reason with the union of field names) — its `{ records, count }`
+    response has no per-row slot, and the insert-time strip is static-`readonly`
+    only, so it is schema-uniform across rows and the aggregate is faithful.
+  - `insertManyData` keeps per-row precision, attaching `droppedFields` to each
+    outcome.
+  - **Correctness fix bundled in:** `updateManyData` and `batchData` never threaded
+    the caller's execution `context` to the engine — bulk writes ran context-less,
+    so RLS/FLS and `readonlyWhen` evaluated without the caller's principal, and the
+    batch create-ingress strip was hard-coded to a non-system context. All engine
+    calls in both methods now run under the resolved `context`.
+
+  **Contract (spec).** `BatchOperationResultSchema` gains an optional per-row
+  `droppedFields` (covers `updateMany` + `batch`, which alias
+  `BatchUpdateResponseSchema`); `CreateManyDataResponseSchema` gains the optional
+  aggregated `droppedFields`. Both are omit-when-empty, so existing clients are
+  unaffected. `X-ObjectStack-Dropped-Fields` is deliberately **not** emitted for
+  batches — one response header cannot express per-row drops, so the per-row body
+  field is the canonical bulk channel.
+
+  **Typed client warnings (@objectstack/client).** `CreateDataResult` /
+  `UpdateDataResult` gain `droppedFields?: DroppedFieldsEvent[]`, giving the body
+  channel a type instead of an untyped property.
+
+  **CORS (@objectstack/hono, @objectstack/plugin-hono-server).**
+  `x-objectstack-dropped-fields` is added to the default `Access-Control-Expose-Headers`
+  allow-list (kept in lockstep across both Hono CORS sites) so a cross-origin
+  browser can read the single-write drop header. The body `droppedFields` remains
+  the primary, cross-origin-safe surface — this is a convenience mirror.
+
+  **GraphQL — not applicable (documented).** #3455 lists a GraphQL mutation item,
+  but GraphQL has no runtime: `kernel.graphql` is unassigned everywhere and
+  `handleGraphQL` returns `501`, and discovery never advertises `/graphql`. There
+  is no schema generator or mutation resolver to expose a typed payload field on,
+  so there is nothing to wire until a GraphQL engine lands — at which point the
+  protocol-layer `droppedFields` is already present and only the GraphQL schema
+  projection would remain.
+
+- Updated dependencies [af5a224]
+- Updated dependencies [879ea13]
+- Updated dependencies [6877e9a]
+- Updated dependencies [0bab8bb]
+- Updated dependencies [840ee4b]
+- Updated dependencies [3c8cfd1]
+- Updated dependencies [ad4af62]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [9f060e5]
+- Updated dependencies [d3f2ff6]
+- Updated dependencies [b7550d6]
+- Updated dependencies [0164f40]
+- Updated dependencies [e295ad1]
+- Updated dependencies [48c110e]
+- Updated dependencies [87aca93]
+- Updated dependencies [19e3e6e]
+- Updated dependencies [cbedd62]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [9613396]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [41642b0]
+- Updated dependencies [394b7a1]
+- Updated dependencies [0045682]
+- Updated dependencies [7180ed5]
+- Updated dependencies [083c414]
+- Updated dependencies [030125b]
+- Updated dependencies [8e08bc3]
+- Updated dependencies [3d5f726]
+- Updated dependencies [70a1ce1]
+- Updated dependencies [93f267f]
+- Updated dependencies [48d5a1c]
+- Updated dependencies [3216344]
+- Updated dependencies [f5bfac8]
+- Updated dependencies [6163393]
+- Updated dependencies [688e9df]
+- Updated dependencies [8f124a7]
+- Updated dependencies [21ca1d5]
+- Updated dependencies [03b11e8]
+- Updated dependencies [8891f93]
+- Updated dependencies [d729a31]
+- Updated dependencies [cb8322e]
+- Updated dependencies [810a3a2]
+- Updated dependencies [9981c1d]
+- Updated dependencies [d60968c]
+- Updated dependencies [e231abb]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+  - @objectstack/runtime@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+  - @objectstack/plugin-hono-server@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

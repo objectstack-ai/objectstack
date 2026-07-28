@@ -1,5 +1,353 @@
 # @objectstack/service-external-datasource
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 48c110e: feat(datasource): a datasource that is down is visible, and says why when queried (#3827, #3828)
+
+  #3816 made an explicitly-bound datasource that cannot connect refuse the boot. Two
+  gaps survived that fix, both in the cases that still boot — a policy denial, an
+  `autoConnect` datasource, or any failure the operator waved through with
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE`:
+
+  - **It was invisible.** `DatasourceSummary.status` was the literal `'unvalidated'`
+    for every row — the contract declared three states and the implementation only
+    ever emitted one — so a dead datasource looked exactly like a healthy-untested
+    one. `checkDriversHealth()` could not help either: it iterates registered
+    drivers, and a datasource that never connected was never registered, so it is
+    _absent_ from the probe rather than unhealthy. The only trace was a warning
+    that scrolled past at boot, which made the diagnostic procedure "restart the
+    server and re-read the logs".
+  - **The query-time error said nothing.** `getDriver()` answered four different
+    situations with one sentence, `Datasource 'x' is not registered.`: refused by
+    policy, failed to connect under the escape hatch, a misspelled name, and
+    `active: false`. Only the third is an authoring bug, so the other three sent
+    the reader hunting for a typo that does not exist.
+
+  Both come from the same root: `connect()` already produced a `ConnectResult` for
+  every attempt and every caller threw it away.
+
+  - **`DatasourceConnectionService` retains the last verdict per datasource**, with a
+    coarse `availability` (`available` / `blocked` / `failed` / `unattempted`) beside
+    the raw status. New `getConnectionState(name)` / `listConnectionStates()`.
+    `disconnect()` drops it, so a removed pool stops explaining itself.
+  - **`DatasourceSummary.status` tells the truth**: `ok` | `error` | `blocked` |
+    `unvalidated`, with a new operator-facing `statusReason`. `blocked` is new and
+    deliberate — a policy denial is a decision, not a fault, and will not clear on
+    its own. Reported in **Setup → Datasources**, `GET /api/v1/datasources`, and the
+    summary returned from create/update, so a "Save" whose pool failed to open is no
+    longer presented as success.
+  - **`ERR_DATASOURCE_UNAVAILABLE` (HTTP 503)**: new `DatasourceUnavailableError`
+    from `@objectstack/objectql`, thrown by `getDriver()` when the connection layer
+    recorded _why_ a declared datasource has no driver. An undeclared name keeps the
+    original message — there is genuinely nothing to add. 503 rather than 500/400:
+    nothing about the request is wrong, and the state may clear.
+  - **A privileged/public split for the reason.** The error **never** carries the
+    underlying cause — connect failures routinely contain hosts, ports and DSNs, and
+    a policy's `reason` is written for operators. Those stay in the logs and the
+    (admin-gated) datasource list. `DatasourceConnectDecision` gains an opt-in
+    `publicReason` for hosts that want to tell tenants something specific
+    (e.g. `'External datasources require the Scale plan.'`); it is the only string
+    that reaches an end user.
+  - **Readiness is deliberately not gated on this.** `/ready` still reflects
+    registered-driver health only: an optional datasource being down must not pull an
+    otherwise-working replica out of the load balancer.
+
+  Also lands a drift guard for **#3826**, and corrects ADR-0062's status while doing
+  it. The ADR claimed D1 ("exactly one definition → live driver path") as
+  implemented; only the _construction_ half converged. The `default` driver is still
+  registered as a `driver.*` kernel service and connected by `ObjectQLEngine.init()`,
+  with its own failure verdict, pool teardown, and no connect policy. What blocks the
+  merge is an input-shape mismatch, not ordering: `connect()` takes a datasource
+  _definition_ and builds the driver, while `default` arrives pre-built, and routing
+  it through the service would make `ObjectQLPlugin`'s boot depend on an optional
+  higher-layer service. Until that is designed, `degraded-boot-parity.test.ts` pins
+  both paths to the same operator-visible contract (fail-fast by default, identical
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE` parsing, `DEGRADED BOOT` on stderr) so a change
+  to one that forgets the other fails CI — #3741 → #3758 was exactly that miss, and
+  it cost three months and a second bug report.
+
+  **Migration.** Additive. `DatasourceSummary.status` gains a `'blocked'` member: a
+  consumer exhaustively switching on it needs a case (the admin UI shows it as a
+  distinct state). Nothing that was `'ok'` or `'error'` changes meaning; rows that
+  were reported `'unvalidated'` now report their real state. Query-time errors for a
+  datasource the connection layer recorded change from a generic `Error` to
+  `DatasourceUnavailableError` (503 instead of the previous catch-all status);
+  matching on the old `is not registered` text still works for the undeclared-name
+  case, which is the only one that was ever accurate.
+
+- 87aca93: fix(datasource)!: a declared datasource that objects bind to must connect, or the boot fails (#3758)
+
+  `DatasourceConnectionService.handleFailure()` fail-fasted only for an `external`
+  datasource with `validation.onMismatch: 'fail'`. Everything else degraded to one
+  `warn` line — including the case the D2 auto-connect gate itself flags as having
+  **no fallback path**: a datasource that objects bind to explicitly via
+  `object.datasource`. Those objects never fall through to the `default` driver;
+  `engine.getDriver` throws `Datasource 'x' is not registered` for them.
+
+  So an app declaring `datasource: 'analytics'` with 20 objects bound to it, booted
+  against a wrong `ANALYTICS_URL`, started clean and exited zero — and then failed
+  every read and write of those 20 objects with an error that reads nothing like
+  _the analytics database is unreachable_. The rest of the app worked, which made it
+  **harder** to locate than a total outage: it looks like "some pages are broken",
+  not like a misconfigured datasource. This is the same decision #3741/#3751 fixed
+  one layer up in `ObjectQLEngine.init()`; the boundary here was still drawn in the
+  old place.
+
+  - **Fail-fast is now keyed on "no fallback path", not on `onMismatch` alone.** At
+    the `declared-auto` (boot) trigger, a connect failure aborts the boot when the
+    datasource is `external` + `onMismatch: 'fail'` **or** when ≥1 object binds to
+    it explicitly. `autoConnect: true` with nothing bound stays lenient — that is
+    "connect it if you can", and nothing declares a dependency on it. The
+    runtime-admin create/update and boot-rehydration triggers are unchanged and
+    still always degrade: a UI action must never brick a running server.
+  - **Every failure mode counts**, not just an unreachable socket: an unresolvable
+    `external.credentialsRef` (D3) and an unsupported `driver` leave the bound
+    objects exactly as dead, so they take the same verdict.
+  - **The error names the bound objects** (up to 10, then `+N more`) alongside the
+    underlying cause, so the message points at the real problem instead of just the
+    datasource name. The service already receives the list for post-connect
+    `syncObjectSchema`.
+  - **`connectDeclared()` attempts every gated datasource before throwing**, and
+    aggregates, so one failed boot reports all the misconfigured ones rather than
+    one per restart — the same shape as `ObjectQLEngine.init()`'s
+    `DriverConnectError`.
+  - **The escape hatch is shared with the engine guard**:
+    `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` now also covers this path (and covers
+    `onMismatch: 'fail'`, which previously had no opt-out). The operator intent is
+    identical — "I know the database is unreachable, boot anyway" — and two flags
+    would only guarantee one of them gets missed. When set, boot continues and a
+    `DEGRADED BOOT` banner goes to stderr as well as the logger, because `os serve`
+    swallows stdout during boot. `emitDegradedBootBanner` moved to
+    `@objectstack/types` so both call sites share one implementation;
+    `@objectstack/objectql` re-exports it unchanged.
+
+  ADR-0062 D5 is amended with the new criterion and the shared flag.
+
+  **Migration.** No change for a correctly configured deployment — a datasource that
+  connected before still connects. A deployment that was _silently_ booting with a
+  dead, explicitly-bound datasource now fails the boot instead, naming the
+  datasource, the cause, and the objects that depend on it; fix the datasource
+  configuration. To keep booting without it — deliberately, knowing every request
+  touching those objects will fail — set `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`.
+
+- 19e3e6e: feat(runtime)!: the standalone `default` datasource is a declaration, connected through the one datasource path (#3826)
+
+  ADR-0062 D1 asked for exactly one "definition → live driver" path. Construction
+  converged earlier; the _connect + failure verdict_ half did not — the standalone
+  `default` driver was pre-built and smuggled into the engine as a `driver.*`
+  kernel service, so "what if it cannot connect" lived in `ObjectQLEngine.init()`,
+  a second implementation of the policy `DatasourceConnectionService` owns for
+  every other datasource. #3741 → #3758 showed what two copies cost: a fix to one
+  missed the other for three months.
+
+  - **`createStandaloneStack` now emits a datasource DEFINITION**, not a driver.
+    URL→config translation and `mkdir` stay host concerns; the new
+    **`DefaultDatasourcePlugin`** (exported from `@objectstack/runtime`) connects
+    the definition at boot through the shared `DatasourceConnectionService` —
+    same driver factory, same failure verdict, same retained state. It must be
+    registered before `ObjectQLPlugin` (boot schema-sync needs the driver);
+    `createStandaloneStack` orders it correctly.
+  - **`sqlite-wasm` joined the shared driver factory** (`sqlite-wasm` /
+    `wasm-sqlite` ids) — it was the last bespoke construction site.
+  - **`bootCritical` on `ConnectableDatasource`**: the host declares a datasource
+    the platform cannot run without; a boot connect failure is then fatal
+    regardless of object bindings, sharing `OS_ALLOW_DRIVER_CONNECT_FAILURE` and
+    the `DEGRADED BOOT` banner with the engine-level guard. A connect policy that
+    denies a boot-critical datasource fails the boot loudly — the #3828 "denial is
+    not a failure" boundary was drawn for optional datasources.
+  - **`connect(record, { asDefault: true })`**: registers the built driver as the
+    engine's default under its natural name (no `'default'` stamping — routing to
+    `default` goes through the engine's default-driver fallback, and the natural
+    name keeps logs/lookups byte-for-byte with the previous boot).
+  - **`default` is a host-reserved name**: an app bundle declaring a datasource
+    named `default` is rejected at load (`AppPlugin`), and the runtime-admin
+    create rejects it too. It would shadow the host's primary datasource and, if
+    it passed the auto-connect gate, silently divert every unbound object.
+  - The primary DB now shows a REAL `status` in Setup → Datasources (#3827) —
+    `ok` when connected, `error` + reason when the operator boots degraded.
+  - `ObjectQLEngine.init()` is unchanged and keeps its fail-fast: it re-connects
+    the already-connected default (every open-core driver's `connect()` is
+    idempotent), which is exactly the boot verification #3741 wants.
+  - `DriverPlugin` remains the escape hatch for tests and pre-built/proxy drivers
+    (e.g. the CLI's `telemetry` datasource) — no longer how the standalone
+    default boots. The CLI serve config-load fallback (`createStorageDriver`,
+    incl. mysql/turso) still constructs directly; tracked in #3826.
+
+  **Migration.** Boots through `createStandaloneStack` (CLI `serve`/`dev`
+  artifact path, quickstarts, embedders using the stack factory) change shape but
+  not behavior: same driver kinds, same URLs, same fail-fast semantics, same
+  escape hatch. Embedders that composed `DriverPlugin` manually are unaffected.
+  An app that declared a datasource literally named `default` now fails to load
+  with a rename instruction — that name never routed correctly to begin with.
+
+- 5cfd4d5: feat(cli): the serve storage fallback declares the default datasource instead of constructing a driver (#3826)
+
+  The last open-core second site of "definition → live driver": when a host
+  `objectstack.config.ts` supplies objects but no driver plugin, `serve` built a
+  driver via `createStorageDriver` and registered it through `DriverPlugin`, with
+  its connect and failure verdict landing in `ObjectQLEngine.init()` — the same
+  split #3869 removed from the standalone stack.
+
+  - **`createStorageDriver` is gone.** `resolveStorageDefinition` translates the
+    driver kind + URL into `{ driverId, config }` (a pure host-side translation,
+    like `standalone-stack`'s), and serve hands it to the runtime's
+    `DefaultDatasourcePlugin` — same shared factory, same `bootCritical` failure
+    verdict, same `OS_ALLOW_DRIVER_CONNECT_FAILURE` escape hatch, and the primary
+    DB's real status in Setup → Datasources.
+  - **`mysql`/`mysql2` joined the shared driver factory** (SqlDriver over
+    `mysql2`; DSN or discrete fields, secret as password).
+  - **Host-composition passthroughs**: the factory honours `config.autoMigrate`
+    (the #2186 dev loosen-only self-heal, for the SQL kinds) and `config.persist`
+    (the CLI's wasm `on-disconnect` mode). Connection builders ignore both keys.
+  - **`turso`/libSQL fails loud at resolution**, same typed
+    `UnsupportedDriverError`, same actionable message — nothing is constructed to
+    fail later.
+  - **The `telemetry` sibling datasource stays a pre-built `DriverPlugin`** — the
+    documented escape hatch for named auxiliary drivers. Its provisioning now
+    gates on the statically-known sqlite file path; the old coupling to the
+    primary's _resolved_ engine is replaced by the telemetry provision's own
+    step-down check, which already guarded the ABI-broken case.
+
+  Verified end to end: a host-composed config (plugins + objects, no driver)
+  boots through the declared fallback with the same banner labels; the artifact
+  path (`dev:crm --fresh`) is table-for-table unchanged (71 tables, zero
+  `no such table`).
+
+  **Migration.** None for CLI users — same URLs, same env vars, same banner. The
+  removed `createStorageDriver` was CLI-internal; `resolveDriverType`,
+  `inferDriverTypeFromUrl` and `UnsupportedDriverError` are unchanged.
+
+### Patch Changes
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [840ee4b]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

@@ -1,5 +1,462 @@
 # @objectstack/service-i18n
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 4cca74c: fix(i18n)!: the `translation` metadata type speaks the same `objects.` shape everything else does (#3778)
+
+  A translation authored in the product saved successfully and then rendered
+  nothing. Not a resolver gap — a contract split. The `translation` metadata type
+  (`allowRuntimeCreate: true`, so Studio/the metadata API/an agent can author it)
+  was registered against `AppTranslationBundleSchema`, an object-first shape keyed
+  on `o.<object>`. Every resolver, `os i18n extract`, `os i18n check`, the objectui
+  hooks, and all nine shipped bundles read `objects.<object>`. Nothing bridged the
+  two, so the save path and the read path never met.
+
+  **Why converge instead of bridge.** A converter was the obvious fix and the
+  wrong one: it would be throwaway code, and it would start producing _working_
+  `o.`-shaped rows — closing the migration-free window that exists precisely
+  because the feature never functioned. The retired shape's real-world footprint
+  was zero: all three `*.translation.ts` files in the tree (platform-objects,
+  CRM and todo examples) were already `objects.`-shaped, contradicting the type's
+  own registered schema. Converging is a registration fix, not a migration.
+
+  **Breaking.** `AppTranslationBundleSchema`, `ObjectTranslationNodeSchema`, and
+  their types are **deleted** — no deprecation cycle. Nothing worked end-to-end
+  through them, so there is no functioning consumer to protect, and a
+  deprecated-but-present schema is exactly the exemplar an AI agent copies into
+  new code. The optional `II18nService.getAppBundle` / `loadAppBundle` methods go
+  with them: zero implementers, so they advertised a capability the runtime never
+  delivered.
+
+  **The replacement.** `TranslationItemSchema` — one locale of the same
+  `TranslationData` groups a file bundle uses, plus the `locale` it translates,
+  with a `defineTranslation()` factory. An item is one entry of a
+  `TranslationBundle`; that is the whole type.
+
+  Three details are deliberate, all aimed at the failure being silent rather than
+  loud:
+
+  - **`locale` is required**, not inferred from the item name. The sync skips an
+    item whose locale it cannot resolve, and a skip is invisible to whoever — or
+    whatever — authored it. (The name fallback still covers rows written before
+    this.)
+  - **Retired keys are rejected, not stripped.** Zod drops undeclared keys
+    silently, which would reproduce this bug exactly: save succeeds, nothing
+    renders. A pre-parse guard turns that silence into a 422 naming the group to
+    use (`'o' … — use 'objects.<object_name>'`). It runs ahead of the parse so the
+    retired keys stay out of the schema itself — the generated JSON Schema and the
+    Studio editor never advertise a shape that cannot work.
+  - **`ObjectTranslationData.label` is now optional.** Partial translation is the
+    normal state and every resolver already treats each key as independent.
+    Requiring it forced authors to restate the source label just to validate,
+    filling bundles with fake translations that mask real coverage gaps.
+
+  Also in this change: the authored-translation sync warns (naming the row and the
+  fix) when it meets a row still in the retired shape instead of loading it into
+  nowhere, and no longer merges publish bookkeeping (`_lockReason`,
+  `_packageVersion`, …) into the translation layer. `GET
+/i18n/labels/:object/:locale`'s fallback now reads the nested
+  `objects.<obj>.fields.<field>.label` data it is actually given — it scanned for
+  flat dotted `o.<obj>.fields.<field>` keys, a third dialect no producer ever
+  wrote, so it always returned `{}`.
+
+  Migration: author every translation — file or runtime item — under `objects.`.
+  `o` → `objects`, `app` → `apps`, `nav` → `apps.<app>.navigation.<id>.label`,
+  `dashboard` → `dashboards`, `_globalOptions` →
+  `objects.<obj>.fields.<field>.options`, `_meta.locale` → top-level `locale`,
+  `_actions.confirmMessage` → `_actions.confirmText`. `reports`, `notifications`,
+  `errors`, and `namespace` had no runtime consumer and have no replacement.
+
+### Patch Changes
+
+- 1d4756e: fix(i18n)!: `/i18n/labels/:object/:locale` emits the entry shape it declares —
+  and stops discarding `help`/`options` (#3847)
+
+  `GetFieldLabelsResponseSchema` has always declared each label as an object:
+
+  ```ts
+  labels: z.record(
+    z.string(),
+    z.object({
+      label: z.string(),
+      help: z.string().optional(),
+      options: z.record(z.string(), z.string()).optional(),
+    })
+  );
+  ```
+
+  Both serving surfaces emitted `Record<string, string>` — a bare label per field.
+  A client typed against `GetFieldLabelsResponse` read `labels[field].label` and
+  got `undefined`, because the value was the string itself. The SDK's type was
+  right the whole time; the servers were wrong.
+
+  The cost is not only the type mismatch. `FieldTranslationSchema` carries `help`
+  and `options`, bundles populate them, and the endpoint threw them away. objectui
+  needs exactly those — its `spec-translations.ts` transform reads `label` **and**
+  `options` (as `fieldOptions.<obj>.<fld>.<value>`) — and gets them by pulling the
+  whole bundle from `/i18n/translations/:locale` and resolving client-side. The
+  per-object endpoint could not have served it even if it wanted to: the data was
+  being dropped at the emit site.
+
+  Fixed at that emit site, `resolveObjectFieldLabels`, which both surfaces already
+  share as of #3833 — so one change covers both. `help` and `options` are attached
+  only when non-empty: an `options: {}` would claim a field has translated options
+  and hand back none, and a `help: ''` would erase a caller's source help text.
+  Fields with no non-empty `label` are still omitted entirely, which is what lets
+  `ResolvedFieldLabel.label` be a required string.
+
+  **The response schema is unchanged** — this moves the implementation onto the
+  contract, not the contract onto the implementation. Generated docs are
+  byte-identical for that reason.
+
+  `placeholder` is deliberately left out. `FieldTranslationSchema` has it and the
+  response schema does not, so emitting it would be widening the contract rather
+  than satisfying it — and adding an optional response field later is additive and
+  non-breaking, whereas guessing now is not.
+
+  The regression guard is the part worth keeping: a test that builds the response
+  body from the shared helper and parses it with `GetFieldLabelsResponseSchema`.
+  Nothing had ever put the emitted value and the declared contract in one
+  assertion, which is precisely why a bare string could sit under an object schema
+  unnoticed. Third and last of the declared ≠ enforced gaps on this endpoint
+  family, after #3676 (request filters no server read) and #3833 (a derivation
+  scanning a retired dialect).
+
+  BREAKING: `labels[field]` is now `{ label, help?, options? }` rather than a
+  string. No consumer in this repo or objectui read it — objectui never calls this
+  route, and in-repo use is the SDK method plus URL-shape tests — so the practical
+  blast radius is nil, and this is the cheap moment to align it.
+
+- 720c5ad: fix(runtime,i18n): the dispatcher's field-labels route reads the bundle shape
+  producers actually write — one shared derivation (#3833)
+
+  `GET /i18n/labels/:object/:locale` served through the dispatcher returned
+  `{ labels: {} }` for every provider. Its derivation scanned for flat
+  `o.<object>.fields.<field>` keys:
+
+  ```ts
+  const prefix = `o.${objectName}.fields.`;
+  for (const [key, value] of Object.entries(translations)) { … }
+  ```
+
+  That dialect was retired by #3778 — no producer has ever written it, and a real
+  bundle's top-level keys are the `TranslationData` groups (`objects`, `apps`,
+  `messages`, …), so the prefix could not match anything. 4cca74c fixed the
+  identical derivation in `service-i18n` and did not reach the dispatcher's copy.
+
+  This is not a rare fallback. `getFieldLabels` is optional on `II18nService` and
+  **nothing implements it** — not `memory-i18n`, not `file-i18n-adapter` — so the
+  dedicated-method branch both surfaces check first is dead in production and this
+  derivation is the only path there is. Any stack served by the dispatcher (the
+  AppPlugin in-memory provider auto-registered for stacks declaring translation
+  bundles) got an empty map, indistinguishable from "this object has no translated
+  labels": nothing errored, nothing warned.
+
+  Worse than the class it was found next to. #3676, which prompted the check,
+  ignored a declared filter and returned the full bundle — a correct superset. This
+  returned nothing and said it was fine.
+
+  The derivation now lives once, as `resolveObjectFieldLabels` in
+  `packages/spec/src/system/i18n-resolver.ts`, alongside the other resolvers that
+  read `TranslationData`. Both surfaces call it. Keeping a copy each is precisely
+  how one got fixed and the other did not; the next bundle-shape change now has one
+  place to land. Fields carrying no non-empty `label` stay omitted rather than
+  emitted blank — partial translation is the normal state, and callers merge this
+  map over their source labels, where a `''` would erase them.
+
+  ### The tests were fiction on both sides
+
+  The dispatcher's fallback test fed flat `o.contact.fields.first_name` keys and
+  asserted labels came back, so it passed on data that cannot occur while
+  production returned `{}` — the same failure mode as the client test retired in
+  #3676, which asserted a query string was built that no server read. It now feeds
+  the nested shape, and was confirmed to fail against the pre-fix code (`expected
+{} to deeply equal { first_name: 'First Name', … }`) rather than merely passing
+  after it. The shared helper carries its own unit tests, including one pinning
+  that the retired flat dialect resolves to `{}`.
+
+  The same suite's mock also declared a `getFieldLabels` no shipped provider has,
+  and returned flat-dialect data from `getTranslations`; both now reflect what a
+  real provider does, with the divergence noted where it remains deliberate.
+
+  Not addressed here, filed separately: `GetFieldLabelsResponseSchema` declares
+  `labels` as `Record<string, { label, help?, options? }>`, but both surfaces emit
+  `Record<string, string>` — a third declared ≠ enforced gap in the same endpoint,
+  and a wire-shape change too breaking to fold into a correctness fix.
+
+- 41642b0: fix(runtime,i18n)!: `/i18n/locales` answers in one shape — plus the
+  success-envelope conformance gate that found it
+
+  Follow-up to #3676 / #3833 / #3847. Those three were each a body that did not
+  match the schema declaring it, and each survived a green suite because **every
+  test asserted the emitted body against a hand-written literal**. Comparing
+  output to a literal proves the code does what the test author believed; it
+  cannot prove the code does what the contract declares. Nothing had ever put the
+  emitted value and the declared schema in the same assertion.
+
+  This adds that assertion as a suite — `i18n-success-envelope.conformance.test.ts`
+  in `runtime`, the missing success-path twin of service-i18n's
+  `error-envelope.conformance.test.ts` and the same pairing storage got in #3689.
+  Every `/i18n` success body is parsed against `BaseResponseSchema` and against
+  the schema `plugin-rest-api` names for that route (`responseSchema:
+'GetLocalesResponseSchema'`, …), imported rather than restated.
+
+  **It found a fourth gap on its first run.** `GET /i18n/locales` passed
+  `getLocales()`'s raw `string[]` straight through the dispatcher, while
+  `GetLocalesResponseSchema` declares `{ code, label, isDefault }[]` — and
+  service-i18n, the _other_ provider of this identical route, already emitted
+  descriptors. One endpoint, two shapes, decided by which plugin mounted it, with
+  the dispatcher's form contradicting the SDK's own `GetLocalesResponse` type.
+
+  That is the same split #3833 found in the field-labels derivation, one route
+  over, and it happened for the same reason: two surfaces, one mapping, kept
+  twice. So the mapping is now shared as `toLocaleDescriptors` in
+  `packages/spec/src/system/i18n-resolver.ts`, next to `resolveObjectFieldLabels`,
+  and both surfaces call it. `label` is the locale code — no display-name source
+  exists in the tree and the schema requires the field; inventing an ICU
+  display-name table here would be a product decision, not an implementation
+  detail.
+
+  The gate was verified the same way #3833's was: the fix was reverted and the
+  suite confirmed to fail on it —
+
+  ```
+  locales body does not match its declared schema:
+    [{"expected":"object","code":"invalid_type","path":["locales",0],
+      "message":"Invalid input: expected object, received string"}, …]
+  ```
+
+  — rather than merely passing once written. Five existing tests pinned the bare
+  `string[]`; they now assert on `.map(l => l.code)`, so the codes stay pinned
+  while the shape is owned by the schema.
+
+  BREAKING: `GET /i18n/locales` served by the dispatcher now returns
+  `[{ code, label, isDefault }]` instead of `['en', …]`. Callers on the
+  service-i18n mount already received this shape, and the SDK's published
+  `GetLocalesResponse` type has always described it, so this ends a divergence
+  rather than starting one.
+
+  Worth generalizing beyond `/i18n`: `plugin-rest-api.zod.ts` already carries a
+  `responseSchema` name on essentially every route (29 declarations across 28
+  handlers), so the route → declaring-schema mapping needed to run this check
+  repo-wide exists today and is unused.
+
+- f1a8114: fix(client,service-i18n): ledger the autonomously-mounted service routes, and repair the two i18n calls that reached nothing (#3636)
+
+  Tranche 3 of the #3563 route audit — the last un-audited server surface. The
+  dispatcher ledger (#3563) and the REST ledger (#3587) each stop at their own
+  package boundary, and two services mount routes outside both: they reach for
+  the `http-server` service and register straight on `IHttpServer`, so neither
+  `RouteManager` nor `RestServer.getRoutes()` has ever seen them. That left the
+  SDK's entire storage surface, plus all of i18n, in the pre-#3563 posture:
+  expressed, working, guarded by nothing.
+
+  **Ledgers + guards.** `storage-route-ledger.ts` (10 routes) and
+  `i18n-route-ledger.ts` (3) sit next to the registrars that mount them, each
+  enumerated for real — the registrar runs against a capturing mock
+  `IHttpServer` and its registration calls _are_ the route set, so a new route
+  lands with a reviewed disposition or fails CI. The client half is
+  `packages/client/src/service-route-ledger-coverage.test.ts`; ledgers cross the
+  boundary as relative source imports, never a service→client package edge.
+
+  **Two wire-level 404s fixed.** `i18n.getTranslations` sent
+  `/i18n/translations?locale=xx` and `i18n.getFieldLabels` sent
+  `/i18n/labels/:object?locale=xx`, while every serving surface — service-i18n's
+  mounts, the dispatcher's HTTP mounts, and the `plugin-rest-api.zod.ts`
+  contract — mounts only the path form. Neither call could ever be answered.
+  Both had carried a green `sdk` row in the dispatcher ledger since tranche 1,
+  because that guard asks whether the client _method_ exists, not whether it
+  speaks a URL anything mounts. The client now sends the path dialect, the same
+  resolution #3611 gave `meta.getView`, and a new suite drives the real client
+  at a real router so a revert cannot pass quietly.
+
+  **One response-shape fix.** service-i18n's success bodies omitted the
+  `success` flag that `ObjectStackClient.unwrapResponse` keys on, so the SDK
+  returned the raw `{ data: … }` wrapper against that provider while returning
+  the declared unwrapped shape against the dispatcher — one method, two shapes,
+  decided by which plugin mounted the route. Its three handlers now emit the
+  `{ success: true, data }` envelope the `i18n` route group declares. `data` did
+  not move, so direct body readers are unaffected.
+
+  Storage audited clean: 7 routes SDK-expressed, 3 reviewed `server-only` (the
+  browser capability URL objectql stamps into file-field payloads, and the two
+  local-driver loopbacks). The chunked-upload family, flagged for triage, turned
+  out fully expressed. Both ledgers ratchet `gap` and `mismatch` at zero.
+
+  Filed, not fixed: `GET {base}/_local/file/:key` is built by three call sites
+  and mounted by none (#3641); the cross-surface URL conformance guard that would
+  have caught all of the above mechanically is the capstone (#3642).
+
+- bd68f08: fix(service-storage,service-i18n): emit the declared error envelope, not a bare `{ error }` (#3675)
+
+  #3636 aligned the **success** bodies of the autonomously-mounted service
+  routes because those were the ones breaking `ObjectStackClient.unwrapResponse`.
+  The error bodies were left alone and stayed a bare `{ error: '<message>' }` —
+  with the code, where one existed at all, as a _sibling_ of `error` rather than
+  a field of it — against a contract (`BaseResponseSchema` + `ApiErrorSchema`)
+  that declares `{ success: false, error: { code, message } }`.
+
+  So the same SDK method returned two different error shapes depending on which
+  provider mounted the route: a caller reading `body.error.message` got the real
+  message from the dispatcher and `undefined` from these services. All 32 sites
+  (27 in `storage-routes.ts`, 5 in `i18n-service-plugin.ts`) now go through a
+  single `sendError` helper per module — the nested-`error` shape the sibling
+  services already use (`settings-routes.ts`, `share-link-routes.ts`), plus the
+  `success` flag those two still omit and the contract requires.
+
+  **Codes moved, and that is the breaking part.** `AUTH_REQUIRED`,
+  `ATTACHMENT_DOWNLOAD_DENIED` and `FILE_DOWNLOAD_DENIED` used to sit at
+  `body.code`; they now sit at `body.error.code`. The SDK is unaffected — it
+  already reads `errorBody?.code || errorBody?.error?.code`, one of the four
+  shapes its error path sniffs for, which is the consumer-side shim Prime
+  Directive #12 says to cure at the producer. The console's attachment panel
+  was NOT: it read the top level only, so every gated download would have
+  degraded from "You don't have access to download this attachment." to
+  "Download failed (403)". Fixed in objectui to read both dialects, since a
+  console build ships independently of the server it talks to.
+
+  **Guarded both ways.** New `error-envelope.conformance.test.ts` in each
+  service drives every distinct error branch through the real registrar and
+  parses the body against the real `BaseResponseSchema` imported from
+  `packages/spec` — not a local restatement of it — and scans the module source
+  so a new route cannot quietly reintroduce the bare shape. The route ledgers
+  (#3563 → #3656) could never have caught this: they audit which routes exist
+  and whether the SDK can address them, not what comes back.
+
+  Measured and left alone: the dispatcher does not conform either — it puts the
+  HTTP status in `error.code`, where the contract declares a semantic string,
+  and parks the real code in `details` to work around its own occupied field.
+  That deviation is now pinned to exactly one field by a test in
+  `http-dispatcher.test.ts` rather than described in prose. Also unchanged:
+  service-storage's success bodies are still three shapes of their own
+  (`{ data }`, bare `{ url }`, `{ ok, key }`, none with `success: true`) — a
+  non-additive change that needs its own issue, not a quiet ride along with this
+  one.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

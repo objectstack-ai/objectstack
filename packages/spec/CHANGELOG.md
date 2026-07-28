@@ -1,5 +1,4681 @@
 # @objectstack/spec
 
+## 17.0.0-rc.0
+
+### Major Changes
+
+- e2616e0: feat(spec,lint)!: remove `agent.tools[]`, lint agent authoring, and resolve `action_<name>` only when it actually materialises (#3820, ADR-0109 accepted)
+
+  **Breaking — `agent.tools[]` is removed.** ADR-0064's central invariant is
+  "an agent's tool set is the union of its surface-compatible skills' tools;
+  nothing falls through to the global registry", and this legacy inline slot
+  was the one seam that broke it: the runtime resolved `agent.tools[].name`
+  against the **full** tool registry with no surface check, so an `ask`-surface
+  agent could name an authoring tool and get it. Removing the field makes the
+  invariant structural — there is no second slot to disagree with the skills —
+  rather than a rule every reader has to remember (ADR-0049 "design+enforce or
+  remove"). `AIToolSchema` / the `AITool` type go with it.
+
+  _Migration:_ attach capability through `skills`. An agent authoring `tools` is
+  not a parse error — Zod strips the unknown key — so existing stacks keep
+  parsing, but the slot no longer does anything.
+
+  **`validate-ai-tool-references` now models AI exposure.** The rule previously
+  resolved `action_<name>` against every declared action. The runtime is far
+  stricter (ADR-0011): it materialises a tool only when the action opts in with
+  `ai.exposed: true` + `ai.description` **and** has a headless path (type
+  `script`/`api`/`flow` with a target or body — `url`/`modal`/`form` are
+  UI-only). Resolving against all actions therefore blessed references the agent
+  could never call — the exact failure the rule exists to catch. Unresolved
+  `action_*` references now get their own message and fix, since "the action
+  isn't exposed" and "the name is fictional" need different answers.
+
+  **New rule `validate-ai-agent-authoring`** (`agent-authoring-withdrawn`,
+  warning): flags a stack that declares `stack.agents`. Tenant/app-package
+  agents were withdrawn in ADR-0063 §2 — the runtime filters them from the
+  catalog and refuses to load them — but `defineStack` still accepted the array,
+  so an app could ship agents that parse, validate, and never run. This is the
+  authoring-time signal that was missing (ADR-0078: loud at the producer,
+  tolerant at the consumer). Joins `REFERENCE_INTEGRITY_RULES`.
+
+  ADR-0109 is now **Accepted — implemented (Phase 1)**, and the AI docs teach
+  the zero-tool-record default path, including the three conditions that decide
+  whether `action_<name>` exists and why a `modal` action staying human-driven
+  is a design answer rather than a gap.
+
+- 8b9d71e: feat(client,spec)!: the SDK's `ai` namespace now expresses the AI surface that exists (#3718)
+
+  `client.ai` and the AI service were **disjoint sets**. The namespace held three
+  methods — `nlq`, `suggest`, `insights` — whose URLs no repo has ever mounted
+  (removed in v17), while `service-ai` mounted 12 routes the SDK could not reach
+  at all. v17 closed the first half by deleting the dead methods. This closes the
+  second: the SDK now reaches every route that is meant to be tenant API surface.
+
+  | SDK                                                         | Route                                                                             |
+  | ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
+  | `ai.chat(request)`                                          | `POST /api/v1/ai/chat` — forces `stream: false`, so the JSON mode is what you get |
+  | `ai.chatStream(request)`                                    | `POST /api/v1/ai/chat` — `AsyncIterable` of UI Message Stream frames              |
+  | `ai.complete(request)`                                      | `POST /api/v1/ai/complete`                                                        |
+  | `ai.models()`                                               | `GET /api/v1/ai/models` — the ADR-0028 plan-filtered picker list                  |
+  | `ai.conversations.create/list/get/update/delete/addMessage` | the six `/api/v1/ai/conversations` routes                                         |
+
+  `ai.chatStream` returns a promise for an async iterable rather than being an
+  async generator, so the request is issued — and an HTTP error thrown — when you
+  call it, not when you first iterate.
+
+  **Where the server is.** `service-ai` is a Cloud/EE package in the `cloud`
+  repo; this repo only proxies `/api/v1/ai/**` and 404s `AI service is not
+configured` without it. Check `discovery.services` before calling, exactly as
+  for any other plugin-provided namespace. For a React chat UI, `useChat()`
+  (`@ai-sdk/react`) is still the better client — it speaks the same protocol
+  `ai.chatStream` parses and owns message state; these methods are for callers
+  that are not components.
+
+  **Breaking — the spec's dead AI declarations are retired.** All three had no
+  implementation anywhere and no runtime consumer:
+
+  - `Ai{Nlq,Suggest,Insights}{Request,Response}[Schema]` → replaced by the wire
+    shapes of the real routes: `AiChat{Request,Response}`, `AiStreamChunk`,
+    `AiCompleteRequest`, `AiModelsResponse`, `AiConversation`, `AiMessage`,
+    `{Create,List,Update}AiConversation*`. The six retired JSON Schemas are
+    dropped from `json-schema.manifest.json` (deliberate retirement, #2978).
+  - `DEFAULT_AI_ROUTES` → deleted, and `getDefaultRouteRegistrations()` returns 8
+    groups instead of 9. It declared the three phantom endpoints and had no
+    runtime consumer; re-declaring the real ones here would recreate the same
+    illusion, since they are mounted from another repo.
+  - `AiProtocol` (`aiNlq?` / `aiSuggest?` / `aiInsights?`) → deleted. Nothing
+    implemented it and nothing dispatched through it. The real server contract is
+    `IAIService` + `IAIConversationService` in `@objectstack/spec/contracts`.
+
+  **The guard.** `/api/v1/ai/` becomes a bounded prefix exemption in the capstone
+  (#3642) alongside the control plane — bounded from both ends: only `ai.*` may
+  use it, and the namespace must still be reaching it. That is not a
+  wave-through. The reachability check lives where the routes are:
+  `cloud`'s `packages/service-ai/src/ai-route-ledger.conformance.test.ts` reads
+  the table `buildAIRoutes()` returns and drives this SDK against it, so an
+  `ai.*` URL that stops resolving fails a test in the repo that mounts it. The
+  wildcard-only bound stays **0** — these URLs never touch the `* /ai/**` row,
+  which is what certified three dead methods for years.
+
+  The four replaced client tests are worth naming: they mocked `fetch` and
+  asserted the URL the client _built_, never that anything answered it, and
+  passed for years against endpoints that did not exist. The new ones assert only
+  what this repo can honestly know — verb, path, and the body decisions the SDK
+  makes for you (`stream: false` on `chat`, the 204 on `delete`, SSE frame
+  parsing) — and leave "does it resolve" to the ledger next to the routes.
+
+- e47b342: feat!: require Node.js 22 — promise the runtime we actually test (#3825)
+
+  Every published package declared `engines.node: ">=18.0.0"`. **Node 18 reached
+  end-of-life on 2025-04-30 and Node 20 on 2026-04-30**, so the compatibility
+  promise covered two runtimes nobody patches — and, after #3830 moved CI to Node
+  22, two runtimes nothing in this repo verifies.
+
+  That left the promise and the evidence with **no overlap at all**:
+
+  |                                                                                                 | Node version |
+  | ----------------------------------------------------------------------------------------------- | ------------ |
+  | What CI validates every PR on                                                                   | **22**       |
+  | What `release.yml` publishes from                                                               | **22**       |
+  | What every shipped Docker image runs (`docker/Dockerfile`, `blank` template, self-hosting docs) | **22**       |
+  | What `engines.node` promised users                                                              | **>=18**     |
+
+  `engines.node` is now `>=22.0.0` across all 50 manifests. This is the honest
+  floor: it is the only runtime the packages are built, tested and shipped on.
+
+  ## Migration
+
+  **If you are on Node 22 or newer, nothing changes.** Node 24 (Active LTS since
+  2025-10-28) and Node 26 both satisfy the new range.
+
+  If you are on Node 18 or 20, upgrade to Node 22+. Both are past end-of-life and
+  receive no security patches:
+
+  ```bash
+  nvm install 22 && nvm use 22
+  ```
+
+  npm and pnpm surface an unsatisfied `engines` as an **`EBADENGINE` warning**, not
+  a hard failure, so an existing install will not break the moment you upgrade —
+  but the package is no longer tested on that runtime, and the failures are the
+  kind that do not announce themselves. #3812 is the worked example: a native
+  dependency whose `engines` required a newer Node loaded anyway on the older one
+  and then killed the test worker at the process level, with no JS error and a
+  summary that still said "passed".
+
+  If your CI pins Node, pin it to 22 as well — running your gates on a runtime
+  your dependencies no longer support is exactly the split this change closes.
+
+  ## Also updated
+
+  The "Node 18+" prerequisite was restated in ten user-facing places
+  (`README.md`, `CONTRIBUTING.md`, the getting-started and deployment docs, the
+  todo example, and the `objectstack-platform` skill's `compatibility` field).
+  All now say 22. Changelogs and ADRs are historical records and were left alone.
+
+- 4ed7ed4: feat(security)!: the export axis is now OPT-IN, explainable, and covers reports (#3544, #3710)
+
+  **BREAKING — `allowExport` unset no longer means "inherit read".** Reading a
+  record and taking a bulk machine-readable copy of the whole table are different
+  privileges (Salesforce "Export Reports", Dynamics "Export to Excel", NetSuite
+  "Export Lists", SAP `S_GUI` 61 all separate them). The axis now says so.
+
+  ### Migration — FROM → TO
+
+  |                      | before                              | after                      |
+  | -------------------- | ----------------------------------- | -------------------------- |
+  | `allowExport` unset  | export **allowed** (inherited read) | export **denied**          |
+  | `allowExport: false` | export denied                       | export denied (unchanged)  |
+  | `allowExport: true`  | export allowed                      | export allowed (unchanged) |
+
+  **The one-line fix:** add `allowExport: true` to the object entry (or the `'*'`
+  wildcard) of every permission set whose holders should keep exporting.
+
+  ```ts
+  objects: {
+    deal: { allowRead: true, allowExport: true },   // ← add the grant
+  }
+  ```
+
+  Nothing else changes: read, CRUD, RLS, FLS and sharing are untouched, and a set
+  that never exported is unaffected.
+
+  **Who is affected.** Package-shipped sets are re-seeded on upgrade, so the
+  built-ins are handled for you — `admin_full_access` and `organization_admin` now
+  carry `allowExport: true` explicitly. **Environment-authored sets are not**: any
+  custom set whose users export must be edited. `member_default` deliberately does
+  NOT carry the grant, so ordinary authenticated users lose export until an admin
+  grants it — that is the point of the flip, not an oversight.
+
+  **Merge semantics.** Most-permissive, exactly like the CRUD bits: any set
+  granting `true` grants export. `false` and unset are the same outcome; `false`
+  is authoring intent, not a veto, because permission sets are additive capability
+  containers (ADR-0090).
+
+  **Not implied by super-user bits.** `viewAllRecords` / `modifyAllRecords` no
+  longer confer export. Separating "may see all data" from "may take a bulk copy"
+  is the segregation-of-duties case the axis exists for.
+
+  ### Also in this change
+
+  - **spec** — a set carrying `allowExport` is now **high-privilege**
+    (`describeHighPrivilegeBits`), so it cannot be bound to the `everyone` /
+    `guest` audience anchors. Without this the opt-in was defeatable by binding an
+    export-granting set to `everyone`. One predicate, so the runtime anchor gate,
+    the `@objectstack/lint` security-posture rule and the install-time suggestion
+    surface all pick it up together.
+  - **spec / plugin-security** — `ExplainOperationSchema` gains `export`, so
+    `explain` can answer _why_ a caller got `403 EXPORT_NOT_PERMITTED`. It
+    explains as `read ∧ the export grant`: `object_crud` reports the conjunction
+    and attributes the granting set, while every data-shaped layer
+    (requiredPermissions, OWD/depth/sharing, RLS, record attribution) is computed
+    as the `find` the export actually performs — asking the RLS compiler about an
+    `export` operation would match no policy and wrongly report "no RLS applies".
+    `readFilter` is surfaced for `export` as it is for `read`.
+  - **plugin-reports** — closes the reports side door (#3710). A report rendered
+    as `csv`/`json` is the same bulk copy of the same object, so it is gated by
+    the same `ISecurityService.canExport`. Enforced in `executeReport`, which the
+    interactive run, the ad-hoc run and the scheduled dispatch all funnel through;
+    `scheduleReport` additionally refuses at create time so an author is not told
+    at 3am. A schedule created while granted stops delivering once the grant is
+    revoked. `html_table` stays a read — it is a rendered view, not a bulk copy.
+    Deployments without `plugin-security` are unaffected (no permission sets
+    exist, so the axis does not apply).
+
+- acbf364: feat(spec)!: retire the last three deprecated authorable aliases (#3855)
+
+  Protocol 17 removes the three keys that a schema transform used to fold into a
+  canonical slot and drop from the parsed output. Every slot now has exactly one
+  spelling.
+
+  ## Migration
+
+  | Removed                     | Use instead               | Value shape                            |
+  | --------------------------- | ------------------------- | -------------------------------------- |
+  | `action.execute`            | `action.target`           | unchanged — a handler / flow / URL ref |
+  | `field.conditionalRequired` | `field.requiredWhen`      | unchanged — a CEL predicate            |
+  | `agent.knowledge.topics`    | `agent.knowledge.sources` | unchanged — a list of source tags      |
+
+  All three are **pure key renames**. Nothing about the value changes, and no
+  runtime behaviour changes: each alias was already lowered into its canonical key
+  at parse time and erased before any consumer saw it, so what shrinks is the
+  authorable surface, not the semantics.
+
+  **Run `os migrate meta --from <your current major>`.** It rewrites your source
+  mechanically — these renames are registered as protocol-17 chain steps, so the
+  tool applies all three (and every earlier step you skipped) in one pass. Manual
+  alternative: rename the key. That is the entire fix.
+
+  ```diff
+  - actions: [{ name: 'convert', type: 'script', execute: 'convertHandler' }]
+  + actions: [{ name: 'convert', type: 'script', target: 'convertHandler' }]
+
+  - fields: { due_date: { type: 'date', conditionalRequired: 'record.stage == "closed"' } }
+  + fields: { due_date: { type: 'date', requiredWhen: 'record.stage == "closed"' } }
+
+  - knowledge: { topics: ['faq', 'policies'], indexes: ['docs'] }
+  + knowledge: { sources: ['faq', 'policies'], indexes: ['docs'] }
+  ```
+
+  ## Why these reject instead of being ignored
+
+  None of the three schemas is `.strict()`, so deleting a key outright makes Zod
+  **silently strip** it: the metadata would parse clean and the setting would
+  simply never take effect — a script action bound to nothing, a field that is
+  never required, an agent recruiting no RAG context. `FieldSchema` already
+  carries a comment about the last time that happened (`dataQuality` / `cached`,
+  #3726 / #3733).
+
+  So each removed key is **tombstoned**: it stays declared as `never`, which makes
+  writing it a `tsc` error at the authoring site _and_ a parse error carrying the
+  rename. You cannot lose the setting quietly.
+
+  ## Where to find this if you missed it
+
+  The removal is in the machine-readable change manifest (`spec-changes.json`,
+  ADR-0087 D4) as three protocol-17 conversions. Per-major manifests **compose**,
+  so jumping several majors at once still yields a single answer rather than N
+  changelogs to reconcile — the generated upgrade guide and the `spec_changes` MCP
+  tool are both projections of that record.
+
+  ## Also removed
+
+  `lintDeprecatedAliases` and its rule-id exports (`ACTION_TARGET_EXECUTE_CONFLICT`,
+  `FIELD_REQUIREDWHEN_CONDITIONALREQUIRED_CONFLICT`,
+  `AGENT_KNOWLEDGE_SOURCES_TOPICS_CONFLICT`, `DeprecatedAliasFinding`,
+  `formatDeprecatedAliasFinding`). That pass existed to warn when an author
+  declared both an alias and its canonical key, because the parse resolved the
+  conflict silently. With the aliases gone the parse **rejects** instead, which is
+  strictly louder — the rule has no subject left. If you imported any of these,
+  delete the import; there is no replacement because the condition it reported can
+  no longer occur.
+
+  The CLI's inline-handler lowering also stops binding a function on `execute`. It
+  runs before the parse, so binding it there would have kept the removed alias
+  quietly working for one authoring style while every other style rejected it.
+
+- f24cb83: feat(spec)!: dissolve the ObjectStackProtocol composition alias — ADR-0076 D9 end-state (v17, #3606)
+
+  The transitional union of the twelve per-domain contracts (and its parallel
+  `ObjectStackProtocolSchema` Zod object + `ObjectStackProtocolZod` inferred
+  type, 171 schema lines) is removed. Capability availability comes from the
+  runtime discovery `services` registry — a static union was its degraded
+  snapshot (ADR-0076 rev.7 verdict). Depend on the narrowest per-domain slice
+  (`DataProtocol`, `MetadataProtocol`, …; composition precedent: REST's
+  `DataProtocol & MetadataProtocol`, A1.5/#3028).
+  `ObjectStackProtocolImplementation` now declares exactly the four domains it
+  actually provides (Data/Metadata/Analytics/Package) — the D10 "facade never
+  implemented the other domains" reality, now enforced by the type system.
+  BREAKING for anything importing the alias or the Zod schema; no runtime
+  behavior change.
+
+- 5dbbb92: release!: promote the accumulated launch-window train to v17.0.0 (RC cycle)
+
+  Anchor changeset for the v17 major. The lockstep group applies the highest
+  bump across all pending changesets to every package, so this single `major`
+  promotes the whole train — every other pending changeset keeps its own
+  `minor`/`patch` declaration and its own narrative.
+
+  **Why a major, when the launch-window policy ships breaking changes as
+  `minor`:** this train's breaking density is the highest since the policy was
+  adopted — the `ApiMethod` enum shrink (#3543, compile-time breaking for TS
+  authors), the GraphQL surface removal, the ADR-0104 field value-shape write
+  cutover, and the retirement of several dead spec clusters all ride together.
+  Publishing that set as a bare minor would auto-upgrade every `^16.x` consumer
+  into it on their next install. A major puts the version-number signal back:
+  caret ranges hold at 16.x until a consumer opts in.
+
+  **RC cycle:** this lands inside Changesets pre-mode (`rc` tag), so the train
+  publishes as `17.0.0-rc.N` — nothing reaches `latest` until `changeset pre
+exit`. Downstream validation during the RC window: cloud / objectui /
+  examples upgrade against the RC, the dogfood gate and the third-party
+  consumer gate (#2035) run against it, and legacy `apiMethods` strip warnings
+  are watched for the deny-all cliff.
+
+  Migration: each breaking change's own changeset carries its FROM → TO guide
+  (grep the CHANGELOG for `!:` entries); the ApiMethod shrink additionally
+  ships a reporter codemod (`scripts/codemod/apimethods-legacy-to-primitives.mjs`).
+
+### Minor Changes
+
+- 50616d9: feat(spec,cli): warn the author when a deprecated action alias is discarded (#3743)
+
+  #3742 made `target` beat the deprecated `execute` alias everywhere and had the
+  `ActionSchema` transform **drop** the alias from its output, so "two different
+  scripts for one button" became unrepresentable. What it left behind: an author
+  who declares both slots with different values still loses one of the two
+  handlers they wrote, **silently**. Per Prime Directive #12 that belongs at
+  authoring time, so it is now reported there.
+
+  **New rule — `action-target-execute-conflict` (advisory).** An action declaring
+  both `target` and `execute` with different values gets a warning naming both
+  handlers, stating that `target` wins, and giving the one-line fix (delete
+  `execute`). Identical values in both slots are harmless duplication and stay
+  quiet. It never fails the build: the resulting stack is well-defined — the cost
+  is a handler that never runs, not a broken artifact.
+
+  The rule must run **pre-parse**, because the parse is what consumes the alias:
+  once `ObjectStackDefinitionSchema` has run there is no `execute` key left to
+  report. It therefore lives in `@objectstack/spec`
+  (`lintDeprecatedAliases`, exported from the package root) and is wired into
+  both layers that perform the discard:
+
+  - **`defineStack`** — the dominant authoring path, and the one that consumes the
+    alias earliest: it parses inside your own config module, so by the time
+    `os build` loads that module the alias is already gone. It now warns on the
+    console before parsing (once per distinct conflict per process).
+  - **`os build` / `os validate`** — a new pre-parse pass covering stacks that
+    skip strict `defineStack`: a plain object default-export,
+    `defineStack(…, { strict: false })`, and inline function handlers (`target` is
+    `z.string()`, so those cannot pass strict `defineStack` and are lowered by the
+    CLI instead). Both commands lint the same input, so they agree by construction
+    (#3782).
+
+  Each layer reports only its own discards, so one authored conflict produces
+  exactly one warning however the stack is compiled.
+
+  **Behaviour fix in the same contract.** #3742 fixed compile-time precedence by
+  probing for a _callable_ `target` first, which left one combination still
+  resolving the alias's way: a **string** `target` beside a **function** `execute`
+  bound the alias and then overwrote the canonical ref the author wrote. `target`
+  now wins in every combination of string/function across the two slots, matching
+  the `ActionSchema` transform — so the new warning states one precedence rule
+  that is true everywhere. If you relied on an inline `execute` function winning
+  over a string `target`, move it into `target`; the warning names the action.
+
+  Authoring is otherwise unchanged: `execute` alone is still accepted, still
+  lowered into `target`, and still documented.
+
+- 08b5a3d: fix(action): one precedence for `target` vs the deprecated `execute` — lower the alias, then drop it (#3713)
+
+  `execute` is the deprecated alias of `target`, and three readers resolved "the
+  author declared both" in **two opposite directions**:
+
+  | Reader                                | Preferred |
+  | ------------------------------------- | --------- |
+  | `ActionSchema` transform (spec)       | `target`  |
+  | objectui `ActionRunner.executeScript` | `execute` |
+  | CLI compile step (`lowerCallables`)   | `execute` |
+
+  So `defineAction({ type: 'script', target: 'preferredHandler', execute: 'legacyHandler' })`
+  ran `preferredHandler` server-side and `legacyHandler` client-side — two
+  different scripts for one button, silently, with no error anywhere. Low
+  frequency (it needs an author to set both, which happens mid-migration or by
+  copy-paste), but the failure mode is "the wrong code ran".
+
+  **`target` now wins everywhere, and the alias is removed from the parsed
+  output** — the same "canonical wins, alias disappears" shape as
+  `agent.knowledge.topics` → `sources`. The conflict is now _unrepresentable_
+  rather than merely agreed-upon: no renderer can see a second slot to disagree
+  about. Worth noting the server runtime never read `execute` at all
+  (`isHeadlessInvokableAction` gates on `target || body`; dispatch probes
+  `target`/`name`), so authoring `execute` worked _solely_ because it was lowered
+  at parse time — dropping it costs the server nothing.
+
+  The CLI's inline-handler lowering had the same bug in compile-time form: with a
+  function in both slots it bundled the `execute` one and then overwrote
+  `action.target` with that ref, silently discarding the function the author
+  declared on `target`. It now probes `target` first and drops the alias.
+
+  **Authoring is unchanged** — `execute` is still accepted on input (`ActionInput`),
+  still lowered to `target`, and still listed in the reference docs. Nothing to
+  migrate in your app metadata.
+
+  **Consumers of the parsed metadata**, however, must read the canonical slot:
+
+  - FROM: `parsedAction.execute` → TO: `parsedAction.target`
+  - One-line fix: delete the alias fallback, e.g. `action.execute || action.target`
+    becomes `action.target`.
+
+  `z.infer<typeof ActionSchema>` no longer carries `execute`, so any such reader
+  fails to compile rather than silently reading `undefined`. The objectui
+  `ActionRunner` counterpart ships separately.
+
+- 4727eb8: feat(spec): reject unknown keys on an action param instead of stripping them (#3405)
+
+  `ActionParamSchema` was zod-default `.strip`: any key it does not declare was
+  **discarded silently** and the param went on parsing. That is the mechanism
+  behind the `reference` bug — an author wrote a correct, clearly intended
+  `reference: 'sys_user'`, the key was eaten, and the param dialog rendered a text
+  box asking a human to paste a UUID. Adding `reference` fixed that one key; the
+  mechanism that swallowed it stayed, so the next mis-spelled key would fail the
+  same way, with the same zero feedback (ADR-0078 no-silently-inert-metadata,
+  ADR-0049 enforce-or-remove).
+
+  An action param is now `.strict()`. An undeclared key is a parse error naming the
+  offending key, and — when the key is a recognisable spelling of a declared one —
+  the canonical key to use instead:
+
+  ```
+  Unrecognized key(s) on this action param: `reference_to`. Until #3405 these were
+  dropped silently — the param still parsed, so a mis-spelled config shipped as a
+  control that quietly ignored it. Did you mean `reference_to` → `reference`?
+  ```
+
+  **Migration.** A param that previously carried an extra key now fails to parse.
+  The fix is to correct or remove that key; the error names it. Common mappings —
+  case/underscore slips are matched automatically, these are the ones that need a
+  different word:
+
+  | Wrote                                           | Use            |
+  | ----------------------------------------------- | -------------- |
+  | `reference_to` / `referenceTo` / `targetObject` | `reference`    |
+  | `visibleWhen` / `visibleOn` / `visibility`      | `visible`      |
+  | `description` / `help`                          | `helpText`     |
+  | `default`                                       | `defaultValue` |
+
+  Declared keys are unchanged: `name`, `field`, `objectOverride`, `label`, `type`,
+  `required`, `options`, `placeholder`, `helpText`, `defaultValue`, `multiple`,
+  `accept`, `maxSize`, `reference`, `defaultFromRow`, `visible`, `requiresFeature`.
+
+- fa3d0cf: feat(spec): field runtime value-shape contract — ADR-0104 phase 1 (D1)
+
+  `@objectstack/spec/data` now owns the runtime VALUE shape of every field type
+  (`field-value.zod.ts`): semantic type classes (`STRING_VALUE_TYPES`,
+  `NUMERIC_VALUE_TYPES`, `REFERENCE_VALUE_TYPES`, `FILE_REFERENCE_TYPES`,
+  `STRUCTURED_JSON_TYPES`, `MULTI_CAPABLE_TYPES`, …), the shared
+  `isMultiValueField`, and `valueSchemaFor(field, 'stored' | 'expanded')`. The
+  four consumers that each hand-copied this knowledge (objectql record-validator,
+  rest import-coerce, driver-sql column classification, qa conformance) now
+  derive from the spec, and the field-zoo round-trip MATRIX is asserted against
+  the contract so the two cannot drift.
+
+  **Write-path change (objectql, warn-first):** previously-unvalidated types —
+  single `lookup`/`master_detail`/`user`/`tree`, `file`/`image`/`avatar`/
+  `video`/`audio`, `location`, `address`, `composite`, `repeater`, `record`,
+  `vector` — are now checked against the contract. A violation **logs a warning
+  and passes** in this release (legacy rows must not strand their records);
+  set `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` to enforce as a
+  `400 VALIDATION_FAILED`. The flip to strict-by-default rides a later minor
+  (ADR-0104 R1/R2).
+
+  **Deprecations (removal rides the next spec major), FROM → TO:**
+
+  - `CurrencyValueSchema` (`{value, currency}`) → none. A `currency` field's
+    value is a **bare number** everywhere in the runtime (validator, SQL `float`
+    column, import coercion, field-zoo oracle); the currency code lives in field
+    config. Use `valueSchemaFor({type: 'currency'})`.
+  - `LocationCoordinatesSchema` (`{latitude, longitude}`) → `LocationValueSchema`
+    (`{lat, lng}`) — the shape the platform actually stores.
+  - `AddressSchema` is **adopted** (unchanged) as the enforced `address` value
+    contract via `AddressValueSchema`.
+
+  No stored data changes shape; the contract codifies deployed reality
+  ("reality wins", ADR-0104 D1).
+
+- af5a224: feat: enforce declared action-param contract at dispatch — ADR-0104 phase 2 (D2)
+
+  An action's declared `params[]` (`type` / `required` / `multiple` / `options` /
+  `reference`) was a complete value contract that only ever informed the client
+  dialog — the server passed `reqBody.params` straight to the handler unvalidated
+  (REST `handleActions` and the MCP `invokeBusinessAction` path), and handlers
+  read an untyped bag. D2 makes the declaration enforced and typed.
+
+  - **`@objectstack/spec/ui`** now exports `validateActionParams` (+
+    `ResolvedActionParam`, `ActionParamIssue`, `ACTION_PARAM_BUILTIN_KEYS`): a
+    pure check that validates a params bag against resolved param declarations,
+    reusing the D1 `valueSchemaFor` so option membership, `multiple` arrays and
+    reference-id shape all ride the one value contract. Also exports the typed
+    authoring surface `ActionHandler` / `ActionHandlerContext` /
+    `ActionEngineFacade` — annotate a handler with `ActionHandler` instead of
+    `(ctx: any)`.
+  - **Dispatch (runtime)**: both the REST and MCP action paths resolve the
+    action's declared params (field-backed params resolved through the referenced
+    object field) and validate the request bag **before the handler runs** —
+    required presence, per-type value shape, and unknown keys (the dispatcher's
+    own `recordId` / `objectName` are allowlisted).
+
+  **Warn-first rollout (ADR-0104 R3).** A violation is **logged and passes** by
+  default — params that were silently wrong before keep working while the drift
+  becomes visible. Set `OS_ACTION_PARAMS_STRICT_ENABLED=1` to reject with a
+  `400 VALIDATION` (REST) / an error (MCP). Actions that declare no `params` are
+  untouched (nothing to validate against). The flip to strict-by-default rides a
+  later minor once telemetry is quiet.
+
+  Not included: file/image params becoming `sys_file` references — that depends
+  on file-as-reference (ADR-0104 D3). Per-name static typing of `ctx.params` from
+  the literal `params` array is a deferred DX nicety; the runtime guarantee holds
+  regardless.
+
+- 71f76e1: feat(spec): declared media value shape — ADR-0104 D3 wave 1 (file/image/avatar/video/audio)
+
+  `@objectstack/spec/data` now exports `FileValueSchema` — the declared inline
+  form the platform stores today for the whole `FILE_REFERENCE_TYPES` class
+  (`file` / `image` / `avatar` / `video` / `audio`): `{ url, name?, size?,
+mimeType?, alt?, duration? }` with `url` required. It replaces D1's loose
+  transitional union, so `valueSchemaFor(fileField, 'stored')` now catches a
+  malformed media value (a number, an empty object, a url-less `{ name }`
+  fragment) that was previously waved through as an opaque payload — while still
+  admitting the opaque id/url string form for import compatibility.
+
+  This is **wave 1** of ADR-0104 D3 (see the 2026-07-24 addendum): the value-shape
+  contract only. It is single-repo, additive, and carries no migration — the
+  enforcement rides D1's existing warn-first write-path posture, so deployed
+  records with a legacy media value are not stranded. `accept` / `maxSize` field
+  config, the `sys_file` reference storage model, GC, and governed download are
+  **wave 2** (a protocol-major migration), deliberately not in this change.
+
+- 99736a0: feat(storage): exclusive field-reference file ownership — ADR-0104 D3 wave 2 (PR-3)
+
+  A `file`/`image`/`avatar`/`video`/`audio` field that holds a `sys_file` id now
+  records its owner on the file: `sys_file.ref_object` / `ref_id` / `ref_field`
+  name the single `(object, record, field)` slot that references it, maintained on
+  the engine write path — claimed on insert, reconciled on update, released when
+  the owning record is deleted.
+
+  **Field references are exclusive, unlike attachments.** The attachments surface
+  deliberately shares one file across many `sys_attachment` join rows; a field
+  reference is owned by at most one slot, and writing an already-owned id into a
+  second slot **copies the bytes into a fresh `sys_file`** rather than sharing the
+  row. That keeps a file's read authorisation derived from exactly one parent
+  record instead of the union of every referrer's — so copying a private record's
+  file id into a world-readable one cannot silently widen access — and it removes
+  reference counting from the lifecycle entirely: a file is released because its
+  one owner let go, never because a count came back zero.
+
+  **Deletes nothing.** This records and releases ownership; it never tombstones,
+  and the `scope === 'attachments'` guardrail that keeps field-referenced files
+  out of the reap is untouched. Collection is a separate, gated change that must
+  also extend the reap guard's sweep-time re-verify in the same commit.
+
+  Also exports `isFileIdToken` from `@objectstack/spec/data` as the single arbiter
+  of "is this stored string an opaque file id, or a legacy/external URL?", now
+  shared by the read resolver and the write claimer so the two cannot drift.
+
+  Dormant until a field actually holds an id token: objects without file-class
+  fields, inline-blob values and URL-shaped values all exit before any I/O.
+
+- fe67e34: feat(spec)!: media fields declare accept/maxSize, and the stored form is a file reference — ADR-0104 D3 wave 2 (PR-5a)
+
+  **`accept` and `maxSize` are now declared on `FieldSchema`, and enforced on the
+  server.** Both were already read by the upload widgets — `field.accept`,
+  `field.maxSize` — while the spec did not declare them, so an author who wrote
+  them had the keys silently stripped at parse and the constraint simply never
+  existed. That is exactly the ADR-0104 failure class (a declaration accepted in
+  source, dropped from the contract, with no feedback).
+
+  Now that the platform owns the file, `sys_file` carries the authoritative MIME
+  type and byte size, so a record write is re-checked against the declaration
+  where it actually binds rather than only in the browser — a client-side check is
+  a convenience, not a control, since any caller talking to the API directly
+  bypasses it. Violations raise `FileConstraintError` and fail the write. An entry
+  is only judged against metadata the file actually reports: a file with no
+  recorded MIME type cannot fail an `accept` test, and one with no recorded size
+  cannot fail `maxSize` — "we don't know" must not become "not permitted".
+
+  **The stored form of a media field narrows to an opaque `sys_file` id.**
+  `valueSchemaFor(field, 'stored')` now yields an id for `file`/`image`/`avatar`/
+  `video`/`audio`; the inline `{url, name, size, …}` blob becomes the `'expanded'`
+  read form, which also still admits an unresolved id (storage service absent,
+  file not committed) exactly as an unexpanded lookup id stays valid.
+
+  Two legacy forms therefore stop conforming, both deliberately:
+
+  - the **inline blob**, which is no longer stored but derived;
+  - an **external URL**, which was never a managed file — ADR-0104 R7 retires it
+    toward an explicit `url` field, and under AI authoring that is the point: it
+    stops "managed file" and "external link" being the same declaration.
+
+  **Not a breaking change today.** Value-shape checking is warn-first
+  (ADR-0104 R1/R2): a not-yet-backfilled row still writes and the author gets a
+  warning naming the field. Hard rejection arrives only when a deployment opts
+  into `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` — which it should do after running the
+  backfill and confirming reconciliation. The `!` marks the contract change for
+  the v17 window, not a runtime break on upgrade.
+
+- fdb4f50: feat(migrate): `os migrate files-to-references` — a data migration with a self-check, gated per deployment (#3617)
+
+  The ADR-0104 file-as-reference migration ships as a command a deployment runs
+  against its own database, and the deployment-level flag it records is what may
+  later authorise irreversible behaviour — never the platform version.
+
+  ```bash
+  os migrate files-to-references           # dry run: reports, writes nothing
+  os migrate files-to-references --apply   # converts, verifies, records the flag
+  ```
+
+  The run backfills legacy file-field values (inline metadata blobs, own-resolver
+  URLs, `data:` URIs) into owned `sys_file` references, reconciles the ownership
+  ledger against what records actually hold, and — only on an `--apply` run whose
+  reconciliation reports **zero blocking discrepancies** — records
+  `sys_migration { id: 'adr-0104-file-references', verified_at, blocking: 0 }`.
+
+  **Why a flag rather than a release note.** ObjectStack is a development
+  platform: third-party deployments upgrade on their own schedule and their data
+  is not observable by anyone else, so no release-side soak can vouch for them.
+  The evidence has to be produced where the data is. Consequences:
+
+  - Installing a new version never starts deleting bytes. Running the migration
+    and passing its self-check is the consent.
+  - Not run, or not passed → files are retained forever. Wasted storage, zero
+    data loss.
+  - A later failing run **clears** `verified_at`: a deployment whose data has
+    drifted closes its own gate.
+  - A dry run writes nothing at all — not the conversions, and not the flag,
+    even when the self-check would pass.
+  - External URLs stay advisory. They are not `sys_file`s, so they can never
+    enter collection; whether to remodel them as a `url` field is the app
+    author's decision (ADR-0104 R7), not a gate.
+
+  Ships alongside:
+
+  - `@objectstack/spec` — `DataMigrationFlagSchema`, `FILE_REFERENCES_MIGRATION_ID`,
+    and the single `isDataMigrationFlagVerified` predicate both future consumers
+    (collection #3459, strict value-shape #3438) read, so the two gates cannot
+    disagree about the same fact.
+  - `@objectstack/platform-objects` — the `sys_migration` object plus
+    `readDataMigrationFlag` / `isDataMigrationVerified` / `recordDataMigrationRun`.
+    Reads fail toward "not verified": a gate that cannot read its evidence stays
+    closed.
+  - `@objectstack/objectql` — a read may now opt out of file-reference expansion
+    via the spec's `RAW_FILE_VALUES_CONTEXT_KEY`, and the storage service's
+    bookkeeping/scan reads do. Without it the read resolver rewrites stored ids to
+    their expanded form before the reconciliation sees them, which reports held
+    references as absent — noisy `stale_owner` findings, and a missed
+    `unowned_reference` would have been a false pass of the collection gate.
+
+- 1bd5652: feat(auth): give ADR-0105 D8's scope-bounded issuance a caller — the
+  `delegated_admin` org role, capped so it cannot mint authority (#3697)
+
+  D8 authorizes invitation _placement_ against the issuer's `adminScope`
+  (ADR-0090 D12), so a delegated plant admin may invite only into their own
+  subtree. That gate is implemented, unit-proven and reachable — but no principal
+  could reach it in a state where it did anything:
+
+  - better-auth grants `invitation: ["create"]` to `owner` and `admin` only
+    (`memberAc` holds `invitation: []`, which every other registered role
+    inherits);
+  - under a wall-enforcing posture, owners and admins are auto-elevated to
+    `organization_admin` (`auto-org-admin-grant.ts`), which carries the wildcard
+    `modifyAllRecords` that makes `isTenantAdmin()` true — and the gate
+    short-circuits on tenant admins.
+
+  The two sets were disjoint. Issuance placement was bounded by the Layer 0 org
+  wall (real, and correct) but never by `adminScope`, so D8's motivating story —
+  "a plant admin invites into their own subtree without a platform admin
+  finishing the job" — could not happen.
+
+  **Two pieces, and they only ship together.**
+
+  **1. The role.** `delegated_admin` is now registered with the organization
+  plugin as `memberAc.statements` plus `invitation: ["create"]` — the one
+  membership grade that may reach `/organization/invite-member` without being an
+  org admin. Deliberately _not_ `invitation: ["cancel"]`: better-auth's cancel
+  route checks the permission with no inviterId attribution, so it would mean
+  "cancel anyone's pending invitation in the org".
+
+  The role carries no ObjectStack authority by construction — `mapMembershipRole`
+  passes it through as a position name, and with no `sys_position_permission_set`
+  binding that name resolves to nothing. Role = _can reach the endpoint_;
+  `adminScope` = _what the endpoint permits_.
+
+  `sys_member.role` and `sys_invitation.role` each gain `delegated_admin` as a
+  fourth option. Those selects are **enforced on write** — better-auth's own
+  invitation and membership inserts are validated like any other row — so
+  registering the role with the org plugin without listing it in both would have
+  produced a role nobody could hold and nobody could hand out
+  (`ValidationError: role must be one of: owner, admin, member`). That is exactly
+  how the end-to-end regression caught it, twice; neither unit test could. The
+  three non-English translation bundles carry the English label for the new option
+  until localized.
+
+  **2. The role cap**, in the framework's own `beforeCreateInvitation` hook,
+  beside the D8 placement gate. Registering the role alone would have been a
+  four-step privilege escalation: better-auth's only role-level cap on _what role
+  you may invite someone as_ is its `creatorRole` check (default `owner`), which
+  blocks inviting an **owner** but not an **admin** — and an accepted `admin`
+  membership is auto-elevated to `organization_admin` → `isTenantAdmin()`. A
+  subtree-scoped delegate could have manufactured a tenant admin, with every
+  existing defense off the path (`sys_member` is not a `GOVERNED_OBJECT`, and the
+  acceptance-time membership write runs under better-auth's context, not the
+  issuer's).
+
+  The cap refuses an invitation whose role outranks the issuer's own, and
+  restricts a below-admin issuer to plain `member` — not merely "not admin/owner",
+  because an app-registered role projects into `current_user.positions` and may be
+  bound to permission sets, making it a capability channel too. A delegate's
+  channel for capability is the invitation's _placement_ intent, which the D12
+  gate allowlists position-by-position. The cap applies to every invitation,
+  placement-carrying or not (the escalation is independent of placement), and
+  fails closed: an issuer role that cannot be resolved confers nothing above a
+  plain member.
+
+  **What changes for deployments.** One new class of principal exists: members
+  holding the `delegated_admin` org role, who can invite into the org — as
+  `member` only, into the subtree their `adminScope` allows. It is opt-in twice
+  over (someone must set the membership role _and_ grant an adminScope set), so a
+  default deployment changes not at all. Org owners and admins are unaffected.
+
+  Also exported: `MEMBERSHIP_ROLE_DELEGATED_ADMIN` from `@objectstack/spec`, so
+  console and control-plane surfaces name the role from one place.
+
+- 14252d3: feat(approvals): cross-organization approver targeting — a plant document can
+  require a group-side sign-off (ADR-0105 D9)
+
+  One organization id used to decide three different things at once in
+  `openNodeRequest`: where the request row lives, where its inbox index rows
+  live, and **where its approvers are looked up**. The first two are the
+  request's own organization by definition. The third is not — a group CFO holds
+  her `cfo` position in the GROUP organization while the purchase order she signs
+  off lives in the PLANT organization. `expandPositionUsers('cfo', <plant>)`
+  matched nobody, the slot fell back to the dead `position:cfo` literal, and a
+  group escalation could not be expressed at all.
+
+  An approver may now declare which organization's directory resolves it:
+
+  ```yaml
+  approvers:
+    - { type: position, value: plant_manager, group: plant }
+    - { type: position, value: cfo, organization: $root, group: finance }
+  behavior: per_group
+  ```
+
+  - **`$root` / `$parent`** walk D6's `parent_organization_id` tree, so the two
+    common intents need **no deployment knowledge** — flow metadata is portable
+    across environments while organization ids are minted per deployment. A slug
+    covers what the symbols cannot, notably a **sibling** organization (a
+    shared-services centre approving payables for every plant).
+  - Declared **per approver**, so one node can require a plant manager and a
+    group CFO in parallel. A node-level form cannot express that without
+    splitting into serial nodes, which changes the semantics.
+  - **Bounded, not free:** the target must share a `parent_organization_id` root
+    with the request's organization. The rule reads only the organization tree —
+    never the submitter — so one flow routes identically for everyone.
+
+  Everything else fails loudly rather than quietly:
+
+  - a non-`group` posture **refuses** the declaration (a `group` → `isolated`
+    migration must not silently reroute approvals);
+  - an approver type with no org-scoped directory (`user` / `field` / `manager` /
+    `team`) refuses it too, and a new `approval-approver-cross-org-unsupported`
+    lint catches that at author time;
+  - a targeted approver holding no membership in the request's organization is
+    dropped with a warning naming them — D2's union wall would otherwise hide the
+    request from someone already routed to, so the node's existing
+    `onEmptyApprovers` policy takes over instead of leaving an unopenable task.
+
+  Nothing changes for an approver without `organization`: same resolution, same
+  queries, no extra reads.
+
+- 7fb436c: Multi-organization operation is an ENTITLEMENT again: the `group` posture no
+  longer activates without the enterprise runtime (ADR-0105 D12 correction).
+
+  The first ADR-0105 wave read D12 as "the `group` wall ships open" and made the
+  posture self-activating — it never probed for `@objectstack/organizations`. That
+  turned `group` into a free multi-org path around the `isolated` gate (ADR-0081
+  D2), and made the weaker isolation the free one, which is not a boundary anyone
+  would draw on purpose.
+
+  The distinction that was missed: **open code is not free activation.** The wall's
+  implementation has always lived in the open packages — that is equally true of
+  `isolated`, whose Layer 0 wall sits in `plugin-security` and is gated on a
+  service the enterprise package registers. Cloud ADR-0016's 铁律
+  (强制免费、治理收费) guarantees that a deployment RUNNING a multi-org shape is
+  safe; it is satisfied by REFUSING to run one unwalled, not by giving the posture
+  away.
+
+  ## Changes
+
+  - **`tenancy-service`**: `group` probes `org-scoping` exactly like `isolated`.
+    Without it the posture resolves to `single` and reports `degraded`.
+  - **`os serve`**: the ADR-0093 D5 boot guard keys off the resolved POSTURE
+    instead of `OS_MULTI_ORG_ENABLED`. Previously `OS_TENANCY_POSTURE=group` skipped
+    both the enterprise package load AND the fail-fast, silently degrading to an
+    unwalled deployment — the exact ADR-0049 class that guard exists to close. A
+    `group` request without the runtime now refuses to boot unless
+    `OS_ALLOW_DEGRADED_TENANCY=1`.
+  - **New seam — the runtime declares what it entitles.** `org-scoping` may expose
+    `supportedPostures` (`OrgScopingEntitlement`, `@objectstack/spec/security`);
+    the open side honours it and fails closed on anything not listed. Whether
+    `group` and `isolated` are one commercial tier or two is packaging policy, and
+    packaging policy belongs to the commercial runtime rather than hard-coded in
+    open core. Omitting the field entitles every walled posture, so existing
+    runtimes are unaffected.
+  - **`organization_id` stamping returns to the enterprise runtime.** The previous
+    wave moved auto-stamping into the open engine; that removed the closed
+    package's only load-bearing runtime duty, so a five-line forged `org-scoping`
+    registration would have produced a fully working multi-org deployment. With
+    stamping back where it was, a forged registration yields NULL-org rows the wall
+    hides — a broken deployment, not an unlicensed working one.
+
+    **Write-side VALIDATION stays open and is unchanged**, including the
+    bulk-insert coverage: rejecting a forged `organization_id` is a security
+    property, not a packaging one. Only filling an ABSENT value moved back.
+
+  - Default-organization bootstrap returns to `single`-only; every walled posture
+    keeps its existing owner (ADR-0081 D1).
+
+  ## Note for operators
+
+  `OS_TENANCY_POSTURE=group` without `@objectstack/organizations` installed now
+  **refuses to boot** rather than running single-org. This only affects
+  deployments that adopted `group` between the two waves.
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 6fdc5c6: feat(client,spec): `ai.agents.*` and `ai.pendingActions.*` — the AI routes the SDK could not reach (#3718)
+
+  #3718 deleted three `client.ai.*` methods whose URLs no route had ever mounted,
+  then expressed the surface that does exist. It expressed **one** builder's worth
+  of it. `service-ai` mounts seven; the audit that widened its ledger
+  (objectstack-ai/cloud#903) counted **ten** routes the SDK cannot reach, nine of
+  which had simply never been counted.
+
+  This closes the six with the strongest evidence: `objectui` already ships
+  product on them, over URLs it builds by hand because there was nothing to call.
+
+  **`ai.agents`** — `/ai/chat` talks to the environment's default agent; these
+  talk to one you name.
+
+  - `agents.list()` — the agents this CALLER may chat with. The route filters by
+    the caller's permissions (ADR-0049), so an empty list is a legitimate answer
+    for a seat-less user, not an error to retry.
+  - `agents.chat(name, request)` / `agents.chatStream(name, request)` — one route,
+    two methods, mirroring `ai.chat` / `ai.chatStream` rather than inventing a
+    third shape for the same endpoint. `chat` forces `stream: false` for the same
+    reason `ai.chat` does: the route streams by default, so leaving the flag to
+    the caller means the JSON path is the one you have to remember.
+
+  **`ai.pendingActions`** — the human-in-the-loop approval queue. When a tool call
+  needs a human decision the turn parks an action instead of executing it, and an
+  app embedding the chat has to render and resolve that queue.
+
+  - `pendingActions.list(options?)` — `status`, `conversationId` and `limit` only.
+    `AIService.listPendingActions` also accepts `objectName`, but the route never
+    forwards it; typing it here would offer a filter that silently does nothing.
+  - `pendingActions.get(id)`
+  - `pendingActions.approve(id)` — approves **and executes**. Check the returned
+    `status`: a tool that fails after approval comes back
+    `{ status: 'failed', error }` with HTTP 200, because the approval succeeded
+    even though the execution did not. Code that reads only `res.ok` reports a
+    failed write as a success.
+  - `pendingActions.reject(id, reason?)` — executes nothing.
+
+  Reads and decisions are separately permissioned server-side (`ai:read` vs
+  `ai:approve`), so a caller that can list the queue may still be refused on
+  approve. Handle the 403; one does not imply the other.
+
+  **Typed from what the routes return**, not from what a client might like them
+  to — the failure #3718 exists to punish. The pending-action shape is the
+  persisted row, `snake_case` on the wire because that is what it is. Agent rows
+  require `capabilities`, because that object is what tells a UI which
+  affordances to render.
+
+  The capstone (#3642) exempts `/api/v1/ai/` by prefix and says the evidence lives
+  on the other side of the repo boundary. It does: cloud's ledger drives every
+  `ai.*` method against the tables its builders really return — and since #903
+  that means all seven builders, which is what makes these six routes checkable
+  at all. Their routes come from `buildAgentRoutes()` and
+  `buildPendingActionRoutes()`, neither of which the ledger could see when the
+  exemption was written.
+
+- 259af21: feat(spec,lint): ADR-0109 Phase 1 — platform tool-name registry + advisory `skill.tools[]` reference lint (#3820 R7)
+
+  ADR-0109 (revised) settles the AI tool authoring model: **the default
+  third-party path needs no tool records at all.** A skill's `tools[]` names
+  either a platform-registered tool or a tool the runtime materialises from the
+  app's own declarative actions (`action_<name>`) — the executable, its authz,
+  and its audit trail stay on the action/flow the app already ships. Tool
+  records are demoted to an optional AI-presentation refinement layer (Phase 2,
+  gated on acceptance).
+
+  Phase 1, shipped here:
+
+  - **`PLATFORM_PROVIDED_TOOL_NAMES`** (`@objectstack/spec/system`) — curated
+    registry of every statically-named tool the cloud AI runtime registers,
+    grouped by owning package, plus `PLATFORM_TOOL_FAMILY_PREFIXES` for the
+    materialised `action_` family and `isPlatformProvidedToolName()`. The
+    `PLATFORM_PROVIDED_OBJECT_NAMES` precedent, applied to tools; conformance
+    tests live in the owning cloud packages.
+  - **`validate-ai-tool-references`** (`@objectstack/lint`) — the #3820 R7
+    `skill.tools` branch, wildcard-aware, resolving against declared
+    `stack.tools` ∪ the registry ∪ the materialised action family. Severity
+    **warning** (ADR-0078 advisory-first ratchet): the registry cannot see
+    third-party runtime plugins. Joins `REFERENCE_INTEGRITY_RULES`, so
+    `validate`, `lint`, and `compile` all pick it up. On the HotCRM corpus it
+    reports exactly the 10 fictional tool references (0 false positives on the
+    6 that resolve).
+  - **`composeStacks` no longer drops `tools`** — the slot joins the
+    concatenated array fields, so a declared record survives composition.
+  - `stack.tools` / AI-slot docs updated to the ADR-0109 model.
+
+- 587fc91: feat(analytics): the executeAggregate bridge carries ExecutionContext — ADR-0021 D-C second belt
+
+  The analytics→engine bridge now forwards the request's `ExecutionContext` to
+  `engine.aggregate`, so the engine's own middleware chain scopes analytics reads
+  independently of the analytics layer's `getReadScope`.
+
+  **Why.** `BaseEngineOptions.context` has always been `.optional()`, so nothing
+  forced the bridge to pass it — and it did not. An authenticated aggregate
+  reached the engine with no principal, plugin-security's principal-less fall-open
+  skipped its RLS injection, and the only thing left scoping the query was the
+  strategy remembering to call `getReadScope`. #3597 was a strategy that did not,
+  and both belts were off at once.
+
+  `getReadScope` stays: the two resolve scope through different paths (engine
+  middleware vs `security.getReadFilter`), and a deployment without
+  plugin-security has only the analytics layer. This is depth, not a replacement.
+
+  - `StrategyContext` gains `context?: ExecutionContext`, bound per call by
+    `AnalyticsService` from `query()` / `generateSql()` / `queryDataset()`.
+  - `StrategyContext.executeAggregate` and the `AnalyticsServicePlugin` /
+    `AnalyticsService` `executeAggregate` config options gain `context?:
+ExecutionContext`. **Custom bridges should forward it** to their engine; the
+    built-in auto-bridge does. Purely additive — an existing bridge that ignores
+    it keeps working exactly as before.
+  - `DimensionLabelDeps.fetchRecordLabels` and `resolveDimensionLabels` each gain
+    an optional trailing `context`, beside the `scope` / `resolveScope` that
+    #3639 added — the same two-belt split as the aggregate path.
+  - `BootOptions.analytics` (`@objectstack/verify`) overrides the
+    AnalyticsServicePlugin instance, so a gate can boot with the analytics belt
+    off and assert the engine-side belt alone still scopes.
+
+  **Also fixed on the same seam:**
+
+  - `fetchRecordLabels` — the dimension display-label lookup — is row-granular
+    (one row per record, real display names). #3639 gave it the analytics-layer
+    belt (the referenced object's own read scope); it now also carries the
+    context, so the engine scopes the same read independently.
+  - `ObjectQLStrategy.generateSql` emitted no `WHERE` at all, so the
+    `/analytics/sql` preview read as an unscoped table scan while the real
+    aggregate was scoped. It now renders the caller's filters and the read scope.
+    The preview never executed, so this was misleading output rather than a leak.
+
+- ad4af62: feat: single-source API-method derivation — the server is the only adjudicator (#3391)
+
+  An object's effective API surface is now resolved from **six primitives**
+  (`get/list/create/update/delete/bulk`) by ONE derivation table in
+  `@objectstack/spec/data` (`resolveEffectiveApiMethods` / `isApiOperationAllowed`
+  / `effectiveOperationsArray` / `API_METHOD_DERIVATION`). Every gate consumes it:
+  the REST data surface, the runtime HTTP/MCP dispatcher, and the
+  `/me/permissions` annotation. The `apiMethods` whitelist is three-state —
+  `undefined` = unrestricted, `[]` = deny-all, a subset = the derived closure — and
+  the legacy 8 verbs (`upsert/aggregate/history/search/restore/purge/import/
+export`) are DERIVED from the primitives, never declared standalone. (This
+  release also ships the enum shrink — see the `#3543` changeset: the authored
+  enum IS the six primitives, and a stored legacy value is stripped at parse
+  with a warning rather than honored.)
+
+  **Derivation:** `import` ⊆ create∨update (writeMode-precise: insert→create,
+  update→update, upsert→create∧update); `export` ⊆ list (reserved user-export slot,
+  always on this phase); `aggregate`/`search` ⊆ list (search also needs
+  `searchable`); `history` ⊆ get ∧ `trackHistory`; `upsert` ⊆ create∧update;
+  bulk sub-ops ⊆ bulk ∧ derived(child). `restore`/`purge` do not derive (the
+  `enable.trash` flag was retired, #2377).
+
+  **New response-side contract:** `EffectiveObjectPermissionSchema` extends
+  `ObjectPermissionSchema` with an optional `apiOperations` array;
+  `GetEffectivePermissionsResponse.objects` uses it, and `/me/permissions` now
+  hands down the per-object effective operation set. The authoring
+  `ObjectPermissionSchema` is deliberately NOT extended — the frontend consumes
+  the effective set the server resolves, never the raw whitelist.
+
+  **Behavior changes (tightening — a `declared ≠ enforced` gap closed):**
+
+  1. `apiMethods: []` + `apiEnabled: true` now denies every operation (405),
+     matching the documented three-state contract instead of the prior fail-open
+     "no restriction". In-repo impact is zero (every `[]` object also sets
+     `apiEnabled: false`, so 404 precedes 405).
+  2. The runtime dispatcher / MCP whitelist is now live. It previously read the
+     flat shape while `getObject()` returns the flags nested under `.enable`, so
+     the gate never fired — a silent dead gate now enforced (nested-first,
+     flat-compatible).
+  3. `import`/`export` reverse-derive: an object with a plain CRUD whitelist (no
+     explicit `import`/`export`) now admits import (⊆ create∨update) and export
+     (⊆ list). Row-level FLS is shared with list; the export column header is now
+     projected to the FLS-readable set so it can never expose a wider column set
+     than list (previously a masked column leaked its name as an empty column).
+  4. The bulk surfaces (`createMany`/`updateMany`/`deleteMany`, per-object
+     `/batch`, cross-object `/batch`) now require the `bulk` primitive AND the
+     child write (`bulk ∧ child`). The four in-repo explicit-whitelist objects
+     (`sys_user`, `sys_user_preference`, `sys_business_unit`,
+     `sys_business_unit_member`) gained `bulk`; a third-party object with an
+     explicit write whitelist that omits `bulk` will now 405 on the Many/batch
+     routes.
+  5. The 405 body's `allowed` array is now the derived EFFECTIVE operation set
+     (enum-ordered), not the raw whitelist.
+
+- d44dbfa: feat(spec)!: shrink the `ApiMethod` enum to the six primitives — legacy values are stripped at parse, never honored (#3543, P2 of #3391)
+
+  **BREAKING** (the `!` marker and this changeset are the breaking-change
+  record; the train ships as the v17 major — see the `v17-rc-anchor` changeset):
+  the authored `enable.apiMethods` enum is now exactly the six
+  primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`). The eight
+  legacy values (`upsert`, `aggregate`, `history`, `search`, `restore`, `purge`,
+  `import`, `export`) are no longer authorable — they are DERIVED effective
+  operations, resolved by the server's single derivation table.
+
+  **Migration (FROM → TO).** Replace each legacy value with the primitives it
+  derives from, then de-duplicate; if the result names all six primitives, delete
+  the `apiMethods` key entirely (equivalent to default-open, and it tracks future
+  primitives):
+
+  | FROM (legacy) | TO (primitives)      | why                                            |
+  | ------------- | -------------------- | ---------------------------------------------- |
+  | `upsert`      | `create`, `update`   | upsert ⊆ create ∧ update                       |
+  | `import`      | `create`, `update`   | import ⊆ create ∨ update (writeMode-precise)   |
+  | `export`      | `list`               | export ⊆ list                                  |
+  | `aggregate`   | `list`               | aggregate ⊆ list                               |
+  | `search`      | `list`               | search ⊆ list ∧ `searchable`                   |
+  | `history`     | `get`                | history ⊆ get ∧ `trackHistory`                 |
+  | `restore`     | _(delete the value)_ | never derives — `enable.trash` retired (#2377) |
+  | `purge`       | _(delete the value)_ | never derives — `enable.trash` retired (#2377) |
+
+  Reporter codemod: `node scripts/codemod/apimethods-legacy-to-primitives.mjs`
+  (scans, reports the exact replacement per site, and flags whitelists the
+  mapping would WIDEN so the edit stays reviewable).
+
+  **Stored metadata keeps parsing — permanent tolerance, narrowing only.** Real
+  metadata does not upgrade in lockstep with the spec, so a stored legacy value
+  is NOT a parse error: `stripLegacyApiMethods` (new export) strips it with a
+  FROM→TO warning (canonicalize-and-warn). Stripping only ever NARROWS exposure —
+  the derivation table still grants every legacy verb that derives from the
+  primitives you declared. Two cliffs to know:
+
+  1. A whitelist of ONLY legacy values (e.g. `['upsert']`) strips to `[]` =
+     **deny-all** — the object's API closes instead of widening. The strip
+     warning and the objectql registration diagnostic both call this out.
+  2. A legacy value NOT derivable from your declared primitives (e.g.
+     `['get', 'export']` — export needs `list`) was honored by the P1
+     "explicit wins" path and is now denied. Declare the underlying primitive.
+
+  **Type split — authored vs effective vocabulary.** `ApiMethod` (authored) is
+  now six values; the NEW `ApiOperation` type / `ApiOperationSchema` /
+  `API_OPERATION_ORDER` (fourteen values, byte-stable pre-shrink wire order)
+  carry the EFFECTIVE vocabulary. The wire contract is unchanged: the 405
+  `allowed` array and `/me/permissions` `apiOperations` still serialize derived
+  verbs (`export`, `search`, …), and `EffectiveObjectPermissionSchema.apiOperations`
+  now validates against `ApiOperationSchema`. `EffectiveApiMethods.explicitLegacy`
+  is removed (nothing is honored verbatim anymore); `API_METHOD_ORDER` remains as
+  a deprecated alias of `API_OPERATION_ORDER`.
+
+  **Fail-closed tightening (#3545):** a PRESENT but non-array `apiMethods` (only
+  producible by a raw/out-of-band metadata write) now resolves to `deny-all`
+  instead of unrestricted — a policy that exists but cannot be read fails CLOSED.
+
+  **Published JSON Schema diverges deliberately:** `data/ApiMethod.json` is the
+  strict six-value enum (a `z.preprocess` is not representable in JSON Schema),
+  so external JSON-Schema validators reject legacy values that the zod parse
+  would strip-and-warn. Treat the JSON Schema as the authored contract; the zod
+  tolerance exists for stored metadata.
+
+  **objectql:** the P1 "explicit wins" transition is reclaimed —
+  `warnDeprecatedExplicitApiMethods` is replaced by `warnStrippedLegacyApiMethods`
+  (a permanent per-object diagnostic for schemas that reach the registry without
+  passing through Zod; the parse-time strip warning carries no object name).
+
+  **platform-objects:** whitelist audit — `sys_business_unit`,
+  `sys_business_unit_member` (P1's explicit `import`/`export` reclaimed) and
+  `sys_user_preference` dropped their `apiMethods` entirely (each named all six
+  primitives = default-open). Read-only and deny-all whitelists are unchanged;
+  the seven `[]` declarations are deliberately KEPT as defense-in-depth alongside
+  `apiEnabled: false`.
+
+- 474fe39: feat(approvals): declare approver value bindings; retire `queue` approver authoring (#3508)
+
+  - `@objectstack/spec` exports `APPROVER_VALUE_BINDINGS` — the single declaration of how a
+    designer must source each approver row's `value`: `user`/`team`/`department`/`position`
+    are DATA-record lookups on the system directory objects (`sys_user` / `sys_team` /
+    `sys_business_unit` / `sys_position`; `position` commits the machine **name**, the
+    others the row id), `org_membership_level` is a closed enum (`ORG_MEMBERSHIP_LEVELS`),
+    `manager` is auto-resolved, `field` names a trigger-object field, and `queue` is
+    unsupported. Also exports `NON_AUTHORABLE_APPROVER_TYPES`.
+  - `queue` approver type is deprecated-for-authoring: it still parses (stored flows keep
+    loading and rendering) but is published in `xEnumDeprecated`, so designers stop
+    offering it — the runtime has no queue resolution and the slot routes to nobody. The
+    approver `value` xRef now also maps `manager`, so designers can render its
+    auto-resolved state. No authored key is removed; nothing to migrate. If a flow carries
+    `{ type: 'queue' }`, replace it with `team` / `department` / `position` (or a concrete
+    `user`) until a real ownership-queue implementation lands.
+  - `@objectstack/plugin-approvals` now warns at resolution time when a stored `queue`
+    approver is skipped.
+  - `@objectstack/lint` adds `approval-approver-type-unsupported` (warning) for approver
+    types that are declared but not implemented by the runtime.
+
+- a6c3f38: feat(approvals): expose the pending node's `lockRecord` policy on the request row (#3814, objectui#2902)
+
+  An approval node declares `lockRecord` (default `true`), and the record-lock
+  `beforeUpdate` hook enforces exactly that: `lockRecord: false` and the record
+  stays writable for the whole time the node waits. The behavior was correct and
+  has been since Phase B — but it was **invisible to every client**.
+
+  `rowFromRequest` parses `node_config_json` and projects a whitelist out of it
+  (`__flowLabel`, `__nodeLabel`, `__round`, `escalation.timeoutHours`,
+  `decisionOutputs`). `lockRecord` was never in that list, and no other field on
+  `ApprovalRequestRow` carried the lock either. So the strongest thing a console
+  could learn from `GET /approvals/requests` was _"a pending request exists"_ —
+  from which it can only assume the record is locked.
+
+  That assumption is wrong on every opted-out node, and a flow that chains nodes
+  with different policies makes it visibly wrong: the same UI state renders for
+  "you may edit this" and "the server will reject your save with `RECORD_LOCKED`".
+  The console has no third option — guessing the other way would offer an edit
+  that dies on save.
+
+  `ApprovalRequestRow` now carries **`lock_record: boolean`**, read from the same
+  snapshot the hook reads, with the same `!== false` default. Present on every
+  service read (`openNodeRequest` / `getRequest` / `listRequests`), so the flag a
+  client renders and the rule the server applies cannot drift.
+
+  Additive and backward compatible — nothing to migrate. A client that wants
+  node-accurate lock state reads `request.lock_record`; treat `undefined` (an
+  older backend) as locked, which is the pre-existing behavior.
+
+  The showcase's `showcase_budget_approval` now declares `lockRecord: false` on
+  its single-approver Manager Review and keeps `true` on the multi-approver
+  Executive Review, so both policies are exercised in one flow.
+
+- 0f8ad09: feat(spec)+fix(approvals): publish approver value data sources, order the type enum for authors, stop silent dead approver slots (#3508 / #3807 follow-ups)
+
+  Four follow-ups from browser-verifying the #3508 approver work end to end.
+
+  **`APPROVER_VALUE_SOURCES` — the designer stops guessing where candidates live.**
+  `xRef.map` only ever named a picker KIND (`'team'`), never where that picker's
+  rows come from, so the designer carried its own copy of the data contract — and
+  the first copy was wrong: every directory kind was wired to `GET
+/api/v1/meta/:type`, the metadata REGISTRY, which does not hold `sys_user` /
+  `sys_team` / `sys_business_unit` / `sys_position` rows. Candidates came back
+  empty and the control degraded to free text (#3508). The binding is now
+  projected onto the published JSON schema as `xRef.sources` — `{ source: 'data',
+object, valueField }` for the record-backed kinds, the closed enum inline for
+  `org_membership_level` — derived from `APPROVER_VALUE_BINDINGS` so the two
+  cannot drift, and inheriting its `satisfies` exhaustiveness (a new
+  `ApproverType` member that declares no source is a compile error). Presentation
+  — which field to show, whether to open a people-picker, what subtitle to use —
+  stays a renderer decision.
+
+  **`ApproverType` declaration order is now the authoring recommendation.**
+  objectui#2834 argued for leading with indirect bindings and shipped that order
+  in its own options array — which the Studio inspector never reads: it derives
+  the picker from this enum via the published schema, so `user` still came first.
+  The intent only takes effect if the enum carries it, so the enum now reads
+  `manager, position, department, team, field, expression, org_membership_level,
+user` (deprecated `role` / `queue` still parse and stay out of every picker via
+  `xEnumDeprecated`). Binding one specific person is the least portable choice an
+  author can make — it breaks when the flow moves to another environment (that id
+  does not exist there) and again when that person leaves.
+
+  **A graph approver that expands to nobody no longer does it in silence.**
+  `queue` already warned (#3508); every OTHER graph type — `team`, `department`,
+  `position`, `org_membership_level`, `manager` — fell back to the same
+  unactionable `type:value` literal without a word. That silence is what let
+  #3807 hide for as long as it did: the request opened with an empty slate and
+  the first symptom was a permanently stuck approval (#3424). The fallback stays
+  (15.x slots and substring fixtures depend on it); it now logs the type, value
+  and organization that produced it. `user` / `field` stay quiet — they take the
+  id they were given and never had an "expanded to nobody" state.
+
+  **`plugin-sharing`'s identical org scope is pinned by tests.**
+  `BusinessUnitGraphService.orgScope` has the same strict `organization_id`
+  equality #3807 fixed in approvals. It is unreachable today — every materialized
+  `sys_sharing_rule` carries `organization_id = null`, so the filter is skipped —
+  and widening an authorization path on a defect that cannot currently fire is
+  not a change to make blind. New tests lock both the reachable paths and the
+  divergence itself, so if sharing ever adopts the null-org=env-wide reading it
+  is a deliberate edit to a named test rather than a silent behaviour change.
+
+- 57a3bb3: fix(automation,approvals): the run-resume route is gated by the node the run is parked on (#3801)
+
+  `POST /api/v1/automation/:name/runs/:runId/resume` forwarded a caller-supplied
+  `{ inputs, output, branchLabel }` straight into `AutomationEngine.resume`, and
+  `resumeInternal` validated **machine state only** — the concurrent-resume latch,
+  the run exists, the flow exists, the suspended node still exists. Nothing asked
+  _who was calling_.
+
+  Approval nodes suspend and resume through exactly that mechanism. So a resume
+  carrying `branchLabel: 'approve'` walked the approve edge with **no approver
+  check, no `sys_approval_action` row and no status mirror** — the
+  `sys_approval_request` row and the run then disagreed permanently. The only
+  thing standing between the route and the approvals rules was convention; the
+  showcase spelled it out in a comment ("decide via the approvals API, never a raw
+  engine `resume`"), and a comment in an example is not an access control.
+
+  Removing the route was not the fix: it is load-bearing for **screen flows** —
+  the UI flow-runner posts `{ inputs }` there to advance a paused `screen` node.
+  The gate therefore keys on **what the run is parked on**:
+
+  - `ActionDescriptor.resumeAuthority` (`'any'` | `'service'`, default `'any'`) —
+    a pausing node declares who may continue it. `approval` declares `'service'`.
+  - The engine refuses a `'service'` suspension unless the signal carries
+    `RESUME_AUTHORITY_SERVICE` (`@objectstack/spec/contracts`), a **symbol** the
+    owning service stamps in-process — a JSON body can never produce one, so the
+    transport cannot forge it. `ApprovalService` stamps it on the tail of a
+    decision it has already authorized and recorded.
+  - The gate follows a **subflow** pause down to the child the signal would
+    actually reach, so resuming the parent is not a way around it.
+  - Refusal returns `{ success: false, code: 'forbidden' }` and the route answers
+    **403**. Nothing is consumed — the request stays pending and the run stays
+    parked, so the real decision still lands.
+
+  `screen` and `wait` pauses are unchanged, as is every path that already went
+  through the approvals API. What changes for consumers:
+
+  - **FROM:** finishing an approval with
+    `client.automation.resume(flow, runId, { branchLabel: 'approve' })`
+    **TO:** `client.approvals.approve(requestId, …)` (or `.reject` / `.recall`).
+    The old call now answers 403 and changes nothing.
+  - Registering your own pausing node whose continuation belongs to a service
+    rather than to whoever holds the run id? Declare `resumeAuthority: 'service'`
+    on its descriptor and stamp `RESUME_AUTHORITY_SERVICE` on the signal from that
+    service.
+
+  A suspension now records the node type that produced it
+  (`SuspendedRun.nodeType` / `sys_automation_run.node_type`), captured at suspend
+  time so a flow republished mid-pause cannot re-type the node out from under the
+  gate; rows written before this fall back to the flow definition.
+
+- 5f9a987: fix(rest): report `droppedFields` from the cross-object batch, so a silent strip stops reading as a clean save (#3794)
+
+  The engine strips writes to `readonly` (#2948) and `readonlyWhen`-locked (#3042)
+  fields and completes the write without them. Every write path already reported
+  which fields it dropped (#3431/#3455) — except the cross-object transactional
+  batch, which never wired `onFieldsDropped` at all.
+
+  That path is the Console record form's save for a master-detail record, so it is
+  exactly where a _user_ edits a `readonlyWhen` field: they changed it, the form
+  said "updated successfully", the value never moved, and nothing anywhere said
+  so.
+
+  `POST /batch` responses now carry a top-level `droppedFields` list, each event
+  tagged with the `index` of the operation that produced it (`results` entries are
+  bare record echoes, with no envelope to hang a per-row list on). Omitted
+  entirely when nothing was dropped, so the shape stays backward-compatible; the
+  batch still commits either way — a strip is legal semantics, not an error.
+
+  The Console half ships in objectui: the write-warning toast now fires on batch
+  saves too.
+
+- db02d47: **BREAKING** `ChartInteraction` drops `zoom` and `clickAction`; `stepSize` / `description` / `height` are delivered (issue #3752)
+
+  The tail of the declared-≠-delivered sweep from #3729. Five `ChartConfig` props
+  reached the renderer and did nothing; each got the ADR-0078 call — honor it, or
+  remove it. Three were honored (objectui#2885), two are removed here.
+
+  **Removed — `ChartInteraction.zoom` and `ChartInteraction.clickAction`.** Both
+  were redundant against something the platform already delivers, which is why
+  neither had a consumer anywhere in the framework, the console, the showcase, or
+  the skill corpus:
+
+  - `zoom` had no renderer primitive behind it, and `brush` already narrows a
+    range. **Migration:** `interaction: { brush: true }`.
+  - `clickAction` competed with two click owners that _do_ work — `drillDown`
+    (opens the filtered records, which is what a segment click is almost always
+    for) and, in the react tier, the host's own `onSegmentClick`. A third, silent
+    owner only invited authors to wire a click that never fired.
+    **Migration:** `drillDown`, or handle the click in React.
+
+  `ChartInteraction` is now `{ tooltips, brush }` — both honored. This follows the
+  #1475 precedent: trim what cannot be cleanly delivered, implement the rest, and
+  leave nothing declared-but-inert in between.
+
+  **Delivered — `ChartAxis.stepSize`, `ChartConfig.description`, `ChartConfig.height`**
+  (objectui#2885). `description` and `height` join `<ObjectChart>`'s published
+  `dataProps` now that they do something; `stepSize` rides along inside
+  `xAxis`/`yAxis`. Their schema descriptions say what they actually do rather than
+  restating their names.
+
+  Breaking, but shipped as `minor` per the launch-window convention (see
+  `scripts/check-changeset-no-major.mjs`). Off-spec `zoom`/`clickAction` keys are
+  stripped by Zod rather than rejected, so no stored metadata fails to parse — the
+  break is at the TypeScript type level for anyone constructing a
+  `ChartInteraction` in code.
+
+- 0bfdf46: fix(spec,cli): conversion deprecation notices reach the author, not just `os validate` (#3855)
+
+  The ADR-0087 D2 conversion layer rewrites an old-shape key to its canonical
+  spelling at load and emits a structured `ConversionNotice` for each rewrite. The
+  conversion being silent about _fixing_ the shape is the point — zero consumer
+  action. Being silent about having **had** to is not: the notice is the one signal
+  that says _this spelling retires in protocol N, and your metadata stops loading
+  then_.
+
+  Two of the three surfaces that run the conversion pass discarded every notice:
+
+  | Surface                   | Before                                 | After                                                                                                    |
+  | ------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+  | `os validate`             | passed a sink, printed them            | unchanged                                                                                                |
+  | `os build` / `os compile` | **passed no sink — notices discarded** | prints them, and includes a `conversions` array in `--json` under the same key `os validate --json` uses |
+  | `defineStack`             | **passed no sink — notices discarded** | warns on the console, once per distinct conversion site                                                  |
+
+  This is the #3782 parity class one layer down: not "does this command run the
+  gate" but "does it listen to what the gate says". Five conversions are live
+  today (protocol 11 and 15), so an author on any of those shapes was told by one
+  command and not the other two — and `defineStack` is where that author actually
+  is, since it runs inside their own config module.
+
+  `defineStack` surfaces notices in **both** strict and non-strict mode: the
+  conversion happens on the shared `normalizeStackInput` call before the strict
+  branch, and `strict: false` does not make the old shape any less retiring.
+
+  A new assertion in `validate-build-gate-parity.test.ts` fails if either command
+  calls `normalizeStackInput` without a sink, so the gap cannot silently reopen.
+
+  No behaviour change for a stack already on canonical shapes: nothing converts,
+  so nothing warns.
+
+- 7c7e246: feat(authz): expose the caller's delegable scope — the read half of the
+  delegated-administration gate (ADR-0090 D12 / ADR-0105 D8)
+
+  `adminScope` decided writes but could not be READ: `assignablePermissionSets`
+  lived only inside `delegated-admin-gate.ts`, so a UI offering "place this
+  person in a unit, with these positions" (the D8 scoped-invitation form) had no
+  way to narrow its pickers. It would list the whole tree and let the user
+  discover the boundary by being refused — which turns an authorization gate into
+  a validator and makes the boundary invisible until it bites.
+
+  `ISecurityService.describeDelegableScope(callerContext)` answers it, exposed as
+  `GET /api/v1/security/my-delegable-scope` and `client.security.describeDelegableScope()`:
+
+  - `placeableBusinessUnitIds` — union of the subtrees where the caller may place
+    people (scopes granting `manageAssignments`);
+  - `assignablePositions` — positions whose every distributed permission set the
+    caller may hand out (containment check included);
+  - `scopes` — the held `adminScope`s with subtrees resolved, for attribution;
+  - `isTenantAdmin` — unconstrained, with everything enumerated so a consumer
+    renders ONE uniform picker instead of special-casing.
+
+  Computed by the same helpers the write gate enforces with, so an option this
+  reports is one `assert()` accepts — a test asserts that agreement directly. It
+  NARROWS; the gate still decides.
+
+  Strictly self-scoped: no target-user parameter, so it discloses nothing beyond
+  the authority the caller already holds (unlike `explain`, which has one and
+  gates it). Fail-closed — unresolvable scopes contribute nothing, a caller with
+  no delegated authority gets empty lists, and a deployment without
+  `@objectstack/plugin-security` gets 501.
+
+- f35cdc5: feat(spec): the deprecated-alias warning now covers all three fold-and-drop aliases (#3743 follow-up)
+
+  #3838 introduced `lintDeprecatedAliases` — the pre-parse pass that reports an
+  alias the parse is about to consume — with one rule, for `action.execute`. The
+  issue that asked for it predicted the pass would earn its keep beyond that rule,
+  and it does: `execute` was never special. The spec has exactly **three**
+  transforms that fold an alias into its canonical key and then drop it from the
+  parsed output, and all three share the same failure mode — declare both slots
+  with different values and one of them is discarded with no signal, invisible to
+  every downstream check because the parse already erased it.
+
+  Two more rules, same shape, same advisory severity, same two surfaces
+  (`defineStack` at authoring time; `os build` / `os validate` for stacks that skip
+  strict `defineStack`):
+
+  - **`field-requiredwhen-conditionalrequired-conflict`** — `FieldSchema` folds
+    `conditionalRequired` into `requiredWhen` (#3754). The discarded predicate
+    never gates the field. Covers fields on objects _and_ on object extensions.
+    Compares the predicate **text**, so a bare string and the
+    `{ dialect, source }` envelope it lowers into are recognised as the same
+    predicate and stay quiet.
+  - **`agent-knowledge-sources-topics-conflict`** — `AIKnowledgeSchema` folds
+    `knowledge.topics` into `knowledge.sources` (#1891). The discarded list names
+    RAG sources the agent never recruits from. Compares by **set**, so the same
+    sources in a different order stay quiet.
+
+  Neither fails the build; both name the two values and give the one-line fix.
+
+  Also corrects `content/docs/ai/agents.mdx`, which documented `knowledge` as
+  `{ topics, indexes }` and used `topics` in all three examples — teaching the
+  deprecated alias as if it were the canonical key, and disagreeing with
+  `skills/objectstack-ai/SKILL.md`, which already had it right. The examples now
+  use `sources`.
+
+- c2d9098: feat(rest/protocol): extend droppedFields write-observability to the bulk paths + client SDK (#3455)
+
+  Follow-up to #3448 (#3431 D2): the single-write PATCH/POST `/data` paths already
+  surface LEGALLY-stripped write fields (static `readonly` #2948 / `readonlyWhen`
+  #3042 / #3043 create ingress) as `droppedFields`. The **bulk** write paths did
+  not — the same strips happened silently on every batched row — and the typed
+  client warning + CORS mirror were deferred. This closes those out.
+
+  **Bulk passthrough (metadata-protocol).**
+
+  - `updateManyData` and `batchData` (update/upsert rows) now register a per-row
+    `onFieldsDropped` collector and attach the events to that row's result.
+  - `createManyData` diffs each supplied row against its #3043-stripped form and
+    returns an **aggregated** top-level `droppedFields` (one event per
+    object/reason with the union of field names) — its `{ records, count }`
+    response has no per-row slot, and the insert-time strip is static-`readonly`
+    only, so it is schema-uniform across rows and the aggregate is faithful.
+  - `insertManyData` keeps per-row precision, attaching `droppedFields` to each
+    outcome.
+  - **Correctness fix bundled in:** `updateManyData` and `batchData` never threaded
+    the caller's execution `context` to the engine — bulk writes ran context-less,
+    so RLS/FLS and `readonlyWhen` evaluated without the caller's principal, and the
+    batch create-ingress strip was hard-coded to a non-system context. All engine
+    calls in both methods now run under the resolved `context`.
+
+  **Contract (spec).** `BatchOperationResultSchema` gains an optional per-row
+  `droppedFields` (covers `updateMany` + `batch`, which alias
+  `BatchUpdateResponseSchema`); `CreateManyDataResponseSchema` gains the optional
+  aggregated `droppedFields`. Both are omit-when-empty, so existing clients are
+  unaffected. `X-ObjectStack-Dropped-Fields` is deliberately **not** emitted for
+  batches — one response header cannot express per-row drops, so the per-row body
+  field is the canonical bulk channel.
+
+  **Typed client warnings (@objectstack/client).** `CreateDataResult` /
+  `UpdateDataResult` gain `droppedFields?: DroppedFieldsEvent[]`, giving the body
+  channel a type instead of an untyped property.
+
+  **CORS (@objectstack/hono, @objectstack/plugin-hono-server).**
+  `x-objectstack-dropped-fields` is added to the default `Access-Control-Expose-Headers`
+  allow-list (kept in lockstep across both Hono CORS sites) so a cross-origin
+  browser can read the single-write drop header. The body `droppedFields` remains
+  the primary, cross-origin-safe surface — this is a convenience mirror.
+
+  **GraphQL — not applicable (documented).** #3455 lists a GraphQL mutation item,
+  but GraphQL has no runtime: `kernel.graphql` is unassigned everywhere and
+  `handleGraphQL` returns `501`, and discovery never advertises `/graphql`. There
+  is no schema generator or mutation resolver to expose a typed payload field on,
+  so there is nothing to wire until a GraphQL engine lands — at which point the
+  protocol-layer `droppedFields` is already present and only the GraphQL schema
+  projection would remain.
+
+- 9613396: feat(security): ENFORCE the user-level export axis on the server (#3544)
+
+  `allowExport` landed as a spec bit plus a `/me/permissions` annotation, which
+  hid the client's Export button — and nothing else. Because `export ⊆ list`, the
+  REST export route streams through `findData` and the engine middleware sees an
+  ordinary `find` gated by `allowRead`, so no code path ever read the bit: a caller
+  holding `allowExport: false` could still `curl
+/api/v1/data/:object/export` and drain the whole table. Declared, not enforced.
+
+  - **plugin-security** `PermissionEvaluator.checkObjectPermission('export', …)` is
+    now a real decision: `export` = read granted ∧ not explicitly denied.
+    `allowExport` stays out of `OPERATION_TO_PERMISSION` on purpose — that map
+    means "the bit must be truthy", which would have denied export to every
+    permission set authored before the axis existed. The new exported
+    `resolveUserExportAllowed()` folds the tri-state across sets (`true` beats
+    `false` beats unset) exactly as the `/me/permissions` merge does.
+  - **spec** `ISecurityService` gains `canExport(object, context)` — the question a
+    bulk-egress door outside the engine middleware has to ask before it reads.
+    Fails CLOSED; `isSystem` and an empty set resolution bypass, mirroring the
+    middleware.
+  - **rest** `GET /data/:object/export` calls it and answers **403
+    `EXPORT_NOT_PERMITTED`** before the first chunk is fetched. Distinct from the
+    object-level 405 `OBJECT_API_METHOD_NOT_ALLOWED`, which still runs first: 405
+    says the object exposes no export, 403 says this caller may not use it. No
+    security service (no `plugin-security` ⇒ no permission sets) → allowed, the
+    same fail-open posture as every other permission gate in that layer; service
+    present but unable to answer → denied.
+  - **plugin-hono-server** the `/me/permissions` annotation now falls back to the
+    `'*'` entry's export bit when a per-object entry declares none, matching the
+    evaluator's own wildcard fallback — so a set that denies export wholesale via
+    `'*'` no longer offers a button the server refuses.
+
+  Backward-compatible: `allowExport` is still an opt-out with no default, so an
+  unset bit inherits read and existing permission sets behave exactly as before.
+  Only a permission set that explicitly sets `allowExport: false` changes — and it
+  now changes on the server, which is the point.
+
+  Implementers of `ISecurityService` outside this repo must add `canExport`; the
+  interface member is required, matching how `getReadableFields` was added.
+  Consumers still feature-detect (`typeof svc.canExport === 'function'`), so a
+  partial implementation degrades rather than throwing.
+
+- 2fa4ca1: Dynamic approver routing for approval nodes (#3447 P2) — three new declarative capabilities:
+
+  **`expression` approvers.** A new approver type whose CEL expression resolves WHO approves at node entry, over exactly three roots: `current.*` (the record's live state), `trigger.*` (the submit-time snapshot) and `vars.*` (flow variables, incl. upstream node outputs). `record` and bare field names are rejected before evaluation — on this platform `record` always means "the record at event time", which is ambiguous at an approval node — with error messages that prescribe the correct spelling. The optional `resolveAs: 'user' | 'department' | 'position' | 'team'` re-expands each resolved id through the same graph lookups the static types use; with `behavior: 'per_group'` each intermediate value (e.g. each returned department) forms its own sign-off group. A missing key fails the node loudly; only a present-but-empty result counts as an empty slate.
+
+  **`onEmptyApprovers` policy.** What an empty resolved slate does, node-level, for all approver types: `admin_rescue` (default — request opens for privileged takeover, the #3424 behaviour), `fail` (node fails), or `auto_approve` (skip the request, continue down the `approve` edge with `output.autoApproved = true`). To support auto-approve, the automation engine now honours `NodeExecutionResult.branchLabel` on the synchronous completion path — the field existed but was only ever consumed via resume signals.
+
+  **Decision outputs.** `decide(..., { outputs })` hands structured data from the approver to the flow: the author declares allowed keys on the node (`decisionOutputs`), approvers fill values only, and accepted outputs resume the run as `<nodeId>.<key>` variables — a later approval node's expression can read `vars.<nodeId>.picked_departments`, closing "the previous approver picks the next step's approvers" without a record-field detour. Undeclared keys reject the decision; `decision`/`requestId` are reserved. Multi-approver tallies now always pin to the open-time approver snapshot (previously unanimous re-resolved at each decision against the payload snapshot).
+
+  Also: `collectCelRootIdentifiers` is exported from `@objectstack/formula` (shared by the new `os lint` rules and the runtime pre-check, so they can never drift), resolution inputs are audited on the request snapshot as `__resolvedFrom`, and three new lint rules gate expressions, empty-slate policies and reserved output keys at author time.
+
+- f5a2320: fix(field): fold the deprecated `conditionalRequired` alias into `requiredWhen` and drop it from the parsed output (#3754)
+
+  Second instance of the alias-drift shape #3713/#3742 fixed for `action.execute`.
+  `requiredWhen` is canonical and `conditionalRequired` is its documented deprecated
+  alias, but `FieldSchema` had **no canonicalization at all** — both keys stayed live
+  in the parsed output, so every consumer had to re-implement the precedence. That is
+  exactly the condition that produced #3713, where the server kept `target` while
+  objectui's renderer preferred the alias and one button ran two different scripts.
+
+  Worse, the alias surviving parse was **test-pinned**, including a case literally
+  named _"requiredWhen and its alias conditionalRequired can coexist"_ — the inverse
+  of the contract #3742 had just established one field over.
+
+  `FieldSchema` now lowers `conditionalRequired` into `requiredWhen` at parse time and
+  removes the alias from its output; `requiredWhen` wins when both are declared. The
+  pinning tests are inverted accordingly, and a new case asserts the alias is gone
+  from a field parsed through `ObjectSchema` — the path a renderer actually receives,
+  not just a bare `FieldSchema.parse()`.
+
+  No live bug is being fixed here: every reader we can see already prefers the
+  canonical key (`rule-validator.ts` reads `requiredWhen ?? conditionalRequired`). The
+  point is that nothing in the contract _made_ that right. This is hardening — it
+  removes the chance rather than a defect.
+
+  `objectql`'s `requiredWhen ?? conditionalRequired` fallback is kept on purpose:
+  `evaluateValidationRules` is also handed raw, unparsed field definitions, which still
+  carry the alias.
+
+  **Authoring is unchanged.** `conditionalRequired` is still accepted on input, still
+  lowered, still listed in the reference docs and JSON Schema. Nothing to migrate in
+  app metadata.
+
+  **Consumers of the parsed metadata** must read the canonical slot:
+
+  - FROM `parsedField.conditionalRequired` → TO `parsedField.requiredWhen`
+  - One-line fix: `field.conditionalRequired || field.requiredWhen` becomes
+    `field.requiredWhen`
+
+  `z.infer<typeof FieldSchema>` no longer carries `conditionalRequired`, so a stale
+  reader fails to compile rather than silently reading `undefined`. A new
+  `FieldParseInput` (`z.input<typeof FieldSchema>`) names the author-facing shape that
+  still accepts the alias — distinct from the pre-existing `FieldInput` factory-helper
+  type, which is `Partial<Field>` and unrelated.
+
+- deb538f: fix(storage): let an object delegate file-read authorization to its service
+
+  Fixes a regression from the governed-download change (ADR-0104 D3 wave 2): a
+  **legitimate approver could see a decision attachment's filename but got 403
+  opening it**, found by driving app-showcase in a browser as a real non-admin
+  approver.
+
+  Cause: a field-owned file's download was authorized by testing whether the
+  caller can READ the owning row. For an ordinary business object that is right —
+  row readability _is_ the access rule. For `sys_approval_action` it is the wrong
+  authority: the audit table is deliberately closed to ordinary approver
+  positions (`operation 'find' … is not permitted for positions [auditor,
+everyone]`), so the test denied the very approver the attachment was filed for.
+  The approvals _service_ has always had the real rule, which is why the timeline
+  listing the attachment returned 200 while the bytes returned 403.
+
+  An object may now name a service to answer the question instead:
+
+  - `ObjectSchema.fileAccessDelegate` — a kernel service that authorizes
+    downloads of files owned by that object's media fields.
+  - `IFileAccessDelegate.authorizeFileRead(recordId, context)` — the contract.
+  - `sys_approval_action` declares `'approvals'`; `ApprovalService.authorizeFileRead`
+    reuses the _same_ gate `listActions` applies (visibility of the parent
+    request) rather than inventing a second, looser rule for the bytes.
+
+  **Fails closed**: a declared delegate that is missing or does not implement the
+  method denies, rather than silently reverting to the raw read it was declared to
+  replace. Objects without the declaration are unchanged.
+
+  Verified in the browser against app-showcase, both sides of the gate: the
+  approver now downloads the real PDF (200), and an anonymous request is still
+  refused (401) — the anonymous capability URL the original change closed stays
+  closed. A decision attachment ends up exactly as readable as the decision it
+  hangs off: never more, and no longer less.
+
+- 0c8a22f: feat(spec): one canonical conformance table for the filter logical combinators
+
+  `FilterCondition` is evaluated by four independent implementations, and nothing
+  held them to a shared standard:
+
+  | Backend                    | Where                                                       |
+  | -------------------------- | ----------------------------------------------------------- |
+  | SQL compiler               | `driver-sql` `applyFilterCondition`                         |
+  | In-memory matcher          | `driver-memory` `memory-matcher`                            |
+  | Record-at-a-time evaluator | `formula` `matchesFilterCondition` (RLS write-side `check`) |
+  | Read-scope SQL lowering    | `service-analytics` `read-scope-sql`                        |
+
+  In #3774 the SQL compiler OR-ed the contents _within_ a `$or` branch instead of
+  AND-ing them, so every `$or` filter matched more rows than it should. The other
+  three were correct — but that was luck, not enforcement, and the divergence was
+  invisible until someone ran a real query. The fix for #3774 left three
+  near-identical shape tables copied across packages and the fourth backend
+  unlocked entirely, which is the same drift setup one step later.
+
+  `@objectstack/spec/data` now exports the table itself:
+
+  - `FILTER_LOGIC_ROWS` — a 2x2 truth table over two columns (so a wrongly-OR-ed
+    pair always shows up as extra ids rather than by luck of the data), plus the
+    record-scope columns real read scopes are written against.
+  - `FILTER_LOGIC_CASES` — 17 cases, each a `FilterCondition` and the ids it must
+    match: keys within a branch, multiple operators on one field, `$and`/`$or`/
+    `$not` nesting in both key orders, and the scope shapes that occur in shipped
+    metadata.
+
+  Each backend now has a thin test that feeds the rows through its own evaluator
+  and asserts the shared expectations. **Adding a case to the table adds it to all
+  four at once** — that is the point.
+
+  Two things this bought immediately:
+
+  - `read-scope-sql` — the compiler that lowers RLS read scopes for the analytics
+    path — is now verified by **executing** its SQL against a real engine and
+    comparing rows. It was previously only checked by asserting the emitted SQL
+    string, whose ceiling is the author's own reading of SQL. It passes unchanged.
+  - The table is a public export, so a third-party driver author can check a new
+    backend against the same standard.
+
+  **Deliberate scope:** logical combinators only. The predicates are boring on
+  purpose — string equality, `$in`, `$ne`, `$gte`/`$lt`. Nothing here exercises
+  null handling, dates, numeric coercion, `LIKE` escaping or case sensitivity,
+  because those legitimately differ between a SQL engine and a JS matcher; folding
+  them in would make the table unpassable rather than more useful. A case belongs
+  in it only if **every** backend must agree.
+
+- 1d4756e: fix(i18n)!: `/i18n/labels/:object/:locale` emits the entry shape it declares —
+  and stops discarding `help`/`options` (#3847)
+
+  `GetFieldLabelsResponseSchema` has always declared each label as an object:
+
+  ```ts
+  labels: z.record(
+    z.string(),
+    z.object({
+      label: z.string(),
+      help: z.string().optional(),
+      options: z.record(z.string(), z.string()).optional(),
+    })
+  );
+  ```
+
+  Both serving surfaces emitted `Record<string, string>` — a bare label per field.
+  A client typed against `GetFieldLabelsResponse` read `labels[field].label` and
+  got `undefined`, because the value was the string itself. The SDK's type was
+  right the whole time; the servers were wrong.
+
+  The cost is not only the type mismatch. `FieldTranslationSchema` carries `help`
+  and `options`, bundles populate them, and the endpoint threw them away. objectui
+  needs exactly those — its `spec-translations.ts` transform reads `label` **and**
+  `options` (as `fieldOptions.<obj>.<fld>.<value>`) — and gets them by pulling the
+  whole bundle from `/i18n/translations/:locale` and resolving client-side. The
+  per-object endpoint could not have served it even if it wanted to: the data was
+  being dropped at the emit site.
+
+  Fixed at that emit site, `resolveObjectFieldLabels`, which both surfaces already
+  share as of #3833 — so one change covers both. `help` and `options` are attached
+  only when non-empty: an `options: {}` would claim a field has translated options
+  and hand back none, and a `help: ''` would erase a caller's source help text.
+  Fields with no non-empty `label` are still omitted entirely, which is what lets
+  `ResolvedFieldLabel.label` be a required string.
+
+  **The response schema is unchanged** — this moves the implementation onto the
+  contract, not the contract onto the implementation. Generated docs are
+  byte-identical for that reason.
+
+  `placeholder` is deliberately left out. `FieldTranslationSchema` has it and the
+  response schema does not, so emitting it would be widening the contract rather
+  than satisfying it — and adding an optional response field later is additive and
+  non-breaking, whereas guessing now is not.
+
+  The regression guard is the part worth keeping: a test that builds the response
+  body from the shared helper and parses it with `GetFieldLabelsResponseSchema`.
+  Nothing had ever put the emitted value and the declared contract in one
+  assertion, which is precisely why a bare string could sit under an object schema
+  unnoticed. Third and last of the declared ≠ enforced gaps on this endpoint
+  family, after #3676 (request filters no server read) and #3833 (a derivation
+  scanning a retired dialect).
+
+  BREAKING: `labels[field]` is now `{ label, help?, options? }` rather than a
+  string. No consumer in this repo or objectui read it — objectui never calls this
+  route, and in-repo use is the SDK method plus URL-shape tests — so the practical
+  blast radius is nil, and this is the cheap moment to align it.
+
+- 720c5ad: fix(runtime,i18n): the dispatcher's field-labels route reads the bundle shape
+  producers actually write — one shared derivation (#3833)
+
+  `GET /i18n/labels/:object/:locale` served through the dispatcher returned
+  `{ labels: {} }` for every provider. Its derivation scanned for flat
+  `o.<object>.fields.<field>` keys:
+
+  ```ts
+  const prefix = `o.${objectName}.fields.`;
+  for (const [key, value] of Object.entries(translations)) { … }
+  ```
+
+  That dialect was retired by #3778 — no producer has ever written it, and a real
+  bundle's top-level keys are the `TranslationData` groups (`objects`, `apps`,
+  `messages`, …), so the prefix could not match anything. 4cca74c fixed the
+  identical derivation in `service-i18n` and did not reach the dispatcher's copy.
+
+  This is not a rare fallback. `getFieldLabels` is optional on `II18nService` and
+  **nothing implements it** — not `memory-i18n`, not `file-i18n-adapter` — so the
+  dedicated-method branch both surfaces check first is dead in production and this
+  derivation is the only path there is. Any stack served by the dispatcher (the
+  AppPlugin in-memory provider auto-registered for stacks declaring translation
+  bundles) got an empty map, indistinguishable from "this object has no translated
+  labels": nothing errored, nothing warned.
+
+  Worse than the class it was found next to. #3676, which prompted the check,
+  ignored a declared filter and returned the full bundle — a correct superset. This
+  returned nothing and said it was fine.
+
+  The derivation now lives once, as `resolveObjectFieldLabels` in
+  `packages/spec/src/system/i18n-resolver.ts`, alongside the other resolvers that
+  read `TranslationData`. Both surfaces call it. Keeping a copy each is precisely
+  how one got fixed and the other did not; the next bundle-shape change now has one
+  place to land. Fields carrying no non-empty `label` stay omitted rather than
+  emitted blank — partial translation is the normal state, and callers merge this
+  map over their source labels, where a `''` would erase them.
+
+  ### The tests were fiction on both sides
+
+  The dispatcher's fallback test fed flat `o.contact.fields.first_name` keys and
+  asserted labels came back, so it passed on data that cannot occur while
+  production returned `{}` — the same failure mode as the client test retired in
+  #3676, which asserted a query string was built that no server read. It now feeds
+  the nested shape, and was confirmed to fail against the pre-fix code (`expected
+{} to deeply equal { first_name: 'First Name', … }`) rather than merely passing
+  after it. The shared helper carries its own unit tests, including one pinning
+  that the retired flat dialect resolves to `{}`.
+
+  The same suite's mock also declared a `getFieldLabels` no shipped provider has,
+  and returned flat-dialect data from `getTranslations`; both now reflect what a
+  real provider does, with the divergence noted where it remains deliberate.
+
+  Not addressed here, filed separately: `GetFieldLabelsResponseSchema` declares
+  `labels` as `Record<string, { label, help?, options? }>`, but both surfaces emit
+  `Record<string, string>` — a third declared ≠ enforced gap in the same endpoint,
+  and a wire-shape change too breaking to fold into a correctness fix.
+
+- 41642b0: fix(runtime,i18n)!: `/i18n/locales` answers in one shape — plus the
+  success-envelope conformance gate that found it
+
+  Follow-up to #3676 / #3833 / #3847. Those three were each a body that did not
+  match the schema declaring it, and each survived a green suite because **every
+  test asserted the emitted body against a hand-written literal**. Comparing
+  output to a literal proves the code does what the test author believed; it
+  cannot prove the code does what the contract declares. Nothing had ever put the
+  emitted value and the declared schema in the same assertion.
+
+  This adds that assertion as a suite — `i18n-success-envelope.conformance.test.ts`
+  in `runtime`, the missing success-path twin of service-i18n's
+  `error-envelope.conformance.test.ts` and the same pairing storage got in #3689.
+  Every `/i18n` success body is parsed against `BaseResponseSchema` and against
+  the schema `plugin-rest-api` names for that route (`responseSchema:
+'GetLocalesResponseSchema'`, …), imported rather than restated.
+
+  **It found a fourth gap on its first run.** `GET /i18n/locales` passed
+  `getLocales()`'s raw `string[]` straight through the dispatcher, while
+  `GetLocalesResponseSchema` declares `{ code, label, isDefault }[]` — and
+  service-i18n, the _other_ provider of this identical route, already emitted
+  descriptors. One endpoint, two shapes, decided by which plugin mounted it, with
+  the dispatcher's form contradicting the SDK's own `GetLocalesResponse` type.
+
+  That is the same split #3833 found in the field-labels derivation, one route
+  over, and it happened for the same reason: two surfaces, one mapping, kept
+  twice. So the mapping is now shared as `toLocaleDescriptors` in
+  `packages/spec/src/system/i18n-resolver.ts`, next to `resolveObjectFieldLabels`,
+  and both surfaces call it. `label` is the locale code — no display-name source
+  exists in the tree and the schema requires the field; inventing an ICU
+  display-name table here would be a product decision, not an implementation
+  detail.
+
+  The gate was verified the same way #3833's was: the fix was reverted and the
+  suite confirmed to fail on it —
+
+  ```
+  locales body does not match its declared schema:
+    [{"expected":"object","code":"invalid_type","path":["locales",0],
+      "message":"Invalid input: expected object, received string"}, …]
+  ```
+
+  — rather than merely passing once written. Five existing tests pinned the bare
+  `string[]`; they now assert on `.map(l => l.code)`, so the codes stay pinned
+  while the shape is owned by the schema.
+
+  BREAKING: `GET /i18n/locales` served by the dispatcher now returns
+  `[{ code, label, isDefault }]` instead of `['en', …]`. Callers on the
+  service-i18n mount already received this shape, and the SDK's published
+  `GetLocalesResponse` type has always described it, so this ends a divergence
+  rather than starting one.
+
+  Worth generalizing beyond `/i18n`: `plugin-rest-api.zod.ts` already carries a
+  `responseSchema` name on essentially every route (29 declarations across 28
+  handlers), so the route → declaring-schema mapping needed to run this check
+  repo-wide exists today and is unused.
+
+- 4cca74c: fix(i18n)!: the `translation` metadata type speaks the same `objects.` shape everything else does (#3778)
+
+  A translation authored in the product saved successfully and then rendered
+  nothing. Not a resolver gap — a contract split. The `translation` metadata type
+  (`allowRuntimeCreate: true`, so Studio/the metadata API/an agent can author it)
+  was registered against `AppTranslationBundleSchema`, an object-first shape keyed
+  on `o.<object>`. Every resolver, `os i18n extract`, `os i18n check`, the objectui
+  hooks, and all nine shipped bundles read `objects.<object>`. Nothing bridged the
+  two, so the save path and the read path never met.
+
+  **Why converge instead of bridge.** A converter was the obvious fix and the
+  wrong one: it would be throwaway code, and it would start producing _working_
+  `o.`-shaped rows — closing the migration-free window that exists precisely
+  because the feature never functioned. The retired shape's real-world footprint
+  was zero: all three `*.translation.ts` files in the tree (platform-objects,
+  CRM and todo examples) were already `objects.`-shaped, contradicting the type's
+  own registered schema. Converging is a registration fix, not a migration.
+
+  **Breaking.** `AppTranslationBundleSchema`, `ObjectTranslationNodeSchema`, and
+  their types are **deleted** — no deprecation cycle. Nothing worked end-to-end
+  through them, so there is no functioning consumer to protect, and a
+  deprecated-but-present schema is exactly the exemplar an AI agent copies into
+  new code. The optional `II18nService.getAppBundle` / `loadAppBundle` methods go
+  with them: zero implementers, so they advertised a capability the runtime never
+  delivered.
+
+  **The replacement.** `TranslationItemSchema` — one locale of the same
+  `TranslationData` groups a file bundle uses, plus the `locale` it translates,
+  with a `defineTranslation()` factory. An item is one entry of a
+  `TranslationBundle`; that is the whole type.
+
+  Three details are deliberate, all aimed at the failure being silent rather than
+  loud:
+
+  - **`locale` is required**, not inferred from the item name. The sync skips an
+    item whose locale it cannot resolve, and a skip is invisible to whoever — or
+    whatever — authored it. (The name fallback still covers rows written before
+    this.)
+  - **Retired keys are rejected, not stripped.** Zod drops undeclared keys
+    silently, which would reproduce this bug exactly: save succeeds, nothing
+    renders. A pre-parse guard turns that silence into a 422 naming the group to
+    use (`'o' … — use 'objects.<object_name>'`). It runs ahead of the parse so the
+    retired keys stay out of the schema itself — the generated JSON Schema and the
+    Studio editor never advertise a shape that cannot work.
+  - **`ObjectTranslationData.label` is now optional.** Partial translation is the
+    normal state and every resolver already treats each key as independent.
+    Requiring it forced authors to restate the source label just to validate,
+    filling bundles with fake translations that mask real coverage gaps.
+
+  Also in this change: the authored-translation sync warns (naming the row and the
+  fix) when it meets a row still in the retired shape instead of loading it into
+  nowhere, and no longer merges publish bookkeeping (`_lockReason`,
+  `_packageVersion`, …) into the translation layer. `GET
+/i18n/labels/:object/:locale`'s fallback now reads the nested
+  `objects.<obj>.fields.<field>.label` data it is actually given — it scanned for
+  flat dotted `o.<obj>.fields.<field>` keys, a third dialect no producer ever
+  wrote, so it always returned `{}`.
+
+  Migration: author every translation — file or runtime item — under `objects.`.
+  `o` → `objects`, `app` → `apps`, `nav` → `apps.<app>.navigation.<id>.label`,
+  `dashboard` → `dashboards`, `_globalOptions` →
+  `objects.<obj>.fields.<field>.options`, `_meta.locale` → top-level `locale`,
+  `_actions.confirmMessage` → `_actions.confirmText`. `reports`, `notifications`,
+  `errors`, and `namespace` had no runtime consumer and have no replacement.
+
+- 88ef03e: fix(spec,client)!: `GetTranslationsRequest` is locale-only — drop the
+  `namespace` / `keys` filters no server ever read (#3676)
+
+  `GetTranslationsRequestSchema` declared two optional filters, and the endpoint
+  description promised one of them ("...for the specified locale and optional
+  namespace"). Neither serving surface read either: the dispatcher domain body
+  (`runtime/src/domains/i18n.ts`) takes `parts[1]` / `query.locale`, and
+  service-i18n (`i18n-service-plugin.ts`) takes `req.params.locale`. Both return
+  the locale's whole bundle. The SDK meanwhile put both on the query string, so a
+  caller who passed `keys` to shrink the response shrank nothing and got no
+  indication the filter was inert — Prime Directive #10's declared ≠ enforced, the
+  same shape #1475 trimmed out of the validation-rule types.
+
+  Trimmed rather than implemented, on three counts:
+
+  - **No consumer.** No call site in this repo or `objectui` passed either field.
+    The docs (`content/docs/api/client-sdk.mdx`, `skills/objectstack-i18n/SKILL.md`)
+    already documented `getTranslations(locale)` as a full-bundle snapshot, so the
+    schema was the outlier, not the docs. The one thing that did exercise them was
+    a client test asserting the query string got _built_ — it pinned the phantom
+    rather than any behaviour, since no server read what it asserted was sent. It
+    is replaced here by its inverse: a regression test that the request carries no
+    filter query at all.
+  - **`keys` could not deliver what it advertises.** `II18nService.getTranslations`
+    (`contracts/i18n-service.ts`) takes only `locale`, so a filter could only be a
+    post-filter over an already-materialized bundle. `keys` reads as a payload
+    optimization; a post-filter saves wire bytes but none of the server work, and
+    widening the contract would break every implementer (`memory-i18n`,
+    `file-i18n-adapter`) for a capability with no caller.
+  - **`keys` has no defined meaning against the current bundle shape.** Under the
+    retired flat `o.`-dotted dialect, `keys: ['o.account.label']` was an obvious
+    pick. #3778 settled the tree on one nested `TranslationData` shape, where a
+    flat `string[]` is neither a path set nor a group set, and a filtered response
+    would have to be rebuilt as a sparse nested tree to stay schema-valid. That is
+    a design decision, and nothing is waiting on it.
+
+  `namespace` is the one that got _easier_ — it now lands exactly on
+  `TranslationData`'s top-level groups, which is what its own description already
+  said ("e.g., objects, apps, messages"). It is still trimmed here: re-adding an
+  optional request field is additive and non-breaking the day the Studio's
+  per-module views actually need it, whereas shipping an unexercised filter path
+  now means dead code with tests to match, and a declared-but-unread field is
+  precisely the exemplar the next author copies.
+
+  BREAKING: the two schema fields and the `getTranslations(locale, options?)`
+  second parameter are removed with no deprecation cycle. Nothing worked through
+  them — a passed filter was silently ignored — so there is no behavior to
+  protect. Runtime impact is nil (the fields were optional and now strip); TS
+  callers passing them fail to compile, which is the intended signal.
+
+- 9e2caf3: feat(spec): codify the IHttpServer soft extensions and unmatched-request semantics (#3607, ADR-0076 OQ#10 follow-up)
+
+  Three behaviors every adapter already implements — locked until now only by
+  the `@objectstack/http-conformance` cross-adapter suite — become formal
+  contract on the interface: `IHttpResponse.write`/`end` (SSE/chunked
+  streaming: headers flush on first write, no buffering until end, `end`
+  required wherever `write` exists), `IHttpServer.getPort()` (real bound port
+  after `listen()`, incl. ephemeral `listen(0)`), and the unmatched-request
+  semantics (path-miss → 404 with the shared not-found body; method-miss →
+  405 with an `Allow` header). All members optional with feature-detect
+  guidance — zero behavior change, both adapters already conform; the
+  conformance assertions now cite the contract instead of merely observing
+  parity.
+
+- 394b7a1: feat(job): honor the authored `retryPolicy` / `timeout` in the job scheduler (#3494)
+
+  `JobSchema.retryPolicy` and `JobSchema.timeout` used to be parsed-but-ignored
+  (the 2026-06 liveness audit's aspirational-config cluster). They are now
+  enforced end to end — built rather than pruned, since retry/backoff and
+  per-run time limits are semantics job authors reasonably expect:
+
+  - **spec**: `IJobService.schedule` gains an optional 4th `options` argument
+    (`JobScheduleOptions` with `retryPolicy` / `timeout`, mirroring the
+    authorable schema); new `JobRetryPolicy` type. Backward compatible —
+    existing 3-arg implementations and callers are unaffected.
+  - **service-job**: new `runWithPolicy` helper (exported, with
+    `JobTimeoutError`) wraps every handler invocation in `CronJobAdapter` and
+    `IntervalJobAdapter`; `DbJobAdapter` threads options through to its inner
+    adapters. Failed attempts (including timeouts) retry with exponential
+    backoff `backoffMs * backoffMultiplier^(retry-1)` up to `maxRetries`;
+    an attempt exceeding `timeout` is recorded with execution status
+    `'timeout'`. No `options` → exactly the legacy single-attempt behavior.
+  - **runtime**: declarative-jobs registration in AppPlugin forwards the
+    authored `retryPolicy` / `timeout` to the scheduler.
+
+  Note: JavaScript cannot forcibly cancel an in-flight handler — a timed-out
+  attempt is abandoned, not killed. The retry delay caps only via the
+  multiplier arithmetic (no maxDelay knob yet).
+
+  Refs #3494, #1878, #1893.
+
+- 677b591: feat(spec): `ListColumn` gains `prefix` and the `{ type, field }` `summary` form (objectui#2231)
+
+  Two list-column capabilities the ObjectUI grid renderer has shipped for a while
+  were missing from the protocol, so they lived on as a local `.extend()` in
+  `@object-ui/types` — the exact fork-shaped drift objectui#2231 is closing. Both
+  are now spec-owned:
+
+  - **`prefix`** (`ColumnPrefixSchema`) — Airtable-style compound cells: render a
+    second field inline before the cell value (e.g. a status badge in front of the
+    record name), so a list carries two signals in one column.
+    `{ field, type?: 'badge' | 'text' }`, `type` defaulting to `'text'`.
+  - **`summary` object form** (`ColumnSummaryConfigSchema`) — `{ type, field? }`,
+    for a footer that aggregates a field OTHER than the column's own (an `amount`
+    column summing `amount_in_base_currency`). The shorthand `summary: 'sum'` is
+    unchanged and remains the common case. `type` reuses `ColumnSummarySchema`, so
+    both forms share one aggregation vocabulary and cannot drift apart.
+
+  Additive and backward compatible: every previously valid `ListColumn` still
+  parses. New exports: `ColumnPrefixSchema` / `ColumnPrefix` and
+  `ColumnSummaryConfigSchema` / `ColumnSummaryConfig`.
+
+- 0045682: feat(auth)!: membership grade is not a capability channel — the `sys_member.role`
+  vocabulary is closed (ADR-0108, #3723)
+
+  `sys_member.role` answers "what is your standing in this organization". It does
+  not answer "what may you do" — that is what positions are for. One column was
+  answering both.
+
+  `resolve-authz-context` projects EVERY value stored in `sys_member.role` into
+  `current_user.positions`, alongside the rows read from `sys_user_position`. So a
+  business role handed out through the membership role _was_ capability — granted
+  with none of the position system's controls: no `granted_by`, no ADR-0091
+  validity window, no BU-subtree check, no `assignablePermissionSets` allowlist.
+  That is what ADR-0057 D4 ruled out ("feed the names to better-auth **only** so
+  invitations are accepted — **never as the authority for RBAC**"), what
+  ADR-0090 D3's word ban restates (distribution = `position`), and what
+  ADR-0095 D3 keeps out of the enforcement path.
+
+  The vocabulary is therefore closed to the four framework-owned names:
+  `owner` / `admin` / `delegated_admin` / `member`.
+
+  **BREAKING — `additionalOrgRoles` is removed** from `AuthManagerOptions` and
+  `AuthPluginOptions`, together with `plugin-auth/src/org-roles.ts` in full
+  (`collectStackOrgRoles`, `collectRegisteredOrgRoles`,
+  `normalizeAdditionalOrgRoles`, `membershipRoleOptions`,
+  `withMembershipRoleOptions`, `membershipRoleLabel`, `orgRoleNames`,
+  `MEMBERSHIP_ROLE_OBJECTS`, `OrgRoleDescriptor`, `OrgRoleInput`,
+  `OrgRoleLogger`) and the `kernel:ready` derivation hook that fed them. From
+  `@objectstack/spec`, `MEMBERSHIP_ROLE_NAME_PATTERN` and
+  `MEMBERSHIP_ROLE_NAME_MIN_LENGTH` are removed — they existed only to validate
+  app-supplied names. A TypeScript error is the intended failure: an option that
+  is silently ignored is `declared ≠ enforced` one more time.
+
+  FROM → TO:
+
+  ```diff
+  - new AuthPlugin({ additionalOrgRoles: ['sales_rep'] })
+  + new AuthPlugin({ /* nothing — declare `sales_rep` as a position */ })
+
+  - POST /organization/invite-member { email, role: 'sales_rep' }
+  + POST /organization/invite-member { email, role: 'member',
+  +                                    businessUnitId, positions: ['sales_rep'] }
+  ```
+
+  For an existing member, assign the position through `sys_user_position` (the
+  governed write path). Invitation placement (ADR-0105 D8) is the one-step
+  admission flow: issuance is authorized against the issuer's `adminScope` by
+  dry-running `DelegatedAdminGate`, and acceptance writes real
+  `sys_user_position` rows with a `granted_by` stamp. It reaches **further** than
+  what it replaces — a delegated admin may use it within their subtree, where the
+  membership-role route was open to org admins only (the invitation role cap holds
+  anyone below admin grade to plain `member`).
+
+  An invitation naming an app role now fails at better-auth's door with
+  `ROLE_NOT_FOUND`, before any row is written.
+
+  This reverses two changesets that were never consumed into a release
+  (`app-org-roles-storable`, `auth-org-roles-self-derived`), so no published
+  version ever offered the behaviour; both are removed rather than shipped and
+  retracted in the same changelog. A pre-existing deployment could only have
+  stored a custom value by direct DB write.
+
+  Also derived rather than transcribed: `@objectstack/lint`'s `MEMBERSHIP_TIERS`
+  now reads `BUILTIN_MEMBERSHIP_ROLES` from `@objectstack/spec`. The hand-kept
+  copy carried `guest`, which the `sys_member.role` select has never offered — an
+  approver authored as `{ type: 'org_membership_level', value: 'guest' }`
+  resolved to nobody and the lint whose whole job is to catch that stayed silent.
+
+- 2a5f04a: `<ObjectChart>` aggregate result-column naming is now a contract, and its axis bindings are validated (issue #3701)
+
+  Split out of #3583 Phase 2 (#3684), which extended ADR-0021 axis checking to
+  report charts, list-view charts, and dataset-bound page chart components but had
+  to leave the react `<ObjectChart>` block out: it is OBJECT-bound (`objectName` +
+  an inline `aggregate`), `aggregate` existed in the contract only as the
+  description string `'{ field, function, groupBy }'`, and nothing in the repo said
+  what the aggregated result columns were called. Without that, `xAxis`/`yAxis` had
+  nothing to resolve against, and guessing a convention would have manufactured
+  false positives (ADR-0072 D1).
+
+  **The convention, recorded rather than invented.** Every path that can serve an
+  object-bound chart already agreed — the engine's structured-`groupBy` aggregate
+  (whose alias objectui sets to `field || function`), the legacy analytics query
+  (which remaps its measure key back to `field`), the client-side fallback, and the
+  console's own chart-view wiring (`xAxisKey: groupBy`, `series[].dataKey: field`).
+  `packages/spec/src/ui/chart-aggregate.ts` writes it down and exports it:
+
+  - an object-bound aggregate returns rows keyed by the **raw field names** —
+    `groupBy` for the category column, `field` for the value column, the literal
+    `count` for a fieldless count, plus `<field>__comparison` under a comparison
+    overlay;
+  - `chartAggregateCategoryKey` / `chartAggregateValueKey` / `chartAggregateResultKeys`
+    derive those columns so producers and checkers cannot re-derive them apart;
+  - `ChartAggregateSchema` replaces the description string with a real Zod schema
+    and rejects a non-`count` function with no `field` (which used to reach the
+    renderer as `sum(undefined)` and render blank).
+
+  This is the deliberate opposite of the dataset path, whose rows are keyed by the
+  declared measure `name` (`sum_amount`) — the trap `chart-measure-unknown` catches.
+  Only the dataset path has an author-chosen name to key by.
+
+  **`<ObjectChart>`'s contract now names the props it actually reads.** The block
+  consumes `xAxisKey` and `series[].dataKey`; `ChartConfig`'s `xAxis`/`yAxis`/`series`
+  shapes reached it and were silently dropped, which ADR-0078 forbids. They are
+  removed from the block's `dataProps`; `chartType`, `xAxisKey`, and `series` are
+  declared in the React overlay where the other bindings live.
+
+  **`validate-react-page-props` now reads attribute VALUES**, not just names, for
+  `<ObjectChart>`:
+
+  - `react-chart-field-unknown` (error) — `aggregate.field` / `aggregate.groupBy`
+    naming a field the bound object does not declare;
+  - `react-chart-aggregate-invalid` (error) — an unimplemented aggregation
+    function, or a non-`count` function with nothing to aggregate;
+  - `react-chart-axis-unknown` (error) — `xAxisKey` / `series[].dataKey` naming a
+    column the aggregate does not return (including a dataset-style `sum_total`),
+    or a category axis bound to the value column;
+  - `react-chart-axis-inert` (warning) — the `xAxis` / `yAxis` shapes this block
+    never reads.
+
+  Value reading is opt-in per block and evaluates only static literals: a prop
+  driven by React state or a variable, a usage carrying a `{...spread}`, a chart
+  given inline `data`, and objects another package defines are all skipped
+  silently — an unresolvable binding is not a wrong one.
+
+- 4f740b0: `<ObjectChart>`'s author contract is the spec `ChartConfig` shape again (issue #3729)
+
+  #3701 trimmed `xAxis`/`yAxis`/`series` out of the `<ObjectChart>` contract
+  because the renderer read `xAxisKey`/`series[].dataKey` and silently dropped the
+  ChartConfig shapes — an honest record of the runtime gap, not the target state.
+  objectui#2880 closed the gap the other way round (the renderer now honors
+  `ChartConfig` through one normalization boundary), so the contract follows the
+  protocol again (ADR-0082 D1: the spec schema IS the protocol).
+
+  **Contract.** `type`, `xAxis`, `yAxis`, `series`, `subtitle`, `showDataLabels`,
+  `annotations` and `interaction` are published from `ChartConfigSchema`; the
+  internal `chartType`/`xAxisKey`/`series[].dataKey` spellings leave the author
+  contract. `annotations` and `interaction` gained the `.describe()` they never
+  had, so the generated contract stops publishing bare `object[]` with no meaning.
+
+  **The `type` exception.** `ChartConfig.type` is the chart family, but on any
+  surface that flattens chart config into a props bag `type` is already the SDUI
+  envelope's component discriminator — an author writing `type="bar"` used to
+  replace `object-chart` and the block stopped resolving. The collision is created
+  by the flattening and is resolved there (objectui's react-page wrapper), so the
+  contract can publish `type` as the spec spells it. The contract generator's
+  blanket `type` skip is now overridable by an explicit `dataProps` allow-list,
+  since for this one block `type` is a real author prop.
+
+  **Lint.** `validate-react-page-props` reads the axes in the spec spelling —
+  `xAxis.field`, `yAxis[].field`, `series[].name` — and keeps accepting the
+  internal spellings silently, because dashboards and the console's own chart-view
+  wiring emit them. `react-chart-axis-inert` is retired: the props it warned about
+  are honored now, so the warning would be false. The three binding-integrity
+  rules from #3701 are unchanged.
+
+  **Spec.** `chart-aggregate.ts` records the constraint the whole result-column
+  convention rests on: an inline `aggregate` is SINGLE-MEASURE. Keying rows by the
+  raw field name only works because there is exactly one measure to key; two
+  measures over one field would collide, and resolving that needs an author-chosen
+  name per measure — which is what a dataset is. Widening `ChartAggregateSchema`
+  into a measures array would silently invalidate every axis binding these rules
+  validate, so the boundary is now written down rather than left to be rediscovered.
+
+  The chart taxonomy note is corrected too: grouped/stacked bar and stacked area
+  are absent from `ChartTypeSchema` not because they render as their base chart,
+  but because stacking is a property of the SERIES (`ChartSeries.stack`), not a
+  chart family — one `bar` family plus a series stack group expresses all three.
+  `ChartInteraction.zoom` is now marked declared-not-delivered in its own
+  description rather than reading as shipped.
+
+- 67452d1: feat(spec): resolve page metadata i18n — `page:header` title/subtitle (#3589)
+
+  Custom system pages authored as metadata (Installed Apps, Cloud Connection,
+  Connect an Agent) hard-code their `page:header` copy in
+  `properties.title` / `properties.subtitle`. Every other metadata type is
+  localized at the REST boundary, but `page` was not: the `pages` namespace
+  existed only on `AppTranslationBundleSchema` — a schema no runtime reads —
+  with no resolver behind it, so those headers stayed English in every locale
+  while the matching nav labels translated correctly.
+
+  - `TranslationDataSchema` (the shape the i18n service actually serves) gains a
+    `pages` namespace: `pages.<name>.{label,description,title,subtitle}`.
+  - New `translatePage` in `@objectstack/spec/system` translates a page's own
+    `label` / `description` and overlays `title` / `subtitle` onto every
+    `page:header` in the page's regions. Registered in
+    `translateMetadataDocument`, so it rides the existing read path.
+  - `page` added to the REST boundary's `TRANSLATABLE_META_TYPES`. Locale
+    extraction, the locale-keyed ETag, and `Vary: Accept-Language` already
+    covered every metadata type — no new plumbing.
+  - `objectstack i18n extract` now emits page entries, including the
+    `page:header` copy, so the new namespace is not invisible to the tooling.
+  - zh-CN / ja-JP / es-ES translations shipped for the three Setup pages, plus
+    the missing `nav_cloud_connection` / `nav_connect_agent` nav labels (these
+    existed only in zh-CN).
+
+  Header copy is keyed by **page name**, not by component id: `page:header`
+  instances carry no stable id. `title` falls back to `pages.<name>.label`, since
+  a page's header title and its nav label are normally the same string.
+
+  Authoring is unchanged and English literals stay in metadata as the fallback —
+  a page with no `pages` entry renders exactly as before. Consumers of
+  `@object-ui` need no change: pages arrive already localized from the server.
+
+- 605e190: feat(spec)!: prune the still-dead aspirational config from Theme / Translation / Webhook (#3494)
+
+  Removes the authorable-but-never-consumed props confirmed dead by the 2026-06
+  liveness audit (follow-up to #1878/#1893; same treatment as the #2377 and
+  #3464 prunes). Authoring any of these was a silent no-op.
+
+  ## Removed
+
+  **Theme** (`ThemeSchema`) — the theme engine (objectui `generateThemeVars`)
+  never emitted or consumed them:
+
+  - Props: `spacing`, `breakpoints`, `logo`, `density`, `wcagContrast`, `rtl`,
+    `touchTarget`, `keyboardNavigation`
+  - Exports: `SpacingSchema`, `BreakpointsSchema`, `DensityModeSchema` (+
+    deprecated `DensityMode` alias), `WcagContrastLevelSchema` (+ deprecated
+    `WcagContrastLevel` alias), and the `Spacing` / `Breakpoints` /
+    `DensityMode` / `WcagContrastLevel` types
+
+  **Translation** (`TranslationConfigSchema`) — no runtime reader; there is no
+  ICU engine and interpolation is always simple `{variable}` substitution:
+
+  - Props: `fileOrganization`, `messageFormat`, `lazyLoad`, `cache`
+  - Exports: `MessageFormatSchema`, `TranslationFileOrganizationSchema`, and the
+    `MessageFormat` / `TranslationFileOrganization` types
+
+  **Webhook** (`WebhookSchema`) — the delivery path always sends its own fixed
+  envelope and only applies HMAC signing via `secret`; delivery retries are owned
+  by the messaging outbox's fixed schedule:
+
+  - Props: `body`, `payloadFields`, `includeSession`, `authentication`
+    (bearer/basic/api-key were never attached; HMAC via `secret` stays),
+    `retryPolicy`, `tags`
+  - Exports: the entire inbound `WebhookReceiverSchema` + `WebhookReceiver` type
+    (never consumed by any runtime)
+
+  ## Migration
+
+  Delete these keys from your configs — they never did anything, so removing
+  them changes no behavior. Parsed output no longer contains the previously
+  defaulted keys (`includeSession: false`, `fileOrganization: 'per_locale'`,
+  `messageFormat: 'simple'`, `lazyLoad: false`, `cache: true`). Webhook HMAC
+  signing (`secret`), `headers`, and `timeoutMs` are unaffected. File layout for
+  translations remains a pure authoring convention — no config knob needed.
+
+  ## Deliberately NOT removed
+
+  - Translation `supportedLocales` — it has a live reader (pinyin-search
+    capability toggle in `serve.ts`).
+  - Job `retryPolicy` / `timeout` — being implemented (built, not pruned) in the
+    #3494 follow-up PR.
+  - The materialized webhook props (`name`, `object`, `triggers`, `url`,
+    `method`, `headers`, `timeoutMs`, `secret`, `isActive`, `description`,
+    `label`) — live via the #3489 bridge; ledger flip tracked in #3490.
+
+  Refs #3494, #1878, #1893.
+
+- c6c59f1: feat(spec)!: remove the dead `AuditConfig` cluster from `@objectstack/spec/system` (#1878 recheck loose-end)
+
+  The entire `system/audit.zod.ts` module — `AuditConfigSchema`,
+  `AuditStorageConfigSchema`, `AuditRetentionPolicySchema`,
+  `AuditEventFilterSchema`, `SuspiciousActivityRuleSchema`,
+  `DEFAULT_SUSPICIOUS_ACTIVITY_RULES`, and the `AuditEvent` /
+  `AuditEventActor` / `AuditEventTarget` / `AuditEventChange` /
+  `AuditEventType` / `AuditEventSeverity` shape schemas (plus all their
+  type exports) — is removed. Verified zero consumers repo-wide: the live
+  audit path (`plugin-audit`) imports none of it, defines its own
+  `sys_audit_log` row shape, and captures **unconditionally** via engine
+  hooks, so `AuditConfigSchema.enabled: false` advertised a semantic
+  (turning the compliance ledger off) the platform deliberately rejects.
+  Same ADR-0056 D8 family as the earlier `compliance.zod` / `masking.zod` /
+  `RLSAuditConfig` / `PolicySchema` removals: security/compliance-shaped
+  config must never merely look live.
+
+  **Migration — every dead knob maps to a live surface (or is deliberately
+  not configurable):**
+
+  | Removed (never enforced)                                                          | Live replacement                                                                                                         |
+  | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+  | `AuditConfigSchema.enabled`                                                       | none — audit capture is **always on** (compliance ledger; `object.zod` `trackHistory` contract)                          |
+  | `eventTypes` / `excludeEventTypes` / `minimumSeverity` / `AuditEventFilterSchema` | none today — if event filtering ships it lands as an `audit` **settings** namespace (ADR-0069 pattern), not app metadata |
+  | which fields/objects are summarized + History tab UI                              | object-level + field-level **`trackHistory`** (live, enforced by plugin-audit)                                           |
+  | `AuditRetentionPolicySchema` / `storage`                                          | object **`lifecycle`** `audit` category (retain → archive → delete) + per-org settings overrides (ADR-0057)              |
+  | `SuspiciousActivityRuleSchema` / `DEFAULT_SUSPICIOUS_ACTIVITY_RULES`              | none — no detection engine exists; security monitoring is org-operations tooling, not app-package metadata               |
+  | `AuditEvent*` shape schemas                                                       | the `sys_audit_log` object definition in `plugin-audit` is the row-shape source of truth                                 |
+
+  No first-party, example, or downstream-contract code imported any of
+  these symbols; `defineStack` never accepted an `audit` key, so no stack
+  config changes. Docs page `references/system/audit.mdx` is removed by
+  regeneration; the security-context module doc now marks audit alongside
+  the previously removed compliance/masking subsystems.
+
+- b0e78a8: feat(spec)!: remove the dead static capabilities-descriptor cluster (`ObjectQL`/`ObjectUI`/`Kernel`/`ObjectStack`/`ObjectOS CapabilitiesSchema`) (#1878 family)
+
+  The "RUNTIME CAPABILITIES PROTOCOL" tail of `stack.zod.ts` — `ObjectQLCapabilitiesSchema`,
+  `ObjectUICapabilitiesSchema`, `KernelCapabilitiesSchema`, `ObjectStackCapabilitiesSchema`,
+  the deprecated `ObjectOSCapabilitiesSchema` alias, and all five inferred types — is
+  removed. Verified zero consumers repo-wide (framework, objectui apart from bare
+  re-exports, cloud, downstream-contract): it was never authorable (`defineStack` has
+  no such key), never registered, and never fed any endpoint.
+
+  Worse than dead, it **lied**: the fixed-boolean self-portrait defaulted
+  `fieldLevelSecurity` / `rowLevelSecurity` / `auditLogging` / `backgroundJobs` to
+  `false` while every one of those is live and enforced on the platform, and
+  advertised `odataApi` which has never existed. An AI reading the schema would
+  build a systematically wrong model of the platform.
+
+  **Migration — runtime capability discovery is dynamic, not a static schema:**
+
+  | Removed                                                                       | Live replacement                                                                                                                                                                                         |
+  | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `KernelCapabilitiesSchema` booleans (`restApi`/`websockets`/`auditLogging`/…) | `GET /api/v1/discovery` — dynamic `capabilities` record with **declared === enforced** discipline (#3298: a capability is advertised only when the route is actually mounted AND the engine supports it) |
+  | `WellKnown`-style backend feature probes                                      | `WellKnownCapabilitiesSchema` (`@objectstack/spec/api` discovery contract: `comments`/`automation`/`cron`/`search`/…)                                                                                    |
+  | `ObjectQLCapabilitiesSchema` driver/query booleans                            | driver-level `DriverCapabilities` / `DatasourceCapabilities` (`@objectstack/spec/data`) — per-connection, resolved at runtime                                                                            |
+  | `ObjectStackCapabilitiesSchema` layer roll-up + `ObjectOS*` aliases           | none — no replacement import                                                                                                                                                                             |
+
+  The objectui `@object-ui/types` re-exports of these symbols are dropped in the
+  companion objectui change. `ClusterCapabilityConfigSchema` / `FeatureFlagSchema` /
+  `ApiEndpointSchema` (referenced by the dead cluster) are untouched — they live in
+  their own modules and `ApiEndpointSchema` remains consumed by the stack `apis` key.
+
+- f31cc8d: refactor(spec)!: finish the 2026-06 field prune — drop both orphaned value schemas, `DataQualityRulesSchema` and `ComputedFieldCacheSchema` (#3726, #3733)
+
+  **BREAKING** (the `!` marker and this changeset are the breaking-change record;
+  the train ships as the v17 major — see the `v17-rc-anchor` changeset), though
+  nothing in-tree or out could have depended on either meaningfully. Removed from
+  the `@objectstack/spec` public surface:
+
+  - `DataQualityRulesSchema` (const), `DataQualityRules` (type), `DataQualityRulesInput` (type) — #3726
+  - `ComputedFieldCacheSchema` (const), `ComputedFieldCache` (type) — #3733
+
+  and the published `data/DataQualityRules.json` / `data/ComputedFieldCache.json`
+  JSON Schemas.
+
+  **Why.** Five field keys were pruned in 2026-06 — `encryptionConfig`,
+  `maskingRule`, `auditTrail`, `cached` and `dataQuality` — as "dead in both
+  layers, aspirational governance with no runtime consumer" (see
+  `docs/audits/2026-06-dead-surface-disposition-plan.md`, P0/P2 field prune).
+  Three of the five took their value schemas with them. Two did not: `dataQuality`
+  and `cached` each lost their key from `FieldSchema` while
+  `DataQualityRulesSchema` / `ComputedFieldCacheSchema` stayed on the published API
+  surface and in the generated reference docs, with zero consumers anywhere in the
+  tree. The tombstone claimed "dead in both layers"; for these two it was true of
+  only one.
+
+  That middle state is the worst of the three available (key + schema + consumer /
+  none of them / schema only), and it failed quietly rather than loudly.
+  `FieldSchema` is **not** `.strict()`, so an author who found either type in the
+  reference docs and wrote `dataQuality: { uniqueness: true }` or
+  `cached: { enabled: true, ttl: 3600 }` got no error at all — the field parsed
+  clean and the key was silently stripped, leaving a rule that was declared in
+  source, absent from the contract, and enforced by nothing. That is the ADR-0104
+  failure class, the same one the `accept` / `maxSize` declarations were added to
+  close.
+
+  Each had its own sharp edge. `DataQualityRules.uniqueness`, described as "Enforce
+  unique values across all records", reads exactly like the platform-wide scope
+  that `unique: 'global'` actually provides (#3696), making it the option an author
+  was most likely to reach for by mistake. `ComputedFieldCache` was quieter and
+  therefore harder to catch: an author writing `ttl: 3600` on a formula field would
+  believe results were cached for an hour, get no error, and never see a signal
+  that nothing had happened.
+
+  **Migration.** There is no runtime behavior to migrate — neither schema was ever
+  reachable from `FieldSchema`, and neither had a consumer in-tree. For per-field
+  uniqueness use `unique` (`true` = unique within the tenant, `'global'` = unique
+  platform-wide; see #3696). `completeness`, `accuracy`, and computed-field caching
+  (`enabled` / `ttl` / `invalidateOn`) have no replacement; none was ever
+  implemented.
+
+  If field-level data-quality governance or computed-field caching is built for
+  real later, re-add the field key and its schema **together, with a consumer** —
+  the enforce side of enforce-or-remove (ADR-0049). A tombstone in `field.zod.ts`
+  records this so neither schema is restored on its own again.
+
+- f343dc4: feat(spec)!: remove the orphaned `FeatureFlagSchema` module (`@objectstack/spec/kernel` feature.zod)
+
+  Follow-through of the capabilities-descriptor prune (#3605). `kernel/feature.zod.ts`
+  (`FeatureStrategy`, `FeatureFlagSchema`, the `FeatureFlag` factory and its
+  `FeatureFlag` / `FeatureFlagInput` types) had **zero runtime consumers**, and its
+  only protocol home — the static `ObjectStackCapabilities.system.features`
+  descriptor — was itself removed as dead in #3605 (no endpoint ever served it).
+  The module was a compile-checkable shape with nowhere to go: not authorable
+  (`defineStack` has no `features` key; strict parsing strips it), not registered,
+  not read by any engine.
+
+  **Migration — flags are runtime configuration, not authored metadata:**
+
+  | Removed                                                                                                  | Live replacement                                                                                                                                                              |
+  | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `FeatureFlagSchema` / `FeatureFlag.create()` rollout documents (strategies, percentage/group conditions) | the `feature_flags` **settings manifest** (`@objectstack/service-settings`, ADR-0007) — org-tunable `ai_enabled` / `beta_*` toggles, env-overridable via `OS_FEATURE_FLAGS_*` |
+  | deployment-level capability gating                                                                       | `PUBLIC_AUTH_FEATURES` registry (`kernel/public-auth-features.ts`) + `requiresFeature` sugar on actions/params (unchanged, live)                                              |
+  | runtime capability discovery                                                                             | `GET /api/v1/discovery` (dynamic, declared === enforced)                                                                                                                      |
+
+  Docs regenerated (`references/kernel/feature.mdx` removed); the platform skill's
+  Feature Flags section and the hand-written quick-reference row now point at the
+  settings surface; `PROTOCOL_MAP.md` row dropped.
+
+- 8269e32: feat(spec)!: remove the dead PortalSchema (portal metadata was never enforced)
+
+  `PortalSchema` and its top-level `portals` collection on `StackSchema` were a
+  forward-looking design that was **never wired to a runtime** — no metadata-type
+  registration, no dispatcher route family, no auth scope, and no
+  LayoutDispatcher / NavigationBuilder / ThemeProvider ever consumed it. Authoring
+  a portal was already documented as a no-op and marked
+  `[EXPERIMENTAL — not enforced]`. This removes the dead schema rather than
+  building a portal runtime (issue #3464, disposition **A — prune**).
+
+  **Removed exports** (`@objectstack/spec`, from `ui/portal.zod`):
+  `PortalSchema`, `Portal`, `definePortal`, and the `PortalInput` /
+  `PortalTheme` / `PortalNavItem` (+ `PortalViewNavItem`, `PortalActionNavItem`,
+  `PortalDashboardNavItem`, `PortalUrlNavItem`) / `PortalAnonymousEntry` /
+  `PortalAnonymousRoute` / `PortalRateLimit` / `PortalSeo` / `PortalAuthMode` /
+  `PortalLayout` schemas and inferred types. The `portals` key is removed from
+  `StackSchema` / `defineStack()`.
+
+  **Migration**: none required for behavior — authoring a portal had no runtime
+  effect. Any `portals: [...]` entry in a `defineStack()` config was already
+  ignored at runtime and should be deleted (with the schema gone it is an
+  excess-property type error). To project a scoped UI to external users today,
+  compose the existing `apps` / `views` surfaces and gate admission with
+  `positions` + permission sets (`externalSharingModel` on the objects you
+  expose).
+
+  Refs #3464, #1893, #1878.
+
+- 74f7339: feat(spec)!: prune the dead `aria` / `performance` props from ReportSchema (report-liveness close-out)
+
+  Follow-up to the #3463 report cleanup. The 2026-06 ReportSchema liveness audit
+  flagged `aria` and `performance` as dead — declared on `ReportSchema` (and
+  editable in the Studio report form) but read by **no renderer**. This removes
+  them. Every other finding from that audit is now closed too: `chart` turned out
+  to be **live** (`DatasetReportRenderer` plots `chart.xAxis`/`yAxis` via
+  `DatasetReportChart`), and the obsolete sub-schemas / naming-drift / joined-preview
+  items were resolved by #3463 and earlier work.
+
+  - Removed `ReportSchema.aria` (`AriaPropsSchema`) and `ReportSchema.performance`
+    (`PerformanceConfigSchema`), dropping the now-orphan imports. Both schemas
+    remain exported and are still used by other metadata types (views, pages,
+    charts) — only the report's use of them is removed. `ReportChart` keeps its
+    own `aria` (inherited from `ChartConfigSchema`).
+  - No manifest key or public export changes (`aria`/`performance` were properties,
+    not schemas); `report.mdx` regenerated.
+
+  **Migration**: nothing an author writes changes — no first-party or example
+  report set `aria`/`performance`. Reports carry no ARIA/performance overrides;
+  use the dataset/view surface for those concerns. Ships as `minor` per the
+  launch-window breaking-as-minor policy.
+
+- a6c35a2: feat(spec)!: prune the dead `ReportColumnSchema`/`ReportGroupingSchema` exports + the unread report chart `groupBy` (#3463, #1878/#1890)
+
+  Deep-cleanup close-out of the report-chart disposition (follow-up to #3441).
+  After the ADR-0021 single-form cutover a dataset-bound report expresses its
+  columns/grouping as dataset **measure/dimension name arrays** — `values`,
+  `rows` and `columns` are `z.array(z.string())`, not object literals — so
+  `ReportColumnSchema` / `ReportGroupingSchema` were referenced by **no schema
+  body**. They survived only as public type exports and were marked
+  `@deprecated` in #3441; this removes them.
+
+  - Deleted `ReportColumnSchema` / `ReportGroupingSchema` and their type
+    exports `ReportColumn` / `ReportGrouping` / `ReportColumnInput` /
+    `ReportGroupingInput` from `@objectstack/spec/ui`. The manifest ratchet
+    keys `ui/ReportColumn` / `ui/ReportGrouping` are dropped in the same PR.
+  - Deleted `ReportChart.groupBy` — the `[EXPERIMENTAL — not enforced]`
+    series-split field flagged in #3441. The dataset-bound `DatasetReportRenderer`
+    plots a single `xAxis`×`yAxis` series and never read it; only the retired
+    legacy `ReportViewer` fallback ever consumed a top-level `groupBy`.
+    `ReportChartSchema` is non-strict, so any residual `chart.groupBy` in stored
+    metadata is silently stripped on parse — no tombstone needed.
+  - Regenerated `content/docs/references/ui/report.mdx` and the spec API-surface
+    snapshot.
+
+  **Migration**: nothing an author writes changes.
+
+  - No first-party or example report authored `ReportColumn` / `ReportGrouping`
+    objects or `chart.groupBy` — a dataset-bound report already expresses
+    columns as `values` (measure names) and grouping as `rows` / `columns`
+    (dimension names).
+  - TypeScript consumers importing `ReportColumn` / `ReportGrouping` /
+    `ReportColumnInput` / `ReportGroupingInput` (or the `*Schema` values) from
+    `@objectstack/spec/ui` have no replacement type — model report columns as
+    the dataset's measure names and grouping as its dimension names. objectui's
+    `SpecReportColumn*` / `SpecReportGrouping*` re-exports are removed in the
+    companion objectui change.
+
+- c2f1002: feat(spec)!: remove `SkillSchema.permissions` — it never gated anything (#3686)
+
+  Owner decision on the enforce-or-prune call filed in #3686: **prune**.
+
+  `skill.permissions` was declared, surfaced in the Studio authoring form under a
+  section labelled _"Access — Required permissions to use this skill"_, and echoed
+  by the objectui preview — but **no runtime ever read it**. The cloud
+  `SkillRegistry` selects skills by `active` / `triggerConditions` / `tools` only.
+  A security-shaped field that enforces nothing is worse than no field: it invites
+  an author (or an AI) to believe a skill is gated when it is not. Same disposition
+  as agent `visibility` (#1901) and the `PolicySchema` tree (#2387).
+
+  Removed: the schema property, the form's whole `Access` section (it existed only
+  for this field), its generated i18n keys, the liveness-ledger entry, and the
+  `permissions` line from the objectstack-ai skill doc's `os:check` example. The
+  objectui preview's "Required Permissions" panel is removed in the companion
+  objectui change.
+
+  **Migration** — gate access where it is actually enforced:
+
+  - **Agent level** — `access` / `permissions` on `defineAgent` ARE enforced at the
+    chat route (403 for a caller missing any of them, #1884). Bind the restricted
+    skill only to a restricted agent.
+  - **Action level** — gate the underlying actions the skill's tools invoke via
+    permission sets (ADR-0066).
+
+  `SkillSchema` is non-strict, so an existing `permissions:` key is silently
+  stripped on parse rather than rejected — no boot break, but it stops appearing
+  anywhere.
+
+- f163028: Reference-integrity validation for object and action names (issue #3583)
+
+  A HotCRM audit found ~20 shipped instances of one bug class — metadata naming
+  something that does not exist — all passing `objectstack validate` / `lint`
+  cleanly and failing silently at runtime. This closes the object-name and
+  action-name half of that class.
+
+  **New — `@objectstack/spec`:** `PLATFORM_PROVIDED_OBJECT_NAMES`, a curated
+  registry of every object name contributed by a platform package, official
+  plugin, or the cloud runtime, plus `isPlatformProvidedObjectName()` and
+  `hasPlatformObjectPrefix()`. This replaces the `startsWith('sys_')` prefix guess
+  that could not tell `sys_user` (real) from `sys_approval_process` (fictional —
+  removed by ADR-0019, registered by nothing), which is why every fictional
+  platform-prefixed reference shipped. A conformance test scans each package's
+  `*.object.ts` declarations and fails if the registry drifts.
+
+  **New lint rules** (wired into both `os validate` and `os lint`):
+
+  - `validate-object-references` — action-param `reference` / `objectOverride`,
+    dashboard `globalFilters[].optionsFrom.object`, and navigation
+    `requiresObject` gates. Severity follows resolvability: an unresolved
+    _unprefixed_ name is a typo (**error** — `object: 'user'` where the platform
+    object is `sys_user`); an unresolved _platform-prefixed_ name is **advisory**,
+    since a third-party package may still provide it.
+  - `validate-action-name-refs` — the surfaces that bind an action BY NAME:
+    list-view `bulkActions` / `rowActions`, page `record:quick_actions`
+    `actionNames`, and nav action items. A name matching no defined action is an
+    **error** (the button renders and does nothing), matching the existing
+    dashboard-action-target rule.
+
+  **Fixes:**
+
+  - `defineStack` cross-reference validation now walks `app.areas[].navigation` —
+    an areas-based app previously got no navigation checking at all — and recurses
+    into `children` on `object` nav items, not only `group` ones.
+  - `os lint` i18n coverage now reads field `options` in the canonical
+    `{value,label}[]` array shape; it only handled the record map, so option-label
+    coverage silently never fired for canonically-shaped select fields.
+  - Hook `condition` expressions are now field-checked when `object` is an ARRAY
+    of targets (previously only a single string target was checked, so a
+    multi-target hook filtering on a nonexistent field passed clean). Per-target
+    diagnostics are de-duplicated.
+  - A dashboard widget binding no `dataset` at all is now reported instead of
+    silently bypassing every binding and chart check on the raw-config
+    (`lint`/`doctor`) paths. `dataset` is schema-required, so this matches what
+    the parsed paths already enforce.
+
+- 7ffc3d3: feat(client,spec)!: delete the 21 dead SDK methods and the four ghost route
+  tables that underwrote them (#3612, #3587 finding)
+
+  Five client surface families built URLs that exist on NO server surface —
+  not the dispatcher, not `@objectstack/rest`, not the autonomous service
+  mounts — so every call was a guaranteed 404:
+
+  - `permissions` (check, getObjectPermissions, getEffectivePermissions)
+  - `realtime` (connect, disconnect, subscribe, unsubscribe, setPresence,
+    getPresence) — `service-realtime` registers zero HTTP routes and the
+    dispatcher deliberately never advertises `/realtime`
+  - `workflow` (getConfig, getState, transition)
+  - `views` CRUD (list, get, create, update, delete) — no `/ui/views` route
+    anywhere
+  - `notifications` device/preference helpers (registerDevice,
+    unregisterDevice, getPreferences, updatePreferences) — the ADR-0012
+    server side was never built
+
+  Each family was underwritten only by an unconsumed spec `DEFAULT_*_ROUTES`
+  table — the same disease `DEFAULT_DISPATCHER_ROUTES` had (#3586) — so
+  `DEFAULT_PERMISSION_ROUTES`, `DEFAULT_VIEW_ROUTES`, `DEFAULT_WORKFLOW_ROUTES`,
+  and `DEFAULT_REALTIME_ROUTES` are deleted with them;
+  `getDefaultRouteRegistrations()` now returns 9 registrations.
+  `ApiRouteType` loses its client-only `'views' | 'permissions'` extras.
+
+  Kept: `client.events` (explicitly local in-memory buffer, no HTTP),
+  `notifications.list/markRead/markAllRead` (dispatcher-served),
+  `approvals.*` (ADR-0019 — the real approval decision API), and
+  `meta.getLegalNextStates` (the real FSM read).
+
+  Breaking for anyone calling the removed methods — a repo-wide and
+  objectui-wide sweep found one consumer (`useClientNotifications`'s dead
+  device/preference delegates, trimmed in the objectui companion change);
+  shipped as minor per the launch-window convention (cf. #3562/#3581/#3595).
+  Re-adding any of these surfaces requires the server route to exist and a
+  route-ledger row proving it (#3569/#3609 guards).
+
+- 88346ba: feat(spec)!: remove the dead `object.enable.trash` / `enable.mru` capability flags (#2377, ADR-0049 enforce-or-remove — close-out)
+
+  Both flags parsed and defaulted to `true` but had **no runtime consumer**:
+  every delete has always been a hard delete (no recycle bin), and no MRU
+  tracking was ever implemented. A default-true flag promising recoverability
+  is the worst kind of false affordance — first-party objects were authoring
+  `trash: false // Never soft-delete audit logs` in the belief that a
+  soft-delete existed to opt out of.
+
+  - `ObjectCapabilities` is now **`.strict()`** (pattern of the tenancy block,
+    #2763): an unknown `enable` key — the retired `trash`/`mru` or a typo like
+    `feedEnabled` — fails parse with upgrade guidance instead of stripping
+    silently (#1535). The retired-key tombstones live in
+    `CAPABILITIES_RETIRED_KEY_GUIDANCE`.
+  - ~45 first-party object definitions (platform-objects, plugin-security,
+    plugin-audit, plugin-approvals, plugin-sharing, metadata-core,
+    service-realtime, examples) dropped their inert `trash:`/`mru:` lines.
+  - Liveness ledger: both entries deleted (removal precedent: `tags`/
+    `recordName`); object row in the README count table now shows **0 dead**.
+  - Docs + skills no longer advertise a recycle bin / MRU tracking; the API
+    skill's "DELETE is soft-delete when `trash: true`" claim is corrected to
+    the real contract (hard delete; use per-field `trackHistory` or a
+    `lifecycle` policy for recoverability).
+
+  **Migration**: delete any `enable.trash` / `enable.mru` keys from object
+  metadata — they never changed behavior. `ObjectSchema.create()` /
+  `ObjectCapabilities.parse()` now reject them with this prescription. A real
+  recycle bin or MRU feature, if built, returns as a live enforced flag
+  (#1893 prune-or-build).
+
+- 4631592: feat(spec)!: remove the never-implemented GraphQL surface from the product plan (#2462 follow-on)
+
+  GraphQL was schema-only from day one: the spec shipped 20+ config schemas
+  (`GraphQLTypeConfig`, federation, persisted queries, …), the dispatcher's
+  `handleGraphQL` answered 501 unconditionally (`kernel.graphql` was never
+  assigned in the monorepo), and THREE separate mounts advertised the dead
+  endpoint. Per the product decision, the surface is deleted rather than
+  maintained:
+
+  - **spec**: `api/graphql.zod.ts` + `contracts/graphql-service.ts` deleted;
+    `graphql` removed from `CoreServiceName`, `ApiProtocolType`, the
+    query-adapter dialects, `graphql-playground` from testing-UI types; the
+    `graphqlApi`/network capability booleans, discovery/router route fields
+    dropped. Breaking for consumers referencing those exports/enum members (shipped as minor per the launch-window convention, cf. #3486/#2377).
+  - **runtime**: `handleGraphQL`, the if-chain branch, the dispatcher-plugin
+    and hono-adapter mounts, discovery advertisement, and the now-dead
+    `resolveRequestExecutionContext` helper removed.
+  - **plugin-dev**: the graphql stub family removed.
+  - **qa**: authz-conformance matrix rows, ratchet high-risk id, discover
+    patterns and identity pins for the GraphQL surface retired; expression
+    ledger covers updated.
+  - **NOT removed**: the `'graphql'` protocol option on external datasource
+    lookups (third-party systems may speak GraphQL) and cloud's reserved
+    slug — those are not our API surface.
+
+  `/graphql` now 404s (was an unconditional 501); the anonymous-deny posture
+  matrix shrinks by the two GraphQL rows.
+
+- 5ac93d4: feat(rest): surface silently-dropped write fields on PATCH/POST /data (#3431)
+
+  #3413 (closes #3407) built the engine-level strip-observability channel
+  (`WriteObservabilityOptions.onFieldsDropped`) and wired the flow side
+  (`update_record` / `create_record` emit a step warning + `droppedFields`). The
+  **REST write path was never wired**, so an external API caller writing N fields
+  still got a bare `200 + record` when `readonly` (#2948) / `readonlyWhen` (#3042)
+  stripping meant `< N` actually landed — the same silent-success class #3407
+  fixed flow-side, just on HTTP. The only way to notice was a per-field diff of
+  the returned row (which need not echo every field). This wires the channel
+  through the protocol → REST, on both write verbs.
+
+  **Passthrough (metadata-protocol).** `updateData` now registers an
+  `onFieldsDropped` collector on `engine.update` and returns the events on the
+  response as `droppedFields`. `createData` surfaces the #3043 static-`readonly`
+  INGRESS strip too — that strip runs at the protocol ingress
+  (`stripReadonlyForInsert`), _before_ the engine, so it is recovered by diffing
+  the supplied payload against the stripped one (the engine's `onFieldsDropped` is
+  also wired for a future insert-side engine strip). A faulty listener never
+  breaks the write — the engine catches and logs.
+
+  **Contract (spec).** `UpdateDataResponseSchema` / `CreateDataResponseSchema`
+  gain an **optional** `droppedFields: DroppedFieldsEvent[]` — present only when
+  ≥1 field was dropped. Optional + omit-when-empty keeps the response shape
+  backward-compatible for clients that only read `record`.
+
+  **REST surface.** PATCH `/data/:object/:id` and POST `/data/:object` echo the
+  drops as an `X-ObjectStack-Dropped-Fields` response header
+  (`field;reason=<reason>` tokens, comma-joined — e.g.
+  `approval_status;reason=readonly`) and keep the structured `droppedFields` on
+  the body. **Status/success semantics are unchanged** (200 update / 201 create) —
+  a strip is legitimate semantics, not a failure (same principle as #3413). The
+  FLS write gate is untouched (it already fails closed with 403).
+
+  Out of scope (issue #3431 D2 open questions, deferred): bulk
+  (`updateManyData` / `createManyData` / `batchData`) and GraphQL mutation wiring,
+  typed `@objectstack/client` warnings, and adding the header to the Hono CORS
+  `exposeHeaders` allow-list for cross-origin browser reads (the body
+  `droppedFields` is the cross-origin-safe channel meanwhile).
+
+- 93f267f: fix(automation): one chokepoint for the resume signal — `output` reopened the hole `inputs` had just closed (#3879)
+
+  #3853 guarded `signal.variables` at the route. That closed one of **two**
+  equivalent paths into the same variable map and left the other open:
+  `signal.output` keys are merged under `${run.nodeId}.${key}`, and for a run
+  parked on a `map` node `run.nodeId` **is** the map node — so
+
+  ```jsonc
+  {
+    "output": { "$mapItemDone": true, "$mapItemOutput": { "result": "FORGED" } }
+  }
+  ```
+
+  writes exactly the `<mapNodeId>.$mapItemDone` the `inputs` guard had refused,
+  making the map record a result for an item nobody decided. Demonstrated with a
+  repro, then fixed.
+
+  Scope: the #3853 map gate still held, so a batch whose pending item sits on an
+  `approval` was refused before any of this — the **approval bypass stayed
+  closed**. The residual was forging the recorded result of an item on an
+  _ungated_ pause.
+
+  Two escapes with one shape is a design signal, not two bugs, so the fix is
+  structural rather than a third patch:
+
+  - **`applyResumeSignal` is the one place a resume signal reaches the variable
+    map.** Both fields are collected into a single write list (already in final,
+    prefixed form), checked, then applied — a new signal field is covered by
+    construction rather than by remembering.
+  - **All-or-nothing**, and checked _before_ the suspension is consumed: a
+    rejected signal applies nothing (not even legitimate keys sent alongside) and
+    the run stays parked, so the real continuation still lands.
+  - **The engine owns the rule; the transport maps the verdict.** `resume` returns
+    `{ success: false, code: 'invalid_signal' }`; the route answers **400**. The
+    SDK and any future adapter inherit it — implemented in one transport it
+    protected exactly one transport, and one field of it.
+  - Engine-built signals (the subflow output mapping, the map item handoff) are
+    exempt via a module-private symbol. Deliberately _not_
+    `RESUME_AUTHORITY_SERVICE`: that marker means "the owning service authorized
+    this decision", and a service still has no business writing engine internals.
+
+  `AutomationResult.code` gains `'invalid_signal'` alongside `'forbidden'` — a
+  `switch` over it needs a new arm; a plain read does not.
+
+  Nothing changes for authoring: ordinary variables pass, `$` mid-name (`price$`)
+  and dotted names (`collect.note`) included. Only names the engine reserves —
+  `$…` or a `.$` segment — are refused.
+
+- 0024abf: feat(spec)!: delete `DEFAULT_DISPATCHER_ROUTES` — the dead route table that
+  underwrote a false compliance verdict (#3586, #3563 follow-up)
+
+  The const was consumed by nothing in the runtime — only its own tests and
+  `api-surface.json`. It listed dispatcher branches that never existed
+  (`/workflow`, `/realtime`) while omitting eight real prefixes (`/keys`,
+  `/mcp`, `/mcp/skill`, `/actions`, `/security`, `/share-links`, `/ready`,
+  `/openapi.json`), and `CLIENT_SPEC_COMPLIANCE.md` anchored a "FULLY
+  COMPLIANT" verdict on it while 27 real routes had no SDK expression.
+
+  The audited, guard-enforced source of truth for the dispatcher's route
+  surface is `packages/runtime/src/route-ledger.ts` (#3569): the conformance
+  suite fails when the registry and the ledger drift, which the dead table
+  never could.
+
+  Also swept the last GraphQL fixture debris that #3562's surface removal
+  left behind: registry test fixtures renamed to honest OData naming, the
+  tautological `config.graphql` assertions dropped, and the stale
+  `"type": "graphql"` JSDoc example in `registry.zod.ts` corrected.
+
+  Breaking for anyone importing `DEFAULT_DISPATCHER_ROUTES` (a repo-wide and
+  objectui-wide grep shows zero consumers); shipped as minor per the
+  launch-window convention, cf. #3562/#3581.
+
+- 7687f7b: fix(automation): a screen field's `visibleWhen` reaches the client (#3528)
+
+  `visibleWhen` has been on the `screen` node's designer form since #3304 —
+  declared as an expression (`xExpression`), documented as bare CEL, offered to
+  authors in Studio. The executor never put it on the wire. `ScreenFieldSpec`
+  carried `name` / `label` / `type` / `required` / `options` / `defaultValue` /
+  `placeholder` and nothing else, so no client could honour a predicate it never
+  received. Authors wrote conditional visibility; every field rendered
+  unconditionally; nothing errored.
+
+  That is worse than a cosmetic miss, because `required` **is** honoured. A field
+  that is optional-by-design but required _when shown_ becomes permanently
+  required once its predicate is dropped — and a runner that validates the full
+  field list then blocks Submit on input the user was never asked for. No resume
+  request is issued and the run sits paused forever. HotCRM's lead-conversion
+  screen is exactly that shape:
+
+  ```ts
+  { name: 'createOpportunity', type: 'boolean', required: true },
+  { name: 'opportunityName',   type: 'text', required: true,
+    visibleWhen: 'createOpportunity == true' },
+  ```
+
+  Leave the checkbox unticked and `opportunityName` — which should not be on
+  screen at all — blocks the whole conversion.
+
+  - `ScreenFieldSpec.visibleWhen` is now part of the contract, documented as
+    client-evaluated bare CEL over the screen's own field names, with the
+    `required`-must-follow-visibility rule stated where implementors will read it.
+  - The `screen` executor forwards it **raw**, deliberately uninterpolated: the
+    predicate is re-evaluated per keystroke against values only the client has, so
+    resolving it server-side against flow variables would freeze the field.
+  - Covered by tests — the screen wire payload had none for this key.
+
+  Clients must evaluate the predicate and skip hidden fields when enforcing
+  `required`. Honouring one without the other reproduces the dead-end above.
+
+- 1659072: feat(spec): publish `ISecurityService` — the `security` service surface becomes an enforced contract
+
+  The `security` service registers seven cross-package methods (`getReadFilter`,
+  `getReadableFields`, `resolvePermissionSetNames`, `explain`, and the three
+  audience-binding suggestion calls) but had no contract in
+  `@objectstack/spec/contracts`. Consumers duck-typed it, and each one invented its
+  own fallback for a missing method or an "empty" answer — with more consumers
+  arriving, that is a drift surface.
+
+  `ISecurityService` now documents the surface, and both ends are typed against it
+  so it is **enforced rather than declared**: `plugin-security` assigns its
+  registration to `ISecurityService` (a renamed, dropped, or re-typed method fails
+  that build), and the REST layer resolves the service as a `Partial<ISecurityService>`
+  (so call sites must keep feature-detecting instead of assuming the full surface).
+
+  The contract makes explicit the one thing consumers cannot guess — that the
+  methods do **not** share a failure convention:
+
+  - `getReadFilter` fails **CLOSED**: a resolution failure yields a deny filter
+    matching zero rows, never `undefined`. `undefined` means "no row restriction",
+    and nothing else.
+  - `getReadableFields` fails **SOFT**: `undefined` means "no answer, use your own
+    projection", while `[]` is authoritative and means "no field is readable" —
+    opposite instructions that a consumer must not conflate.
+
+  Typing the producer immediately caught one real discrepancy, fixed here:
+  `getReadFilter` declared `Promise<Record<string, unknown> | null | undefined>`
+  while every return path yields a filter or `undefined` (`filter ?? undefined`
+  normalizes the null away). The dead `| null` is removed, so "no restriction" has
+  exactly one representation. Type-level only — no runtime behaviour changes.
+
+- f00d8d4: fix(sharing): remove the `full` access level — it promised delete/transfer/share and granted `edit` (#3865)
+
+  `sys_sharing_rule.access_level` / `sys_record_share.access_level` offered three
+  levels, the third documented as **Full Access (Transfer, Share, Delete)**. No
+  code path granted transfer, re-share, or delete because of it: both enforcement
+  sites matched `access_level in ('edit','full')`, so `full` was byte-equivalent
+  to `edit`. An admin picking "Full Access" in Setup was told they had granted
+  delete rights and had not — declared-but-unenforced metadata (ADR-0078,
+  ADR-0049), the same defect that retired the `queue` recipient before it.
+
+  Measured on showcase, a `full` recipient got `read: allowed`, `update: allowed`,
+  `delete: DENIED` — and the denial came from `decidedBy=object_crud`, i.e. the
+  object-level CRUD gate rejected the delete _before_ sharing was consulted at
+  all. That is not an oversight to patch around; it is the model working. Record
+  sharing widens **which rows** a principal reaches, never **which verbs** they
+  may use — the same split Salesforce enforces (its sharing rules stop at
+  Read-Only / Read-Write; Full Access is owner / hierarchy / Modify All only,
+  never grantable by a rule) and Dataverse enforces by AND-ing every shared access
+  right against the security role's own privilege. Delete and transfer belong to
+  ownership, the ADR-0057 DEPTH scopes, and admin scope.
+
+  **What changed**
+
+  - `SharingLevel` (spec/security) and `ShareAccessLevel` (spec/contracts) are now
+    `read | edit`. The `Field.select` on both objects offers the same two, so the
+    Setup dropdown no longer shows the misleading option.
+  - `SharingService.grant()` and `SharingRuleService.defineRule()` gained the
+    access-level validation they never had: `full` normalises to `edit`, and an
+    unrecognised level is a `VALIDATION_FAILED` (HTTP 400) instead of being
+    persisted verbatim as a grant no gate would ever match.
+  - Enforcement stays deliberately wider than authoring — the read/write gates
+    still match `edit`/`full` — so a row written before this release keeps
+    working. Narrowing them would silently _revoke_ access.
+  - A boot backfill normalises stored `full` rows on both tables, and the
+    `sharing-rule-access-level-full-to-edit` conversion rewrites declarative
+    stacks at load, so nothing needs consumer action.
+
+  **Migration.** None. `full` and `edit` were already behaviourally identical, so
+  rewriting one to the other cannot change an access decision — unlike the OWD
+  `sharingModel: 'full'` alias retired in ADR-0090 D4, which changed posture and
+  had to be delegated to the author. A stack that still authors `accessLevel:
+'full'` converts at load with a deprecation notice; stored rows normalise at
+  next boot. Code that pinned the `ShareAccessLevel` type to `'full'` no longer
+  compiles — use `'edit'`.
+
+  Reviving a real per-record delete grant is a separate design (a capability mask
+  AND-ed with object CRUD, plus the share-administration model that would have to
+  authorise re-sharing), not a fourth enum member.
+
+- 503be86: feat(security)!: reconcile the SharingRule authoring surface with the enforced runtime — rename `group` → `team`, add `business_unit`, prune `guest` + owner-type rules (#1878)
+
+  The authoring `ShareRecipientType` enum had drifted behind the ADR-0090 D3
+  rename and the enforced runtime: the runtime expands `team` (via
+  `sys_team`/`sys_team_member`) and `business_unit`, but the authoring enum
+  still offered the pre-rename `group` (silently skipped at seed time) and
+  omitted the two live recipients. After this change **every authorable
+  recipient and rule type is enforced** — nothing on the SharingRule surface
+  validates and then silently does nothing (ADR-0078).
+
+  - **`sharedWith.type: 'group'` → `'team'`** (wire-rename): the enum member is
+    renamed to match the runtime vocabulary and now maps through the seed
+    bootstrap to the live `TeamGraphService` expansion. Flat `sys_team`
+    membership; enforced.
+  - **`business_unit` added** to the authoring enum — exactly one business
+    unit's members (no subtree; use `unit_and_subordinates` for the subtree).
+    The runtime + bootstrap already enforced it; only the enum omitted it.
+  - **`guest` removed** — it had no runtime recipient mapping. Anonymous access
+    is served by the public-form grant and share links, not sharing rules.
+  - **Owner-type rules removed** (`type: 'owner'`, `ownedBy`,
+    `OwnerSharingRuleSchema` + its type export): they depend on live
+    team/position membership, which the static materialiser cannot track, so
+    they validated but never materialised a share. They return as an enforced
+    form if membership-reactive re-materialisation is designed.
+    `SharingRuleSchema` is now the criteria form; the `queue` recipient stays
+    runtime-reserved (no `sys_queue` yet) and deliberately non-authorable.
+
+  **Migration** (stale definitions now fail parse with the valid options listed):
+
+  - `sharedWith: { type: 'group', … }` → `sharedWith: { type: 'team', … }`.
+  - `sharedWith: { type: 'guest', … }` → delete the rule; expose the records
+    via a public form or share link instead.
+  - `type: 'owner'` rules → rewrite as a `type: 'criteria'` rule scoping the
+    rows by field values (see the migrated examples:
+    `share_open_tasks_with_manager` in app-showcase,
+    `share_active_leads_with_manager` in app-crm), or use a scope-depth grant.
+
+- 4d00b13: feat(spec)!: remove `tool.requiresConfirmation` — a safety flag nothing enforced (#3715, ADR-0033 §2)
+
+  `ToolSchema.requiresConfirmation` accepted `true` and no execution path ever read
+  it. Not the LLM tool set (a tool reaches the model as name/description/parameters
+  only), not `ToolRegistry.execute`, not `POST /ai/tools/:name/execute`, and not the
+  MCP bridge — which derives `destructiveHint` from a hardcoded name list. Setting
+  it on a destructive tool produced **no pause**.
+
+  For an ordinary dead property that is untidy. For a **safety** property it is
+  false compliance, which is the case ADR-0049 exists for: an author gates a
+  destructive tool, sees the flag accepted, and ships believing a human is in the
+  loop. It is made worse by the near-miss — `action.ai.requiresConfirmation` has
+  the same name and **does** work, so the mistake reads as correct in review.
+  ADR-0033 §2 already resolved to delete this one.
+
+  ## Migration
+
+  - **FROM:** `requiresConfirmation: true` on a tool definition
+  - **TO:** put the operation behind an action and set `ai.requiresConfirmation:
+true` there — that is the flag the HITL approval queue reads
+    (`packages/runtime/src/action-execution.ts`) and the only path that actually
+    stops execution.
+  - For AI _metadata_ mutations there is nothing to migrate: the ADR-0033
+    draft/publish workspace is the gate — nothing is live until a human publishes.
+
+  **`ToolSchema` is now `.strict()`.** This is load-bearing, not tidying. Removing a
+  key from a non-strict schema swaps one silent no-op for another: zod strips the
+  key wordlessly, the author keeps writing it, and the safety flag goes on meaning
+  nothing — the "silent strip" ADR-0032 / #1535 closed for objects. The retired key
+  now **rejects**, and the error carries the FROM → TO above, because a parse error
+  is the one channel every consumer bumping `@objectstack/spec` is guaranteed to
+  hit.
+
+  Strictness applies to _all_ unknown keys on a tool definition, so a typo
+  (`buildIn`, `catagory`) is now a located parse error instead of a silently
+  dropped field.
+
+  Also removed: the Studio form row, its four generated locale bundles (the
+  `en`/`zh-CN`/`ja-JP`/`es-ES` strings still promised _"Ask user to approve before
+  executing (for destructive actions)"_ — a translated false promise), the
+  liveness-ledger entry, and the generated reference-doc row.
+
+  objectui's `ToolPreview.tsx` reads the field via `!!d.requiresConfirmation`, so it
+  degrades to "not shown" with no error; removing that badge is a follow-up in that
+  repo.
+
+- 57bab76: Typed `decisionOutputs` declarations (#3447 follow-up). A `decisionOutputs` entry may now be `{ key, label?, type: 'text' | 'user' | 'department' | 'position' | 'team', multiple? }` alongside the bare-string form — a typed entry tells the decision UI to render the matching record picker (id values; `multiple` collects an id array) instead of free text, turning "paste user ids" into "pick people". The type shapes only the input widget: the runtime whitelist works by `key` either way, via the new `normalizeDecisionOutputs` helper exported from `@objectstack/spec/automation` — the single reader of the union shape shared by the service, the request read, and `os lint`. The request read now carries `decision_output_defs` (normalized declarations) alongside the version-skew-safe `decision_outputs` key list.
+- b90086a: fix(driver-sql)!: `unique` materializes per tenant, ending its contradiction with the per-tenant autonumber sequence (#3696)
+
+  `unique: true` became a **single-column global index that ignored `tenancy`
+  entirely**, while the autonumber sequence table is keyed by
+  `(object, tenant_id, field, scope)` and hands every tenant its own counter
+  starting at 1. Two subsystems of the same platform contradicted each other:
+  tenant B's `PROD-00001` was rejected by an index it could not see — **no user
+  did anything wrong**, the platform's left hand refused what its right hand
+  issued.
+
+  The rejection also doubled as a **cross-tenant existence oracle**: a UNIQUE
+  violation told tenant B that some _other_ tenant held the value, enumerable by
+  probing emails / codes / names.
+
+  **The contract now:**
+
+  | Declaration                      | Materializes as                                                 |
+  | -------------------------------- | --------------------------------------------------------------- |
+  | `unique: true` + tenant column   | composite `(tenantField, field)` — unique **within** the tenant |
+  | `unique: true`, no tenant column | single-column — single-tenant DDL is byte-identical to before   |
+  | `unique: 'global'`               | single-column, always platform-wide                             |
+
+  The tenant column comes first in the composite, so the index also serves the
+  `WHERE tenant = ?` prefix scans every tenant-scoped read issues.
+
+  **Declared `indexes[]` are deliberately unchanged.** They are materialized over
+  exactly the columns listed — no tenant column is injected. The author already
+  spells them out, per-tenant ones have always been written explicitly
+  (`fields: ['organization_id', 'code']`), and many are legitimately platform-wide
+  (a DNS hostname, a reserved slug, an external provider id). `'global'` is
+  accepted there as a synonym of `true` so one vocabulary covers both spellings.
+
+  **Migration is automatic and cannot fail.** Legacy indexes
+  (`<table>_<col>_unique` from knex, `uniq_<table>_<col>` from the drift-rebuild
+  path) are retired inline at schema-sync time. The old global constraint is
+  strictly stronger than the new per-tenant one, so existing rows satisfy the
+  replacement by construction — no dedup, no cleanup, no data touched. It
+  converges at sync rather than waiting for a deliberate `os migrate` run because
+  a deployment that never ran migrate would otherwise stay broken.
+
+  **Upgrading — audit your `unique: true` fields.** On a tenant-scoped object the
+  constraint is now per tenant. Anything that must stay platform-wide has to say
+  so:
+
+  ```ts
+  hostname: Field.text({ unique: "global" }); // no two tenants may claim it
+  ```
+
+  Note the reach: `applySystemFields` injects `organization_id` into every
+  registered object unless it opts out, and the driver falls back to that column
+  when no `tenancy.tenantField` is declared — so most objects are tenant-scoped.
+  Typical candidates for `'global'`: DNS hostnames, reserved slugs, external
+  provider ids (Stripe customer/subscription), device identities.
+
+  Postgres materializes `col.unique()` as a table CONSTRAINT rather than a bare
+  index, so the retirement tries `DROP CONSTRAINT` before `DROP INDEX` —
+  `DROP INDEX` alone would have made the migration a no-op on exactly the
+  deployments that matter most.
+
+  `@objectstack/driver-mongodb` accepts the new declaration but keeps single-field
+  indexes: it implements no row-level tenancy at all (no tenant predicate on read,
+  no tenant stamp on write), so a `(tenant, field)` index would advertise an
+  isolation it does not deliver. Tracked separately.
+
+- b95577a: feat(automation): surface silently-stripped write fields as step warnings (#3407)
+
+  `update_record` used to report an unconditional `success` even when the data
+  layer legally stripped the requested write fields — static `readonly` (#2948)
+  or a TRUE `readonlyWhen` predicate (#3042). The only trace was a server-side
+  logger warn, invisible in the flow run trace: an author saw a clean 3ms
+  `success` while the DB truth never changed (how #3356's approval stage
+  write-backs failed unnoticed).
+
+  - **spec**: new `DroppedFieldsEventSchema` / `DroppedFieldsEvent`
+    (`{ object, fields, reason: 'readonly' | 'readonly_when' }`) in
+    `data/data-engine.zod.ts`, and a `WriteObservabilityOptions`
+    (`onFieldsDropped` listener) mixin on `IDataEngine.insert/update` option
+    params in `contracts/data-engine.ts`. The listener is a TS-contract-level,
+    in-process-only channel — deliberately NOT part of the serializable Zod
+    options schemas or the RPC boundary.
+  - **objectql**: `engine.update()` reports each strip pass's dropped keys +
+    reason through `options.onFieldsDropped` (all four strip sites: single-id +
+    bulk × readonly + readonlyWhen). A throwing listener never breaks the write.
+    System-context writes skip the readonly strip and therefore report nothing,
+    as before. `insert()` accepts the option for symmetry but strips nothing
+    today (INSERT is readonly-exempt; FLS write denial throws).
+  - **service-automation**: `NodeExecutionResult` and `StepLogEntry` gain
+    advisory `warnings?: string[]`; `update_record` / `create_record` attach one
+    warning per strip event naming the dropped fields, plus a structured
+    `droppedFields` output (`{<nodeId>.droppedFields}`) for downstream nodes.
+    `success` semantics are unchanged — stripping stays legal, it just is no
+    longer silent.
+
+- d8c4957: feat: user-level export permission axis (#3544, #3391 follow-up)
+
+  `export` is a user-gated operation, not just "anyone who can list". A permission
+  set can now deny export on an object while keeping read — matching Salesforce
+  "Export Reports" / Dynamics "Export to Excel" / NetSuite "Export Lists" / SAP
+  S_GUI 61.
+
+  - **spec** `ObjectPermissionSchema` gains an optional `allowExport` bit. It is
+    deliberately OPTIONAL with **no default** so it is a backward-compatible
+    opt-out: unset → inherits read (today's "can-list ⇒ can-export"), `false` →
+    export denied while read is kept, `true` → granted.
+  - **plugin-hono-server** `annotateEffectiveApiOperations` derives
+    `userExportAllowed = allowExport !== false` from the resolved per-object
+    permission and threads it into `resolveEffectiveApiMethods` — so `export`
+    derives from `list ∧ userExportAllowed`. When the axis removes `export` from
+    an otherwise-open object, the object is now annotated (the effective set minus
+    `export`) so the client hides the Export button; an unrestricted object with
+    export still allowed stays unannotated (client default-allow).
+
+  Wires the `userExportAllowed` slot reserved in #3391 P1 — zero contract change
+  to the derivation table or the frontend (it already consumes the effective
+  `apiOperations`). Backward-compatible: existing permission sets (no
+  `allowExport`) keep today's behavior everywhere.
+
+### Patch Changes
+
+- d99aeb3: feat(spec): let an inline `lookup` action param declare its reference target (#3405)
+
+  `ActionParamSchema` had no way to name the object an inline record-picker param
+  should search. Authors reasonably wrote the same key the field schema uses —
+  `{ name: 'inspector', type: 'lookup', reference: 'sys_user' }` — and the schema
+  stripped it as an unknown key, without an error. Downstream, the param dialog
+  saw a picker with no target and degraded it to a "paste the record id (UUID)"
+  text input. The authored intent was dropped silently and the user was handed a
+  control that a human cannot reasonably operate.
+
+  - Added `reference` to `ActionParamSchema`, spelled to match
+    `FieldSchema.reference` so one spelling works in both places. It sits with the
+    existing inline widget config (`multiple` / `accept` / `maxSize`), which had
+    covered the file/image params but not the picker ones.
+  - A `lookup` / `master_detail` param declared **inline** with no `reference` is
+    now a parse-time error pointing at the missing key, instead of degrading at
+    render time. Field-backed params are unaffected: they inherit the target from
+    the referenced field's metadata, which is not visible at parse time.
+
+- f63cd09: fix(spec): `action.undoable` is `live`, not `experimental` — stop warning on a property that works (#3714)
+
+  The liveness ledger marked `action.undoable` `experimental` on a #1992-era note:
+  _"no runtime reader yet — neither service-automation nor objectui consume the
+  action's `undoable` flag (objectui has an UndoManager but does not key off this
+  field)."_ That was true when written. objectui has since wired **two** readers,
+  both gating real behaviour:
+
+  | Reader                                      | What the flag gates                                                        |
+  | ------------------------------------------- | -------------------------------------------------------------------------- |
+  | app-shell `useConsoleActionRuntime.tsx:409` | builds the undo operation the success toast's Undo button invokes (`:147`) |
+  | app-shell `RecordDetailView.tsx:545`        | restores the record's prior field values (`:404`)                          |
+
+  `components` `action/action-button.tsx:113` forwards the flag for exactly this
+  reason, per its own comment: _"without this the flag is dropped and the handler
+  never builds the undo operation."_
+
+  **Why it mattered.** The CLI liveness lint warns on `experimental` as well as
+  `dead`, so authoring a _working_ property produced a
+  `liveness-experimental-property` warning — "declared but NOT enforced at
+  runtime". An author (or an AI) reading the ledger or that warning concludes
+  `undoable` is aspirational and skips it, losing a shipped feature. Authoring
+  `undoable: true` is now silent, and the protocol reference no longer claims
+  setting it "currently has no effect".
+
+  Nothing to migrate: the schema, the parsed shape, and the runtime are unchanged
+  — only the classification of what they already do.
+
+  This is the _understating_ failure direction, the mirror of the preview-renderer
+  over-claims corrected in #3685/#3711/#3686. Both directions have the same root
+  cause, now written into `packages/spec/liveness/README.md`: **a ledger entry is a
+  claim with a timestamp, and code moves under it in both directions** — entries
+  are worth re-verifying rather than trusting indefinitely.
+
+- 37b1346: feat(storage): surface the sys_file id on upload-complete — ADR-0104 D3 wave 2 (PR-1)
+
+  `POST /api/v1/storage/upload/complete` now returns the opaque `sys_file` id
+  (`data.fileId`), and `client.storage.upload()` surfaces it on the returned
+  `FileMetadata`. Previously the commit response omitted the id — the caller
+  could not learn which id to persist after committing an upload, so a file
+  field could never store a reference.
+
+  Additive and non-breaking (new optional `fileId` on `FileMetadataSchema`; the
+  client falls back to the presigned id when talking to an older server). This is
+  the enabling foundation for file-as-reference; the storage model itself is
+  unchanged in this PR.
+
+- 201b31f: fix(spec): fold agent `knowledge.topics` into `sources` at parse; mark unenforced AI config experimental (#1891, #1893)
+
+  Two liveness-audit closeouts (umbrella #1878):
+
+  - **`AIKnowledgeSchema`** now folds the deprecated `topics` alias into the
+    canonical `sources` at parse time (canonical wins; alias dropped from the
+    output — mirrors the `visibleWhen` normalization, ADR-0089 D2). Authoring
+    `topics` was a silent no-op: the renderer only reads `sources`. The schema's
+    JSDoc example now shows `sources`.
+  - **Author-facing experimental markers** added to config that is parsed but has
+    no runtime consumer, matching the liveness ledger (ADR-0078): agent
+    `memory` / `guardrails` / `structuredOutput` / `lifecycle`, and tool
+    `outputSchema` (keys folded into the LLM-facing description only — no output
+    validation).
+
+  Reference docs regenerated. No parse-acceptance change; `Agent`'s inferred
+  output type no longer carries `knowledge.topics` (input still accepts it).
+
+- 33f5e23: feat(lint): `validate-ai-surface-affinity` — skill ↔ agent surface affinity is now linted (#3820)
+
+  An agent binds a product surface (`'ask'` | `'build'`, ADR-0063 §1) and a skill
+  declares which surface it belongs to (`'ask'` | `'build'` | `'both'`, §3). The
+  runtime refuses an incompatible binding with a **load error at chat time** —
+  after parse, validate, and deploy all passed cleanly. The new rule reports that
+  contradiction statically, and joins `REFERENCE_INTEGRITY_RULES`, so
+  `objectstack validate`, `lint`, and `compile` all pick it up with no CLI
+  changes.
+
+  Scope is deliberately narrow (zero false positives by construction): only
+  bindings where **both** the agent and the skill are declared in the same stack
+  are checked. `agent.skills[]` names that don't resolve in-stack (kernel skills
+  are runtime-registered and statically invisible) are skipped — resolving those
+  namespaces is #3820 D0/D2, decided by ADR-0109 (Proposed).
+
+  The spec side is doc-truth only, no schema shape changes:
+
+  - `stack.agents` is documented as **platform-internal** (ADR-0063 §2 — the
+    kernel ships exactly two agents; third parties extend via skills), replacing
+    prose that still described the withdrawn ADR-0040 per-app-copilot model.
+  - `stack.tools` is documented as declaration-only pending the ADR-0109 tool
+    authoring model.
+  - `app.defaultAgent` is re-documented as a surface-binding knob (`'ask'`
+    implicit / `'build'` for authoring surfaces), not a custom-agent slot.
+  - `SkillSchema` now states that a per-skill `permissions` field deliberately
+    does not exist (ADR-0049) — authoring one is silently stripped; access is
+    gated by `agent.access` / `agent.permissions` and per-tool authz.
+
+- 1986594: feat(analytics): honour widget `dateGranularity`, `sortBy`/`sortOrder`, and `limit` in the dataset query (#3588)
+
+  Three presentation options were accepted by the metadata layer and then dropped
+  by the analytics query builder. They reached no SQL, produced no error, and the
+  only way to notice was to read the `sql` a dataset response echoes — so a
+  dashboard could declare `dateGranularity: 'month'` and quietly render one bar
+  per record.
+
+  - **`dateGranularity` now buckets.** `DatasetSelection` gained an optional
+    `dateGranularity`, applied to every selected `date` dimension. Precedence per
+    dimension: an explicit `timeDimensions` granularity, then the selection's,
+    then the dataset dimension's own default. A widget can bucket a trend by month
+    without the dataset committing every other consumer to that granularity.
+  - **`order` / `limit` / `offset` now apply on every path.** They are applied to
+    the ASSEMBLED grid — after measure-scoped sub-queries merge, after `compareTo`
+    columns attach, and after derived measures are computed — so a derived measure
+    is a valid sort key and the ObjectQL aggregate path (which has no ordering
+    grammar, and which native SQL hands every date-bucketed query to) orders
+    identically to native SQL. A single-query selection still pushes the window
+    down into the statement. An `order` key that names nothing the selection
+    projects is now rejected (400) rather than silently ignored.
+  - **`limit` is deterministic.** Without an `order`, a limit orders by the
+    selected dimensions first, so it truncates a reproducible window instead of an
+    arbitrary subset.
+  - **Widget `options` is a contract again.** The four query-affecting keys
+    (`dateGranularity`, `sortBy`, `sortOrder`, `limit`) plus `stageOrder` are
+    declared on `DashboardWidgetOptionsSchema`, so a typo like `sortDirection` is
+    an author-time error. The bag stays open — renderer extras (`icon`, `columns`,
+    `striped`, …) pass through untouched.
+
+  Two latent bugs surfaced while fixing the above and are fixed here too:
+
+  - `order`/`limit` were forwarded to EVERY sub-query. A measure-scoped
+    supplementary query selects one measure, so an inherited `ORDER BY` named a
+    column it never selected, and an inherited `LIMIT` truncated it before the
+    merge — dropping rows from the assembled grid. Nothing hit this only because
+    nothing passed `order`.
+  - The `compareTo` pass built its query by hand and skipped granularity
+    resolution, so a month-bucketed primary grid was merged against raw-timestamp
+    comparison rows. No dimension key matched and every `<measure>__compare`
+    column came back empty.
+
+  `ObjectQLStrategy` now also echoes a representative `sql` (with `date_trunc`,
+  `WHERE`, `ORDER BY`, and `LIMIT`; filter values parameterized, never inlined).
+  Previously the `sql` field simply vanished from the response whenever a query
+  was date-bucketed, leaving an author unable to tell "not implemented" from "this
+  strategy doesn't report".
+
+- 0bc685a: fix(approvals): return decision attachments as file values, not "[object Object]" (#3504)
+
+  `sys_approval_action.attachments` is a `Field.file`, so the column **stores an
+  opaque `sys_file` id** (ADR-0104 D3 — the stored form of every media field). The
+  ObjectQL read path resolves that id into its expanded
+  `{ id, name, size, mimeType, url }` form on the way out. But `rowFromAction`
+  mapped the column with `.map(String)`, collapsing each expanded value to the
+  literal string `"[object Object]"`. Every `listActions` consumer (the approval
+  inbox timeline) then received garbage: the attachment chip had no filename and
+  its id was `"[object Object]"`, so opening it 404'd.
+
+  - `ApprovalActionRow.attachments` is now `ApprovalActionAttachment[]` — the
+    expanded file value plus its id, so a consumer can label and open an
+    attachment without needing read access to the system `sys_file` object (which
+    regular approvers do not have).
+  - Three read forms are accepted: the expanded value (the normal case), a bare id
+    (nothing to expand it into — storage service absent, file not committed), and
+    a legacy inline blob written before file-as-reference (`file_id` /
+    `mime_type`), until the backfill converts it. The id test reuses the
+    platform's `isFileIdToken`, so this and the engine's read resolver cannot
+    disagree about what counts as an id.
+  - The decision _input_ (`ApprovalDecisionInput.attachments`) is unchanged — it
+    still takes fileId strings, which is also exactly what the column stores. Only
+    the read shape changed.
+
+- b949059: fix(approvals): a dead approval run no longer leaves the record RECORD_LOCKED (#3456)
+
+  The record lock is keyed on a **pending** `sys_approval_request`, and it could
+  not tell _the run that owns that request_ from _an unrelated user editing the
+  record_. So a flow that touched its own target record while its own approval was
+  still pending — a manual `resume` with no decision, or a node that writes the
+  record between opening the approval and the decision — died on its own
+  `RECORD_LOCKED`, and the record stayed locked behind the dead run. Recovery
+  existed (#3424 lets an admin `recall`/`reject` to release it) but nothing made it
+  self-healing.
+
+  Both halves are now closed.
+
+  **Prevention — the owning run may write its own record.** The automation engine
+  stamps `flowRunId` onto the run context at setup, alongside `runAs`, and it
+  travels with every data node's ObjectQL context into `ctx.provenance`. The lock
+  hook exempts a write whose `flowRunId` matches the pending request's `flow_run_id`.
+  It is keyed on run identity rather than elevation on purpose: a `runAs:'user'`
+  run stays fully RLS-scoped while it writes. `flowRunId` is pure provenance —
+  server-constructed like `isSystem`, never client-supplied, evaluated by no
+  security middleware, and the only write it permits is to the one record its own
+  run already holds a pending request against.
+
+  **Recovery — a sweep releases records held by runs that died anyway.** A pending
+  request whose owning run has reached a terminal state (`completed`, `failed`,
+  `cancelled`, `timed_out`) can never be decided, so it is finalised as `recalled`
+  — releasing the lock — and audited under the reserved actor `system:dead-run`
+  with the run and its status in the comment, so it is never mistaken for a
+  submitter's withdrawal. It runs on the existing approvals sweep clock, which also
+  covers the case no in-band handler can: a run killed by a process crash.
+
+  The sweep is fail-safe by construction. It acts only on an explicit terminal
+  status from a closed set; `paused` (the normal state of a live approval),
+  `running`, an unrecognised status, an unknown run, a `getRun` that throws, and a
+  deployment with no automation engine are all read as "still alive". The failure
+  mode is "a dead run's lock survives until an admin recalls it" — today's
+  behaviour — never "a live approval is destroyed".
+
+  Also fixes `AutomationEngine.getRun`, which returned the **first** log entry for
+  a run id rather than the latest. A run that pauses and later finishes records two
+  entries under one id, so every suspend-then-finish run — every approval, screen
+  and wait flow — reported itself as `paused` forever, both on the Runs
+  observability surface and to this sweep.
+
+  One shape was left out here and closed separately in #3712: a `runAs:'user'` run
+  with no trigger user (a schedule) resolved no ObjectQL context at all, so it
+  carried no `flowRunId` and stayed subject to the lock. It now passes a
+  provenance-only context — the run id and nothing the security middleware keys on
+  — so it is attributable without acquiring a principal, and its documented
+  unscoped posture (#1888) is unchanged.
+
+- be1c52c: fix(approvals): admin override for a request routed to an unstaffed approver (#3424)
+
+  An `approval` node routed to a `position` (or `team`/`department`) with **no
+  holders** resolved to only the unresolvable `position:<name>` literal in
+  `pending_approvers` — no concrete user was in the slate. Every normal
+  `decide` / `reassign` / `recall` then returned `FORBIDDEN` (not a pending
+  approver) and, with `lockRecord`, the target record stayed `RECORD_LOCKED`
+  forever: a data-availability dead-end with no in-product recovery (the only exit
+  was editing the DB by hand). Very easy to hit in fresh/demo orgs (positions
+  seeded, holders not) and whenever a role is vacated in production.
+
+  A **platform or tenant admin** — the same posture the engine's superuser bypass
+  already trusts — may now act on any _pending_ request to release it: **approve,
+  reject, reassign** it to a real approver, or **recall** it. The override finalizes
+  the request (which releases the record lock, keyed on a pending request); a
+  tenant admin's authority is org-scoped, a platform admin's is not, and the
+  decision is audited under the admin's own id. An admin approval is authoritative,
+  finalizing the node even under `unanimous` / `quorum` / `per_group` rather than
+  counting as one vote among the (empty) slate.
+
+  - `sys_approval_request.viewer` gains `can_override` (server-computed): true for a
+    privileged admin on a pending request. The `approve` / `reject` / `reassign`
+    declared actions OR it into their `visible` gate, so the console surfaces the
+    recovery path without a hand-wired button. Existing approver/submitter gating is
+    unchanged.
+  - `openNodeRequest` now logs a loud warning when a node resolves to **no concrete
+    approver**, so the misconfiguration is visible instead of silently locking the
+    record. The literal-fallback behavior (kept for 15.x slot back-compat) is
+    otherwise unchanged.
+
+- c5ff96d: fix(approvals): a schedule-triggered run can write its own locked record (#3712)
+
+  #3456 let the run that opened a pending approval write its own target record,
+  keyed on `flowRunId`. It worked for every run that resolves an identity and
+  missed the one that doesn't: an effective `runAs:'user'` run with **no trigger
+  user** — a schedule being the canonical case — passed no ObjectQL context at
+  all, so nothing carried the run id and the run still died on its own
+  `RECORD_LOCKED`.
+
+  The blocker was never the lock. It was that "no identity" and "no context" were
+  the same thing on the wire, so a run could not say _who it was_ without also
+  claiming _what it was allowed to do_.
+
+  **A run with no principal now passes provenance alone.**
+  `resolveRunDataContext` returns `{ flowRunId }` — no `userId`, no `positions`,
+  no `permissions`, not even `isSystem: false`. Every principal gate keys on one
+  of those fields (the elevation short-circuit on `isSystem`, the ADR-0103
+  engine-owned write guard and the ADR-0090 D12 delegated-admin gate on `userId`,
+  the empty-principal fall-open on all three), so this context authorizes
+  **identically to no context at all**. The run keeps the documented #1888
+  unscoped posture, its loud `[runAs]` warning, and the
+  `flow-schedule-runas-unscoped` build-time lint. Nothing about what it may touch
+  changed — only that it can now be attributed.
+
+  **Provenance moved out of the hook session, into `ctx.provenance`.** `session`
+  answers _who is calling_ and is absent when no identity envelope was supplied —
+  a distinction real gates depend on (the attachment access gate skips bare-kernel
+  writes on exactly that test). Folding a run id into `session` would have forced
+  an identity-less run to present an empty session, silently turning "no caller"
+  into "an anonymous caller" and narrowing the #1888 fail-open for attachments
+  alone. `HookContext.provenance.flowRunId` says what produced the write; the
+  approvals lock reads it there.
+
+  Also relaxes `BaseEngineOptionsSchema.context` to a partial envelope
+  (`ExecutionContextInput`). `positions`/`permissions`/`isSystem` carry parse-time
+  defaults, which made them _required_ on a caller-supplied option and asserted
+  something untrue — that every data-engine context carries a principal. Callers
+  have always passed slices (`{ isSystem: true }` for a system read); the type now
+  says so.
+
+  Migration: nothing to change unless you read the run id inside a hook. If you
+  wrote `ctx.session.flowRunId`, read `ctx.provenance.flowRunId` instead — the
+  field never shipped under the old name.
+
+- 84e7be9: feat(plugin-approvals): expose per-group membership of pending approvers (objectui#2807)
+
+  `per_group` (会签) requests now carry `pending_approver_groups` on the
+  enriched row — a map from each still-pending approver id to the group key(s)
+  it fills (e.g. `{ "u_devadmin": ["finance", "legal"] }`). A client can label
+  each "waiting on" chip with the group it represents instead of showing
+  duplicate, context-free names.
+
+  - Resolved in `attachDecisionProgress` from the same open-time
+    `__approverGroups` snapshot the `decision_progress` groups already use, so
+    the two never disagree.
+  - Only the **pending** slots are mapped (a resolved approver has left
+    `pending_approvers`), and **synthetic** (unnamed, `#N`) group keys are
+    dropped — a `· #0` sub-tag would be noise.
+  - Absent for non-`per_group` behaviors. Display-only; the engine's
+    finalization tally stays authoritative.
+  - Added to the `ApprovalRequestRow` contract in `@objectstack/spec`.
+
+- debc23a: feat(approvals): enrich inbox rows with `payload_labels` (snapshot field labels)
+
+  The approvals inbox summary title-cased raw snapshot machine keys
+  (`assessment_status` → "Assessment Status") because the API sent no field
+  labels. `ApprovalService.enrichRows` now attaches `payload_labels` (snapshot
+  field key → the target object's field label), symmetric with the existing
+  `payload_display` (which resolves the values), and `ApprovalRequestRow` gains
+  the field. For a single-locale project the schema label is already the
+  localized string, so a client can render the human field name (e.g. "考核状态")
+  instead of a prettified English key.
+
+- 8f9689f: fix(spec): ratchet the authorable key surface — the one contract no witness watched (#3855)
+
+  For a metadata-driven platform the third-party API is **what an author may
+  write**: the keys inside each schema. Nothing guarded them.
+
+  The two existing witnesses look at the TypeScript surface instead:
+
+  - `api-surface.json` records exported `name (kind)`. A key inside a schema is
+    not an export, so removing one never moves it.
+  - `api-surface-signatures.json` hashes each `defineX` factory's type — but via
+    `checker.typeToString()`, which prints a type _reference_
+    (`z.input<typeof ActionSchema>`) and never expands it structurally. Member-level
+    narrowing cannot reach the hash.
+
+  `spec-changes.json` inherits the same blind spot: its `added`/`removed` arrays
+  are a diff of `api-surface.json`.
+
+  So #3883 removed three authorable keys with every witness green — and #3733 did
+  the same **by accident**, when `dataQuality` / `cached` outlived their keys and
+  were silently stripped. ADR-0059 §5 deferred a deeper gate "until a narrowing
+  actually slips both". It has, twice.
+
+  **New: `authorable-surface.json`**, a committed ratchet of all 8588 authorable
+  keys, derived from the same walk that already emits the JSON Schemas — one level
+  deeper, no new introspection. It distinguishes three states, because a tombstoned
+  key (`retiredKey()`) is `z.never()`, which Zod renders as `{ "not": {} }`:
+
+  | State       | Meaning                                                       |
+  | ----------- | ------------------------------------------------------------- |
+  | live        | a normal property — the author may write it                   |
+  | `[RETIRED]` | present but unwritable, carrying its own upgrade prescription |
+  | absent      | gone from the contract with nothing left to say               |
+
+  Three failure modes now fail the build, each verified non-vacuous by simulation:
+
+  1. **A key vanishes without a tombstone.** These schemas are not `.strict()`, so
+     Zod silently strips an unknown key: the author gets a clean parse and a
+     setting that never takes effect. The error spells out the retirement protocol.
+  2. **A key is tombstoned with no registered migration.** The tombstone is audible
+     to whoever hits it, but the change documentation — `spec-changes.json`, the
+     generated upgrade guide, the `spec_changes` MCP tool, `os migrate meta` — is
+     still empty. Requires a D2 conversion / D3 chain entry naming the surface.
+  3. **An addition is left uncommitted** (`--check`). An unrecorded key is
+     invisible to the ratchet forever after, since it can only detect the
+     disappearance of something it once saw.
+
+  It runs in `check:docs` (unconditional, required — cannot go dormant) and as an
+  explicit `check:authorable-surface` step in `Check Generated Artifacts`, with the
+  paths filter widened in lockstep per that filter's own rule.
+
+  Also corrects the `build-api-surface.ts` docblock, which advertised the signature
+  snapshot as answering "did the accepted authoring shape narrow?" — it does not,
+  and believing it did is what let this gap sit. Value-level narrowing (an enum
+  losing a member) remains ungated, per ADR-0059 §5's evidence gate.
+
+- 376a061: Surface the approval node's author-declared `decisionOutputs` keys on the request read as `ApprovalRequestRow.decision_outputs` (#3447 P2 UI enablement). The set varies per request (each node declares its own), so it rides the row rather than the object's static action params — a decision UI renders one input per key and POSTs `outputs` with the decision.
+- 9ea2bc5: fix(docs): `FieldSchema.extend()` does not exist — the FAQ was recommending a call that throws
+
+  #3882 brought `content/docs` under the example type-check gate and left an open
+  question: of the blocks still unmarked, is any of it **genuine rot** rather than a
+  fragment? Swept them. One real one:
+
+  `content/docs/deployment/troubleshooting.mdx` answered _"How do I extend a
+  built-in schema?"_ with
+
+  ```ts
+  const CustomFieldSchema = FieldSchema.extend({ … });   // TypeError
+  ```
+
+  `FieldSchema` carries a `.transform()` that lowers author-facing sugar at parse
+  time, which makes it a **`ZodPipe`, not a `ZodObject`** — `.extend` is `undefined`
+  on it (verified against the built package). Anyone following the FAQ got a
+  `not a function` throw. The example also used `z` without importing it.
+
+  Rewritten to **compose** — parse with `FieldSchema`, validate your additions
+  alongside it — verified to both type-check and run. `.in.extend()` is mentioned in
+  prose as the merged-schema route, with the caveat that it skips the transform.
+
+  **A divergence worth knowing about, found while fixing this.** The first fix used
+  `FieldSchema.in.extend(…)` in the checked block. It passed locally and failed in
+  CI with `Property 'in' does not exist on type 'ZodObject<…>'` — the two builds
+  emit **different declarations for the same source**: locally
+  `z.ZodPipe<z.ZodObject<…>>`, in CI a plain `z.ZodObject`. The runtime is
+  unambiguous (`bound ZodPipe`, `.extend === undefined`, verified after a clean
+  `rm -rf dist && pnpm build`), so **CI's declaration contradicts the value it
+  describes** — `.extend()` type-checks there and throws at runtime. Probably
+  inference instability in the DTS bundling of these very large zod types; worth its
+  own investigation. The example now uses only `.parse()`, so it is correct under
+  either declaration and the doc is not hostage to which one you get.
+
+  **The sweep's method is recorded in the gate's docstring**, because two traps make
+  a naive pass report a confident "nothing found":
+
+  1. **`tsc` stops after syntactic diagnostics** — it never reaches the semantic
+     pass. Marking all 780 blocks at once let ~200 broken fragments suppress
+     type-checking for every other block; the run came back with only TS1xxx codes,
+     which reads exactly like "no rot" and proves nothing. Verified by injecting a
+     deliberate type error and watching it go unreported.
+  2. **Unimported type names resolve against the DOM lib.** `Plugin`, `Event`,
+     `Response`, `Storage` all exist there, so a block missing its import reports
+     _"'version' does not exist in type 'Plugin'"_ against `lib.dom`'s `Plugin` —
+     an artefact, not drift. Three of the strongest-looking candidates were this.
+
+  After both corrections the remaining blocks are fragments, plus
+  `protocol/kernel/config-resolution.mdx`, whose aspirational snippets are already
+  labelled as design intent by a callout on the page.
+
+- a227ed7: fix(objectql)!: one key for the empty group bucket — real `null`, on both aggregation paths (#3839)
+
+  A grouped row whose dimension value is empty now carries `null` for that
+  dimension no matter which way the aggregate ran. Downstream code can test the
+  empty bucket with a plain `value == null` again: charts render their own empty
+  label, drill-through on that bucket builds `field = null` and returns the rows
+  it should, and a dashboard no longer changes shape when the driver, the
+  granularity or the reference timezone changes.
+
+  ### What was wrong
+
+  `engine.aggregate` has two implementations of one feature. It pushes the
+  aggregate down as SQL when the driver advertises every requested granularity and
+  the reference timezone is UTC; otherwise it fetches rows and buckets them in JS.
+  The two disagreed about how to spell "empty":
+
+  ```
+  --- same dataset, same query, one row with a NULL value ---
+    pushed-down SQL : [{ "key": null,     "type": "null",   "total": 2 }, …]
+    in-memory       : [{ "key": "(null)", "type": "string", "total": 2 }, …]
+  ```
+
+  The measures were always right — only the key's type and literal differed —
+  which is why this went unnoticed for so long: every total reconciled. But the
+  engine picks a path per query, so the same data produced a different bucket key
+  on SQLite-plus-UTC-plus-`month` than on `week` (which SQLite does not advertise),
+  a non-UTC timezone, or `driver-rest` / `driver-memory` / a remote Turso, all of
+  which bucket in memory unconditionally.
+
+  It was never date-specific either. A plain `groupBy: ['stage']` over a NULL
+  column diverged the same way.
+
+  Consumers are written against `null` — they check `== null` and supply their own
+  empty label ('—', '(empty)', a localized "Uncategorized"). The sentinel defeated
+  every one of them: it rendered a raw English debug string in the UI, and a drill
+  on the empty bucket compiled to `field = '(null)'` and matched nothing.
+
+  The in-memory path's comment justified the string as staying "consistent with
+  the client `useReportData` hook". That hook was removed with ADR-0021, and the
+  literal never appeared in it.
+
+  ### What changed
+
+  - `applyInMemoryAggregation` and `bucketDateValue` (`@objectstack/objectql`) key
+    the empty bucket as `null`. `bucketDateValue` now returns `string | null`. A
+    null instant and an unparseable one still share one bucket, because SQL cannot
+    tell them apart either (`strftime('%Y-%m', 'not-a-date')` is NULL).
+  - The internal composite bucket id is JSON-encoded, so the empty bucket stays
+    distinct from a row whose value is the literal string `"null"`.
+  - `bucketKeyToCalendarRange` (`@objectstack/core`) accepts `string | null`. The
+    empty bucket has no calendar span, so a drill on it opens the unscoped
+    superset instead of an invented bound — unchanged behavior, honest signature.
+  - The driver output contract in `@objectstack/spec` now states the rule: a row
+    with no value keys as `null`, never a sentinel. Propagating NULL through the
+    bucket expression is the whole of it; a driver only breaks it by adding a
+    `COALESCE`.
+
+  ### Gates
+
+  `checkDateBucketParity` (`@objectstack/verify`) deliberately carried no null
+  instant, because the divergence would have failed it for a reason it was not
+  about. Its fixture now has one, so the convergence is held in place — including
+  for out-of-tree drivers that run the check against themselves.
+
+  Two fixes were needed to make that fixture meaningful:
+
+  - The check folded bucket labels through `String(value)`, which turns SQL NULL
+    into `'null'` — a label a TEXT column can genuinely hold. A driver spelling
+    "empty" as a string could compare equal to one returning real NULL. The empty
+    bucket is now keyed out of band.
+  - Label sets were compared with `JSON.stringify`, which is sensitive to key
+    insertion order. Row order is not part of this contract and the two paths
+    naturally differ (SQL sorts its groups; the in-memory path emits first-seen
+    order), so a driver with entirely correct buckets could be reported as
+    disagreeing — with an empty diff message, since nothing actually differed.
+    The comparison is now order-insensitive.
+
+  A new dogfood check covers the non-date half against real drivers: same dataset,
+  plain and date-bucketed `groupBy`, both paths, one key.
+
+- 5b89711: feat(spec,lint): freeze the `{current_user_id}` filter vocabulary and fail the build on unresolvable placeholders (#3574)
+
+  A dashboard widget filtered on `{current_user}` rendered `0`. Not an error — a
+  zero, indistinguishable from a metric that is legitimately empty, with nothing
+  in the console or the server log. `service_dashboard.my_open_cases_by_priority`
+  in the HotCRM template had shipped broken this way since the day it was
+  written.
+
+  The token had never been part of the contract. Date macros were frozen in
+  `date-macros.zod.ts` with a spec vocabulary, a lint-usable predicate, and a
+  single client resolver; `{current_user_id}` had only prose in an `app.zod.ts`
+  JSDoc and three ad-hoc client implementations that each handled one surface's
+  filter shape. Nothing could tell an author their token was wrong.
+
+  - **`@objectstack/spec`** — new `data/context-tokens.zod.ts` freezing
+    `CONTEXT_TOKENS` (`current_user_id`, `current_org_id`) as the sibling of
+    `DATE_MACRO_TOKENS`, with `isContextToken` / `isKnownFilterToken` /
+    `classifyFilterToken` and a `CONTEXT_TOKEN_SUGGESTIONS` near-miss table. The
+    module documents what the tokens are _not_: presentation scope, never an
+    access boundary — that is RLS, which uses the unrelated `current_user.id`
+    expression root.
+  - **`@objectstack/lint`** — new `validateFilterTokens` (rule
+    `filter-token-unknown`, severity `error`). It walks `filter` / `filters` /
+    `runtimeFilter` subtrees across dashboards, objects, views, reports,
+    datasets, pages and apps, and reports any placeholder that resolves in
+    neither vocabulary. It scans for filter _keys_ rather than enumerating known
+    surfaces, so a new surface following the convention is covered the day it
+    ships — enumerating surfaces is how the dashboard was missed in the first
+    place. Navigation `recordId` / `params` are deliberately out of scope: they
+    resolve `AppContextSelector` ids, which are meaningless in a filter.
+  - **`@objectstack/cli`** — the gate runs in `os validate` and `os compile`.
+
+  It is an error rather than a warning because of who authors this metadata. An
+  AI reads a query returning `0` as a correct answer and builds on it; its
+  correction loop is author → validate → fix, so a diagnostic only reaches it if
+  it can fail the build. The three spellings the suggestion table covers —
+  `{current_user}`, `{user_id}`, `{organization_id}` — are each correct
+  _somewhere else_ in the platform, which is exactly why authors reach for them.
+
+  Also fixes a `ViewSchema` JSDoc example that documented `{user_id}`, a token
+  that resolves nowhere.
+
+- 763931e: feat(filters): evaluate `{filter-token}` placeholders server-side (#3582)
+
+  Filter values travel as JSON, so a time- or user-scoped slice writes a
+  placeholder instead of code:
+
+  ```ts
+  filter: { close_date: { $gte: '{current_year_start}' }, owner: '{current_user_id}' }
+  ```
+
+  The vocabulary has been in `@objectstack/spec` for a while (`date-macros.zod.ts`,
+  `context-tokens.zod.ts`) and `objectstack build` rejects tokens outside it
+  (#3574). What was missing is the half that _substitutes a value_: **nothing on
+  the server ever did**. A placeholder reached the driver as the literal string
+  `'{current_year_start}'`, compared as text, and matched nothing.
+
+  That failure is invisible — an empty widget looks exactly like a metric that is
+  legitimately zero — so apps worked around it by computing dates at module load,
+  which freezes "this year" into the built artifact and quietly goes stale.
+
+  **New: `resolveFilterTokens()` in `@objectstack/core`**, wired into the two
+  server-side seams every filter passes through:
+
+  - **ObjectQL read path** — `find` / `findOne` / `count` / `aggregate`, so REST
+    queries, related lists, saved-view filters and flow `find_records` all resolve.
+    It runs before the middleware chain, so only author-supplied filters are
+    inspected; RLS/sharing filters are injected downstream from concrete values.
+  - **Analytics dataset executor** — a dataset's intrinsic `filter`, a widget's
+    `runtimeFilter`, measure-scoped filters, and time-dimension `dateRange`s.
+    This path needs its own call: `NativeSQLStrategy` compiles raw SQL and binds
+    comparands directly, so a dashboard widget never passes through `engine.find()`.
+
+  Behavioural notes:
+
+  - Date tokens resolve to ISO strings (`YYYY-MM-DD`, or a full timestamp for
+    `{now}` / `{N_hours_ago}` / `{N_minutes_ago}`). Turning that into a column's
+    on-disk form stays the driver's job (`SqlDriver.temporalFilterValue`), so
+    there is still exactly one source of truth for the storage convention.
+  - Calendar boundaries follow `ExecutionContext.timezone`; one instant is pinned
+    per filter tree, so a `>= {current_month_start}` / `< {next_month_start}` pair
+    can never straddle a boundary.
+  - `{current_org_id}` reads `ExecutionContext.tenantId`; `{current_user_id}` reads
+    `userId`. A request carrying neither now **throws** instead of resolving to
+    `null` — a null comparand degrades to `IS NULL` on most drivers and would hand
+    back the rows the filter was written to exclude.
+  - An unrecognised placeholder **throws**, carrying the near-miss fix
+    (`{current_user}` → `{current_user_id}`, `{this_quarter_start}` →
+    `{current_quarter_start}`). This matches what `objectstack build` already
+    enforces. Consequence, previously implicit and now load-bearing: a filter value
+    that is _entirely_ `{...}` is always read as a placeholder, so a literal value
+    of that shape is not expressible — rename the value.
+
+  Also in this change: `notify` no longer sends the six-character string
+  `"undefined"` as an audience member. `to: ['{record.owner.manager}']` walks
+  `.manager` on a scalar foreign-key id, resolves to nothing, and `String(undefined)`
+  turned that into a phantom recipient — the emit "succeeded", addressed nobody,
+  and said nothing. Unresolved recipients are now dropped, and a node with no
+  recipient left fails naming the offending template and pointing at the start
+  node's `config.expand` (#3475), which does hydrate the relation.
+
+- de9af8a: fix(automation,objectql): a filter that loses a condition must not run (#3810)
+
+  Three related holes, all of which end in "the query matched rows the author
+  excluded".
+
+  **1. A flow filter could silently widen to match everything.**
+
+  The flow template interpolator expresses "this token did not resolve" as
+  `undefined`. In a message that renders as empty text — harmless. In a FILTER it
+  removes the condition, and a removed condition matches MORE rows. When it was
+  the only condition, `{ owner: '{record.ownr}' }` became `{}`, and `{}` handed to
+  `deleteMany` is every row in the table.
+
+  So one mistyped field name in a `delete_record` node silently emptied the
+  object. Reproduced with all four causes: a typo (`{record.ownr}`), an input the
+  run never received, a lookup hop (`{record.account.name}` — the trigger record
+  carries a scalar id), and a filter placeholder.
+
+  `get_record` / `update_record` / `delete_record` now refuse to execute when
+  interpolation erased any authored condition, naming the offending template. The
+  guard keys on LOSS, not emptiness: an author who deliberately wrote no filter is
+  unaffected, and losing one of two conditions still fails, because widening from
+  "my open records" to "all open records" is the same class of bug.
+
+  **2. Filter placeholders never reached the engine that resolves them.**
+
+  `config.filter` is where two `{…}` dialects meet — the flow template dialect
+  (`{record.owner}`) and the filter placeholder dialect (`{current_year_start}`,
+  `{current_user_id}`, resolved by `resolveFilterTokens()`). Evaluation order
+  picked the winner by accident: the flow interpolator ran first, found no flow
+  variable by that name, and erased it.
+
+  `interpolateFilter()` hands that position back to the dialect that owns it — a
+  whole-string token that no flow variable resolves and that IS a recognised
+  placeholder passes through verbatim for the engine to expand. Flow variables
+  keep precedence, so a template that works today cannot change meaning.
+
+  **3. The engine resolved placeholders on reads but not on writes.**
+
+  `resolveFilterTokens()` reached `find`/`findOne`/`count`/`aggregate` only. So
+  the SAME filter selected different rows depending on the verb: `find({ owner:
+'{current_user_id}' })` matched the signed-in user's rows, while
+  `update`/`delete` compared the literal token text and matched none — a flow that
+  previewed with one and acted with the other operated on two different row sets.
+  This is the #3106 shape one layer down: the evaluator existed, only some call
+  sites reached it.
+
+  `update` and `delete` now resolve too, BEFORE the by-id fast path claims a
+  scalar `where.id` (otherwise an unresolved `{current_user_id}` would be bound as
+  the primary key itself). Caller options are never mutated.
+
+- c4df271: chore(spec): mark FormView `buttons`/`defaults` live now the ObjectUI renderer folds them (#1894)
+
+  The structured `FormViewSchema.buttons` (per-button `submit`/`cancel`/`reset`
+  visibility + label) and `defaults` (create-mode initial values) shipped under
+  the ADR-0078 escape hatch — declared, but carrying an `[EXPERIMENTAL — NOT
+ENFORCED]` marker because no consumer read them yet. The ObjectUI `ObjectForm`
+  renderer now folds both onto the flat props it reads
+  (`showSubmit`/`submitText`/`showCancel`/`cancelText`/`showReset`/
+  `initialValues`), so the escape-hatch marker is dropped and the two spec
+  liveness-ledger entries (`view.form.buttons`, `view.form.defaults`) flip
+  `experimental → live`.
+
+  No shape or parse-behavior change — both keys were already accepted. This
+  closes the `view` half of the inverse-drift cleanup (renderers reading
+  undeclared props), umbrella #1878.
+
+- a41ba5c: chore(spec): enroll `report` and `dashboard` in the liveness GOVERNED set (#3462)
+
+  Closes the systemic anti-drift gap for two more authorable UI types (umbrella
+  #1878). Both were registered/round-trippable but ungoverned, so their property
+  liveness wasn't CI-checked — the reason drifts like dashboard `title`↔`label`
+  and stale report `chart` config survived until an audit caught them.
+
+  - Added `packages/spec/liveness/report.json` (20 live / 2 dead) and
+    `dashboard.json` (18 live / 2 dead), each property classified with an
+    objectui consumer reference.
+  - Re-verification corrected several stale 2026-06 audit findings against current
+    code: report `chart` is **live** (DatasetReportChart plots `chart.xAxis`/
+    `yAxis` via `useDatasetRows`, #1890/#3441); dashboard `globalFilters`/
+    `dateRange` are **live** (framework#2501); `title`↔`label` fixed (objectui#2806);
+    the ADR-0021 widget migration shipped (#3251). Only `aria`/`performance` remain
+    dead on each (perf `authorWarn`'d).
+  - Added both to `GOVERNED` in `check-liveness.mts`; the gate is green. Future
+    drift on these types is now a CI failure, not an audit finding.
+
+  `webhook` (the third type in #3462) is deferred — it isn't a registered
+  metadata type; its enrollment rides with the disconnect decision in #3461.
+
+  No spec shape/behavior change (ledger + gate config only).
+
+- 189854c: chore(spec,cli): enroll `webhook` in the liveness GOVERNED set (#3462)
+
+  Closes the final third of #3462 (umbrella #1878) — `report` and `dashboard`
+  landed in #3474; `webhook` was deferred for two reasons, both handled here.
+
+  - **Not a registered metadata type.** `webhook` is absent from the metadata-type
+    registry, so the gate can't resolve it via `getMetadataTypeSchema`. Registering
+    it would switch on Studio webhook CRUD, `saveMetaItem` overlay acceptance, and
+    diagnostics sweeping — the wrong move while the authoring surface is still
+    disconnected (below). Instead the gate resolves it through a small
+    `SPEC_ONLY_SCHEMAS` override in `check-liveness.mts` (consulted before the
+    registry): the gate only needs to **walk** the schema, not register it.
+  - **The whole authoring surface is dead (#3461).** Nothing materializes an
+    authored `webhooks:` entry (stack/connector) into a `sys_webhook` dispatcher
+    row — the runtime reads only admin-authored `sys_webhook` rows. So
+    `packages/spec/liveness/webhook.json` classifies all 16 authorable props
+    **dead** and `authentication` **experimental** (HMAC-`secret`-only, its
+    existing marker). Per-prop notes record which props a future materializer
+    (#3461 option A) could remap (e.g. `object`→`object_name`, `isActive`→`active`)
+    vs which have no sink anywhere — doubling as that mapping table.
+  - **Author-warning wired (`@objectstack/cli`).** Added
+    `{ type: 'webhook', key: 'webhooks' }` to `TYPE_COLLECTIONS` in
+    `lint-liveness-properties.ts`, so `os compile` now advises authors that
+    `webhooks:` is a silent no-op. The required `url` prop carries the single
+    warning per webhook (one heads-up per artifact, not one per dead prop);
+    `isActive` is left unmarked (default(true) boolean).
+
+  This is enrollment only — it does **not** decide #3461's build-the-bridge vs
+  retire-the-surface question. When that lands, the mapped props flip to live (cite
+  the materializer) or the ledger is removed with the schema. No spec shape/behavior
+  change (ledger + gate/lint config only).
+
+- 0e3a226: fix(authz): widen the driver's native tenant scope to the membership union
+  under the `group` posture — ADR-0105 D2 finally reaches the wire (#3623)
+
+  The Layer 0 wall correctly compiled `organization_id IN accessible_org_ids`
+  under `group`, but the ObjectQL engine also propagated the active-org
+  `tenantId` into `DriverOptions` unconditionally, and the SQL driver's native
+  scoping ANDed `organization_id = tenantId` under the union — collapsing every
+  group read back to active-org (isolated) reach. Found by the cloud-side
+  `ee-group-showcase` dogfood (cloud#880), the first end-to-end boot of `group`
+  against a real driver.
+
+  - `DriverOptions.tenantIds` (spec): the union tenant access set. Drivers with
+    native scoping widen reads/updates/deletes/aggregates to `IN (...)`,
+    keeping the NULL-tenant global-row carve-out; inserts still stamp from
+    `tenantId` (the active organization is the write target, D5). Absent or
+    empty ⇒ equality fallback — fail toward isolation, never toward exposure.
+  - ObjectQL engine threads `ExecutionContext.accessible_org_ids` as
+    `tenantIds` when the tenancy posture is `group`, reported by a new
+    `setTenancyPostureProvider` seam.
+  - SecurityPlugin wires that provider at start — deliberately from the
+    enforcement layer, so the driver wall only widens while the Layer 0 union
+    wall enforces above it. Embeddings without plugin-security keep active-org
+    equality.
+
+- a8d1e24: feat(cli,spec): gate the whole declared surface for i18n, and translate inline object actions server-side (#3370)
+
+  In a zh-CN workspace the platform chrome was localized while author-declared
+  labels leaked English — the approval drawer rendered **Approve / Reject /
+  Reassign** right beside the inbox's own 通过 / 拒绝. Two independent holes, both
+  closed here.
+
+  **The lint gate could not see them.** `os lint`'s i18n coverage kept its own
+  walk of the metadata, separate from the one `os i18n extract` uses to scaffold
+  bundles, and the two had drifted: coverage only ever walked the _top-level_
+  `actions` array, while `sys_approval_request` declares its decision actions
+  **inline on the object**. Those labels were extractable but ungated, so an
+  untranslated one could ship and no lint run would notice. Coverage now derives
+  its expected keys from `collectExpectedEntries()` — the extractor's walker — so
+  the gated surface and the scaffolded surface cannot disagree again. Newly gated
+  as a result: inline object actions, action `params` and `resultDialog` copy,
+  object-nested `listViews` (label / description / `emptyState`), object
+  `description`, field `help` / `placeholder`, and the `apps` / `dashboards` /
+  `pages` surfaces. Extract output is byte-identical — verified against the
+  committed plugin bundles.
+
+  **It stays silent for projects that do not translate.** Which locales get
+  checked is the project's declaration, never an assumption: `os lint`,
+  `os i18n check` and `os i18n extract` now read the stack's own
+  `i18n.defaultLocale` / `i18n.supportedLocales`, falling back to the locales a
+  bundle already exists for, and finally to `en`. A project with neither is
+  checked against its default locale alone — which its inline labels already
+  satisfy — so it reports zero i18n issues. That also fixes a monolingual
+  _non-English_ project being told it owed `en` translations it never claimed to
+  speak. Locked by regression tests; the three bundled examples stay at 0 errors.
+
+  **The server sent English regardless of locale.** `translateObject` walked an
+  object's `label` / `pluralLabel` / `description` / `fields` but never its inline
+  `actions`, so `GET /api/v1/meta/object/:name` returned the authored English
+  literals even though `@objectstack/plugin-approvals` ships `_actions`
+  translations for all eight decision actions in zh-CN / ja-JP / es-ES. The
+  Console compensated by re-resolving labels client-side against a separately
+  fetched bundle; every other consumer — mobile, plain HTTP, SDUI — rendered the
+  source language. It now runs inline actions through `translateAction`, without
+  stamping a synthetic `objectName` onto the response.
+
+  Adds `os i18n extract --no-metadata-forms`. Whether the companion
+  `<locale>.metadata-forms.generated.ts` file is written was previously implicit:
+  every run emitted it, so `--check` demanded that file in packages that
+  deliberately do not commit one. The Studio metadata-form baseline is
+  registry-driven and identical for every stack, so exactly one package owns it
+  (`platform-objects`); a plugin translating only its own objects now opts out,
+  and its `--check` stops failing on a tree that is in sync. Defaults to emitting,
+  so `pnpm check:i18n` keeps covering all 8 platform bundles.
+
+- 81ce41a: feat(rest): `treatAsHistorical` import also preserves the original audit timeline (#3493)
+
+  Follow-up to #3479/#3483. `treatAsHistorical` solved the FSM half — mid-lifecycle
+  rows are no longer rejected by `initialStates` — but the OTHER half of a historical
+  migration, preserving the original timeline, still didn't hold: an imported ticket
+  that closed in 2021 stored `updated_at` = the import day (and `updated_by` = the
+  importer), and a `writeMode: 'upsert'` refresh silently dropped business `readonly`
+  fields (`closed_at`, `resolved_by`). Reports, audit, and "recently modified"
+  sorting all came out wrong.
+
+  Three layers were force-overwriting the timeline; all three now respect a single
+  new opt-in flag, `ExecutionContext.preserveAudit`, which `treatAsHistorical` sets
+  alongside `skipStateMachine`:
+
+  - **spec**: `ExecutionContext.preserveAudit` (server-set only, never client-supplied)
+    and `DriverOptions.preserveAudit` (threaded to the driver's update stamp).
+  - **objectql** — the built-in audit hook (`plugin.ts`) now treats `updated_at` /
+    `updated_by` as CLIENT-PREFERRED (`?? now` / `?? userId`) under `preserveAudit`,
+    symmetric with how `created_at` / `created_by` already behave on insert; and the
+    static-`readonly` write strip (`stripReadonlyFields`) admits a WHITELIST — the
+    audit/timestamp family plus author-declared business `readonly` fields — so an
+    upsert refresh no longer drops them.
+  - **driver-sql** — the SQL `update` path keeps a supplied `updated_at` instead of
+    force-advancing it to `now` when `DriverOptions.preserveAudit` is set (fills-only-
+    empty, mirroring the insert stamp).
+  - **rest** — the import runner sets `preserveAudit` on the write context iff the
+    request opts into `treatAsHistorical`.
+
+  Deliberately a WHITELIST, not the blanket `isSystem` exemption: platform-managed
+  `system` columns OUTSIDE the audit family (`organization_id` / tenancy, generated
+  columns) STAY stripped, so a historical import reinstates established facts without
+  becoming a backdoor to forge tenancy. Permissions / RLS / field-level security are
+  unaffected — this changes only which audit/readonly values the runtime overwrites,
+  never who may write the record. Fully opt-in: a normal write still auto-stamps
+  `updated_at`/`updated_by` and strips `readonly` exactly as before. The objectui
+  "Import as historical data" checkbox (objectui#2815) now drives both halves — no new
+  UI.
+
+- 85e1e4e: feat(rest): `treatAsHistorical` import option — skip the state machine for historical-data migration (#3479)
+
+  Sibling of #3433 (seed exemption), one entry point over. #3165's `initialStates` enforced
+  the FSM entry point on every INSERT, so importing established historical facts —
+  a batch of already-`closed` tickets, `closed_won` deals, `completed` projects —
+  was rejected row-by-row with `invalid_initial_state`, blocking the core
+  data-migration path. Unlike the seed case it was visible (per-row errors), but it
+  still functionally blocked a legitimate use.
+
+  - **spec**: `ExecutionContext.skipStateMachine` — a general, server-set flag (the
+    seed-specific `seedReplay`'s sibling) that skips the `state_machine` rule for a
+    write; `ImportRequestSchema.treatAsHistorical` (default `false`) — the user-facing
+    import option.
+  - **objectql**: the engine now skips the state machine for `seedReplay` OR
+    `skipStateMachine` (one helper), covering both seed replay and historical import.
+  - **rest**: the import runner sets `skipStateMachine` on the write context iff the
+    request opts into `treatAsHistorical`; default off, so a normal import still walks
+    the FSM (the strict behavior is the default). Import **undo** now also carries
+    `skipStateMachine`, since restoring a prior snapshot re-writes an earlier state
+    that need not be a legal transition from where the row is now.
+  - **platform-objects**: `sys_import_job.treat_as_historical` audit column (additive).
+
+  Scope is identical to the seed exemption: ONLY the `state_machine` rule is skipped;
+  field shape, `format`, `cross_field`, `script` all still run. The objectui import
+  wizard checkbox is a separate follow-up.
+
+- dac6a08: feat(driver-sql)!: make index drift visible to `os migrate plan` — no more silent DDL at boot (#3728)
+
+  The #3696 unique-scope migration converged **in place**: `syncTableIndexes` ran a
+  `DROP` + `CREATE UNIQUE INDEX` during `initObjects`, in every environment,
+  leaving one log line behind. `os migrate plan` showed nothing, because
+  `detectManagedDrift` was column-only — `ManagedDriftOp` had no index dimension at
+  all. An operator who wanted to review the DDL before it reached their database
+  had no way to, and a managed schema was being auto-altered in production, which
+  the #2186 contract explicitly forbids.
+
+  Index drift is now a first-class dimension, reconciled through the same path as
+  column drift:
+
+  - **`syncTableIndexes` is additive only.** It creates indexes; it never drops or
+    rewrites one. `dropLegacyGlobalUniques` is gone.
+  - **New `DriftOp` variants** — `replace_unique_index` (safe: retire the legacy
+    platform-wide unique in favour of the tenant composite), `create_index` (safe),
+    `recreate_index` (needs-confirm; destructive when it tightens to `UNIQUE`), and
+    `drop_index` (destructive).
+  - **`detectManagedDrift` reports them**, `os migrate plan` renders them (index
+    ops display as `table [index_name]`), and `os migrate apply` executes them.
+    Index DDL is portable, so it applies directly on every dialect — no SQLite
+    table rebuild.
+  - **`replace_unique_index` creates before it drops**, so uniqueness is never
+    unenforced mid-migration and a failed create leaves the schema untouched.
+  - **Declared `indexes[]` drift is covered too**: an index metadata declares but
+    the database lacks, and one whose definition no longer matches the declaration
+    (the additive sync skips those by name, so they could never self-heal).
+  - **Orphan detection is limited to ObjectStack's own generated naming**
+    (`uniq_…` / `idx_…`, plus the pre-#3696 `<table>_<column>_unique` knex
+    spelling). A hand-rolled operational index is never reported as drift and
+    `--allow-destructive` will not delete it.
+
+  **Behaviour change.** Boot no longer rewrites the index unconditionally. Dev
+  (`autoMigrate: 'safe'`, what `os dev` / `os serve` use) still self-heals on
+  restart, so local workflows are unchanged. Production now **warns** with an
+  actionable `os migrate` hint and leaves the schema alone — the deployment stays
+  on the legacy global unique (multi-tenant inserts still collide) until someone
+  runs `os migrate apply`. That is the deliberate trade: a visible, pre-inspectable
+  migration instead of an invisible one.
+
+  Also fixed: `managedObjectIndexes` was never cleared when an object dropped its
+  `indexes[]`, so drift detection kept expecting an index nobody declared.
+
+  `SchemaDiffEntryKind` gains `index_mismatch` and `unmapped_index`.
+
+- d77d1b7: fix(spec): the liveness gate's stale-evidence check was ~100% false positives — and it was burying a real one
+
+  The check was one line:
+
+  ```ts
+  const file = String(led.evidence).split(':')[0];
+  if (/\//.test(file) && !existsSync(join(repoRoot, file))) → flag
+  ```
+
+  i.e. it assumed every `evidence` string is exactly `path/to/file.ts:123`. Almost
+  none are — they carry prose (`packages/spec/src/stack.zod.ts (mergeActionsIntoObjects
+stable-sorts each group)`), multiple pointers, or a cross-repo attribution
+  (`objectui: packages/app-shell/…`). Taking everything before the first colon
+  turns that prose into the "filename", which never exists.
+
+  Result: **48 of 227 entries flagged, every one a parse artefact or a deliberate
+  cross-repo pointer.** A permanently non-empty, ~100%-false warning is a warning
+  nobody reads — which is exactly how the one genuine rot in that list went
+  unnoticed:
+
+  - **`object.enable.clone`** cited `packages/objectql/src/protocol.ts:2259`. That
+    file no longer exists; `cloneData()`'s `enable.clone` gate moved to
+    `packages/metadata-protocol/src/protocol.ts:2938`. The claim stayed true, the
+    pointer rotted, and the check that exists to catch precisely this could not be
+    heard over the noise. Pointer repaired and dated.
+
+  **New `evidence.mts`** extracts repo-rooted paths properly and honours the
+  cross-repo attribution entries already write in prose:
+
+  - a realm marker (`objectui`, `cloud`, `ee`) attributes the paths after it, up to
+    the next clause boundary, so one string can cite both repos; `framework`
+    switches back explicitly;
+  - `packages/services/service-ai/…` is always foreign — the closed cloud runtime,
+    the one sibling missing from this repo's `packages/services/`;
+  - non-repo-rooted tokens (`app-shell/MetadataProvider.tsx`,
+    `action-button/-group`) read as prose, neither resolved nor reported.
+
+  The gate now resolves **156 evidence paths** against the checkout, attributes 36
+  to another repo, and reports **zero** stale — down from 48 warnings that said
+  nothing. Each run prints the two counts, so the check degrading to "extracts
+  nothing" is visible rather than silently green (a unit test asserts it too).
+
+  Also updates the ledger README, whose advice to write objectui paths "as prose to
+  avoid false stale-flags" was a workaround for this bug: write the full path with
+  a realm prefix instead.
+
+- 5b79a34: feat(spec): register the 13 orphan dogfood proofs — five advance the ADR-0054 ratchet, eight say why they can't
+
+  The gate flagged 13 `@proof:` tags under `packages/qa/dogfood/test/**` that no
+  class in `proof-registry.mts` claimed. Silencing that warning is trivial and
+  worthless; the useful question is the one ADR-0054 §3 actually asks: **is there
+  an authorable property whose `live` status this proof gates?** Each of the 13 was
+  re-read against that.
+
+  **Five had one, and are now BOUND** — a `live` classification on these entries
+  requires its proof, so the ratchet advances from 10 bound paths to 17:
+
+  | Proof                           | Now gates                                               | Why it qualifies                                                                                                                                                |
+  | ------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `attachments-permission-matrix` | `object.enable.files`                                   | the #2727 opt-in gate proven in BOTH directions — the fixture carries a deliberate non-declaring object (`att_nofiles`) that must be refused 403 FILES_DISABLED |
+  | `showcase-d3-d4-capabilities`   | `permission.rowLevelSecurity.check`                     | authors `check: 'owner == current_user.email'` and proves the write POST-image is validated (distinct from `using`, which filters the pre-image)                |
+  | `showcase-scope-depth`          | `permission.objects.readScope`                          | authors `unit` / `unit_and_below` profiles and proves the owner-match widens, with cross-BU still isolated                                                      |
+  | `owner-anchor-and-bulk-writes`  | `permission.objects.modifyAllRecords`                   | member denied the transfer, privileged caller allowed — both directions                                                                                         |
+  | `semantic-roles-served`         | `object.highlightFields`, `.stageField`, `.fieldGroups` | asserts all three survive defineStack → artifact → registry → REST verbatim (incl. `stageField: false` as a strict false)                                       |
+
+  **Eight do not, and record why** rather than faking a binding — the shape the
+  registry already used for `permission-set-projection`:
+
+  - `flow-runas-schedule` and `showcase-scope-depth-fallback` guard properties
+    (`flow.runAs`, `permission.objects.readScope`) that are _already_ bound to a
+    sibling proof. A ledger entry carries one `proof` ref, so a second gate on the
+    same property is not representable — they run unconditionally instead.
+  - `me-apps-and-everyone-baseline` enforces `app.requiredPermissions` /
+    `app.tabPermissions`; `app` is not a governed type yet. Bind when it lands.
+  - `showcase-agent-intersection` / `showcase-agent-scope-ceiling` guard runtime
+    principal-resolution invariants (`onBehalfOf`, OAuth scope → ceiling set), not
+    authorable metadata.
+  - `showcase-bu-hierarchy-sharing` / `showcase-declarative-rbac-seeding` act on
+    stack-level `roles`/`sharingRules`, not a per-type property surface.
+  - `showcase-permission-zoo` is a breadth guard over the whole ADR-0090 surface;
+    binding it to any one entry would misrepresent both.
+
+  **One deliberate non-binding worth naming.** `owner-anchor-and-bulk-writes` binds
+  `modifyAllRecords`, not the sibling `allowTransfer` — the proof only _mentions_
+  `allowTransfer` in a comment and never authors it. Binding a property a proof
+  does not exercise is the same false comfort as a preview renderer standing in for
+  a runtime consumer, which is the error this ledger spent #3686 unwinding.
+
+  Also verified the bound proofs actually run: the only `skipIf` among them covers
+  `attachments-permission-matrix`'s enterprise cross-tenant block, not the
+  FILES_DISABLED assertion the binding rests on.
+
+  The gate now runs with **zero warnings** — the orphan list joins the
+  stale-evidence list at empty, so both mean something again. The ledger README's
+  ratchet table was itself stale (5 classes listed, 10 bound) and is now complete,
+  with the unbound set and its reasons alongside.
+
+- c757854: feat(spec): `verifiedAt` re-verification clock on liveness entries + two entries re-verified against objectui (#3714 follow-up)
+
+  A ledger entry is a claim with a timestamp, and **twice** now one has been
+  falsified by code moving under it — `flow.status` (#3711) and `action.undoable`
+  (#3714), both _understated_, both found only because a sweep aimed at the
+  opposite failure walked past them. Nothing in the gate asked how old a claim
+  was, so a stale entry stayed invisible until someone tripped over it.
+
+  **`verifiedAt`.** Ledger entries may now carry `"verifiedAt": "YYYY-MM-DD"` —
+  the date a human last closed the call graph. The asymmetry is the design:
+
+  - **Age never fails CI.** Re-verification is a worklist, not a merge gate. Every
+    run prints one summary line; `pnpm check:liveness --stale-verification[=days]`
+    prints the worklist (stale oldest-first, then undated). Default 180 days.
+  - **A malformed or future-dated value DOES fail CI.** A date the parser can't
+    read would silently exempt that entry from every staleness window — the same
+    silent-no-op shape this ledger exists to catch. Also rejects calendar-invalid
+    dates, since `new Date('2026-02-30')` rolls over to March 2 rather than
+    throwing.
+
+  Currently 2 of 401 entries are dated. The rest predate the field and report as
+  undated; date them as you re-verify rather than back-filling guesses.
+
+  **Two entries re-verified against objectui `732b1bf`:**
+
+  - `action.undoable` — both readers stand, and the call graph now closes end to
+    end in the evidence: the two `if (action.undoable …)` gates build
+    `result.undo`; `ActionRunner.ts:640-643` pushes it onto `globalUndoManager`
+    and passes `undo` to the toast handler; the toast's Undo button runs
+    `undoCtl.undo()` → `useGlobalUndo` → `UndoManager` → `dataSource`. The cited
+    `RecordDetailView` line numbers had already drifted (545→573, 404→432) in the
+    day between the issue being filed and this pass — hence the pinned sha.
+  - `action.type` — `api` → `executeAPI`, `form` → `executeForm`, both real.
+
+  **Docs correction (`content/docs/ui/actions.mdx`).** That page told authors the
+  schema's `api` and `form` types have "no runtime executor / renderer today —
+  stick to the four above." Both have had executors in objectui's `ActionRunner`
+  for some time, and the ledger's own `action.type` entry recorded `form` as live
+  since #2377. Same understatement shape as #3714, one page over. Both types now
+  have table rows; the callout keeps the parts that are true (`shortcut` and
+  `bulkEnabled` really are unwired) and links the ledger. `undoable` also joins
+  the UX property list, which is the author-facing payoff of #3714.
+
+- 0fc6219: feat(spec): the example type-check gate now covers `content/docs`, not just `skills/`
+
+  `check:skill-examples` compiles the TypeScript in prose against the built spec, so
+  an example that stops compiling fails CI instead of quietly teaching code that no
+  longer works. It does its job — it caught the broken `defineTool` example when
+  `tool.requiresConfirmation` was removed (#3715).
+
+  But it only ever walked `skills/`:
+
+  | Tree                           | files with `ts` blocks | compiled |
+  | ------------------------------ | ---------------------- | -------- |
+  | `skills/`                      | 9                      | **9**    |
+  | `content/docs/` (hand-written) | 124                    | **0**    |
+
+  The identical break in a docs page would have shipped. Docs examples are copied
+  verbatim by humans and AI exactly like skill examples, so a gate covering a
+  fraction of the surface it appears to cover reads as coverage — the same shape as
+  the stale-evidence and orphan-proof warnings fixed in #3857 / #3868.
+
+  The walker is now a `SOURCE_ROOTS` list, and this lands the first batch: **164
+  docs blocks across 63 pages, taking the gate from 32 to 196 checked examples**.
+  `content/docs/references/` is excluded — `build-docs.ts` regenerates it from the
+  schemas, so it cannot drift independently of its source.
+
+  **The marker is now per-format.** MDX has no HTML comments: `<!-- os:check -->` in
+  a `.mdx` fails the fumadocs build outright — _"Unexpected character `!`… to create
+  a comment in MDX, use `{/_ text _/}`"_. Caught by building the docs site, after
+  the first attempt broke 60+ pages. `skills/**/*.md` keeps `<!-- os:check -->`;
+  `content/docs/**/*.mdx` uses `{/* os:check */}`. Both spellings are recognised for
+  **orphan** detection, so a wrong-format marker fails loudly rather than silently
+  checking nothing — the existing guard's philosophy, extended to the new failure
+  mode this change introduces.
+
+  The batch was measured rather than guessed: marking all 780 docs blocks and
+  compiling showed which are self-contained. One subtlety worth recording — a block
+  that "passes" inside a 780-file program can be leaning on globals declared by
+  _other_ blocks (a file with no import/export is a global script), so the set was
+  converged by recompiling and dropping newly-failing blocks until green. 164 stand
+  on their own.
+
+  The remaining blocks are mostly fragments (a `columns: [...]` subtree), which the
+  gate's opt-in design already anticipates. Whether any are genuine rot is worth a
+  follow-up now that the machinery reaches them.
+
+- f07808c: feat(spec): reject a `body` on a non-script action — it would never run (#3530)
+
+  `Action.body` is documented as "only meaningful when `type === 'script'`", but
+  nothing enforced it. A `type: 'modal'` action authored with `params` and a
+  `body` — expecting the modal to collect the input and the body to write the
+  record on submit — passed validation, passed shape tests, and shipped a button
+  that opened a modal and silently wrote nothing. Non-script types all dispatch on
+  `target` (the page to open, the URL, the flow, the endpoint); there is no point
+  at which a renderer would invoke the body.
+
+  This is the same invisible-failure shape as the existing rule that rejects a
+  `script` action with neither `body` nor `target` (#2169), so it is enforced the
+  same way: a parse-time error that names the fix — `type: 'script'` collects the
+  same `params` and does run the body, and a modal that only opens a page should
+  drop the `body` and keep `target` naming the page.
+
+- 32ff033: docs(spec): correct ReportChart `xAxis`/`yAxis` semantics; mark dead report surface (#1890)
+
+  Closes the report residual of the ADR-0021 analytics migration (#1890). The
+  dataset-bound report chart already renders — objectui's `DatasetReportRenderer`
+  plots `chart.xAxis`/`yAxis` as the bound dataset's **dimension**/**measure** via
+  `useDatasetRows`, and the Studio `ReportDefaultInspector` picks them from the
+  dataset's dimension/measure catalogs — but the spec `.describe()` still called
+  them raw "Grouping field" / "Summary field", misleading an author (or AI) into
+  naming object fields instead of dataset dimension/measure names.
+
+  - `ReportChart.xAxis`/`yAxis` describe now states they are dataset
+    dimension/measure names (matching the live renderer + inspector).
+  - `ReportChart.groupBy` marked `[EXPERIMENTAL — not enforced]` — the
+    dataset-bound renderer plots a single `xAxis`×`yAxis` series and never reads
+    it; only the legacy `ReportViewer` fallback did.
+  - `ReportColumnSchema` / `ReportGroupingSchema` marked `@deprecated` — the
+    single-form report shape expresses columns/grouping as dataset
+    measure/dimension name arrays, so these objects are unreferenced; they remain
+    only as public type exports (objectui re-exports them) pending a governed
+    prune.
+
+  Docs regenerated (`ui/report.mdx`). No shape or parse-behavior change; no
+  export removed.
+
+- abceb0d: fix(seed-loader): support a composite `externalId` so join-table seeds dedupe on replay (#3434)
+
+  A junction / join table has no single-field natural key — the PAIR of its
+  foreign keys is what's unique — so its seed could only run `mode: 'insert'`,
+  which re-inserts every row on each replay boot with no existing-row check
+  (`decideWriteAction`'s `insert` case returns `insert` unconditionally). The
+  table duplicated on every restart: the showcase `showcase_project_membership`
+  fixture (3 rows) grew 3 → 6 → 9. It was masked until #3415 let the master-detail
+  parents seed at all.
+
+  - `SeedSchema.externalId` now accepts a **list** of field names
+    (`externalId: ['team', 'project']`) in addition to a single field name,
+    declaring a composite natural key. Default stays `'name'`.
+  - `SeedLoaderService` builds the uniqueness key from all listed fields (joined
+    with a `\u0000` separator that can't occur in a natural-key value). Reference
+    key fields are compared by their RESOLVED parent ids — which the existing DB
+    row already stores — so a composite of foreign keys matches across restarts.
+    A partial key (any component absent) is treated as no key, falling back to
+    insert, exactly as a missing single-field key already did.
+  - A composite-key target does not participate in single-value reference
+    resolution (a reference is one natural-key string), so such objects keep the
+    `'name'` default when referenced by another dataset.
+
+  The showcase membership fixture switches to `mode: 'ignore'` +
+  `externalId: ['team', 'project']`, so replay boots leave the three rows
+  untouched instead of duplicating them.
+
+- 0c302a7: Exempt curated seed writes from `state_machine` validation (#3433).
+
+  A seed is a snapshot of established facts — a project already `completed`, an
+  opportunity already `closed_won` — not a record walking its lifecycle. But once
+  an object declared `state_machine.initialStates` (#3165), the write path enforced
+  the FSM entry point on **every** insert, so seed replay silently rejected every
+  mid-lifecycle row and cascaded its master-detail children. That is the "installed
+  but no data" failure for the showcase board (1 of 5 projects), and it would hit
+  every marketplace template (a `closed_won` opportunity, a `closed` case) plus the
+  rehydrate-heal and per-org replay paths.
+
+  `SeedLoaderService` now marks its writes with a server-set `ExecutionContext.seedReplay`
+  flag; the engine passes `skipStateMachine` to the rule evaluator for those writes,
+  which skips the `state_machine` rule on both insert (`initialStates`) and update
+  (transitions). The exemption is scoped to `state_machine` only — a seed must still
+  satisfy every other validation (`format`, `cross_field`, `script`, `json_schema`,
+  `conditional`). Because all seed paths funnel through `SeedLoaderService.SEED_OPTIONS`,
+  the fix covers boot inline seed, marketplace install/heal, and per-org replay at once.
+
+  The showcase project seed drops its three-phase FSM-walk workaround (#3415) and
+  seeds each project directly at its real status again.
+
+- 6633337: fix(service-storage): emit the declared success envelope on all eight routes (#3689)
+
+  #3675 moved the **error** bodies of the autonomously-mounted `/api/v1/storage/*`
+  routes into the declared `{ success: false, error: { code, message } }`
+  envelope and deliberately stopped there: unlike the errors, the success bodies
+  were not an additive fix. They were three shapes, none of them carrying the
+  `success` flag `BaseResponseSchema` declares and
+  `ObjectStackClient.unwrapResponse` keys on —
+
+  | Route(s)                                                                                                                     | Was                 | Now                                |
+  | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ---------------------------------- |
+  | the six upload routes (`/upload/presigned`, `/upload/complete`, `/upload/chunked`, `…/chunk/:i`, `…/complete`, `…/progress`) | `{ data: {…} }`     | `{ success: true, data: {…} }`     |
+  | `GET /files/:fileId/url`                                                                                                     | `{ url }`           | `{ success: true, data: { url } }` |
+  | `PUT /_local/raw/:token`                                                                                                     | `{ ok: true, key }` | `{ success: true, data: { key } }` |
+
+  — while `storage.zod.ts` declared every one of them as
+  `BaseResponseSchema.extend({ data })`, and `PresignedUrlResponse` and friends
+  are `z.infer`red from those schemas and published as the SDK's return types.
+  The declaration said `success: boolean`; the wire said nothing. It broke
+  nothing only because the storage SDK methods returned `res.json()` raw —
+  `any`, so TypeScript could not see the gap and nothing relied on the
+  declaration. That is the posture i18n was in before #3636, right up until
+  something did rely on it.
+
+  **The payload moved on two routes, and that is the breaking part.** A direct
+  HTTP caller reading `body.url` from `GET /files/:fileId/url` must now read
+  `body.data.url`; one reading `body.ok`/`body.key` from the local adapter's
+  `PUT /_local/raw/:token` loopback must read `body.success`/`body.data.key`.
+  `ok` is dropped rather than kept beside `success` — it was a second, private
+  word for the same thing. The six upload routes are additive: callers already
+  destructure `.data`, and a new sibling key changes nothing.
+
+  Every in-repo consumer was fixed first, so the two repos are not coupled by
+  merge order:
+
+  - `client.storage.getDownloadUrl()` now reads through `unwrapResponse`, the
+    SDK's one standard envelope seam — which strips the envelope when present
+    and returns the body untouched when not, so a client either side of this
+    server change resolves the same URL. The other storage methods hand back the
+    whole envelope by design and were already correct.
+  - The console's two attachment openers (`RecordAttachmentsPanel`,
+    `ApprovalsInboxPage`) already read `body?.url ?? body?.data?.url`; objectui
+    gains tests pinning that tolerance as deliberate.
+
+  Two schemas that were missing are now declared — `FileDownloadUrlResponse` and
+  `RawUploadResponse` — and `getDownloadUrl` joins `StorageApiContracts`, which
+  it had never been in. That absence is how its shape drifted outside the
+  envelope unnoticed. The two `_local/raw/:token` routes stay out of the
+  registry on purpose: they are the local adapter's own presign loopback,
+  ledgered `server-only` and addressed as an opaque signed URL rather than as an
+  API.
+
+  `success-envelope.conformance.test.ts` holds the new shape in place the way
+  `error-envelope.conformance.test.ts` holds the error one: every route is
+  driven and its body parsed against the **declared schema** it answers to — not
+  a restatement — the retired shapes are asserted dead, and the module source is
+  scanned so a new route cannot bypass the `sendOk` helper. As with #3675, the
+  route ledgers cannot catch this class of drift: they audit which routes exist
+  and whether the SDK can address them, not what comes back.
+
+- cde1975: fix(dev): eliminate three fixed startup log warnings so official examples boot clean (#3420)
+
+  `os dev` on the stock showcase printed three fixed noise sources on every boot,
+  with zero example-side changes — training users to ignore warnings.
+
+  - **spec** — add a field-level `ackPlaintextMasking: true` opt-out for the
+    generic `password` author-time warning (ADR-0100). A deliberately-masked
+    field (like field-zoo's `f_password`) can now affirm intent instead of
+    printing an un-actionable "safe to ignore" on every boot; the warning text
+    points authors at the flag.
+  - **plugin-auth** — pass better-auth's documented
+    `silenceWarnings.oauthAuthServerConfig` to `oauthProvider(...)`. We already
+    mount the `/.well-known/oauth-authorization-server` documents ourselves at
+    the issuer root, so the plugin's "please ensure it exists" reminder was a
+    false positive (printed twice); silencing it removes both.
+  - **objectql** — route the Registry's re-register / package-overwrite lines
+    (normal rebuild / HMR / seed-replay paths) through a new debug-only
+    `SchemaRegistry.debug()` so they stay out of the default `info` boot log. Adds
+    a `logLevel` construction option (and matching `OS_REGISTRY_LOG` env var) so
+    the debug-gated housekeeping is discoverable for troubleshooting.
+
+- 0bc685a: fix(storage): downloads carry the real filename + content-type, not the URL token (#3504)
+
+  A presigned download served the bytes as `application/octet-stream` with no
+  `Content-Disposition`, so a browser saved the file under the opaque URL token
+  (e.g. `eyJrIjoiYXR0YWNo…`) instead of its real name — an approval's
+  `signed-contract.pdf` downloaded as a nameless blob.
+
+  - `IStorageService.getSignedUrl` / `getPresignedDownload` take an optional
+    `PresignedDownloadOptions` (`filename`, `contentType`, `disposition`).
+  - The REST download routes (`GET /storage/files/:id/url` and `/:id`) pass the
+    `sys_file` record's `name` + `mime_type`.
+  - The local adapter carries them in the signed token; the `_local/raw` route
+    emits `Content-Type` + an RFC 5987 `Content-Disposition` (ASCII fallback +
+    `filename*=UTF-8''…` for non-ASCII names). The S3 adapter bakes the same into
+    the signed URL via `ResponseContentType` / `ResponseContentDisposition`.
+  - Default disposition is `inline`, so previewable types (PDF, images) still open
+    in the browser — now with the correct name when saved.
+
+- 11949fc: fix(spec): tombstone `agent.tools` instead of deleting it — main was red (#3894 follow-up)
+
+  #3894 removed `agent.tools` (and `AIToolSchema`) outright. That broke
+  `pnpm --filter @objectstack/spec build` on `main`: the authorable-surface
+  ratchet (ADR-0104 / #3733) fails when an authorable key disappears from
+  the contract, because none of these schemas is `.strict()` — Zod silently
+  STRIPS an unknown key, so an author who keeps writing `tools:` would get a
+  clean parse and an agent that reaches none of the tools they listed. That
+  is the same silent-capability-loss shape #3820 exists to eliminate,
+  restored one layer down. The gate was right and the removal was wrong.
+
+  The removal itself stands — ADR-0064's "an agent reaches exactly its
+  surface-compatible skills' tools, nothing falls through to the global
+  registry" needs the second slot gone. What changes is HOW:
+
+  - **`agent.tools` is now `retiredKey()`** — authoring it throws with the
+    fix in the message (use `skills`; a platform tool by name, or
+    `action_<name>` for your own AI-exposed Action; `os migrate meta
+--from 16`). This supersedes #3894's changeset line saying the key
+    "remains a silent no-op rather than a parse error": loud is correct,
+    and it is what this repo's ratchet requires.
+  - **A D2 conversion `agent-tools-to-skills`** plus its D3 chain step, so
+    the removal reaches `spec-changes.json`, the upgrade guide, and the
+    `spec_changes` MCP tool. Unlike the protocol-17 renames beside it this
+    has no lossless target — each entry must become a reference inside a
+    skill, a human decision — so the conversion drops the dead key (the
+    runtime stopped reading it in cloud#910) and emits one notice per agent
+    marking where capability has to be re-declared.
+  - **The three `ai/AITool:*` baseline lines are deleted deliberately**, the
+    one case the ratchet sanctions in-PR. Those keys were authorable only as
+    the element shape of `agent.tools`; with the parent tombstoned there is
+    no path that reaches them, so they cannot vanish silently — the parent
+    speaks first, with a prescription.
+
+  Agent tests updated to pin the rejection (and its message) rather than the
+  strip semantics they asserted before.
+
+- b098b0e: docs(ai): stop `tool.requiresConfirmation` promising a gate it does not provide (#3715)
+
+  The flag is read by **no execution path** — not the LLM tool set, not
+  `ToolRegistry.execute`, not `POST /ai/tools/:name/execute`, not the MCP bridge.
+  Yet the authoring surface actively taught reliance on it: the Studio form
+  section was titled _"Access & safety"_ with helpText _"Ask user to approve
+  before executing (for destructive actions)"_, and the AI skill doc, MCP guide
+  and spec README all recommended it for destructive operations.
+
+  The prune-or-wire decision is deliberately **deferred** (#3715 — the field's
+  shape is likely needed once side-effect tools exist, which `ToolCategory`
+  already anticipates with `action` / `integration` / `flow`). What changes now
+  is only the promise:
+
+  - spec `.describe()` carries `[EXPERIMENTAL — not enforced]` + a pointer to the
+    real gate;
+  - the form section is renamed _"Declarative metadata (not enforced)"_ and both
+    its fields (this and the already-dead `permissions`) say so, with the enforced
+    alternative spelled out;
+  - `skills/objectstack-ai/SKILL.md`, `MCP_GUIDE.md` and `README.md` now point at
+    the action-level `ai.requiresConfirmation` + approval queue (and note that AI
+    metadata edits are already gated by draft/publish, ADR-0033).
+
+  No behaviour change: nothing read the flag before and nothing reads it now.
+
+- 83c161f: feat(automation)!: a flow run with no trigger user may no longer touch data (#3760)
+
+  An effective `runAs:'user'` run that resolves **no trigger user** used to execute
+  its data nodes **UNSCOPED** — it presented no principal, and the data security
+  middleware skips when there is no principal, so the run read and wrote every row.
+  `runAs:'user'` is an access-_narrowing_ declaration; failing to resolve it must
+  never resolve to a grant (ADR-0049). It now **refuses** the operation
+  (`UnscopedRunDataAccessError`), naming `runAs:'system'` as the fix.
+
+  **This was never really about schedules.** The docs, the spec, the runtime
+  warning and the lint all described a schedule-shaped problem, and the lint only
+  ever matched that shape. But the runtime predicate is "no user", and the
+  commonest way to have no user is a **record-change flow fired by a write that
+  carried none**: `isSystem` does _not_ suppress trigger dispatch — only
+  `skipTriggers` does, and exactly three first-party paths set it — so every
+  plugin/service system write, the approvals status mirror, and a `runAs:'system'`
+  flow's own data node dispatched record-change flows with `userId: undefined`.
+  Ordinary users reach those writes routinely (submitting for approval mirrors a
+  status onto the target record), so the fail-open was reachable by unprivileged
+  input and was the common case, not the rare one.
+
+  Deliberately **not** implemented as "inherit the triggering write's posture and
+  run as `isSystem`". That reads like a relabel but is a privilege escalation: the
+  security middleware's `isSystem` short-circuit fires _before_ its
+  package-managed-row, system-row, audience-anchor and delegated-admin gates, all
+  of which a principal-less context still has to clear. Such a run cannot write
+  `sys_user_position` today; as `isSystem` it could. "Unscoped" was never
+  equivalent to "system".
+
+  **Breaking — how to migrate.** A flow that reacts to system writes and needs to
+  act beyond one user's grants declares `runAs: 'system'`, making the elevation
+  explicit and audit-attributable. Otherwise ensure the trigger supplies a user.
+  Flows that touch no data are unaffected (`runAs` is moot), and the failure is
+  isolated: the trigger already swallows flow errors, so the originating write
+  still succeeds. The engine warns at run _setup_, before any node executes.
+
+  **#3712's user-less provenance path is subsumed, not broken.** That fix let a
+  run with no trigger user write its own approval-locked record by carrying a
+  provenance-only ObjectQL context (the run id, nothing else). Such a run can no
+  longer perform a data operation at all — presenting no principal is exactly what
+  made the write unscoped — so it is refused before the lock is consulted. The
+  capability survives via the explicit route: a schedule that must write records
+  declares `runAs:'system'`, which the lock hook exempts on its own `isSystem`
+  branch. The `flowRunId` exemption itself stays live and load-bearing for what
+  #3703 built it for — a `runAs:'user'` run that _does_ have a user — where the
+  exemption is still provenance rather than privilege.
+
+  Also in this change:
+
+  - **`flow-schedule-runas-unscoped` → `flow-runas-unscoped`, and it now fails the
+    build.** It read as a gate and behaved as a comment — `os compile` documented
+    that the flow lint "NEVER fails the build" — which is close to no net at all
+    for the audience it protects, very often an AI generating flows in bulk. It now
+    also covers the other provably user-less triggers (`time_relative`, `api`), per
+    ADR-0073 D5. It still cannot cover `record_change`, which is undecidable at
+    authoring time — that is exactly why the runtime refusal exists.
+  - **Three seed writes stopped firing automation.** The seed loader's pass-2
+    deferred-reference back-fill and both of `AppPlugin`'s basic-insert fallbacks
+    inlined a bare `{ isSystem: true }` instead of the shared seed options, so they
+    seeded with record-change automation live — the self-trigger vector
+    `skipTriggers` exists to prevent, on the writes that skipped it.
+  - **ADR-0073 amended.** Its severity rationale ("an unprivileged user cannot
+    trigger a schedule, so there is no untrusted-input path") is falsified, and its
+    rejection of fail-closed ("breaks legitimate scheduled CRUD — 2/3 example flows
+    relied on the default") expired when those flows were fixed to declare
+    `runAs:'system'`. Refusal is an interim posture, forward-compatible with the
+    ADR's `automation` principal: when that lands, the refusal point becomes the
+    place that resolves it.
+
+- 69f1dfd: fix(webhooks): materialize stack-declared webhooks into the dispatcher (#3461)
+
+  A webhook authored declaratively — `defineStack({ webhooks })` / `defineWebhook()`,
+  validated against the spec `WebhookSchema` — was a **silent no-op**. The runtime
+  dispatcher (`AutoEnqueuer`) fans out off `sys_webhook` DATA rows (`object_name` /
+  `active`), which until now were only ever written by hand through the object's
+  CRUD UI. Nothing turned a declared webhook (`object` / `isActive`) into a
+  dispatchable row, so authoring `webhooks:` on a stack produced `webhook` metadata
+  that never fired (ADR-0078). The showcase app itself shipped a `webhooks:` entry
+  that did nothing.
+
+  `@objectstack/plugin-webhooks` now bridges the two on boot:
+
+  - **`bootstrapDeclaredWebhooks`** reads declared `webhook` metadata from the
+    ObjectQL registry (where the manifest decomposition already parks
+    `stack.webhooks`), validates each through `WebhookSchema.parse()` — the spec
+    schema finally has a real consumer — and materializes it into a `sys_webhook`
+    row, mapping `object → object_name`, `isActive → active`, and stashing the full
+    envelope (headers / secret / retry / timeout) in `definition_json`. The
+    auto-enqueuer's first cache refresh then picks the row up and dispatches it.
+  - **Seed-not-clobber provenance** (mirrors `sys_sharing_rule`, #2909): `sys_webhook`
+    gains `managed_by` / `customized` columns. Declared webhooks re-seed every boot
+    as `managed_by: 'package'`, but a row an admin created (`managed_by: 'admin'`) or
+    edited in Setup (`customized: true`, stamped by a `beforeUpdate` hook) is never
+    overwritten — a deactivated noisy webhook survives redeploys.
+
+  Connector-declared `webhooks` remain not-yet-enforced (that is a separate seam,
+  #3197). Registering `webhook` as a first-class metadata type + enrolling it in the
+  liveness `GOVERNED` set is a tracked follow-up.
+
+  Migration: none required. Existing hand-authored `sys_webhook` rows default to
+  `managed_by: 'admin'` and are never touched by the seeder. Anyone who authored
+  `webhooks:` on a stack expecting it to fire will find it now does — review those
+  declarations (especially `url` / `isActive`) before upgrading.
+
 ## 16.1.0
 
 ### Minor Changes

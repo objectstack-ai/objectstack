@@ -1,5 +1,251 @@
 # @objectstack/plugin-trigger-record-change
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 6f55c63: feat(trigger-record-change): `record-after-write` fires one flow on create OR update (#3427)
+
+  A `record_change` flow's `start` node bound to exactly one lifecycle event via
+  `triggerType`, so a rule meant to run on both insert and update ("recompute the
+  SLA whenever a case is created or its priority changes") forced authors to
+  duplicate the whole flow — two near-identical definitions that drift.
+
+  Adds `record-after-write` and `record-before-write` as the **create-OR-update
+  union** trigger tokens. One `start` node binds both lifecycle hooks
+  (`afterInsert` + `afterUpdate`) under the same flow; exactly one fires per
+  mutation (a write is an insert _xor_ an update), so it is not a double run.
+  `delete` is deliberately excluded — a write persists field data, a delete
+  removes the row. To branch on which event fired inside the flow, test
+  `previous` (empty on create, populated on update).
+
+  - `triggerTypeToHookEvents(triggerType)` (new, plural) is the canonical mapper:
+    it returns the list of hook events a token binds, expanding `write` to both.
+    `triggerTypeToHookEvent` (singular) is kept for back-compat and now returns
+    `null` for the multi-event `write` tokens rather than silently dropping a
+    binding.
+  - The engine already forwards any `record-*` token through to this trigger, so
+    no engine, lint, or spec change is needed — the trigger owns the vocabulary.
+
+  Documented under Automation › Flows (Create-or-update flow) and the trigger's
+  README.
+
+### Patch Changes
+
+- 9dcc0ae: fix(automation): array-form flow `triggerType` fails loudly instead of silently never firing (#3481)
+
+  An array `triggerType` on a flow start node — the shape an author (or an AI
+  authoring pass) naturally reaches for to fire on more than one event, e.g.
+
+  ```ts
+  config: { objectName: 'app_task', triggerType: ['record-after-create', 'record-after-delete'] }
+  ```
+
+  was accepted everywhere and armed nowhere. Multi-event unions are deliberately
+  unsupported (only the single tokens plus the `record-after-write` create-OR-update
+  union exist — see #3457), but nothing said so: `defineFlow` passed the array
+  (start-node `config` is an open record), the engine's `typeof === 'string'` check
+  folded it to no trigger and misclassified the flow as **manual**, so it never
+  entered the trigger-binding audit, and the flow-trigger-readiness lint used the
+  same `typeof` narrowing and produced no finding. The flow bound to nothing and
+  never fired, with zero output at any layer — the same silent-never-fire class as
+  #3427 / #3472, and the last authoring shape still slipping past every guard.
+
+  This is a **defensive** fix — arrays remain unsupported; they now fail loudly:
+
+  - **lint** (`validate-flow-trigger-readiness`): an array `triggerType` containing
+    any `record-*` element now yields a `flow-trigger-unknown-event` warning at
+    `os validate` time, steering to `record-after-write` (for created-or-updated) or
+    one flow per event.
+  - **engine** (`resolveTriggerBinding`): such an array is routed to the
+    `record_change` trigger — exactly as an unmappable single token is — instead of
+    being folded to a manual flow, so it reaches the trigger's bind-time rejection.
+  - **trigger** (`record-change`): the bind-time rejection detects the array shape
+    and emits a targeted warning (naming the flow, pointing at `record-after-write`
+    and #3457) rather than the generic unknown-token line.
+
+- 169b58a: fix(#3426): build-time warning for unresolvable flow template paths + guard the formula re-read
+
+  Two follow-ups to #3426 (the formula/lookup `{record.<path>}` template gap that #3445 began closing).
+
+  **Build-time signal (the issue's fallback ask).** `os validate` now flags a
+  record-change flow node whose `{record.<path>}` template cannot resolve —
+  turning the previous SILENT blank into an advisory warning. Two cases, via the
+  new `@objectstack/lint` rule `validateFlowTemplatePaths`:
+
+  - `flow-template-unknown-field` — `{record.<x>}` where `<x>` is neither a
+    declared field nor a system column (a typo like `{record.full_naem}`).
+  - `flow-template-lookup-traversal` — `{record.<lookup>.<field>}`, a cross-object
+    hop the seeded record carries only as a scalar id (still unsupported; tracked
+    on #3426).
+
+  Deliberately quiet: formula fields, bare lookup ids, numeric indexes into
+  `multiple` lookups (#1872), `json` sub-paths, and system columns are NOT flagged,
+  and flows bound to an object this stack does not define are skipped (no schema to
+  compare against).
+
+  **Hydration re-read guards.** The `trigger-record-change` computed-field re-read
+  (#3445) is now (a) skipped when the object declares no `formula` field — the only
+  thing it adds — via the engine's optional `getObjectConfig`, and (b) memoized per
+  write on the shared HookContext, so N flows on one written record share ONE
+  re-read instead of N. Any uncertainty falls back to the prior unconditional
+  re-read (correctness over the optimization).
+
+- 1dc94f0: fix(trigger-record-change): hydrate read-time formula fields onto the seeded flow record (#3426)
+
+  A `formula` field is a read-time virtual — the engine evaluates it post-fetch on
+  `find`/`findOne`, never on the write path — so it was absent from the raw
+  after-create/after-update row a record-change flow is seeded with. A notify
+  node template like `{record.full_name}` (or a start condition on the same field)
+  therefore resolved to an empty string, silently emitting notifications such as
+  `"New lead to assign: "` with the name missing.
+
+  The record-change trigger now re-reads the just-written record through the data
+  engine, so the seeded `record` carries the same computed fields a data-API read
+  returns. The fix is at the trigger (the producer of the flow's `record`), so it
+  benefits the whole flow — start condition, every node, and notify `title`/`body`
+  templates — not just the notify node.
+
+  Deliberately conservative:
+
+  - Runs only for `afterInsert` / `afterUpdate` (the row exists in its post-write
+    state); `before*` and `afterDelete` keep the raw hook record untouched.
+  - Reads as an elevated system principal, so it can only ADD computed fields,
+    never let RLS/FLS on the re-read shrink the snapshot the flow already saw.
+  - Raw hook fields win on merge, preserving trigger-time scalar values and the
+    #1872 multi-lookup input overlay; the re-read only fills in keys the raw row
+    lacks (the formula virtuals).
+  - Any failure (no read surface, no id, a throw, an empty read) falls back to the
+    raw record — hydration never breaks the flow it feeds.
+
+  Lookup **traversal** (`{record.account.name}`) is intentionally not hydrated: a
+  default data-API read does not expand relations either, and expanding would turn
+  `record.account` from its scalar FK id into an object, breaking templates and
+  conditions that use the bare id (e.g. #1872's `{record.target_channels.0}`).
+  That traversal remains tracked on #3426.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

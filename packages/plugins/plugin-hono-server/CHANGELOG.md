@@ -1,5 +1,544 @@
 # @objectstack/plugin-hono-server
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- ad4af62: feat: single-source API-method derivation — the server is the only adjudicator (#3391)
+
+  An object's effective API surface is now resolved from **six primitives**
+  (`get/list/create/update/delete/bulk`) by ONE derivation table in
+  `@objectstack/spec/data` (`resolveEffectiveApiMethods` / `isApiOperationAllowed`
+  / `effectiveOperationsArray` / `API_METHOD_DERIVATION`). Every gate consumes it:
+  the REST data surface, the runtime HTTP/MCP dispatcher, and the
+  `/me/permissions` annotation. The `apiMethods` whitelist is three-state —
+  `undefined` = unrestricted, `[]` = deny-all, a subset = the derived closure — and
+  the legacy 8 verbs (`upsert/aggregate/history/search/restore/purge/import/
+export`) are DERIVED from the primitives, never declared standalone. (This
+  release also ships the enum shrink — see the `#3543` changeset: the authored
+  enum IS the six primitives, and a stored legacy value is stripped at parse
+  with a warning rather than honored.)
+
+  **Derivation:** `import` ⊆ create∨update (writeMode-precise: insert→create,
+  update→update, upsert→create∧update); `export` ⊆ list (reserved user-export slot,
+  always on this phase); `aggregate`/`search` ⊆ list (search also needs
+  `searchable`); `history` ⊆ get ∧ `trackHistory`; `upsert` ⊆ create∧update;
+  bulk sub-ops ⊆ bulk ∧ derived(child). `restore`/`purge` do not derive (the
+  `enable.trash` flag was retired, #2377).
+
+  **New response-side contract:** `EffectiveObjectPermissionSchema` extends
+  `ObjectPermissionSchema` with an optional `apiOperations` array;
+  `GetEffectivePermissionsResponse.objects` uses it, and `/me/permissions` now
+  hands down the per-object effective operation set. The authoring
+  `ObjectPermissionSchema` is deliberately NOT extended — the frontend consumes
+  the effective set the server resolves, never the raw whitelist.
+
+  **Behavior changes (tightening — a `declared ≠ enforced` gap closed):**
+
+  1. `apiMethods: []` + `apiEnabled: true` now denies every operation (405),
+     matching the documented three-state contract instead of the prior fail-open
+     "no restriction". In-repo impact is zero (every `[]` object also sets
+     `apiEnabled: false`, so 404 precedes 405).
+  2. The runtime dispatcher / MCP whitelist is now live. It previously read the
+     flat shape while `getObject()` returns the flags nested under `.enable`, so
+     the gate never fired — a silent dead gate now enforced (nested-first,
+     flat-compatible).
+  3. `import`/`export` reverse-derive: an object with a plain CRUD whitelist (no
+     explicit `import`/`export`) now admits import (⊆ create∨update) and export
+     (⊆ list). Row-level FLS is shared with list; the export column header is now
+     projected to the FLS-readable set so it can never expose a wider column set
+     than list (previously a masked column leaked its name as an empty column).
+  4. The bulk surfaces (`createMany`/`updateMany`/`deleteMany`, per-object
+     `/batch`, cross-object `/batch`) now require the `bulk` primitive AND the
+     child write (`bulk ∧ child`). The four in-repo explicit-whitelist objects
+     (`sys_user`, `sys_user_preference`, `sys_business_unit`,
+     `sys_business_unit_member`) gained `bulk`; a third-party object with an
+     explicit write whitelist that omits `bulk` will now 405 on the Many/batch
+     routes.
+  5. The 405 body's `allowed` array is now the derived EFFECTIVE operation set
+     (enum-ordered), not the raw whitelist.
+
+- 4ed7ed4: feat(security)!: the export axis is now OPT-IN, explainable, and covers reports (#3544, #3710)
+
+  **BREAKING — `allowExport` unset no longer means "inherit read".** Reading a
+  record and taking a bulk machine-readable copy of the whole table are different
+  privileges (Salesforce "Export Reports", Dynamics "Export to Excel", NetSuite
+  "Export Lists", SAP `S_GUI` 61 all separate them). The axis now says so.
+
+  ### Migration — FROM → TO
+
+  |                      | before                              | after                      |
+  | -------------------- | ----------------------------------- | -------------------------- |
+  | `allowExport` unset  | export **allowed** (inherited read) | export **denied**          |
+  | `allowExport: false` | export denied                       | export denied (unchanged)  |
+  | `allowExport: true`  | export allowed                      | export allowed (unchanged) |
+
+  **The one-line fix:** add `allowExport: true` to the object entry (or the `'*'`
+  wildcard) of every permission set whose holders should keep exporting.
+
+  ```ts
+  objects: {
+    deal: { allowRead: true, allowExport: true },   // ← add the grant
+  }
+  ```
+
+  Nothing else changes: read, CRUD, RLS, FLS and sharing are untouched, and a set
+  that never exported is unaffected.
+
+  **Who is affected.** Package-shipped sets are re-seeded on upgrade, so the
+  built-ins are handled for you — `admin_full_access` and `organization_admin` now
+  carry `allowExport: true` explicitly. **Environment-authored sets are not**: any
+  custom set whose users export must be edited. `member_default` deliberately does
+  NOT carry the grant, so ordinary authenticated users lose export until an admin
+  grants it — that is the point of the flip, not an oversight.
+
+  **Merge semantics.** Most-permissive, exactly like the CRUD bits: any set
+  granting `true` grants export. `false` and unset are the same outcome; `false`
+  is authoring intent, not a veto, because permission sets are additive capability
+  containers (ADR-0090).
+
+  **Not implied by super-user bits.** `viewAllRecords` / `modifyAllRecords` no
+  longer confer export. Separating "may see all data" from "may take a bulk copy"
+  is the segregation-of-duties case the axis exists for.
+
+  ### Also in this change
+
+  - **spec** — a set carrying `allowExport` is now **high-privilege**
+    (`describeHighPrivilegeBits`), so it cannot be bound to the `everyone` /
+    `guest` audience anchors. Without this the opt-in was defeatable by binding an
+    export-granting set to `everyone`. One predicate, so the runtime anchor gate,
+    the `@objectstack/lint` security-posture rule and the install-time suggestion
+    surface all pick it up together.
+  - **spec / plugin-security** — `ExplainOperationSchema` gains `export`, so
+    `explain` can answer _why_ a caller got `403 EXPORT_NOT_PERMITTED`. It
+    explains as `read ∧ the export grant`: `object_crud` reports the conjunction
+    and attributes the granting set, while every data-shaped layer
+    (requiredPermissions, OWD/depth/sharing, RLS, record attribution) is computed
+    as the `find` the export actually performs — asking the RLS compiler about an
+    `export` operation would match no policy and wrongly report "no RLS applies".
+    `readFilter` is surfaced for `export` as it is for `read`.
+  - **plugin-reports** — closes the reports side door (#3710). A report rendered
+    as `csv`/`json` is the same bulk copy of the same object, so it is gated by
+    the same `ISecurityService.canExport`. Enforced in `executeReport`, which the
+    interactive run, the ad-hoc run and the scheduled dispatch all funnel through;
+    `scheduleReport` additionally refuses at create time so an author is not told
+    at 3am. A schedule created while granted stops delivering once the grant is
+    revoked. `html_table` stays a read — it is a rendered view, not a bulk copy.
+    Deployments without `plugin-security` are unaffected (no permission sets
+    exist, so the axis does not apply).
+
+- d8c4957: feat: user-level export permission axis (#3544, #3391 follow-up)
+
+  `export` is a user-gated operation, not just "anyone who can list". A permission
+  set can now deny export on an object while keeping read — matching Salesforce
+  "Export Reports" / Dynamics "Export to Excel" / NetSuite "Export Lists" / SAP
+  S_GUI 61.
+
+  - **spec** `ObjectPermissionSchema` gains an optional `allowExport` bit. It is
+    deliberately OPTIONAL with **no default** so it is a backward-compatible
+    opt-out: unset → inherits read (today's "can-list ⇒ can-export"), `false` →
+    export denied while read is kept, `true` → granted.
+  - **plugin-hono-server** `annotateEffectiveApiOperations` derives
+    `userExportAllowed = allowExport !== false` from the resolved per-object
+    permission and threads it into `resolveEffectiveApiMethods` — so `export`
+    derives from `list ∧ userExportAllowed`. When the axis removes `export` from
+    an otherwise-open object, the object is now annotated (the effective set minus
+    `export`) so the client hides the Export button; an unrestricted object with
+    export still allowed stays unannotated (client default-allow).
+
+  Wires the `userExportAllowed` slot reserved in #3391 P1 — zero contract change
+  to the derivation table or the frontend (it already consumes the effective
+  `apiOperations`). Backward-compatible: existing permission sets (no
+  `allowExport`) keep today's behavior everywhere.
+
+### Patch Changes
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 9f060e5: chore(deps)!: better-auth 1.7.0-rc.2 (account identity restructuring) + the
+  production-dependency batch from #3517
+
+  **better-auth 1.7.0-rc.1 → 1.7.0-rc.2** across the family (`better-auth`,
+  `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/sso`, and the
+  adapter/telemetry overrides). `@better-auth/scim` deliberately stays on
+  1.7.0-rc.1 — rc.2 replaces its whole model (code-defined connections; the
+  `scimProvider` model and the generate-token endpoint are gone), which is a
+  feature migration, not a version bump. Its peer range accepts rc.2 core, and the
+  advisory that forced the original pin (GHSA-j8v8-g9cx-5qf4) is still fixed.
+
+  **BREAKING — account identity.** better-auth renamed `account.accountId` to
+  `account.providerAccountId` and added a REQUIRED `account.issuer`; sign-in now
+  resolves accounts by `(issuer, providerAccountId)`.
+
+  - FROM `fields: { accountId: 'account_id' }` → TO
+    `fields: { issuer: 'issuer', providerAccountId: 'account_id' }`. The provider
+    account id keeps its `account_id` column — only the better-auth-side name
+    moved — and `sys_account` gains an `issuer` column.
+  - FROM `internalAdapter.createAccount({ providerId, accountId, … })` → TO
+    `createAccount({ providerId, issuer, providerAccountId, … })`. A local
+    password account carries the issuer better-auth mints for itself,
+    `local:credential`.
+  - FROM `client.auth.accounts.unlink({ providerId, accountId })` → TO
+    `unlink({ accountId })`, where `accountId` is now the account ROW id (the `id`
+    from `accounts.list()`), matching better-auth's narrowed body.
+    `accounts.list()` returns `issuer` + `providerAccountId` in place of
+    `accountId`.
+
+  **Existing deployments:** rows written before 1.7 have no issuer and are
+  invisible to sign-in until stamped. The auth plugin now runs an idempotent
+  boot-time backfill that stamps what it can derive — `local:credential` for
+  password accounts, `local:oauth:<providerId>` for configured social providers,
+  and the registered IdP's real `iss` from `sys_sso_provider` for federated ones.
+  Accounts from a federated IdP that is no longer registered cannot be derived;
+  they are logged with their provider id and row count rather than guessed, and
+  those users cannot sign in through that provider until the row is stamped with
+  the IdP's issuer or removed so a fresh login re-links it.
+
+  **Also required by 1.7:** `SecondaryStorage` gained two mandatory methods, both
+  now implemented over the kernel cache service — `getAndDelete` (single-use
+  verification values) and `increment` (fixed-window rate-limit counter;
+  `rateLimit.storage: 'secondary-storage'` throws at boot without it).
+
+  The rest of #3517's production-dependency batch rides along: `@oclif/core`
+  4.13.0, `@hono/node-server` 2.0.12, `hono` 4.12.32, `tar` 7.5.22, `jose` 6.2.4,
+  `pinyin-pro` 3.28.2, plus the private docs app's fumadocs/next/react bumps.
+
+- c2d9098: feat(rest/protocol): extend droppedFields write-observability to the bulk paths + client SDK (#3455)
+
+  Follow-up to #3448 (#3431 D2): the single-write PATCH/POST `/data` paths already
+  surface LEGALLY-stripped write fields (static `readonly` #2948 / `readonlyWhen`
+  #3042 / #3043 create ingress) as `droppedFields`. The **bulk** write paths did
+  not — the same strips happened silently on every batched row — and the typed
+  client warning + CORS mirror were deferred. This closes those out.
+
+  **Bulk passthrough (metadata-protocol).**
+
+  - `updateManyData` and `batchData` (update/upsert rows) now register a per-row
+    `onFieldsDropped` collector and attach the events to that row's result.
+  - `createManyData` diffs each supplied row against its #3043-stripped form and
+    returns an **aggregated** top-level `droppedFields` (one event per
+    object/reason with the union of field names) — its `{ records, count }`
+    response has no per-row slot, and the insert-time strip is static-`readonly`
+    only, so it is schema-uniform across rows and the aggregate is faithful.
+  - `insertManyData` keeps per-row precision, attaching `droppedFields` to each
+    outcome.
+  - **Correctness fix bundled in:** `updateManyData` and `batchData` never threaded
+    the caller's execution `context` to the engine — bulk writes ran context-less,
+    so RLS/FLS and `readonlyWhen` evaluated without the caller's principal, and the
+    batch create-ingress strip was hard-coded to a non-system context. All engine
+    calls in both methods now run under the resolved `context`.
+
+  **Contract (spec).** `BatchOperationResultSchema` gains an optional per-row
+  `droppedFields` (covers `updateMany` + `batch`, which alias
+  `BatchUpdateResponseSchema`); `CreateManyDataResponseSchema` gains the optional
+  aggregated `droppedFields`. Both are omit-when-empty, so existing clients are
+  unaffected. `X-ObjectStack-Dropped-Fields` is deliberately **not** emitted for
+  batches — one response header cannot express per-row drops, so the per-row body
+  field is the canonical bulk channel.
+
+  **Typed client warnings (@objectstack/client).** `CreateDataResult` /
+  `UpdateDataResult` gain `droppedFields?: DroppedFieldsEvent[]`, giving the body
+  channel a type instead of an untyped property.
+
+  **CORS (@objectstack/hono, @objectstack/plugin-hono-server).**
+  `x-objectstack-dropped-fields` is added to the default `Access-Control-Expose-Headers`
+  allow-list (kept in lockstep across both Hono CORS sites) so a cross-origin
+  browser can read the single-write drop header. The body `droppedFields` remains
+  the primary, cross-origin-safe surface — this is a convenience mirror.
+
+  **GraphQL — not applicable (documented).** #3455 lists a GraphQL mutation item,
+  but GraphQL has no runtime: `kernel.graphql` is unassigned everywhere and
+  `handleGraphQL` returns `501`, and discovery never advertises `/graphql`. There
+  is no schema generator or mutation resolver to expose a typed payload field on,
+  so there is nothing to wire until a GraphQL engine lands — at which point the
+  protocol-layer `droppedFields` is already present and only the GraphQL schema
+  projection would remain.
+
+- 9613396: feat(security): ENFORCE the user-level export axis on the server (#3544)
+
+  `allowExport` landed as a spec bit plus a `/me/permissions` annotation, which
+  hid the client's Export button — and nothing else. Because `export ⊆ list`, the
+  REST export route streams through `findData` and the engine middleware sees an
+  ordinary `find` gated by `allowRead`, so no code path ever read the bit: a caller
+  holding `allowExport: false` could still `curl
+/api/v1/data/:object/export` and drain the whole table. Declared, not enforced.
+
+  - **plugin-security** `PermissionEvaluator.checkObjectPermission('export', …)` is
+    now a real decision: `export` = read granted ∧ not explicitly denied.
+    `allowExport` stays out of `OPERATION_TO_PERMISSION` on purpose — that map
+    means "the bit must be truthy", which would have denied export to every
+    permission set authored before the axis existed. The new exported
+    `resolveUserExportAllowed()` folds the tri-state across sets (`true` beats
+    `false` beats unset) exactly as the `/me/permissions` merge does.
+  - **spec** `ISecurityService` gains `canExport(object, context)` — the question a
+    bulk-egress door outside the engine middleware has to ask before it reads.
+    Fails CLOSED; `isSystem` and an empty set resolution bypass, mirroring the
+    middleware.
+  - **rest** `GET /data/:object/export` calls it and answers **403
+    `EXPORT_NOT_PERMITTED`** before the first chunk is fetched. Distinct from the
+    object-level 405 `OBJECT_API_METHOD_NOT_ALLOWED`, which still runs first: 405
+    says the object exposes no export, 403 says this caller may not use it. No
+    security service (no `plugin-security` ⇒ no permission sets) → allowed, the
+    same fail-open posture as every other permission gate in that layer; service
+    present but unable to answer → denied.
+  - **plugin-hono-server** the `/me/permissions` annotation now falls back to the
+    `'*'` entry's export bit when a per-object entry declares none, matching the
+    evaluator's own wildcard fallback — so a set that denies export wholesale via
+    `'*'` no longer offers a button the server refuses.
+
+  Backward-compatible: `allowExport` is still an opt-out with no default, so an
+  unset bit inherits read and existing permission sets behave exactly as before.
+  Only a permission set that explicitly sets `allowExport: false` changes — and it
+  now changes on the server, which is the point.
+
+  Implementers of `ISecurityService` outside this repo must add `canExport`; the
+  interface member is required, matching how `getReadableFields` was added.
+  Consumers still feature-detect (`typeof svc.canExport === 'function'`), so a
+  partial implementation degrades rather than throwing.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [840ee4b]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+  - @objectstack/observability@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

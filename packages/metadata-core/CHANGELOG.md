@@ -1,5 +1,177 @@
 # @objectstack/metadata-core
 
+## 17.0.0-rc.0
+
+### Patch Changes
+
+- db48ad5: fix(security,approvals,metadata-core): restore batch routes on the eight objects the #3391 P1 companion fix missed (#3026)
+
+  The #3391 P1 contract made the bulk gate `bulk ∧ derived(child)`: a batch
+  request is admitted only when the object grants the `bulk` **primitive** and the
+  batched child operation is itself allowed. Before that, the `*Many` routes
+  checked only the child verb, so a boilerplate CRUD-five whitelist
+  (`['get','list','create','update','delete']`) batched fine.
+
+  The companion fix — adding the `bulk` primitive wherever an explicit whitelist
+  survived — was applied only inside `platform-objects`. Eight objects carrying
+  the same boilerplate live in other packages and kept the gap, so `/batch`,
+  `createMany`, `updateMany` and `deleteMany` answered `405
+OBJECT_API_METHOD_NOT_ALLOWED` on objects whose single-record create/update/
+  delete were wide open. `data-objectstack` rethrows that 405 without falling back
+  to per-row writes, which surfaced as a hard error on multi-select delete in the
+  Setup grids.
+
+  Objects reclaimed (whitelist now `['get','list','create','update','delete','bulk']`):
+  `sys_capability`, `sys_permission_set`, `sys_position`,
+  `sys_position_permission_set`, `sys_user_permission_set`, `sys_user_position`
+  (plugin-security); `sys_approval_delegation` (plugin-approvals);
+  `sys_view_definition` (metadata-core).
+
+  No new authority is granted: `bulk` only permits batching verbs each object
+  already exposes one record at a time, and every batched row still passes the
+  same row- and field-level permission checks. The whitelists stay explicit rather
+  than being deleted — seven of the eight are `managedBy`, and
+  `reconcileManagedApiMethods` (ADR-0103 D3) early-returns on a non-array
+  `apiMethods`, so dropping the line would silently disable the managed-write
+  backstop.
+
+- c073b8c: refactor(metadata-core): drop `sys_view_definition`'s all-six `apiMethods` whitelist (#3026)
+
+  #3745 completed this object's boilerplate CRUD-five whitelist to all six
+  primitives so its batch routes stopped 405-ing. A whitelist naming all six is
+  equivalent to no whitelist — except it stops tracking primitives the enum grows
+  later — so the #3543 audit rule applies and the declaration is removed.
+
+  No behaviour change: `undefined` resolves to `unrestricted`, whose effective
+  operation set is identical to `restricted` holding all six.
+
+  Removing it is safe HERE specifically because the object has no `managedBy`:
+  `reconcileManagedApiMethods` (ADR-0103 D3) early-returns on a non-array
+  `apiMethods`, so for a managed object an absent whitelist would take the
+  managed-write backstop with it. That is why the RBAC objects reclaimed by #3745
+  keep their explicit arrays and this one does not.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

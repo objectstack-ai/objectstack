@@ -1,5 +1,822 @@
 # @objectstack/plugin-security
 
+## 17.0.0-rc.0
+
+### Major Changes
+
+- 4ed7ed4: feat(security)!: the export axis is now OPT-IN, explainable, and covers reports (#3544, #3710)
+
+  **BREAKING — `allowExport` unset no longer means "inherit read".** Reading a
+  record and taking a bulk machine-readable copy of the whole table are different
+  privileges (Salesforce "Export Reports", Dynamics "Export to Excel", NetSuite
+  "Export Lists", SAP `S_GUI` 61 all separate them). The axis now says so.
+
+  ### Migration — FROM → TO
+
+  |                      | before                              | after                      |
+  | -------------------- | ----------------------------------- | -------------------------- |
+  | `allowExport` unset  | export **allowed** (inherited read) | export **denied**          |
+  | `allowExport: false` | export denied                       | export denied (unchanged)  |
+  | `allowExport: true`  | export allowed                      | export allowed (unchanged) |
+
+  **The one-line fix:** add `allowExport: true` to the object entry (or the `'*'`
+  wildcard) of every permission set whose holders should keep exporting.
+
+  ```ts
+  objects: {
+    deal: { allowRead: true, allowExport: true },   // ← add the grant
+  }
+  ```
+
+  Nothing else changes: read, CRUD, RLS, FLS and sharing are untouched, and a set
+  that never exported is unaffected.
+
+  **Who is affected.** Package-shipped sets are re-seeded on upgrade, so the
+  built-ins are handled for you — `admin_full_access` and `organization_admin` now
+  carry `allowExport: true` explicitly. **Environment-authored sets are not**: any
+  custom set whose users export must be edited. `member_default` deliberately does
+  NOT carry the grant, so ordinary authenticated users lose export until an admin
+  grants it — that is the point of the flip, not an oversight.
+
+  **Merge semantics.** Most-permissive, exactly like the CRUD bits: any set
+  granting `true` grants export. `false` and unset are the same outcome; `false`
+  is authoring intent, not a veto, because permission sets are additive capability
+  containers (ADR-0090).
+
+  **Not implied by super-user bits.** `viewAllRecords` / `modifyAllRecords` no
+  longer confer export. Separating "may see all data" from "may take a bulk copy"
+  is the segregation-of-duties case the axis exists for.
+
+  ### Also in this change
+
+  - **spec** — a set carrying `allowExport` is now **high-privilege**
+    (`describeHighPrivilegeBits`), so it cannot be bound to the `everyone` /
+    `guest` audience anchors. Without this the opt-in was defeatable by binding an
+    export-granting set to `everyone`. One predicate, so the runtime anchor gate,
+    the `@objectstack/lint` security-posture rule and the install-time suggestion
+    surface all pick it up together.
+  - **spec / plugin-security** — `ExplainOperationSchema` gains `export`, so
+    `explain` can answer _why_ a caller got `403 EXPORT_NOT_PERMITTED`. It
+    explains as `read ∧ the export grant`: `object_crud` reports the conjunction
+    and attributes the granting set, while every data-shaped layer
+    (requiredPermissions, OWD/depth/sharing, RLS, record attribution) is computed
+    as the `find` the export actually performs — asking the RLS compiler about an
+    `export` operation would match no policy and wrongly report "no RLS applies".
+    `readFilter` is surfaced for `export` as it is for `read`.
+  - **plugin-reports** — closes the reports side door (#3710). A report rendered
+    as `csv`/`json` is the same bulk copy of the same object, so it is gated by
+    the same `ISecurityService.canExport`. Enforced in `executeReport`, which the
+    interactive run, the ad-hoc run and the scheduled dispatch all funnel through;
+    `scheduleReport` additionally refuses at create time so an author is not told
+    at 3am. A schedule created while granted stops delivering once the grant is
+    revoked. `html_table` stays a read — it is a rendered view, not a bulk copy.
+    Deployments without `plugin-security` are unaffected (no permission sets
+    exist, so the axis does not apply).
+
+### Minor Changes
+
+- 7fb436c: Multi-organization operation is an ENTITLEMENT again: the `group` posture no
+  longer activates without the enterprise runtime (ADR-0105 D12 correction).
+
+  The first ADR-0105 wave read D12 as "the `group` wall ships open" and made the
+  posture self-activating — it never probed for `@objectstack/organizations`. That
+  turned `group` into a free multi-org path around the `isolated` gate (ADR-0081
+  D2), and made the weaker isolation the free one, which is not a boundary anyone
+  would draw on purpose.
+
+  The distinction that was missed: **open code is not free activation.** The wall's
+  implementation has always lived in the open packages — that is equally true of
+  `isolated`, whose Layer 0 wall sits in `plugin-security` and is gated on a
+  service the enterprise package registers. Cloud ADR-0016's 铁律
+  (强制免费、治理收费) guarantees that a deployment RUNNING a multi-org shape is
+  safe; it is satisfied by REFUSING to run one unwalled, not by giving the posture
+  away.
+
+  ## Changes
+
+  - **`tenancy-service`**: `group` probes `org-scoping` exactly like `isolated`.
+    Without it the posture resolves to `single` and reports `degraded`.
+  - **`os serve`**: the ADR-0093 D5 boot guard keys off the resolved POSTURE
+    instead of `OS_MULTI_ORG_ENABLED`. Previously `OS_TENANCY_POSTURE=group` skipped
+    both the enterprise package load AND the fail-fast, silently degrading to an
+    unwalled deployment — the exact ADR-0049 class that guard exists to close. A
+    `group` request without the runtime now refuses to boot unless
+    `OS_ALLOW_DEGRADED_TENANCY=1`.
+  - **New seam — the runtime declares what it entitles.** `org-scoping` may expose
+    `supportedPostures` (`OrgScopingEntitlement`, `@objectstack/spec/security`);
+    the open side honours it and fails closed on anything not listed. Whether
+    `group` and `isolated` are one commercial tier or two is packaging policy, and
+    packaging policy belongs to the commercial runtime rather than hard-coded in
+    open core. Omitting the field entitles every walled posture, so existing
+    runtimes are unaffected.
+  - **`organization_id` stamping returns to the enterprise runtime.** The previous
+    wave moved auto-stamping into the open engine; that removed the closed
+    package's only load-bearing runtime duty, so a five-line forged `org-scoping`
+    registration would have produced a fully working multi-org deployment. With
+    stamping back where it was, a forged registration yields NULL-org rows the wall
+    hides — a broken deployment, not an unlicensed working one.
+
+    **Write-side VALIDATION stays open and is unchanged**, including the
+    bulk-insert coverage: rejecting a forged `organization_id` is a security
+    property, not a packaging one. Only filling an ABSENT value moved back.
+
+  - Default-organization bootstrap returns to `single`-only; every walled posture
+    keeps its existing owner (ADR-0081 D1).
+
+  ## Note for operators
+
+  `OS_TENANCY_POSTURE=group` without `@objectstack/organizations` installed now
+  **refuses to boot** rather than running single-org. This only affects
+  deployments that adopted `group` between the two waves.
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 7c7e246: feat(authz): expose the caller's delegable scope — the read half of the
+  delegated-administration gate (ADR-0090 D12 / ADR-0105 D8)
+
+  `adminScope` decided writes but could not be READ: `assignablePermissionSets`
+  lived only inside `delegated-admin-gate.ts`, so a UI offering "place this
+  person in a unit, with these positions" (the D8 scoped-invitation form) had no
+  way to narrow its pickers. It would list the whole tree and let the user
+  discover the boundary by being refused — which turns an authorization gate into
+  a validator and makes the boundary invisible until it bites.
+
+  `ISecurityService.describeDelegableScope(callerContext)` answers it, exposed as
+  `GET /api/v1/security/my-delegable-scope` and `client.security.describeDelegableScope()`:
+
+  - `placeableBusinessUnitIds` — union of the subtrees where the caller may place
+    people (scopes granting `manageAssignments`);
+  - `assignablePositions` — positions whose every distributed permission set the
+    caller may hand out (containment check included);
+  - `scopes` — the held `adminScope`s with subtrees resolved, for attribution;
+  - `isTenantAdmin` — unconstrained, with everything enumerated so a consumer
+    renders ONE uniform picker instead of special-casing.
+
+  Computed by the same helpers the write gate enforces with, so an option this
+  reports is one `assert()` accepts — a test asserts that agreement directly. It
+  NARROWS; the gate still decides.
+
+  Strictly self-scoped: no target-user parameter, so it discloses nothing beyond
+  the authority the caller already holds (unlike `explain`, which has one and
+  gates it). Fail-closed — unresolvable scopes contribute nothing, a caller with
+  no delegated authority gets empty lists, and a deployment without
+  `@objectstack/plugin-security` gets 501.
+
+- 9613396: feat(security): ENFORCE the user-level export axis on the server (#3544)
+
+  `allowExport` landed as a spec bit plus a `/me/permissions` annotation, which
+  hid the client's Export button — and nothing else. Because `export ⊆ list`, the
+  REST export route streams through `findData` and the engine middleware sees an
+  ordinary `find` gated by `allowRead`, so no code path ever read the bit: a caller
+  holding `allowExport: false` could still `curl
+/api/v1/data/:object/export` and drain the whole table. Declared, not enforced.
+
+  - **plugin-security** `PermissionEvaluator.checkObjectPermission('export', …)` is
+    now a real decision: `export` = read granted ∧ not explicitly denied.
+    `allowExport` stays out of `OPERATION_TO_PERMISSION` on purpose — that map
+    means "the bit must be truthy", which would have denied export to every
+    permission set authored before the axis existed. The new exported
+    `resolveUserExportAllowed()` folds the tri-state across sets (`true` beats
+    `false` beats unset) exactly as the `/me/permissions` merge does.
+  - **spec** `ISecurityService` gains `canExport(object, context)` — the question a
+    bulk-egress door outside the engine middleware has to ask before it reads.
+    Fails CLOSED; `isSystem` and an empty set resolution bypass, mirroring the
+    middleware.
+  - **rest** `GET /data/:object/export` calls it and answers **403
+    `EXPORT_NOT_PERMITTED`** before the first chunk is fetched. Distinct from the
+    object-level 405 `OBJECT_API_METHOD_NOT_ALLOWED`, which still runs first: 405
+    says the object exposes no export, 403 says this caller may not use it. No
+    security service (no `plugin-security` ⇒ no permission sets) → allowed, the
+    same fail-open posture as every other permission gate in that layer; service
+    present but unable to answer → denied.
+  - **plugin-hono-server** the `/me/permissions` annotation now falls back to the
+    `'*'` entry's export bit when a per-object entry declares none, matching the
+    evaluator's own wildcard fallback — so a set that denies export wholesale via
+    `'*'` no longer offers a button the server refuses.
+
+  Backward-compatible: `allowExport` is still an opt-out with no default, so an
+  unset bit inherits read and existing permission sets behave exactly as before.
+  Only a permission set that explicitly sets `allowExport: false` changes — and it
+  now changes on the server, which is the point.
+
+  Implementers of `ISecurityService` outside this repo must add `canExport`; the
+  interface member is required, matching how `getReadableFields` was added.
+  Consumers still feature-detect (`typeof svc.canExport === 'function'`), so a
+  partial implementation degrades rather than throwing.
+
+- aa8b847: feat(authz): scoped invitations — placement intent on an invitation, gated by
+  the issuer's adminScope and applied on acceptance (ADR-0105 D8)
+
+  An invitation may now carry PLACEMENT INTENT — the business unit the invitee
+  lands in and the positions they are assigned — so a delegated (plant) admin's
+  invitee arrives already in the right unit and role instead of waiting on a
+  platform admin. This closes the structural gap ADR-0105 D8 names for
+  `single`-posture deployments and is the natural admission path under `group`.
+
+  The two halves ship together, deliberately:
+
+  - **Issuance is authorized** against the ISSUER's `adminScope` (ADR-0090 D12),
+    by dry-running the existing `DelegatedAdminGate` against the very
+    `sys_user_position` rows the acceptance would write. The gate is reused
+    verbatim — no second copy of the subtree/allowlist logic to drift — so an
+    invitation can never place what its issuer could not have assigned directly.
+    Without that gate the feature would be an escalation hole: the built-in
+    `organization_admin` is deliberately read-only on the RBAC tables precisely
+    so a fresh org admin cannot rebind themselves, and applying an unchecked
+    invitation payload under system context would hand that authority straight
+    back.
+  - **Acceptance applies it**, idempotently and failure-isolated: a replayed
+    acceptance converges instead of duplicating assignments, and a placement
+    miss never undoes a valid membership.
+
+  Surface:
+
+  - `sys_invitation` gains `business_unit_id` + `positions` (ADR-0092 extension
+    fields, registered in the D7 collision-guarded whitelist; NOT generically
+    editable — placement is set only at issuance, through the gate).
+  - `@objectstack/plugin-security` registers the `invitation-placement` service
+    (`assertIssuable` / `apply`).
+  - `@objectstack/plugin-auth` wires better-auth's `beforeCreateInvitation` /
+    `afterAcceptInvitation` to it. **Fail closed**: an invitation that requests
+    placement in a deployment without the delegated-administration runtime is
+    refused, never silently placed unchecked.
+
+  Existing invitations are unaffected — an invitation without placement intent
+  never consults the gate and behaves exactly as before.
+
+- d318b24: feat: `security.getReadableFields` query surface for export column projection (#3547, #3391 follow-up)
+
+  The REST export route projected its columns by inferring readability from the
+  first chunk of already-masked data rows (#3498). That has two known
+  compromises: a readable column whose first-chunk values are all null (and thus
+  omitted by the driver) drops out of the header, and an empty result set leaves
+  nothing to narrow. This adds the long-term-correct path.
+
+  - **plugin-security** — the `security` service gains
+    `getReadableFields(object, context)`. It resolves the caller's permission
+    sets and builds the field-permission map with the SAME evaluator +
+    `requiredPermissions` fold the read middleware's `FieldMasker` uses (and the
+    same on-behalf-of delegator intersection, fail-closed on a dangling
+    delegator), then returns every schema field NOT masked non-readable — the
+    exact complement of what the mask deletes, so it can never drift from
+    data-plane FLS. Computed from schema + context, never from data rows: immune
+    to null values and empty result sets. A system context bypasses FLS; an
+    unresolvable schema returns `undefined` so callers fall back.
+  - **rest** — the `GET /data/:object/export` route asks the environment's
+    `security` service for `getReadableFields(object, context)` and projects the
+    schema-derived header to that set BEFORE streaming. When no security service
+    is reachable (no plugin-security / single-kernel without a provider) it
+    degrades to the existing masked-row inference, so there is zero regression.
+    Explicit `?fields=` requests are still honored verbatim.
+
+  Contract-neutral: export columns already equal list's readable columns
+  (`export ⊆ list`, #3391); this makes the projection authoritative instead of
+  inferred.
+
+### Patch Changes
+
+- 735f850: fix(security): resolve the ISSUER's real grants when authorizing invitation
+  placement (ADR-0105 D8)
+
+  Scoped-invitation issuance dry-runs `DelegatedAdminGate` against the
+  `sys_user_position` rows the acceptance would write. The gate reads authority
+  off `context.positions` / `context.permissions` — but the invitation hook
+  handed it a hand-built `{ userId, tenantId }`, which carries neither. Every
+  delegated administrator therefore resolved to the additive baseline alone and
+  was refused:
+
+  > requires tenant-level administration or a delegated adminScope (ADR-0090 D12)
+
+  Fail-closed, but dead: only a tenant admin could ever issue a placement, which
+  is the one case the feature was not for. Caught by cloud's group-posture
+  dogfood, which exercises the real HTTP path with a real delegate.
+
+  `assertIssuable` now takes `actorUserId` instead of a caller-built
+  `actorContext` and resolves that user's grants itself through the single authz
+  resolver (`@objectstack/core` `resolveUserAuthzGrants`) — the same envelope a
+  transport would have carried, from the same reads. There is no request to
+  resolve a context from inside a better-auth hook, so the id is what the caller
+  can honestly supply and the resolution belongs behind the boundary.
+
+  A principal-less call still reaches the gate with an empty context on purpose:
+  the gate owns that refusal too, so the security boundary keeps exactly one
+  place an issuance can be denied.
+
+- 307e0fe: fix(security): govern `sys_member` writes — organization membership is not a delegable capability (#3697 follow-up)
+
+  `DelegatedAdminGate`'s `GOVERNED_OBJECTS` covered the four RBAC link tables but
+  not `sys_member`, so the table that decides _who is an org admin_ was the one
+  authority surface the delegated-administration gate never saw.
+
+  That matters because a membership row is an authority dial: `role` containing
+  `owner`/`admin` is auto-elevated to `organization_admin` by
+  `auto-org-admin-grant.ts`, and that set's wildcard `modifyAllRecords` is exactly
+  what `isTenantAdmin()` tests. Writing one mints a tenant admin — the same
+  escalation the invitation role cap closes on the issuance path, one layer down
+  at the table.
+
+  **Not exploitable today, and this changes no working behaviour.** Every
+  `sys_member` writer is a better-auth path running under `isSystem`, which
+  short-circuits the whole security middleware before this gate; the ADR-0092 D2
+  identity write guard refuses user-context writes to better-auth-managed tables
+  upstream of it. The gate is added so the chain cannot silently reopen the day a
+  direct-write surface is introduced — a `case` label is not enforcement, and the
+  call site is what decides (AGENTS.md Prime Directive #10).
+
+  The rule is tenant-admin-only rather than scope-delegable, deliberately: no axis
+  of `AdminScope` expresses "organization membership" (its vocabulary is BU
+  subtree, action flags and an assignable-set allowlist), so there is nothing for
+  a delegated scope to approve part of — and a delegate who could write one would
+  mint authority strictly greater than their own, which is what ADR-0090 D12
+  exists to prevent. Adding people to an organization already has a delegable
+  path: the **invitation**, whose placement is authorized against the issuer's
+  `adminScope` and whose role is capped at the issuer's own grade. The refusal
+  message says so.
+
+- 0e3a226: fix(authz): widen the driver's native tenant scope to the membership union
+  under the `group` posture — ADR-0105 D2 finally reaches the wire (#3623)
+
+  The Layer 0 wall correctly compiled `organization_id IN accessible_org_ids`
+  under `group`, but the ObjectQL engine also propagated the active-org
+  `tenantId` into `DriverOptions` unconditionally, and the SQL driver's native
+  scoping ANDed `organization_id = tenantId` under the union — collapsing every
+  group read back to active-org (isolated) reach. Found by the cloud-side
+  `ee-group-showcase` dogfood (cloud#880), the first end-to-end boot of `group`
+  against a real driver.
+
+  - `DriverOptions.tenantIds` (spec): the union tenant access set. Drivers with
+    native scoping widen reads/updates/deletes/aggregates to `IN (...)`,
+    keeping the NULL-tenant global-row carve-out; inserts still stamp from
+    `tenantId` (the active organization is the write target, D5). Absent or
+    empty ⇒ equality fallback — fail toward isolation, never toward exposure.
+  - ObjectQL engine threads `ExecutionContext.accessible_org_ids` as
+    `tenantIds` when the tenancy posture is `group`, reported by a new
+    `setTenancyPostureProvider` seam.
+  - SecurityPlugin wires that provider at start — deliberately from the
+    enforcement layer, so the driver wall only widens while the Layer 0 union
+    wall enforces above it. Embeddings without plugin-security keep active-org
+    equality.
+
+- d1cabaa: fix(i18n): translate the SSO / SCIM / user-position / import-job admin objects
+
+  Four live, UI-facing system objects were registered but never added to their
+  package's i18n extract config, so non-English admins saw raw English `label`
+  metadata:
+
+  - `sys_sso_provider`, `sys_scim_provider` (platform-objects) — identity-provider
+    admin grids plus the register / verify-domain actions.
+  - `sys_user_position` (plugin-security) — delegated position assignment
+    (`userActions` create/edit/delete); its sibling `sys_user_permission_set` was
+    already translated, so this closes an inconsistency.
+  - `sys_import_job` (platform-objects) — import history / progress, alongside the
+    already-translated `sys_job` / `sys_job_run`.
+
+  Adds each object to its package's `scripts/i18n-extract.config.ts` and supplies
+  real zh-CN / ja-JP / es-ES translations across all four locale bundles, and
+  extends the bundle-ownership guards' `OWNED_OBJECTS` to cover them. The
+  orphan-only guards from #3502 could not catch this "owned-and-live-but-never-
+  extracted" gap.
+
+- aff9e56: fix(i18n): translate the platform packages' declared surface, and gate all nine bundles instead of one (#3762)
+
+  Only `platform-objects` was wired into a translation-drift check. The other
+  **eight** packages shipped a `scripts/i18n-extract.config.ts` that nothing ever
+  ran — and four of them had already drifted out of sync with the schema, exactly
+  the rot `pnpm check:i18n` exists to catch, one directory over.
+
+  **Translated.** `plugin-security` (45 strings per locale), `plugin-webhooks`
+  (15), `plugin-audit` (8), `plugin-sharing` (7) and `service-storage` (7) are now
+  at **zero** untranslated declared strings in zh-CN / ja-JP / es-ES — 246
+  translations. Most were newly _visible_ rather than newly missing: #3753 taught
+  the coverage detector to walk action `params`, `resultDialog`, `listViews` and
+  the rest of the declared surface, and these are what it found.
+
+  Wording was harvested from the repo's own bundles wherever a string was already
+  translated somewhere (1382 unambiguous source strings), so `Created At` reads
+  `创建时间` here because that is what it reads everywhere else, rather than a
+  fresh invention. Protocol tokens are deliberately left identical across locales:
+  `GET` / `POST` / `PUT` / `PATCH` / `DELETE`, `ETag`, `ACL`, `URL`.
+
+  **Gated.** `scripts/check-i18n-bundles.mjs` replaces the single-package
+  `pnpm check:i18n` and checks all nine. It does not restate each package's
+  command — it parses the one already documented in that config's own docstring
+  and runs it, so the documented regenerate command and the gate cannot diverge.
+  The coverage ratchet grows the same way, from `examples/*` to twelve configs;
+  eight of them sit at zero, which makes it the strict gate there.
+
+  **Fixed a real truncation bug it exposed.** `os lint --json` on a large config
+  came out of a pipe cut off at exactly 65536 bytes — `console.log(big)` followed
+  by `process.exit(1)` tears the process down before an async pipe write drains,
+  while an interactive run (stdout is a TTY, written synchronously) looks perfect.
+  Every scripted consumer silently got invalid JSON. `emitJson` in
+  `packages/cli/src/utils/format.ts` waits for the write to drain and sets
+  `process.exitCode` instead; `lint`, `i18n check` and `i18n extract` use it.
+  Roughly 30 other CLI commands share the pattern and are not touched here.
+
+  The nine documented regenerate commands also gain `--no-metadata-forms` (added
+  in #3768), since the Studio metadata-form baseline belongs to `platform-objects`
+  alone, not to a copy in every plugin.
+
+  Not fixed here: `platform-objects`' own 77-per-locale gap is `apps.*` /
+  `dashboards.*` navigation and widget labels, which live outside the `objects`
+  subtree and cannot be scaffolded while the package extracts with
+  `--objects-only`. That needs an emit decision first — tracked in #3762.
+
+- 7180ed5: fix(security): fail closed when an object's security posture can't be resolved
+  (#3545)
+
+  #3545 accepted the API-exposure gate's fail-open on unresolvable metadata on one
+  load-bearing premise: that gate is a SURFACE-AREA control, while the real
+  authorization boundary — auth + the ObjectQL security middleware (CRUD/FLS/RLS)
+  — enforces unconditionally on the data call whatever the gate answers.
+
+  Verifying that premise rather than assuming it shows it did not hold. The
+  middleware does run unconditionally, but two of its INPUTS were read from the
+  same object metadata and defaulted permissively when it could not be resolved,
+  so the very trigger the issue is about reached one layer PAST the gate, into the
+  boundary itself: an unresolved `access.default` read as PUBLIC (so a plain `'*'`
+  wildcard covered an object ADR-0066 D2 excludes from it) and an unresolved
+  `requiredPermissions` read as NO CONTRACT (so the D3 capability AND-gate was
+  skipped entirely).
+
+  `getObjectSecurityMeta` now flags `unresolved`, and the three consumers that turn
+  posture into an access decision fail closed on it: the middleware denies (with an
+  error log, so a persistent metadata outage is observable rather than a silent
+  blanket-allow), `canExport` denies, and `getReadableFields` exposes no columns —
+  the same stance already taken for a permission-resolution failure and a dangling
+  delegator. `computeLayeredRlsFilter` keeps consuming the defaults deliberately:
+  there the permissive value WITHHOLDS the cross-tenant exemption, so it is already
+  the closed direction.
+
+  Blast radius is bounded to the risky case. System/boot writes (`isSystem`) and
+  principal-less/anonymous contexts short-circuit earlier in the middleware, so
+  reaching the new check means an authenticated principal with resolved grants
+  asking for an object whose declaration is missing; the cold-start window is
+  served by those short-circuits, not by the permissive default. The exposure
+  gate's own tiered decision (transient unavailability → fail open) is therefore
+  unchanged — it now rests on a boundary that actually holds.
+
+  The explain engine reports the denial on its existing `object_crud` layer naming
+  the real cause, so the "why am I denied?" surface cannot drift from enforcement.
+
+- db48ad5: fix(security,approvals,metadata-core): restore batch routes on the eight objects the #3391 P1 companion fix missed (#3026)
+
+  The #3391 P1 contract made the bulk gate `bulk ∧ derived(child)`: a batch
+  request is admitted only when the object grants the `bulk` **primitive** and the
+  batched child operation is itself allowed. Before that, the `*Many` routes
+  checked only the child verb, so a boilerplate CRUD-five whitelist
+  (`['get','list','create','update','delete']`) batched fine.
+
+  The companion fix — adding the `bulk` primitive wherever an explicit whitelist
+  survived — was applied only inside `platform-objects`. Eight objects carrying
+  the same boilerplate live in other packages and kept the gap, so `/batch`,
+  `createMany`, `updateMany` and `deleteMany` answered `405
+OBJECT_API_METHOD_NOT_ALLOWED` on objects whose single-record create/update/
+  delete were wide open. `data-objectstack` rethrows that 405 without falling back
+  to per-row writes, which surfaced as a hard error on multi-select delete in the
+  Setup grids.
+
+  Objects reclaimed (whitelist now `['get','list','create','update','delete','bulk']`):
+  `sys_capability`, `sys_permission_set`, `sys_position`,
+  `sys_position_permission_set`, `sys_user_permission_set`, `sys_user_position`
+  (plugin-security); `sys_approval_delegation` (plugin-approvals);
+  `sys_view_definition` (metadata-core).
+
+  No new authority is granted: `bulk` only permits batching verbs each object
+  already exposes one record at a time, and every batched row still passes the
+  same row- and field-level permission checks. The whitelists stay explicit rather
+  than being deleted — seven of the eight are `managedBy`, and
+  `reconcileManagedApiMethods` (ADR-0103 D3) early-returns on a non-array
+  `apiMethods`, so dropping the line would silently disable the managed-write
+  backstop.
+
+- 1659072: feat(spec): publish `ISecurityService` — the `security` service surface becomes an enforced contract
+
+  The `security` service registers seven cross-package methods (`getReadFilter`,
+  `getReadableFields`, `resolvePermissionSetNames`, `explain`, and the three
+  audience-binding suggestion calls) but had no contract in
+  `@objectstack/spec/contracts`. Consumers duck-typed it, and each one invented its
+  own fallback for a missing method or an "empty" answer — with more consumers
+  arriving, that is a drift surface.
+
+  `ISecurityService` now documents the surface, and both ends are typed against it
+  so it is **enforced rather than declared**: `plugin-security` assigns its
+  registration to `ISecurityService` (a renamed, dropped, or re-typed method fails
+  that build), and the REST layer resolves the service as a `Partial<ISecurityService>`
+  (so call sites must keep feature-detecting instead of assuming the full surface).
+
+  The contract makes explicit the one thing consumers cannot guess — that the
+  methods do **not** share a failure convention:
+
+  - `getReadFilter` fails **CLOSED**: a resolution failure yields a deny filter
+    matching zero rows, never `undefined`. `undefined` means "no row restriction",
+    and nothing else.
+  - `getReadableFields` fails **SOFT**: `undefined` means "no answer, use your own
+    projection", while `[]` is authoritative and means "no field is readable" —
+    opposite instructions that a consumer must not conflate.
+
+  Typing the producer immediately caught one real discrepancy, fixed here:
+  `getReadFilter` declared `Promise<Record<string, unknown> | null | undefined>`
+  while every return path yields a filter or `undefined` (`filter ?? undefined`
+  normalizes the null away). The dead `| null` is removed, so "no restriction" has
+  exactly one representation. Type-level only — no runtime behaviour changes.
+
+- f00d8d4: fix(sharing): remove the `full` access level — it promised delete/transfer/share and granted `edit` (#3865)
+
+  `sys_sharing_rule.access_level` / `sys_record_share.access_level` offered three
+  levels, the third documented as **Full Access (Transfer, Share, Delete)**. No
+  code path granted transfer, re-share, or delete because of it: both enforcement
+  sites matched `access_level in ('edit','full')`, so `full` was byte-equivalent
+  to `edit`. An admin picking "Full Access" in Setup was told they had granted
+  delete rights and had not — declared-but-unenforced metadata (ADR-0078,
+  ADR-0049), the same defect that retired the `queue` recipient before it.
+
+  Measured on showcase, a `full` recipient got `read: allowed`, `update: allowed`,
+  `delete: DENIED` — and the denial came from `decidedBy=object_crud`, i.e. the
+  object-level CRUD gate rejected the delete _before_ sharing was consulted at
+  all. That is not an oversight to patch around; it is the model working. Record
+  sharing widens **which rows** a principal reaches, never **which verbs** they
+  may use — the same split Salesforce enforces (its sharing rules stop at
+  Read-Only / Read-Write; Full Access is owner / hierarchy / Modify All only,
+  never grantable by a rule) and Dataverse enforces by AND-ing every shared access
+  right against the security role's own privilege. Delete and transfer belong to
+  ownership, the ADR-0057 DEPTH scopes, and admin scope.
+
+  **What changed**
+
+  - `SharingLevel` (spec/security) and `ShareAccessLevel` (spec/contracts) are now
+    `read | edit`. The `Field.select` on both objects offers the same two, so the
+    Setup dropdown no longer shows the misleading option.
+  - `SharingService.grant()` and `SharingRuleService.defineRule()` gained the
+    access-level validation they never had: `full` normalises to `edit`, and an
+    unrecognised level is a `VALIDATION_FAILED` (HTTP 400) instead of being
+    persisted verbatim as a grant no gate would ever match.
+  - Enforcement stays deliberately wider than authoring — the read/write gates
+    still match `edit`/`full` — so a row written before this release keeps
+    working. Narrowing them would silently _revoke_ access.
+  - A boot backfill normalises stored `full` rows on both tables, and the
+    `sharing-rule-access-level-full-to-edit` conversion rewrites declarative
+    stacks at load, so nothing needs consumer action.
+
+  **Migration.** None. `full` and `edit` were already behaviourally identical, so
+  rewriting one to the other cannot change an access decision — unlike the OWD
+  `sharingModel: 'full'` alias retired in ADR-0090 D4, which changed posture and
+  had to be delegated to the author. A stack that still authors `accessLevel:
+'full'` converts at load with a deprecation notice; stored rows normalise at
+  next boot. Code that pinned the `ShareAccessLevel` type to `'full'` no longer
+  compiles — use `'edit'`.
+
+  Reviving a real per-record delete grant is a separate design (a capability mask
+  AND-ed with object CRUD, plus the share-administration model that would have to
+  authorise re-sharing), not a fourth enum member.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [524151c]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [4921a95]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [5487c20]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [9aa5510]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/platform-objects@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/formula@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

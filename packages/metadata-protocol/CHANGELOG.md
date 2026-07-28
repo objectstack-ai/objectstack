@@ -1,5 +1,469 @@
 # @objectstack/metadata-protocol
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 3949a43: fix(metadata-protocol,rest): the data path really 404s unknown objects now (#3770)
+
+  The REST API-exposure gate (`enforceApiAccess`) passes through any object it
+  cannot find in metadata, and the comment there justified that with
+  `// unknown object → let the data path 404`. That fallback did not exist.
+
+  - `findData` — and every other data entry point except `cloneData` — had **no
+    existence check**. The repo's only `OBJECT_NOT_FOUND` throw was in `cloneData`.
+  - The engine does not reject unregistered names either: `resolveObjectName`
+    falls back to `StorageNameMapping.resolveTableName({ name })`, so the object
+    name is used **as the table name**.
+  - The 404 was therefore only ever a side effect of the **driver** erroring on a
+    missing table, which the REST layer recognised by matching the driver's error
+    string.
+
+  So the 404 held only when the table happened not to exist. When a physical table
+  with that name **did** exist — out-of-band DDL, a registration that failed after
+  `syncObjectSchema` had already run, a registration race — the exposure gate was
+  silently skipped and the rows were served, with no layer turning it into a 404.
+  (Since #3545 an authenticated caller on a plugin-security deployment is refused
+  by the fail-closed posture check; anonymous callers and deployments without
+  plugin-security were not.)
+
+  **The gate.** `ObjectStackProtocolImplementation` now runs a shared
+  `assertObjectRegistered` before storage is touched, on `findData`, `getData`,
+  `createData`, `cloneData`, `updateData`, `deleteData`, `batchData`,
+  `createManyData`, `insertManyData`, `updateManyData`, `deleteManyData` and
+  `analyticsQuery`. An object absent from the schema registry is rejected with
+  `OBJECT_NOT_FOUND` / 404 — an authoritative answer from the registry, raised
+  _before_ the name becomes a table name, instead of an inference from driver
+  prose. `cloneData`'s open-coded check is now that shared gate; its envelope is
+  unchanged.
+
+  It sits at the protocol ingress, the same boundary `apiEnabled` guards: internal
+  callers (hooks, flows, migrations, raw ObjectQL) go to the engine directly and
+  are unaffected. When the engine exposes no schema registry at all there is
+  nothing to consult, so the gate stands down and warns once per process —
+  matching the tiering #3545 recorded in `api-exposure.ts` for a whole-registry
+  outage.
+
+  **Behaviour change.** A REST data request for an object that is not in the
+  schema registry now returns `404 object_not_found` even when a table of that
+  name exists. Previously it returned that table's rows. If a deployment depended
+  on reading a table with no registered object, register the object (its schema is
+  what every other layer — exposure, RBAC/FLS/RLS, field projection — already
+  needs in order to enforce anything at all).
+
+  **One wire code.** `mapDataError` maps the protocol's `OBJECT_NOT_FOUND` to the
+  canonical `object_not_found` `ApiErrorCode` — byte-identical to the envelope the
+  driver-string branch already produced — so a client keying on `code` sees _what
+  happened_, not _which layer noticed_. The driver-string branch stays as the
+  safety net for the other failure it actually covers: an object that IS registered
+  but whose physical table is missing. Callers that were reading `cloneData`'s 404
+  as `code: 'OBJECT_NOT_FOUND'` on the wire now get `object_not_found`; the status
+  is 404 either way.
+
+  The misleading comment is replaced with what actually closes the hole — this
+  gate for existence, plugin-security's `unresolved` posture (#3545) for
+  authorization — and a note not to widen the exposure gate on the assumption that
+  some other layer 404s.
+
+- c2d9098: feat(rest/protocol): extend droppedFields write-observability to the bulk paths + client SDK (#3455)
+
+  Follow-up to #3448 (#3431 D2): the single-write PATCH/POST `/data` paths already
+  surface LEGALLY-stripped write fields (static `readonly` #2948 / `readonlyWhen`
+  #3042 / #3043 create ingress) as `droppedFields`. The **bulk** write paths did
+  not — the same strips happened silently on every batched row — and the typed
+  client warning + CORS mirror were deferred. This closes those out.
+
+  **Bulk passthrough (metadata-protocol).**
+
+  - `updateManyData` and `batchData` (update/upsert rows) now register a per-row
+    `onFieldsDropped` collector and attach the events to that row's result.
+  - `createManyData` diffs each supplied row against its #3043-stripped form and
+    returns an **aggregated** top-level `droppedFields` (one event per
+    object/reason with the union of field names) — its `{ records, count }`
+    response has no per-row slot, and the insert-time strip is static-`readonly`
+    only, so it is schema-uniform across rows and the aggregate is faithful.
+  - `insertManyData` keeps per-row precision, attaching `droppedFields` to each
+    outcome.
+  - **Correctness fix bundled in:** `updateManyData` and `batchData` never threaded
+    the caller's execution `context` to the engine — bulk writes ran context-less,
+    so RLS/FLS and `readonlyWhen` evaluated without the caller's principal, and the
+    batch create-ingress strip was hard-coded to a non-system context. All engine
+    calls in both methods now run under the resolved `context`.
+
+  **Contract (spec).** `BatchOperationResultSchema` gains an optional per-row
+  `droppedFields` (covers `updateMany` + `batch`, which alias
+  `BatchUpdateResponseSchema`); `CreateManyDataResponseSchema` gains the optional
+  aggregated `droppedFields`. Both are omit-when-empty, so existing clients are
+  unaffected. `X-ObjectStack-Dropped-Fields` is deliberately **not** emitted for
+  batches — one response header cannot express per-row drops, so the per-row body
+  field is the canonical bulk channel.
+
+  **Typed client warnings (@objectstack/client).** `CreateDataResult` /
+  `UpdateDataResult` gain `droppedFields?: DroppedFieldsEvent[]`, giving the body
+  channel a type instead of an untyped property.
+
+  **CORS (@objectstack/hono, @objectstack/plugin-hono-server).**
+  `x-objectstack-dropped-fields` is added to the default `Access-Control-Expose-Headers`
+  allow-list (kept in lockstep across both Hono CORS sites) so a cross-origin
+  browser can read the single-write drop header. The body `droppedFields` remains
+  the primary, cross-origin-safe surface — this is a convenience mirror.
+
+  **GraphQL — not applicable (documented).** #3455 lists a GraphQL mutation item,
+  but GraphQL has no runtime: `kernel.graphql` is unassigned everywhere and
+  `handleGraphQL` returns `501`, and discovery never advertises `/graphql`. There
+  is no schema generator or mutation resolver to expose a typed payload field on,
+  so there is nothing to wire until a GraphQL engine lands — at which point the
+  protocol-layer `droppedFields` is already present and only the GraphQL schema
+  projection would remain.
+
+- 5ac93d4: feat(rest): surface silently-dropped write fields on PATCH/POST /data (#3431)
+
+  #3413 (closes #3407) built the engine-level strip-observability channel
+  (`WriteObservabilityOptions.onFieldsDropped`) and wired the flow side
+  (`update_record` / `create_record` emit a step warning + `droppedFields`). The
+  **REST write path was never wired**, so an external API caller writing N fields
+  still got a bare `200 + record` when `readonly` (#2948) / `readonlyWhen` (#3042)
+  stripping meant `< N` actually landed — the same silent-success class #3407
+  fixed flow-side, just on HTTP. The only way to notice was a per-field diff of
+  the returned row (which need not echo every field). This wires the channel
+  through the protocol → REST, on both write verbs.
+
+  **Passthrough (metadata-protocol).** `updateData` now registers an
+  `onFieldsDropped` collector on `engine.update` and returns the events on the
+  response as `droppedFields`. `createData` surfaces the #3043 static-`readonly`
+  INGRESS strip too — that strip runs at the protocol ingress
+  (`stripReadonlyForInsert`), _before_ the engine, so it is recovered by diffing
+  the supplied payload against the stripped one (the engine's `onFieldsDropped` is
+  also wired for a future insert-side engine strip). A faulty listener never
+  breaks the write — the engine catches and logs.
+
+  **Contract (spec).** `UpdateDataResponseSchema` / `CreateDataResponseSchema`
+  gain an **optional** `droppedFields: DroppedFieldsEvent[]` — present only when
+  ≥1 field was dropped. Optional + omit-when-empty keeps the response shape
+  backward-compatible for clients that only read `record`.
+
+  **REST surface.** PATCH `/data/:object/:id` and POST `/data/:object` echo the
+  drops as an `X-ObjectStack-Dropped-Fields` response header
+  (`field;reason=<reason>` tokens, comma-joined — e.g.
+  `approval_status;reason=readonly`) and keep the structured `droppedFields` on
+  the body. **Status/success semantics are unchanged** (200 update / 201 create) —
+  a strip is legitimate semantics, not a failure (same principle as #3413). The
+  FLS write gate is untouched (it already fails closed with 403).
+
+  Out of scope (issue #3431 D2 open questions, deferred): bulk
+  (`updateManyData` / `createManyData` / `batchData`) and GraphQL mutation wiring,
+  typed `@objectstack/client` warnings, and adding the header to the Hono CORS
+  `exposeHeaders` allow-list for cross-origin browser reads (the body
+  `droppedFields` is the cross-origin-safe channel meanwhile).
+
+- 20cb232: feat(metadata-protocol,objectql): MetadataProtocolPlugin + `registerProtocol` opt-out — ADR-0076 Step 2 PR-A (#2462)
+
+  `createMetadataProtocolPlugin()` now owns what `ObjectQLPlugin` historically
+  assembled inline: the `ObjectStackProtocolImplementation` construction +
+  `protocol` registration, the metadata-storage platform objects, and the D12
+  `degraded` analytics fallback (pattern: plugin-security — named plugin,
+  `dependencies` on the engine, `ctx.getService('objectql')`). `ObjectQLPlugin`
+  grows `registerProtocol?: boolean` (default `true`, fully backward
+  compatible): pass `false` when mounting the new plugin. Protocol CONSUMERS
+  stay on the engine plugin either way — DB hydration and the authored
+  hook/action rebind resolve `protocol` lazily (the rebind arms from `start()`
+  in delegated mode) and degrade gracefully. Mixing both assemblies fails fast
+  with the fix in the message. This is the additive first leg of the
+  cross-repo sequence; cloud's 3 boot sites flip in PR-B, the built-in
+  assembly + re-exports retire in PR-C.
+
+- e231abb: feat(objectql,metadata-protocol)!: single-source the protocol assembly; drop objectql's protocol re-exports — ADR-0076 Step 2 PR-C (#2462)
+
+  The ONE assembly now lives in `@objectstack/metadata-protocol` as
+  `assembleMetadataProtocol()` — `createMetadataProtocolPlugin()` (delegated
+  mode, cloud) and `ObjectQLPlugin`'s built-in convenience mode
+  (`registerProtocol !== false`, single-kernel/dev boots) both mount the same
+  code path (~112 inline lines deleted from the engine plugin). objectql's six
+  protocol re-exports (`ObjectStackProtocolImplementation`,
+  `SysMetadataRepository`, `SeedLoaderService`, `runBuildProbes` + types) are
+  removed — import them from `@objectstack/metadata-protocol` directly
+  (breaking, shipped as minor per the launch-window convention; the only known
+  importers were five test files, repointed). Scope note vs the original Step-2
+  recipe: the objectql→metadata-protocol dependency is deliberately KEPT for
+  the convenience mount — `@objectstack/objectql/core` was already
+  protocol-free, and forcing 20 framework boot sites to mount two plugins buys
+  no runtime win. "Zero protocol dependency" lands as "zero assembly ownership,
+  single source".
+
+### Patch Changes
+
+- abceb0d: fix(seed-loader): support a composite `externalId` so join-table seeds dedupe on replay (#3434)
+
+  A junction / join table has no single-field natural key — the PAIR of its
+  foreign keys is what's unique — so its seed could only run `mode: 'insert'`,
+  which re-inserts every row on each replay boot with no existing-row check
+  (`decideWriteAction`'s `insert` case returns `insert` unconditionally). The
+  table duplicated on every restart: the showcase `showcase_project_membership`
+  fixture (3 rows) grew 3 → 6 → 9. It was masked until #3415 let the master-detail
+  parents seed at all.
+
+  - `SeedSchema.externalId` now accepts a **list** of field names
+    (`externalId: ['team', 'project']`) in addition to a single field name,
+    declaring a composite natural key. Default stays `'name'`.
+  - `SeedLoaderService` builds the uniqueness key from all listed fields (joined
+    with a `\u0000` separator that can't occur in a natural-key value). Reference
+    key fields are compared by their RESOLVED parent ids — which the existing DB
+    row already stores — so a composite of foreign keys matches across restarts.
+    A partial key (any component absent) is treated as no key, falling back to
+    insert, exactly as a missing single-field key already did.
+  - A composite-key target does not participate in single-value reference
+    resolution (a reference is one natural-key string), so such objects keep the
+    `'name'` default when referenced by another dataset.
+
+  The showcase membership fixture switches to `mode: 'ignore'` +
+  `externalId: ['team', 'project']`, so replay boots leave the three rows
+  untouched instead of duplicating them.
+
+- 4c5a584: fix(seed-loader): resolve lookup/master_detail references for objects that only live in the engine registry (marketplace installs)
+
+  `SeedLoaderService.buildDependencyGraph` consulted only `metadata.getObject()`
+  when building the reference graph. Marketplace-installed packages register
+  their objects through the `manifest` service straight into the ObjectQL
+  registry — after the boot-time `bridgeObjectsToMetadataService` pass — so the
+  metadata service never lists them. The reference graph came back empty for
+  those objects and every lookup / master_detail seed value was written
+  verbatim: `crm_contact.crm_account` held the authored natural key
+  (`"Acme Corporation"`) instead of the target record's id.
+
+  The damage compounded under RLS: `crm_contact` declares
+  `sharingModel: controlled_by_parent`, whose row filter compiles to a join on
+  the parent reference. With every reference dangling, the join matched nothing
+  and the whole object went invisible to everyone — platform admins included —
+  while the rows sat in the table (REST list `total=0`, single GET 404).
+
+  The loader now falls back to the engine's own schema registry
+  (feature-detected `engine.getSchema()`, which the ObjectQL engine exposes)
+  whenever the metadata service has no definition for a seeded object. The
+  metadata service remains the preferred source; engines without a schema
+  registry keep the old behavior.
+
+- 0c302a7: Exempt curated seed writes from `state_machine` validation (#3433).
+
+  A seed is a snapshot of established facts — a project already `completed`, an
+  opportunity already `closed_won` — not a record walking its lifecycle. But once
+  an object declared `state_machine.initialStates` (#3165), the write path enforced
+  the FSM entry point on **every** insert, so seed replay silently rejected every
+  mid-lifecycle row and cascaded its master-detail children. That is the "installed
+  but no data" failure for the showcase board (1 of 5 projects), and it would hit
+  every marketplace template (a `closed_won` opportunity, a `closed` case) plus the
+  rehydrate-heal and per-org replay paths.
+
+  `SeedLoaderService` now marks its writes with a server-set `ExecutionContext.seedReplay`
+  flag; the engine passes `skipStateMachine` to the rule evaluator for those writes,
+  which skips the `state_machine` rule on both insert (`initialStates`) and update
+  (transitions). The exemption is scoped to `state_machine` only — a seed must still
+  satisfy every other validation (`format`, `cross_field`, `script`, `json_schema`,
+  `conditional`). Because all seed paths funnel through `SeedLoaderService.SEED_OPTIONS`,
+  the fix covers boot inline seed, marketplace install/heal, and per-org replay at once.
+
+  The showcase project seed drops its three-phase FSM-walk workaround (#3415) and
+  seeds each project directly at its real status again.
+
+- 83c161f: feat(automation)!: a flow run with no trigger user may no longer touch data (#3760)
+
+  An effective `runAs:'user'` run that resolves **no trigger user** used to execute
+  its data nodes **UNSCOPED** — it presented no principal, and the data security
+  middleware skips when there is no principal, so the run read and wrote every row.
+  `runAs:'user'` is an access-_narrowing_ declaration; failing to resolve it must
+  never resolve to a grant (ADR-0049). It now **refuses** the operation
+  (`UnscopedRunDataAccessError`), naming `runAs:'system'` as the fix.
+
+  **This was never really about schedules.** The docs, the spec, the runtime
+  warning and the lint all described a schedule-shaped problem, and the lint only
+  ever matched that shape. But the runtime predicate is "no user", and the
+  commonest way to have no user is a **record-change flow fired by a write that
+  carried none**: `isSystem` does _not_ suppress trigger dispatch — only
+  `skipTriggers` does, and exactly three first-party paths set it — so every
+  plugin/service system write, the approvals status mirror, and a `runAs:'system'`
+  flow's own data node dispatched record-change flows with `userId: undefined`.
+  Ordinary users reach those writes routinely (submitting for approval mirrors a
+  status onto the target record), so the fail-open was reachable by unprivileged
+  input and was the common case, not the rare one.
+
+  Deliberately **not** implemented as "inherit the triggering write's posture and
+  run as `isSystem`". That reads like a relabel but is a privilege escalation: the
+  security middleware's `isSystem` short-circuit fires _before_ its
+  package-managed-row, system-row, audience-anchor and delegated-admin gates, all
+  of which a principal-less context still has to clear. Such a run cannot write
+  `sys_user_position` today; as `isSystem` it could. "Unscoped" was never
+  equivalent to "system".
+
+  **Breaking — how to migrate.** A flow that reacts to system writes and needs to
+  act beyond one user's grants declares `runAs: 'system'`, making the elevation
+  explicit and audit-attributable. Otherwise ensure the trigger supplies a user.
+  Flows that touch no data are unaffected (`runAs` is moot), and the failure is
+  isolated: the trigger already swallows flow errors, so the originating write
+  still succeeds. The engine warns at run _setup_, before any node executes.
+
+  **#3712's user-less provenance path is subsumed, not broken.** That fix let a
+  run with no trigger user write its own approval-locked record by carrying a
+  provenance-only ObjectQL context (the run id, nothing else). Such a run can no
+  longer perform a data operation at all — presenting no principal is exactly what
+  made the write unscoped — so it is refused before the lock is consulted. The
+  capability survives via the explicit route: a schedule that must write records
+  declares `runAs:'system'`, which the lock hook exempts on its own `isSystem`
+  branch. The `flowRunId` exemption itself stays live and load-bearing for what
+  #3703 built it for — a `runAs:'user'` run that _does_ have a user — where the
+  exemption is still provenance rather than privilege.
+
+  Also in this change:
+
+  - **`flow-schedule-runas-unscoped` → `flow-runas-unscoped`, and it now fails the
+    build.** It read as a gate and behaved as a comment — `os compile` documented
+    that the flow lint "NEVER fails the build" — which is close to no net at all
+    for the audience it protects, very often an AI generating flows in bulk. It now
+    also covers the other provably user-less triggers (`time_relative`, `api`), per
+    ADR-0073 D5. It still cannot cover `record_change`, which is undecidable at
+    authoring time — that is exactly why the runtime refusal exists.
+  - **Three seed writes stopped firing automation.** The seed loader's pass-2
+    deferred-reference back-fill and both of `AppPlugin`'s basic-insert fallbacks
+    inlined a bare `{ isSystem: true }` instead of the shared seed options, so they
+    seeded with record-change automation live — the self-trigger vector
+    `skipTriggers` exists to prevent, on the writes that skipped it.
+  - **ADR-0073 amended.** Its severity rationale ("an unprivileged user cannot
+    trigger a schedule, so there is no untrusted-input path") is falsified, and its
+    rejection of fail-closed ("breaks legitimate scheduled CRUD — 2/3 example flows
+    relied on the default") expired when those flows were fixed to declare
+    `runAs:'system'`. Refusal is an interim posture, forward-compatible with the
+    ADR's `automation` principal: when that lands, the refusal point becomes the
+    place that resolves it.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [840ee4b]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [db48ad5]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [c073b8c]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+  - @objectstack/formula@17.0.0-rc.0
+  - @objectstack/metadata-core@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

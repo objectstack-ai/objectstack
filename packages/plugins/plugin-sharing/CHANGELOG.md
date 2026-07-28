@@ -1,5 +1,349 @@
 # @objectstack/plugin-sharing
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- f00d8d4: fix(sharing): remove the `full` access level — it promised delete/transfer/share and granted `edit` (#3865)
+
+  `sys_sharing_rule.access_level` / `sys_record_share.access_level` offered three
+  levels, the third documented as **Full Access (Transfer, Share, Delete)**. No
+  code path granted transfer, re-share, or delete because of it: both enforcement
+  sites matched `access_level in ('edit','full')`, so `full` was byte-equivalent
+  to `edit`. An admin picking "Full Access" in Setup was told they had granted
+  delete rights and had not — declared-but-unenforced metadata (ADR-0078,
+  ADR-0049), the same defect that retired the `queue` recipient before it.
+
+  Measured on showcase, a `full` recipient got `read: allowed`, `update: allowed`,
+  `delete: DENIED` — and the denial came from `decidedBy=object_crud`, i.e. the
+  object-level CRUD gate rejected the delete _before_ sharing was consulted at
+  all. That is not an oversight to patch around; it is the model working. Record
+  sharing widens **which rows** a principal reaches, never **which verbs** they
+  may use — the same split Salesforce enforces (its sharing rules stop at
+  Read-Only / Read-Write; Full Access is owner / hierarchy / Modify All only,
+  never grantable by a rule) and Dataverse enforces by AND-ing every shared access
+  right against the security role's own privilege. Delete and transfer belong to
+  ownership, the ADR-0057 DEPTH scopes, and admin scope.
+
+  **What changed**
+
+  - `SharingLevel` (spec/security) and `ShareAccessLevel` (spec/contracts) are now
+    `read | edit`. The `Field.select` on both objects offers the same two, so the
+    Setup dropdown no longer shows the misleading option.
+  - `SharingService.grant()` and `SharingRuleService.defineRule()` gained the
+    access-level validation they never had: `full` normalises to `edit`, and an
+    unrecognised level is a `VALIDATION_FAILED` (HTTP 400) instead of being
+    persisted verbatim as a grant no gate would ever match.
+  - Enforcement stays deliberately wider than authoring — the read/write gates
+    still match `edit`/`full` — so a row written before this release keeps
+    working. Narrowing them would silently _revoke_ access.
+  - A boot backfill normalises stored `full` rows on both tables, and the
+    `sharing-rule-access-level-full-to-edit` conversion rewrites declarative
+    stacks at load, so nothing needs consumer action.
+
+  **Migration.** None. `full` and `edit` were already behaviourally identical, so
+  rewriting one to the other cannot change an access decision — unlike the OWD
+  `sharingModel: 'full'` alias retired in ADR-0090 D4, which changed posture and
+  had to be delegated to the author. A stack that still authors `accessLevel:
+'full'` converts at load with a deprecation notice; stored rows normalise at
+  next boot. Code that pinned the `ShareAccessLevel` type to `'full'` no longer
+  compiles — use `'edit'`.
+
+  Reviving a real per-record delete grant is a separate design (a capability mask
+  AND-ed with object CRUD, plus the share-administration model that would have to
+  authorise re-sharing), not a fourth enum member.
+
+- 503be86: feat(security)!: reconcile the SharingRule authoring surface with the enforced runtime — rename `group` → `team`, add `business_unit`, prune `guest` + owner-type rules (#1878)
+
+  The authoring `ShareRecipientType` enum had drifted behind the ADR-0090 D3
+  rename and the enforced runtime: the runtime expands `team` (via
+  `sys_team`/`sys_team_member`) and `business_unit`, but the authoring enum
+  still offered the pre-rename `group` (silently skipped at seed time) and
+  omitted the two live recipients. After this change **every authorable
+  recipient and rule type is enforced** — nothing on the SharingRule surface
+  validates and then silently does nothing (ADR-0078).
+
+  - **`sharedWith.type: 'group'` → `'team'`** (wire-rename): the enum member is
+    renamed to match the runtime vocabulary and now maps through the seed
+    bootstrap to the live `TeamGraphService` expansion. Flat `sys_team`
+    membership; enforced.
+  - **`business_unit` added** to the authoring enum — exactly one business
+    unit's members (no subtree; use `unit_and_subordinates` for the subtree).
+    The runtime + bootstrap already enforced it; only the enum omitted it.
+  - **`guest` removed** — it had no runtime recipient mapping. Anonymous access
+    is served by the public-form grant and share links, not sharing rules.
+  - **Owner-type rules removed** (`type: 'owner'`, `ownedBy`,
+    `OwnerSharingRuleSchema` + its type export): they depend on live
+    team/position membership, which the static materialiser cannot track, so
+    they validated but never materialised a share. They return as an enforced
+    form if membership-reactive re-materialisation is designed.
+    `SharingRuleSchema` is now the criteria form; the `queue` recipient stays
+    runtime-reserved (no `sys_queue` yet) and deliberately non-authorable.
+
+  **Migration** (stale definitions now fail parse with the valid options listed):
+
+  - `sharedWith: { type: 'group', … }` → `sharedWith: { type: 'team', … }`.
+  - `sharedWith: { type: 'guest', … }` → delete the rule; expose the records
+    via a public form or share link instead.
+  - `type: 'owner'` rules → rewrite as a `type: 'criteria'` rule scoping the
+    rows by field values (see the migrated examples:
+    `share_open_tasks_with_manager` in app-showcase,
+    `share_active_leads_with_manager` in app-crm), or use a scope-depth grant.
+
+### Patch Changes
+
+- aff9e56: fix(i18n): translate the platform packages' declared surface, and gate all nine bundles instead of one (#3762)
+
+  Only `platform-objects` was wired into a translation-drift check. The other
+  **eight** packages shipped a `scripts/i18n-extract.config.ts` that nothing ever
+  ran — and four of them had already drifted out of sync with the schema, exactly
+  the rot `pnpm check:i18n` exists to catch, one directory over.
+
+  **Translated.** `plugin-security` (45 strings per locale), `plugin-webhooks`
+  (15), `plugin-audit` (8), `plugin-sharing` (7) and `service-storage` (7) are now
+  at **zero** untranslated declared strings in zh-CN / ja-JP / es-ES — 246
+  translations. Most were newly _visible_ rather than newly missing: #3753 taught
+  the coverage detector to walk action `params`, `resultDialog`, `listViews` and
+  the rest of the declared surface, and these are what it found.
+
+  Wording was harvested from the repo's own bundles wherever a string was already
+  translated somewhere (1382 unambiguous source strings), so `Created At` reads
+  `创建时间` here because that is what it reads everywhere else, rather than a
+  fresh invention. Protocol tokens are deliberately left identical across locales:
+  `GET` / `POST` / `PUT` / `PATCH` / `DELETE`, `ETag`, `ACL`, `URL`.
+
+  **Gated.** `scripts/check-i18n-bundles.mjs` replaces the single-package
+  `pnpm check:i18n` and checks all nine. It does not restate each package's
+  command — it parses the one already documented in that config's own docstring
+  and runs it, so the documented regenerate command and the gate cannot diverge.
+  The coverage ratchet grows the same way, from `examples/*` to twelve configs;
+  eight of them sit at zero, which makes it the strict gate there.
+
+  **Fixed a real truncation bug it exposed.** `os lint --json` on a large config
+  came out of a pipe cut off at exactly 65536 bytes — `console.log(big)` followed
+  by `process.exit(1)` tears the process down before an async pipe write drains,
+  while an interactive run (stdout is a TTY, written synchronously) looks perfect.
+  Every scripted consumer silently got invalid JSON. `emitJson` in
+  `packages/cli/src/utils/format.ts` waits for the write to drain and sets
+  `process.exitCode` instead; `lint`, `i18n check` and `i18n extract` use it.
+  Roughly 30 other CLI commands share the pattern and are not touched here.
+
+  The nine documented regenerate commands also gain `--no-metadata-forms` (added
+  in #3768), since the Studio metadata-form baseline belongs to `platform-objects`
+  alone, not to a copy in every plugin.
+
+  Not fixed here: `platform-objects`' own 77-per-locale gap is `apps.*` /
+  `dashboards.*` navigation and widget labels, which live outside the `objects`
+  subtree and cannot be scaffolded while the package extracts with
+  `--objects-only`. That needs an emit decision first — tracked in #3762.
+
+- 647ec8b: fix(driver-sql,sharing): an unsortable query loses its ORDER BY, not its rows (#3821)
+
+  `SqlDriver.find()` already recovered from a SELECT projection naming a column
+  the table lacks (retry with `select('*')`, the unknown field is simply absent
+  from each row). The identical failure one clause over — an **ORDER BY** column
+  the table lacks — fell through to `return []`. Because `count()` is a separate
+  statement, the list endpoint answered `HTTP 200` with `records: []` and
+  `total: 3`: the rows are there, none are shown, nothing is logged. Same family
+  as the `$`-param footgun closed by #2926.
+
+  It surfaced through the Console's sharing-rule **recipient picker**, which
+  never listed a single candidate. The client mangled `'name asc'` into
+  `0 n,1 a,2 m,…` (fixed separately in objectui) and the driver turned that into
+  "no users exist", so no sharing rule could be authored from the UI at all.
+
+  Rows now outrank their order: the retry ladder drops the projection first (the
+  likelier culprit and the cheaper thing to lose), then the sort, then gives up.
+  A query that cannot be sorted comes back **unordered instead of empty**. Errors
+  that are not about an unknown column still propagate untouched.
+
+  **A rule authored in Setup now actually applies — and switching it off actually
+  withdraws access.** Writing a `sys_sharing_rule` rebound the per-record hooks,
+  which only makes the rule reach records written FROM THEN ON. So an admin who
+  created a rule and enabled it saw nothing happen: the recipient's list stayed
+  empty until somebody happened to touch each record. The reverse was worse —
+  switching a rule OFF, or deleting it, left every grant it had already issued in
+  place, and boot backfill only reconciles ACTIVE rules, so those grants outlived
+  restarts while the UI displayed the rule as disabled. The reconcile was reachable
+  only through `POST /sharing/rules/:id/evaluate`, which the Console never calls.
+
+  Each non-system write to `sys_sharing_rule` now also reconciles that rule's
+  grants, chained behind the existing rebind: insert/update run the same
+  diff-based `evaluateRule` the REST endpoint runs (it purges when the rule is
+  inactive), and delete purges directly via the new
+  `SharingRuleService.revokeRuleGrants` — `evaluateRule` can't help there because
+  the row is already gone (`RULE_NOT_FOUND`), which is also why a rule deleted
+  through the plain data API used to orphan its grants. Seeding and package
+  bootstrap write with `isSystem` and are skipped; `kernel:bootstrapped` already
+  backfills those. Reconciliation is best-effort and never fails the write.
+
+  **The dialog's help text was engineering notes, shown to tenant admins.** The
+  field descriptions on `sys_sharing_rule` render under each input in Setup, and
+  they cited ADR numbers, table and column names (`parent_business_unit_id`,
+  `sys_business_unit`), enum machine values the dropdown never shows
+  (`business_unit`, `team`), a third-party library (better-auth), and engine
+  vocabulary ("evaluation", "lifecycle"). Several were also stale: they still told
+  admins to type an id or hand-write a `FilterCondition` after those inputs became
+  a record picker and a visual builder. Rewritten for the reader who actually sees
+  them — the implementation detail was already in the object's doc comment, which
+  is where it stays. `criteria_json`'s LABEL loses its "(FilterCondition JSON)"
+  suffix for the same reason, and `active` can finally say what it now does:
+  turning it off withdraws the access.
+
+  Also refreshes the `sys_sharing_rule` help text in the zh-CN / ja-JP / es-ES
+  translation bundles, which still described `recipient_type` in terms of
+  `department` (the enum value is `business_unit`) and told admins to enter a
+  queue name for `recipient_id` (`queue` was removed in ADR-0078). The es-ES
+  option labels for `position` / `unit_and_subordinates` were translated as
+  "rol" — corrected to "Puesto" / "Unidad de negocio y subordinados".
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [6169615]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [a749273]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [48c110e]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [5d4de37]
+- Updated dependencies [0e3a226]
+- Updated dependencies [524151c]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [e1fa8d5]
+- Updated dependencies [402f534]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [67452d1]
+- Updated dependencies [4921a95]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [8e08bc3]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [5487c20]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [5f0852f]
+- Updated dependencies [cde1975]
+- Updated dependencies [20cb232]
+- Updated dependencies [e231abb]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [9aa5510]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [54f479a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/objectql@17.0.0-rc.0
+  - @objectstack/platform-objects@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/formula@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

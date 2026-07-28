@@ -1,5 +1,252 @@
 # @objectstack/cloud-connection
 
+## 17.0.0-rc.0
+
+### Patch Changes
+
+- 402f534: fix(objectql): bridge late-registered manifest objects into the metadata service
+
+  Marketplace-installed template packages register through the `manifest`
+  service on `kernel:ready` (install) or later (HTTP install), but the one-shot
+  SchemaRegistry→metadata bridge runs once during `ObjectQLPlugin.start()` —
+  so their objects only ever reached the ObjectQL registry. Every
+  IMetadataService consumer (AI `describe_object`, Studio object lists,
+  `metadata.listObjects`) missed them; only the seed loader had grown an
+  engine-side fallback (#3422).
+
+  The manifest service's `register` now bridges the manifest's own objects into
+  the metadata service after registering them with the engine, resolving the
+  service at call time and mirroring the startup bridge's contract:
+  `register('object', name, obj, { notify: false })` (#3112), skip entries it
+  did not bridge itself, refresh its own copy on same-package re-install (hot
+  upgrade). Armed only after `start()` has run the one-shot bridge, and never
+  on project kernels — boot-time behavior is unchanged. `register` now returns
+  a promise; the marketplace install/rehydrate paths await it so metadata reads
+  right after an install are deterministic.
+
+- 1c8bf4f: fix(marketplace): heal missing sample data when rehydrating installed packages onto a new database
+
+  The install ledger (`.objectstack/installed-packages/`) is anchored to the
+  project directory while the database can be swapped out from under it —
+  `os dev --fresh`, a deleted `dev.db`, a `--database` switch. Rehydrate
+  deliberately never re-seeds (existing rows must not be re-upserted over user
+  edits on every boot), which left a rehydrated marketplace package PERMANENTLY
+  empty on a new database: app in the switcher, tables created, zero rows — the
+  "HotCRM installed but every KPI is 0 / Sales Pipeline all-empty" state.
+
+  Rehydrate now runs the bundled seed datasets iff the manifest actually bundles
+  them, the user never explicitly purged them, the runtime is single-tenant
+  (multi-tenant seeding stays owned by the per-org replay), and EVERY seeded
+  object is empty — one surviving row anywhere means the data is still there and
+  nothing is touched, so the heal is idempotent across restarts and can never
+  revert user edits.
+
+  Also fixed along the way: a purge now stamps `sampleDataPurged` on the ledger
+  entry (so healed restarts respect the deliberate empty baseline), and install
+  marks `withSampleData: true` when the seed run reports all rows _skipped_
+  (already present, e.g. a reinstall over live demo data) instead of leaving the
+  flag false over a seeded database.
+
+- 810a3a2: fix(runtime,cloud-connection): multi-tenant seed replay covers every source, not just the first (#3453)
+
+  In multi-tenant deployments (enterprise `@objectstack/organizations`) a brand-new org
+  gets its own private copy of demo data by replaying the kernel's `seed-datasets` list
+  on the `sys_organization` insert. That list is meant to hold the union of every seed
+  source — every config-declared app AND every marketplace package — but two framework
+  traps (the same pair #3444 fixed for seed-summary) shrank it to just the first source:
+
+  - The standard `PluginContext` exposes `getService`/`registerService` but has NO
+    `.kernel` handle, so `(ctx as any).kernel?.getService('seed-datasets')` always read
+    `undefined`. Each source then saw "nothing registered" and overwrote the list with
+    only its own datasets instead of extending it.
+  - `registerService` throws on a duplicate name, so the second source's re-register was
+    swallowed by the surrounding try/catch — its datasets (and, for a config app, its
+    replayer) silently lost.
+
+  Net effect: with two config apps, or a config app plus marketplace packages, a new org
+  replayed only the first app's seeds.
+
+  The fix mirrors #3444's seed-summary hardening: `seed-datasets` is now a single shared
+  array, registered once and mutated in place by every source through a new
+  `mergeSeedDatasets` helper that reads via the context's own resolver first. AppPlugin's
+  per-org replayer reads that live list at invoke time instead of a captured snapshot, so
+  it replays the full union — including datasets merged after its closure was built — and
+  the replayer itself is registered once and reused by later config apps.
+
+  Covered by seam-level unit tests (accumulation across app + marketplace sources; the
+  replayer reads the live union). True multi-tenant end-to-end coverage requires the
+  enterprise `@objectstack/organizations` plugin, which lives in the cloud repo.
+
+- d60968c: Surface marketplace rehydrate/heal seed outcomes in the `os dev` / `os serve` boot banner (#3430), extending the config-app Seeds line from #3415.
+
+  The seed pipeline's most useful result lines are all `logger.info`, but `os dev` forwards a default `warn` level and the serve boot-quiet window swallows stdout — so "marketplace package rehydrated onto a fresh DB with 0 rows", a fresh-DB self-heal, and row-level seed failures were all invisible unless you queried the database directly.
+
+  The `seed-summary` kernel service is now a per-source list. AppPlugin (config apps) and the marketplace rehydrate/heal path each contribute a labelled entry, and the banner prints one combined line that ignores the log level:
+
+  ```
+  Seeds:   showcase 162 rows · hotcrm(marketplace) 157 ok / 5 errors ⚠
+  ```
+
+  Fresh-DB heals are marked `(healed on fresh db)`; a marketplace package that installed with seed datasets but landed 0 rows, and any run that dropped records, escalate to a yellow `⚠` line instead of passing silently.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [6877e9a]
+- Updated dependencies [0bab8bb]
+- Updated dependencies [840ee4b]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [3c8cfd1]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [d3f2ff6]
+- Updated dependencies [b7550d6]
+- Updated dependencies [0164f40]
+- Updated dependencies [e295ad1]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [48c110e]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [19e3e6e]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [cbedd62]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [7180ed5]
+- Updated dependencies [083c414]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [8e08bc3]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [3d5f726]
+- Updated dependencies [70a1ce1]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [48d5a1c]
+- Updated dependencies [3216344]
+- Updated dependencies [f5bfac8]
+- Updated dependencies [6163393]
+- Updated dependencies [688e9df]
+- Updated dependencies [8f124a7]
+- Updated dependencies [21ca1d5]
+- Updated dependencies [03b11e8]
+- Updated dependencies [8891f93]
+- Updated dependencies [d729a31]
+- Updated dependencies [cb8322e]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [810a3a2]
+- Updated dependencies [abceb0d]
+- Updated dependencies [9981c1d]
+- Updated dependencies [d60968c]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [e231abb]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/runtime@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

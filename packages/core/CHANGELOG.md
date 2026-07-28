@@ -1,5 +1,453 @@
 # @objectstack/core
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 763931e: feat(filters): evaluate `{filter-token}` placeholders server-side (#3582)
+
+  Filter values travel as JSON, so a time- or user-scoped slice writes a
+  placeholder instead of code:
+
+  ```ts
+  filter: { close_date: { $gte: '{current_year_start}' }, owner: '{current_user_id}' }
+  ```
+
+  The vocabulary has been in `@objectstack/spec` for a while (`date-macros.zod.ts`,
+  `context-tokens.zod.ts`) and `objectstack build` rejects tokens outside it
+  (#3574). What was missing is the half that _substitutes a value_: **nothing on
+  the server ever did**. A placeholder reached the driver as the literal string
+  `'{current_year_start}'`, compared as text, and matched nothing.
+
+  That failure is invisible — an empty widget looks exactly like a metric that is
+  legitimately zero — so apps worked around it by computing dates at module load,
+  which freezes "this year" into the built artifact and quietly goes stale.
+
+  **New: `resolveFilterTokens()` in `@objectstack/core`**, wired into the two
+  server-side seams every filter passes through:
+
+  - **ObjectQL read path** — `find` / `findOne` / `count` / `aggregate`, so REST
+    queries, related lists, saved-view filters and flow `find_records` all resolve.
+    It runs before the middleware chain, so only author-supplied filters are
+    inspected; RLS/sharing filters are injected downstream from concrete values.
+  - **Analytics dataset executor** — a dataset's intrinsic `filter`, a widget's
+    `runtimeFilter`, measure-scoped filters, and time-dimension `dateRange`s.
+    This path needs its own call: `NativeSQLStrategy` compiles raw SQL and binds
+    comparands directly, so a dashboard widget never passes through `engine.find()`.
+
+  Behavioural notes:
+
+  - Date tokens resolve to ISO strings (`YYYY-MM-DD`, or a full timestamp for
+    `{now}` / `{N_hours_ago}` / `{N_minutes_ago}`). Turning that into a column's
+    on-disk form stays the driver's job (`SqlDriver.temporalFilterValue`), so
+    there is still exactly one source of truth for the storage convention.
+  - Calendar boundaries follow `ExecutionContext.timezone`; one instant is pinned
+    per filter tree, so a `>= {current_month_start}` / `< {next_month_start}` pair
+    can never straddle a boundary.
+  - `{current_org_id}` reads `ExecutionContext.tenantId`; `{current_user_id}` reads
+    `userId`. A request carrying neither now **throws** instead of resolving to
+    `null` — a null comparand degrades to `IS NULL` on most drivers and would hand
+    back the rows the filter was written to exclude.
+  - An unrecognised placeholder **throws**, carrying the near-miss fix
+    (`{current_user}` → `{current_user_id}`, `{this_quarter_start}` →
+    `{current_quarter_start}`). This matches what `objectstack build` already
+    enforces. Consequence, previously implicit and now load-bearing: a filter value
+    that is _entirely_ `{...}` is always read as a placeholder, so a literal value
+    of that shape is not expressible — rename the value.
+
+  Also in this change: `notify` no longer sends the six-character string
+  `"undefined"` as an audience member. `to: ['{record.owner.manager}']` walks
+  `.manager` on a scalar foreign-key id, resolves to nothing, and `String(undefined)`
+  turned that into a phantom recipient — the emit "succeeded", addressed nobody,
+  and said nothing. Unresolved recipients are now dropped, and a node with no
+  recipient left fails naming the offending template and pointing at the start
+  node's `config.expand` (#3475), which does hydrate the relation.
+
+- 4cca74c: fix(i18n)!: the `translation` metadata type speaks the same `objects.` shape everything else does (#3778)
+
+  A translation authored in the product saved successfully and then rendered
+  nothing. Not a resolver gap — a contract split. The `translation` metadata type
+  (`allowRuntimeCreate: true`, so Studio/the metadata API/an agent can author it)
+  was registered against `AppTranslationBundleSchema`, an object-first shape keyed
+  on `o.<object>`. Every resolver, `os i18n extract`, `os i18n check`, the objectui
+  hooks, and all nine shipped bundles read `objects.<object>`. Nothing bridged the
+  two, so the save path and the read path never met.
+
+  **Why converge instead of bridge.** A converter was the obvious fix and the
+  wrong one: it would be throwaway code, and it would start producing _working_
+  `o.`-shaped rows — closing the migration-free window that exists precisely
+  because the feature never functioned. The retired shape's real-world footprint
+  was zero: all three `*.translation.ts` files in the tree (platform-objects,
+  CRM and todo examples) were already `objects.`-shaped, contradicting the type's
+  own registered schema. Converging is a registration fix, not a migration.
+
+  **Breaking.** `AppTranslationBundleSchema`, `ObjectTranslationNodeSchema`, and
+  their types are **deleted** — no deprecation cycle. Nothing worked end-to-end
+  through them, so there is no functioning consumer to protect, and a
+  deprecated-but-present schema is exactly the exemplar an AI agent copies into
+  new code. The optional `II18nService.getAppBundle` / `loadAppBundle` methods go
+  with them: zero implementers, so they advertised a capability the runtime never
+  delivered.
+
+  **The replacement.** `TranslationItemSchema` — one locale of the same
+  `TranslationData` groups a file bundle uses, plus the `locale` it translates,
+  with a `defineTranslation()` factory. An item is one entry of a
+  `TranslationBundle`; that is the whole type.
+
+  Three details are deliberate, all aimed at the failure being silent rather than
+  loud:
+
+  - **`locale` is required**, not inferred from the item name. The sync skips an
+    item whose locale it cannot resolve, and a skip is invisible to whoever — or
+    whatever — authored it. (The name fallback still covers rows written before
+    this.)
+  - **Retired keys are rejected, not stripped.** Zod drops undeclared keys
+    silently, which would reproduce this bug exactly: save succeeds, nothing
+    renders. A pre-parse guard turns that silence into a 422 naming the group to
+    use (`'o' … — use 'objects.<object_name>'`). It runs ahead of the parse so the
+    retired keys stay out of the schema itself — the generated JSON Schema and the
+    Studio editor never advertise a shape that cannot work.
+  - **`ObjectTranslationData.label` is now optional.** Partial translation is the
+    normal state and every resolver already treats each key as independent.
+    Requiring it forced authors to restate the source label just to validate,
+    filling bundles with fake translations that mask real coverage gaps.
+
+  Also in this change: the authored-translation sync warns (naming the row and the
+  fix) when it meets a row still in the retired shape instead of loading it into
+  nowhere, and no longer merges publish bookkeeping (`_lockReason`,
+  `_packageVersion`, …) into the translation layer. `GET
+/i18n/labels/:object/:locale`'s fallback now reads the nested
+  `objects.<obj>.fields.<field>.label` data it is actually given — it scanned for
+  flat dotted `o.<obj>.fields.<field>` keys, a third dialect no producer ever
+  wrote, so it always returned `{}`.
+
+  Migration: author every translation — file or runtime item — under `objects.`.
+  `o` → `objects`, `app` → `apps`, `nav` → `apps.<app>.navigation.<id>.label`,
+  `dashboard` → `dashboards`, `_globalOptions` →
+  `objects.<obj>.fields.<field>.options`, `_meta.locale` → top-level `locale`,
+  `_actions.confirmMessage` → `_actions.confirmText`. `reports`, `notifications`,
+  `errors`, and `namespace` had no runtime consumer and have no replacement.
+
+### Patch Changes
+
+- a227ed7: fix(objectql)!: one key for the empty group bucket — real `null`, on both aggregation paths (#3839)
+
+  A grouped row whose dimension value is empty now carries `null` for that
+  dimension no matter which way the aggregate ran. Downstream code can test the
+  empty bucket with a plain `value == null` again: charts render their own empty
+  label, drill-through on that bucket builds `field = null` and returns the rows
+  it should, and a dashboard no longer changes shape when the driver, the
+  granularity or the reference timezone changes.
+
+  ### What was wrong
+
+  `engine.aggregate` has two implementations of one feature. It pushes the
+  aggregate down as SQL when the driver advertises every requested granularity and
+  the reference timezone is UTC; otherwise it fetches rows and buckets them in JS.
+  The two disagreed about how to spell "empty":
+
+  ```
+  --- same dataset, same query, one row with a NULL value ---
+    pushed-down SQL : [{ "key": null,     "type": "null",   "total": 2 }, …]
+    in-memory       : [{ "key": "(null)", "type": "string", "total": 2 }, …]
+  ```
+
+  The measures were always right — only the key's type and literal differed —
+  which is why this went unnoticed for so long: every total reconciled. But the
+  engine picks a path per query, so the same data produced a different bucket key
+  on SQLite-plus-UTC-plus-`month` than on `week` (which SQLite does not advertise),
+  a non-UTC timezone, or `driver-rest` / `driver-memory` / a remote Turso, all of
+  which bucket in memory unconditionally.
+
+  It was never date-specific either. A plain `groupBy: ['stage']` over a NULL
+  column diverged the same way.
+
+  Consumers are written against `null` — they check `== null` and supply their own
+  empty label ('—', '(empty)', a localized "Uncategorized"). The sentinel defeated
+  every one of them: it rendered a raw English debug string in the UI, and a drill
+  on the empty bucket compiled to `field = '(null)'` and matched nothing.
+
+  The in-memory path's comment justified the string as staying "consistent with
+  the client `useReportData` hook". That hook was removed with ADR-0021, and the
+  literal never appeared in it.
+
+  ### What changed
+
+  - `applyInMemoryAggregation` and `bucketDateValue` (`@objectstack/objectql`) key
+    the empty bucket as `null`. `bucketDateValue` now returns `string | null`. A
+    null instant and an unparseable one still share one bucket, because SQL cannot
+    tell them apart either (`strftime('%Y-%m', 'not-a-date')` is NULL).
+  - The internal composite bucket id is JSON-encoded, so the empty bucket stays
+    distinct from a row whose value is the literal string `"null"`.
+  - `bucketKeyToCalendarRange` (`@objectstack/core`) accepts `string | null`. The
+    empty bucket has no calendar span, so a drill on it opens the unscoped
+    superset instead of an invented bound — unchanged behavior, honest signature.
+  - The driver output contract in `@objectstack/spec` now states the rule: a row
+    with no value keys as `null`, never a sentinel. Propagating NULL through the
+    bucket expression is the whole of it; a driver only breaks it by adding a
+    `COALESCE`.
+
+  ### Gates
+
+  `checkDateBucketParity` (`@objectstack/verify`) deliberately carried no null
+  instant, because the divergence would have failed it for a reason it was not
+  about. Its fixture now has one, so the convergence is held in place — including
+  for out-of-tree drivers that run the check against themselves.
+
+  Two fixes were needed to make that fixture meaningful:
+
+  - The check folded bucket labels through `String(value)`, which turns SQL NULL
+    into `'null'` — a label a TEXT column can genuinely hold. A driver spelling
+    "empty" as a string could compare equal to one returning real NULL. The empty
+    bucket is now keyed out of band.
+  - Label sets were compared with `JSON.stringify`, which is sensitive to key
+    insertion order. Row order is not part of this contract and the two paths
+    naturally differ (SQL sorts its groups; the in-memory path emits first-seen
+    order), so a driver with entirely correct buckets could be reported as
+    disagreeing — with an empty diff message, since nothing actually differed.
+    The comparison is now order-insensitive.
+
+  A new dogfood check covers the non-date half against real drivers: same dataset,
+  plain and date-bucketed `groupBy`, both paths, one key.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Minor Changes

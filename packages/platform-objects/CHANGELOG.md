@@ -1,5 +1,948 @@
 # @objectstack/platform-objects
 
+## 17.0.0-rc.0
+
+### Major Changes
+
+- 9f060e5: chore(deps)!: better-auth 1.7.0-rc.2 (account identity restructuring) + the
+  production-dependency batch from #3517
+
+  **better-auth 1.7.0-rc.1 → 1.7.0-rc.2** across the family (`better-auth`,
+  `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/sso`, and the
+  adapter/telemetry overrides). `@better-auth/scim` deliberately stays on
+  1.7.0-rc.1 — rc.2 replaces its whole model (code-defined connections; the
+  `scimProvider` model and the generate-token endpoint are gone), which is a
+  feature migration, not a version bump. Its peer range accepts rc.2 core, and the
+  advisory that forced the original pin (GHSA-j8v8-g9cx-5qf4) is still fixed.
+
+  **BREAKING — account identity.** better-auth renamed `account.accountId` to
+  `account.providerAccountId` and added a REQUIRED `account.issuer`; sign-in now
+  resolves accounts by `(issuer, providerAccountId)`.
+
+  - FROM `fields: { accountId: 'account_id' }` → TO
+    `fields: { issuer: 'issuer', providerAccountId: 'account_id' }`. The provider
+    account id keeps its `account_id` column — only the better-auth-side name
+    moved — and `sys_account` gains an `issuer` column.
+  - FROM `internalAdapter.createAccount({ providerId, accountId, … })` → TO
+    `createAccount({ providerId, issuer, providerAccountId, … })`. A local
+    password account carries the issuer better-auth mints for itself,
+    `local:credential`.
+  - FROM `client.auth.accounts.unlink({ providerId, accountId })` → TO
+    `unlink({ accountId })`, where `accountId` is now the account ROW id (the `id`
+    from `accounts.list()`), matching better-auth's narrowed body.
+    `accounts.list()` returns `issuer` + `providerAccountId` in place of
+    `accountId`.
+
+  **Existing deployments:** rows written before 1.7 have no issuer and are
+  invisible to sign-in until stamped. The auth plugin now runs an idempotent
+  boot-time backfill that stamps what it can derive — `local:credential` for
+  password accounts, `local:oauth:<providerId>` for configured social providers,
+  and the registered IdP's real `iss` from `sys_sso_provider` for federated ones.
+  Accounts from a federated IdP that is no longer registered cannot be derived;
+  they are logged with their provider id and row count rather than guessed, and
+  those users cannot sign in through that provider until the row is stamped with
+  the IdP's issuer or removed so a fresh login re-links it.
+
+  **Also required by 1.7:** `SecondaryStorage` gained two mandatory methods, both
+  now implemented over the kernel cache service — `getAndDelete` (single-use
+  verification values) and `increment` (fixed-window rate-limit counter;
+  `rateLimit.storage: 'secondary-storage'` throws at boot without it).
+
+  The rest of #3517's production-dependency batch rides along: `@oclif/core`
+  4.13.0, `@hono/node-server` 2.0.12, `hono` 4.12.32, `tar` 7.5.22, `jose` 6.2.4,
+  `pinyin-pro` 3.28.2, plus the private docs app's fumadocs/next/react bumps.
+
+### Minor Changes
+
+- fdb4f50: feat(migrate): `os migrate files-to-references` — a data migration with a self-check, gated per deployment (#3617)
+
+  The ADR-0104 file-as-reference migration ships as a command a deployment runs
+  against its own database, and the deployment-level flag it records is what may
+  later authorise irreversible behaviour — never the platform version.
+
+  ```bash
+  os migrate files-to-references           # dry run: reports, writes nothing
+  os migrate files-to-references --apply   # converts, verifies, records the flag
+  ```
+
+  The run backfills legacy file-field values (inline metadata blobs, own-resolver
+  URLs, `data:` URIs) into owned `sys_file` references, reconciles the ownership
+  ledger against what records actually hold, and — only on an `--apply` run whose
+  reconciliation reports **zero blocking discrepancies** — records
+  `sys_migration { id: 'adr-0104-file-references', verified_at, blocking: 0 }`.
+
+  **Why a flag rather than a release note.** ObjectStack is a development
+  platform: third-party deployments upgrade on their own schedule and their data
+  is not observable by anyone else, so no release-side soak can vouch for them.
+  The evidence has to be produced where the data is. Consequences:
+
+  - Installing a new version never starts deleting bytes. Running the migration
+    and passing its self-check is the consent.
+  - Not run, or not passed → files are retained forever. Wasted storage, zero
+    data loss.
+  - A later failing run **clears** `verified_at`: a deployment whose data has
+    drifted closes its own gate.
+  - A dry run writes nothing at all — not the conversions, and not the flag,
+    even when the self-check would pass.
+  - External URLs stay advisory. They are not `sys_file`s, so they can never
+    enter collection; whether to remodel them as a `url` field is the app
+    author's decision (ADR-0104 R7), not a gate.
+
+  Ships alongside:
+
+  - `@objectstack/spec` — `DataMigrationFlagSchema`, `FILE_REFERENCES_MIGRATION_ID`,
+    and the single `isDataMigrationFlagVerified` predicate both future consumers
+    (collection #3459, strict value-shape #3438) read, so the two gates cannot
+    disagree about the same fact.
+  - `@objectstack/platform-objects` — the `sys_migration` object plus
+    `readDataMigrationFlag` / `isDataMigrationVerified` / `recordDataMigrationRun`.
+    Reads fail toward "not verified": a gate that cannot read its evidence stays
+    closed.
+  - `@objectstack/objectql` — a read may now opt out of file-reference expansion
+    via the spec's `RAW_FILE_VALUES_CONTEXT_KEY`, and the storage service's
+    bookkeeping/scan reads do. Without it the read resolver rewrites stored ids to
+    their expanded form before the reconciliation sees them, which reports held
+    references as absent — noisy `stale_owner` findings, and a missed
+    `unowned_reference` would have been a false pass of the collection gate.
+
+- 1bd5652: feat(auth): give ADR-0105 D8's scope-bounded issuance a caller — the
+  `delegated_admin` org role, capped so it cannot mint authority (#3697)
+
+  D8 authorizes invitation _placement_ against the issuer's `adminScope`
+  (ADR-0090 D12), so a delegated plant admin may invite only into their own
+  subtree. That gate is implemented, unit-proven and reachable — but no principal
+  could reach it in a state where it did anything:
+
+  - better-auth grants `invitation: ["create"]` to `owner` and `admin` only
+    (`memberAc` holds `invitation: []`, which every other registered role
+    inherits);
+  - under a wall-enforcing posture, owners and admins are auto-elevated to
+    `organization_admin` (`auto-org-admin-grant.ts`), which carries the wildcard
+    `modifyAllRecords` that makes `isTenantAdmin()` true — and the gate
+    short-circuits on tenant admins.
+
+  The two sets were disjoint. Issuance placement was bounded by the Layer 0 org
+  wall (real, and correct) but never by `adminScope`, so D8's motivating story —
+  "a plant admin invites into their own subtree without a platform admin
+  finishing the job" — could not happen.
+
+  **Two pieces, and they only ship together.**
+
+  **1. The role.** `delegated_admin` is now registered with the organization
+  plugin as `memberAc.statements` plus `invitation: ["create"]` — the one
+  membership grade that may reach `/organization/invite-member` without being an
+  org admin. Deliberately _not_ `invitation: ["cancel"]`: better-auth's cancel
+  route checks the permission with no inviterId attribution, so it would mean
+  "cancel anyone's pending invitation in the org".
+
+  The role carries no ObjectStack authority by construction — `mapMembershipRole`
+  passes it through as a position name, and with no `sys_position_permission_set`
+  binding that name resolves to nothing. Role = _can reach the endpoint_;
+  `adminScope` = _what the endpoint permits_.
+
+  `sys_member.role` and `sys_invitation.role` each gain `delegated_admin` as a
+  fourth option. Those selects are **enforced on write** — better-auth's own
+  invitation and membership inserts are validated like any other row — so
+  registering the role with the org plugin without listing it in both would have
+  produced a role nobody could hold and nobody could hand out
+  (`ValidationError: role must be one of: owner, admin, member`). That is exactly
+  how the end-to-end regression caught it, twice; neither unit test could. The
+  three non-English translation bundles carry the English label for the new option
+  until localized.
+
+  **2. The role cap**, in the framework's own `beforeCreateInvitation` hook,
+  beside the D8 placement gate. Registering the role alone would have been a
+  four-step privilege escalation: better-auth's only role-level cap on _what role
+  you may invite someone as_ is its `creatorRole` check (default `owner`), which
+  blocks inviting an **owner** but not an **admin** — and an accepted `admin`
+  membership is auto-elevated to `organization_admin` → `isTenantAdmin()`. A
+  subtree-scoped delegate could have manufactured a tenant admin, with every
+  existing defense off the path (`sys_member` is not a `GOVERNED_OBJECT`, and the
+  acceptance-time membership write runs under better-auth's context, not the
+  issuer's).
+
+  The cap refuses an invitation whose role outranks the issuer's own, and
+  restricts a below-admin issuer to plain `member` — not merely "not admin/owner",
+  because an app-registered role projects into `current_user.positions` and may be
+  bound to permission sets, making it a capability channel too. A delegate's
+  channel for capability is the invitation's _placement_ intent, which the D12
+  gate allowlists position-by-position. The cap applies to every invitation,
+  placement-carrying or not (the escalation is independent of placement), and
+  fails closed: an issuer role that cannot be resolved confers nothing above a
+  plain member.
+
+  **What changes for deployments.** One new class of principal exists: members
+  holding the `delegated_admin` org role, who can invite into the org — as
+  `member` only, into the subtree their `adminScope` allows. It is opt-in twice
+  over (someone must set the membership role _and_ grant an adminScope set), so a
+  default deployment changes not at all. Org owners and admins are unaffected.
+
+  Also exported: `MEMBERSHIP_ROLE_DELEGATED_ADMIN` from `@objectstack/spec`, so
+  console and control-plane surfaces name the role from one place.
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 0045682: feat(auth)!: membership grade is not a capability channel — the `sys_member.role`
+  vocabulary is closed (ADR-0108, #3723)
+
+  `sys_member.role` answers "what is your standing in this organization". It does
+  not answer "what may you do" — that is what positions are for. One column was
+  answering both.
+
+  `resolve-authz-context` projects EVERY value stored in `sys_member.role` into
+  `current_user.positions`, alongside the rows read from `sys_user_position`. So a
+  business role handed out through the membership role _was_ capability — granted
+  with none of the position system's controls: no `granted_by`, no ADR-0091
+  validity window, no BU-subtree check, no `assignablePermissionSets` allowlist.
+  That is what ADR-0057 D4 ruled out ("feed the names to better-auth **only** so
+  invitations are accepted — **never as the authority for RBAC**"), what
+  ADR-0090 D3's word ban restates (distribution = `position`), and what
+  ADR-0095 D3 keeps out of the enforcement path.
+
+  The vocabulary is therefore closed to the four framework-owned names:
+  `owner` / `admin` / `delegated_admin` / `member`.
+
+  **BREAKING — `additionalOrgRoles` is removed** from `AuthManagerOptions` and
+  `AuthPluginOptions`, together with `plugin-auth/src/org-roles.ts` in full
+  (`collectStackOrgRoles`, `collectRegisteredOrgRoles`,
+  `normalizeAdditionalOrgRoles`, `membershipRoleOptions`,
+  `withMembershipRoleOptions`, `membershipRoleLabel`, `orgRoleNames`,
+  `MEMBERSHIP_ROLE_OBJECTS`, `OrgRoleDescriptor`, `OrgRoleInput`,
+  `OrgRoleLogger`) and the `kernel:ready` derivation hook that fed them. From
+  `@objectstack/spec`, `MEMBERSHIP_ROLE_NAME_PATTERN` and
+  `MEMBERSHIP_ROLE_NAME_MIN_LENGTH` are removed — they existed only to validate
+  app-supplied names. A TypeScript error is the intended failure: an option that
+  is silently ignored is `declared ≠ enforced` one more time.
+
+  FROM → TO:
+
+  ```diff
+  - new AuthPlugin({ additionalOrgRoles: ['sales_rep'] })
+  + new AuthPlugin({ /* nothing — declare `sales_rep` as a position */ })
+
+  - POST /organization/invite-member { email, role: 'sales_rep' }
+  + POST /organization/invite-member { email, role: 'member',
+  +                                    businessUnitId, positions: ['sales_rep'] }
+  ```
+
+  For an existing member, assign the position through `sys_user_position` (the
+  governed write path). Invitation placement (ADR-0105 D8) is the one-step
+  admission flow: issuance is authorized against the issuer's `adminScope` by
+  dry-running `DelegatedAdminGate`, and acceptance writes real
+  `sys_user_position` rows with a `granted_by` stamp. It reaches **further** than
+  what it replaces — a delegated admin may use it within their subtree, where the
+  membership-role route was open to org admins only (the invitation role cap holds
+  anyone below admin grade to plain `member`).
+
+  An invitation naming an app role now fails at better-auth's door with
+  `ROLE_NOT_FOUND`, before any row is written.
+
+  This reverses two changesets that were never consumed into a release
+  (`app-org-roles-storable`, `auth-org-roles-self-derived`), so no published
+  version ever offered the behaviour; both are removed rather than shipped and
+  retracted in the same changelog. A pre-existing deployment could only have
+  stored a custom value by direct DB write.
+
+  Also derived rather than transcribed: `@objectstack/lint`'s `MEMBERSHIP_TIERS`
+  now reads `BUILTIN_MEMBERSHIP_ROLES` from `@objectstack/spec`. The hand-kept
+  copy carried `guest`, which the `sys_member.role` select has never offered — an
+  approver authored as `{ type: 'org_membership_level', value: 'guest' }`
+  resolved to nobody and the lint whose whole job is to catch that stayed silent.
+
+- 67452d1: feat(spec): resolve page metadata i18n — `page:header` title/subtitle (#3589)
+
+  Custom system pages authored as metadata (Installed Apps, Cloud Connection,
+  Connect an Agent) hard-code their `page:header` copy in
+  `properties.title` / `properties.subtitle`. Every other metadata type is
+  localized at the REST boundary, but `page` was not: the `pages` namespace
+  existed only on `AppTranslationBundleSchema` — a schema no runtime reads —
+  with no resolver behind it, so those headers stayed English in every locale
+  while the matching nav labels translated correctly.
+
+  - `TranslationDataSchema` (the shape the i18n service actually serves) gains a
+    `pages` namespace: `pages.<name>.{label,description,title,subtitle}`.
+  - New `translatePage` in `@objectstack/spec/system` translates a page's own
+    `label` / `description` and overlays `title` / `subtitle` onto every
+    `page:header` in the page's regions. Registered in
+    `translateMetadataDocument`, so it rides the existing read path.
+  - `page` added to the REST boundary's `TRANSLATABLE_META_TYPES`. Locale
+    extraction, the locale-keyed ETag, and `Vary: Accept-Language` already
+    covered every metadata type — no new plumbing.
+  - `objectstack i18n extract` now emits page entries, including the
+    `page:header` copy, so the new namespace is not invisible to the tooling.
+  - zh-CN / ja-JP / es-ES translations shipped for the three Setup pages, plus
+    the missing `nav_cloud_connection` / `nav_connect_agent` nav labels (these
+    existed only in zh-CN).
+
+  Header copy is keyed by **page name**, not by component id: `page:header`
+  instances carry no stable id. `title` falls back to `pages.<name>.label`, since
+  a page's header title and its nav label are normally the same string.
+
+  Authoring is unchanged and English literals stay in metadata as the fallback —
+  a page with no `pages` entry renders exactly as before. Consumers of
+  `@object-ui` need no change: pages arrive already localized from the server.
+
+- aa8b847: feat(authz): scoped invitations — placement intent on an invitation, gated by
+  the issuer's adminScope and applied on acceptance (ADR-0105 D8)
+
+  An invitation may now carry PLACEMENT INTENT — the business unit the invitee
+  lands in and the positions they are assigned — so a delegated (plant) admin's
+  invitee arrives already in the right unit and role instead of waiting on a
+  platform admin. This closes the structural gap ADR-0105 D8 names for
+  `single`-posture deployments and is the natural admission path under `group`.
+
+  The two halves ship together, deliberately:
+
+  - **Issuance is authorized** against the ISSUER's `adminScope` (ADR-0090 D12),
+    by dry-running the existing `DelegatedAdminGate` against the very
+    `sys_user_position` rows the acceptance would write. The gate is reused
+    verbatim — no second copy of the subtree/allowlist logic to drift — so an
+    invitation can never place what its issuer could not have assigned directly.
+    Without that gate the feature would be an escalation hole: the built-in
+    `organization_admin` is deliberately read-only on the RBAC tables precisely
+    so a fresh org admin cannot rebind themselves, and applying an unchecked
+    invitation payload under system context would hand that authority straight
+    back.
+  - **Acceptance applies it**, idempotently and failure-isolated: a replayed
+    acceptance converges instead of duplicating assignments, and a placement
+    miss never undoes a valid membership.
+
+  Surface:
+
+  - `sys_invitation` gains `business_unit_id` + `positions` (ADR-0092 extension
+    fields, registered in the D7 collision-guarded whitelist; NOT generically
+    editable — placement is set only at issuance, through the gate).
+  - `@objectstack/plugin-security` registers the `invitation-placement` service
+    (`assertIssuable` / `apply`).
+  - `@objectstack/plugin-auth` wires better-auth's `beforeCreateInvitation` /
+    `afterAcceptInvitation` to it. **Fail closed**: an invitation that requests
+    placement in a deployment without the delegated-administration runtime is
+    refused, never silently placed unchecked.
+
+  Existing invitations are unaffected — an invitation without placement intent
+  never consults the gate and behaves exactly as before.
+
+### Patch Changes
+
+- ad4af62: feat: single-source API-method derivation — the server is the only adjudicator (#3391)
+
+  An object's effective API surface is now resolved from **six primitives**
+  (`get/list/create/update/delete/bulk`) by ONE derivation table in
+  `@objectstack/spec/data` (`resolveEffectiveApiMethods` / `isApiOperationAllowed`
+  / `effectiveOperationsArray` / `API_METHOD_DERIVATION`). Every gate consumes it:
+  the REST data surface, the runtime HTTP/MCP dispatcher, and the
+  `/me/permissions` annotation. The `apiMethods` whitelist is three-state —
+  `undefined` = unrestricted, `[]` = deny-all, a subset = the derived closure — and
+  the legacy 8 verbs (`upsert/aggregate/history/search/restore/purge/import/
+export`) are DERIVED from the primitives, never declared standalone. (This
+  release also ships the enum shrink — see the `#3543` changeset: the authored
+  enum IS the six primitives, and a stored legacy value is stripped at parse
+  with a warning rather than honored.)
+
+  **Derivation:** `import` ⊆ create∨update (writeMode-precise: insert→create,
+  update→update, upsert→create∧update); `export` ⊆ list (reserved user-export slot,
+  always on this phase); `aggregate`/`search` ⊆ list (search also needs
+  `searchable`); `history` ⊆ get ∧ `trackHistory`; `upsert` ⊆ create∧update;
+  bulk sub-ops ⊆ bulk ∧ derived(child). `restore`/`purge` do not derive (the
+  `enable.trash` flag was retired, #2377).
+
+  **New response-side contract:** `EffectiveObjectPermissionSchema` extends
+  `ObjectPermissionSchema` with an optional `apiOperations` array;
+  `GetEffectivePermissionsResponse.objects` uses it, and `/me/permissions` now
+  hands down the per-object effective operation set. The authoring
+  `ObjectPermissionSchema` is deliberately NOT extended — the frontend consumes
+  the effective set the server resolves, never the raw whitelist.
+
+  **Behavior changes (tightening — a `declared ≠ enforced` gap closed):**
+
+  1. `apiMethods: []` + `apiEnabled: true` now denies every operation (405),
+     matching the documented three-state contract instead of the prior fail-open
+     "no restriction". In-repo impact is zero (every `[]` object also sets
+     `apiEnabled: false`, so 404 precedes 405).
+  2. The runtime dispatcher / MCP whitelist is now live. It previously read the
+     flat shape while `getObject()` returns the flags nested under `.enable`, so
+     the gate never fired — a silent dead gate now enforced (nested-first,
+     flat-compatible).
+  3. `import`/`export` reverse-derive: an object with a plain CRUD whitelist (no
+     explicit `import`/`export`) now admits import (⊆ create∨update) and export
+     (⊆ list). Row-level FLS is shared with list; the export column header is now
+     projected to the FLS-readable set so it can never expose a wider column set
+     than list (previously a masked column leaked its name as an empty column).
+  4. The bulk surfaces (`createMany`/`updateMany`/`deleteMany`, per-object
+     `/batch`, cross-object `/batch`) now require the `bulk` primitive AND the
+     child write (`bulk ∧ child`). The four in-repo explicit-whitelist objects
+     (`sys_user`, `sys_user_preference`, `sys_business_unit`,
+     `sys_business_unit_member`) gained `bulk`; a third-party object with an
+     explicit write whitelist that omits `bulk` will now 405 on the Many/batch
+     routes.
+  5. The 405 body's `allowed` array is now the derived EFFECTIVE operation set
+     (enum-ordered), not the raw whitelist.
+
+- d44dbfa: feat(spec)!: shrink the `ApiMethod` enum to the six primitives — legacy values are stripped at parse, never honored (#3543, P2 of #3391)
+
+  **BREAKING** (the `!` marker and this changeset are the breaking-change
+  record; the train ships as the v17 major — see the `v17-rc-anchor` changeset):
+  the authored `enable.apiMethods` enum is now exactly the six
+  primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`). The eight
+  legacy values (`upsert`, `aggregate`, `history`, `search`, `restore`, `purge`,
+  `import`, `export`) are no longer authorable — they are DERIVED effective
+  operations, resolved by the server's single derivation table.
+
+  **Migration (FROM → TO).** Replace each legacy value with the primitives it
+  derives from, then de-duplicate; if the result names all six primitives, delete
+  the `apiMethods` key entirely (equivalent to default-open, and it tracks future
+  primitives):
+
+  | FROM (legacy) | TO (primitives)      | why                                            |
+  | ------------- | -------------------- | ---------------------------------------------- |
+  | `upsert`      | `create`, `update`   | upsert ⊆ create ∧ update                       |
+  | `import`      | `create`, `update`   | import ⊆ create ∨ update (writeMode-precise)   |
+  | `export`      | `list`               | export ⊆ list                                  |
+  | `aggregate`   | `list`               | aggregate ⊆ list                               |
+  | `search`      | `list`               | search ⊆ list ∧ `searchable`                   |
+  | `history`     | `get`                | history ⊆ get ∧ `trackHistory`                 |
+  | `restore`     | _(delete the value)_ | never derives — `enable.trash` retired (#2377) |
+  | `purge`       | _(delete the value)_ | never derives — `enable.trash` retired (#2377) |
+
+  Reporter codemod: `node scripts/codemod/apimethods-legacy-to-primitives.mjs`
+  (scans, reports the exact replacement per site, and flags whitelists the
+  mapping would WIDEN so the edit stays reviewable).
+
+  **Stored metadata keeps parsing — permanent tolerance, narrowing only.** Real
+  metadata does not upgrade in lockstep with the spec, so a stored legacy value
+  is NOT a parse error: `stripLegacyApiMethods` (new export) strips it with a
+  FROM→TO warning (canonicalize-and-warn). Stripping only ever NARROWS exposure —
+  the derivation table still grants every legacy verb that derives from the
+  primitives you declared. Two cliffs to know:
+
+  1. A whitelist of ONLY legacy values (e.g. `['upsert']`) strips to `[]` =
+     **deny-all** — the object's API closes instead of widening. The strip
+     warning and the objectql registration diagnostic both call this out.
+  2. A legacy value NOT derivable from your declared primitives (e.g.
+     `['get', 'export']` — export needs `list`) was honored by the P1
+     "explicit wins" path and is now denied. Declare the underlying primitive.
+
+  **Type split — authored vs effective vocabulary.** `ApiMethod` (authored) is
+  now six values; the NEW `ApiOperation` type / `ApiOperationSchema` /
+  `API_OPERATION_ORDER` (fourteen values, byte-stable pre-shrink wire order)
+  carry the EFFECTIVE vocabulary. The wire contract is unchanged: the 405
+  `allowed` array and `/me/permissions` `apiOperations` still serialize derived
+  verbs (`export`, `search`, …), and `EffectiveObjectPermissionSchema.apiOperations`
+  now validates against `ApiOperationSchema`. `EffectiveApiMethods.explicitLegacy`
+  is removed (nothing is honored verbatim anymore); `API_METHOD_ORDER` remains as
+  a deprecated alias of `API_OPERATION_ORDER`.
+
+  **Fail-closed tightening (#3545):** a PRESENT but non-array `apiMethods` (only
+  producible by a raw/out-of-band metadata write) now resolves to `deny-all`
+  instead of unrestricted — a policy that exists but cannot be read fails CLOSED.
+
+  **Published JSON Schema diverges deliberately:** `data/ApiMethod.json` is the
+  strict six-value enum (a `z.preprocess` is not representable in JSON Schema),
+  so external JSON-Schema validators reject legacy values that the zod parse
+  would strip-and-warn. Treat the JSON Schema as the authored contract; the zod
+  tolerance exists for stored metadata.
+
+  **objectql:** the P1 "explicit wins" transition is reclaimed —
+  `warnDeprecatedExplicitApiMethods` is replaced by `warnStrippedLegacyApiMethods`
+  (a permanent per-object diagnostic for schemas that reach the registry without
+  passing through Zod; the parse-time strip warning carries no object name).
+
+  **platform-objects:** whitelist audit — `sys_business_unit`,
+  `sys_business_unit_member` (P1's explicit `import`/`export` reclaimed) and
+  `sys_user_preference` dropped their `apiMethods` entirely (each named all six
+  primitives = default-open). Read-only and deny-all whitelists are unchanged;
+  the seven `[]` declarations are deliberately KEPT as defense-in-depth alongside
+  `apiEnabled: false`.
+
+- bc17d39: fix(auth): provision the better-auth 1.7 columns `sys_team` / `sys_team_member` / `sys_two_factor` were missing (#3624)
+
+  better-auth 1.7.0-rc.1 added fields to three models that the platform objects
+  never provisioned and `auth-schema-config.ts` never mapped. Because an unmapped
+  field keeps its camelCase name, the adapter emitted columns no table had:
+
+  | model        | field                                     | column now provisioned                                      |
+  | :----------- | :---------------------------------------- | :---------------------------------------------------------- |
+  | `team`       | `memberCount`                             | `sys_team.member_count`                                     |
+  | `teamMember` | `membershipKey`                           | `sys_team_member.membership_key`                            |
+  | `twoFactor`  | `failedVerificationCount` / `lockedUntil` | `sys_two_factor.failed_verification_count` / `locked_until` |
+
+  The team pair broke org creation outright. The organization plugin's team
+  sub-feature is on by default, so `POST /api/v1/auth/organization/create`
+  auto-creates a default team — and that insert died with `table sys_team has no
+column named memberCount` _after_ the organization row had already committed.
+  Callers got an HTTP 500 on top of a half-created org: a real org row with no
+  default team behind it. Every multi-org deployment's create-org flow hit this.
+
+  The two-factor pair broke the 2FA lockout path the same way: better-auth
+  guard-increments `failedVerificationCount` on each wrong code and stamps
+  `lockedUntil` past the threshold, so a wrong code 500'd instead of being
+  counted. All four columns are better-auth's own state — provisioned, readable,
+  and never written from the ObjectStack side.
+
+  Existing environments pick the columns up through the driver's additive schema
+  sync; no data migration is needed. `member_count` backfills to 0 and
+  better-auth's own `syncTeamMemberCount` reconciles it on the next membership
+  change, and `membership_key` stays null on pre-upgrade rows, which better-auth
+  tolerates by falling back to the `(team_id, user_id)` pair.
+
+  A new drift gate (`better-auth-schema-parity.test.ts`) now asserts that every
+  column the installed better-auth version can write exists on the platform
+  object backing it, across the auth manager's whole model surface. The ADR-0092
+  D7 guard only ever caught _collisions_ between our extension fields and
+  better-auth's, so a bump that adds a brand-new field passed the build and failed
+  at runtime — twice now, counting the 1.7 `oauthAccessToken.authorizationCodeId`
+  regression. The next one fails the build instead.
+
+- 524151c: fix(i18n): clear the accumulated drift in the generated translation bundles
+
+  The committed bundles had fallen behind the spec on three independent axes.
+  `os i18n extract` (merge mode — every existing translation is preserved)
+  reconciles all of them:
+
+  **Keys the spec no longer has**, still carrying translations in
+  `*.metadata-forms.generated.ts`. All three were removed deliberately and are
+  now _rejected_ by the schema, so their entries were dead weight:
+
+  - `capabilities.trash` / `capabilities.mru` — `enable.trash`/`enable.mru`
+    retired in the 16.x line (#2377), with tombstone guidance in
+    `UNKNOWN_KEY_GUIDANCE`.
+  - agent `visibility` — removed 2026-07 (#1901).
+
+  **Keys the spec gained** but the bundles never learned: the
+  `summaryOperations.*` sub-fields (`object` / `function` / `field` /
+  `relationshipField` / `filter`), and `sys_invitation.business_unit_id` /
+  `positions` from the ADR-0105 D8 placement work.
+
+  **Objects stuck on empty strings.** `sys_migration`'s labels and help text were
+  committed as `""` in the ja-JP and es-ES bundles, which renders as _blank_ in
+  those locales rather than falling back to anything readable. They now carry the
+  schema text like every other untranslated key.
+
+  No API or schema change — this only affects what the UI displays.
+
+- d1cabaa: fix(i18n): translate the SSO / SCIM / user-position / import-job admin objects
+
+  Four live, UI-facing system objects were registered but never added to their
+  package's i18n extract config, so non-English admins saw raw English `label`
+  metadata:
+
+  - `sys_sso_provider`, `sys_scim_provider` (platform-objects) — identity-provider
+    admin grids plus the register / verify-domain actions.
+  - `sys_user_position` (plugin-security) — delegated position assignment
+    (`userActions` create/edit/delete); its sibling `sys_user_permission_set` was
+    already translated, so this closes an inconsistency.
+  - `sys_import_job` (platform-objects) — import history / progress, alongside the
+    already-translated `sys_job` / `sys_job_run`.
+
+  Adds each object to its package's `scripts/i18n-extract.config.ts` and supplies
+  real zh-CN / ja-JP / es-ES translations across all four locale bundles, and
+  extends the bundle-ownership guards' `OWNED_OBJECTS` to cover them. The
+  orphan-only guards from #3502 could not catch this "owned-and-live-but-never-
+  extracted" gap.
+
+- 85e1e4e: feat(rest): `treatAsHistorical` import option — skip the state machine for historical-data migration (#3479)
+
+  Sibling of #3433 (seed exemption), one entry point over. #3165's `initialStates` enforced
+  the FSM entry point on every INSERT, so importing established historical facts —
+  a batch of already-`closed` tickets, `closed_won` deals, `completed` projects —
+  was rejected row-by-row with `invalid_initial_state`, blocking the core
+  data-migration path. Unlike the seed case it was visible (per-row errors), but it
+  still functionally blocked a legitimate use.
+
+  - **spec**: `ExecutionContext.skipStateMachine` — a general, server-set flag (the
+    seed-specific `seedReplay`'s sibling) that skips the `state_machine` rule for a
+    write; `ImportRequestSchema.treatAsHistorical` (default `false`) — the user-facing
+    import option.
+  - **objectql**: the engine now skips the state machine for `seedReplay` OR
+    `skipStateMachine` (one helper), covering both seed replay and historical import.
+  - **rest**: the import runner sets `skipStateMachine` on the write context iff the
+    request opts into `treatAsHistorical`; default off, so a normal import still walks
+    the FSM (the strict behavior is the default). Import **undo** now also carries
+    `skipStateMachine`, since restoring a prior snapshot re-writes an earlier state
+    that need not be a legal transition from where the row is now.
+  - **platform-objects**: `sys_import_job.treat_as_historical` audit column (additive).
+
+  Scope is identical to the seed exemption: ONLY the `state_machine` rule is skipped;
+  field shape, `format`, `cross_field`, `script` all still run. The objectui import
+  wizard checkbox is a separate follow-up.
+
+- 4921a95: fix(i18n): platform-objects' 231 untranslated strings were 1 — close the real gap and stop the phantom (#3762)
+
+  Closes the rest of #3762. The remaining item was recorded as "platform-objects
+  is 77 strings short per locale, in `apps.*` / `dashboards.*`, and its
+  `--objects-only` extract cannot scaffold them — needs an emit decision (drop
+  `--objects-only`, or a companion `.apps.generated.ts`) before any translating."
+
+  Measured, the premise did not hold. Of the 77 declared keys per locale, **76
+  were already translated** in the hand-authored `<locale>.ts` files and had been
+  for months. Exactly one was genuinely missing —
+  `apps.studio.navigation.nav_app_builder.label`, absent in all four locales
+  including `en`. The 231 was a measurement artifact: this config declares
+  SETUP_APP / STUDIO_APP / ACCOUNT_APP and SystemOverviewDashboard, but its
+  `translations` merge baseline listed only the two GENERATED subtrees
+  (`objects`, `metadataForms`), so coverage counted every hand-authored
+  app/dashboard key as untranslated.
+
+  **Neither proposed emit is right, and the second would have caused damage.**
+  The Setup app is a shell of empty group anchors; its ~25 menu entries are
+  contributed at runtime by `SETUP_NAV_CONTRIBUTIONS` and by capability plugins
+  (ADR-0029 D7). A bundle generated from a static walk of `SETUP_APP` is
+  therefore structurally incomplete, and regenerating over the hand-authored
+  files would have **deleted 40 live nav translations per locale**. Dropping
+  `--objects-only` fails differently: `kind: 'full'` folds all 803 metadata-form
+  keys into `<locale>.objects.generated.ts` and renames the export the baseline
+  imports.
+
+  The split is correct as it stands and is now written down: `objects` /
+  `metadataForms` are generated and gated by the bundle-drift check; `apps` /
+  `dashboards` / `pages` are hand-authored and gated by the coverage ratchet.
+  What was wrong was only that the baseline omitted the hand-authored half.
+
+  - Extract config's `translations` now carries the per-locale assemblers, with
+    `objects`/`metadataForms` still pinned to the committed generated files.
+    Safe for the emit — `--objects-only` writes `data.objects` alone, so nothing
+    added here can reach a generated bundle, and `check:i18n` stays in sync
+    across all nine packages.
+  - `nav_app_builder` translated in all four locales, wording taken from the
+    repo's own precedent for "builder" (`构建器` / `ビルダー` / `generador`).
+  - `nav_workflows` removed from all four: its menu entry is gone from
+    `STUDIO_APP` and nothing contributes to that app, so the translation was
+    dead.
+  - Coverage ratchet baselined 231 → **0**, making platform-objects the ninth
+    package where the ratchet is a strict gate — verified to go red on a single
+    removed translation.
+  - A local, CLI-independent parity test walks the statically declared Studio and
+    Account navigation plus the dashboard's widgets and asserts a translation in
+    every locale — and the reverse, that no translation survives its nav item.
+    Both directions verified to fail before passing.
+
+  An untranslated nav id is invisible in the UI — it falls back to the app's
+  English label, so a Chinese Studio menu just shows one English entry among
+  thirty. That is why this needed a gate rather than a one-time sweep.
+
+  Still out of scope: the ~25 Setup entries contributed at runtime. Bringing them
+  under a static gate needs either an objectql dependency in this package (it
+  depends only on spec and metadata-core) or extractor support for
+  `navigationContributions` — a real follow-up, not something to half-do here.
+
+- 5487c20: fix(auth): provision `sys_scim_provider.provider_key` — SCIM provider creation failed the moment SCIM was switched on (#3653)
+
+  `@better-auth/scim` declares `providerKey` as `required: true, unique: true`
+  and writes it on every provider insert — a derived `<organization>:<provider_id>`
+  uniqueness key it owns end to end. `sys_scim_provider` never provisioned the
+  column, so the adapter emitted a `provider_key` no table had: the same failure
+  shape as #3624, waiting behind the `OS_SCIM_ENABLED` flag.
+
+  Found by extending the better-auth parity gate to `@better-auth/sso` and
+  `@better-auth/scim`. Neither accepts a `schema` option, so `getAuthTables()` is
+  blind to them and they were excluded when that gate shipped; the gate now reads
+  each plugin's own declared schema and resolves columns the way the adapter
+  actually does for a bridged model. `@better-auth/sso` came back fully covered.
+
+  Existing environments pick the column up through the driver's additive schema
+  sync; it stays null on pre-upgrade rows, which the nullable UNIQUE index admits.
+
+- 4d00b13: feat(spec)!: remove `tool.requiresConfirmation` — a safety flag nothing enforced (#3715, ADR-0033 §2)
+
+  `ToolSchema.requiresConfirmation` accepted `true` and no execution path ever read
+  it. Not the LLM tool set (a tool reaches the model as name/description/parameters
+  only), not `ToolRegistry.execute`, not `POST /ai/tools/:name/execute`, and not the
+  MCP bridge — which derives `destructiveHint` from a hardcoded name list. Setting
+  it on a destructive tool produced **no pause**.
+
+  For an ordinary dead property that is untidy. For a **safety** property it is
+  false compliance, which is the case ADR-0049 exists for: an author gates a
+  destructive tool, sees the flag accepted, and ships believing a human is in the
+  loop. It is made worse by the near-miss — `action.ai.requiresConfirmation` has
+  the same name and **does** work, so the mistake reads as correct in review.
+  ADR-0033 §2 already resolved to delete this one.
+
+  ## Migration
+
+  - **FROM:** `requiresConfirmation: true` on a tool definition
+  - **TO:** put the operation behind an action and set `ai.requiresConfirmation:
+true` there — that is the flag the HITL approval queue reads
+    (`packages/runtime/src/action-execution.ts`) and the only path that actually
+    stops execution.
+  - For AI _metadata_ mutations there is nothing to migrate: the ADR-0033
+    draft/publish workspace is the gate — nothing is live until a human publishes.
+
+  **`ToolSchema` is now `.strict()`.** This is load-bearing, not tidying. Removing a
+  key from a non-strict schema swaps one silent no-op for another: zod strips the
+  key wordlessly, the author keeps writing it, and the safety flag goes on meaning
+  nothing — the "silent strip" ADR-0032 / #1535 closed for objects. The retired key
+  now **rejects**, and the error carries the FROM → TO above, because a parse error
+  is the one channel every consumer bumping `@objectstack/spec` is guaranteed to
+  hit.
+
+  Strictness applies to _all_ unknown keys on a tool definition, so a typo
+  (`buildIn`, `catagory`) is now a located parse error instead of a silently
+  dropped field.
+
+  Also removed: the Studio form row, its four generated locale bundles (the
+  `en`/`zh-CN`/`ja-JP`/`es-ES` strings still promised _"Ask user to approve before
+  executing (for destructive actions)"_ — a translated false promise), the
+  liveness-ledger entry, and the generated reference-doc row.
+
+  objectui's `ToolPreview.tsx` reads the field via `!!d.requiresConfirmation`, so it
+  degrades to "not shown" with no error; removing that badge is a follow-up in that
+  repo.
+
+- 9aa5510: fix(i18n): ship the missing object-translation keys for the better-auth 1.7 and ADR-0105 D6 fields (#3624 follow-up)
+
+  The generated object-translation bundles predate two rounds of field additions,
+  so six fields had no entry in **any** locale and fell back to their raw schema
+  labels in every UI surface that reads the bundle:
+
+  - `sys_team.member_count`, `sys_team_member.membership_key`,
+    `sys_two_factor.failed_verification_count` / `locked_until` — the better-auth
+    1.7 columns provisioned in #3647.
+  - `sys_organization.parent_organization_id` / `sort_order` — the same gap left
+    by the earlier ADR-0105 D6 group-structure work.
+
+  Regenerated with `os i18n extract` (merge mode, so every existing translation is
+  preserved — the diff is purely additive). No API or schema change; the fields
+  themselves already shipped.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [db48ad5]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [c073b8c]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/metadata-core@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

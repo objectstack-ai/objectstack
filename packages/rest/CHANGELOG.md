@@ -1,5 +1,1195 @@
 # @objectstack/rest
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- ad4af62: feat: single-source API-method derivation — the server is the only adjudicator (#3391)
+
+  An object's effective API surface is now resolved from **six primitives**
+  (`get/list/create/update/delete/bulk`) by ONE derivation table in
+  `@objectstack/spec/data` (`resolveEffectiveApiMethods` / `isApiOperationAllowed`
+  / `effectiveOperationsArray` / `API_METHOD_DERIVATION`). Every gate consumes it:
+  the REST data surface, the runtime HTTP/MCP dispatcher, and the
+  `/me/permissions` annotation. The `apiMethods` whitelist is three-state —
+  `undefined` = unrestricted, `[]` = deny-all, a subset = the derived closure — and
+  the legacy 8 verbs (`upsert/aggregate/history/search/restore/purge/import/
+export`) are DERIVED from the primitives, never declared standalone. (This
+  release also ships the enum shrink — see the `#3543` changeset: the authored
+  enum IS the six primitives, and a stored legacy value is stripped at parse
+  with a warning rather than honored.)
+
+  **Derivation:** `import` ⊆ create∨update (writeMode-precise: insert→create,
+  update→update, upsert→create∧update); `export` ⊆ list (reserved user-export slot,
+  always on this phase); `aggregate`/`search` ⊆ list (search also needs
+  `searchable`); `history` ⊆ get ∧ `trackHistory`; `upsert` ⊆ create∧update;
+  bulk sub-ops ⊆ bulk ∧ derived(child). `restore`/`purge` do not derive (the
+  `enable.trash` flag was retired, #2377).
+
+  **New response-side contract:** `EffectiveObjectPermissionSchema` extends
+  `ObjectPermissionSchema` with an optional `apiOperations` array;
+  `GetEffectivePermissionsResponse.objects` uses it, and `/me/permissions` now
+  hands down the per-object effective operation set. The authoring
+  `ObjectPermissionSchema` is deliberately NOT extended — the frontend consumes
+  the effective set the server resolves, never the raw whitelist.
+
+  **Behavior changes (tightening — a `declared ≠ enforced` gap closed):**
+
+  1. `apiMethods: []` + `apiEnabled: true` now denies every operation (405),
+     matching the documented three-state contract instead of the prior fail-open
+     "no restriction". In-repo impact is zero (every `[]` object also sets
+     `apiEnabled: false`, so 404 precedes 405).
+  2. The runtime dispatcher / MCP whitelist is now live. It previously read the
+     flat shape while `getObject()` returns the flags nested under `.enable`, so
+     the gate never fired — a silent dead gate now enforced (nested-first,
+     flat-compatible).
+  3. `import`/`export` reverse-derive: an object with a plain CRUD whitelist (no
+     explicit `import`/`export`) now admits import (⊆ create∨update) and export
+     (⊆ list). Row-level FLS is shared with list; the export column header is now
+     projected to the FLS-readable set so it can never expose a wider column set
+     than list (previously a masked column leaked its name as an empty column).
+  4. The bulk surfaces (`createMany`/`updateMany`/`deleteMany`, per-object
+     `/batch`, cross-object `/batch`) now require the `bulk` primitive AND the
+     child write (`bulk ∧ child`). The four in-repo explicit-whitelist objects
+     (`sys_user`, `sys_user_preference`, `sys_business_unit`,
+     `sys_business_unit_member`) gained `bulk`; a third-party object with an
+     explicit write whitelist that omits `bulk` will now 405 on the Many/batch
+     routes.
+  5. The 405 body's `allowed` array is now the derived EFFECTIVE operation set
+     (enum-ordered), not the raw whitelist.
+
+- 5f9a987: fix(rest): a batch create goes through the same create ingress as a single create (#3835)
+
+  `readonly` meant two different things depending on which create endpoint you
+  used. `POST /data/:object` runs the #3043 ingress strip, so a non-system caller
+  cannot seed a read-only column — the field is dropped and reported. The
+  cross-object transactional batch (`POST /batch`) called `ql.insert` directly and
+  skipped that ingress entirely, and the engine's INSERT path is
+  static-`readonly`-exempt **by design** (#3413, the strip lives one layer up), so
+  nothing enforced it: the same forged `readonly` value that was rejected on one
+  route was written through on the other.
+
+  Measured on the showcase (`showcase_contact.lead_score`, `readonly: true`, same
+  signed-in non-system user):
+
+  |                               | before                                 | after            |
+  | ----------------------------- | -------------------------------------- | ---------------- |
+  | `POST /data/showcase_contact` | `lead_score = null`, reported          | unchanged        |
+  | `POST /batch` create          | **`lead_score = 999` written, silent** | `null`, reported |
+
+  The fix routes the batch's create ops through the protocol's `createData` rather
+  than re-implementing the strip at the REST layer. That keeps **one** create
+  ingress: a future change to its policy covers the batch for free, and the
+  carve-outs already encoded there stay intact — notably the platform-object
+  exemption (a `sys_`/`managedBy` object's own guard must _reject_ a forged value
+  with 403, not have it silently swallowed) and the `isSystem` exemption. The
+  context passed through is the transaction context, so the insert still joins the
+  batch transaction and rolls back with it, and `{ $ref: <opIndex> }` resolution is
+  unaffected.
+
+  `createData`'s `droppedFields` are folded into the batch response's per-op
+  `droppedFields` list (#3794), so a batch create now reports its strips the same
+  way an update does.
+
+  Update ops are untouched: the engine enforces `readonly` and `readonlyWhen` on
+  its own update path.
+
+- 5f9a987: fix(rest): report `droppedFields` from the cross-object batch, so a silent strip stops reading as a clean save (#3794)
+
+  The engine strips writes to `readonly` (#2948) and `readonlyWhen`-locked (#3042)
+  fields and completes the write without them. Every write path already reported
+  which fields it dropped (#3431/#3455) — except the cross-object transactional
+  batch, which never wired `onFieldsDropped` at all.
+
+  That path is the Console record form's save for a master-detail record, so it is
+  exactly where a _user_ edits a `readonlyWhen` field: they changed it, the form
+  said "updated successfully", the value never moved, and nothing anywhere said
+  so.
+
+  `POST /batch` responses now carry a top-level `droppedFields` list, each event
+  tagged with the `index` of the operation that produced it (`results` entries are
+  bare record echoes, with no envelope to hang a per-row list on). Omitted
+  entirely when nothing was dropped, so the shape stays backward-compatible; the
+  batch still commits either way — a strip is legal semantics, not an error.
+
+  The Console half ships in objectui: the write-warning toast now fires on batch
+  saves too.
+
+- 3949a43: fix(metadata-protocol,rest): the data path really 404s unknown objects now (#3770)
+
+  The REST API-exposure gate (`enforceApiAccess`) passes through any object it
+  cannot find in metadata, and the comment there justified that with
+  `// unknown object → let the data path 404`. That fallback did not exist.
+
+  - `findData` — and every other data entry point except `cloneData` — had **no
+    existence check**. The repo's only `OBJECT_NOT_FOUND` throw was in `cloneData`.
+  - The engine does not reject unregistered names either: `resolveObjectName`
+    falls back to `StorageNameMapping.resolveTableName({ name })`, so the object
+    name is used **as the table name**.
+  - The 404 was therefore only ever a side effect of the **driver** erroring on a
+    missing table, which the REST layer recognised by matching the driver's error
+    string.
+
+  So the 404 held only when the table happened not to exist. When a physical table
+  with that name **did** exist — out-of-band DDL, a registration that failed after
+  `syncObjectSchema` had already run, a registration race — the exposure gate was
+  silently skipped and the rows were served, with no layer turning it into a 404.
+  (Since #3545 an authenticated caller on a plugin-security deployment is refused
+  by the fail-closed posture check; anonymous callers and deployments without
+  plugin-security were not.)
+
+  **The gate.** `ObjectStackProtocolImplementation` now runs a shared
+  `assertObjectRegistered` before storage is touched, on `findData`, `getData`,
+  `createData`, `cloneData`, `updateData`, `deleteData`, `batchData`,
+  `createManyData`, `insertManyData`, `updateManyData`, `deleteManyData` and
+  `analyticsQuery`. An object absent from the schema registry is rejected with
+  `OBJECT_NOT_FOUND` / 404 — an authoritative answer from the registry, raised
+  _before_ the name becomes a table name, instead of an inference from driver
+  prose. `cloneData`'s open-coded check is now that shared gate; its envelope is
+  unchanged.
+
+  It sits at the protocol ingress, the same boundary `apiEnabled` guards: internal
+  callers (hooks, flows, migrations, raw ObjectQL) go to the engine directly and
+  are unaffected. When the engine exposes no schema registry at all there is
+  nothing to consult, so the gate stands down and warns once per process —
+  matching the tiering #3545 recorded in `api-exposure.ts` for a whole-registry
+  outage.
+
+  **Behaviour change.** A REST data request for an object that is not in the
+  schema registry now returns `404 object_not_found` even when a table of that
+  name exists. Previously it returned that table's rows. If a deployment depended
+  on reading a table with no registered object, register the object (its schema is
+  what every other layer — exposure, RBAC/FLS/RLS, field projection — already
+  needs in order to enforce anything at all).
+
+  **One wire code.** `mapDataError` maps the protocol's `OBJECT_NOT_FOUND` to the
+  canonical `object_not_found` `ApiErrorCode` — byte-identical to the envelope the
+  driver-string branch already produced — so a client keying on `code` sees _what
+  happened_, not _which layer noticed_. The driver-string branch stays as the
+  safety net for the other failure it actually covers: an object that IS registered
+  but whose physical table is missing. Callers that were reading `cloneData`'s 404
+  as `code: 'OBJECT_NOT_FOUND'` on the wire now get `object_not_found`; the status
+  is 404 either way.
+
+  The misleading comment is replaced with what actually closes the hole — this
+  gate for existence, plugin-security's `unresolved` posture (#3545) for
+  authorization — and a note not to widen the exposure gate on the assumption that
+  some other layer 404s.
+
+- 7c7e246: feat(authz): expose the caller's delegable scope — the read half of the
+  delegated-administration gate (ADR-0090 D12 / ADR-0105 D8)
+
+  `adminScope` decided writes but could not be READ: `assignablePermissionSets`
+  lived only inside `delegated-admin-gate.ts`, so a UI offering "place this
+  person in a unit, with these positions" (the D8 scoped-invitation form) had no
+  way to narrow its pickers. It would list the whole tree and let the user
+  discover the boundary by being refused — which turns an authorization gate into
+  a validator and makes the boundary invisible until it bites.
+
+  `ISecurityService.describeDelegableScope(callerContext)` answers it, exposed as
+  `GET /api/v1/security/my-delegable-scope` and `client.security.describeDelegableScope()`:
+
+  - `placeableBusinessUnitIds` — union of the subtrees where the caller may place
+    people (scopes granting `manageAssignments`);
+  - `assignablePositions` — positions whose every distributed permission set the
+    caller may hand out (containment check included);
+  - `scopes` — the held `adminScope`s with subtrees resolved, for attribution;
+  - `isTenantAdmin` — unconstrained, with everything enumerated so a consumer
+    renders ONE uniform picker instead of special-casing.
+
+  Computed by the same helpers the write gate enforces with, so an option this
+  reports is one `assert()` accepts — a test asserts that agreement directly. It
+  NARROWS; the gate still decides.
+
+  Strictly self-scoped: no target-user parameter, so it discloses nothing beyond
+  the authority the caller already holds (unlike `explain`, which has one and
+  gates it). Fail-closed — unresolvable scopes contribute nothing, a caller with
+  no delegated authority gets empty lists, and a deployment without
+  `@objectstack/plugin-security` gets 501.
+
+- 9613396: feat(security): ENFORCE the user-level export axis on the server (#3544)
+
+  `allowExport` landed as a spec bit plus a `/me/permissions` annotation, which
+  hid the client's Export button — and nothing else. Because `export ⊆ list`, the
+  REST export route streams through `findData` and the engine middleware sees an
+  ordinary `find` gated by `allowRead`, so no code path ever read the bit: a caller
+  holding `allowExport: false` could still `curl
+/api/v1/data/:object/export` and drain the whole table. Declared, not enforced.
+
+  - **plugin-security** `PermissionEvaluator.checkObjectPermission('export', …)` is
+    now a real decision: `export` = read granted ∧ not explicitly denied.
+    `allowExport` stays out of `OPERATION_TO_PERMISSION` on purpose — that map
+    means "the bit must be truthy", which would have denied export to every
+    permission set authored before the axis existed. The new exported
+    `resolveUserExportAllowed()` folds the tri-state across sets (`true` beats
+    `false` beats unset) exactly as the `/me/permissions` merge does.
+  - **spec** `ISecurityService` gains `canExport(object, context)` — the question a
+    bulk-egress door outside the engine middleware has to ask before it reads.
+    Fails CLOSED; `isSystem` and an empty set resolution bypass, mirroring the
+    middleware.
+  - **rest** `GET /data/:object/export` calls it and answers **403
+    `EXPORT_NOT_PERMITTED`** before the first chunk is fetched. Distinct from the
+    object-level 405 `OBJECT_API_METHOD_NOT_ALLOWED`, which still runs first: 405
+    says the object exposes no export, 403 says this caller may not use it. No
+    security service (no `plugin-security` ⇒ no permission sets) → allowed, the
+    same fail-open posture as every other permission gate in that layer; service
+    present but unable to answer → denied.
+  - **plugin-hono-server** the `/me/permissions` annotation now falls back to the
+    `'*'` entry's export bit when a per-object entry declares none, matching the
+    evaluator's own wildcard fallback — so a set that denies export wholesale via
+    `'*'` no longer offers a button the server refuses.
+
+  Backward-compatible: `allowExport` is still an opt-out with no default, so an
+  unset bit inherits read and existing permission sets behave exactly as before.
+  Only a permission set that explicitly sets `allowExport: false` changes — and it
+  now changes on the server, which is the point.
+
+  Implementers of `ISecurityService` outside this repo must add `canExport`; the
+  interface member is required, matching how `getReadableFields` was added.
+  Consumers still feature-detect (`typeof svc.canExport === 'function'`), so a
+  partial implementation degrades rather than throwing.
+
+- 2fa4ca1: Dynamic approver routing for approval nodes (#3447 P2) — three new declarative capabilities:
+
+  **`expression` approvers.** A new approver type whose CEL expression resolves WHO approves at node entry, over exactly three roots: `current.*` (the record's live state), `trigger.*` (the submit-time snapshot) and `vars.*` (flow variables, incl. upstream node outputs). `record` and bare field names are rejected before evaluation — on this platform `record` always means "the record at event time", which is ambiguous at an approval node — with error messages that prescribe the correct spelling. The optional `resolveAs: 'user' | 'department' | 'position' | 'team'` re-expands each resolved id through the same graph lookups the static types use; with `behavior: 'per_group'` each intermediate value (e.g. each returned department) forms its own sign-off group. A missing key fails the node loudly; only a present-but-empty result counts as an empty slate.
+
+  **`onEmptyApprovers` policy.** What an empty resolved slate does, node-level, for all approver types: `admin_rescue` (default — request opens for privileged takeover, the #3424 behaviour), `fail` (node fails), or `auto_approve` (skip the request, continue down the `approve` edge with `output.autoApproved = true`). To support auto-approve, the automation engine now honours `NodeExecutionResult.branchLabel` on the synchronous completion path — the field existed but was only ever consumed via resume signals.
+
+  **Decision outputs.** `decide(..., { outputs })` hands structured data from the approver to the flow: the author declares allowed keys on the node (`decisionOutputs`), approvers fill values only, and accepted outputs resume the run as `<nodeId>.<key>` variables — a later approval node's expression can read `vars.<nodeId>.picked_departments`, closing "the previous approver picks the next step's approvers" without a record-field detour. Undeclared keys reject the decision; `decision`/`requestId` are reserved. Multi-approver tallies now always pin to the open-time approver snapshot (previously unanimous re-resolved at each decision against the payload snapshot).
+
+  Also: `collectCelRootIdentifiers` is exported from `@objectstack/formula` (shared by the new `os lint` rules and the runtime pre-check, so they can never drift), resolution inputs are audited on the request snapshot as `__resolvedFrom`, and three new lint rules gate expressions, empty-slate policies and reserved output keys at author time.
+
+- 16adb3c: fix(rest,client)!: reconcile the two REST↔client mismatches the #3587 audit
+  ledgered (#3610, #3611)
+
+  **#3610 — `POST /api/v1/packages` publish-vs-install collision.** The REST
+  package registrar claimed the bare `POST /packages` for _marketplace publish_
+  (`{manifest, metadata}`), while the dispatcher packages domain gives the same
+  verb+path _install_ semantics — and REST registers first in the production
+  stack (first-match-wins), so every `client.packages.install` call landed on
+  the publish handler and 400'd. Marketplace publish moves to
+  `POST /api/v1/packages/publish` (breaking for direct callers; a repo-wide and
+  objectui-wide sweep found zero). The dispatcher's `POST /packages/:id/publish`
+  (ADR-0033 draft publish) is two segments — different shape, no clash. The
+  dispatcher already writes both stores on install (`protocol.installPackage`)
+  and fully uninstalls on DELETE (`protocol.deletePackage`), so the remaining
+  REST GET/GET/DELETE shadows stay — they are compatible.
+
+  **#3611 — UI view dialect split.** `meta.getView` spoke the `?type=` query
+  dialect that only the dispatcher `/ui` domain understands; the REST surface
+  mounts only the path form `/ui/view/:object/:type`, so the query form 404'd
+  wherever REST serves (e.g. project-scoped bases). The client now sends the
+  path form both surfaces accept; a URL-pinning test keeps it that way.
+
+  REST route ledger updated: the two `mismatch` rows are resolved (packages
+  publish row is `server-only` publisher tooling; the ui row flips to `sdk`).
+  The ledger now carries zero mismatches.
+
+- bbd902d: feat(rest): unify request→environment resolution on the host's `kernel-resolver` seam — ADR-0076 D11 step ④ (#2462)
+
+  The REST server kept its own parallel hostname/`X-Environment-Id` resolution
+  chain (duplicated inline in three places), while the HTTP dispatcher resolves
+  the same question through the host-injected ADR-0006 `kernel-resolver` seam —
+  so the same unscoped request could be attributed to different environments
+  depending on which HTTP surface served it.
+
+  `RestApiPlugin` now adapts the host's `kernel-resolver` service (registered by
+  the cloud runtime next to `env-registry`; no cloud-side change needed) into a
+  new `RestRequestEnvResolver` seam, and `resolveRequestEnvironmentId` becomes
+  the single entry point every per-environment decision (protocol, i18n,
+  exec-ctx) flows through. Where a resolver is wired, its answer — including the
+  session-driven fallbacks the REST chain never had — is final; the legacy
+  built-in chain remains for OSS single-environment boots (no resolver
+  registered) and as the degradation path if the resolver throws.
+
+- 5ac93d4: feat(rest): surface silently-dropped write fields on PATCH/POST /data (#3431)
+
+  #3413 (closes #3407) built the engine-level strip-observability channel
+  (`WriteObservabilityOptions.onFieldsDropped`) and wired the flow side
+  (`update_record` / `create_record` emit a step warning + `droppedFields`). The
+  **REST write path was never wired**, so an external API caller writing N fields
+  still got a bare `200 + record` when `readonly` (#2948) / `readonlyWhen` (#3042)
+  stripping meant `< N` actually landed — the same silent-success class #3407
+  fixed flow-side, just on HTTP. The only way to notice was a per-field diff of
+  the returned row (which need not echo every field). This wires the channel
+  through the protocol → REST, on both write verbs.
+
+  **Passthrough (metadata-protocol).** `updateData` now registers an
+  `onFieldsDropped` collector on `engine.update` and returns the events on the
+  response as `droppedFields`. `createData` surfaces the #3043 static-`readonly`
+  INGRESS strip too — that strip runs at the protocol ingress
+  (`stripReadonlyForInsert`), _before_ the engine, so it is recovered by diffing
+  the supplied payload against the stripped one (the engine's `onFieldsDropped` is
+  also wired for a future insert-side engine strip). A faulty listener never
+  breaks the write — the engine catches and logs.
+
+  **Contract (spec).** `UpdateDataResponseSchema` / `CreateDataResponseSchema`
+  gain an **optional** `droppedFields: DroppedFieldsEvent[]` — present only when
+  ≥1 field was dropped. Optional + omit-when-empty keeps the response shape
+  backward-compatible for clients that only read `record`.
+
+  **REST surface.** PATCH `/data/:object/:id` and POST `/data/:object` echo the
+  drops as an `X-ObjectStack-Dropped-Fields` response header
+  (`field;reason=<reason>` tokens, comma-joined — e.g.
+  `approval_status;reason=readonly`) and keep the structured `droppedFields` on
+  the body. **Status/success semantics are unchanged** (200 update / 201 create) —
+  a strip is legitimate semantics, not a failure (same principle as #3413). The
+  FLS write gate is untouched (it already fails closed with 403).
+
+  Out of scope (issue #3431 D2 open questions, deferred): bulk
+  (`updateManyData` / `createManyData` / `batchData`) and GraphQL mutation wiring,
+  typed `@objectstack/client` warnings, and adding the header to the Hono CORS
+  `exposeHeaders` allow-list for cross-origin browser reads (the body
+  `droppedFields` is the cross-origin-safe channel meanwhile).
+
+- d318b24: feat: `security.getReadableFields` query surface for export column projection (#3547, #3391 follow-up)
+
+  The REST export route projected its columns by inferring readability from the
+  first chunk of already-masked data rows (#3498). That has two known
+  compromises: a readable column whose first-chunk values are all null (and thus
+  omitted by the driver) drops out of the header, and an empty result set leaves
+  nothing to narrow. This adds the long-term-correct path.
+
+  - **plugin-security** — the `security` service gains
+    `getReadableFields(object, context)`. It resolves the caller's permission
+    sets and builds the field-permission map with the SAME evaluator +
+    `requiredPermissions` fold the read middleware's `FieldMasker` uses (and the
+    same on-behalf-of delegator intersection, fail-closed on a dangling
+    delegator), then returns every schema field NOT masked non-readable — the
+    exact complement of what the mask deletes, so it can never drift from
+    data-plane FLS. Computed from schema + context, never from data rows: immune
+    to null values and empty result sets. A system context bypasses FLS; an
+    unresolvable schema returns `undefined` so callers fall back.
+  - **rest** — the `GET /data/:object/export` route asks the environment's
+    `security` service for `getReadableFields(object, context)` and projects the
+    schema-derived header to that set BEFORE streaming. When no security service
+    is reachable (no plugin-security / single-kernel without a provider) it
+    degrades to the existing masked-row inference, so there is zero regression.
+    Explicit `?fields=` requests are still honored verbatim.
+
+  Contract-neutral: export columns already equal list's readable columns
+  (`export ⊆ list`, #3391); this makes the projection authoritative instead of
+  inferred.
+
+### Patch Changes
+
+- fa3d0cf: feat(spec): field runtime value-shape contract — ADR-0104 phase 1 (D1)
+
+  `@objectstack/spec/data` now owns the runtime VALUE shape of every field type
+  (`field-value.zod.ts`): semantic type classes (`STRING_VALUE_TYPES`,
+  `NUMERIC_VALUE_TYPES`, `REFERENCE_VALUE_TYPES`, `FILE_REFERENCE_TYPES`,
+  `STRUCTURED_JSON_TYPES`, `MULTI_CAPABLE_TYPES`, …), the shared
+  `isMultiValueField`, and `valueSchemaFor(field, 'stored' | 'expanded')`. The
+  four consumers that each hand-copied this knowledge (objectql record-validator,
+  rest import-coerce, driver-sql column classification, qa conformance) now
+  derive from the spec, and the field-zoo round-trip MATRIX is asserted against
+  the contract so the two cannot drift.
+
+  **Write-path change (objectql, warn-first):** previously-unvalidated types —
+  single `lookup`/`master_detail`/`user`/`tree`, `file`/`image`/`avatar`/
+  `video`/`audio`, `location`, `address`, `composite`, `repeater`, `record`,
+  `vector` — are now checked against the contract. A violation **logs a warning
+  and passes** in this release (legacy rows must not strand their records);
+  set `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` to enforce as a
+  `400 VALIDATION_FAILED`. The flip to strict-by-default rides a later minor
+  (ADR-0104 R1/R2).
+
+  **Deprecations (removal rides the next spec major), FROM → TO:**
+
+  - `CurrencyValueSchema` (`{value, currency}`) → none. A `currency` field's
+    value is a **bare number** everywhere in the runtime (validator, SQL `float`
+    column, import coercion, field-zoo oracle); the currency code lives in field
+    config. Use `valueSchemaFor({type: 'currency'})`.
+  - `LocationCoordinatesSchema` (`{latitude, longitude}`) → `LocationValueSchema`
+    (`{lat, lng}`) — the shape the platform actually stores.
+  - `AddressSchema` is **adopted** (unchanged) as the enforced `address` value
+    contract via `AddressValueSchema`.
+
+  No stored data changes shape; the contract codifies deployed reality
+  ("reality wins", ADR-0104 D1).
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 840ee4b: fix(analytics,runtime,types): gate cube auto-inference on object existence; stop the dispatcher boundary returning raw SQL (#3867)
+
+  Two independent defects on the `/analytics` surface, found while verifying #3770
+  against a real server. On an authenticated CRM dev server, before this change:
+
+  ```
+  POST /api/v1/analytics/query {"cube":"sqlite_master","measures":["count"],"dimensions":["type"]}
+  → 200 {"rows":[{"type":"index","count":262},{"type":"table","count":71},{"type":"view","count":1}],
+         "sql":"SELECT type AS \"type\", COUNT(*) AS \"count\" FROM \"sqlite_master\" GROUP BY type"}
+  ```
+
+  That is SQLite's internal schema table — never a registered object — read
+  successfully through the analytics endpoint. Not merely "the name reaches the
+  driver and errors": **any table the connection can see was readable.**
+
+  **① The cube name reached the driver as a table name.** `AnalyticsService.ensureCube`
+  auto-infers a minimal Cube when none is registered, with `cube.sql = <the queried
+name>`. That is the intended "metric over an object" path — an `object-metric` KPI
+  widget queries `crm_account` with no authored Cube — but it accepted _any_ string,
+  so the endpoint could aggregate over an arbitrary physical table. The
+  analytics-side twin of the data-path gap #3770 closed, and it was not covered by
+  that fix: #3770 gated the protocol's `analyticsQuery`, which is the _degraded
+  fallback_; a deployment with `@objectstack/service-analytics` installed runs the
+  real engine instead (`ctx.replaceService`).
+
+  Inference is now gated on the same schema registry the data path consults, via a
+  new optional `AnalyticsServiceConfig.isRegisteredObject` that `plugin.ts` wires
+  from the `data` engine's `getObject`. Three-way rule: a registered Cube runs
+  untouched (its `sql` is whatever it declares); an unregistered name that IS an
+  object still auto-infers exactly as before; neither → `CUBE_NOT_FOUND` / 404
+  raised before any SQL exists, naming both ways to make the request valid. With no
+  probe configured the gate stands down and warns once — the same tiering #3770
+  took for a missing registry. `generateSql` (`/analytics/sql`) is gated too.
+
+  **② The dispatcher boundary returned `err.message` verbatim.** `errorResponseBase`
+  is the single error exit for _every_ route the dispatcher plugin mounts —
+  `/analytics`, `/packages`, `/i18n`, `/storage`, `/automation`, `/auth`,
+  `/notifications`, `/mcp`. `@objectstack/rest` has guarded its data routes against
+  driver dumps forever (`mapDataError`); this boundary guarded nothing, so any
+  driver error on any of those routes shipped its SQL to the client. Unlike ①, this
+  half is unconditional — it does not depend on the cube being invalid.
+
+  The leak heuristic moved out of `rest-server.ts` into `@objectstack/types` as
+  `looksLikeInternalErrorLeak` (both packages already depend on it) and is now
+  applied at both boundaries — one predicate, one place to widen when a new
+  dialect's phrasing shows up. `mapDataError`'s behaviour is unchanged. At the
+  dispatcher it applies **only to 5xx**: a 4xx message is a deliberate
+  business/validation answer and must reach the caller intact. Sanitising costs no
+  diagnostics — the untouched error still reaches `errorReporter` through the
+  existing `__obsRecordedError` side-channel.
+
+  **Also fixed in the same function:** `errorResponseBase` read only
+  `err.statusCode`, while domain errors across this codebase carry `status` (and
+  `HttpDispatcher.errorFromThrown` already reads `status` first). Every deliberate
+  4xx thrown through a dispatcher route — including #3770's `OBJECT_NOT_FOUND` on
+  the analytics fallback path — was rendered as a **500**. It now reads `status`
+  then `statusCode`.
+
+  **Behaviour change.** `/analytics/query` and `/analytics/sql` return 404
+  `CUBE_NOT_FOUND` for a cube that is neither registered nor a registered object;
+  previously the name was passed to the driver. Dashboards and KPI widgets pointed
+  at real objects or authored cubes are unaffected. A 5xx on a dispatcher route
+  whose message looks like a driver dump now reads `Internal server error` — check
+  server logs or your error reporter for the original.
+
+- 1986594: feat(analytics): honour widget `dateGranularity`, `sortBy`/`sortOrder`, and `limit` in the dataset query (#3588)
+
+  Three presentation options were accepted by the metadata layer and then dropped
+  by the analytics query builder. They reached no SQL, produced no error, and the
+  only way to notice was to read the `sql` a dataset response echoes — so a
+  dashboard could declare `dateGranularity: 'month'` and quietly render one bar
+  per record.
+
+  - **`dateGranularity` now buckets.** `DatasetSelection` gained an optional
+    `dateGranularity`, applied to every selected `date` dimension. Precedence per
+    dimension: an explicit `timeDimensions` granularity, then the selection's,
+    then the dataset dimension's own default. A widget can bucket a trend by month
+    without the dataset committing every other consumer to that granularity.
+  - **`order` / `limit` / `offset` now apply on every path.** They are applied to
+    the ASSEMBLED grid — after measure-scoped sub-queries merge, after `compareTo`
+    columns attach, and after derived measures are computed — so a derived measure
+    is a valid sort key and the ObjectQL aggregate path (which has no ordering
+    grammar, and which native SQL hands every date-bucketed query to) orders
+    identically to native SQL. A single-query selection still pushes the window
+    down into the statement. An `order` key that names nothing the selection
+    projects is now rejected (400) rather than silently ignored.
+  - **`limit` is deterministic.** Without an `order`, a limit orders by the
+    selected dimensions first, so it truncates a reproducible window instead of an
+    arbitrary subset.
+  - **Widget `options` is a contract again.** The four query-affecting keys
+    (`dateGranularity`, `sortBy`, `sortOrder`, `limit`) plus `stageOrder` are
+    declared on `DashboardWidgetOptionsSchema`, so a typo like `sortDirection` is
+    an author-time error. The bag stays open — renderer extras (`icon`, `columns`,
+    `striped`, …) pass through untouched.
+
+  Two latent bugs surfaced while fixing the above and are fixed here too:
+
+  - `order`/`limit` were forwarded to EVERY sub-query. A measure-scoped
+    supplementary query selects one measure, so an inherited `ORDER BY` named a
+    column it never selected, and an inherited `LIMIT` truncated it before the
+    merge — dropping rows from the assembled grid. Nothing hit this only because
+    nothing passed `order`.
+  - The `compareTo` pass built its query by hand and skipped granularity
+    resolution, so a month-bucketed primary grid was merged against raw-timestamp
+    comparison rows. No dimension key matched and every `<measure>__compare`
+    column came back empty.
+
+  `ObjectQLStrategy` now also echoes a representative `sql` (with `date_trunc`,
+  `WHERE`, `ORDER BY`, and `LIMIT`; filter values parameterized, never inlined).
+  Previously the `sql` field simply vanished from the response whenever a query
+  was date-bucketed, leaving an author unable to tell "not implemented" from "this
+  strategy doesn't report".
+
+- 3c8cfd1: fix(rest): make the API-exposure gate's metadata fail-open observable (#3545, #3391 follow-up)
+
+  The object API-exposure gate (`apiEnabled` / `apiMethods`) fails OPEN when object
+  metadata can't be resolved, so a transient metadata outage doesn't 405 every
+  request. #3545 evaluated the residual risk of that path and confirmed it is
+  acceptable — the gate is a **surface-area control, not the authorization
+  boundary**: every request still passes auth and the ObjectQL security middleware
+  (CRUD / FLS / RLS) on the data call regardless of the gate's outcome, so a
+  fail-open can never bypass data authorization.
+
+  The one gap was that the fail-open was **silent** — a persistent metadata fault
+  (store down / corrupt schema doc), during which the gate allows every operation
+  unchecked, looked identical to healthy operation.
+
+  - **rest** `loadObjectItems` now LOGS a _thrown_ metadata read (a real fault)
+    while leaving a legitimately-empty registry (a cold-start `[]`) silent — so a
+    genuine outage is diagnosable without false alarms during normal startup. The
+    behavior is unchanged (still returns `[]` → gate abstains → data path + security
+    enforce).
+  - **runtime** `api-exposure.ts` records the #3545 tiered decision in its
+    contract doc: keep fail-open when the whole metadata service is unavailable
+    (failing closed would break the cold-start window for no security gain); the
+    narrow "object resolvable but its `enable` policy is present-yet-unreadable"
+    widen (unreachable through Zod-validated registration) is deferred to the
+    exposure-semantics window (#3543).
+
+  No contract or behavior change to the gate itself — observability + decision
+  record only.
+
+- f92096b: fix(approvals): an approval action is recorded against the authenticated caller, never a body field (#3800)
+
+  Every mutating approvals entrypoint takes an `actorId`, and the REST routes
+  filled it from `body.actorId ?? body.actor_id ?? context.userId` — so the body
+  won. The service then authorized _that value_: `pending_approvers.includes(
+input.actorId)` for a decision, `submitter_id === actorId` for a recall. It never
+  checked that the value named the caller.
+
+  So any authenticated user could POST `{"actorId": "<someone else>"}` and have
+  that person's approval recorded, the request finalized, and the owning flow run
+  resumed down the `approve` edge — or name a request's submitter and recall it.
+  With `api.requireAuth` unset the anonymous-deny never fires either, so an
+  unauthenticated request could do the same.
+
+  #3783 drew this line for the _data-write_ identity and called the audit-row half
+  "tolerable". It was not: the same unchecked string was the authorization key, so
+  naming someone else was not a mislabelled audit row, it was how you got through
+  the door.
+
+  The actor is now resolved server-side (`ApprovalService.resolveActor`) on all
+  nine entrypoints — `decide` / `decideNode`, `recall`, `sendBack`, `resubmit`,
+  `reassign`, `remind`, `requestInfo`, `comment`.
+
+  **The rule is not "`actorId` must equal `context.userId`."** A slot can
+  legitimately be keyed by something else: the approver resolver stores the
+  `type:value` literal when a graph lookup finds no holders, and the Console picks
+  from the caller's own identity list — user id, email, or `role:<r>`. The rule is
+  **"the actor must be an identity the server can prove belongs to the caller"**:
+
+  - A **system** context keeps its explicit actor. The SLA sweep's reserved
+    `system:sla` sentinel and the ADR-0043 action link — whose single-use hashed
+    token binds exactly one approver — are unchanged. They are the only callers
+    holding a trustworthy actor with no session behind them.
+  - A caller with **no identity at all** is now refused. This is the anonymous case
+    above.
+  - **No `actorId`, or one naming the caller**, resolves to the caller. This is the
+    common path and what the Console already sends.
+  - **Any other value** is accepted only when the server can prove the caller holds
+    it — `position:<p>` / `role:<p>` against the positions on the resolved authz
+    context, or the caller's own email (one lazy `sys_user` read, taken only when
+    nothing cheaper matched). Otherwise `FORBIDDEN`.
+
+  REST still forwards the body value; it is now a _hint_ the service validates,
+  which is what keeps the email and `type:value` slot cases working.
+
+  **Upgrade note.** A client that deliberately sent another user's `actorId` now
+  gets `403 FORBIDDEN` instead of silently succeeding. Send the action as the
+  acting user's own session — the field can be omitted entirely, and the caller is
+  used. Server-to-server callers that legitimately act for someone else should
+  present a system context, as the SLA sweep and the action link already do.
+
+  This also makes two existing claims true that were previously aspirational: the
+  approval object's declared actions say "`actorId` defaults to the caller
+  server-side… the service remains the authority on who may act", and
+  `attachViewers` documents `can_act` as mirroring "the exact authorization the
+  decision methods enforce".
+
+- 1003125: feat(client): close the approvals (6) + record-shares (3) REST gaps (#3587 batch 3/5)
+
+  `client.approvals` gains the full request lifecycle beyond approve/reject:
+  `recall` (submitter withdraw), `revise` / `resubmit` (ADR-0044 send-back
+  round-trip), and the thread interactions `remind` / `requestInfo` / `comment`.
+  New `client.shares` namespace for per-record sharing grants: `list` / `grant` /
+  `revoke` (204-safe) under `/data/:object/:id/shares`. REST route-ledger
+  ratchet: 26 → 17.
+
+- 6e62a93: feat(client): close the sharing-rules (5) + security-explain (2) + search (1) REST gaps (#3587 batch 4/5)
+
+  New `client.shares.rules` sub-namespace for tenant-wide sharing rules
+  (M10.17): `list` / `save` / `get` / `delete` (204-safe, grants cascade) /
+  `evaluate` (reconcile). `client.security.explain` speaks the ADR-0090 D6
+  access-explanation contract via the POST transport (the GET query form is the
+  same `ExplainRequestSchema`). Top-level `client.search` covers global
+  cross-object search (M10.5). REST route-ledger ratchet: 17 → 9.
+
+- ecda20c: feat(client): close the 8 reports-family REST gaps (#3587 batch 2/5)
+
+  New `client.reports` namespace speaking the plugin-reports REST surface:
+  `list` / `save` / `get` / `delete` (schedules cascade), `run`, `schedule`,
+  `listSchedules`, `unschedule`. The two DELETE routes return 204 — the client
+  methods return `{ deleted: true }` without attempting to parse an empty body.
+  Fixed path (`/api/v1/reports` is not in `ApiRoutesSchema`), matching the
+  keys / share-links precedent. REST route-ledger ratchet: 34 → 26.
+
+- 6e62a93: feat(client): close the final 9 REST gaps — ratchet 9 → 0 (#3587 batch 5/5)
+
+  `data.clone` (enable.clone duplication) and `data.export` (streaming
+  CSV/JSON/XLSX; returns the raw `Response` — a file stream, not a JSON
+  envelope). New `email.send` (IEmailService; branch on the returned `status`).
+  `analytics.queryDataset` speaks the ADR-0021 REST dataset-query dialect. New
+  `datasources.external.*` federation admin: `listTables` / `draft` / `import` /
+  `refreshCatalog` / `validate` (ADR-0015 Addendum, 503-degrading). Every REST
+  route is now either SDK-expressed or carries a reviewed non-sdk disposition —
+  the #3587 gap ratchet rests at ZERO.
+
+- fc968af: feat(client): close the 9 metadata-family REST gaps the #3587 ledger carried (#3587)
+
+  New `meta` surface: `getDiagnostics` (spec-validation sweep), `getReferences`
+  (reverse references), `getBookTree` (ADR-0046 §6 spine resolution), `getAudit`
+  (ADR-0010 §3.6 protection trail), `publishItem` / `rollbackItem` / `diffItem`
+  (ADR-0033 per-item draft lifecycle). The two compound-name routes
+  (`GET|PUT /meta/:type/:section/:name`) turned out to be already expressible —
+  `getItem`/`saveItem` pass slashes through unencoded — so they are flipped to
+  `sdk` with URL-pinning tests instead of new methods (the audit note claiming
+  an encoding barrier was wrong; only `deleteItem` encodes). REST route-ledger
+  ratchet: 43 → 34.
+
+- 48c110e: feat(datasource): a datasource that is down is visible, and says why when queried (#3827, #3828)
+
+  #3816 made an explicitly-bound datasource that cannot connect refuse the boot. Two
+  gaps survived that fix, both in the cases that still boot — a policy denial, an
+  `autoConnect` datasource, or any failure the operator waved through with
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE`:
+
+  - **It was invisible.** `DatasourceSummary.status` was the literal `'unvalidated'`
+    for every row — the contract declared three states and the implementation only
+    ever emitted one — so a dead datasource looked exactly like a healthy-untested
+    one. `checkDriversHealth()` could not help either: it iterates registered
+    drivers, and a datasource that never connected was never registered, so it is
+    _absent_ from the probe rather than unhealthy. The only trace was a warning
+    that scrolled past at boot, which made the diagnostic procedure "restart the
+    server and re-read the logs".
+  - **The query-time error said nothing.** `getDriver()` answered four different
+    situations with one sentence, `Datasource 'x' is not registered.`: refused by
+    policy, failed to connect under the escape hatch, a misspelled name, and
+    `active: false`. Only the third is an authoring bug, so the other three sent
+    the reader hunting for a typo that does not exist.
+
+  Both come from the same root: `connect()` already produced a `ConnectResult` for
+  every attempt and every caller threw it away.
+
+  - **`DatasourceConnectionService` retains the last verdict per datasource**, with a
+    coarse `availability` (`available` / `blocked` / `failed` / `unattempted`) beside
+    the raw status. New `getConnectionState(name)` / `listConnectionStates()`.
+    `disconnect()` drops it, so a removed pool stops explaining itself.
+  - **`DatasourceSummary.status` tells the truth**: `ok` | `error` | `blocked` |
+    `unvalidated`, with a new operator-facing `statusReason`. `blocked` is new and
+    deliberate — a policy denial is a decision, not a fault, and will not clear on
+    its own. Reported in **Setup → Datasources**, `GET /api/v1/datasources`, and the
+    summary returned from create/update, so a "Save" whose pool failed to open is no
+    longer presented as success.
+  - **`ERR_DATASOURCE_UNAVAILABLE` (HTTP 503)**: new `DatasourceUnavailableError`
+    from `@objectstack/objectql`, thrown by `getDriver()` when the connection layer
+    recorded _why_ a declared datasource has no driver. An undeclared name keeps the
+    original message — there is genuinely nothing to add. 503 rather than 500/400:
+    nothing about the request is wrong, and the state may clear.
+  - **A privileged/public split for the reason.** The error **never** carries the
+    underlying cause — connect failures routinely contain hosts, ports and DSNs, and
+    a policy's `reason` is written for operators. Those stay in the logs and the
+    (admin-gated) datasource list. `DatasourceConnectDecision` gains an opt-in
+    `publicReason` for hosts that want to tell tenants something specific
+    (e.g. `'External datasources require the Scale plan.'`); it is the only string
+    that reaches an end user.
+  - **Readiness is deliberately not gated on this.** `/ready` still reflects
+    registered-driver health only: an optional datasource being down must not pull an
+    otherwise-working replica out of the load balancer.
+
+  Also lands a drift guard for **#3826**, and corrects ADR-0062's status while doing
+  it. The ADR claimed D1 ("exactly one definition → live driver path") as
+  implemented; only the _construction_ half converged. The `default` driver is still
+  registered as a `driver.*` kernel service and connected by `ObjectQLEngine.init()`,
+  with its own failure verdict, pool teardown, and no connect policy. What blocks the
+  merge is an input-shape mismatch, not ordering: `connect()` takes a datasource
+  _definition_ and builds the driver, while `default` arrives pre-built, and routing
+  it through the service would make `ObjectQLPlugin`'s boot depend on an optional
+  higher-layer service. Until that is designed, `degraded-boot-parity.test.ts` pins
+  both paths to the same operator-visible contract (fail-fast by default, identical
+  `OS_ALLOW_DRIVER_CONNECT_FAILURE` parsing, `DEGRADED BOOT` on stderr) so a change
+  to one that forgets the other fails CI — #3741 → #3758 was exactly that miss, and
+  it cost three months and a second bug report.
+
+  **Migration.** Additive. `DatasourceSummary.status` gains a `'blocked'` member: a
+  consumer exhaustively switching on it needs a case (the admin UI shows it as a
+  distinct state). Nothing that was `'ok'` or `'error'` changes meaning; rows that
+  were reported `'unvalidated'` now report their real state. Query-time errors for a
+  datasource the connection layer recorded change from a generic `Error` to
+  `DatasourceUnavailableError` (503 instead of the previous catch-all status);
+  matching on the old `is not registered` text still works for the undeclared-name
+  case, which is the only one that was ever accurate.
+
+- ce1f100: fix(rest): export emits the projected header row on an empty result set (#3547)
+
+  `GET /data/:object/export` wrote a zero-byte file whenever the query matched no
+  rows — the header was only ever written alongside the first data chunk. With the
+  `getReadableFields` column projection the readable column set is derived from
+  schema + context, so it is known even when no rows come back: an empty CSV/xlsx
+  export now carries the exact readable header, which also makes it a usable
+  import template.
+
+  The header is emitted only when the column set is AUTHORITATIVE — the security
+  service's readable projection, or an explicit `?fields=` request. When the header
+  is schema-derived and the projection was unavailable, the export stays headerless
+  as before: the masked-row fallback has no rows to narrow with, and writing the
+  full schema header would name FLS-hidden columns. `header=false` still suppresses
+  the header in every case.
+
+- 81ce41a: feat(rest): `treatAsHistorical` import also preserves the original audit timeline (#3493)
+
+  Follow-up to #3479/#3483. `treatAsHistorical` solved the FSM half — mid-lifecycle
+  rows are no longer rejected by `initialStates` — but the OTHER half of a historical
+  migration, preserving the original timeline, still didn't hold: an imported ticket
+  that closed in 2021 stored `updated_at` = the import day (and `updated_by` = the
+  importer), and a `writeMode: 'upsert'` refresh silently dropped business `readonly`
+  fields (`closed_at`, `resolved_by`). Reports, audit, and "recently modified"
+  sorting all came out wrong.
+
+  Three layers were force-overwriting the timeline; all three now respect a single
+  new opt-in flag, `ExecutionContext.preserveAudit`, which `treatAsHistorical` sets
+  alongside `skipStateMachine`:
+
+  - **spec**: `ExecutionContext.preserveAudit` (server-set only, never client-supplied)
+    and `DriverOptions.preserveAudit` (threaded to the driver's update stamp).
+  - **objectql** — the built-in audit hook (`plugin.ts`) now treats `updated_at` /
+    `updated_by` as CLIENT-PREFERRED (`?? now` / `?? userId`) under `preserveAudit`,
+    symmetric with how `created_at` / `created_by` already behave on insert; and the
+    static-`readonly` write strip (`stripReadonlyFields`) admits a WHITELIST — the
+    audit/timestamp family plus author-declared business `readonly` fields — so an
+    upsert refresh no longer drops them.
+  - **driver-sql** — the SQL `update` path keeps a supplied `updated_at` instead of
+    force-advancing it to `now` when `DriverOptions.preserveAudit` is set (fills-only-
+    empty, mirroring the insert stamp).
+  - **rest** — the import runner sets `preserveAudit` on the write context iff the
+    request opts into `treatAsHistorical`.
+
+  Deliberately a WHITELIST, not the blanket `isSystem` exemption: platform-managed
+  `system` columns OUTSIDE the audit family (`organization_id` / tenancy, generated
+  columns) STAY stripped, so a historical import reinstates established facts without
+  becoming a backdoor to forge tenancy. Permissions / RLS / field-level security are
+  unaffected — this changes only which audit/readonly values the runtime overwrites,
+  never who may write the record. Fully opt-in: a normal write still auto-stamps
+  `updated_at`/`updated_by` and strips `readonly` exactly as before. The objectui
+  "Import as historical data" checkbox (objectui#2815) now drives both halves — no new
+  UI.
+
+- 85e1e4e: feat(rest): `treatAsHistorical` import option — skip the state machine for historical-data migration (#3479)
+
+  Sibling of #3433 (seed exemption), one entry point over. #3165's `initialStates` enforced
+  the FSM entry point on every INSERT, so importing established historical facts —
+  a batch of already-`closed` tickets, `closed_won` deals, `completed` projects —
+  was rejected row-by-row with `invalid_initial_state`, blocking the core
+  data-migration path. Unlike the seed case it was visible (per-row errors), but it
+  still functionally blocked a legitimate use.
+
+  - **spec**: `ExecutionContext.skipStateMachine` — a general, server-set flag (the
+    seed-specific `seedReplay`'s sibling) that skips the `state_machine` rule for a
+    write; `ImportRequestSchema.treatAsHistorical` (default `false`) — the user-facing
+    import option.
+  - **objectql**: the engine now skips the state machine for `seedReplay` OR
+    `skipStateMachine` (one helper), covering both seed replay and historical import.
+  - **rest**: the import runner sets `skipStateMachine` on the write context iff the
+    request opts into `treatAsHistorical`; default off, so a normal import still walks
+    the FSM (the strict behavior is the default). Import **undo** now also carries
+    `skipStateMachine`, since restoring a prior snapshot re-writes an earlier state
+    that need not be a legal transition from where the row is now.
+  - **platform-objects**: `sys_import_job.treat_as_historical` audit column (additive).
+
+  Scope is identical to the seed exemption: ONLY the `state_machine` rule is skipped;
+  field shape, `format`, `cross_field`, `script` all still run. The objectui import
+  wizard checkbox is a separate follow-up.
+
+- 65ac468: fix(import): sanitize row errors — never leak raw SQL, map constraint failures to human wording (#3566)
+
+  A failing import row surfaced the driver's raw error verbatim. When a write hit
+  a DB constraint (e.g. `sys_user.phone_number` is `unique`), the query builder
+  embeds the entire failing statement in `err.message`, and `toFailedResult`
+  handed that straight back — so the importer saw `` insert into `sys_user`
+(...) values (...) - UNIQUE constraint failed: sys_user.phone_number ``. That is
+  both unreadable and an information disclosure of the schema.
+
+  - `sanitizeRowError()` (import-runner) maps the common constraint failures —
+    SQLite / MySQL / Postgres `UNIQUE` and `NOT NULL` — to human wording
+    ("A record with this `<column>` already exists.", "`<column>` is required.")
+    and, as a backstop, never lets a message that still reads as a SQL statement
+    reach the client (it salvages the driver's trailing reason, or falls back to
+    a generic message). Already-friendly messages (e.g. better-auth's "User
+    already exists") pass through unchanged. Applies to every import path.
+  - `isLikelyEmail` now rejects non-ASCII addresses, so an address like
+    `x@柴仟.com` fails the import **dry-run** pre-check instead of passing client
+    and dry-run validation only to be rejected by better-auth's strict ASCII
+    validator at real-import time.
+
+- ef5e72d: fix(rest): undo of a historical import now preserves the audit timeline (#3549)
+
+  A `treatAsHistorical` import writes with `preserveAudit` (#3493), keeping the
+  original `updated_at`/`updated_by` and business `readonly` fields instead of
+  stamping-now / stripping them. Its undo route, however, restored the captured
+  pre-import snapshot with a plain write context — so the audit auto-stamp
+  re-wrote `updated_at`/`updated_by` to "now", silently corrupting the very
+  timeline the historical import had preserved.
+
+  The undo write context now mirrors the import's own: it carries
+  `preserveAudit` iff the job row is flagged `treat_as_historical`, so restoring
+  `u.before` re-writes the snapshotted audit/timestamp values verbatim. A normal
+  import's undo is unchanged (default stamp/strip).
+
+- 67452d1: feat(spec): resolve page metadata i18n — `page:header` title/subtitle (#3589)
+
+  Custom system pages authored as metadata (Installed Apps, Cloud Connection,
+  Connect an Agent) hard-code their `page:header` copy in
+  `properties.title` / `properties.subtitle`. Every other metadata type is
+  localized at the REST boundary, but `page` was not: the `pages` namespace
+  existed only on `AppTranslationBundleSchema` — a schema no runtime reads —
+  with no resolver behind it, so those headers stayed English in every locale
+  while the matching nav labels translated correctly.
+
+  - `TranslationDataSchema` (the shape the i18n service actually serves) gains a
+    `pages` namespace: `pages.<name>.{label,description,title,subtitle}`.
+  - New `translatePage` in `@objectstack/spec/system` translates a page's own
+    `label` / `description` and overlays `title` / `subtitle` onto every
+    `page:header` in the page's regions. Registered in
+    `translateMetadataDocument`, so it rides the existing read path.
+  - `page` added to the REST boundary's `TRANSLATABLE_META_TYPES`. Locale
+    extraction, the locale-keyed ETag, and `Vary: Accept-Language` already
+    covered every metadata type — no new plumbing.
+  - `objectstack i18n extract` now emits page entries, including the
+    `page:header` copy, so the new namespace is not invisible to the tooling.
+  - zh-CN / ja-JP / es-ES translations shipped for the three Setup pages, plus
+    the missing `nav_cloud_connection` / `nav_connect_agent` nav labels (these
+    existed only in zh-CN).
+
+  Header copy is keyed by **page name**, not by component id: `page:header`
+  instances carry no stable id. `title` falls back to `pages.<name>.label`, since
+  a page's header title and its nav label are normally the same string.
+
+  Authoring is unchanged and English literals stay in metadata as the fallback —
+  a page with no `pages` entry renders exactly as before. Consumers of
+  `@object-ui` need no change: pages arrive already localized from the server.
+
+- 3d5f726: feat(rest): route audit tranche 2 — the REST surface gets its own ledger +
+  conformance guard (#3587, follow-up to #3563)
+
+  The dispatcher tranche closed its 27 gaps and guards them (#3569…#3579), but
+  `@objectstack/rest` mounts a second, larger surface the client also reaches —
+  89 routes, never audited. `rest-route-ledger.ts` now records a reviewed
+  disposition for every one of them (38 sdk, 43 gap, 3 server-only, 3 public,
+  2 mismatch), and the guard is real enumeration on both sources: RouteManager
+  routes via the `getRoutes()` introspection seam, and the two
+  RouteManager-bypassing registrars (`package-routes.ts`,
+  `external-datasource-routes.ts`) via captured mock-server registrations — no
+  pinned-by-hand list. The client half
+  (`rest-route-ledger-coverage.test.ts`) verifies every claimed method exists;
+  a 43-gap ratchet is wired into CI. Every guard direction was negative-tested.
+
+  Notable dispositions the audit surfaced: `POST /api/v1/packages` is a
+  publish/install shape collision between REST and the dispatcher (REST
+  registers first and wins) — ledgered `mismatch`; the REST
+  `GET /ui/view/:object/:type` path dialect is unreachable by the SDK's
+  query-param dialect — ledgered `mismatch`; `service-storage` /
+  `service-i18n` mount a third route surface outside `@objectstack/rest`,
+  explicitly out of scope here and tracked under #3587.
+
+  No behavior change — data + tests only, plus a scope-note refresh in the
+  runtime ledger pointing at the new REST ledger.
+
+- 1659072: feat(spec): publish `ISecurityService` — the `security` service surface becomes an enforced contract
+
+  The `security` service registers seven cross-package methods (`getReadFilter`,
+  `getReadableFields`, `resolvePermissionSetNames`, `explain`, and the three
+  audience-binding suggestion calls) but had no contract in
+  `@objectstack/spec/contracts`. Consumers duck-typed it, and each one invented its
+  own fallback for a missing method or an "empty" answer — with more consumers
+  arriving, that is a drift surface.
+
+  `ISecurityService` now documents the surface, and both ends are typed against it
+  so it is **enforced rather than declared**: `plugin-security` assigns its
+  registration to `ISecurityService` (a renamed, dropped, or re-typed method fails
+  that build), and the REST layer resolves the service as a `Partial<ISecurityService>`
+  (so call sites must keep feature-detecting instead of assuming the full surface).
+
+  The contract makes explicit the one thing consumers cannot guess — that the
+  methods do **not** share a failure convention:
+
+  - `getReadFilter` fails **CLOSED**: a resolution failure yields a deny filter
+    matching zero rows, never `undefined`. `undefined` means "no row restriction",
+    and nothing else.
+  - `getReadableFields` fails **SOFT**: `undefined` means "no answer, use your own
+    projection", while `[]` is authoritative and means "no field is readable" —
+    opposite instructions that a consumer must not conflate.
+
+  Typing the producer immediately caught one real discrepancy, fixed here:
+  `getReadFilter` declared `Promise<Record<string, unknown> | null | undefined>`
+  while every return path yields a filter or `undefined` (`filter ?? undefined`
+  normalizes the null away). The dead `| null` is removed, so "no restriction" has
+  exactly one representation. Type-level only — no runtime behaviour changes.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [840ee4b]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [87aca93]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [32d3800]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [524151c]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [67452d1]
+- Updated dependencies [4921a95]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [5487c20]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [9aa5510]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/platform-objects@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+  - @objectstack/types@17.0.0-rc.0
+  - @objectstack/observability@17.0.0-rc.0
+  - @objectstack/service-package@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

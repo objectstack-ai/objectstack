@@ -1,5 +1,715 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.0.0-rc.0
+
+### Minor Changes
+
+- 840ee4b: fix(analytics,runtime,types): gate cube auto-inference on object existence; stop the dispatcher boundary returning raw SQL (#3867)
+
+  Two independent defects on the `/analytics` surface, found while verifying #3770
+  against a real server. On an authenticated CRM dev server, before this change:
+
+  ```
+  POST /api/v1/analytics/query {"cube":"sqlite_master","measures":["count"],"dimensions":["type"]}
+  → 200 {"rows":[{"type":"index","count":262},{"type":"table","count":71},{"type":"view","count":1}],
+         "sql":"SELECT type AS \"type\", COUNT(*) AS \"count\" FROM \"sqlite_master\" GROUP BY type"}
+  ```
+
+  That is SQLite's internal schema table — never a registered object — read
+  successfully through the analytics endpoint. Not merely "the name reaches the
+  driver and errors": **any table the connection can see was readable.**
+
+  **① The cube name reached the driver as a table name.** `AnalyticsService.ensureCube`
+  auto-infers a minimal Cube when none is registered, with `cube.sql = <the queried
+name>`. That is the intended "metric over an object" path — an `object-metric` KPI
+  widget queries `crm_account` with no authored Cube — but it accepted _any_ string,
+  so the endpoint could aggregate over an arbitrary physical table. The
+  analytics-side twin of the data-path gap #3770 closed, and it was not covered by
+  that fix: #3770 gated the protocol's `analyticsQuery`, which is the _degraded
+  fallback_; a deployment with `@objectstack/service-analytics` installed runs the
+  real engine instead (`ctx.replaceService`).
+
+  Inference is now gated on the same schema registry the data path consults, via a
+  new optional `AnalyticsServiceConfig.isRegisteredObject` that `plugin.ts` wires
+  from the `data` engine's `getObject`. Three-way rule: a registered Cube runs
+  untouched (its `sql` is whatever it declares); an unregistered name that IS an
+  object still auto-infers exactly as before; neither → `CUBE_NOT_FOUND` / 404
+  raised before any SQL exists, naming both ways to make the request valid. With no
+  probe configured the gate stands down and warns once — the same tiering #3770
+  took for a missing registry. `generateSql` (`/analytics/sql`) is gated too.
+
+  **② The dispatcher boundary returned `err.message` verbatim.** `errorResponseBase`
+  is the single error exit for _every_ route the dispatcher plugin mounts —
+  `/analytics`, `/packages`, `/i18n`, `/storage`, `/automation`, `/auth`,
+  `/notifications`, `/mcp`. `@objectstack/rest` has guarded its data routes against
+  driver dumps forever (`mapDataError`); this boundary guarded nothing, so any
+  driver error on any of those routes shipped its SQL to the client. Unlike ①, this
+  half is unconditional — it does not depend on the cube being invalid.
+
+  The leak heuristic moved out of `rest-server.ts` into `@objectstack/types` as
+  `looksLikeInternalErrorLeak` (both packages already depend on it) and is now
+  applied at both boundaries — one predicate, one place to widen when a new
+  dialect's phrasing shows up. `mapDataError`'s behaviour is unchanged. At the
+  dispatcher it applies **only to 5xx**: a 4xx message is a deliberate
+  business/validation answer and must reach the caller intact. Sanitising costs no
+  diagnostics — the untouched error still reaches `errorReporter` through the
+  existing `__obsRecordedError` side-channel.
+
+  **Also fixed in the same function:** `errorResponseBase` read only
+  `err.statusCode`, while domain errors across this codebase carry `status` (and
+  `HttpDispatcher.errorFromThrown` already reads `status` first). Every deliberate
+  4xx thrown through a dispatcher route — including #3770's `OBJECT_NOT_FOUND` on
+  the analytics fallback path — was rendered as a **500**. It now reads `status`
+  then `statusCode`.
+
+  **Behaviour change.** `/analytics/query` and `/analytics/sql` return 404
+  `CUBE_NOT_FOUND` for a cube that is neither registered nor a registered object;
+  previously the name was passed to the driver. Dashboards and KPI widgets pointed
+  at real objects or authored cubes are unaffected. A 5xx on a dispatcher route
+  whose message looks like a driver dump now reads `Internal server error` — check
+  server logs or your error reporter for the original.
+
+- 587fc91: feat(analytics): the executeAggregate bridge carries ExecutionContext — ADR-0021 D-C second belt
+
+  The analytics→engine bridge now forwards the request's `ExecutionContext` to
+  `engine.aggregate`, so the engine's own middleware chain scopes analytics reads
+  independently of the analytics layer's `getReadScope`.
+
+  **Why.** `BaseEngineOptions.context` has always been `.optional()`, so nothing
+  forced the bridge to pass it — and it did not. An authenticated aggregate
+  reached the engine with no principal, plugin-security's principal-less fall-open
+  skipped its RLS injection, and the only thing left scoping the query was the
+  strategy remembering to call `getReadScope`. #3597 was a strategy that did not,
+  and both belts were off at once.
+
+  `getReadScope` stays: the two resolve scope through different paths (engine
+  middleware vs `security.getReadFilter`), and a deployment without
+  plugin-security has only the analytics layer. This is depth, not a replacement.
+
+  - `StrategyContext` gains `context?: ExecutionContext`, bound per call by
+    `AnalyticsService` from `query()` / `generateSql()` / `queryDataset()`.
+  - `StrategyContext.executeAggregate` and the `AnalyticsServicePlugin` /
+    `AnalyticsService` `executeAggregate` config options gain `context?:
+ExecutionContext`. **Custom bridges should forward it** to their engine; the
+    built-in auto-bridge does. Purely additive — an existing bridge that ignores
+    it keeps working exactly as before.
+  - `DimensionLabelDeps.fetchRecordLabels` and `resolveDimensionLabels` each gain
+    an optional trailing `context`, beside the `scope` / `resolveScope` that
+    #3639 added — the same two-belt split as the aggregate path.
+  - `BootOptions.analytics` (`@objectstack/verify`) overrides the
+    AnalyticsServicePlugin instance, so a gate can boot with the analytics belt
+    off and assert the engine-side belt alone still scopes.
+
+  **Also fixed on the same seam:**
+
+  - `fetchRecordLabels` — the dimension display-label lookup — is row-granular
+    (one row per record, real display names). #3639 gave it the analytics-layer
+    belt (the referenced object's own read scope); it now also carries the
+    context, so the engine scopes the same read independently.
+  - `ObjectQLStrategy.generateSql` emitted no `WHERE` at all, so the
+    `/analytics/sql` preview read as an unscoped table scan while the real
+    aggregate was scoped. It now renders the caller's filters and the read scope.
+    The preview never executed, so this was misleading output rather than a leak.
+
+- 763931e: feat(filters): evaluate `{filter-token}` placeholders server-side (#3582)
+
+  Filter values travel as JSON, so a time- or user-scoped slice writes a
+  placeholder instead of code:
+
+  ```ts
+  filter: { close_date: { $gte: '{current_year_start}' }, owner: '{current_user_id}' }
+  ```
+
+  The vocabulary has been in `@objectstack/spec` for a while (`date-macros.zod.ts`,
+  `context-tokens.zod.ts`) and `objectstack build` rejects tokens outside it
+  (#3574). What was missing is the half that _substitutes a value_: **nothing on
+  the server ever did**. A placeholder reached the driver as the literal string
+  `'{current_year_start}'`, compared as text, and matched nothing.
+
+  That failure is invisible — an empty widget looks exactly like a metric that is
+  legitimately zero — so apps worked around it by computing dates at module load,
+  which freezes "this year" into the built artifact and quietly goes stale.
+
+  **New: `resolveFilterTokens()` in `@objectstack/core`**, wired into the two
+  server-side seams every filter passes through:
+
+  - **ObjectQL read path** — `find` / `findOne` / `count` / `aggregate`, so REST
+    queries, related lists, saved-view filters and flow `find_records` all resolve.
+    It runs before the middleware chain, so only author-supplied filters are
+    inspected; RLS/sharing filters are injected downstream from concrete values.
+  - **Analytics dataset executor** — a dataset's intrinsic `filter`, a widget's
+    `runtimeFilter`, measure-scoped filters, and time-dimension `dateRange`s.
+    This path needs its own call: `NativeSQLStrategy` compiles raw SQL and binds
+    comparands directly, so a dashboard widget never passes through `engine.find()`.
+
+  Behavioural notes:
+
+  - Date tokens resolve to ISO strings (`YYYY-MM-DD`, or a full timestamp for
+    `{now}` / `{N_hours_ago}` / `{N_minutes_ago}`). Turning that into a column's
+    on-disk form stays the driver's job (`SqlDriver.temporalFilterValue`), so
+    there is still exactly one source of truth for the storage convention.
+  - Calendar boundaries follow `ExecutionContext.timezone`; one instant is pinned
+    per filter tree, so a `>= {current_month_start}` / `< {next_month_start}` pair
+    can never straddle a boundary.
+  - `{current_org_id}` reads `ExecutionContext.tenantId`; `{current_user_id}` reads
+    `userId`. A request carrying neither now **throws** instead of resolving to
+    `null` — a null comparand degrades to `IS NULL` on most drivers and would hand
+    back the rows the filter was written to exclude.
+  - An unrecognised placeholder **throws**, carrying the near-miss fix
+    (`{current_user}` → `{current_user_id}`, `{this_quarter_start}` →
+    `{current_quarter_start}`). This matches what `objectstack build` already
+    enforces. Consequence, previously implicit and now load-bearing: a filter value
+    that is _entirely_ `{...}` is always read as a placeholder, so a literal value
+    of that shape is not expressible — rename the value.
+
+  Also in this change: `notify` no longer sends the six-character string
+  `"undefined"` as an audience member. `to: ['{record.owner.manager}']` walks
+  `.manager` on a scalar foreign-key id, resolves to nothing, and `String(undefined)`
+  turned that into a phantom recipient — the emit "succeeded", addressed nobody,
+  and said nothing. Unresolved recipients are now dropped, and a node with no
+  recipient left fails naming the offending template and pointing at the start
+  node's `config.expand` (#3475), which does hydrate the relation.
+
+- fc5f126: feat(analytics): serve in-envelope cross-object grouping on the ObjectQL path by FK-expand (#3654)
+
+  `engine.aggregate()` cannot join, so the ObjectQL fallback path (date-granularity
+  bucketing, in-memory driver, federated objects) previously REJECTED any
+  cross-object grouping like `revenue by account.region` (#3664 stopgap — a loud
+  error instead of the earlier silent `(null)` mis-bucket). It now SERVES the
+  common case directly.
+
+  For a single-hop cross-object DIMENSION with recombinable measures, the strategy:
+
+  1. groups the base aggregate on the lookup FK column (`account`) — which the
+     engine can do — scoped to the base object;
+  2. resolves each FK id to the related attribute (`region`) with a read of the
+     referenced object **scoped to that object's own RLS**; then
+  3. re-buckets by the resolved attribute in memory, recombining the measures
+     (sum/count add; min/max take the extremum).
+
+  A base row whose referenced record the caller cannot read buckets under an
+  explicit `(restricted)` group: its measure still counts (grand totals are
+  preserved) but the hidden record's attribute never appears — no leak (ADR-0021
+  D-C, the #3602 class). `/analytics/sql` renders the equivalent `LEFT JOIN`.
+
+  Deliberately bounded — still REJECTED (loud, never silently wrong): cross-object
+  references in a MEASURE or FILTER (need a real join to evaluate), multi-hop
+  dimensions (`a.b.c`), and non-recombinable measures (`avg`, `count_distinct`)
+  with a cross-object dimension. Cross-object queries on `NativeSQLStrategy` (the
+  normal SQL path) are unchanged — it hand-compiles the joins.
+
+### Patch Changes
+
+- c7f4417: fix(driver-sql,analytics): stop `aggregate()` / `distinct()` leaking SQLite's raw epoch storage (#3797)
+
+  Both returned `await builder` directly, without the `formatOutput` pass every
+  `find()` row gets. On SQLite — the one dialect where a `Field.datetime` is
+  stored as INTEGER epoch milliseconds rather than a native timestamp — that raw
+  storage form went straight to the caller:
+
+  | call                                   | before                       | after                            |
+  | -------------------------------------- | ---------------------------- | -------------------------------- |
+  | `find()`                               | `"2026-01-10T09:00:00.000Z"` | unchanged                        |
+  | `distinct('closed_at')`                | `[1768035600000]`            | `["2026-01-10T09:00:00.000Z"]`   |
+  | `aggregate()` `max(closed_at)`         | `1768035600000`              | `"2026-01-10T09:00:00.000Z"`     |
+  | `aggregate()` `groupBy: ['closed_at']` | key `1768035600000`          | key `"2026-01-10T09:00:00.000Z"` |
+
+  Same root cause as #3773, different exit. `Field.date` was never affected — it
+  is ISO TEXT on every dialect, so its storage form already equals its
+  presentation.
+
+  The visible surfaces were a `_max`/`_min` measure over a datetime (a "last
+  closed" KPI tile rendered `1768035600000`) and a `groupBy` on a raw datetime
+  dimension, which also disagreed with the in-memory `applyInMemoryAggregation`
+  fallback — that one consumes already-formatted `find()` rows, so the same
+  dataset changed key type depending on which path served it.
+
+  Which columns hold an instant is now recorded while the statement is built,
+  because that is the only point where a column name and its meaning are both
+  known: a `min()` lands under its alias and never under the field name, while a
+  date-BUCKETED column lands under the field name but holds a label (`'2026-01'`)
+  rather than an instant. Matching on names afterwards gets both backwards.
+
+  `distinct()` additionally re-deduplicates after presenting: SQL `DISTINCT`
+  compares STORED values, and one SQLite datetime column holds both INTEGER and
+  TEXT forms, so two rows recording the same instant survived as two and then
+  presented identically. It has no in-repo callers today; this keeps it honest
+  rather than leaving a second convention in the driver.
+
+  **`cross-object-rebucket` was fixed alongside it, because presenting min/max
+  correctly is what exposed it.** `recombine()` coerced every operand with
+  `Number()`, which silently depended on receiving an epoch: handed the ISO string
+  the driver now returns it produced `NaN`, and on Postgres/MySQL (where knex
+  returns a `Date`) it had always flattened the value back to an epoch integer one
+  layer above the driver. `min`/`max` now order by the instant and return the
+  winning value in the shape it arrived in; `sum`/`count` stay numeric.
+
+- 7101ca2: fix(analytics): apply the EFFECTIVE date granularity to bucket labels and drill ranges (#3588 follow-up)
+
+  `selection.dateGranularity` (shipped in #3652) reached the `GROUP BY` but not the
+  post-processing: the bucket-label formatter and the drill-range inverter both
+  kept reading the DATASET dimension's default. A query was grouped one way and
+  described another. Found by driving a real dashboard query in a browser against
+  a dataset whose dimension declares `dateGranularity: 'month'`:
+
+  - selection `year` → the row came back labelled **`1970-01`** — a year bucket
+    re-formatted with the dataset's month granularity, its `"2026"` key re-read as
+    2026 _milliseconds_ past the epoch;
+  - selection `day` → day buckets were re-labelled as months, so ten distinct days
+    collapsed into two duplicated keys;
+  - selection `quarter` / `year` / `day` / `week` → `drillRanges` came back empty,
+    silently removing drill-through from every bucketed chart.
+
+  Granularity precedence now lives in one exported function,
+  `resolveDimensionGranularity`, called from all three sites that must agree — the
+  query's `GROUP BY`, the label formatter, and the range inverter. The drift was
+  possible only because each site resolved it independently.
+
+  Two consequences beyond the override case:
+
+  - A dataset dimension that declares **no** granularity but is bucketed by the
+    widget now gets drill ranges too. Previously the range sidecar keyed off the
+    dataset's own `dateGranularity`, so this case — the one #3588 is actually
+    about — could never drill.
+  - `formatDateBucket` no longer mistakes a bare year key for an epoch timestamp.
+    A year bucket's canonical key IS `"2026"`, which is the only bucket key that
+    collides with the pure-digit epoch heuristic (`"2026-Q2"`, `"2026-07"` and
+    `"2026-07-15"` all fail it). Being idempotent over already-formatted keys is
+    that function's stated contract; the year case just never held.
+
+- 415254c: fix(analytics): scope the dimension-label lookup to the referenced object's RLS (#3602)
+
+  When a dataset groups by a `lookup`/`master_detail` dimension, analytics resolves
+  the grouped FK ids to the related record's display name via a per-record read
+  (`group by id`) dressed as an aggregate. That read carried **no read scope**, so
+  it revealed related-record display names whenever the referenced object's RLS is
+  stricter than the base object whose rows carry the id — a user could see a name
+  the referenced object's own RLS would hide. (Same-object and looser-referenced
+  cases were already safe because the ids come from the post-#3597 scoped
+  aggregate; this closes the stricter-referenced case.)
+
+  The label lookup now applies the **referenced object's own** read scope — bound
+  to the request via the same `getReadScope` provider the aggregate path uses,
+  composed with `$and` (never key-merge) so it can't be displaced by the id
+  predicate. Fail-closed: if that object's scope can't be resolved, the dimension's
+  labels are skipped (the raw id renders) rather than fetched unscoped. No behaviour
+  change when no read-scope provider is configured.
+
+  Internal `DimensionLabelDeps.fetchRecordLabels` gains an optional `scope` argument
+  and `resolveDimensionLabels` an optional `resolveScope` resolver; both are
+  service-analytics-internal (no spec/contract change).
+
+- 1f8390b: fix(analytics): ObjectQLStrategy now enforces the read scope (RLS + tenant) (#3597)
+
+  `ObjectQLStrategy` never consumed `getReadScope`, so any analytics query served by
+  that path ran with **no RLS or tenant predicate** — an authenticated caller
+  received aggregates computed over every tenant's rows.
+
+  Both belts were off at once. The strategy dropped the pre-resolved read scope, and
+  the engine could not compensate: the `executeAggregate` bridge passes no
+  `ExecutionContext`, so plugin-security's principal-less fall-open skipped its own
+  RLS injection. Only `NativeSQLStrategy` was ever wired for ADR-0021 D-C.
+
+  The exposure was **not** limited to exotic drivers. `NativeSQLStrategy` declines —
+  handing the query to this path — on any date-bucketed query
+  (`timeDimensions[].granularity`, the most common dashboard shape, on Postgres and
+  SQLite too), on `RAW_SQL_UNSUPPORTED` (in-memory driver), and on federated objects.
+
+  The scope is composed with `$and`, never by key merge, so a caller filter naming
+  the same field (e.g. `organization_id`) cannot displace the security predicate.
+
+  **Behaviour change to be aware of:** a query that references a **joined** object
+  carrying its own read scope is now REJECTED on this path rather than run
+  partially-scoped. `engine.aggregate`'s `where` addresses the base object, so a
+  per-join predicate cannot be expressed there; failing closed matches the posture
+  already taken by `resolveReadScopes` and `compileScopedFilterToSql`. Such a query
+  previously returned results that omitted the joined object's tenant predicate.
+  Run it on a native-SQL driver (`NativeSQLStrategy` scopes each join), or drop the
+  cross-object dimension/measure.
+
+  Deployments with no read-scope provider configured are unaffected — that path
+  stays unscoped by documented contract.
+
+- 3167e29: fix(analytics): sort dataset selections by the display label for select/lookup dimensions (#3680)
+
+  `DatasetSelection.order` (what a widget's `options.sortBy` lowers to) sorted a
+  `select` or `lookup`/`master_detail` dimension by its STORED value — the option
+  value or the foreign-key id — while the response rows carry the resolved display
+  label. A "sort by Account" therefore ordered by opaque ids and read as arbitrary;
+  a localized select sorted by its ASCII value while showing a non-ASCII label.
+
+  Order keys naming a label-bearing dimension now sort by the display label the
+  user reads. The executor receives an injected sort-key hook (`OrderLabelResolver`,
+  built by `queryDataset` over the same label-resolution capabilities and #3602
+  read scoping as the display pass); only the COMPARISON substitutes the label —
+  rows keep their raw values until the display pass, so drill metadata still
+  snapshots stored values, and ordering + windowing stay one adjacent step (a
+  "top 10 by account name" truncates the right ten).
+
+  Cost model: sorting by a measure or a plain/date dimension is unchanged (SQL
+  pushdown included). A label-ordered `select` resolves from field metadata (no
+  query). A label-ordered `lookup` costs one batched id→name read over the
+  pre-window grouped ids (chunked, and reused by the display pass via a
+  per-request cache), and its window can no longer be pushed into SQL — the
+  inherent price of ordering by a value the database doesn't store.
+
+- 0a6fb1e: fix(analytics): the read-scope auto-bridge no longer depends on plugin order (#3618)
+
+  `getReadScope` was only wired when the `security` service already existed at this
+  plugin's `init()`. The closure itself resolved lazily, but the ASSIGNMENT was
+  gated on an init-time probe — so a kernel that registers `AnalyticsServicePlugin`
+  before the security plugin got **no read-scope provider at all**, and every
+  analytics strategy ran unscoped with only a WARN to show for it.
+
+  Both sibling bridges (`executeAggregate`, `executeRawSql`) are wired
+  unconditionally and resolve at call time, and this one's own comment claimed the
+  same. Now it actually does: the probe only decides the log wording.
+
+  The CLI (`os serve`) registers security before analytics, so that path was
+  already correct. The exposure was for embedders composing their own kernel — and
+  for this repo's own `bootStack` harness, which registers analytics first, meaning
+  the entire dogfood/verify suite had analytics RLS silently disabled and any RLS
+  assertion written there passed vacuously.
+
+  Also corrects the WARN text: with no provider, scoping is absent on ALL paths and
+  ALL objects, not just "the raw-SQL path" and "joined objects" as it claimed.
+
+  Adds `analytics-rls.dogfood.test.ts`: an owner-scoped RLS fixture driven over real
+  HTTP as a real non-admin, asserting the rows a member's aggregate actually
+  returns. Reverting either this fix or the #3597 strategy fix turns it red.
+
+- 1986594: feat(analytics): honour widget `dateGranularity`, `sortBy`/`sortOrder`, and `limit` in the dataset query (#3588)
+
+  Three presentation options were accepted by the metadata layer and then dropped
+  by the analytics query builder. They reached no SQL, produced no error, and the
+  only way to notice was to read the `sql` a dataset response echoes — so a
+  dashboard could declare `dateGranularity: 'month'` and quietly render one bar
+  per record.
+
+  - **`dateGranularity` now buckets.** `DatasetSelection` gained an optional
+    `dateGranularity`, applied to every selected `date` dimension. Precedence per
+    dimension: an explicit `timeDimensions` granularity, then the selection's,
+    then the dataset dimension's own default. A widget can bucket a trend by month
+    without the dataset committing every other consumer to that granularity.
+  - **`order` / `limit` / `offset` now apply on every path.** They are applied to
+    the ASSEMBLED grid — after measure-scoped sub-queries merge, after `compareTo`
+    columns attach, and after derived measures are computed — so a derived measure
+    is a valid sort key and the ObjectQL aggregate path (which has no ordering
+    grammar, and which native SQL hands every date-bucketed query to) orders
+    identically to native SQL. A single-query selection still pushes the window
+    down into the statement. An `order` key that names nothing the selection
+    projects is now rejected (400) rather than silently ignored.
+  - **`limit` is deterministic.** Without an `order`, a limit orders by the
+    selected dimensions first, so it truncates a reproducible window instead of an
+    arbitrary subset.
+  - **Widget `options` is a contract again.** The four query-affecting keys
+    (`dateGranularity`, `sortBy`, `sortOrder`, `limit`) plus `stageOrder` are
+    declared on `DashboardWidgetOptionsSchema`, so a typo like `sortDirection` is
+    an author-time error. The bag stays open — renderer extras (`icon`, `columns`,
+    `striped`, …) pass through untouched.
+
+  Two latent bugs surfaced while fixing the above and are fixed here too:
+
+  - `order`/`limit` were forwarded to EVERY sub-query. A measure-scoped
+    supplementary query selects one measure, so an inherited `ORDER BY` named a
+    column it never selected, and an inherited `LIMIT` truncated it before the
+    merge — dropping rows from the assembled grid. Nothing hit this only because
+    nothing passed `order`.
+  - The `compareTo` pass built its query by hand and skipped granularity
+    resolution, so a month-bucketed primary grid was merged against raw-timestamp
+    comparison rows. No dimension key matched and every `<measure>__compare`
+    column came back empty.
+
+  `ObjectQLStrategy` now also echoes a representative `sql` (with `date_trunc`,
+  `WHERE`, `ORDER BY`, and `LIMIT`; filter values parameterized, never inlined).
+  Previously the `sql` field simply vanished from the response whenever a query
+  was date-bucketed, leaving an author unable to tell "not implemented" from "this
+  strategy doesn't report".
+
+- a227ed7: fix(objectql)!: one key for the empty group bucket — real `null`, on both aggregation paths (#3839)
+
+  A grouped row whose dimension value is empty now carries `null` for that
+  dimension no matter which way the aggregate ran. Downstream code can test the
+  empty bucket with a plain `value == null` again: charts render their own empty
+  label, drill-through on that bucket builds `field = null` and returns the rows
+  it should, and a dashboard no longer changes shape when the driver, the
+  granularity or the reference timezone changes.
+
+  ### What was wrong
+
+  `engine.aggregate` has two implementations of one feature. It pushes the
+  aggregate down as SQL when the driver advertises every requested granularity and
+  the reference timezone is UTC; otherwise it fetches rows and buckets them in JS.
+  The two disagreed about how to spell "empty":
+
+  ```
+  --- same dataset, same query, one row with a NULL value ---
+    pushed-down SQL : [{ "key": null,     "type": "null",   "total": 2 }, …]
+    in-memory       : [{ "key": "(null)", "type": "string", "total": 2 }, …]
+  ```
+
+  The measures were always right — only the key's type and literal differed —
+  which is why this went unnoticed for so long: every total reconciled. But the
+  engine picks a path per query, so the same data produced a different bucket key
+  on SQLite-plus-UTC-plus-`month` than on `week` (which SQLite does not advertise),
+  a non-UTC timezone, or `driver-rest` / `driver-memory` / a remote Turso, all of
+  which bucket in memory unconditionally.
+
+  It was never date-specific either. A plain `groupBy: ['stage']` over a NULL
+  column diverged the same way.
+
+  Consumers are written against `null` — they check `== null` and supply their own
+  empty label ('—', '(empty)', a localized "Uncategorized"). The sentinel defeated
+  every one of them: it rendered a raw English debug string in the UI, and a drill
+  on the empty bucket compiled to `field = '(null)'` and matched nothing.
+
+  The in-memory path's comment justified the string as staying "consistent with
+  the client `useReportData` hook". That hook was removed with ADR-0021, and the
+  literal never appeared in it.
+
+  ### What changed
+
+  - `applyInMemoryAggregation` and `bucketDateValue` (`@objectstack/objectql`) key
+    the empty bucket as `null`. `bucketDateValue` now returns `string | null`. A
+    null instant and an unparseable one still share one bucket, because SQL cannot
+    tell them apart either (`strftime('%Y-%m', 'not-a-date')` is NULL).
+  - The internal composite bucket id is JSON-encoded, so the empty bucket stays
+    distinct from a row whose value is the literal string `"null"`.
+  - `bucketKeyToCalendarRange` (`@objectstack/core`) accepts `string | null`. The
+    empty bucket has no calendar span, so a drill on it opens the unscoped
+    superset instead of an invented bound — unchanged behavior, honest signature.
+  - The driver output contract in `@objectstack/spec` now states the rule: a row
+    with no value keys as `null`, never a sentinel. Propagating NULL through the
+    bucket expression is the whole of it; a driver only breaks it by adding a
+    `COALESCE`.
+
+  ### Gates
+
+  `checkDateBucketParity` (`@objectstack/verify`) deliberately carried no null
+  instant, because the divergence would have failed it for a reason it was not
+  about. Its fixture now has one, so the convergence is held in place — including
+  for out-of-tree drivers that run the check against themselves.
+
+  Two fixes were needed to make that fixture meaningful:
+
+  - The check folded bucket labels through `String(value)`, which turns SQL NULL
+    into `'null'` — a label a TEXT column can genuinely hold. A driver spelling
+    "empty" as a string could compare equal to one returning real NULL. The empty
+    bucket is now keyed out of band.
+  - Label sets were compared with `JSON.stringify`, which is sensitive to key
+    insertion order. Row order is not part of this contract and the two paths
+    naturally differ (SQL sorts its groups; the in-memory path emits first-seen
+    order), so a driver with entirely correct buckets could be reported as
+    disagreeing — with an empty diff message, since nothing actually differed.
+    The comparison is now order-insensitive.
+
+  A new dogfood check covers the non-date half against real drivers: same dataset,
+  plain and date-bucketed `groupBy`, both paths, one key.
+
+- adabaa8: fix(analytics): fail closed on cross-object aggregation the ObjectQL path cannot join (#3654)
+
+  `engine.aggregate()` has no join — it never expands a lookup and the SQL driver's
+  aggregate emits no `JOIN`. So a dotted dimension/measure like `account.region`
+  reaching `ObjectQLStrategy` (the fallback NativeSQL declines: date-granularity
+  bucketing, in-memory driver, federated objects) failed SILENTLY: the in-memory
+  path bucketed every row under one `(null)` group and summed the whole table into
+  it (a plausible number that is actually a mislabelled full-table total), and the
+  native path errored on the unresolved column.
+
+  `ObjectQLStrategy` now rejects any cross-object reference outright, with a clear
+  message, before the query reaches the engine. This generalizes the #3597 guard
+  (which only rejected when the joined object carried a read scope, and skipped the
+  check entirely when no read-scope provider was configured — so the silent
+  `(null)` bucket still shipped on unsecured/in-memory setups) into an
+  unconditional one, and subsumes it: a rejected query never loads the joined
+  object, so there is nothing left unscoped.
+
+  Cross-object datasets are unaffected on `NativeSQLStrategy`, which hand-compiles
+  the LEFT JOINs (and scopes each). This only changes the fallback path, turning a
+  silent wrong answer into a loud, actionable error. Full lookup-traversal support
+  in the aggregate path is left as follow-up (see #3654).
+
+- 605c23f: fix(analytics): ObjectQLStrategy applies `timeDimensions[].dateRange` — the predicate every date-bucketed chart was missing (#3650)
+
+  `ObjectQLStrategy.execute()` built its engine filter purely from
+  `normalizeAnalyticsFilters(query)`, which reads only `query.where`. But
+  `dateRange` is a **sibling** of `where`, never folded into it — so the window
+  was dropped on the floor. No error, no warning: the chart rendered, and the
+  numbers were for all of history.
+
+  This was not a "some drivers only" corner. `NativeSQLStrategy.canHandle`
+  declines any query carrying a `granularity`, so a **date-bucketed trend lands on
+  the ObjectQL path on every driver**, Postgres and SQLite included — and a
+  bucketed trend is precisely the shape that also carries a range ("last 12
+  months", "this quarter"). The other two paths always applied it
+  (`NativeSQLStrategy` as `BETWEEN`, `preview-evaluator` row-wise); only this one
+  did not.
+
+  **Two visible symptoms:**
+
+  - A trend chart with a time filter plotted **every row ever recorded** instead
+    of the selected window.
+  - `compareTo` (period-over-period) was **structurally dead**. `runCompare`
+    builds the comparison pass by shifting `dateRange` and changing nothing else,
+    so with the window ignored both passes issued a byte-identical aggregate:
+    every `<measure>__compare` column equalled its primary and the delta was a
+    flat 0%. And since `compareTo` requires a time dimension, it always took this
+    path.
+
+  The window now lowers to an inclusive `{$gte, $lte}` on the resolved field — the
+  same shape `NativeSQLStrategy` binds as `BETWEEN` and the memory driver builds
+  as a `$match` — so one dashboard reads the same on every driver. No storage
+  coercion is applied here on purpose: unlike the raw-SQL path (which had to learn
+  about SQLite's INTEGER epoch in #2034), this path goes through
+  `engine.aggregate()`, where the driver's own CRUD filter coercion already
+  handles a `where` bound on that same column.
+
+  **Same-field composition was fixed alongside it**, because the window makes it
+  routine. Operands merged into one field entry by spreading, which silently kept
+  whichever came last: a `where` bound and a window bound on `close_date` would
+  have had one erase the other, and a `where` that names one field twice through
+  `$and` (`{$and: [{stage: 'won'}, {stage: {$ne: 'lost'}}]}`) already lost its
+  first operand today. Operands that name **different** operators still share one
+  entry; colliding ones become their own `$and` conjunct, so the engine
+  intersects them instead of the strategy picking a winner.
+
+  `generateSql()` renders the window as a parameterised `BETWEEN` to match — its
+  comment previously explained why a `BETWEEN` was deliberately absent, which was
+  correct only while `execute()` dropped the window. Bounds bind as `$n`
+  placeholders, never inlined: the echoed statement travels to the browser.
+
+  A window on a **cross-object** time dimension is still rejected, and is now
+  reported as the bucketing error it is rather than as the "cross-object filter"
+  its lowered predicate would otherwise resemble. `execute()` and
+  `/analytics/sql` continue to accept and reject the same set.
+
+  Relative-phrase ranges ("Last 7 days") are still not resolved on this path, and
+  a bare-string `dateRange` degenerates to a single point — both matching
+  `NativeSQLStrategy` exactly, rather than inventing a second interpretation for
+  the driver-independent path.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

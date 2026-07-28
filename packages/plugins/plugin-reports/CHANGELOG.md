@@ -1,5 +1,211 @@
 # @objectstack/plugin-reports
 
+## 17.0.0-rc.0
+
+### Major Changes
+
+- 4ed7ed4: feat(security)!: the export axis is now OPT-IN, explainable, and covers reports (#3544, #3710)
+
+  **BREAKING — `allowExport` unset no longer means "inherit read".** Reading a
+  record and taking a bulk machine-readable copy of the whole table are different
+  privileges (Salesforce "Export Reports", Dynamics "Export to Excel", NetSuite
+  "Export Lists", SAP `S_GUI` 61 all separate them). The axis now says so.
+
+  ### Migration — FROM → TO
+
+  |                      | before                              | after                      |
+  | -------------------- | ----------------------------------- | -------------------------- |
+  | `allowExport` unset  | export **allowed** (inherited read) | export **denied**          |
+  | `allowExport: false` | export denied                       | export denied (unchanged)  |
+  | `allowExport: true`  | export allowed                      | export allowed (unchanged) |
+
+  **The one-line fix:** add `allowExport: true` to the object entry (or the `'*'`
+  wildcard) of every permission set whose holders should keep exporting.
+
+  ```ts
+  objects: {
+    deal: { allowRead: true, allowExport: true },   // ← add the grant
+  }
+  ```
+
+  Nothing else changes: read, CRUD, RLS, FLS and sharing are untouched, and a set
+  that never exported is unaffected.
+
+  **Who is affected.** Package-shipped sets are re-seeded on upgrade, so the
+  built-ins are handled for you — `admin_full_access` and `organization_admin` now
+  carry `allowExport: true` explicitly. **Environment-authored sets are not**: any
+  custom set whose users export must be edited. `member_default` deliberately does
+  NOT carry the grant, so ordinary authenticated users lose export until an admin
+  grants it — that is the point of the flip, not an oversight.
+
+  **Merge semantics.** Most-permissive, exactly like the CRUD bits: any set
+  granting `true` grants export. `false` and unset are the same outcome; `false`
+  is authoring intent, not a veto, because permission sets are additive capability
+  containers (ADR-0090).
+
+  **Not implied by super-user bits.** `viewAllRecords` / `modifyAllRecords` no
+  longer confer export. Separating "may see all data" from "may take a bulk copy"
+  is the segregation-of-duties case the axis exists for.
+
+  ### Also in this change
+
+  - **spec** — a set carrying `allowExport` is now **high-privilege**
+    (`describeHighPrivilegeBits`), so it cannot be bound to the `everyone` /
+    `guest` audience anchors. Without this the opt-in was defeatable by binding an
+    export-granting set to `everyone`. One predicate, so the runtime anchor gate,
+    the `@objectstack/lint` security-posture rule and the install-time suggestion
+    surface all pick it up together.
+  - **spec / plugin-security** — `ExplainOperationSchema` gains `export`, so
+    `explain` can answer _why_ a caller got `403 EXPORT_NOT_PERMITTED`. It
+    explains as `read ∧ the export grant`: `object_crud` reports the conjunction
+    and attributes the granting set, while every data-shaped layer
+    (requiredPermissions, OWD/depth/sharing, RLS, record attribution) is computed
+    as the `find` the export actually performs — asking the RLS compiler about an
+    `export` operation would match no policy and wrongly report "no RLS applies".
+    `readFilter` is surfaced for `export` as it is for `read`.
+  - **plugin-reports** — closes the reports side door (#3710). A report rendered
+    as `csv`/`json` is the same bulk copy of the same object, so it is gated by
+    the same `ISecurityService.canExport`. Enforced in `executeReport`, which the
+    interactive run, the ad-hoc run and the scheduled dispatch all funnel through;
+    `scheduleReport` additionally refuses at create time so an author is not told
+    at 3am. A schedule created while granted stops delivering once the grant is
+    revoked. `html_table` stays a read — it is a rendered view, not a bulk copy.
+    Deployments without `plugin-security` are unaffected (no permission sets
+    exist, so the axis does not apply).
+
+### Patch Changes
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [524151c]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [4921a95]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [5487c20]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [9aa5510]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/platform-objects@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes

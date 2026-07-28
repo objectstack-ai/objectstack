@@ -1,5 +1,1061 @@
 # @objectstack/client
 
+## 17.0.0-rc.0
+
+### Major Changes
+
+- 8b9d71e: feat(client,spec)!: the SDK's `ai` namespace now expresses the AI surface that exists (#3718)
+
+  `client.ai` and the AI service were **disjoint sets**. The namespace held three
+  methods — `nlq`, `suggest`, `insights` — whose URLs no repo has ever mounted
+  (removed in v17), while `service-ai` mounted 12 routes the SDK could not reach
+  at all. v17 closed the first half by deleting the dead methods. This closes the
+  second: the SDK now reaches every route that is meant to be tenant API surface.
+
+  | SDK                                                         | Route                                                                             |
+  | ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
+  | `ai.chat(request)`                                          | `POST /api/v1/ai/chat` — forces `stream: false`, so the JSON mode is what you get |
+  | `ai.chatStream(request)`                                    | `POST /api/v1/ai/chat` — `AsyncIterable` of UI Message Stream frames              |
+  | `ai.complete(request)`                                      | `POST /api/v1/ai/complete`                                                        |
+  | `ai.models()`                                               | `GET /api/v1/ai/models` — the ADR-0028 plan-filtered picker list                  |
+  | `ai.conversations.create/list/get/update/delete/addMessage` | the six `/api/v1/ai/conversations` routes                                         |
+
+  `ai.chatStream` returns a promise for an async iterable rather than being an
+  async generator, so the request is issued — and an HTTP error thrown — when you
+  call it, not when you first iterate.
+
+  **Where the server is.** `service-ai` is a Cloud/EE package in the `cloud`
+  repo; this repo only proxies `/api/v1/ai/**` and 404s `AI service is not
+configured` without it. Check `discovery.services` before calling, exactly as
+  for any other plugin-provided namespace. For a React chat UI, `useChat()`
+  (`@ai-sdk/react`) is still the better client — it speaks the same protocol
+  `ai.chatStream` parses and owns message state; these methods are for callers
+  that are not components.
+
+  **Breaking — the spec's dead AI declarations are retired.** All three had no
+  implementation anywhere and no runtime consumer:
+
+  - `Ai{Nlq,Suggest,Insights}{Request,Response}[Schema]` → replaced by the wire
+    shapes of the real routes: `AiChat{Request,Response}`, `AiStreamChunk`,
+    `AiCompleteRequest`, `AiModelsResponse`, `AiConversation`, `AiMessage`,
+    `{Create,List,Update}AiConversation*`. The six retired JSON Schemas are
+    dropped from `json-schema.manifest.json` (deliberate retirement, #2978).
+  - `DEFAULT_AI_ROUTES` → deleted, and `getDefaultRouteRegistrations()` returns 8
+    groups instead of 9. It declared the three phantom endpoints and had no
+    runtime consumer; re-declaring the real ones here would recreate the same
+    illusion, since they are mounted from another repo.
+  - `AiProtocol` (`aiNlq?` / `aiSuggest?` / `aiInsights?`) → deleted. Nothing
+    implemented it and nothing dispatched through it. The real server contract is
+    `IAIService` + `IAIConversationService` in `@objectstack/spec/contracts`.
+
+  **The guard.** `/api/v1/ai/` becomes a bounded prefix exemption in the capstone
+  (#3642) alongside the control plane — bounded from both ends: only `ai.*` may
+  use it, and the namespace must still be reaching it. That is not a
+  wave-through. The reachability check lives where the routes are:
+  `cloud`'s `packages/service-ai/src/ai-route-ledger.conformance.test.ts` reads
+  the table `buildAIRoutes()` returns and drives this SDK against it, so an
+  `ai.*` URL that stops resolving fails a test in the repo that mounts it. The
+  wildcard-only bound stays **0** — these URLs never touch the `* /ai/**` row,
+  which is what certified three dead methods for years.
+
+  The four replaced client tests are worth naming: they mocked `fetch` and
+  asserted the URL the client _built_, never that anything answered it, and
+  passed for years against endpoints that did not exist. The new ones assert only
+  what this repo can honestly know — verb, path, and the body decisions the SDK
+  makes for you (`stream: false` on `chat`, the 204 on `delete`, SSE frame
+  parsing) — and leave "does it resolve" to the ledger next to the routes.
+
+- 9f060e5: chore(deps)!: better-auth 1.7.0-rc.2 (account identity restructuring) + the
+  production-dependency batch from #3517
+
+  **better-auth 1.7.0-rc.1 → 1.7.0-rc.2** across the family (`better-auth`,
+  `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/sso`, and the
+  adapter/telemetry overrides). `@better-auth/scim` deliberately stays on
+  1.7.0-rc.1 — rc.2 replaces its whole model (code-defined connections; the
+  `scimProvider` model and the generate-token endpoint are gone), which is a
+  feature migration, not a version bump. Its peer range accepts rc.2 core, and the
+  advisory that forced the original pin (GHSA-j8v8-g9cx-5qf4) is still fixed.
+
+  **BREAKING — account identity.** better-auth renamed `account.accountId` to
+  `account.providerAccountId` and added a REQUIRED `account.issuer`; sign-in now
+  resolves accounts by `(issuer, providerAccountId)`.
+
+  - FROM `fields: { accountId: 'account_id' }` → TO
+    `fields: { issuer: 'issuer', providerAccountId: 'account_id' }`. The provider
+    account id keeps its `account_id` column — only the better-auth-side name
+    moved — and `sys_account` gains an `issuer` column.
+  - FROM `internalAdapter.createAccount({ providerId, accountId, … })` → TO
+    `createAccount({ providerId, issuer, providerAccountId, … })`. A local
+    password account carries the issuer better-auth mints for itself,
+    `local:credential`.
+  - FROM `client.auth.accounts.unlink({ providerId, accountId })` → TO
+    `unlink({ accountId })`, where `accountId` is now the account ROW id (the `id`
+    from `accounts.list()`), matching better-auth's narrowed body.
+    `accounts.list()` returns `issuer` + `providerAccountId` in place of
+    `accountId`.
+
+  **Existing deployments:** rows written before 1.7 have no issuer and are
+  invisible to sign-in until stamped. The auth plugin now runs an idempotent
+  boot-time backfill that stamps what it can derive — `local:credential` for
+  password accounts, `local:oauth:<providerId>` for configured social providers,
+  and the registered IdP's real `iss` from `sys_sso_provider` for federated ones.
+  Accounts from a federated IdP that is no longer registered cannot be derived;
+  they are logged with their provider id and row count rather than guessed, and
+  those users cannot sign in through that provider until the row is stamped with
+  the IdP's issuer or removed so a fresh login re-links it.
+
+  **Also required by 1.7:** `SecondaryStorage` gained two mandatory methods, both
+  now implemented over the kernel cache service — `getAndDelete` (single-use
+  verification values) and `increment` (fixed-window rate-limit counter;
+  `rateLimit.storage: 'secondary-storage'` throws at boot without it).
+
+  The rest of #3517's production-dependency batch rides along: `@oclif/core`
+  4.13.0, `@hono/node-server` 2.0.12, `hono` 4.12.32, `tar` 7.5.22, `jose` 6.2.4,
+  `pinyin-pro` 3.28.2, plus the private docs app's fumadocs/next/react bumps.
+
+- a137bbc: feat(client)!: remove the `ai` namespace — three methods, none of which ever worked (#3718)
+
+  `client.ai` held exactly three methods, and **no server in any repo has ever
+  mounted the URLs they build**:
+
+  | Removed              | Built                      | Why it 404ed                                                                                                                                                   |
+  | -------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `client.ai.nlq`      | `POST /api/v1/ai/nlq`      | declared in `DEFAULT_AI_ROUTES`, which has no runtime consumer — only the spec's own test reads it; `aiNlq?` is an optional protocol method nothing implements |
+  | `client.ai.suggest`  | `POST /api/v1/ai/suggest`  | same                                                                                                                                                           |
+  | `client.ai.insights` | `POST /api/v1/ai/insights` | same                                                                                                                                                           |
+
+  Found by the AI route ledger (#3718, in `cloud`, where `service-ai` lives),
+  which enumerates the table `buildAIRoutes()` returns and matches the SDK's URLs
+  against it. The two sets are **disjoint**: the real AI surface is 12 routes —
+  `chat`, `chat/stream`, `complete`, `models`, `status`, `effective-model` and six
+  `conversations` routes — and the SDK expressed none of them.
+
+  **Removed, not deprecated.** A typed method that always throws is worse than no
+  method: it costs a runtime round-trip to discover, where absence is a compile
+  error. No working code can break, because there was no working behaviour. This
+  lands in the v17 major `@objectstack/client` is already taking, which is the
+  right window for a breaking removal rather than a reason to defer one.
+
+  Expressing the real surface is tracked on #3718 as **new** API, not a rename of
+  what was removed. For chat, `useChat()` (`@ai-sdk/react`) already speaks the
+  Data Stream Protocol `POST /api/v1/ai/chat` serves.
+
+  Also removed: the `AI_PLANE` exemption added to the capstone hours earlier
+  (#3727). With no method targeting `/api/v1/ai/`, an exemption there is a hole
+  with nothing to cover — the wildcard-only bound stays `0` and now reaches 0
+  with nothing exempted to get there.
+
+  The four AI tests in `client.test.ts` are **replaced, not deleted**. They were
+  the exact shape this audit keeps finding behind green suites: mock `fetch`,
+  assert the URL the client _built_, never assert that anything answered it. They
+  passed for years against three endpoints that did not exist. The replacement
+  asserts the one thing worth defending — the namespace is gone and must not
+  return without a route behind it.
+
+  `Ai{Nlq,Suggest,Insights}{Request,Response}` are still re-exported straight
+  from `@objectstack/spec/api`, so anyone holding those types keeps them.
+  Retiring the spec-side declarations is a separate change.
+
+  Docs corrected: `client-sdk.mdx` carried three copy-pasteable examples that
+  404ed, and `plugin-endpoints.mdx` had the AI surface **inverted** — it tabled
+  the three phantom routes and explicitly denied `/ai/chat`, which is mounted. It
+  now lists the 12 real ones.
+
+### Minor Changes
+
+- 6fdc5c6: feat(client,spec): `ai.agents.*` and `ai.pendingActions.*` — the AI routes the SDK could not reach (#3718)
+
+  #3718 deleted three `client.ai.*` methods whose URLs no route had ever mounted,
+  then expressed the surface that does exist. It expressed **one** builder's worth
+  of it. `service-ai` mounts seven; the audit that widened its ledger
+  (objectstack-ai/cloud#903) counted **ten** routes the SDK cannot reach, nine of
+  which had simply never been counted.
+
+  This closes the six with the strongest evidence: `objectui` already ships
+  product on them, over URLs it builds by hand because there was nothing to call.
+
+  **`ai.agents`** — `/ai/chat` talks to the environment's default agent; these
+  talk to one you name.
+
+  - `agents.list()` — the agents this CALLER may chat with. The route filters by
+    the caller's permissions (ADR-0049), so an empty list is a legitimate answer
+    for a seat-less user, not an error to retry.
+  - `agents.chat(name, request)` / `agents.chatStream(name, request)` — one route,
+    two methods, mirroring `ai.chat` / `ai.chatStream` rather than inventing a
+    third shape for the same endpoint. `chat` forces `stream: false` for the same
+    reason `ai.chat` does: the route streams by default, so leaving the flag to
+    the caller means the JSON path is the one you have to remember.
+
+  **`ai.pendingActions`** — the human-in-the-loop approval queue. When a tool call
+  needs a human decision the turn parks an action instead of executing it, and an
+  app embedding the chat has to render and resolve that queue.
+
+  - `pendingActions.list(options?)` — `status`, `conversationId` and `limit` only.
+    `AIService.listPendingActions` also accepts `objectName`, but the route never
+    forwards it; typing it here would offer a filter that silently does nothing.
+  - `pendingActions.get(id)`
+  - `pendingActions.approve(id)` — approves **and executes**. Check the returned
+    `status`: a tool that fails after approval comes back
+    `{ status: 'failed', error }` with HTTP 200, because the approval succeeded
+    even though the execution did not. Code that reads only `res.ok` reports a
+    failed write as a success.
+  - `pendingActions.reject(id, reason?)` — executes nothing.
+
+  Reads and decisions are separately permissioned server-side (`ai:read` vs
+  `ai:approve`), so a caller that can list the queue may still be refused on
+  approve. Handle the 403; one does not imply the other.
+
+  **Typed from what the routes return**, not from what a client might like them
+  to — the failure #3718 exists to punish. The pending-action shape is the
+  persisted row, `snake_case` on the wire because that is what it is. Agent rows
+  require `capabilities`, because that object is what tells a UI which
+  affordances to render.
+
+  The capstone (#3642) exempts `/api/v1/ai/` by prefix and says the evidence lives
+  on the other side of the repo boundary. It does: cloud's ledger drives every
+  `ai.*` method against the tables its builders really return — and since #903
+  that means all seven builders, which is what makes these six routes checkable
+  at all. Their routes come from `buildAgentRoutes()` and
+  `buildPendingActionRoutes()`, neither of which the ledger could see when the
+  exemption was written.
+
+- 0cdb57a: feat(client): `automation.resume()` / `automation.getScreen()` — finish a paused screen flow from the SDK (#3528)
+
+  A `type: 'screen'` flow suspends when it reaches a `screen` node: `execute()`
+  returns `{ status: 'paused', runId, screen }` and the run waits for input. The
+  second half of that contract — `POST /automation/:flow/runs/:runId/resume` —
+  has shipped in the dispatcher since ADR-0019, but the client SDK's automation
+  surface stopped at `getFlow` / `execute` / `listRuns` / `getRun`. Anything built
+  on the SDK could therefore _start_ a screen flow and never finish it: the run
+  stayed suspended and the only way out was hand-rolling the HTTP call. That gap
+  is what stranded the Console's developer "Flow Runs" test runner, where every
+  test run of a screen flow orphaned a `paused` row.
+
+  - **`automation.resume(flowName, runId, signal?)`** — posts the collected screen
+    values as `inputs` (applied as bare flow variables), plus the approval-style
+    `output` / `branchLabel` the dispatcher already accepts. Returns the next
+    `{ status: 'paused', screen }` of a multi-step wizard, or the terminal
+    `AutomationResult`.
+  - **`automation.getScreen(flowName, runId)`** — the screen a paused run is
+    waiting on, so a client that did not launch the run (a page reload, another
+    tab, an inbox) can render the pending step before resuming.
+  - Both are available on the environment-scoped client
+    (`client.project(id).automation.*`) as well as the unscoped one.
+
+  Also covers the two dispatcher routes with tests — the resume and screen paths
+  had none, including the ordering guard that keeps `/runs/:runId/screen` from
+  being swallowed by the `/runs/:runId` run lookup.
+
+- d3f2ff6: feat(client): `actions` surface — the SDK path to server-registered actions (#3563 PR-2)
+
+  `client.actions.invoke(object, action, { recordId, params })` and
+  `client.actions.invokeGlobal(action, opts)` dispatch handlers registered via
+  `engine.registerAction` (`POST /api/v1/actions/...`). This closes the largest
+  gap in the #3563 route audit: the whole `/actions` domain — the documented way
+  to expose custom server-side operations — was unreachable from the SDK, and
+  every console hand-rolled `fetch` for it. The record id travels in the body,
+  which both server URL shapes honor; the handler's own business failure comes
+  back as `{ success: false, error }` rather than a thrown exception.
+
+  The route ledger flips all three `/actions` rows to `sdk` and the gap ratchet
+  drops 27 → 24. Also takes the documentation-drift findings from the audit:
+  the client README no longer documents six methods that do not exist,
+  `CLIENT_SPEC_COMPLIANCE.md` is retired to a tombstone pointing at the
+  CI-enforced ledger (its "FULLY COMPLIANT" verdict was measured against a
+  route table nothing consumes), and the docs-site SDK page documents the new
+  surface.
+
+- b7550d6: feat(client): `keys`, `shareLinks`, and `security` surfaces (#3563 PR-3)
+
+  Three more domains the route audit found with zero SDK expression:
+
+  - `client.keys.create({ name?, expiresAt? })` — mints a `sys_api_key`
+    (`POST /api/v1/keys`). The raw secret comes back exactly once; `user_id`
+    is pinned server-side. There was previously no SDK path to create an API
+    key at all.
+  - `client.shareLinks.create / list / revoke` — authenticated management of
+    record share links. Listing is server-constrained to the caller's own
+    links; the public token-consumption routes stay browser-only by design.
+  - `client.security.suggestedBindings.list / confirm / dismiss` — the
+    ADR-0090 admin surface for package audience-binding suggestions.
+
+  The route ledger flips all seven rows to `sdk` and the gap ratchet drops
+  24 → 17.
+
+- 0164f40: feat(client): the final six route-audit gaps — meta drafts/published/FSM + automation descriptors (#3563 PR-5)
+
+  - `meta.getPublished(type, name)` — the published version of a metadata item
+    (ADR-0033; compound names pass through unencoded, matching `getItem`).
+  - `meta.listDrafts({ packageId?, type? })` — pending drafts the active-only
+    lists hide.
+  - `meta.getLegalNextStates(object, field, from?)` — ADR-0020 FSM
+    introspection ("from here, where can this record go?").
+  - `automation.listActions({ paradigm?, source?, category? })` /
+    `automation.listConnectors({ type? })` — the ADR-0018/0022 descriptor
+    registries backing the Studio designer's pickers.
+  - `automation.getRuntimeStatus()` — per-flow enabled/bound engine state.
+
+  With these, the #3563 gap ratchet reaches **0** (from 27): every dispatcher
+  route that should be SDK-expressible is, and the conformance guard keeps it
+  that way.
+
+- e295ad1: feat(client): the eleven package-lifecycle methods (#3563 PR-4)
+
+  `client.packages` grows from install/enable to the full lifecycle the server
+  has shipped for three ADR generations: `update` (manifest edit),
+  `publish`, `publishDrafts` / `discardDrafts` (ADR-0033 whole-app draft
+  promotion), `listCommits` / `revertCommit` / `rollback` (ADR-0067 commit
+  timeline), `revert`, `export`, `adoptOrphans`, `duplicate` (ADR-0070
+  portability). All eleven routes existed with no SDK expression — Studio
+  reached them via raw fetch.
+
+  The route ledger flips all eleven rows to `sdk` and the gap ratchet drops
+  17 → 6 (from 27 at the start of the audit).
+
+- 1003125: feat(client): close the approvals (6) + record-shares (3) REST gaps (#3587 batch 3/5)
+
+  `client.approvals` gains the full request lifecycle beyond approve/reject:
+  `recall` (submitter withdraw), `revise` / `resubmit` (ADR-0044 send-back
+  round-trip), and the thread interactions `remind` / `requestInfo` / `comment`.
+  New `client.shares` namespace for per-record sharing grants: `list` / `grant` /
+  `revoke` (204-safe) under `/data/:object/:id/shares`. REST route-ledger
+  ratchet: 26 → 17.
+
+- 6e62a93: feat(client): close the sharing-rules (5) + security-explain (2) + search (1) REST gaps (#3587 batch 4/5)
+
+  New `client.shares.rules` sub-namespace for tenant-wide sharing rules
+  (M10.17): `list` / `save` / `get` / `delete` (204-safe, grants cascade) /
+  `evaluate` (reconcile). `client.security.explain` speaks the ADR-0090 D6
+  access-explanation contract via the POST transport (the GET query form is the
+  same `ExplainRequestSchema`). Top-level `client.search` covers global
+  cross-object search (M10.5). REST route-ledger ratchet: 17 → 9.
+
+- ecda20c: feat(client): close the 8 reports-family REST gaps (#3587 batch 2/5)
+
+  New `client.reports` namespace speaking the plugin-reports REST surface:
+  `list` / `save` / `get` / `delete` (schedules cascade), `run`, `schedule`,
+  `listSchedules`, `unschedule`. The two DELETE routes return 204 — the client
+  methods return `{ deleted: true }` without attempting to parse an empty body.
+  Fixed path (`/api/v1/reports` is not in `ApiRoutesSchema`), matching the
+  keys / share-links precedent. REST route-ledger ratchet: 34 → 26.
+
+- 6e62a93: feat(client): close the final 9 REST gaps — ratchet 9 → 0 (#3587 batch 5/5)
+
+  `data.clone` (enable.clone duplication) and `data.export` (streaming
+  CSV/JSON/XLSX; returns the raw `Response` — a file stream, not a JSON
+  envelope). New `email.send` (IEmailService; branch on the returned `status`).
+  `analytics.queryDataset` speaks the ADR-0021 REST dataset-query dialect. New
+  `datasources.external.*` federation admin: `listTables` / `draft` / `import` /
+  `refreshCatalog` / `validate` (ADR-0015 Addendum, 503-degrading). Every REST
+  route is now either SDK-expressed or carries a reviewed non-sdk disposition —
+  the #3587 gap ratchet rests at ZERO.
+
+- fc968af: feat(client): close the 9 metadata-family REST gaps the #3587 ledger carried (#3587)
+
+  New `meta` surface: `getDiagnostics` (spec-validation sweep), `getReferences`
+  (reverse references), `getBookTree` (ADR-0046 §6 spine resolution), `getAudit`
+  (ADR-0010 §3.6 protection trail), `publishItem` / `rollbackItem` / `diffItem`
+  (ADR-0033 per-item draft lifecycle). The two compound-name routes
+  (`GET|PUT /meta/:type/:section/:name`) turned out to be already expressible —
+  `getItem`/`saveItem` pass slashes through unencoded — so they are flipped to
+  `sdk` with URL-pinning tests instead of new methods (the audit note claiming
+  an encoding barrier was wrong; only `deleteItem` encodes). REST route-ledger
+  ratchet: 43 → 34.
+
+- 7c7e246: feat(authz): expose the caller's delegable scope — the read half of the
+  delegated-administration gate (ADR-0090 D12 / ADR-0105 D8)
+
+  `adminScope` decided writes but could not be READ: `assignablePermissionSets`
+  lived only inside `delegated-admin-gate.ts`, so a UI offering "place this
+  person in a unit, with these positions" (the D8 scoped-invitation form) had no
+  way to narrow its pickers. It would list the whole tree and let the user
+  discover the boundary by being refused — which turns an authorization gate into
+  a validator and makes the boundary invisible until it bites.
+
+  `ISecurityService.describeDelegableScope(callerContext)` answers it, exposed as
+  `GET /api/v1/security/my-delegable-scope` and `client.security.describeDelegableScope()`:
+
+  - `placeableBusinessUnitIds` — union of the subtrees where the caller may place
+    people (scopes granting `manageAssignments`);
+  - `assignablePositions` — positions whose every distributed permission set the
+    caller may hand out (containment check included);
+  - `scopes` — the held `adminScope`s with subtrees resolved, for attribution;
+  - `isTenantAdmin` — unconstrained, with everything enumerated so a consumer
+    renders ONE uniform picker instead of special-casing.
+
+  Computed by the same helpers the write gate enforces with, so an option this
+  reports is one `assert()` accepts — a test asserts that agreement directly. It
+  NARROWS; the gate still decides.
+
+  Strictly self-scoped: no target-user parameter, so it discloses nothing beyond
+  the authority the caller already holds (unlike `explain`, which has one and
+  gates it). Fail-closed — unresolvable scopes contribute nothing, a caller with
+  no delegated authority gets empty lists, and a deployment without
+  `@objectstack/plugin-security` gets 501.
+
+- 094fa34: feat(cli,client)!: drop `os environments create --template` and the
+  `template_id` body field — no control plane has ever read them (#3731)
+
+  The CLI advertised `--template` as _"Built-in template id (e.g. crm, todo,
+  blank)"_ and forwarded it as `template_id` on `projects.create()`. Nothing
+  consumes it: `template_id` / `templateId` appears in **zero** non-test files in
+  the `cloud` repo, `sys_environment` has no such column, and the create route
+  whitelists what it reads (`displayName`, `organizationId`, `isDefault`,
+  `hostname`, `metadata`, …) — `template_id` is not in the list. The
+  `blank`/`crm`/`todo` registry the flag named was the `apps/server`
+  `createTemplatesRoutePlugin` snapshot, removed when the control plane moved to
+  `cloud`; the flag outlived it.
+
+  So the flag was accepted, transmitted, and dropped — no seeding, no error, no
+  stored trace. That is worse than the 404 its listing counterpart returned
+  (`projects.listTemplates`, deleted in #3702): a 404 tells the caller something
+  is wrong, a silently ignored flag reports success.
+
+  **Migration.** `os environments create --template <id>` → drop the flag; it
+  never did anything. Starter content comes from the App Marketplace: create the
+  environment, then install the package (`sys_package` rows with
+  `is_starter = true`, i.e. `client.projects.packages.install(envId, { packageId })`).
+  Callers passing `template_id` to `client.projects.create()` should delete the
+  property — TypeScript now rejects it, which is the point: an unknown field was
+  being silently discarded on the wire.
+
+  Note this is **not** the same `--template` as `os init` / `create-objectstack`
+  (`app` / `plugin` / `empty` scaffolds) — those are local scaffolding templates
+  and are untouched.
+
+- 5e55739: feat(client)!: delete `projects.listTemplates()` — it targeted a route nothing
+  has ever mounted (#3702, #3655 finding)
+
+  `client.projects.listTemplates()` built `GET /api/v1/cloud/templates`. That
+  path is mounted by **nothing**: none of the 17 registrars in `cloud`'s
+  `cloud-artifact-api-plugin.ts` (91 registrations, enumerated by driving them
+  against a capturing mock `IHttpServer`), and nothing in this repo — the string
+  occurred exactly once in each repo, at the call itself. Every invocation was a
+  404 with a type signature promising a resolved value.
+
+  "Templates" are real as **data** — `sys_package_templates`, the
+  `is_starter = true` view over `sys_package`, rendered as a console page — but
+  there has never been an HTTP route that lists them, and no caller in either
+  repo (nor in `objectui`) used the method. Mounting a route to satisfy a method
+  nobody calls is the wrong order: the client's declared shape
+  (`{ id, label, description, category? }`) does not match `sys_package`'s
+  columns, so picking that mapping is a product decision, not an implementation
+  detail. The method returns when a route exists to back it.
+
+  Sixth instance of the `the method exists ≠ the method can be called` class this
+  audit family keeps finding, after `analytics.explain` / `analytics.meta`
+  (#3584), `meta.getView` (#3611) and `i18n.getTranslations` / `getFieldLabels`
+  (#3636) — and the first one only a cross-repo guard could see. The framework
+  capstone (#3642) exempts the `/api/v1/cloud/` prefix wholesale, because this
+  repo does not serve those routes; `cloud`'s control-plane ledger (#3655) is
+  where the mounted set and the SDK are both in scope, and it pins the absence.
+
+  Callers who somehow depended on it were already receiving a 404; read starter
+  packages through the `sys_package` view (`is_starter = true`) instead.
+
+- c2d9098: feat(rest/protocol): extend droppedFields write-observability to the bulk paths + client SDK (#3455)
+
+  Follow-up to #3448 (#3431 D2): the single-write PATCH/POST `/data` paths already
+  surface LEGALLY-stripped write fields (static `readonly` #2948 / `readonlyWhen`
+  #3042 / #3043 create ingress) as `droppedFields`. The **bulk** write paths did
+  not — the same strips happened silently on every batched row — and the typed
+  client warning + CORS mirror were deferred. This closes those out.
+
+  **Bulk passthrough (metadata-protocol).**
+
+  - `updateManyData` and `batchData` (update/upsert rows) now register a per-row
+    `onFieldsDropped` collector and attach the events to that row's result.
+  - `createManyData` diffs each supplied row against its #3043-stripped form and
+    returns an **aggregated** top-level `droppedFields` (one event per
+    object/reason with the union of field names) — its `{ records, count }`
+    response has no per-row slot, and the insert-time strip is static-`readonly`
+    only, so it is schema-uniform across rows and the aggregate is faithful.
+  - `insertManyData` keeps per-row precision, attaching `droppedFields` to each
+    outcome.
+  - **Correctness fix bundled in:** `updateManyData` and `batchData` never threaded
+    the caller's execution `context` to the engine — bulk writes ran context-less,
+    so RLS/FLS and `readonlyWhen` evaluated without the caller's principal, and the
+    batch create-ingress strip was hard-coded to a non-system context. All engine
+    calls in both methods now run under the resolved `context`.
+
+  **Contract (spec).** `BatchOperationResultSchema` gains an optional per-row
+  `droppedFields` (covers `updateMany` + `batch`, which alias
+  `BatchUpdateResponseSchema`); `CreateManyDataResponseSchema` gains the optional
+  aggregated `droppedFields`. Both are omit-when-empty, so existing clients are
+  unaffected. `X-ObjectStack-Dropped-Fields` is deliberately **not** emitted for
+  batches — one response header cannot express per-row drops, so the per-row body
+  field is the canonical bulk channel.
+
+  **Typed client warnings (@objectstack/client).** `CreateDataResult` /
+  `UpdateDataResult` gain `droppedFields?: DroppedFieldsEvent[]`, giving the body
+  channel a type instead of an untyped property.
+
+  **CORS (@objectstack/hono, @objectstack/plugin-hono-server).**
+  `x-objectstack-dropped-fields` is added to the default `Access-Control-Expose-Headers`
+  allow-list (kept in lockstep across both Hono CORS sites) so a cross-origin
+  browser can read the single-write drop header. The body `droppedFields` remains
+  the primary, cross-origin-safe surface — this is a convenience mirror.
+
+  **GraphQL — not applicable (documented).** #3455 lists a GraphQL mutation item,
+  but GraphQL has no runtime: `kernel.graphql` is unassigned everywhere and
+  `handleGraphQL` returns `501`, and discovery never advertises `/graphql`. There
+  is no schema generator or mutation resolver to expose a typed payload field on,
+  so there is nothing to wire until a GraphQL engine lands — at which point the
+  protocol-layer `droppedFields` is already present and only the GraphQL schema
+  projection would remain.
+
+- 88ef03e: fix(spec,client)!: `GetTranslationsRequest` is locale-only — drop the
+  `namespace` / `keys` filters no server ever read (#3676)
+
+  `GetTranslationsRequestSchema` declared two optional filters, and the endpoint
+  description promised one of them ("...for the specified locale and optional
+  namespace"). Neither serving surface read either: the dispatcher domain body
+  (`runtime/src/domains/i18n.ts`) takes `parts[1]` / `query.locale`, and
+  service-i18n (`i18n-service-plugin.ts`) takes `req.params.locale`. Both return
+  the locale's whole bundle. The SDK meanwhile put both on the query string, so a
+  caller who passed `keys` to shrink the response shrank nothing and got no
+  indication the filter was inert — Prime Directive #10's declared ≠ enforced, the
+  same shape #1475 trimmed out of the validation-rule types.
+
+  Trimmed rather than implemented, on three counts:
+
+  - **No consumer.** No call site in this repo or `objectui` passed either field.
+    The docs (`content/docs/api/client-sdk.mdx`, `skills/objectstack-i18n/SKILL.md`)
+    already documented `getTranslations(locale)` as a full-bundle snapshot, so the
+    schema was the outlier, not the docs. The one thing that did exercise them was
+    a client test asserting the query string got _built_ — it pinned the phantom
+    rather than any behaviour, since no server read what it asserted was sent. It
+    is replaced here by its inverse: a regression test that the request carries no
+    filter query at all.
+  - **`keys` could not deliver what it advertises.** `II18nService.getTranslations`
+    (`contracts/i18n-service.ts`) takes only `locale`, so a filter could only be a
+    post-filter over an already-materialized bundle. `keys` reads as a payload
+    optimization; a post-filter saves wire bytes but none of the server work, and
+    widening the contract would break every implementer (`memory-i18n`,
+    `file-i18n-adapter`) for a capability with no caller.
+  - **`keys` has no defined meaning against the current bundle shape.** Under the
+    retired flat `o.`-dotted dialect, `keys: ['o.account.label']` was an obvious
+    pick. #3778 settled the tree on one nested `TranslationData` shape, where a
+    flat `string[]` is neither a path set nor a group set, and a filtered response
+    would have to be rebuilt as a sparse nested tree to stay schema-valid. That is
+    a design decision, and nothing is waiting on it.
+
+  `namespace` is the one that got _easier_ — it now lands exactly on
+  `TranslationData`'s top-level groups, which is what its own description already
+  said ("e.g., objects, apps, messages"). It is still trimmed here: re-adding an
+  optional request field is additive and non-breaking the day the Studio's
+  per-module views actually need it, whereas shipping an unexercised filter path
+  now means dead code with tests to match, and a declared-but-unread field is
+  precisely the exemplar the next author copies.
+
+  BREAKING: the two schema fields and the `getTranslations(locale, options?)`
+  second parameter are removed with no deprecation cycle. Nothing worked through
+  them — a passed filter was silently ignored — so there is no behavior to
+  protect. Runtime impact is nil (the fields were optional and now strip); TS
+  callers passing them fail to compile, which is the intended signal.
+
+- 7ffc3d3: feat(client,spec)!: delete the 21 dead SDK methods and the four ghost route
+  tables that underwrote them (#3612, #3587 finding)
+
+  Five client surface families built URLs that exist on NO server surface —
+  not the dispatcher, not `@objectstack/rest`, not the autonomous service
+  mounts — so every call was a guaranteed 404:
+
+  - `permissions` (check, getObjectPermissions, getEffectivePermissions)
+  - `realtime` (connect, disconnect, subscribe, unsubscribe, setPresence,
+    getPresence) — `service-realtime` registers zero HTTP routes and the
+    dispatcher deliberately never advertises `/realtime`
+  - `workflow` (getConfig, getState, transition)
+  - `views` CRUD (list, get, create, update, delete) — no `/ui/views` route
+    anywhere
+  - `notifications` device/preference helpers (registerDevice,
+    unregisterDevice, getPreferences, updatePreferences) — the ADR-0012
+    server side was never built
+
+  Each family was underwritten only by an unconsumed spec `DEFAULT_*_ROUTES`
+  table — the same disease `DEFAULT_DISPATCHER_ROUTES` had (#3586) — so
+  `DEFAULT_PERMISSION_ROUTES`, `DEFAULT_VIEW_ROUTES`, `DEFAULT_WORKFLOW_ROUTES`,
+  and `DEFAULT_REALTIME_ROUTES` are deleted with them;
+  `getDefaultRouteRegistrations()` now returns 9 registrations.
+  `ApiRouteType` loses its client-only `'views' | 'permissions'` extras.
+
+  Kept: `client.events` (explicitly local in-memory buffer, no HTTP),
+  `notifications.list/markRead/markAllRead` (dispatcher-served),
+  `approvals.*` (ADR-0019 — the real approval decision API), and
+  `meta.getLegalNextStates` (the real FSM read).
+
+  Breaking for anyone calling the removed methods — a repo-wide and
+  objectui-wide sweep found one consumer (`useClientNotifications`'s dead
+  device/preference delegates, trimmed in the objectui companion change);
+  shipped as minor per the launch-window convention (cf. #3562/#3581/#3595).
+  Re-adding any of these surfaces requires the server route to exist and a
+  route-ledger row proving it (#3569/#3609 guards).
+
+### Patch Changes
+
+- 37b1346: feat(storage): surface the sys_file id on upload-complete — ADR-0104 D3 wave 2 (PR-1)
+
+  `POST /api/v1/storage/upload/complete` now returns the opaque `sys_file` id
+  (`data.fileId`), and `client.storage.upload()` surfaces it on the returned
+  `FileMetadata`. Previously the commit response omitted the id — the caller
+  could not learn which id to persist after committing an upload, so a file
+  field could never store a reference.
+
+  Additive and non-breaking (new optional `fileId` on `FileMetadataSchema`; the
+  client falls back to the presigned id when talking to an older server). This is
+  the enabling foundation for file-as-reference; the storage model itself is
+  unchanged in this PR.
+
+- 0bab8bb: fix(client,runtime): analytics.meta/explain now call routes that actually exist (#3584)
+
+  The route audit (#3563) ledgered four dispatcher↔client shape mismatches.
+  Re-verification showed the two analytics shapes the client spoke —
+  `GET /analytics/meta/:cube` and `POST /analytics/explain` — were served by
+  **nothing**: not the dispatcher, not `@objectstack/rest`, not
+  `service-analytics`. Both methods 404ed against every deployment.
+
+  - `analytics.meta(cube?)` — FROM `GET /analytics/meta/:cube` TO
+    `GET /analytics/meta[?cube=<name>]`. The cube argument is now optional; when
+    given, the dispatcher threads it into `AnalyticsService.getMeta(cubeName?)`,
+    which always supported the filter. Responses now use the dispatcher envelope
+    (`{ success, data }`).
+  - `analytics.explain(payload)` — FROM `POST /analytics/explain` TO
+    `POST /analytics/sql` (the dispatcher's SQL dry-run route, backed by
+    `generateSql`). Method name unchanged.
+
+  No migration is expected in practice: a method that unconditionally 404ed can
+  have no working callers (none exist in objectstack or objectui). Anyone who
+  had hand-rolled fetches against the imaginary shapes should switch to the
+  routes above.
+
+  The two storage rows from the same audit are deliberately NOT reshaped: the
+  presigned/chunked protocol the SDK speaks is registered autonomously by
+  `service-storage` on any http-server and stays canonical; the dispatcher's
+  bare `POST /storage/upload` / `GET /storage/file/:id` are reclassified in the
+  route ledger as a `server-only` low-level compat surface.
+
+- 984396b: test(plugin-auth): enumerate better-auth's route table — the `/auth/**` wildcard becomes 55 exact rows (#3656)
+
+  The widest hole the #3642 capstone measured. That guard reports how many SDK
+  calls match only a `**` prefix family rather than a resolvable route, and the
+  answer was 60 of ~196 — with 54 on `* /auth/**`, the largest and most
+  security-relevant namespace in the client. `auth.me` builds
+  `/api/v1/auth/get-session`; a prefix claim cannot tell you better-auth still
+  calls it that, and better-auth is a third-party dependency on its own release
+  cadence (this repo already chased its 1.7 column drift in #3624 / #3647).
+
+  `plugin-auth` mounts it with a single catch-all, so there are no per-route
+  registration calls to capture the way tranche 3 captured
+  `registerStorageRoutes`. The seam is `auth.api`: every better-auth endpoint
+  carries `.path` and `.options.method`, so a live instance is the route table.
+
+  `auth-route-ledger.ts` reads it, in two halves checked differently on purpose:
+
+  - **55 reviewed rows** — every route the SDK calls, each naming its client
+    method, checked strictly against the live table. This is the rename detector.
+  - **129-path mounted-surface inventory** — checked for exact equality both
+    ways, so a version bump that adds publicly-mounted auth endpoints becomes a
+    reviewable CI diff. Machine-maintained rather than reviewed prose: demanding
+    a rationale for all 129 would make every better-auth upgrade a hundred-row
+    review and the ledger would rot into rubber-stamping.
+
+  Enumeration is config-dependent, so the inventory is pinned at the
+  configuration enabling every plugin the SDK targets — the maximal surface —
+  with the participating `OS_*` env vars cleared so a developer's shell cannot
+  produce a spurious diff. Mutation-checked: renaming a ledgered route fails the
+  suite naming it.
+
+  The capstone guard now includes this ledger in its union and prefers exact rows
+  over wildcard families when matching — without that ordering fix every
+  `/auth/*` URL would still have been absorbed by `* /auth/**` and the new ledger
+  would have changed nothing. Wildcard-only matches fall **60 → 3**; the ratchet
+  moves with them. What remains is `* /ai/**`, whose routes `service-ai` builds
+  at plugin start.
+
+  No runtime change: a ledger, a guard, and the header/audit-doc notes.
+
+- 57a3bb3: fix(automation,approvals): the run-resume route is gated by the node the run is parked on (#3801)
+
+  `POST /api/v1/automation/:name/runs/:runId/resume` forwarded a caller-supplied
+  `{ inputs, output, branchLabel }` straight into `AutomationEngine.resume`, and
+  `resumeInternal` validated **machine state only** — the concurrent-resume latch,
+  the run exists, the flow exists, the suspended node still exists. Nothing asked
+  _who was calling_.
+
+  Approval nodes suspend and resume through exactly that mechanism. So a resume
+  carrying `branchLabel: 'approve'` walked the approve edge with **no approver
+  check, no `sys_approval_action` row and no status mirror** — the
+  `sys_approval_request` row and the run then disagreed permanently. The only
+  thing standing between the route and the approvals rules was convention; the
+  showcase spelled it out in a comment ("decide via the approvals API, never a raw
+  engine `resume`"), and a comment in an example is not an access control.
+
+  Removing the route was not the fix: it is load-bearing for **screen flows** —
+  the UI flow-runner posts `{ inputs }` there to advance a paused `screen` node.
+  The gate therefore keys on **what the run is parked on**:
+
+  - `ActionDescriptor.resumeAuthority` (`'any'` | `'service'`, default `'any'`) —
+    a pausing node declares who may continue it. `approval` declares `'service'`.
+  - The engine refuses a `'service'` suspension unless the signal carries
+    `RESUME_AUTHORITY_SERVICE` (`@objectstack/spec/contracts`), a **symbol** the
+    owning service stamps in-process — a JSON body can never produce one, so the
+    transport cannot forge it. `ApprovalService` stamps it on the tail of a
+    decision it has already authorized and recorded.
+  - The gate follows a **subflow** pause down to the child the signal would
+    actually reach, so resuming the parent is not a way around it.
+  - Refusal returns `{ success: false, code: 'forbidden' }` and the route answers
+    **403**. Nothing is consumed — the request stays pending and the run stays
+    parked, so the real decision still lands.
+
+  `screen` and `wait` pauses are unchanged, as is every path that already went
+  through the approvals API. What changes for consumers:
+
+  - **FROM:** finishing an approval with
+    `client.automation.resume(flow, runId, { branchLabel: 'approve' })`
+    **TO:** `client.approvals.approve(requestId, …)` (or `.reject` / `.recall`).
+    The old call now answers 403 and changes nothing.
+  - Registering your own pausing node whose continuation belongs to a service
+    rather than to whoever holds the run id? Declare `resumeAuthority: 'service'`
+    on its descriptor and stamp `RESUME_AUTHORITY_SERVICE` on the signal from that
+    service.
+
+  A suspension now records the node type that produced it
+  (`SuspendedRun.nodeType` / `sys_automation_run.node_type`), captured at suspend
+  time so a flow republished mid-pause cannot re-type the node out from under the
+  gate; rows written before this fall back to the flow definition.
+
+- 1b717e5: test(client): close the route audit's reverse direction — every SDK URL must match a route some surface mounts (#3642)
+
+  The capstone of the #3563 route audit. The dispatcher (#3563), REST (#3587) and
+  service-mount (#3636) ledgers all run server → client: enumerate what a surface
+  mounts, demand a reviewed disposition, and for `sdk` rows demand the named
+  client method exists. None of them asked the reverse question — does the URL
+  the client _builds_ match anything a server _mounts_? — so a method could name
+  a real function, carry a green ledger row, and 404 everywhere.
+
+  That shipped four times, found one at a time by hand: `analytics.explain` and
+  `analytics.meta` (#3584), `meta.getView` (#3611), and `i18n.getTranslations` /
+  `getFieldLabels` (#3636) — the last pair having carried green `sdk` rows since
+  tranche 1.
+
+  `client-url-conformance.test.ts` drives every method on a real client with a
+  recording `fetch` and matches each captured URL against the union of all four
+  ledgers. A real drive rather than a hand-written "method X targets route Y"
+  table, because such a table is an assertion _about_ the code that the code can
+  drift away from — the exact failure being fixed. Mutation-checked: re-injecting
+  the #3636 dialect bug fails the suite.
+
+  The sweep's own completeness is asserted, since that is what rots silently — a
+  new method must be driven or declared `NON_HTTP` with a reason; a driven method
+  emitting zero requests fails (stale placeholder args are how a sweep quietly
+  stops covering anything); a URL containing `undefined` fails; and the
+  `__api-endpoint` `(unmatched)` catch-all is excluded from the pattern set so it
+  cannot match everything and make the suite vacuous.
+
+  196 of ~219 methods matched. Two bounds are reported rather than papered over:
+  `/api/v1/cloud/*` (23 `projects.*` methods) belongs to the sibling `cloud` repo
+  and is exempt by prefix, bounded so no other namespace can use it (#3655); and
+  60 of ~196 matched calls rest only on a `**` prefix claim rather than a
+  resolvable route — 54 of those on `* /auth/**` — a count the guard ratchets so
+  it can only shrink (#3656).
+
+  No runtime change: this is a guard plus the ledger-header and audit-doc notes
+  recording what it does and does not cover.
+
+- 16adb3c: fix(rest,client)!: reconcile the two REST↔client mismatches the #3587 audit
+  ledgered (#3610, #3611)
+
+  **#3610 — `POST /api/v1/packages` publish-vs-install collision.** The REST
+  package registrar claimed the bare `POST /packages` for _marketplace publish_
+  (`{manifest, metadata}`), while the dispatcher packages domain gives the same
+  verb+path _install_ semantics — and REST registers first in the production
+  stack (first-match-wins), so every `client.packages.install` call landed on
+  the publish handler and 400'd. Marketplace publish moves to
+  `POST /api/v1/packages/publish` (breaking for direct callers; a repo-wide and
+  objectui-wide sweep found zero). The dispatcher's `POST /packages/:id/publish`
+  (ADR-0033 draft publish) is two segments — different shape, no clash. The
+  dispatcher already writes both stores on install (`protocol.installPackage`)
+  and fully uninstalls on DELETE (`protocol.deletePackage`), so the remaining
+  REST GET/GET/DELETE shadows stay — they are compatible.
+
+  **#3611 — UI view dialect split.** `meta.getView` spoke the `?type=` query
+  dialect that only the dispatcher `/ui` domain understands; the REST surface
+  mounts only the path form `/ui/view/:object/:type`, so the query form 404'd
+  wherever REST serves (e.g. project-scoped bases). The client now sends the
+  path form both surfaces accept; a URL-pinning test keeps it that way.
+
+  REST route ledger updated: the two `mismatch` rows are resolved (packages
+  publish row is `server-only` publisher tooling; the ui row flips to `sdk`).
+  The ledger now carries zero mismatches.
+
+- 3d5f726: feat(rest): route audit tranche 2 — the REST surface gets its own ledger +
+  conformance guard (#3587, follow-up to #3563)
+
+  The dispatcher tranche closed its 27 gaps and guards them (#3569…#3579), but
+  `@objectstack/rest` mounts a second, larger surface the client also reaches —
+  89 routes, never audited. `rest-route-ledger.ts` now records a reviewed
+  disposition for every one of them (38 sdk, 43 gap, 3 server-only, 3 public,
+  2 mismatch), and the guard is real enumeration on both sources: RouteManager
+  routes via the `getRoutes()` introspection seam, and the two
+  RouteManager-bypassing registrars (`package-routes.ts`,
+  `external-datasource-routes.ts`) via captured mock-server registrations — no
+  pinned-by-hand list. The client half
+  (`rest-route-ledger-coverage.test.ts`) verifies every claimed method exists;
+  a 43-gap ratchet is wired into CI. Every guard direction was negative-tested.
+
+  Notable dispositions the audit surfaced: `POST /api/v1/packages` is a
+  publish/install shape collision between REST and the dispatcher (REST
+  registers first and wins) — ledgered `mismatch`; the REST
+  `GET /ui/view/:object/:type` path dialect is unreachable by the SDK's
+  query-param dialect — ledgered `mismatch`; `service-storage` /
+  `service-i18n` mount a third route surface outside `@objectstack/rest`,
+  explicitly out of scope here and tracked under #3587.
+
+  No behavior change — data + tests only, plus a scope-note refresh in the
+  runtime ledger pointing at the new REST ledger.
+
+- f1a8114: fix(client,service-i18n): ledger the autonomously-mounted service routes, and repair the two i18n calls that reached nothing (#3636)
+
+  Tranche 3 of the #3563 route audit — the last un-audited server surface. The
+  dispatcher ledger (#3563) and the REST ledger (#3587) each stop at their own
+  package boundary, and two services mount routes outside both: they reach for
+  the `http-server` service and register straight on `IHttpServer`, so neither
+  `RouteManager` nor `RestServer.getRoutes()` has ever seen them. That left the
+  SDK's entire storage surface, plus all of i18n, in the pre-#3563 posture:
+  expressed, working, guarded by nothing.
+
+  **Ledgers + guards.** `storage-route-ledger.ts` (10 routes) and
+  `i18n-route-ledger.ts` (3) sit next to the registrars that mount them, each
+  enumerated for real — the registrar runs against a capturing mock
+  `IHttpServer` and its registration calls _are_ the route set, so a new route
+  lands with a reviewed disposition or fails CI. The client half is
+  `packages/client/src/service-route-ledger-coverage.test.ts`; ledgers cross the
+  boundary as relative source imports, never a service→client package edge.
+
+  **Two wire-level 404s fixed.** `i18n.getTranslations` sent
+  `/i18n/translations?locale=xx` and `i18n.getFieldLabels` sent
+  `/i18n/labels/:object?locale=xx`, while every serving surface — service-i18n's
+  mounts, the dispatcher's HTTP mounts, and the `plugin-rest-api.zod.ts`
+  contract — mounts only the path form. Neither call could ever be answered.
+  Both had carried a green `sdk` row in the dispatcher ledger since tranche 1,
+  because that guard asks whether the client _method_ exists, not whether it
+  speaks a URL anything mounts. The client now sends the path dialect, the same
+  resolution #3611 gave `meta.getView`, and a new suite drives the real client
+  at a real router so a revert cannot pass quietly.
+
+  **One response-shape fix.** service-i18n's success bodies omitted the
+  `success` flag that `ObjectStackClient.unwrapResponse` keys on, so the SDK
+  returned the raw `{ data: … }` wrapper against that provider while returning
+  the declared unwrapped shape against the dispatcher — one method, two shapes,
+  decided by which plugin mounted the route. Its three handlers now emit the
+  `{ success: true, data }` envelope the `i18n` route group declares. `data` did
+  not move, so direct body readers are unaffected.
+
+  Storage audited clean: 7 routes SDK-expressed, 3 reviewed `server-only` (the
+  browser capability URL objectql stamps into file-field payloads, and the two
+  local-driver loopbacks). The chunked-upload family, flagged for triage, turned
+  out fully expressed. Both ledgers ratchet `gap` and `mismatch` at zero.
+
+  Filed, not fixed: `GET {base}/_local/file/:key` is built by three call sites
+  and mounted by none (#3641); the cross-surface URL conformance guard that would
+  have caught all of the above mechanically is the capstone (#3642).
+
+- 48d5a1c: Route ledger + conformance guard for the dispatcher↔client surface (#3563)
+
+  #3528's root-cause class — a route that exists and works while
+  `@objectstack/client` has no way to express it — now has an inventory and a
+  ratchet. `route-ledger.ts` records the audited disposition of every dispatcher
+  route (sdk / gap / server-only / public / dynamic / mismatch);
+  The guard is split along the package boundary (a runtime→client edge is a
+  build cycle): runtime's `route-ledger.conformance.test.ts` fails when a
+  dispatcher domain lands with no ledger entry and ratchets the audited gap
+  count (27 at PR-1); client's `route-ledger-coverage.test.ts` fails when a
+  ledger entry claims a client method that doesn't exist. Findings and follow-up slicing live
+  in `docs/audits/2026-07-dispatcher-client-route-coverage.md`. No runtime
+  behavior change.
+
+- 6633337: fix(service-storage): emit the declared success envelope on all eight routes (#3689)
+
+  #3675 moved the **error** bodies of the autonomously-mounted `/api/v1/storage/*`
+  routes into the declared `{ success: false, error: { code, message } }`
+  envelope and deliberately stopped there: unlike the errors, the success bodies
+  were not an additive fix. They were three shapes, none of them carrying the
+  `success` flag `BaseResponseSchema` declares and
+  `ObjectStackClient.unwrapResponse` keys on —
+
+  | Route(s)                                                                                                                     | Was                 | Now                                |
+  | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ---------------------------------- |
+  | the six upload routes (`/upload/presigned`, `/upload/complete`, `/upload/chunked`, `…/chunk/:i`, `…/complete`, `…/progress`) | `{ data: {…} }`     | `{ success: true, data: {…} }`     |
+  | `GET /files/:fileId/url`                                                                                                     | `{ url }`           | `{ success: true, data: { url } }` |
+  | `PUT /_local/raw/:token`                                                                                                     | `{ ok: true, key }` | `{ success: true, data: { key } }` |
+
+  — while `storage.zod.ts` declared every one of them as
+  `BaseResponseSchema.extend({ data })`, and `PresignedUrlResponse` and friends
+  are `z.infer`red from those schemas and published as the SDK's return types.
+  The declaration said `success: boolean`; the wire said nothing. It broke
+  nothing only because the storage SDK methods returned `res.json()` raw —
+  `any`, so TypeScript could not see the gap and nothing relied on the
+  declaration. That is the posture i18n was in before #3636, right up until
+  something did rely on it.
+
+  **The payload moved on two routes, and that is the breaking part.** A direct
+  HTTP caller reading `body.url` from `GET /files/:fileId/url` must now read
+  `body.data.url`; one reading `body.ok`/`body.key` from the local adapter's
+  `PUT /_local/raw/:token` loopback must read `body.success`/`body.data.key`.
+  `ok` is dropped rather than kept beside `success` — it was a second, private
+  word for the same thing. The six upload routes are additive: callers already
+  destructure `.data`, and a new sibling key changes nothing.
+
+  Every in-repo consumer was fixed first, so the two repos are not coupled by
+  merge order:
+
+  - `client.storage.getDownloadUrl()` now reads through `unwrapResponse`, the
+    SDK's one standard envelope seam — which strips the envelope when present
+    and returns the body untouched when not, so a client either side of this
+    server change resolves the same URL. The other storage methods hand back the
+    whole envelope by design and were already correct.
+  - The console's two attachment openers (`RecordAttachmentsPanel`,
+    `ApprovalsInboxPage`) already read `body?.url ?? body?.data?.url`; objectui
+    gains tests pinning that tolerance as deliberate.
+
+  Two schemas that were missing are now declared — `FileDownloadUrlResponse` and
+  `RawUploadResponse` — and `getDownloadUrl` joins `StorageApiContracts`, which
+  it had never been in. That absence is how its shape drifted outside the
+  envelope unnoticed. The two `_local/raw/:token` routes stay out of the
+  registry on purpose: they are the local adapter's own presign loopback,
+  ledgered `server-only` and addressed as an opaque signed URL rather than as an
+  API.
+
+  `success-envelope.conformance.test.ts` holds the new shape in place the way
+  `error-envelope.conformance.test.ts` holds the error one: every route is
+  driven and its body parsed against the **declared schema** it answers to — not
+  a restatement — the retired shapes are asserted dead, and the module source is
+  scanned so a new route cannot bypass the `sendOk` helper. As with #3675, the
+  route ledgers cannot catch this class of drift: they audit which routes exist
+  and whether the SDK can address them, not what comes back.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [4727eb8]
+- Updated dependencies [f63cd09]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [201b31f]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [587fc91]
+- Updated dependencies [1986594]
+- Updated dependencies [ad4af62]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [84e7be9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [8f9689f]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [5f9a987]
+- Updated dependencies [db02d47]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [376a061]
+- Updated dependencies [7c7e246]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [c2d9098]
+- Updated dependencies [a227ed7]
+- Updated dependencies [9613396]
+- Updated dependencies [e47b342]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [f5a2320]
+- Updated dependencies [deb538f]
+- Updated dependencies [5b89711]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [763931e]
+- Updated dependencies [de9af8a]
+- Updated dependencies [c4df271]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [dac6a08]
+- Updated dependencies [394b7a1]
+- Updated dependencies [677b591]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [5b79a34]
+- Updated dependencies [c757854]
+- Updated dependencies [0045682]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [67452d1]
+- Updated dependencies [0fc6219]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [f163028]
+- Updated dependencies [f07808c]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [32ff033]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [93f267f]
+- Updated dependencies [0024abf]
+- Updated dependencies [acbf364]
+- Updated dependencies [7687f7b]
+- Updated dependencies [1659072]
+- Updated dependencies [abceb0d]
+- Updated dependencies [0c302a7]
+- Updated dependencies [6633337]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [503be86]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [11949fc]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [57bab76]
+- Updated dependencies [b90086a]
+- Updated dependencies [b95577a]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [69f1dfd]
+  - @objectstack/spec@17.0.0-rc.0
+  - @objectstack/core@17.0.0-rc.0
+
 ## 16.1.0
 
 ### Patch Changes
