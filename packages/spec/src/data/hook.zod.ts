@@ -209,6 +209,13 @@ export const HookContextSchema = lazySchema(() => z.object({
   /**
    * Execution Session
    * Contains authentication and organization/tenancy information.
+   *
+   * WHO is calling. Absent when the operation carried no identity envelope at
+   * all — a bare-kernel / programmatic call — which is why hooks that gate on
+   * the caller (the attachment access gate, for one) skip when it is missing.
+   * Write PROVENANCE deliberately lives outside it, in {@link provenance}, so
+   * an identity-less writer can still be attributed without manufacturing a
+   * caller that was never there (#3712).
    */
   session: z.object({
     userId: z.string().optional(),
@@ -228,11 +235,30 @@ export const HookContextSchema = lazySchema(() => z.object({
     roles: z.array(z.string()).optional(),
     accessToken: z.string().optional(),
     isSystem: z.boolean().optional().describe('True when the call was made with an elevated system context (engine self-writes)'),
-    flowRunId: z.string().optional().describe('Id of the automation flow run performing this write, when it originates from a flow data node. Provenance only — grants nothing, no security middleware keys on it. Lets a hook tell the run that OWNS some externalized state (e.g. a pending approval) from an unrelated caller (#3456).'),
     skipTriggers: z.boolean().optional().describe('True when record-change automation (flow triggers) must be suppressed for this write — e.g. package seed replay. Lifecycle hooks still run.'),
     skipAutomations: z.boolean().optional().describe('True when metadata-bound automation hooks must be suppressed for this write — e.g. data import with "run automations" unchecked, or import undo. Implies skipTriggers; code-registered system hooks (audit, security) still run.'),
   }).optional().describe('Current session context'),
-  
+
+  /**
+   * Write Provenance
+   * WHAT produced this write, as opposed to WHO is calling ({@link session}).
+   *
+   * Server-stamped and never client-supplied. It is not an identity: nothing
+   * here is evaluated by any security middleware, and it neither widens nor
+   * narrows what the write may touch. It exists so a hook can tell "the actor
+   * that OWNS some externalized state" from "an unrelated caller".
+   *
+   * Kept OUT of `session` on purpose. A writer can have provenance and no
+   * identity at all — a schedule-triggered flow run resolves no principal — and
+   * folding the two together would have forced such a run to present an empty
+   * session, silently turning "no caller" into "an anonymous caller" for every
+   * hook that gates on `session` being absent (#3712).
+   */
+  provenance: z.object({
+    flowRunId: z.string().optional().describe('Id of the automation flow run performing this write, when it originates from a flow data node. Lets a hook recognize the run that OWNS state that run itself opened — the approvals record lock exempts the run holding the pending request (#3456).'),
+  }).optional().describe('Server-stamped write provenance (never client-supplied, never an authorization input)'),
+
+
   /**
    * Transaction Handle
    * If the operation is part of a transaction, use this handle for side-effects.

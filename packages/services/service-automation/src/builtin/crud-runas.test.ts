@@ -188,22 +188,50 @@ describe('resolveRunDataContext (#1888 unit)', () => {
     });
   });
 
-  it('returns undefined for a user-mode run with no user (e.g. schedule trigger)', () => {
+  it('returns undefined for a user-mode run with no user AND no run id', () => {
     expect(resolveRunDataContext({ runAs: 'user' })).toBeUndefined();
     expect(resolveRunDataContext(undefined)).toBeUndefined();
+  });
+
+  // #3712 — a user-mode run with no user still HAS a run. It carries the run id
+  // and nothing else, so it becomes attributable without acquiring a principal.
+  it('maps a user-less run WITH a run id to a provenance-only context', () => {
+    const ctx = resolveRunDataContext({ runAs: 'user', flowRunId: 'run_1' });
+    expect(ctx).toEqual({ flowRunId: 'run_1' });
+    // Exhaustive on purpose: every field below is one the security middleware
+    // keys on. Any of them appearing here would change the run's authorization,
+    // which this fix must not do — the #1888 unscoped posture is unchanged.
+    expect(Object.keys(ctx!)).toEqual(['flowRunId']);
+    for (const key of ['isSystem', 'userId', 'positions', 'permissions', 'tenantId']) {
+      expect(ctx, `provenance-only context leaked '${key}' — it now presents a principal`)
+        .not.toHaveProperty(key);
+    }
   });
 });
 
 /**
  * #1888 FOLLOW-UP — the user-less fail-open. A schedule-triggered run carries no
  * trigger user, so an effective `runAs:'user'` (the default) resolves no identity
- * → CRUD nodes omit `options.context` → the data security middleware skips → the
+ * → CRUD nodes present no principal → the data security middleware skips → the
  * run executes UNSCOPED (effectively elevated). Denying would break legitimate
  * scheduled CRUD and silently elevating would hide the author's intent, so the
  * engine keeps the run working but makes the fail-open AUDIBLE: one clear warning
  * per run, recommending `runAs:'system'` (ADR-0049). These tests pin both the
  * (unchanged, non-breaking) data behavior AND the new warning.
  */
+
+/**
+ * The op ran with NO principal — the #1888 unscoped posture. Since #3712 such a
+ * run DOES carry a context, but a provenance-only one: the run id and nothing
+ * the security middleware keys on. Asserting "no context at all" would pin the
+ * transport instead of the property that matters.
+ */
+function expectUnscoped(ctx: any, op: string): void {
+  for (const key of ['isSystem', 'userId', 'positions', 'permissions', 'tenantId']) {
+    expect(ctx?.[key], `${op} should be unscoped — it presented '${key}'`).toBeUndefined();
+  }
+}
+
 function recordingLogger(): { logger: any; warns: string[] } {
   const warns: string[] = [];
   const l: any = { info() {}, warn: (m: string) => warns.push(m), error() {}, debug() {} };
@@ -224,9 +252,13 @@ describe('schedule/user-less runs surface the unscoped fail-open (#1888 follow-u
     const res = await engine.execute('sched', { event: 'schedule', params: { jobId: 'j1' } });
     expect(res.success).toBe(true);
 
-    // Non-breaking: the run still executes, but every data op is UNSCOPED (no ctx).
+    // Non-breaking: the run still executes, and every data op is UNSCOPED — it
+    // presents no principal, only its own run id (#3712).
     expect(calls.length).toBeGreaterThan(0);
-    for (const c of calls) expect(c.ctx, `${c.op} should be unscoped (no identity)`).toBeUndefined();
+    for (const c of calls) {
+      expectUnscoped(c.ctx, c.op);
+      expect(c.ctx?.flowRunId, `${c.op} carried no run provenance`).toBeTruthy();
+    }
 
     // ...and the fail-open is AUDIBLE: exactly one runAs warning, naming the flow + the fix.
     const w = runAsWarns(warns);
@@ -374,7 +406,7 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
     engine.setUserGrantsResolver(() => { called++; return { positions: [], permissions: [] }; });
     await engine.execute('sched', { event: 'schedule' });
     expect(called).toBe(0);
-    for (const c of calls) expect(c.ctx, `${c.op} should stay unscoped`).toBeUndefined();
+    for (const c of calls) expectUnscoped(c.ctx, c.op);
   });
 
   it('fail-safe: a resolver error warns and keeps the bare user — never elevates', async () => {

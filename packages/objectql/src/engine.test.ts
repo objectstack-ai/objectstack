@@ -527,6 +527,77 @@ describe('ObjectQL Engine', () => {
         });
     });
 
+    /**
+     * #3712 — write PROVENANCE (what produced the write) is surfaced separately
+     * from the SESSION (who is calling), because a writer can have the first and
+     * none of the second: a schedule-triggered flow run resolves no principal but
+     * still owns its writes. Folding the two together would have forced such a run
+     * to present an empty session, silently converting "no caller" into "an
+     * anonymous caller" for every hook that skips when `ctx.session` is absent.
+     */
+    describe('hook provenance is separate from the hook session (#3712)', () => {
+        beforeEach(async () => {
+            engine.registerDriver(mockDriver, true);
+            await engine.init();
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: {} } as any);
+        });
+
+        const capture = () => {
+            const seen: { session?: any; provenance?: any } = {};
+            engine.registerHook('beforeInsert', async (ctx: any) => {
+                seen.session = ctx.session;
+                seen.provenance = ctx.provenance;
+            }, { object: 'task' });
+            return seen;
+        };
+
+        it('a provenance-only context yields provenance and NO session', async () => {
+            const seen = capture();
+
+            await engine.insert('task', { title: 'x' }, { context: { flowRunId: 'run_1' } as any });
+
+            expect(seen.provenance).toEqual({ flowRunId: 'run_1' });
+            // The whole point: `!ctx.session` still means "no identity envelope
+            // was supplied", so caller-gating hooks keep skipping for this write.
+            expect(seen.session).toBeUndefined();
+        });
+
+        it('an identity-bearing run carries both', async () => {
+            const seen = capture();
+
+            await engine.insert('task', { title: 'y' }, { context: { userId: 'u1', flowRunId: 'run_2' } as any });
+
+            expect(seen.provenance).toEqual({ flowRunId: 'run_2' });
+            expect(seen.session).toMatchObject({ userId: 'u1' });
+            // Provenance is NOT identity — it must not reappear inside the session.
+            expect(seen.session).not.toHaveProperty('flowRunId');
+        });
+
+        it('no context at all yields neither', async () => {
+            const seen = capture();
+
+            await engine.insert('task', { title: 'z' });
+
+            expect(seen.provenance).toBeUndefined();
+            expect(seen.session).toBeUndefined();
+        });
+
+        it('an anonymous transport request still yields a session (it has a caller)', async () => {
+            // The shape resolveExecutionContext builds for a signed-out HTTP
+            // request: no userId, but a resolved (empty) principal. That is an
+            // anonymous CALLER, not the absence of one — hooks must keep gating it.
+            const seen = capture();
+
+            await engine.insert('task', { title: 'w' }, {
+                context: { isSystem: false, positions: [], permissions: [] } as any,
+            });
+
+            expect(seen.session).toBeDefined();
+            expect(seen.session.userId).toBeUndefined();
+            expect(seen.provenance).toBeUndefined();
+        });
+    });
+
     describe('execution context via the trailing options arg (read methods)', () => {
         // Regression: reads took context inside the query while writes took it in
         // a trailing options arg — so `find(obj, q, { context })` silently dropped

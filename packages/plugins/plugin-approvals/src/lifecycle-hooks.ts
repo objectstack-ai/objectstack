@@ -106,7 +106,13 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
     // (never client-supplied, like `isSystem`) and it grants nothing by itself —
     // the only write it permits is to the one record this very run already holds
     // a pending request against.
-    const writerRun = (ctx?.session as any)?.flowRunId;
+    //
+    // Read off `provenance`, not `session`: provenance says WHAT produced the
+    // write, and a run can own its writes while resolving no principal at all.
+    // A schedule-triggered run is exactly that — it reaches here with NO
+    // session, and that shape is the one that used to die on its own lock
+    // (#3712).
+    const writerRun = (ctx?.provenance as any)?.flowRunId;
     if (writerRun && pending.flow_run_id && String(writerRun) === String(pending.flow_run_id)) return;
 
     const config = parseJson<any>(pending.node_config_json, {});

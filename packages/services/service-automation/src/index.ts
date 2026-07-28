@@ -52,7 +52,7 @@ export type { AutomationServicePluginOptions } from './plugin.js';
 // ObjectQL `context` its data nodes pass — `system` → elevated/RLS-bypassing,
 // `user` → the triggering user. Exported for hosts building custom data nodes.
 export { resolveRunDataContext } from './runtime-identity.js';
-export type { RunDataContext } from './runtime-identity.js';
+export type { RunDataContext, RunIdentityContext, RunProvenanceContext } from './runtime-identity.js';
 
 // Built-in node executors (ADR-0018). These are seeded by AutomationServicePlugin
 // and exported for advanced hosts that build a custom engine. They are functions,

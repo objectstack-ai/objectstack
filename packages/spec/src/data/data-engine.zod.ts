@@ -54,8 +54,20 @@ export const DataEngineSortSchema = lazySchema(() => z.union([
  * an optional ExecutionContext for identity, tenant, and transaction propagation.
  */
 export const BaseEngineOptionsSchema = lazySchema(() => z.object({
-  /** Execution context (identity, tenant, transaction) */
-  context: ExecutionContextSchema.optional(),
+  /**
+   * Execution context (identity, tenant, transaction) — any SUBSET of the
+   * envelope.
+   *
+   * `ExecutionContextSchema` gives `positions`/`permissions`/`isSystem`
+   * parse-time defaults, which makes them REQUIRED in its inferred output
+   * type. On a caller-supplied option that asserts something untrue: that
+   * every data-engine context carries a principal. Callers routinely pass a
+   * slice — `{ isSystem: true }` for a system read — and a flow run that
+   * resolves no identity passes provenance alone (`{ flowRunId }`, #3712), a
+   * context deliberately carrying no principal at all. `.partial()` states the
+   * real contract: supply what you have, the engine reads what it needs.
+   */
+  context: ExecutionContextSchema.partial().optional(),
 }));
 
 // ==========================================================================

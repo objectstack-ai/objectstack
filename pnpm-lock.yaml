@@ -1252,6 +1252,9 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../../services/service-automation

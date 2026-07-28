@@ -20,8 +20,8 @@ Both halves are now closed.
 
 **Prevention — the owning run may write its own record.** The automation engine
 stamps `flowRunId` onto the run context at setup, alongside `runAs`, and it
-travels with every data node's ObjectQL context into `ctx.session`. The lock hook
-exempts a write whose `flowRunId` matches the pending request's `flow_run_id`.
+travels with every data node's ObjectQL context into `ctx.provenance`. The lock
+hook exempts a write whose `flowRunId` matches the pending request's `flow_run_id`.
 It is keyed on run identity rather than elevation on purpose: a `runAs:'user'`
 run stays fully RLS-scoped while it writes. `flowRunId` is pure provenance —
 server-constructed like `isSystem`, never client-supplied, evaluated by no
@@ -49,9 +49,9 @@ entries under one id, so every suspend-then-finish run — every approval, scree
 and wait flow — reported itself as `paused` forever, both on the Runs
 observability surface and to this sweep.
 
-Residual, deliberately not changed here: a `runAs:'user'` run with no trigger
-user (a schedule) passes no ObjectQL context at all, so it carries no
-`flowRunId` and is still subject to the lock. Manufacturing a context just to
-carry the run id would flip that run from its documented unscoped fail-open
-(#1888) to baseline-member RLS — a separate, larger change. The sweep is what
-recovers that shape.
+One shape was left out here and closed separately in #3712: a `runAs:'user'` run
+with no trigger user (a schedule) resolved no ObjectQL context at all, so it
+carried no `flowRunId` and stayed subject to the lock. It now passes a
+provenance-only context — the run id and nothing the security middleware keys on
+— so it is attributable without acquiring a principal, and its documented
+unscoped posture (#1888) is unchanged.

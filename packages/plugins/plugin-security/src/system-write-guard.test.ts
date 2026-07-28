@@ -75,6 +75,15 @@ describe('assertEngineOwnedWriteAllowed (ADR-0103)', () => {
         expect(() => assertEngineOwnedWriteAllowed(engineOwned, op, undefined)).not.toThrow();
       }
     });
+
+    // #3712 — a schedule-triggered flow run carries only its run id. The guard
+    // keys on the PRINCIPAL, so provenance alone reads exactly like no context:
+    // the run id neither admits nor refuses a write on its own.
+    it('treats a provenance-only context exactly like no context', () => {
+      for (const op of ['insert', 'update', 'delete']) {
+        expect(() => assertEngineOwnedWriteAllowed(engineOwned, op, { flowRunId: 'run_1' })).not.toThrow();
+      }
+    });
   });
 
   describe('the writable set (system + userActions)', () => {

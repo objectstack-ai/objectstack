@@ -1570,7 +1570,22 @@ describe('record-lock hook (node era)', () => {
         input: { id: 'opp1', data: { amount: 200 } },
         // Neither elevated nor admin — the exemption rides on run identity
         // alone, so a `runAs:'user'` run stays RLS-scoped while it writes.
-        session: { isSystem: false, positions: [], userId: 'u1', flowRunId: 'run_1' },
+        session: { isSystem: false, positions: [], userId: 'u1' },
+        provenance: { flowRunId: 'run_1' },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  // #3712 — the residual #3703 left open. A schedule-triggered run resolves NO
+  // principal, so it arrives with no session at all; provenance is the only
+  // thing it carries, and the exemption must key on that rather than on an
+  // identity the run does not have.
+  it('allows an identity-less (schedule-triggered) owning run — no session at all', async () => {
+    await expect(
+      engine.fire('beforeUpdate', {
+        object: 'opportunity',
+        input: { id: 'opp1', data: { amount: 200 } },
+        provenance: { flowRunId: 'run_1' },
       }),
     ).resolves.toBeUndefined();
   });
@@ -1580,7 +1595,18 @@ describe('record-lock hook (node era)', () => {
       engine.fire('beforeUpdate', {
         object: 'opportunity',
         input: { id: 'opp1', data: { amount: 200 } },
-        session: { isSystem: false, positions: [], userId: 'u1', flowRunId: 'run_other' },
+        session: { isSystem: false, positions: [], userId: 'u1' },
+        provenance: { flowRunId: 'run_other' },
+      }),
+    ).rejects.toThrow(/RECORD_LOCKED/);
+  });
+
+  it('still blocks an identity-less caller with no provenance at all', async () => {
+    // The bare-kernel / no-context write. Nothing to match, nothing exempted.
+    await expect(
+      engine.fire('beforeUpdate', {
+        object: 'opportunity',
+        input: { id: 'opp1', data: { amount: 200 } },
       }),
     ).rejects.toThrow(/RECORD_LOCKED/);
   });
@@ -1593,7 +1619,8 @@ describe('record-lock hook (node era)', () => {
       engine.fire('beforeUpdate', {
         object: 'opportunity',
         input: { id: 'opp1', data: { amount: 200 } },
-        session: { isSystem: false, positions: [], userId: 'u1', flowRunId: 'run_1' },
+        session: { isSystem: false, positions: [], userId: 'u1' },
+        provenance: { flowRunId: 'run_1' },
       }),
     ).rejects.toThrow(/RECORD_LOCKED/);
   });

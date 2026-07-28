@@ -129,6 +129,15 @@ describe('DelegatedAdminGate — tenant admins and outsiders', () => {
     })).rejects.toThrow(/authenticated administrator/);
   });
 
+  // #3712 — a schedule-triggered flow run reaches the data layer carrying only
+  // its run id. That is PROVENANCE, not a principal: it must not buy the write
+  // anything the same write would not get with no context at all.
+  it('a provenance-only context is still principal-less — no run id opens this gate', async () => {
+    await expect(insertAssignment({ flowRunId: 'run_1' }, {
+      user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es',
+    })).rejects.toThrow(/authenticated administrator/);
+  });
+
   it('reads and non-governed objects are untouched', async () => {
     await expect(h.gate.assert({ object: 'sys_user_position', operation: 'find', context: {} }))
       .resolves.toBeUndefined();

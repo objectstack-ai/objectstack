@@ -75,7 +75,9 @@ export interface AutomationContext {
      * middleware keys on it. A hook uses it to recognize writes made BY a given
      * run — the approvals record lock (#3456) lets the run that opened a pending
      * approval write its own target record, which it otherwise cannot tell apart
-     * from an unrelated user's edit.
+     * from an unrelated user's edit. A run with no resolvable principal (a
+     * schedule) carries this and nothing else into the data engine, so it is
+     * attributable without presenting an identity it does not have (#3712).
      *
      * Callers do NOT set this — the engine derives it, exactly like {@link runAs}.
      */

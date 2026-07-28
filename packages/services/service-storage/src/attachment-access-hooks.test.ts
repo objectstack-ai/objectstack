@@ -100,6 +100,21 @@ describe('attachment access — beforeInsert (parent visibility + provenance)', 
     await expect(beforeInsert(insertCtx({ parent_object: 'x', parent_id: 'r' }, {}))).resolves.toBeUndefined();
   });
 
+  // #3712 — a schedule-triggered flow run has provenance but no caller. This
+  // gate reads `!ctx.session` as "no identity envelope was supplied", so write
+  // provenance is deliberately kept OUT of the session: had such a run
+  // presented an empty session instead, this bypass would have silently become
+  // a 403 and narrowed the #1888 fail-open for attachments alone.
+  it('still bypasses a flow run that carries provenance but no session', async () => {
+    const { beforeInsert } = install({ sharing: { canEdit: async () => false } });
+    await expect(
+      beforeInsert({
+        ...insertCtx({ parent_object: 'x', parent_id: 'r' }, {}),
+        provenance: { flowRunId: 'run_1' },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   // #2970 item 3 — with a sharing service present, attach requires EDIT
   // (canEdit), not merely read visibility.
   it('with sharing: rejects attaching when the caller cannot EDIT the parent (even if readable)', async () => {

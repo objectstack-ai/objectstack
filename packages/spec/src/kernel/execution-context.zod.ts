@@ -205,6 +205,14 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * (#3456) uses it to let the run that opened a pending approval still write
    * its own target record, which `isSystem` cannot express for a
    * `runAs:'user'` run without elevating it.
+   *
+   * It may be the ONLY populated field of the envelope. A run that resolves no
+   * principal (a schedule-triggered `runAs:'user'` run) passes exactly
+   * `{ flowRunId }`: every principal gate keys on `isSystem`/`userId`/
+   * `positions`/`permissions`, so such a context authorizes identically to no
+   * context at all, and the run keeps the #1888 unscoped posture it already had
+   * while becoming attributable (#3712). Surfaced to hooks as
+   * `HookContext.provenance`, deliberately not folded into `session`.
    */
   flowRunId: z.string().optional(),
 
@@ -329,3 +337,20 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
 }));
 
 export type ExecutionContext = z.infer<typeof ExecutionContextSchema>;
+
+/**
+ * The CALLER-SUPPLIED form of {@link ExecutionContext} — any subset of the
+ * envelope.
+ *
+ * `positions`/`permissions`/`isSystem` carry parse-time defaults, so they are
+ * required in the inferred *output* type ({@link ExecutionContext}) even though
+ * a caller never has to write them. This is the *input* side: what a data
+ * operation may actually be handed. Use it wherever a context arrives from a
+ * caller rather than out of a parse — `options.context` and everything the
+ * engine threads it into.
+ *
+ * Some callers have no principal to state at all: a system read passes
+ * `{ isSystem: true }`, and a flow run with no resolvable identity passes
+ * provenance alone (`{ flowRunId }`, #3712).
+ */
+export type ExecutionContextInput = z.input<typeof ExecutionContextSchema>;

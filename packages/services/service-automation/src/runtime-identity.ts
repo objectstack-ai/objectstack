@@ -3,13 +3,14 @@
 import type { AutomationContext } from '@objectstack/spec/contracts';
 
 /**
- * The identity envelope a flow's data nodes pass to ObjectQL as `options.context`.
- * A structural subset of the kernel `ExecutionContext` — it always carries the
- * three fields the security middleware keys on (`isSystem`, `positions`,
- * `permissions`) so it is directly assignable to the engine's `context` option,
- * plus the optional `userId`/`tenantId` of the acting user.
+ * The IDENTITY envelope a flow's data nodes pass to ObjectQL as
+ * `options.context` when the run resolves a principal. A structural subset of
+ * the kernel `ExecutionContext` — it always carries the three fields the
+ * security middleware keys on (`isSystem`, `positions`, `permissions`) so it is
+ * directly assignable to the engine's `context` option, plus the optional
+ * `userId`/`tenantId` of the acting user.
  */
-export interface RunDataContext {
+export interface RunIdentityContext {
   /** Elevated, RLS-bypassing system principal (full access) when true. */
   isSystem: boolean;
   /** Acting user id — drives owner/role RLS for `runAs:'user'` runs. */
@@ -30,6 +31,31 @@ export interface RunDataContext {
 }
 
 /**
+ * The PROVENANCE-ONLY envelope, for a run that resolves NO principal — an
+ * effective `runAs:'user'` run with no trigger user, a schedule being the
+ * canonical case (#3712).
+ *
+ * It names the run that made the write and carries nothing else: no `userId`,
+ * no `positions`, no `permissions`, not even `isSystem: false`. That absence is
+ * the point. Every principal gate in the data security middleware keys on one
+ * of those fields — the elevation short-circuit on `isSystem`, the ADR-0103
+ * engine-owned write guard and the ADR-0090 D12 delegated-admin gate on
+ * `context.userId`, the empty-principal fall-open on
+ * `positions`/`permissions`/`userId` (and the delegated-admin gate normalizes a
+ * missing context to `{}` before testing it) — so this envelope is
+ * indistinguishable from passing no context at all. The run's authorization
+ * stays EXACTLY the documented #1888 unscoped fail-open it was before; only
+ * provenance rides along.
+ */
+export interface RunProvenanceContext {
+  /** The run performing this operation. The whole envelope (#3712). */
+  flowRunId: string;
+}
+
+/** What a flow's data nodes pass to ObjectQL as `options.context`. */
+export type RunDataContext = RunIdentityContext | RunProvenanceContext;
+
+/**
  * Translate a flow run's {@link AutomationContext} into the ObjectQL `context`
  * its CRUD nodes must pass, honoring `runAs` (ADR-0049 / #1888):
  *
@@ -40,11 +66,11 @@ export interface RunDataContext {
  *    enforces that user's row-level security. The run can never exceed the
  *    triggering user's grants. Empty `positions` falls back to the platform's
  *    baseline permission set, exactly like a fresh member's own REST request.
- *
- * Returns `undefined` when neither elevation nor a user identity applies (e.g. a
- * schedule-triggered `user`-mode run with no user). The CRUD node then omits the
- * `context` and the data engine applies its no-identity default — unchanged from
- * the pre-#1888 behavior for that (identity-less) case.
+ *  - neither (an effective `runAs:'user'` run with no trigger user — a
+ *    schedule) → a {@link RunProvenanceContext}: the run id and nothing else,
+ *    so the middleware still sees no principal and the run still executes under
+ *    the documented #1888 unscoped fail-open, while hooks can tell whose run
+ *    made the write (#3712). `undefined` only when there is no run id either.
  *
  * The engine sets {@link AutomationContext.runAs} on the run context at setup;
  * this function is the single place that maps it to an ObjectQL context, shared
@@ -55,17 +81,19 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   if (context?.runAs === 'system') {
     return { isSystem: true, positions: [], permissions: [], ...(flowRunId ? { flowRunId } : {}) };
   }
-  // NOTE (#3456 residual, tracked as #3712): the identity-less case below returns
-  // `undefined`, so a schedule-triggered `runAs:'user'` run with no user carries
-  // NO context at all — and therefore no `flowRunId` either, leaving it subject
-  // to the approvals record lock on its own target record. Manufacturing a
-  // context here just to carry the run id would flip that run from the
-  // documented unscoped fail-open (#1888) to baseline-member RLS — a separate,
-  // larger behavior change. The dead-run sweep in plugin-approvals is what
-  // recovers this shape.
-  if (!context?.userId) return undefined;
+  if (!context?.userId) {
+    // #3712 — no identity to present, but there IS a run. Carry the run id
+    // ALONE (see {@link RunProvenanceContext}): provenance without a principal,
+    // so the approvals record lock can recognise the owning run's write to its
+    // own target record (#3456) while the security middleware sees exactly what
+    // it saw before — nothing to key on. Manufacturing a *principal* here (even
+    // `{ isSystem: false, positions: [], permissions: [] }`) would be the wrong
+    // tool: it would tie this fix to the #1888 fail-open's fate instead of
+    // leaving that decision open.
+    return flowRunId ? { flowRunId } : undefined;
+  }
   // `context` is now narrowed to a defined AutomationContext with a userId.
-  const out: RunDataContext = {
+  const out: RunIdentityContext = {
     isSystem: false,
     userId: context.userId,
     positions: Array.isArray(context.positions) ? context.positions : [],
@@ -100,10 +128,12 @@ export function flowTouchesData(flow: { nodes?: ReadonlyArray<{ type?: string }>
  * effective `runAs:'user'` (explicit or defaulted) with NO resolvable trigger
  * user — e.g. a schedule-triggered run, which has no user to scope to (#1888).
  *
- * {@link resolveRunDataContext} returns `undefined` for this case, so the CRUD
- * node omits `options.context` and the data security middleware — which *skips*
- * when there is no identity (delegating auth to the auth layer) — runs the
- * operation UNSCOPED (effectively elevated). An author who left `runAs` at the
+ * {@link resolveRunDataContext} resolves no principal for this case — the CRUD
+ * node passes either no `options.context` at all or a provenance-only one
+ * (#3712), neither of which presents an identity — and the data security
+ * middleware, which *skips* when there is no identity (delegating auth to the
+ * auth layer), runs the operation UNSCOPED (effectively elevated). An author
+ * who left `runAs` at the
  * `'user'` default expecting a restricted run instead gets an unscoped one. The
  * engine uses this predicate to surface the footgun at run time (a loud warning,
  * not a silent elevation); the build-time lint `flow-schedule-runas-unscoped`
