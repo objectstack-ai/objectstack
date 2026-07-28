@@ -43,6 +43,14 @@ import {
   ListAiConversationsRequest,
   ListAiConversationsResponse,
   UpdateAiConversationRequest,
+  AiAgentSummary,
+  AiAgentsResponse,
+  AiAgentChatRequest,
+  AiPendingAction,
+  ListAiPendingActionsRequest,
+  ListAiPendingActionsResponse,
+  ApproveAiPendingActionResponse,
+  RejectAiPendingActionResponse,
   GetLocalesResponse,
   GetTranslationsResponse,
   GetFieldLabelsResponse,
@@ -3718,6 +3726,119 @@ export class ObjectStackClient {
         return this.unwrapResponse<AiConversation>(res);
       },
     },
+
+    /**
+     * Named agents.
+     *
+     * `/ai/chat` talks to the environment's default agent; these talk to one
+     * you name. Both routes have been mounted since long before this namespace
+     * existed — `objectui` hand-built their URLs in five places because the SDK
+     * offered nothing to call (#3718).
+     */
+    agents: {
+      /**
+       * Agents the CALLER may chat with — the route filters by the caller's
+       * permissions (ADR-0049), so an empty list is a legitimate answer for a
+       * seat-less user rather than an error to retry.
+       */
+      list: async (): Promise<AiAgentSummary[]> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/agents`);
+        const body = await this.unwrapResponse<AiAgentsResponse>(res);
+        return body?.agents ?? [];
+      },
+
+      /**
+       * Chat with a named agent, returned as JSON.
+       *
+       * Sends `stream: false` for the same reason `ai.chat` does — the route
+       * streams by default, so the flag is forced here rather than left to the
+       * caller to remember.
+       */
+      chat: async (agentName: string, request: AiAgentChatRequest): Promise<AiChatResponse> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/agents/${encodeURIComponent(agentName)}/chat`, {
+          method: 'POST',
+          body: JSON.stringify({ ...request, stream: false }),
+        });
+        return this.unwrapResponse<AiChatResponse>(res);
+      },
+
+      /**
+       * The streaming twin of {@link chat} — same route, streaming mode, the
+       * Vercel UI Message Stream frames. Mirrors `ai.chat` / `ai.chatStream`
+       * rather than introducing a third shape for the same endpoint.
+       */
+      chatStream: async (agentName: string, request: AiAgentChatRequest): Promise<AsyncIterable<AiStreamChunk>> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/agents/${encodeURIComponent(agentName)}/chat`, {
+          method: 'POST',
+          headers: { 'Accept': 'text/event-stream' },
+          body: JSON.stringify({ ...request, stream: true }),
+        });
+        return parseEventStream(res);
+      },
+    },
+
+    /**
+     * The human-in-the-loop approval queue.
+     *
+     * When a tool call needs a human decision the turn parks an action here
+     * instead of executing it. An app embedding the chat has to render and
+     * resolve that queue; until now it had to hand-build these four URLs.
+     *
+     * Reads and decisions are separately permissioned server-side (`ai:read`
+     * vs `ai:approve`), so a caller that can list the queue may still be
+     * refused on approve — handle the 403, do not assume one implies the other.
+     */
+    pendingActions: {
+      /** Queued actions, newest first. */
+      list: async (options?: ListAiPendingActionsRequest): Promise<AiPendingAction[]> => {
+        const route = this.getRoute('ai');
+        const params = new URLSearchParams();
+        if (options?.status) params.set('status', options.status);
+        if (options?.conversationId) params.set('conversationId', options.conversationId);
+        if (options?.limit !== undefined) params.set('limit', String(options.limit));
+        const qs = params.toString();
+        const res = await this.fetch(`${this.baseUrl}${route}/pending-actions${qs ? `?${qs}` : ''}`);
+        const body = await this.unwrapResponse<ListAiPendingActionsResponse>(res);
+        return body?.items ?? [];
+      },
+
+      /** One queued action. 404s when the id is unknown. */
+      get: async (id: string): Promise<AiPendingAction> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/pending-actions/${encodeURIComponent(id)}`);
+        return this.unwrapResponse<AiPendingAction>(res);
+      },
+
+      /**
+       * Approve AND execute.
+       *
+       * CHECK THE RETURNED `status`: a tool that fails after approval comes
+       * back `{ status: 'failed', error }` with HTTP 200, because the approval
+       * succeeded even though the execution did not. Treating 2xx as "the write
+       * happened" reports a failed write as a success.
+       */
+      approve: async (id: string): Promise<ApproveAiPendingActionResponse> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/pending-actions/${encodeURIComponent(id)}/approve`, {
+          method: 'POST',
+          body: JSON.stringify({}),
+        });
+        return this.unwrapResponse<ApproveAiPendingActionResponse>(res);
+      },
+
+      /** Reject with an optional reason. Executes nothing. */
+      reject: async (id: string, reason?: string): Promise<RejectAiPendingActionResponse> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/pending-actions/${encodeURIComponent(id)}/reject`, {
+          method: 'POST',
+          body: JSON.stringify(reason === undefined ? {} : { reason }),
+        });
+        return this.unwrapResponse<RejectAiPendingActionResponse>(res);
+      },
+    },
   };
 
   /**
@@ -4747,6 +4868,14 @@ export type {
   ListAiConversationsRequest,
   ListAiConversationsResponse,
   UpdateAiConversationRequest,
+  AiAgentSummary,
+  AiAgentsResponse,
+  AiAgentChatRequest,
+  AiPendingAction,
+  ListAiPendingActionsRequest,
+  ListAiPendingActionsResponse,
+  ApproveAiPendingActionResponse,
+  RejectAiPendingActionResponse,
   GetLocalesResponse,
   GetTranslationsResponse,
   GetFieldLabelsResponse,

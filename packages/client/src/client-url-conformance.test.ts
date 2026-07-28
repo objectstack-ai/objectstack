@@ -164,15 +164,22 @@ const CONTROL_PLANE_NAMESPACE = 'projects.';
  * counted as matched when not one of their URLs was in the real table at all.
  * Three SDK methods 404ed for years behind a green row (#3718). v17 deleted
  * them; #3718 then expressed the surface that does exist (`ai.chat`,
- * `ai.chatStream`, `ai.complete`, `ai.models`, `ai.conversations.*`), which is
- * why an exemption is needed again.
+ * `ai.chatStream`, `ai.complete`, `ai.models`, `ai.conversations.*`, and since
+ * the follow-up pass `ai.agents.*` and `ai.pendingActions.*`), which is why an
+ * exemption is needed again.
  *
  * It is NOT a wave-through, for the same reason the control plane's is not:
  * `cloud`'s `packages/service-ai/src/ai-route-ledger.conformance.test.ts`
- * reads the table `buildAIRoutes()` returns and drives every `ai.*` method on
- * this very SDK against it — so an `ai.*` URL that stops resolving fails a
- * test in the repo that mounts the route. What this exemption says is "the
- * evidence lives on the other side of the boundary", not "no evidence needed".
+ * drives every `ai.*` method on this very SDK against the tables its route
+ * builders really return — so an `ai.*` URL that stops resolving fails a test
+ * in the repo that mounts the route. What this exemption says is "the evidence
+ * lives on the other side of the boundary", not "no evidence needed".
+ *
+ * That ledger covered ONE builder when this comment was first written. It now
+ * covers all seven plus the family's one out-of-package member, which is what
+ * makes `ai.agents.*` and `ai.pendingActions.*` checkable at all: their routes
+ * are mounted by `buildAgentRoutes()` and `buildPendingActionRoutes()`, not by
+ * `buildAIRoutes()`.
  *
  * Bounded from both ends below: only `ai.*` may use it, and the namespace must
  * still be reaching it.
