@@ -138,6 +138,8 @@ export const SysViewDefinitionObject = ObjectSchema.create({
     trackHistory: true,
     searchable: false,
     apiEnabled: true,
-    apiMethods: ['get', 'list', 'create', 'update', 'delete'],
+    // `bulk` = the batch shape of the verbs above; the gate is `bulk ∧ child`
+    // (#3391 P1), so omitting it 405s /batch and the *Many routes (#3026).
+    apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk'],
   },
 });
