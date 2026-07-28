@@ -3,22 +3,28 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 
+// Why the members sit in THIS order (the generated reference renders the JSDoc
+// below; this rationale stays in source):
+//
+// A designer that derives its approver-type picker from this enum — the Studio
+// flow inspector does, via the published JSON schema minus `xEnumDeprecated` —
+// offers the members in exactly this order. So the order is a recommendation
+// the platform makes to every author, not an accident of when each member was
+// added, and it belongs here rather than in any one renderer's options array
+// (objectui#2834 put it there, where the inspector never read it).
+//
+// Indirect bindings therefore lead and the literal `user` binding comes last.
+// Naming one specific person is the least portable choice an author can make:
+// it breaks when the flow is deployed to another environment (that id does not
+// exist there), and again when that person changes team or leaves — silently
+// routing approvals to someone who should no longer see them. `manager` /
+// `position` / `department` / `team` survive both.
 /**
  * Approval Step Approver Type
  *
- * **Declaration order is author-facing.** A designer that derives its
- * approver-type picker from this enum (the Studio flow inspector does, via the
- * published JSON schema minus `xEnumDeprecated`) offers the members in exactly
- * this order, so the order is the platform's recommendation, not an accident of
- * when each member was added.
- *
- * INDIRECT bindings lead; the literal `user` binding comes last. Naming one
- * specific person is the least portable choice an author can make — it breaks
- * when the flow is deployed to another environment (that id does not exist
- * there) and again when that person changes team or leaves, silently routing
- * approvals to someone who should no longer see them. `manager` / `position` /
- * `department` / `team` all survive both. Offering `user` first taught the
- * opposite (objectui#2834).
+ * Declaration order is author-facing: designers derive their picker from this
+ * enum, and it leads with the portable indirect bindings (`manager`,
+ * `position`, `department`, `team`) — a literal `user` id comes last.
  */
 export const ApproverType = z.enum([
   'manager',        // Submitter's manager (sys_user.manager_id)
