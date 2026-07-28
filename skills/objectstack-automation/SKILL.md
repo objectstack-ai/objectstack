@@ -139,9 +139,15 @@ variables: [
 > `label` is **required** on the flow and on every node.
 
 > **Handling a failed node: a `fault` edge.** `{ source, target, type: 'fault' }`
-> routes a failed node to a handler instead of ending the run; the handler reads
-> `{<nodeId>.error}` (or run-wide `{$error}`). The run then reports success, and
-> the failed step stays in the trace.
+> routes a failed node to a handler instead of ending the run. **`type: 'fault'`
+> is what routes — a `label: 'error'` alone does nothing:** the edge stays
+> ordinary, and every unconditional out-edge traverses on SUCCESS, so the
+> handler would run when the node succeeds and never when it fails
+> (`objectstack validate` reports `flow-error-label-not-fault`).
+> A handled failure does NOT consume a flow-level `errorHandling.retry`, which
+> replays the flow from the start — prefer a fault edge when the failure is
+> local. The handler reads `{<nodeId>.error}` (or run-wide `{$error}`). The run
+> then reports success, and the failed step stays in the trace.
 >
 > **It is not a way past a guardrail.** Only *runtime* failures route — a 404, a
 > rate-limit, a rejected write, a subflow that failed on its own. A *guard*

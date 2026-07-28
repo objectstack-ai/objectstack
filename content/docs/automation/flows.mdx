@@ -564,7 +564,7 @@ Edges connect nodes and define the execution path:
 | `target` | `string` | ✅ | Target node ID |
 | `type` | `enum` | optional | `'default'` (success), `'fault'` (error), `'conditional'` (expression-guarded), or `'back'` (declared back-edge, ADR-0044); defaults to `'default'` |
 | `condition` | `string` | optional | Boolean expression for branching |
-| `label` | `string` | optional | Label displayed on the connector |
+| `label` | `string` | optional | Label displayed on the connector — cosmetic only. It does **not** select a path except on a branching node (`decision` / `approval`), which picks its out-edge by label. |
 
 ### Fault edges — handling a failed node
 
@@ -577,6 +577,16 @@ edges: [
   { id: 'e_fault', source: 'charge_card', target: 'flag_for_review', type: 'fault' },
 ]
 ```
+
+<Callout type="warn">
+**`type: 'fault'` is what routes — a label is not.** Writing
+`{ source: 'charge_card', target: 'flag_for_review', label: 'error' }` without
+the type leaves an ordinary edge, and every unconditional out-edge is traversed
+(in parallel) on **success**. The handler then runs whenever the node
+*succeeds*, never when it fails, and the run still aborts on failure. Both
+halves are silent, so `objectstack validate` reports this as
+`flow-error-label-not-fault`.
+</Callout>
 
 The handler reads what went wrong from two variables:
 
@@ -615,6 +625,21 @@ would turn off the protection against emptying the object while the run still
 reported success. Re-running changes nothing either: the fix is to correct the
 metadata, which `objectstack validate` will point at.
 </Callout>
+
+#### Fault edges vs. `errorHandling.retry`
+
+The two recovery mechanisms operate at different scopes and do not compound:
+
+| | Scope | On failure |
+| :--- | :--- | :--- |
+| `fault` edge | one node | traversal continues from the handler; the run completes |
+| `errorHandling: { strategy: 'retry' }` | the whole flow | the flow re-runs **from the start** |
+
+A failure a fault edge handled is not a flow failure, so it does **not** consume
+a retry. That matters because flow-level retry replays every node that already
+succeeded — a second notification, a second created record. Prefer a fault edge
+where the failure is local; reach for `retry` only when replaying the whole flow
+is genuinely safe.
 
 ## Variables
 

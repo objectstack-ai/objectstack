@@ -287,3 +287,64 @@ describe('#3863 — a fault edge must not swallow a guard refusal', () => {
         expect(data.seen.deleted).toBe(false);
     });
 });
+
+/**
+ * #3863 — the boundary between the two recovery mechanisms.
+ *
+ * Node-level: a `fault` edge, precise — it handles one node and traversal
+ * continues from the handler.
+ * Flow-level: `errorHandling.retry`, blunt — it re-runs the flow FROM THE START,
+ * so every node that already succeeded runs a second time, side effects and all.
+ *
+ * They must not compound. A node whose fault edge handled it is not a flow
+ * failure, so it must not also consume a retry — otherwise declaring a handler
+ * would silently multiply the side effects of everything upstream of it. That
+ * holds today by construction (a routed failure never propagates out of
+ * `executeNode`), and this pins it so a refactor of the catch path cannot
+ * quietly change it.
+ */
+describe('#3863 — a handled failure does not trigger flow-level retry', () => {
+    it('runs the upstream node exactly once when a fault edge handles the failure', async () => {
+        const engine = new AutomationEngine(createTestLogger());
+        let upstreamRuns = 0;
+        let handlerRuns = 0;
+
+        engine.registerNodeExecutor({
+            type: 'script',
+            async execute(node) {
+                if (node.id === 'upstream') { upstreamRuns++; return { success: true }; }
+                if (node.id === 'risky') return { success: false, error: 'upstream 503' };
+                handlerRuns++;
+                return { success: true };
+            },
+        });
+        engine.registerFlow('handled_no_retry', {
+            name: 'handled_no_retry',
+            label: 'Handled No Retry',
+            type: 'autolaunched',
+            errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 1 },
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'upstream', type: 'script' as any, label: 'Upstream' },
+                { id: 'risky', type: 'script' as any, label: 'Risky' },
+                { id: 'handler', type: 'script' as any, label: 'Handler' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e0', source: 'start', target: 'upstream' },
+                { id: 'e1', source: 'upstream', target: 'risky' },
+                { id: 'e2', source: 'risky', target: 'end' },
+                { id: 'e_fault', source: 'risky', target: 'handler', type: 'fault' },
+                { id: 'e3', source: 'handler', target: 'end' },
+            ],
+        } as any);
+
+        const result = await engine.execute('handled_no_retry');
+
+        expect(result.success).toBe(true);
+        expect(handlerRuns).toBe(1);
+        // The point: retry is configured and was NOT consumed. If a handled
+        // failure counted as a flow failure, `upstream` would have run again.
+        expect(upstreamRuns).toBe(1);
+    });
+});

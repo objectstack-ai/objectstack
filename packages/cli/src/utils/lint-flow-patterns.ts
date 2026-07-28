@@ -77,9 +77,35 @@ export const FLOW_APPROVAL_REVISE_DISABLED = 'flow-approval-revise-disabled';
  * resolves NO USER, and a schedule is only the most obvious such trigger.
  */
 export const FLOW_RUNAS_UNSCOPED = 'flow-runas-unscoped';
+export const FLOW_ERROR_LABEL_NOT_FAULT = 'flow-error-label-not-fault';
 
 /** Node types that perform a data operation — the ones `flow.runAs` governs (#1888). */
 const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
+
+/**
+ * #3863 — an edge LABELLED like an error path but not TYPED as one.
+ *
+ * Error routing is `type: 'fault'`. `label` is cosmetic on an ordinary edge, so
+ * `{ source, target, label: 'error' }` without the type does not mean "go here
+ * on failure" — it is an unconditional out-edge, and `traverseNext` runs every
+ * unconditional out-edge in parallel. The handler therefore fires on every
+ * SUCCESSFUL run of the source node, concurrently with the real success path,
+ * and never on a failure.
+ *
+ * Silent in both directions: the author believes errors are handled (they are
+ * not — the run still aborts) and never notices the handler running when
+ * nothing went wrong. The reading is especially natural for an AI author, since
+ * `label: 'error'` is exactly what the intent sounds like.
+ *
+ * Deliberately narrow, because a label IS meaningful on a branching node: a
+ * `decision`/`approval` executor returns a `branchLabel` and traversal then
+ * prefers the edge with that label, so `label: 'error'` there is a real branch
+ * selector. Conditional edges are likewise legitimate. Both are excluded.
+ */
+const ERROR_LABELS = new Set(['error', 'fault', 'failure', 'failed', 'catch', 'on_error', 'onerror', 'on error']);
+
+/** Node types whose executor selects an out-edge BY LABEL (`branchLabel`). */
+const BRANCH_LABEL_NODE_TYPES = new Set(['decision', 'approval', 'screen', 'try_catch']);
 
 /**
  * Does this flow auto-launch on a SCHEDULE (so a run carries no trigger user)?
@@ -225,6 +251,46 @@ function edgeLabelOf(e: AnyRec): string {
  *    `type: 'back'`, so `registerFlow` rejects it as an un-declared cycle. The
  *    lint fires at compile time with the specific fix (mark the resubmit edge).
  */
+/**
+ * #3863 — flag edges labelled like an error path but left at the default type.
+ * See {@link ERROR_LABELS} for why this is a footgun and what is excluded.
+ */
+function scanErrorLabelledEdges(
+  flowName: string,
+  nodes: AnyRec[],
+  edges: AnyRec[],
+  findings: FlowLintFinding[],
+): void {
+  const typeById = new Map<string, string>();
+  for (const n of nodes) {
+    if (typeof n.id === 'string') typeById.set(n.id, typeof n.type === 'string' ? n.type : '');
+  }
+
+  for (const e of edges) {
+    const label = typeof e.label === 'string' ? e.label.trim().toLowerCase() : '';
+    if (!ERROR_LABELS.has(label)) continue;
+    if (e.type === 'fault') continue; // already an error path — nothing to say
+    if (e.condition) continue; // a guarded edge is not the unconditional footgun
+    const src = typeof e.source === 'string' ? e.source : '';
+    // A branching node picks its out-edge BY label, so the label is load-bearing.
+    if (BRANCH_LABEL_NODE_TYPES.has(typeById.get(src) ?? '')) continue;
+
+    findings.push({
+      where: `flow '${flowName}' · edge '${src}' → '${String(e.target)}'`,
+      message:
+        `edge is labelled '${String(e.label)}' but its type is '${String(e.type ?? 'default')}', not 'fault' — ` +
+        `so it is an ORDINARY out-edge. Unconditional out-edges all run in parallel, so '${String(e.target)}' ` +
+        `executes on every SUCCESSFUL run of '${src}' and never on a failure. The error path the label ` +
+        `describes does not exist, and the run still aborts when '${src}' fails.`,
+      hint:
+        `Add \`type: 'fault'\` to this edge. Only runtime failures route — a guard refusal (a filter token ` +
+        `that resolved to nothing, a missing required config key, an unscoped run) stays fatal by design and ` +
+        `must be fixed in the metadata, not handled. (#3863)`,
+      rule: FLOW_ERROR_LABEL_NOT_FAULT,
+    });
+  }
+}
+
 function scanApprovalReviseLoops(
   flowName: string,
   nodes: AnyRec[],
@@ -432,6 +498,11 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
 
     // (c) ADR-0044 — approval send-back-for-revision loop footguns.
     scanApprovalReviseLoops(flowName, nodes, edges, findings);
+
+    // (d) #3863 — an edge labelled like an error path but typed 'default' is an
+    //     unconditional out-edge: the handler runs on every SUCCESS, in parallel
+    //     with the real path, and never on a failure.
+    scanErrorLabelledEdges(flowName, nodes, edges, findings);
   }
   return findings;
 }
