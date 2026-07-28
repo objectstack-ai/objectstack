@@ -21,7 +21,6 @@ import {
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
-import { normalizeAdditionalOrgRoles, orgRoleNames, type OrgRoleInput } from './org-roles.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
@@ -392,33 +391,22 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   oidcProviders?: OidcProvidersConfig;
 
   /**
-   * Application-specific organization roles to register with Better-Auth's
-   * organization plugin. Each name becomes a valid role for invitations and
-   * member assignments without going through Better-Auth's default
-   * `owner|admin|member` whitelist.
+   * `additionalOrgRoles` was REMOVED in ADR-0108 (#3723). The organization-role
+   * vocabulary is closed: `owner` / `admin` / `delegated_admin` / `member`.
    *
-   * The ObjectStack SecurityPlugin handles real RBAC enforcement by matching
-   * these role names against `permission` metadata (PermissionSets / Profiles),
-   * so Better-Auth only needs to accept them as opaque strings. Each role is
-   * registered with the minimum access-control privileges (equivalent to
-   * Better-Auth's `member` role) so it cannot inadvertently grant org-level
-   * admin capabilities.
+   * It registered app-declared `position` / `permission` names with
+   * better-auth so invitations could name them. Because every value stored in
+   * `sys_member.role` is projected into `current_user.positions`, that made the
+   * membership role a capability channel with none of ADR-0090 D12's controls.
    *
-   * Rarely needed since the kernel:ready self-derivation (#3723 follow-up):
-   * AuthPlugin reads the registered `position` / `permission` metadata itself
-   * via `collectRegisteredOrgRoles`, so stack-declared roles arrive with NO
-   * host wiring. Pass this only for roles that exist OUTSIDE stack metadata
-   * (the derived set and this list are unioned).
-   *
-   * Accepts a bare name, or `{ name, label }` to carry the declaring
-   * metadata's own display label into the role picker (#3723) — without it the
-   * picker would title-case the machine name and contradict a position that
-   * already says `销售代表`. The label is presentation only: better-auth sees
-   * just the name, and the stored value is always the name.
-   *
-   * @example ['sales_rep', { name: 'sales_manager', label: '销售经理' }]
+   * FROM → TO:
+   *   `new AuthPlugin({ additionalOrgRoles: ['sales_rep'] })`
+   *   → declare `sales_rep` as a `position`, then either assign it
+   *     (`sys_user_position`, governed by `DelegatedAdminGate`) or invite with
+   *     placement: `POST /organization/invite-member`
+   *     `{ role: 'member', businessUnitId, positions: ['sales_rep'] }`
+   *     (ADR-0105 D8 — authorized against the issuer's `adminScope`).
    */
-  additionalOrgRoles?: OrgRoleInput[];
 
   /**
    * Optional outbound email service used by better-auth callbacks
@@ -1559,37 +1547,33 @@ export class AuthManager {
     if (enabled.organization) {
       await this.addOptionalPlugin(plugins, 'organization', async () => {
       const { organization } = await import('better-auth/plugins/organization');
-      // Build a `roles` map that registers each app-supplied org role
-      // (e.g. CRM's sales_rep, sales_manager) as a valid Better-Auth role
-      // so invitations to those roles aren't rejected with ROLE_NOT_FOUND.
-      // Real RBAC enforcement is handled by ObjectStack's SecurityPlugin,
-      // which matches the role name against `permission` metadata
-      // (PermissionSets). Here we register them with minimum org-plugin
-      // capabilities (same as the built-in `member` role) so they cannot
-      // inadvertently grant org-level admin powers.
+      // [ADR-0108 / #3723] The org-role vocabulary is CLOSED — better-auth's
+      // own `owner`/`admin`/`member` plus `delegated_admin`. App-declared
+      // `position` / `permission` names are NOT registered here.
       //
-      // [ADR-0105 D8 / #3697] The map ALSO registers `delegated_admin` — the
-      // one role that may reach `/organization/invite-member` without being an
-      // org admin. Without it D8's scope-bounded issuance gate has no caller:
+      // They were, until this change: an app role registered with better-auth
+      // became storable in `sys_member.role`, and every value in that column is
+      // projected into `current_user.positions` by `resolve-authz-context`. So
+      // the membership role was a capability channel carrying none of ADR-0090
+      // D12's controls — no `granted_by`, no validity window, no subtree or
+      // allowlist check — which is exactly what ADR-0057 D4 ("never as the
+      // authority for RBAC") and ADR-0090 D3's word ban forbid. An app that
+      // wants `sales_rep` declares a POSITION; the one-step admission flow is
+      // an invitation carrying placement (ADR-0105 D8), which is governed and
+      // reaches further (a delegated admin may use it; this never could).
+      //
+      // [ADR-0105 D8 / #3697] The map registers `delegated_admin` — the one
+      // role that may reach `/organization/invite-member` without being an org
+      // admin. Without it D8's scope-bounded issuance gate has no caller:
       // better-auth grants `invitation:["create"]` to owner/admin only, and
       // under a wall-enforcing posture those two are auto-elevated to tenant
-      // admins, for whom the gate short-circuits and narrows nothing. So the
-      // map is now built unconditionally, not just when an app supplies extras.
+      // admins, for whom the gate short-circuits and narrows nothing.
       //
       // Deliberately `create` WITHOUT `cancel`: better-auth's cancel route
       // (`crud-invites.mjs`) checks only `invitation:["cancel"]` — no inviterId
       // attribution — so the permission would mean "cancel anyone's pending
       // invitation in the org". Attributed cancel needs its own guard first.
       let customOrgRoles: Record<string, any> | undefined;
-      // [#3723] The SAME normalized array `AuthPlugin` stamps onto the
-      // `sys_invitation.role` / `sys_member.role` selects. Registering a name
-      // the write path cannot store is the bug this closes, so a name that
-      // cannot round-trip through `Field.select` is refused HERE too — the
-      // invitation then fails at better-auth's door (`ROLE_NOT_FOUND`) rather
-      // than at the insert.
-      // (Idempotent: `AuthPlugin` normalizes before constructing the manager,
-      // so this pass only warns for a caller wiring `AuthManager` directly.)
-      const extra = normalizeAdditionalOrgRoles(this.config.additionalOrgRoles, this.config.logger);
       try {
         const accessMod = await import('better-auth/plugins/organization/access');
         const { defaultAc, memberAc, defaultRoles } = accessMod as any;
@@ -1597,26 +1581,16 @@ export class AuthManager {
         // (precedence: `||` then spread). When we pass our own `roles`, the
         // built-in owner/admin/member are silently dropped, so even the org
         // owner loses `invitation:create` and every mutation 403s. We must
-        // re-include the defaults alongside our extras — and if the library
-        // ever stops exporting them, build NOTHING and let better-auth fall
-        // back to its own defaults rather than ship a map missing `owner`.
+        // re-include the defaults alongside `delegated_admin` — and if the
+        // library ever stops exporting them, build NOTHING and let better-auth
+        // fall back to its own defaults rather than ship a map missing `owner`.
         if (defaultAc && memberAc && defaultRoles && typeof memberAc.statements === 'object') {
           const built: Record<string, any> = { ...defaultRoles };
           const stmts = memberAc.statements;
-          // Registered BEFORE the app's extras so an app that happens to
-          // declare a same-named permission cannot downgrade it to a plain
-          // member role (the loop below skips names already present).
           built[MEMBERSHIP_ROLE_DELEGATED_ADMIN] = defaultAc.newRole({
             ...stmts,
             invitation: ['create'],
           });
-          // Names only — a descriptor's `label` is presentation for the role
-          // picker and means nothing to better-auth.
-          for (const name of orgRoleNames(extra)) {
-            if (!name) continue;
-            if (built[name]) continue;
-            built[name] = defaultAc.newRole(stmts);
-          }
           customOrgRoles = built;
         }
       } catch {

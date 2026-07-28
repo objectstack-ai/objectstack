@@ -33,14 +33,27 @@ describe('validateApprovalApprovers', () => {
     expect(validateApprovalApprovers({ flows: [] })).toEqual([]);
   });
 
-  it('accepts membership tiers for org_membership_level (owner/admin/member/guest)', () => {
+  it('accepts the closed membership vocabulary (owner/admin/delegated_admin/member)', () => {
     const findings = validateApprovalApprovers(stackWithApprovers([
       { type: 'org_membership_level', value: 'admin' },
       { type: 'org_membership_level', value: 'Owner' }, // case-insensitive
       { type: 'org_membership_level', value: 'member' },
-      { type: 'org_membership_level', value: 'guest' },
+      { type: 'org_membership_level', value: 'delegated_admin' },
     ]));
     expect(findings).toEqual([]);
+  });
+
+  it('[ADR-0108] flags `guest` — the tier list is derived, and never offered it', () => {
+    // The hand-kept copy of this list carried `guest`, which the
+    // `sys_member.role` select has never offered: an approver naming it
+    // resolved to nobody, and the lint whose whole job is to catch that stayed
+    // silent. Deriving the set from `@objectstack/spec` fixed it by
+    // construction.
+    const findings = validateApprovalApprovers(stackWithApprovers([
+      { type: 'org_membership_level', value: 'guest' },
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER);
   });
 
   it("flags a position name authored as a membership tier (the ADR-0090 D3 hotcrm class)", () => {

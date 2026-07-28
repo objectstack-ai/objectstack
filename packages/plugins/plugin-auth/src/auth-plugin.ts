@@ -32,17 +32,9 @@ import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import {
-  AUTH_PLUGIN_ID,
   authIdentityObjects,
   authPluginManifestHeader,
 } from './manifest.js';
-import {
-  MEMBERSHIP_ROLE_OBJECTS,
-  collectRegisteredOrgRoles,
-  normalizeAdditionalOrgRoles,
-  withMembershipRoleOptions,
-  type OrgRoleInput,
-} from './org-roles.js';
 
 /**
  * Auth Plugin Options
@@ -82,14 +74,12 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
   manifestDatasource?: string;
 
   /**
-   * EXTRA organization roles to register with Better-Auth's organization
-   * plugin, beyond the ones AuthPlugin derives itself: stack-declared
-   * `position` / `permission` names arrive automatically via the
-   * kernel:ready self-derivation (#3723 follow-up), so most hosts pass
-   * nothing. Only roles that exist OUTSIDE stack metadata need this; the
-   * two sets are unioned. See {@link AuthManagerOptions.additionalOrgRoles}.
+   * `additionalOrgRoles` was REMOVED in ADR-0108 (#3723) — see
+   * {@link AuthManagerOptions} for the FROM → TO migration. The membership-role
+   * vocabulary is closed (`owner` / `admin` / `delegated_admin` / `member`);
+   * an app's own business roles are POSITIONS, assigned through
+   * `sys_user_position` or an invitation carrying placement (ADR-0105 D8).
    */
-  additionalOrgRoles?: OrgRoleInput[];
 
   /**
    * ADR-0081 D1 — single-org default-organization bootstrap. In single-org
@@ -210,16 +200,8 @@ export class AuthPlugin implements Plugin {
       ctx.logger.warn('No data engine service found - auth will use in-memory storage');
     }
 
-    // [#3723] Normalize the app-declared organization roles ONCE, here: the
-    // same array feeds better-auth's role registry (via AuthManager) and the
-    // `sys_invitation.role` / `sys_member.role` selects (via the manifest
-    // below). Two derivations from one caller-supplied list is exactly the
-    // drift that made a registered role unstorable.
-    const additionalOrgRoles = normalizeAdditionalOrgRoles(this.options.additionalOrgRoles, ctx.logger);
-
     const authConfig: AuthManagerOptions & AuthPluginOptions = {
       ...this.options,
-      additionalOrgRoles,
       dataEngine,
       logger: ctx.logger,
       // ADR-0093 D2/D3 — the membership reconciler consults the tenancy service
@@ -348,14 +330,13 @@ export class AuthPlugin implements Plugin {
       ...(this.options.manifestDatasource
         ? { defaultDatasource: this.options.manifestDatasource }
         : {}),
-      // [#3723] App-declared organization roles widen the `sys_invitation.role`
-      // / `sys_member.role` selects, from the SAME normalized array that
-      // registers them with better-auth (`AuthManager`'s org-plugin roles map).
-      // Without this the two lists drift and a registered role is one
-      // better-auth accepts and the write path rejects — the registration is
-      // half a feature. Copy-on-write: `authIdentityObjects` is a shared
-      // module-level array, never mutated.
-      objects: withMembershipRoleOptions(authIdentityObjects, additionalOrgRoles),
+      // [ADR-0108 / #3723] Registered as authored: nothing widens the
+      // `sys_invitation.role` / `sys_member.role` selects at boot. The closed
+      // four-name vocabulary those objects declare statically
+      // (`BUILTIN_MEMBERSHIP_ROLE_OPTIONS`) is the whole list, and it is the
+      // write-side guardrail that keeps an ungoverned capability grant
+      // unrepresentable.
+      objects: authIdentityObjects,
       // ADR-0048 — Setup/Studio/Account apps (and the Setup nav contributions)
       // moved to their own one-app packages (@objectstack/{setup,studio,account}),
       // each registering under its own package id so /apps/<packageId> resolves
@@ -407,74 +388,16 @@ export class AuthPlugin implements Plugin {
         : {}),
     });
 
-    // [#3723 / cloud#897] Late-bound organization roles — hosts pass nothing.
+    // [ADR-0108 / #3723] There is no organization-role derivation any more.
     //
-    // Five hosts boot AuthPlugin from a stack; three of them (verify harness,
-    // DevPlugin, cloud's ArtifactKernelFactory) at some point forgot to wire
-    // `additionalOrgRoles`, and the failure is silent: app-declared roles are
-    // simply absent, no error anywhere. Per-host wiring is the defect pattern;
-    // this hook removes the need for it. cloud is also ORDER-hostile: it
-    // mounts AuthPlugin before the app metadata exists, so no init-time walk
-    // could ever cover it — `kernel:ready` is the one point that fires after
-    // all metadata is registered in every host.
-    //
-    // What happens when app roles are found beyond the explicit config:
-    //  - better-auth side: `applyConfigPatch` merges them; the instance is
-    //    built lazily (or reset by the patch), so the org-plugin roles map is
-    //    rebuilt with the full set on next use.
-    //  - select side: `sys_invitation` / `sys_member` are re-registered with
-    //    widened `role` options under the SAME package id — an explicitly
-    //    supported re-registration path (the registry replaces the owner
-    //    contribution and invalidates the merge cache). No DDL: options are
-    //    validator/picker metadata, the column stays TEXT.
-    //
-    // Explicit `additionalOrgRoles` remains as override/extra — the union is
-    // what both consumers see, preserving the one-list invariant.
-    ctx.hook('kernel:ready', async () => {
-      try {
-        // PluginContext has no getServiceAsync — the sync getService is the
-        // API (it throws for unknown names, hence the guard). At kernel:ready
-        // the engine is long registered in every real boot; `undefined` only
-        // in mock/Lite kernels, where the metadata facade below still serves
-        // the better-auth half and the select half has no engine to update.
-        const engine = (() => {
-          try { return ctx.getService?.('objectql') as unknown; } catch { return undefined; }
-        })();
-        const metadataService = (() => {
-          try { return ctx.getService?.('metadata') as { list?: (t: string) => unknown } | undefined; }
-          catch { return undefined; }
-        })();
-        if (!engine && !metadataService) return; // mock/Lite boots — nothing to derive from
-
-        const registered = await collectRegisteredOrgRoles(engine, metadataService, ctx.logger);
-        if (registered.length === 0) return;
-
-        const known = new Set(additionalOrgRoles.map((d) => d.name));
-        const discovered = registered.filter((d) => !known.has(d.name));
-        if (discovered.length === 0) return;
-
-        const merged = [...additionalOrgRoles, ...discovered];
-        this.authManager?.applyConfigPatch({ additionalOrgRoles: merged });
-
-        const ql = engine as { registerObject?: (s: unknown, pkg?: string, ns?: string) => string } | undefined;
-        if (typeof ql?.registerObject === 'function') {
-          const widened = withMembershipRoleOptions(authIdentityObjects, merged)
-            .filter((o) => (MEMBERSHIP_ROLE_OBJECTS as readonly string[]).includes((o as { name?: string })?.name ?? ''));
-          for (const schema of widened) {
-            ql.registerObject(schema, AUTH_PLUGIN_ID, authPluginManifestHeader.namespace);
-          }
-        }
-        ctx.logger.info('[auth] app-declared organization roles derived from registered metadata', {
-          discovered: discovered.map((d) => d.name),
-          total: merged.length,
-        });
-      } catch (e) {
-        // Derivation is additive — a failure leaves the explicit config in
-        // force, which is exactly the pre-hook behavior. Loud, not fatal.
-        ctx.logger.warn('[auth] organization-role derivation failed', { error: (e as Error).message });
-      }
-    });
-
+    // A `kernel:ready` hook used to walk the registered `position` /
+    // `permission` metadata and widen both the better-auth role map and the two
+    // `role` selects, so every host got app-declared roles with no wiring. That
+    // made an UNGOVERNED capability channel automatic in every deployment: a
+    // name stored in `sys_member.role` is projected into
+    // `current_user.positions` with none of ADR-0090 D12's controls. Positions
+    // are the governed channel, and an invitation carrying placement
+    // (ADR-0105 D8) is the one-step admission flow that replaces it.
     ctx.logger.info('Auth Plugin initialized successfully');
   }
 

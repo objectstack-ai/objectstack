@@ -45,7 +45,7 @@ import {
   canonicalApproverType,
   normalizeDecisionOutputs,
 } from '@objectstack/spec/automation';
-import { MEMBERSHIP_ROLE_DELEGATED_ADMIN } from '@objectstack/spec';
+import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec';
 import { collectCelRootIdentifiers } from '@objectstack/formula';
 
 export const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER = 'approval-approver-not-membership-tier';
@@ -101,21 +101,22 @@ export interface ApprovalApproverFinding {
 type AnyRec = Record<string, unknown>;
 
 /**
- * The better-auth org-membership tiers `sys_member.role` actually stores
- * (see `identity/organization.zod.ts` + `mapMembershipRole`). Anything else
- * authored as `{ type: 'org_membership_level' }` (or its deprecated `role`
- * spelling) is almost certainly a position name.
+ * The org-membership tiers `sys_member.role` actually stores — DERIVED, not
+ * transcribed (ADR-0108 / #3723).
+ *
+ * The vocabulary is closed and framework-owned, so the one source in
+ * `@objectstack/spec` is also the only correct list here. A hand-kept copy is
+ * how this list came to carry `guest`, which the `sys_member.role` select has
+ * never offered: an approver naming it resolved to nobody, and the lint that
+ * exists to catch exactly that stayed silent.
+ *
+ * Anything outside this set authored as `{ type: 'org_membership_level' }` (or
+ * its deprecated `role` spelling) is almost certainly a position name.
  */
-const MEMBERSHIP_TIERS = new Set([
-  'owner',
-  'admin',
-  'member',
-  'guest',
-  // [ADR-0105 D8 / #3697] A real tier since the framework registers it with the
-  // org plugin — the delegated issuer grade. It is storable in
-  // `sys_member.role`, so an approver naming it resolves to people, not nobody.
-  MEMBERSHIP_ROLE_DELEGATED_ADMIN,
-]);
+const MEMBERSHIP_TIERS: ReadonlySet<string> = new Set<string>(BUILTIN_MEMBERSHIP_ROLES);
+
+/** The same list, rendered for diagnostics — so no message can contradict it. */
+const MEMBERSHIP_TIER_LIST = BUILTIN_MEMBERSHIP_ROLES.join('/');
 
 /** Off-spec dialect spellings we can name a canonical fix for. */
 const TYPE_FIX: Record<string, string> = {
@@ -263,12 +264,13 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             path: `${path}.value`,
             message:
               `approver { type: '${type}', value: '${value}' } resolves against the better-auth ` +
-              `org-membership tier (sys_member.role: owner/admin/member) — '${value}' is not a ` +
-              `membership tier, so this approver matches nobody and the request stalls.`,
+              `org-membership tier (sys_member.role: ${MEMBERSHIP_TIER_LIST}) — '${value}' is not ` +
+              `a membership tier, so this approver matches nobody and the request stalls.`,
             hint:
               `If '${value}' is an org position, author { type: 'position', value: '${value}' } ` +
               `(resolved via sys_user_position, ADR-0090 D3). Keep type 'org_membership_level' ` +
-              `only for membership tiers (owner/admin/member).`,
+              `only for membership tiers (${MEMBERSHIP_TIER_LIST}) — the vocabulary is closed ` +
+              `(ADR-0108), so a business role is always a position.`,
           });
         } else if (type in DEPRECATED_APPROVER_TYPES) {
           const fix = canonicalApproverType(type);

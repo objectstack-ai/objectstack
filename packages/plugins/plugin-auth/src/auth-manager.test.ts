@@ -920,43 +920,34 @@ describe('AuthManager', () => {
       expect(roles.delegated_admin.statements.team).toEqual([]);
     });
 
-    it('registering roles keeps the built-in owner/admin/member intact', async () => {
+    it('the custom map keeps the built-in owner/admin/member intact', async () => {
       // better-auth's `hasPermission` does `{...options.roles || defaultRoles}`,
       // so a custom map that omits the defaults silently strips `owner`'s
       // `invitation:create` and 403s every mutation.
-      const orgPlugin = await bootOrgPlugin({ additionalOrgRoles: ['sales_rep'] });
+      const orgPlugin = await bootOrgPlugin();
 
       const roles = orgPlugin._opts.roles;
       expect(Object.keys(roles)).toEqual(
-        expect.arrayContaining(['owner', 'admin', 'member', 'delegated_admin', 'sales_rep']),
+        expect.arrayContaining(['owner', 'admin', 'member', 'delegated_admin']),
       );
       expect(roles.owner.statements.invitation).toContain('create');
       expect(roles.admin.statements.invitation).toContain('create');
       expect(roles.member.statements.invitation).toEqual([]);
-      // App roles stay at member level — only `delegated_admin` gains invite.
-      expect(roles.sales_rep.statements.invitation).toEqual([]);
     });
 
-    it('an app cannot downgrade `delegated_admin` by declaring the same name', async () => {
-      const orgPlugin = await bootOrgPlugin({ additionalOrgRoles: ['delegated_admin'] });
-      expect(orgPlugin._opts.roles.delegated_admin.statements.invitation).toEqual(['create']);
-    });
-
-    it('#3723: a role name the write path cannot store is not registered either', async () => {
-      // `Field.select` strips the dot, so `showcase.export_data` would be
-      // registered with better-auth verbatim and stored as
-      // `showcaseexport_data` — the two lists agreeing on the name and
-      // disagreeing on the value is the original bug with extra steps.
-      // Refusing it here makes the invitation fail at the door
-      // (`ROLE_NOT_FOUND`) instead of at the `sys_invitation` insert.
-      const orgPlugin = await bootOrgPlugin({
-        additionalOrgRoles: ['showcase.export_data', 'sales_rep'],
-      });
+    it('[ADR-0108] the vocabulary is closed — no app-declared role is registered', async () => {
+      // The retired channel, asserted as retired. `additionalOrgRoles` is gone
+      // from the options; passing the name anyway (an unmigrated host, or a
+      // stack whose `position` metadata declares it) must not put it in the
+      // map. If it did, the name would be storable in `sys_member.role`, and
+      // `resolve-authz-context` projects that column into
+      // `current_user.positions` — capability with no `granted_by`, no
+      // validity window and no subtree/allowlist check (ADR-0090 D12).
+      const orgPlugin = await bootOrgPlugin({ additionalOrgRoles: ['sales_rep'] } as never);
 
       const roles = orgPlugin._opts.roles;
-      expect(Object.keys(roles)).toContain('sales_rep');
-      expect(Object.keys(roles)).not.toContain('showcase.export_data');
-      expect(Object.keys(roles)).not.toContain('showcaseexport_data');
+      expect(Object.keys(roles).sort()).toEqual(['admin', 'delegated_admin', 'member', 'owner']);
+      expect(roles.sales_rep).toBeUndefined();
     });
 
     it('role cap: a delegate inviting an `admin` is REFUSED (the escalation chain)', async () => {

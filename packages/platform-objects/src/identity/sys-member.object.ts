@@ -166,16 +166,19 @@ export const SysMember = ObjectSchema.create({
       required: true,
     }),
     
-    // [#3723] The framework's built-in roles ONLY. App-declared organization
-    // roles are appended at boot by plugin-auth's `withMembershipRoleOptions`,
-    // from the SAME normalized array that registers them with better-auth —
-    // adding one by hand here re-creates the two-lists-that-must-agree bug.
+    // [ADR-0108 / #3723] The framework's four roles — the WHOLE list. Nothing
+    // widens it at boot, and an app's business roles do not belong here: this
+    // column is ORGANIZATION GRADE, and every value in it is projected into
+    // `current_user.positions`, so a name added here is capability granted
+    // with none of ADR-0090 D12's controls. Capability = `position`
+    // (ADR-0090 D3); one-step admission = an invitation carrying placement
+    // (ADR-0105 D8).
     //
     // This select is ENFORCED on write: better-auth's own accept-invitation
     // membership insert is validated like any other row (system context does
-    // not exempt it), so a role better-auth accepts and this list omits is a
-    // role nobody can hold. `delegated_admin` (ADR-0105 D8 / #3697) is in the
-    // built-in list for exactly that reason.
+    // not exempt it), so the closed list is the write-side guardrail, not a
+    // limitation to work around. `delegated_admin` (ADR-0105 D8 / #3697) is in
+    // the list because it is a GRADE — what you may reach — not a capability.
     role: Field.select({
       label: 'Role',
       required: false,

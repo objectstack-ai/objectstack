@@ -2,11 +2,12 @@
 //
 // Regression: the artifact-serve path (`objectstack dev`/`serve`/`start`
 // booting from `dist/objectstack.json`, no host `objectstack.config.ts`) must
-// surface the artifact's app-declared RBAC — `permissions[]` and `roles[]` — at
-// the top level of the returned stack config. The CLI reads `config.permissions`
-// to honour an app-declared default profile (ADR-0056 D7 — `appDefaultPermissionSetName`
-// → SecurityPlugin `fallbackPermissionSet`) and reads `roles[]`/`permissions[]`
-// to register app org roles. Before this was fixed, `createStandaloneStack`
+// surface the artifact's app-declared RBAC — `permissions[]` and `positions[]`
+// — at the top level of the returned stack config. The CLI reads
+// `config.permissions` to honour an app-declared default profile (ADR-0056 D7 —
+// `appDefaultPermissionSetName` → SecurityPlugin `fallbackPermissionSet`); the
+// positions are distributed through `sys_user_position`, never as organization
+// roles (ADR-0108). Before this was fixed, `createStandaloneStack`
 // surfaced `objects`/`requires`/`manifest` but dropped `permissions`/`roles`, so
 // an `isDefault` profile carrying e.g. `readScope: 'unit_and_below'` was silently
 // ignored under `objectstack dev` and every user fell back to the built-in

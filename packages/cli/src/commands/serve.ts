@@ -1491,12 +1491,11 @@ export default class Serve extends Command {
               if (!trustedOrigins.includes(wildcard)) trustedOrigins.push(wildcard);
             }
 
-            // App-declared organization roles (positions / permission sets)
-            // need no wiring here: AuthPlugin derives them from the registered
-            // metadata in its own kernel:ready hook (#3723 / cloud#897) — the
-            // per-host walk was the defect pattern (three of five hosts forgot
-            // it). `additionalOrgRoles` remains available for roles OUTSIDE
-            // the stack metadata, which this host has none of.
+            // [ADR-0108 / #3723] Nothing to wire: the organization-role
+            // vocabulary is closed (owner/admin/delegated_admin/member). A
+            // stack's declared `position` / `permission` names are NOT org
+            // roles — they are positions, assigned through `sys_user_position`
+            // or an invitation carrying placement (ADR-0105 D8).
             await kernel.use(new AuthPlugin({
               secret,
               baseUrl,

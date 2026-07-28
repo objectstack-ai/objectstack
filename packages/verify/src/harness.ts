@@ -182,12 +182,10 @@ export async function bootStack(
   // create, ADR-0062 federation, ADR-0086 two-doors). The bootstrap itself is
   // covered by plugin-auth unit tests + browser E2E.
   //
-  // [#3723] App-declared organization roles need no wiring: AuthPlugin derives
-  // them from the registered metadata in its own kernel:ready hook. The
-  // harness passing NOTHING is deliberate and is itself part of the proof —
-  // the dogfood invite gate only stays green if the auto-derivation works,
-  // which is exactly the guarantee per-host wiring could never give (this
-  // harness was one of the three hosts that forgot it).
+  // [ADR-0108 / #3723] Nothing to wire: the organization-role vocabulary is
+  // closed, and a stack's declared `position` / `permission` names are
+  // positions, not org roles. `membership-role-vocabulary.dogfood.test.ts`
+  // boots through this harness and asserts exactly that.
   await kernel.use(new AuthPlugin({
     secret: opts.authSecret ?? DEFAULT_AUTH_SECRET,
     autoDefaultOrganization: false,

@@ -98,14 +98,17 @@ export interface StandaloneStackResult {
     manifest?: any;
     /**
      * App-declared RBAC metadata, surfaced so the CLI (`serve`/`dev`/`start`)
-     * can wire it without a host `objectstack.config.ts`. In particular the
-     * `serve` command reads `permissions[]` to honour an app-declared default
-     * profile (ADR-0056 D7 — `appDefaultPermissionSetName` → SecurityPlugin
-     * `fallbackPermissionSet`) and reads both `positions[]` and `permissions[]` to
-     * register application org roles with Better-Auth. Without these the
-     * artifact-serve path silently fell back to the built-in `member_default`
-     * (owner-only), so an `isDefault` profile declared purely in app metadata
-     * was ignored under `objectstack dev`.
+     * can wire it without a host `objectstack.config.ts`. The `serve` command
+     * reads `permissions[]` to honour an app-declared default profile
+     * (ADR-0056 D7 — `appDefaultPermissionSetName` → SecurityPlugin
+     * `fallbackPermissionSet`). Without these the artifact-serve path silently
+     * fell back to the built-in `member_default` (owner-only), so an
+     * `isDefault` profile declared purely in app metadata was ignored under
+     * `objectstack dev`.
+     *
+     * These are NOT organization roles: the `sys_member.role` vocabulary is
+     * closed (ADR-0108). A declared position is distributed through
+     * `sys_user_position` or an invitation's placement (ADR-0105 D8).
      */
     permissions?: any[];
     positions?: any[];

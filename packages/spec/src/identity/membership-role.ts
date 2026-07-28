@@ -1,35 +1,60 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Organization membership roles — the ONE list (#3723).
+ * Organization membership roles — a CLOSED, framework-owned vocabulary (#3723).
  *
- * A membership role name has to satisfy two independent gatekeepers before a
- * person can actually hold it:
+ * `sys_member.role` answers **"what is your standing in this organization"**.
+ * It does not answer "what may you do" — that is what positions are for.
  *
- *  1. **better-auth's organization plugin** must know the name, or
- *     `POST /organization/invite-member` answers `ROLE_NOT_FOUND`. Registration
- *     happens in `auth-manager.ts` (`AuthManagerOptions.additionalOrgRoles`).
- *  2. **`sys_invitation.role` / `sys_member.role`** must list the name as a
- *     `select` option. Both are ENFORCED on write — better-auth's own inserts
- *     run through the ordinary ObjectQL validator, system context and all — so
- *     a value missing from the option list is a role nobody can be stored as.
+ * ## Why the list is closed
  *
- * Those were two hand-maintained lists that nothing kept in step: an app
- * declaring a `permission` named `sales_rep` got the role registered with
- * better-auth (step 1) and then watched the `sys_invitation` insert fail with
- * `role must be one of: owner, admin, member` (step 2). `declared ≠ enforced`
- * (Prime Directive #10), one layer below the declaration.
+ * [ADR-0090 D3] "role" is a reserved-forbidden word in this system, with a
+ * single documented exception: `sys_member.role` is better-auth's own schema,
+ * which we do not own. It survives *as a third-party column*, projected as
+ * `org_membership_level`, and its naming commandment is explicit —
+ * **capability = `permission_set` · distribution = `position` · hierarchy =
+ * `business_unit` · collaboration = `team`.** Distribution is a position, so a
+ * membership role is not a distribution channel.
  *
- * The fix is contract-first (Prime Directive #12): this module is the single
- * source both gatekeepers read. The built-ins live here as ordered constants;
- * the app-supplied extras are folded in ONCE, by
- * `plugin-auth/src/org-roles.ts`, which feeds the better-auth role map and the
- * two `select` option lists from the same normalized array. Neither side can
- * accept a name the other rejects, because neither side has its own list.
+ * [ADR-0095 D3] No enforcement-time code path may consult the better-auth role
+ * directly. `mapMembershipRole` normalizes the four names below into their
+ * canonical built-in identities at PROVISIONING time (`resolve-authz-context`),
+ * which is a grant-provisioning concern, not an authorization input.
  *
- * Naming lives here rather than in plugin-auth because the platform objects
- * (`@objectstack/platform-objects`) need the built-in options too, and they
- * must not depend on the auth plugin.
+ * [ADR-0057 D4, carried forward] App-declared names were once fed to
+ * better-auth's `additionalOrgRoles` so invitations naming them would not be
+ * rejected — "**never as the authority for RBAC**". That qualifier was the
+ * whole point, and it did not hold: whatever string lands in `sys_member.role`
+ * is projected into `current_user.positions`, so an app role stored here WAS
+ * capability, granted with none of ADR-0090 D12's controls (no `granted_by`,
+ * no validity window, no subtree or allowlist check). #3747 made those names
+ * storable and #3779 auto-derived them in every host; ADR-0108 retires the
+ * channel and this list is closed again.
+ *
+ * ## What replaced it
+ *
+ * An app that wants `sales_rep` declares a **`position`** and assigns it
+ * through `sys_user_position` — the governed path, with the full ADR-0090 D12
+ * apparatus. At admission time the one-step flow is an **invitation carrying
+ * placement** (ADR-0105 D8): `business_unit_id` + `positions`, authorized
+ * against the issuer's `adminScope` by dry-running `DelegatedAdminGate`, and
+ * applied on acceptance. That path is strictly more capable than the retired
+ * one — a delegated admin may use it, where the membership role was
+ * admin-only.
+ *
+ * ## Three facts that look like one — do not merge them
+ *
+ * A future reader will be tempted to "unify the role lists". Only the first of
+ * these is a list; the other two are rules that belong near what they govern:
+ *
+ *  1. **what names exist** — this module, the one source;
+ *  2. **which names mean administrative authority** — `orgRoleGrade`
+ *     (invitation cap) and `auto-org-admin-grant.ts`;
+ *  3. **how a name projects into an identity** — `mapMembershipRole`.
+ *
+ * Naming lives in `@objectstack/spec` rather than in plugin-auth because the
+ * platform objects (`@objectstack/platform-objects`) need the options too, and
+ * they must not depend on the auth plugin.
  */
 
 /** better-auth's built-in organization roles. */
@@ -58,13 +83,18 @@ export const MEMBERSHIP_ROLE_MEMBER = 'member';
  *
  * Doubly opt-in, so a default deployment changes not at all: someone must set
  * the membership role AND grant an adminScope set.
+ *
+ * This is the shape EVERY membership role must have (ADR-0108): a grade that
+ * decides what you can reach, never a bundle of what you may do.
  */
 export const MEMBERSHIP_ROLE_DELEGATED_ADMIN = 'delegated_admin';
 
 /**
- * The membership roles the framework itself ships, in display order. Always
- * registered — an app supplies roles IN ADDITION to these, never instead of
- * them (dropping better-auth's `owner` alone would 403 every org mutation).
+ * The membership roles — the WHOLE vocabulary, in display order (ADR-0108).
+ *
+ * Not "the built-ins, plus whatever an app adds": there is no second source.
+ * A stack that needs another business role declares a `position`; see the
+ * module doc for the migration.
  */
 export const BUILTIN_MEMBERSHIP_ROLES = [
   MEMBERSHIP_ROLE_OWNER,
@@ -76,10 +106,12 @@ export const BUILTIN_MEMBERSHIP_ROLES = [
 export type BuiltinMembershipRole = (typeof BUILTIN_MEMBERSHIP_ROLES)[number];
 
 /**
- * `select` options for the built-in roles — the static baseline of
- * `sys_invitation.role` and `sys_member.role`. App roles are appended at boot
- * (see `plugin-auth/src/org-roles.ts`); a deployment whose stack declares none
- * sees exactly this list, unchanged.
+ * `select` options for `sys_invitation.role` and `sys_member.role` — the
+ * complete option list both objects declare statically.
+ *
+ * Nothing widens these at boot any more (ADR-0108). The closed list IS the
+ * feature: it is the write-side guardrail that makes an ungoverned capability
+ * grant unrepresentable, and it is the picker's vocabulary.
  */
 export const BUILTIN_MEMBERSHIP_ROLE_OPTIONS: readonly Readonly<{ label: string; value: string }>[] = [
   { label: 'Owner', value: MEMBERSHIP_ROLE_OWNER },
@@ -87,19 +119,3 @@ export const BUILTIN_MEMBERSHIP_ROLE_OPTIONS: readonly Readonly<{ label: string;
   { label: 'Delegated Admin', value: MEMBERSHIP_ROLE_DELEGATED_ADMIN },
   { label: 'Member', value: MEMBERSHIP_ROLE_MEMBER },
 ] as const;
-
-/**
- * The shape a role name must have to survive BOTH gatekeepers unchanged.
- *
- * Identical to `SnakeCaseIdentifierSchema`'s pattern, which every `permission`
- * / `position` name already satisfies — and deliberately so: `Field.select`
- * lowercases option values and strips anything outside `[a-z0-9_]`, so a name
- * like `showcase.export_data` would be registered with better-auth verbatim
- * and stored as `showcaseexport_data`. The two lists would agree on the *name*
- * and still disagree on the *value*. Names that cannot round-trip are refused
- * by `normalizeAdditionalOrgRoles` on both sides rather than half-accepted.
- */
-export const MEMBERSHIP_ROLE_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
-
-/** Minimum length, matching `SnakeCaseIdentifierSchema`. */
-export const MEMBERSHIP_ROLE_NAME_MIN_LENGTH = 2;

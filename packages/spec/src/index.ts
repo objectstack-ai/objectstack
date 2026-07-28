@@ -173,8 +173,9 @@ export {
 } from './identity/eval-user.zod';
 export type { EvalUser, EvalUserInput, BuiltinIdentityName } from './identity/eval-user.zod';
 
-// #3723: organization membership roles — the ONE list read by better-auth's
-// role registry AND the `sys_invitation`/`sys_member` role selects.
+// #3723 / ADR-0108: organization membership roles — the closed, framework-owned
+// vocabulary behind better-auth's role registry AND the `sys_invitation` /
+// `sys_member` role selects. Capability travels through positions, never here.
 export {
   MEMBERSHIP_ROLE_OWNER,
   MEMBERSHIP_ROLE_ADMIN,
@@ -182,7 +183,5 @@ export {
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
   BUILTIN_MEMBERSHIP_ROLES,
   BUILTIN_MEMBERSHIP_ROLE_OPTIONS,
-  MEMBERSHIP_ROLE_NAME_PATTERN,
-  MEMBERSHIP_ROLE_NAME_MIN_LENGTH,
 } from './identity/membership-role';
 export type { BuiltinMembershipRole } from './identity/membership-role';
