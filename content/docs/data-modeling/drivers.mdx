@@ -91,6 +91,10 @@ comes back is the **boot sequence that was skipped**: nothing re-runs the schema
 sync, so those objects can be left with no tables even after the database
 returns.
 
+The same guard covers **declared datasources** whose objects have no fallback —
+see [When auto-connect fails](/docs/data-modeling/external-datasources#when-auto-connect-fails)
+([#3758](https://github.com/objectstack-ai/objectstack/issues/3758)).
+
 <Callout type="warn">
 `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` boots anyway, in an explicitly degraded
 state announced by a `DEGRADED BOOT` banner. Queries to a failed driver fail

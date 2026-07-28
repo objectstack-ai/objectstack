@@ -11,8 +11,15 @@ import { defineDatasource } from '@objectstack/spec/data';
  * queryable through the normal ObjectQL/REST surface.
  *
  * `schemaMode: 'external'` ⇒ ObjectStack never runs DDL here (it's a guest in a
- * database it does not own). `onMismatch: 'warn'` keeps a fixture hiccup from
- * bricking the whole showcase boot — the rest of the demo still loads.
+ * database it does not own). `onMismatch: 'warn'` keeps a *schema drift* in the
+ * fixture (a renamed column, an extra table) from bricking the showcase boot —
+ * the rest of the demo still loads.
+ *
+ * It does **not** make a failed *connection* survivable, and shouldn't: the
+ * `customer` / `order` objects bind to this datasource explicitly, so they have
+ * no fallback driver and every query against them would fail (#3758). If the
+ * fixture file cannot be opened at all, the boot stops with that as the reason
+ * rather than serving a showcase whose federation pages are quietly dead.
  *
  * It also shows up in **Setup → Integrations → Datasources** and via
  * `GET /api/v1/meta/datasource`, where an admin can run the runtime

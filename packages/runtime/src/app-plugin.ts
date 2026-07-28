@@ -455,11 +455,14 @@ export class AppPlugin implements Plugin {
                 }
             }
         } catch (err) {
-            // A fail-fast (external + onMismatch:'fail') connect error propagates
-            // to brick boot as intended (ADR-0062 D5); other errors are already
-            // degraded inside the connection service. Re-throw so the kernel
-            // surfaces the real cause. (Single-string message: the context
-            // logger types `error(message, error?)`, not a meta object.)
+            // A fail-fast connect error propagates to brick boot as intended
+            // (ADR-0062 D5): the datasource has no fallback path — `external` +
+            // onMismatch:'fail', or objects that bind to it explicitly and would
+            // otherwise fail every query with "Datasource 'x' is not registered"
+            // (#3758). Other errors are already degraded inside the connection
+            // service. Re-throw so the kernel surfaces the real cause.
+            // (Single-string message: the context logger types
+            // `error(message, error?)`, not a meta object.)
             ctx.logger.error(
                 `[AppPlugin] declared-datasource auto-connect failed for app '${appId}': ${(err as Error)?.message ?? String(err)}`,
             );

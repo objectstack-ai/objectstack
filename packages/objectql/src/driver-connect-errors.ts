@@ -85,36 +85,10 @@ export class DriverConnectError extends Error {
 }
 
 /**
- * Emit the degraded-boot banner on a channel the host cannot accidentally
- * silence.
- *
- * `OS_ALLOW_DRIVER_CONNECT_FAILURE` only justifies itself if the state it opts
- * into is impossible to miss — and a logger-only banner is missable: `os serve`
- * swallows ALL of stdout while the kernel boots (its "boot-quiet" capture), and
- * `Logger` routes `warn` to stdout, so the one message that matters would be
- * invisible in exactly the situation it exists for. Writing to stderr as well
- * is the same belt-and-braces the kernel already uses for plugin startup
- * failures.
- *
- * Best-effort and never throws: falls back to `console.error`, then to silence
- * on runtimes that have neither (the logger still carries the structured
- * record either way).
+ * The degraded-boot banner now lives in `@objectstack/types` because
+ * `DatasourceConnectionService` owes the operator the same banner for the same
+ * flag (framework#3758) and must not depend on the whole query engine to print
+ * it. Re-exported here so this module stays the single import site for
+ * engine-side driver-connect failure reporting.
  */
-export function emitDegradedBootBanner(message: string): void {
-  const proc = (globalThis as {
-    process?: { stderr?: { write?: (chunk: string) => unknown } };
-  }).process;
-  try {
-    if (typeof proc?.stderr?.write === 'function') {
-      proc.stderr.write(`${message}\n`);
-      return;
-    }
-  } catch {
-    /* stderr unavailable / closed — fall through to console */
-  }
-  try {
-    (globalThis as { console?: { error?: (msg: string) => void } }).console?.error?.(message);
-  } catch {
-    /* no output channel at all — the logger record is the remaining trace */
-  }
-}
+export { emitDegradedBootBanner } from '@objectstack/types';

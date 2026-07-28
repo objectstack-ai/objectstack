@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   DatasourceConnectionService,
   isDatasourceAddressed,
@@ -62,13 +62,15 @@ function svc(over: {
 } = {}) {
   const engine = over.engine === undefined ? fakeEngine() : over.engine;
   const factory = over.factory === undefined ? fakeFactory() : over.factory;
+  const warnings: string[] = [];
   const service = new DatasourceConnectionService({
     factory: () => factory ?? undefined,
     engine: () => engine ?? undefined,
     policy: over.policy,
     secrets: over.secrets,
+    logger: { warn: (msg: string) => { warnings.push(msg); } },
   });
-  return { service, engine: engine as ReturnType<typeof fakeEngine> | undefined, factory };
+  return { service, engine: engine as ReturnType<typeof fakeEngine> | undefined, factory, warnings };
 }
 
 const externalDs: ConnectableDatasource = {
@@ -189,9 +191,148 @@ describe('DatasourceConnectionService.connect', () => {
       expect(result.status).toBe('failed-degraded');
     });
 
-    it('degrade: external + onMismatch:warn degrades even at boot', async () => {
+    it('degrade: external + onMismatch:warn degrades even at boot (nothing binds to it)', async () => {
       const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
       const result = await service.connect(externalDs, { context: { trigger: 'declared-auto' } });
+      expect(result.status).toBe('failed-degraded');
+    });
+  });
+
+  // framework#3758: a datasource that objects bind to explicitly has NO fallback
+  // — `engine.getDriver` throws for them rather than resolving `default` — so a
+  // boot-time connect failure used to leave a clean-looking server whose bound
+  // objects all 500 at query time with "Datasource 'x' is not registered".
+  describe('D5 fail-fast for explicitly-bound datasources (framework#3758)', () => {
+    const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
+    let saved: string | undefined;
+    beforeEach(() => { saved = process.env[ENV]; delete process.env[ENV]; });
+    afterEach(() => {
+      if (saved === undefined) delete process.env[ENV];
+      else process.env[ENV] = saved;
+    });
+
+    /** A plain managed datasource — no `onMismatch:'fail'` to lean on. */
+    const analytics: ConnectableDatasource = {
+      name: 'analytics',
+      driver: 'sqlite',
+      schemaMode: 'managed',
+      config: {},
+    };
+
+    it('fail-fast: bound objects at boot brick the boot, even for a managed datasource', async () => {
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      await expect(
+        service.connect(analytics, { objects: ['visit', 'session'], context: { trigger: 'declared-auto' } }),
+      ).rejects.toThrow(/fail-fast/);
+    });
+
+    it('names the bound objects and the real cause — not just the datasource', async () => {
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      const err = await service
+        .connect(analytics, { objects: ['visit', 'session'], context: { trigger: 'declared-auto' } })
+        .then(
+          () => { throw new Error('connect() resolved but should have thrown'); },
+          (e: unknown) => e as Error,
+        );
+      expect(err.message).toContain("datasource 'analytics'");
+      expect(err.message).toContain('connection refused'); // the underlying cause
+      expect(err.message).toContain('2 object(s) bind to it explicitly');
+      expect(err.message).toContain('visit, session');
+      expect(err.message).toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE=1');
+    });
+
+    it('truncates a long binding list to 10 names + a count', async () => {
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      const objects = Array.from({ length: 20 }, (_, i) => `obj_${i}`);
+      const err = await service
+        .connect(analytics, { objects, context: { trigger: 'declared-auto' } })
+        .then(() => undefined, (e: Error) => e);
+      expect(err!.message).toContain('20 object(s) bind to it explicitly');
+      expect(err!.message).toContain('obj_0, obj_1');
+      expect(err!.message).toContain('+10 more');
+      expect(err!.message).not.toContain('obj_15');
+    });
+
+    it('a credential failure on a bound datasource is fatal too (D3 ∩ D5)', async () => {
+      const { service } = svc({ secrets: { resolve: async () => undefined } });
+      await expect(
+        service.connect(
+          { ...analytics, external: { credentialsRef: 'sys_secret:abc' } },
+          { objects: ['visit'], context: { trigger: 'declared-auto' } },
+        ),
+      ).rejects.toThrow(/fail-fast/);
+    });
+
+    it('an unsupported driver on a bound datasource is fatal too — the objects are just as dead', async () => {
+      const { service } = svc({ factory: fakeFactory({ supports: () => false }) });
+      await expect(
+        service.connect(analytics, { objects: ['visit'], context: { trigger: 'declared-auto' } }),
+      ).rejects.toThrow(/no driver factory supports/);
+    });
+
+    it('degrade: autoConnect:true with nothing bound stays lenient ("connect it if you can")', async () => {
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      const result = await service.connect(
+        { ...analytics, autoConnect: true },
+        { context: { trigger: 'declared-auto' } },
+      );
+      expect(result.status).toBe('failed-degraded');
+    });
+
+    it('degrade: the SAME bound datasource via runtime-admin never bricks the running server', async () => {
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      const result = await service.connect(analytics, {
+        objects: ['visit', 'session'],
+        context: { trigger: 'runtime-admin' },
+      });
+      expect(result.status).toBe('failed-degraded');
+    });
+
+    it('boots degraded when OS_ALLOW_DRIVER_CONNECT_FAILURE opts in, and says so loudly', async () => {
+      process.env[ENV] = '1';
+      const { service, warnings } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      const result = await service.connect(analytics, {
+        objects: ['visit'],
+        context: { trigger: 'declared-auto' },
+      });
+      expect(result.status).toBe('failed-degraded');
+      const warned = warnings.join('\n');
+      expect(warned).toContain('DEGRADED BOOT');
+      expect(warned).toContain('visit');
+    });
+
+    it('repeats the degraded banner on stderr, which `os serve` boot-quiet cannot swallow', async () => {
+      process.env[ENV] = '1';
+      const written: string[] = [];
+      const realWrite = process.stderr.write;
+      (process.stderr as { write: unknown }).write = (chunk: any) => {
+        written.push(String(chunk));
+        return true;
+      };
+      try {
+        const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+        await service.connect(analytics, { objects: ['visit'], context: { trigger: 'declared-auto' } });
+      } finally {
+        (process.stderr as { write: unknown }).write = realWrite;
+      }
+      expect(written.join('')).toContain('DEGRADED BOOT');
+    });
+
+    it('treats a falsy opt-in value as off — still fail-fast', async () => {
+      process.env[ENV] = 'false';
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      await expect(
+        service.connect(analytics, { objects: ['visit'], context: { trigger: 'declared-auto' } }),
+      ).rejects.toThrow(/fail-fast/);
+    });
+
+    it('the shared flag also unblocks the (a) external + onMismatch:fail path', async () => {
+      process.env[ENV] = '1';
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      const result = await service.connect(
+        { ...externalDs, external: { validation: { onMismatch: 'fail' } } },
+        { context: { trigger: 'declared-auto' } },
+      );
       expect(result.status).toBe('failed-degraded');
     });
   });
@@ -290,5 +431,58 @@ describe('DatasourceConnectionService.connectDeclared', () => {
     });
     expect(results).toEqual([]);
     expect(engine!.drivers.size).toBe(0);
+  });
+
+  // framework#3758 — the operator should not have to reboot once per broken
+  // datasource to discover them, so every gated datasource is attempted before
+  // the aggregate throw (same shape as ObjectQL.init()'s DriverConnectError).
+  it('attempts every gated datasource, then reports ALL fatal failures in one error', async () => {
+    const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
+    const saved = process.env[ENV];
+    delete process.env[ENV];
+    try {
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      const err = await service
+        .connectDeclared({
+          datasources: [
+            { name: 'analytics', driver: 'sqlite', schemaMode: 'managed', config: {} },
+            { name: 'billing', driver: 'sqlite', schemaMode: 'managed', config: {} },
+          ],
+          objects: [
+            { name: 'visit', datasource: 'analytics' },
+            { name: 'invoice', datasource: 'billing' },
+          ],
+        })
+        .then(
+          () => { throw new Error('connectDeclared() resolved but should have thrown'); },
+          (e: unknown) => e as Error,
+        );
+      expect(err.message).toContain('2 declared datasource(s) failed to connect');
+      expect(err.message).toContain("datasource 'analytics'");
+      expect(err.message).toContain("datasource 'billing'"); // not stopped at the first
+      expect(err.message).toContain('visit');
+      expect(err.message).toContain('invoice');
+    } finally {
+      if (saved === undefined) delete process.env[ENV];
+      else process.env[ENV] = saved;
+    }
+  });
+
+  it('a single fatal failure propagates as-is (no aggregate wrapper to read past)', async () => {
+    const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
+    const saved = process.env[ENV];
+    delete process.env[ENV];
+    try {
+      const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      await expect(
+        service.connectDeclared({
+          datasources: [{ name: 'analytics', driver: 'sqlite', schemaMode: 'managed', config: {} }],
+          objects: [{ name: 'visit', datasource: 'analytics' }],
+        }),
+      ).rejects.toThrow(/^datasource 'analytics': connect failed/);
+    } finally {
+      if (saved === undefined) delete process.env[ENV];
+      else process.env[ENV] = saved;
+    }
   });
 });

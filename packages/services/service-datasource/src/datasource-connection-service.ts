@@ -24,6 +24,10 @@
  * D8) and auto-connect never double-register.
  */
 
+import {
+  emitDegradedBootBanner,
+  resolveAllowDriverConnectFailure,
+} from '@objectstack/types';
 import type {
   IDatasourceDriverFactory,
   DatasourceConnectionSpec,
@@ -135,6 +139,11 @@ export interface ConnectResult {
  * backward-compat guarantee). External datasources and explicit
  * `object.datasource` bindings never resolved to `default` (they throw when
  * unregistered), so auto-connecting them is a strict improvement, not a change.
+ *
+ * That same "no fallback" property is why gate (b) is also a **fail-fast**
+ * trigger when the connect fails (framework#3758) — see
+ * {@link DatasourceConnectionService.handleFailure}. Gate (c) is not: nothing
+ * declares a dependency on an `autoConnect` datasource.
  */
 export function isDatasourceAddressed(
   ds: Pick<ConnectableDatasource, 'name' | 'schemaMode' | 'autoConnect'>,
@@ -162,6 +171,12 @@ export class DatasourceConnectionService {
    * Called from `AppPlugin.start()` with the app bundle's datasources + objects.
    * Each connected external datasource also has its bound objects' read metadata
    * synced so they are immediately queryable with zero app code.
+   *
+   * Throws when any datasource hits the D5 fail-fast verdict (see
+   * {@link handleFailure}) — but only after attempting **all** of them, so one
+   * boot names every misconfigured datasource instead of one per restart. This
+   * mirrors `ObjectQLEngine.init()`'s aggregate `DriverConnectError`
+   * (framework#3741); the same operator is reading both.
    */
   async connectDeclared(input: {
     datasources: readonly ConnectableDatasource[];
@@ -169,6 +184,7 @@ export class DatasourceConnectionService {
   }): Promise<ConnectResult[]> {
     const objects = input.objects ?? [];
     const results: ConnectResult[] = [];
+    const fatal: Error[] = [];
     for (const ds of input.datasources) {
       if (!ds?.name) continue;
       if (ds.active === false) continue;
@@ -176,8 +192,20 @@ export class DatasourceConnectionService {
       const bound = objects
         .filter((o) => o?.datasource === ds.name && typeof o?.name === 'string')
         .map((o) => o.name as string);
-      results.push(
-        await this.connect(ds, { objects: bound, context: { origin: ds.origin ?? 'code', trigger: 'declared-auto' } }),
+      try {
+        results.push(
+          await this.connect(ds, { objects: bound, context: { origin: ds.origin ?? 'code', trigger: 'declared-auto' } }),
+        );
+      } catch (err) {
+        fatal.push(err instanceof Error ? err : new Error(String(err)));
+        results.push({ name: ds.name, status: 'failed-degraded', reason: errMsg(err) });
+      }
+    }
+    if (fatal.length === 1) throw fatal[0];
+    if (fatal.length > 1) {
+      throw new Error(
+        `${fatal.length} declared datasource(s) failed to connect — refusing to boot.\n` +
+        fatal.map((e) => `  • ${e.message}`).join('\n'),
       );
     }
     return results;
@@ -187,10 +215,12 @@ export class DatasourceConnectionService {
    * Build + connect + register a single datasource's live driver. The shared
    * core used by both auto-connect and the runtime-admin pool registration.
    *
-   * Failure policy (ADR-0062 D5): an `external` datasource with
-   * `validation.onMismatch: 'fail'` fails fast (re-throws, bricking boot as
-   * intended); everything else degrades with a warning so an optional replica's
-   * connectivity blip never bricks boot.
+   * Failure policy (ADR-0062 D5): at boot, a datasource with **no fallback
+   * path** fails fast (re-throws, bricking boot as intended) — `external` with
+   * `validation.onMismatch: 'fail'`, or one that `opts.objects` shows is
+   * explicitly bound by objects. Everything else degrades with a warning so an
+   * optional replica's connectivity blip never bricks boot. See
+   * {@link handleFailure}.
    */
   async connect(
     record: ConnectableDatasource,
@@ -231,6 +261,7 @@ export class DatasourceConnectionService {
         'skipped-unsupported',
         `no driver factory supports driver '${record.driver}'`,
         opts.context,
+        opts.objects,
       );
     }
 
@@ -252,12 +283,13 @@ export class DatasourceConnectionService {
           'failed-credentials',
           `requires credential '${credentialsRef}' but no secret store (SecretBinder/ICryptoProvider) is configured`,
           opts.context,
+          opts.objects,
         );
       }
       try {
         secret = await resolver(credentialsRef);
       } catch (err) {
-        return this.handleFailure(record, 'failed-credentials', `resolving credential '${credentialsRef}' threw: ${errMsg(err)}`, opts.context);
+        return this.handleFailure(record, 'failed-credentials', `resolving credential '${credentialsRef}' threw: ${errMsg(err)}`, opts.context, opts.objects);
       }
       if (secret == null || secret === '') {
         return this.handleFailure(
@@ -265,6 +297,7 @@ export class DatasourceConnectionService {
           'failed-credentials',
           `credential '${credentialsRef}' could not be resolved or decrypted (missing sys_secret row, or the encryption key changed)`,
           opts.context,
+          opts.objects,
         );
       }
     }
@@ -302,7 +335,7 @@ export class DatasourceConnectionService {
       this.logger?.info?.(`datasource '${name}': connected (driver=${record.driver}, schemaMode=${record.schemaMode ?? 'managed'})`);
       return { name, status: 'connected' };
     } catch (err) {
-      return this.handleFailure(record, 'failed-degraded', errMsg(err), opts.context);
+      return this.handleFailure(record, 'failed-degraded', errMsg(err), opts.context, opts.objects);
     }
   }
 
@@ -319,34 +352,87 @@ export class DatasourceConnectionService {
   }
 
   /**
-   * Apply the D5 connect-failure policy (also covers D3 credential failures). A
-   * code-defined `external` datasource with `onMismatch:'fail'` auto-connected at
-   * boot re-throws (fail-fast, bricking boot as intended). Runtime-admin
-   * create/update + boot rehydration always degrade-with-warning — a UI action
-   * or a replica blip must never brick the running server (preserves the
-   * pre-ADR-0062 admin behavior). Either way the datasource is left unconnected
-   * with a clear message — never a silent skip.
+   * Apply the D5 connect-failure policy (also covers D3 credential failures).
+   *
+   * A boot-time (`declared-auto`) connect failure is **fatal** when the
+   * datasource has no fallback path, which is true in two cases:
+   *
+   *  - **(a)** it is `external` with `validation.onMismatch:'fail'` — the author
+   *    asked for a hard stop explicitly; or
+   *  - **(b)** objects bind to it explicitly via `object.datasource` — those
+   *    objects have **no fallback whatsoever**: `engine.getDriver` throws
+   *    `Datasource 'x' is not registered` for them, it never resolves `default`
+   *    (framework#3758). Leaving this at a warning produced the worst possible
+   *    shape: a server that boots clean, serves most of the app, and fails every
+   *    read/write of the bound objects with an error that reads nothing like
+   *    "the analytics database is unreachable".
+   *
+   * Anything else degrades with a warning: `autoConnect:true` means "connect it
+   * if you can" with nothing declaring a dependency on it, and runtime-admin
+   * create/update + boot rehydration must never brick a running server over a
+   * UI action or a replica blip (preserves the pre-ADR-0062 admin behavior).
+   *
+   * The fatal path shares the engine's escape hatch,
+   * `OS_ALLOW_DRIVER_CONNECT_FAILURE` (framework#3741) — the operator intent is
+   * identical ("I know the database is unreachable, boot anyway") and two flags
+   * would only mean one of them gets missed. When it is set the boot continues
+   * and the degraded state is announced on a channel `os serve`'s boot-quiet
+   * stdout capture cannot swallow.
+   *
+   * Either way the datasource is left unconnected with a clear message — never
+   * a silent skip.
    */
   private handleFailure(
     record: ConnectableDatasource,
     status: ConnectStatus,
     reason: string,
     context?: DatasourceConnectContext,
+    boundObjects: readonly string[] = [],
   ): ConnectResult {
     const isExternal = record.schemaMode && record.schemaMode !== 'managed';
-    const failFast =
-      context?.trigger === 'declared-auto' &&
-      isExternal &&
-      record.external?.validation?.onMismatch === 'fail';
     const msg = `datasource '${record.name}': connect failed — ${reason}`;
-    if (failFast) {
+
+    const causes: string[] = [];
+    if (context?.trigger === 'declared-auto') {
+      if (isExternal && record.external?.validation?.onMismatch === 'fail') {
+        causes.push(`schemaMode=${record.schemaMode}, validation.onMismatch='fail'`);
+      }
+      if (boundObjects.length > 0) {
+        causes.push(
+          `${boundObjects.length} object(s) bind to it explicitly (${formatObjectList(boundObjects)}) ` +
+          `and have no fallback datasource — every read/write of them would fail`,
+        );
+      }
+    }
+    if (causes.length === 0) {
+      this.logger?.warn?.(`${msg} — degrading (datasource left unconnected)`);
+      return { name: record.name, status, reason };
+    }
+
+    const why = causes.join('; ');
+    if (!resolveAllowDriverConnectFailure()) {
       throw new Error(
-        `${msg}. (schemaMode=${record.schemaMode}, validation.onMismatch='fail' ⇒ fail-fast per ADR-0062 D5)`,
+        `${msg}. (${why} ⇒ fail-fast per ADR-0062 D5). Fix the datasource configuration, or set ` +
+        `OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway and serve errors until it is reachable.`,
       );
     }
-    this.logger?.warn?.(`${msg} — degrading (datasource left unconnected)`);
+    const banner =
+      `⚠️ DEGRADED BOOT: ${msg} (${why}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting ` +
+      `anyway. Queries against the objects bound to it fail with "Datasource '${record.name}' is ` +
+      `not registered" until it is reachable AND the server is restarted: nothing re-runs the ` +
+      `connect. Unset OS_ALLOW_DRIVER_CONNECT_FAILURE to restore fail-fast boot.`;
+    this.logger?.warn?.(banner);
+    // …and again on a channel the host cannot silence — see the helper's note
+    // on `os serve`'s boot-quiet stdout capture.
+    emitDegradedBootBanner(banner);
     return { name: record.name, status, reason };
   }
+}
+
+/** Up to 10 bound object names, then `+N more` — a name list, not a wall of text. */
+function formatObjectList(names: readonly string[]): string {
+  const head = names.slice(0, 10).join(', ');
+  return names.length > 10 ? `${head}, +${names.length - 10} more` : head;
 }
 
 function toSpec(record: ConnectableDatasource): DatasourceConnectionSpec {

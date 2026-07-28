@@ -124,6 +124,36 @@ A connected external datasource is also visible in **Setup → Datasources** (st
 `origin: code`, read-only in the UI) and via `GET /api/v1/datasources` and
 `GET /api/v1/meta/datasource`, where an admin can run the "Sync objects" wizard.
 
+### When auto-connect fails
+
+An object that binds explicitly via `datasource: '…'` has **no fallback** — it
+never falls through to the `default` driver, so an unconnected datasource means
+every read and write of that object fails. The boot therefore **refuses to start**
+when a datasource in that position cannot be connected
+([#3758](https://github.com/objectstack-ai/objectstack/issues/3758)), rather than
+leaving a server that looks healthy and errors only on the affected pages:
+
+| Gate | Connect fails at boot |
+|:---|:---|
+| **external** with `validation.onMismatch: 'fail'` | refuses the boot |
+| **objects bind explicitly** via `object.datasource` | refuses the boot — the error names them |
+| **`autoConnect: true`** with nothing bound | warning; left unconnected |
+
+This covers every reason a connect can fail — unreachable database, unresolvable
+`credentialsRef`, unsupported `driver` — because the bound objects are equally
+dead in each case. Every gated datasource is attempted before the boot aborts, so
+one failed start reports *all* the misconfigured ones.
+
+<Callout type="warn">
+`OS_ALLOW_DRIVER_CONNECT_FAILURE=1` boots anyway — the same flag as the
+[engine-level driver-connect guard](/docs/data-modeling/drivers#startup-a-driver-that-cannot-connect-aborts-the-boot) —
+in an explicitly degraded state announced by a `DEGRADED BOOT` banner. The
+datasource stays unconnected for the process lifetime: nothing re-runs the
+connect, so queries against its objects keep failing with
+`Datasource 'x' is not registered` even after the database comes back. Do not set
+it in production.
+</Callout>
+
 ## 4. Credentials
 
 Never inline a password. Put a reference in `external.credentialsRef` and store the
@@ -133,10 +163,11 @@ cleartext **at connect, before the driver is built**.
 
 Resolution is **fail-closed**: if a `credentialsRef` is declared but no secret store
 is configured, or the secret cannot be resolved/decrypted, the datasource is left
-**unconnected with a clear error** — never connected without the credential. For a
-code-defined external datasource with `validation.onMismatch: 'fail'` this fails
-the boot; otherwise it degrades with a warning. (Credential-less drivers such as
-SQLite simply have no `credentialsRef`.)
+**unconnected with a clear error** — never connected without the credential. An
+unresolvable credential is a connect failure like any other, so it fails the boot
+for the datasources listed under [When auto-connect fails](#when-auto-connect-fails)
+and degrades with a warning otherwise. (Credential-less drivers such as SQLite
+simply have no `credentialsRef`.)
 
 ## 5. Writes (double opt-in)
 

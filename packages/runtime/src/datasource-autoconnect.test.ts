@@ -11,7 +11,7 @@
 // driver, so the full AppPlugin → `datasource-connection` → engine path runs
 // without any native driver dependency.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { Runtime } from './runtime.js';
 import { DriverPlugin } from './driver-plugin.js';
 import { AppPlugin } from './app-plugin.js';
@@ -176,6 +176,82 @@ describe('ADR-0062 credentials fail-closed (D3)', () => {
       }),
     );
     await expect(kernel.bootstrap()).rejects.toThrow(/needs_secret|credential|fail-fast/i);
+    try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
+  }, BOOT_TIMEOUT);
+});
+
+describe('ADR-0062 D5 — an explicitly-bound datasource that cannot connect bricks boot (#3758)', () => {
+  // A MANAGED datasource with no `onMismatch:'fail'` to lean on, that two
+  // objects bind to explicitly. Those objects never fall back to the `default`
+  // driver — `engine.getDriver` throws for them — so leaving this at a warning
+  // produced a server that started clean and failed every query against them.
+  function boundArtifact() {
+    return {
+      manifest: { id: 'com.test.ds-bound', name: 'DS Bound', version: '1.0.0' },
+      objects: [
+        { name: 'visit', label: 'Visit', datasource: 'analytics', fields: { id: { type: 'text' } } },
+        { name: 'session', label: 'Session', datasource: 'analytics', fields: { id: { type: 'text' } } },
+        { name: 'note', label: 'Note', fields: { title: { type: 'text' } } },
+      ],
+      datasources: [
+        {
+          name: 'analytics',
+          label: 'Analytics',
+          // No factory supports this driver — the same dead end as an
+          // unreachable host, from the bound objects' point of view.
+          driver: 'not-a-real-driver',
+          schemaMode: 'managed',
+          origin: 'code',
+          config: {},
+          active: true,
+        },
+      ],
+    };
+  }
+
+  async function bootBound() {
+    const { ObjectQLPlugin } = await import('@objectstack/objectql');
+    const { InMemoryDriver } = await import('@objectstack/driver-memory');
+    const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
+      '@objectstack/service-datasource'
+    );
+    const runtime = new Runtime({ cluster: false });
+    const kernel = runtime.getKernel();
+    await kernel.use(new DriverPlugin(new InMemoryDriver()));
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AppPlugin(boundArtifact()));
+    await kernel.use(
+      new DatasourceAdminServicePlugin({ driverFactory: createDefaultDatasourceDriverFactory() }),
+    );
+    return kernel;
+  }
+
+  const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env[ENV]; delete process.env[ENV]; });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[ENV];
+    else process.env[ENV] = saved;
+  });
+
+  it('refuses the boot, naming the datasource and the objects that depend on it', async () => {
+    const kernel = await bootBound();
+    const err = await kernel.bootstrap().then(
+      () => { throw new Error('bootstrap() resolved but should have thrown'); },
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toMatch(/analytics/);
+    expect(err.message).toMatch(/visit/);
+    expect(err.message).toMatch(/session/);
+    try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
+  }, BOOT_TIMEOUT);
+
+  it('boots degraded when the operator sets OS_ALLOW_DRIVER_CONNECT_FAILURE', async () => {
+    process.env[ENV] = '1';
+    const kernel = await bootBound();
+    await expect(kernel.bootstrap()).resolves.not.toThrow();
+    const engine = kernel.getService<{ getDriverByName(n: string): unknown }>('data');
+    expect(engine.getDriverByName('analytics')).toBeUndefined(); // still unconnected
     try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
   }, BOOT_TIMEOUT);
 });
