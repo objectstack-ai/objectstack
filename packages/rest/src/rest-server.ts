@@ -6270,6 +6270,14 @@ export class RestServer {
         // through the contract's `decide()`, which finalizes the request and
         // resumes the owning flow run down the matching `approve` / `reject`
         // edge.
+        //
+        // On the `actorId` these routes forward (#3800): it is a HINT, not the
+        // acting identity. The service pins the actor to the authenticated
+        // caller and accepts a body value only when it can prove the caller
+        // holds that identity — a slot keyed by a `type:value` literal or by
+        // the caller's email, which the Console legitimately sends. It is
+        // forwarded rather than dropped for exactly those cases; naming anyone
+        // else is `FORBIDDEN` at the service, never here.
         const decisionRoute = (decision: 'approve' | 'reject') => {
             this.routeManager.register({
                 method: 'POST',
