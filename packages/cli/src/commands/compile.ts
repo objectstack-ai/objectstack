@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
-import { ObjectStackDefinitionSchema, normalizeStackInput, lintDeprecatedAliases } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, normalizeStackInput, lintDeprecatedAliases, type ConversionNotice } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { validateStackExpressions } from '@objectstack/lint';
@@ -92,8 +92,28 @@ export default class Compile extends Command {
       }
 
       // 2. Normalize map-formatted stack definition.
+      //    The ADR-0087 D2 conversion layer runs here (inside normalizeStackInput).
+      //    Each rewrite emits a structured deprecation notice, and this command
+      //    used to drop every one of them: `os validate` passed a sink and
+      //    surfaced them, `os build` passed none. That is the #3782 parity class
+      //    — the two surfaces disagreeing about what an author is told — and it
+      //    bites harder than it reads, because the notice is the ONLY warning an
+      //    old-shape author gets before the conversion retires and their metadata
+      //    stops loading. Five conversions are live today (protocol 11 and 15),
+      //    so the gap is real, not hypothetical.
       if (!flags.json) printStep('Normalizing stack definition...');
-      const normalized = normalizeStackInput(config as Record<string, unknown>);
+      const conversionNotices: ConversionNotice[] = [];
+      const normalized = normalizeStackInput(config as Record<string, unknown>, {
+        onConversionNotice: (n) => conversionNotices.push(n),
+      });
+      if (conversionNotices.length > 0 && !flags.json) {
+        console.log('');
+        for (const n of conversionNotices) {
+          printWarning(
+            `${n.path}: '${n.from}' → '${n.to}' (converted at load; conversion '${n.conversionId}', retires in protocol ${n.retiresIn})`,
+          );
+        }
+      }
 
       // 2a. [#3743] PRE-PARSE authoring lint. Everything in the post-parse lint
       //     block (3d and below) reads `result.data`, which is the wrong side of
@@ -791,6 +811,9 @@ export default class Compile extends Command {
           runtimeModule: runtimeBundle?.outputFileName ?? null,
           runtimeModuleSize: runtimeBundle?.size ?? 0,
           warnings: widgetWarnings,
+          // Same key `os validate --json` uses, so a CI consumer reads one shape
+          // from either command rather than learning two.
+          conversions: conversionNotices,
           specVersionGap: specGap,
           stats,
           duration: timer.elapsed(),

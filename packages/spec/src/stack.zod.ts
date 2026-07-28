@@ -11,6 +11,7 @@ import { hasPlatformObjectPrefix } from './system/constants/platform-object-name
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
 import { lintDeprecatedAliases, formatDeprecatedAliasFinding } from './shared/deprecated-aliases';
+import type { ConversionNotice } from './conversions/types.js';
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
@@ -1068,6 +1069,33 @@ function warnDeprecatedAliases(normalized: Record<string, unknown>): void {
   }
 }
 
+/** Conversion notices already reported this process — same warn-once reason. */
+const warnedConversionNotices = new Set<string>();
+
+/**
+ * Surface the ADR-0087 D2 conversion notices raised while normalizing.
+ *
+ * A conversion is deliberately silent about *fixing* the shape — zero consumer
+ * action is the point — but it is not supposed to be silent about having HAD to.
+ * The notice is the one signal that says "this spelling retires in protocol N,
+ * and your metadata stops loading then", and `defineStack` is where the author
+ * who wrote the old shape actually is. Until now it passed no sink, so that
+ * author heard nothing unless they happened to run `os validate` — the same gap
+ * this change closes in `os build`.
+ *
+ * Advisory and warn-once: the conversion already produced a correct stack.
+ */
+function warnConversionNotice(notice: ConversionNotice): void {
+  const key = `${notice.conversionId} ${notice.path} ${notice.from} ${notice.to}`;
+  if (warnedConversionNotices.has(key)) return;
+  warnedConversionNotices.add(key);
+  console.warn(
+    `defineStack: ${notice.path}: '${notice.from}' → '${notice.to}' (converted at load; ` +
+    `conversion '${notice.conversionId}', retires in protocol ${notice.retiresIn}). ` +
+    `Update the source to the canonical shape — the conversion stops running then.`,
+  );
+}
+
 export function defineStack(
   config: ObjectStackDefinitionInput,
   options?: DefineStackOptions,
@@ -1075,8 +1103,14 @@ export function defineStack(
   // Default to strict=true for safety (validate by default)
   const strict = options?.strict !== false;
 
-  // Normalize map-formatted collections to arrays (key → name injection)
-  const normalized = normalizeStackInput(config as Record<string, unknown>);
+  // Normalize map-formatted collections to arrays (key → name injection), and
+  // surface every ADR-0087 D2 conversion the pass had to apply. Unlike the alias
+  // warning below this runs in BOTH modes: a conversion happens whether or not
+  // we go on to parse, so `strict: false` does not make the old shape any less
+  // retiring.
+  const normalized = normalizeStackInput(config as Record<string, unknown>, {
+    onConversionNotice: warnConversionNotice,
+  });
 
   if (!strict) {
     // Non-strict mode: skip validation (advanced use cases only).
