@@ -76,6 +76,8 @@ Chart over an object’s aggregated data. Bind objectName + aggregate; the axes 
 | `type` | `'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'` | data | ✓ |  |
 | `title` | `string` | data |  | Chart title |
 | `subtitle` | `string` | data |  | Chart subtitle |
+| `description` | `string` | data |  | Accessibility description — announced to screen readers as the chart’s label |
+| `height` | `number` | data |  | Fixed plot height in pixels (overrides the container default) |
 | `xAxis` | `object` | data |  | X-Axis configuration |
 | `yAxis` | `object[]` | data |  | Y-Axis configuration (support dual axis) |
 | `series` | `object[]` | data |  | Defined series configuration |
@@ -83,7 +85,7 @@ Chart over an object’s aggregated data. Bind objectName + aggregate; the axes 
 | `showLegend` | `boolean` | data |  | Display legend |
 | `showDataLabels` | `boolean` | data |  | Display data labels |
 | `annotations` | `object[]` | data |  | Reference lines/bands drawn over the plot: { type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? } |
-| `interaction` | `object` | data |  | Interaction toggles: { tooltips?, brush?, zoom?, clickAction? } |
+| `interaction` | `object` | data |  | Interaction toggles: { tooltips?, brush? } |
 
 ## `<RecordDetails>` — `record:details`
 

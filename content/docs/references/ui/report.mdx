@@ -82,16 +82,16 @@ const result = JoinedReportBlock.parse(data);
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | ✅ |  |
 | **title** | `string` | optional | Chart title |
 | **subtitle** | `string` | optional | Chart subtitle |
-| **description** | `string` | optional | Accessibility description |
+| **description** | `string` | optional | Accessibility description — announced to screen readers as the chart’s label |
 | **xAxis** | `string` | ✅ | Dataset dimension name for the X-axis (bound-dataset dimension, not a raw field) |
 | **yAxis** | `string` | ✅ | Dataset measure name for the Y-axis (bound-dataset measure, not a raw field) |
 | **series** | `{ name: string; label?: string; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; color?: string; … }[]` | optional | Defined series configuration |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
-| **height** | `number` | optional | Fixed height in pixels |
+| **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | ✅ | Display legend |
 | **showDataLabels** | `boolean` | ✅ | Display data labels |
 | **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
-| **interaction** | `{ tooltips: boolean; zoom: boolean; brush: boolean; clickAction?: string }` | optional | Interaction toggles: `{ tooltips?, brush?, zoom?, clickAction? }` |
+| **interaction** | `{ tooltips: boolean; brush: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 

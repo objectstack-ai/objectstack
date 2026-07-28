@@ -342,6 +342,20 @@
           "description": "Chart subtitle"
         },
         {
+          "name": "description",
+          "type": "string",
+          "kind": "data",
+          "required": false,
+          "description": "Accessibility description — announced to screen readers as the chart’s label"
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "kind": "data",
+          "required": false,
+          "description": "Fixed plot height in pixels (overrides the container default)"
+        },
+        {
           "name": "xAxis",
           "type": "object",
           "kind": "data",
@@ -395,7 +409,7 @@
           "type": "object",
           "kind": "data",
           "required": false,
-          "description": "Interaction toggles: { tooltips?, brush?, zoom?, clickAction? }"
+          "description": "Interaction toggles: { tooltips?, brush? }"
         }
       ]
     },

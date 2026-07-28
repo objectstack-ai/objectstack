@@ -72,9 +72,11 @@ export const ChartTypeSchema = lazySchema(() => z.enum([
 // (`ChartSeries.stack` — series sharing a group id stack, otherwise they
 // group). One `bar` family plus a series-level stack group expresses all three
 // without multiplying the taxonomy. The renderer honors it (objectui#2880);
-// before that it did not, which is why they once sat in the list above. (`metric`/`kpi` are kept as honest single-value
-// synonyms; `gauge`/`solid-gauge`/`bullet` render a value today and gain a dial
-// when a gauge renderer lands.)
+// before that it did not, which is why they once sat in the list above.
+//
+// `metric`/`kpi` are kept as honest single-value synonyms; `gauge`/
+// `solid-gauge`/`bullet` render a value today and gain a dial when a gauge
+// renderer lands.
 
 export type ChartType = z.infer<typeof ChartTypeSchema>;
 
@@ -163,18 +165,23 @@ export const ChartAnnotationSchema = lazySchema(() => z.object({
 
 /**
  * Chart Interaction Schema
+ *
+ * Both toggles are honored by the renderer. Two former members were removed in
+ * #3752 rather than left declared-but-inert (ADR-0078; the #1475 trim-vs-
+ * implement call), because each was redundant against something the platform
+ * already delivers:
+ *
+ *   * `zoom` — no renderer had a zoom primitive behind it, and `brush` already
+ *     narrows a range. Migration: `brush: true`.
+ *   * `clickAction` — a chart segment click already has two owners that DO
+ *     work: `drillDown` (opens the filtered records, which is what a segment
+ *     click is almost always for) and, in the react tier, the host's own
+ *     `onSegmentClick`. A third, silent one only invited authors to wire a
+ *     click that never fired. Migration: `drillDown`, or handle it in React.
  */
 export const ChartInteractionSchema = lazySchema(() => z.object({
   tooltips: z.boolean().default(true).describe('Show the hover tooltip'),
-  /**
-   * ⚠️ Declared, not delivered. The default Recharts renderer has no zoom
-   * primitive, so this draws nothing today — `brush` is the shipped way to
-   * narrow a range. Kept in the schema because an opt-in renderer can honor it;
-   * tracked with the rest of the chart-contract work in framework#3729.
-   */
-  zoom: z.boolean().default(false).describe('Pan/zoom the plot — NOT implemented by the default renderer; use `brush`'),
   brush: z.boolean().default(false).describe('Show the range selector under the plot'),
-  clickAction: z.string().optional().describe('Action ID to trigger on click'),
 }));
 
 /**
@@ -188,7 +195,7 @@ export const ChartConfigSchema = lazySchema(() => z.object({
   /** Titles */
   title: I18nLabelSchema.optional().describe('Chart title'),
   subtitle: I18nLabelSchema.optional().describe('Chart subtitle'),
-  description: I18nLabelSchema.optional().describe('Accessibility description'),
+  description: I18nLabelSchema.optional().describe('Accessibility description — announced to screen readers as the chart’s label'),
   
   /** Axes Mapping */
   xAxis: ChartAxisSchema.optional().describe('X-Axis configuration'),
@@ -206,7 +213,7 @@ export const ChartConfigSchema = lazySchema(() => z.object({
     z.array(z.string()),
     z.record(z.string(), z.string()),
   ]).optional().describe('Color palette (string[]) or value→color map ({ value: color })'),
-  height: z.number().optional().describe('Fixed height in pixels'),
+  height: z.number().optional().describe('Fixed plot height in pixels (overrides the container default)'),
   
   /** Components */
   showLegend: z.boolean().default(true).describe('Display legend'),
@@ -218,7 +225,7 @@ export const ChartConfigSchema = lazySchema(() => z.object({
   
   /** Interactions */
   interaction: ChartInteractionSchema.optional()
-    .describe('Interaction toggles: { tooltips?, brush?, zoom?, clickAction? }'),
+    .describe('Interaction toggles: { tooltips?, brush? }'),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

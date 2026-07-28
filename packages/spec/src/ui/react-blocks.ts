@@ -116,7 +116,7 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
     // react-page wrapper parks an author `type` beside it and the renderer
     // reads it back. It is published here as the spec spells it; the internal
     // `chartType` spelling is no longer part of the author contract.
-    dataProps: ['type', 'title', 'subtitle', 'xAxis', 'yAxis', 'series', 'colors', 'showLegend', 'showDataLabels', 'annotations', 'interaction'],
+    dataProps: ['type', 'title', 'subtitle', 'description', 'height', 'xAxis', 'yAxis', 'series', 'colors', 'showLegend', 'showDataLabels', 'annotations', 'interaction'],
     interactions: [
       OBJECT_NAME,
       { name: 'filter', type: 'FilterArray', kind: 'controlled', description: 'ObjectQL filter scoping the data; drive from React state.' },
