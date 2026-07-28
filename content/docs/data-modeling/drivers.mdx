@@ -127,7 +127,9 @@ even earlier — that is where `MongoDBDriver` puts its
 pnpm add @objectstack/driver-sql pg
 ```
 
-`SqlDriver`'s constructor accepts a [Knex `Knex.Config`](https://knexjs.org/guide/#configuration-options) object verbatim.
+`SqlDriver`'s constructor accepts a [Knex `Knex.Config`](https://knexjs.org/guide/#configuration-options)
+object, passing it through unchanged except for two connect-timeout defaults
+described [below](#connect-timeouts).
 
 ```typescript
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -151,6 +153,29 @@ Or via env var alone (driver inferred from `postgres://` scheme):
 ```bash
 export OS_DATABASE_URL=postgres://admin:secret@db.example.com:5432/myapp
 ```
+
+### Connect timeouts
+
+A database endpoint that accepts the TCP connection but never completes the
+handshake — an overloaded instance, a half-open firewall, a load balancer
+mid-failover — makes every query *wait* rather than fail. Left to Knex's own
+defaults that wait is 30 seconds per query on the request path, and with a small
+`pool.max` a handful of them saturate the pool. So `SqlDriver` supplies two
+defaults ([#3769](https://github.com/objectstack-ai/objectstack/issues/3769)):
+
+| Setting | Default | Purpose |
+| :--- | :--- | :--- |
+| `connection.connectionTimeoutMillis` (pg) / `connection.connectTimeout` (mysql2) | `10_000` | The effective bound. Fails with the driver's own wording — `timeout expired` / `connect ETIMEDOUT` — which names the network. |
+| `pool.createTimeoutMillis` | `15_000` | Backstop, only reached by a client that has no connect-timeout option or ignores it. Deliberately looser: the two race, and Knex wins a tie, so an equal value would mask the accurate message with Knex's misleading "the pool is probably full". |
+
+Set either explicitly and it is left untouched — do that when a datasource
+legitimately takes longer to connect (a distant cross-region replica). SQLite
+gets neither: opening a file has no handshake to time out.
+
+Carrying a connect timeout requires `connection` to be an object, so a URL string
+is moved into the client's URL slot (`connectionString` for pg, `uri` for
+mysql2) before reaching Knex. This affects only what Knex receives — the config
+you passed is preserved as-is on the driver.
 
 ## MongoDB
 
