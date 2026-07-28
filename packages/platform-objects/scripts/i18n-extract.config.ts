@@ -22,13 +22,35 @@
  * The config is **build-time only** — it is not deployed and not used at
  * runtime. The Setup App still ships its own bundle via plugin-auth.
  *
- * NOTE: `translations` lists the *currently committed* generated files
- * (plus the curated zh-CN overlay) as merge baselines so that re-running
- * `os i18n extract --merge` preserves every existing translation and only
- * fills in newly-added schema keys per `--fill`. Do NOT add
- * `SetupAppTranslations` or `MetadataFormsTranslations` here — those
- * bundles re-export the same generated files and importing them through
- * the wrapper risks pulling in unrelated hand-edits.
+ * NOTE: `translations` is the merge baseline — what a re-run treats as
+ * ALREADY TRANSLATED. It must therefore carry everything this config
+ * declares, from both halves of this package's i18n:
+ *
+ *   - `objects` / `metadataForms` — GENERATED. Emitted by this command into
+ *     `<locale>.objects.generated.ts` / `<locale>.metadata-forms.generated.ts`
+ *     and gated by `pnpm check:i18n`, which fails when the committed bundle
+ *     differs from a fresh extract.
+ *   - `apps` / `dashboards` / `pages` — HAND-AUTHORED in `<locale>.ts`, and
+ *     they have to stay that way. The Setup app is a shell of empty group
+ *     anchors (ADR-0029 D7); its ~25 menu entries are contributed at RUNTIME
+ *     by `SETUP_NAV_CONTRIBUTIONS` and by capability plugins, so a bundle
+ *     generated from a static walk of `SETUP_APP` would be structurally
+ *     incomplete — regenerating over it would DELETE 40 live nav
+ *     translations per locale. Their gate is the coverage ratchet
+ *     (`scripts/check-i18n-coverage.mjs`), baselined at 0 for this package,
+ *     not the bundle-drift gate.
+ *
+ * Omitting the hand-authored half was a measurable bug, not a style choice:
+ * this config declares SETUP_APP / STUDIO_APP / ACCOUNT_APP and
+ * SystemOverviewDashboard, so coverage counted all 77 `apps.*`/`dashboards.*`
+ * keys as untranslated in every locale — 231 strings of phantom debt — while
+ * 76 of the 77 had been translated for months. Only
+ * `apps.studio.navigation.nav_app_builder.label` was genuinely missing.
+ *
+ * Still do NOT add `SetupAppTranslations` or `MetadataFormsTranslations`:
+ * those are the outer wrappers. Import the per-locale assembler (`en.js`,
+ * `zh-CN.js`, …) and pin `objects`/`metadataForms` to the generated files
+ * explicitly, as below.
  */
 
 import { defineStack } from '@objectstack/spec';
@@ -133,6 +155,28 @@ import { zhCNMetadataForms } from '../src/apps/translations/zh-CN.metadata-forms
 import { jaJPMetadataForms } from '../src/apps/translations/ja-JP.metadata-forms.generated.js';
 import { esESMetadataForms } from '../src/apps/translations/es-ES.metadata-forms.generated.js';
 
+// ── Existing hand-authored app/dashboard/page translations ────────────────
+// The per-locale assemblers, NOT the `SetupAppTranslations` wrapper. Each one
+// already re-exports the generated `objects` bundle above and adds the
+// hand-written `apps` / `dashboards` / `pages` subtrees.
+//
+// These must be in the baseline for the same reason the generated bundles are,
+// and the omission was measurable: `apps.*` and `dashboards.*` are declared by
+// this config (it lists SETUP_APP / STUDIO_APP / ACCOUNT_APP and
+// SystemOverviewDashboard) but their translations were not, so coverage
+// reported all 77 as untranslated. 76 of them had been translated for months —
+// only `apps.studio.navigation.nav_app_builder.label` was genuinely missing.
+// The whole 231 in the ratchet baseline was that artifact, not a real debt.
+//
+// Safe for the emit, which is the reason the split existed: `--objects-only`
+// writes `data.objects` alone, so nothing here can reach
+// `<locale>.objects.generated.ts`. It only changes what MERGE and COVERAGE
+// consider already-translated, which is exactly what was wrong.
+import { en } from '../src/apps/translations/en.js';
+import { zhCN } from '../src/apps/translations/zh-CN.js';
+import { jaJP } from '../src/apps/translations/ja-JP.js';
+import { esES } from '../src/apps/translations/es-ES.js';
+
 export default defineStack({
   name: 'platform-objects-i18n-extract',
 
@@ -201,9 +245,13 @@ export default defineStack({
   dashboards: [SystemOverviewDashboard] as any,
 
   translations: [
-    { en: { objects: enObjects, metadataForms: enMetadataForms } },
-    { 'zh-CN': { objects: zhCNObjects, metadataForms: zhCNMetadataForms } },
-    { 'ja-JP': { objects: jaJPObjects, metadataForms: jaJPMetadataForms } },
-    { 'es-ES': { objects: esESObjects, metadataForms: esESMetadataForms } },
+    // `...en` supplies the hand-authored apps/dashboards/pages; `objects` and
+    // `metadataForms` are then pinned to the generated files explicitly, so the
+    // merge baseline is the committed artifact rather than whatever the
+    // assembler happens to re-export.
+    { en: { ...en, objects: enObjects, metadataForms: enMetadataForms } },
+    { 'zh-CN': { ...zhCN, objects: zhCNObjects, metadataForms: zhCNMetadataForms } },
+    { 'ja-JP': { ...jaJP, objects: jaJPObjects, metadataForms: jaJPMetadataForms } },
+    { 'es-ES': { ...esES, objects: esESObjects, metadataForms: esESMetadataForms } },
   ],
 });

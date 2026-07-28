@@ -96,6 +96,7 @@ export const zhCN: TranslationData = {
       description: '面向开发者、分析师与实施者的元数据工作台',
       navigation: {
         group_overview: { label: '总览' },
+        nav_app_builder: { label: '应用构建器' },
         nav_metadata_directory: { label: '全部元数据类型' },
         nav_packages: { label: '软件包' },
         group_data_model: { label: '数据模型' },
@@ -113,7 +114,6 @@ export const zhCN: TranslationData = {
         nav_hooks: { label: '钩子' },
         group_automation: { label: '自动化' },
         nav_flows: { label: '流程' },
-        nav_workflows: { label: '工作流规则' },
         group_ai: { label: 'AI' },
         nav_agents: { label: '智能体' },
         nav_tools: { label: '工具' },

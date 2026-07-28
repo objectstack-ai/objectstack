@@ -93,6 +93,7 @@ export const jaJP: TranslationData = {
       description: '開発者・アナリスト・実装担当者向けのメタデータワークベンチ',
       navigation: {
         group_overview: { label: '概要' },
+        nav_app_builder: { label: 'アプリビルダー' },
         nav_metadata_directory: { label: 'すべてのメタデータタイプ' },
         nav_packages: { label: 'パッケージ' },
         group_data_model: { label: 'データモデル' },
@@ -110,7 +111,6 @@ export const jaJP: TranslationData = {
         nav_hooks: { label: 'フック' },
         group_automation: { label: '自動化' },
         nav_flows: { label: 'フロー' },
-        nav_workflows: { label: 'ワークフロールール' },
         group_ai: { label: 'AI' },
         nav_agents: { label: 'エージェント' },
         nav_tools: { label: 'ツール' },
