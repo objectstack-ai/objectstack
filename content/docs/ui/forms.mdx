@@ -51,6 +51,7 @@ Only the spec'd whitelist of form fields is accepted; everything else (status, o
 
 ## 1. Declare the form view
 
+{/* os:check */}
 ```ts
 // hotcrm/src/views/lead.view.ts  (https://github.com/objectstack-ai/hotcrm)
 import { defineView } from '@objectstack/spec';
@@ -105,6 +106,7 @@ an older runtime, or object hooks that branch on the `guest_portal` permission).
 When present it is still attached to the anonymous context, so keep it
 INSERT-only on the target object — the guest-safe shape (ADR-0090 D9).
 
+{/* os:check */}
 ```ts
 // hotcrm/src/security/guest-portal.permission.ts
 import { definePermissionSet } from '@objectstack/spec/security';
@@ -128,6 +130,7 @@ Anonymous submitters cannot be trusted to set `lead_source`, `status`, `owner`, 
 - Apply safe defaults (`status='new'`, `lead_source='web'`, …)
 - Strip any internal fields that slipped past the whitelist
 
+{/* os:check */}
 ```ts
 // hotcrm/src/objects/lead.hook.ts
 import type { Hook, HookContext } from '@objectstack/spec/data';
@@ -344,6 +347,7 @@ formViews: {
 
 App actions can declare `type: 'form'` to open a FormView without resorting to free-form URLs. The `target` is the FormView name; the runtime navigates to `/console/forms/:name`.
 
+{/* os:check */}
 ```ts
 // hotcrm/src/actions/new-lead.action.ts
 import { Action } from '@objectstack/spec/ui';

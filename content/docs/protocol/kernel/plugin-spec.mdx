@@ -240,6 +240,7 @@ A well-organized plugin follows this **standard structure**:
 
 Define database objects using ObjectQL schema syntax:
 
+{/* os:check */}
 ```typescript
 // src/objects/account.object.ts
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -288,6 +289,7 @@ export const Account = ObjectSchema.create({
 
 Define user interfaces using ObjectUI layout DSL:
 
+{/* os:check */}
 ```typescript
 // src/views/account_list.view.ts
 import { defineView } from '@objectstack/spec';
@@ -357,6 +359,7 @@ export default defineTrigger({
 
 Define plugin configuration with Zod for validation:
 
+{/* os:check */}
 ```typescript
 // src/config.schema.ts
 import { z } from 'zod';

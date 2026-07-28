@@ -9,6 +9,7 @@ A **Permission Set** defines what a user can do within the application. It contr
 
 ## Basic Structure
 
+{/* os:check */}
 ```typescript
 const salesUserPermission = {
   name: 'sales_user',
@@ -148,6 +149,7 @@ tabPermissions: {
 
 Grant system-level capabilities:
 
+{/* os:check */}
 ```typescript
 systemPermissions: [
   'manage_users',
@@ -165,6 +167,7 @@ systemPermissions: [
 
 Define policies that restrict which records a user can access:
 
+{/* os:check */}
 ```typescript
 rowLevelSecurity: [
   {
@@ -215,6 +218,7 @@ sets bound to [positions](/docs/permissions/positions).
 
 ## Complete Example
 
+{/* os:check */}
 ```typescript
 const salesManagerPermission = {
   name: 'sales_manager',

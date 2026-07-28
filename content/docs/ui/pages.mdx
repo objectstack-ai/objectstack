@@ -9,6 +9,7 @@ A **Page** defines a custom UI layout using components, regions, and variables. 
 
 ## Basic Structure
 
+{/* os:check */}
 ```typescript
 const homePage = {
   name: 'sales_home',
@@ -83,6 +84,7 @@ Earlier roadmap types (`dashboard`, `form`, `record_detail`, `record_review`, `o
 
 Regions define layout zones on the page. Each region contains components.
 
+{/* os:check */}
 ```typescript
 regions: [
   {
@@ -154,6 +156,7 @@ Components may also carry `dataSource` (per-element object binding for multi-obj
 
 Pages can define local variables for managing state across components.
 
+{/* os:check */}
 ```typescript
 variables: [
   {
@@ -173,6 +176,7 @@ Variable `type` accepts `'string'` (default), `'number'`, `'boolean'`, `'object'
 
 ## Complete Example
 
+{/* os:check */}
 ```typescript
 const accountRecordPage = {
   name: 'account_detail',

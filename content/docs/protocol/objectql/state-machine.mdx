@@ -24,6 +24,7 @@ In the era of **AI Agents**, field-level validation is not enough. Large Languag
 
 Add a `state_machine` rule to the object's `validations` array. The rule names the state `field` and declares a `transitions` map of `{ currentValue: [allowedNextValues] }`.
 
+{/* os:check */}
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
@@ -123,6 +124,7 @@ Because the transition table is data, both UIs and Agents can ask "from this sta
 
 For complex business objects (like `Lead`, `Opportunity`, or `Order`), a transition table can grow large. To keep your object definition readable, extract the rule(s) into a plain TypeScript constant — there is no special `*.state.ts` format or `StateMachineConfig` type for object lifecycles; it is just an array of validation rules.
 
+{/* os:check */}
 ```typescript
 // src/objects/lead.validations.ts
 export const leadValidations = [

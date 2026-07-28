@@ -16,6 +16,7 @@ Quick reference for building queries with the ObjectStack QuerySchema.
 
 ## Basic Query Structure
 
+{/* os:check */}
 ```typescript
 const query = {
   object: 'task',
@@ -76,6 +77,7 @@ const query = {
 
 ### `$and` — All conditions must match
 
+{/* os:check */}
 ```typescript
 {
   where: {
@@ -89,6 +91,7 @@ const query = {
 
 ### `$or` — Any condition can match
 
+{/* os:check */}
 ```typescript
 {
   where: {
@@ -102,6 +105,7 @@ const query = {
 
 ### `$not` — Negate a condition
 
+{/* os:check */}
 ```typescript
 {
   where: {
@@ -112,6 +116,7 @@ const query = {
 
 ### Nested Logic
 
+{/* os:check */}
 ```typescript
 {
   where: {
@@ -134,6 +139,7 @@ const query = {
 
 Sort results with `orderBy` (array of sort nodes):
 
+{/* os:check */}
 ```typescript
 {
   orderBy: [
@@ -181,6 +187,7 @@ position from the previous page. There is no `keyset`/`after` query property.
 
 ### Select Specific Fields
 
+{/* os:check */}
 ```typescript
 {
   fields: ['id', 'title', 'status', 'created_at']
@@ -189,6 +196,7 @@ position from the previous page. There is no `keyset`/`after` query property.
 
 ### Nested / Related Fields
 
+{/* os:check */}
 ```typescript
 {
   fields: [

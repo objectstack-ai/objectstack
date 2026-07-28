@@ -40,6 +40,7 @@ Common use cases:
 
 `record:alert` is registered as a slot component in the slotted page schema. Add it to the `alerts` slot of your `*.page.ts`:
 
+{/* os:check */}
 ```ts
 import { definePage } from '@objectstack/spec/ui';
 
@@ -88,6 +89,7 @@ The `visible` predicate uses the same CEL pipeline every condition in the framew
 
 Examples:
 
+{/* os:check */}
 ```ts
 visible: 'record.id == os.user.id && record.email_verified == false'
 visible: 'record.status == "locked"'

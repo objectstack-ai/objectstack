@@ -9,6 +9,7 @@ A **Flow** is a visual automation that orchestrates business logic through conne
 
 ## Basic Structure
 
+{/* os:check */}
 ```typescript
 const approvalFlow = {
   name: 'order_approval',
@@ -564,6 +565,7 @@ Edges connect nodes and define the execution path:
 
 Flows use variables to pass data between nodes and to/from callers:
 
+{/* os:check */}
 ```typescript
 variables: [
   { name: 'input_id', type: 'text', isInput: true, isOutput: false },
@@ -738,6 +740,7 @@ is retired; model the same logic as a Flow.
 
 ### Record-change flow
 
+{/* os:check */}
 ```typescript
 import type { Flow } from '@objectstack/spec/automation';
 

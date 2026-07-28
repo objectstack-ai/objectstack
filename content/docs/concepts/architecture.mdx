@@ -88,6 +88,7 @@ description — data (objects), automation (flows), access (permissions), and in
 
 ### Example: Defining a Customer Object
 
+{/* os:check */}
 ```typescript
 // src/objects/customer.object.ts
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -148,6 +149,7 @@ That's the job of the other layers.
 
 ### Example: Permission Rules
 
+{/* os:check */}
 ```typescript
 // src/permissions/sales_rep.permission.ts
 import { definePermissionSet } from '@objectstack/spec';
@@ -175,6 +177,7 @@ export const SalesRepPermission = definePermissionSet({
 
 ### Example: Workflow Automation
 
+{/* os:check */}
 ```typescript
 // src/flows/high_value_customer.flow.ts
 import { defineFlow } from '@objectstack/spec';
@@ -221,6 +224,7 @@ Kernel **orchestrates** these rules at runtime, independent of the data structur
 
 ### Example: List View
 
+{/* os:check */}
 ```typescript
 // src/views/customer.view.ts
 import { defineView } from '@objectstack/spec';
@@ -245,6 +249,7 @@ export const CustomerView = defineView({
 
 ### Example: Form View
 
+{/* os:check */}
 ```typescript
 // src/views/customer.view.ts
 import { defineView } from '@objectstack/spec';
@@ -300,6 +305,7 @@ User clicks "Save"
 
 ### Step 2: UI Layer Sends Request
 
+{/* os:check */}
 ```typescript
 // ObjectUI dispatches an action to Kernel
 const request = {
@@ -375,6 +381,7 @@ for (const workflow of workflows) {
 
 ### Step 7: ObjectUI Updates Display
 
+{/* os:check */}
 ```typescript
 // Kernel returns success response
 // UI optimistically updates the screen
@@ -388,6 +395,7 @@ Here's how all three protocols collaborate for a **Kanban Board** feature:
 
 ### 1. ObjectQL: Define the Data
 
+{/* os:check */}
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
@@ -426,6 +434,7 @@ export const Opportunity = ObjectSchema.create({
 
 ### 2. Kernel: Define Business Rules
 
+{/* os:check */}
 ```typescript
 import { defineFlow } from '@objectstack/spec';
 
@@ -450,6 +459,7 @@ export const OpportunityWonFlow = defineFlow({
 
 ### 3. ObjectUI: Define the Kanban View
 
+{/* os:check */}
 ```typescript
 import { defineView } from '@objectstack/spec';
 

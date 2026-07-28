@@ -20,6 +20,7 @@ Three patterns that look like validation rules are deliberately **not** rule typ
 
 Validations are defined on an Object's `validations` array:
 
+{/* os:check */}
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
@@ -268,6 +269,7 @@ When multiple validations exist, `priority` controls execution order:
 
 ## Complete Example
 
+{/* os:check */}
 ```typescript
 validations: [
   // Formula validation

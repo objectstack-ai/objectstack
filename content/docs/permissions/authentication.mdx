@@ -227,6 +227,7 @@ console.log('Current user:', session.data.user);
 
 #### Request Password Reset
 
+{/* os:check */}
 ```typescript
 // Direct API call
 const response = await fetch('http://localhost:3000/api/v1/auth/request-password-reset', {
@@ -240,6 +241,7 @@ const response = await fetch('http://localhost:3000/api/v1/auth/request-password
 
 #### Reset Password with Token
 
+{/* os:check */}
 ```typescript
 const response = await fetch('http://localhost:3000/api/v1/auth/reset-password', {
   method: 'POST',
@@ -290,6 +292,7 @@ by OTP self-signup.
 
 Always available once the plugin is on:
 
+{/* os:check */}
 ```typescript
 const response = await fetch('http://localhost:3000/api/v1/auth/sign-in/phone-number', {
   method: 'POST',
@@ -306,6 +309,7 @@ fail loudly with `NOT_SUPPORTED`. The public config advertises real
 availability as `features.phoneNumberOtp`, which is what the Console login UI
 gates its "Sign in with verification code" mode and the SMS reset branch on.
 
+{/* os:check */}
 ```typescript
 // Sign-in / verification: request a code, then verify (creates a session)
 await fetch('/api/v1/auth/phone-number/send-otp', {
@@ -551,6 +555,7 @@ const { totpURI, backupCodes } = await response.json();
 
 #### Verify 2FA Code
 
+{/* os:check */}
 ```typescript
 const response = await fetch('http://localhost:3000/api/v1/auth/two-factor/verify-totp', {
   method: 'POST',
@@ -584,6 +589,7 @@ new AuthPlugin({
 
 #### Send Magic Link
 
+{/* os:check */}
 ```typescript
 const response = await fetch('http://localhost:3000/api/v1/auth/sign-in/magic-link', {
   method: 'POST',
@@ -623,6 +629,7 @@ same flag. The plugin adds `sys_user.phone_number` (unique) and
 
 #### Sign In with Phone + Password
 
+{/* os:check */}
 ```typescript
 const response = await fetch('http://localhost:3000/api/v1/auth/sign-in/phone-number', {
   method: 'POST',
@@ -727,6 +734,7 @@ scrypt-hashed credential and can sign in immediately.
 
 #### Create a User Directly
 
+{/* os:check */}
 ```typescript
 const response = await fetch('http://localhost:3000/api/v1/auth/admin/create-user', {
   method: 'POST',
@@ -842,6 +850,7 @@ await client.auth.refreshToken('refresh-token-value');
 
 All endpoints are available at `/api/v1/auth/*`:
 
+{/* os:check */}
 ```typescript
 // Example: Login
 const response = await fetch('http://localhost:3000/api/v1/auth/sign-in/email', {

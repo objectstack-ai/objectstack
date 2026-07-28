@@ -33,6 +33,7 @@ framework detects that and turns tenant isolation on.
 Rather than re-deriving "what mode is this?" from the env flag, a service probe,
 or row counts, the platform exposes a single `tenancy` kernel service:
 
+{/* os:check */}
 ```ts
 interface TenancyService {
   mode: 'single' | 'multi';   // multi iff isolation is actually active

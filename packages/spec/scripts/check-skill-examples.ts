@@ -45,12 +45,50 @@ import path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const SPEC_DIR = path.resolve(__dirname, '..');
-const SKILLS_DIR = path.resolve(REPO_ROOT, 'skills');
 const BUILD_DIR = path.resolve(SPEC_DIR, '.examples-build');
 const SPEC_PKG_JSON = path.resolve(SPEC_DIR, 'package.json');
 
-/** Opt-in marker: the line directly above a fence opts that block into the gate. */
-const MARKER = '<!-- os:check -->';
+/**
+ * Prose trees whose code examples are copied verbatim by humans and AI, and so
+ * must compile against the real spec.
+ *
+ * `skills/` was the original scope (#3094); `content/docs/` was not covered, and
+ * the gap had exactly the shape this gate exists to close. When
+ * `tool.requiresConfirmation` was removed (#3715) this gate caught the now-broken
+ * `defineTool` example in `skills/objectstack-ai/SKILL.md` — the identical break
+ * in a docs page would have shipped, because nothing compiled those pages. A
+ * gate covering a fraction of the surface it appears to cover reads as coverage.
+ *
+ * `content/docs/references/` is excluded: `build-docs.ts` regenerates it from the
+ * schemas, so its snippets cannot drift independently of their source.
+ */
+const SOURCE_ROOTS: Array<{
+  dir: string;
+  ext: string;
+  label: string;
+  marker: string;
+  exclude?: string[];
+}> = [
+  { dir: path.resolve(REPO_ROOT, 'skills'), ext: '.md', label: 'skills', marker: '<!-- os:check -->' },
+  {
+    dir: path.resolve(REPO_ROOT, 'content/docs'),
+    ext: '.mdx',
+    label: 'docs',
+    // MDX has no HTML comments — fumadocs-mdx fails the build outright on
+    // `<!-- … -->` ("Unexpected character `!`… to create a comment in MDX, use
+    // `{/* text */}`"). The marker must follow each format's own comment syntax.
+    marker: '{/* os:check */}',
+    exclude: [path.resolve(REPO_ROOT, 'content/docs/references')],
+  },
+];
+
+/**
+ * Every marker spelling, in any root. A block tagged with the WRONG root's
+ * spelling would be silently unchecked (and, in `.mdx`, would also break the
+ * docs build), so both forms are recognised for orphan detection and only the
+ * root's own form actually opts a block in.
+ */
+const ALL_MARKERS = ['<!-- os:check -->', '{/* os:check */}'];
 
 const KEEP = process.argv.includes('--keep');
 
@@ -69,21 +107,32 @@ interface Example {
   fileName: string;
 }
 
-/** Every `*.md` under a skill folder — SKILL.md plus references/rules notes. */
-function skillMarkdownFiles(): string[] {
-  if (!fs.existsSync(SKILLS_DIR)) return [];
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) walk(full);
-      else if (e.name.endsWith('.md')) out.push(full);
-    }
-  };
-  for (const e of fs.readdirSync(SKILLS_DIR, { withFileTypes: true })) {
-    if (e.isDirectory()) walk(path.join(SKILLS_DIR, e.name));
+/** Every candidate prose file across `SOURCE_ROOTS`, with the root that owns it. */
+function sourceFiles(): Array<{ file: string; root: (typeof SOURCE_ROOTS)[number] }> {
+  const out: Array<{ file: string; root: (typeof SOURCE_ROOTS)[number] }> = [];
+  for (const root of SOURCE_ROOTS) {
+    if (!fs.existsSync(root.dir)) continue;
+    const walk = (dir: string) => {
+      if (root.exclude?.some((x) => dir === x || dir.startsWith(x + path.sep))) return;
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith(root.ext)) out.push({ file: full, root });
+      }
+    };
+    walk(root.dir);
   }
-  return out.sort();
+  return out.sort((a, b) => a.file.localeCompare(b.file));
+}
+
+/**
+ * Flat, collision-free build-dir name for a block: `<root>__<path>__<n>.ts`.
+ * Path separators become `_` so two pages of the same basename in different
+ * folders (`ui/actions.mdx`, `protocol/objectui/actions.mdx`) cannot collide.
+ */
+function buildFileName(source: string, root: (typeof SOURCE_ROOTS)[number], n: number): string {
+  const relPath = path.relative(root.dir, source).replace(new RegExp(`\\${root.ext}$`), '');
+  return `${root.label}__${relPath.split(path.sep).join('_')}__${n}.ts`;
 }
 
 /**
@@ -96,10 +145,11 @@ function skillMarkdownFiles(): string[] {
  * json block) silently checks nothing — exactly the failure mode this gate
  * exists to prevent — so the caller treats an orphan as an error, not a no-op.
  */
-function extractFromFile(source: string): { examples: Example[]; orphans: number[] } {
+function extractFromFile(
+  source: string,
+  root: (typeof SOURCE_ROOTS)[number],
+): { examples: Example[]; orphans: number[] } {
   const lines = fs.readFileSync(source, 'utf-8').split('\n');
-  const skillDir = path.relative(SKILLS_DIR, source).split(path.sep)[0];
-  const base = path.basename(source, '.md');
   const examples: Example[] = [];
   const claimed = new Set<number>(); // MARKER line indices that opened a real block
   let n = 0;
@@ -107,7 +157,7 @@ function extractFromFile(source: string): { examples: Example[]; orphans: number
   for (let i = 0; i < lines.length; i++) {
     const open = lines[i].match(/^```(ts|typescript)\s*$/);
     if (!open) continue;
-    const marked = i > 0 && lines[i - 1].trim() === MARKER;
+    const marked = i > 0 && lines[i - 1].trim() === root.marker;
     // Find the matching close fence regardless of marking, so `i` advances past
     // this block and we never treat its body as top-level markdown.
     let close = i + 1;
@@ -120,7 +170,7 @@ function extractFromFile(source: string): { examples: Example[]; orphans: number
         source,
         bodyStartLine: i + 2, // 1-based line of body[0]
         code: body.join('\n'),
-        fileName: `${skillDir}__${base}__${n}.ts`,
+        fileName: buildFileName(source, root, n),
       });
     }
     i = close; // skip to the close fence
@@ -128,7 +178,9 @@ function extractFromFile(source: string): { examples: Example[]; orphans: number
 
   const orphans: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() === MARKER && !claimed.has(i)) orphans.push(i + 1); // 1-based
+    // Any marker spelling counts as an orphan claim — a wrong-format marker
+    // checks nothing, which is precisely what this guard exists to catch.
+    if (ALL_MARKERS.includes(lines[i].trim()) && !claimed.has(i)) orphans.push(i + 1); // 1-based
   }
   return { examples, orphans };
 }
@@ -260,13 +312,13 @@ function fail(message: string): never {
 }
 
 function main() {
-  console.log('🧪 Type-checking skill TypeScript examples...\n');
+  console.log('🧪 Type-checking prose TypeScript examples (skills + docs)...\n');
 
-  const files = skillMarkdownFiles();
+  const files = sourceFiles();
   const examples: Example[] = [];
   const orphans: string[] = [];
-  for (const file of files) {
-    const { examples: found, orphans: bad } = extractFromFile(file);
+  for (const { file, root } of files) {
+    const { examples: found, orphans: bad } = extractFromFile(file, root);
     examples.push(...found);
     for (const line of bad) orphans.push(`${rel(file)}:${line}`);
   }
@@ -276,7 +328,8 @@ function main() {
   // no marker, because it looks intentional.
   if (orphans.length > 0) {
     fail(
-      `Found ${MARKER} not directly above a \`\`\`ts / \`\`\`typescript fence:\n\n` +
+      `Found an os:check marker not directly above a \`\`\`ts / \`\`\`typescript fence\n` +
+        `(or written in the wrong comment syntax for its file type):\n\n` +
         orphans.map((o) => `  - ${o}`).join('\n') +
         `\n\n  The marker must be the line IMMEDIATELY above the code fence (no blank\n` +
         `  line between). Move it, or remove it if the block should not be checked.`,
@@ -288,10 +341,10 @@ function main() {
   // A gate that checks nothing must not report success.
   if (examples.length === 0) {
     fail(
-      `No skill examples are marked for type-checking.\n\n` +
+      `No prose examples are marked for type-checking.\n\n` +
         `  Mark a self-contained, compilable block by putting\n\n` +
-        `    ${MARKER}\n\n` +
-        `  on the line directly above its \`\`\`ts fence in a skills/**/*.md file.\n` +
+        SOURCE_ROOTS.map((r) => `    ${r.marker}   (in ${rel(r.dir)}/**/*${r.ext})`).join('\n') + `\n\n` +
+        `  on the line directly above its \`\`\`ts fence in ${SOURCE_ROOTS.map((r) => `${rel(r.dir)}/**/*${r.ext}`).join(' or ')}.\n` +
         `  (If you just removed the last marker, that is almost certainly a mistake.)`,
     );
   }
@@ -319,14 +372,14 @@ function main() {
   const diags = parseDiagnostics(output);
 
   if (code === 0 && diags.length === 0) {
-    console.log(`✅ ${examples.length} skill examples type-check against @objectstack/spec`);
+    console.log(`✅ ${examples.length} prose examples type-check against @objectstack/spec`);
     if (!KEEP) fs.rmSync(BUILD_DIR, { recursive: true, force: true });
     return;
   }
 
-  // Remap every diagnostic back to skills/**/SKILL.md:<real line> so the author
+  // Remap every diagnostic back to the source page:<real line> so the author
   // reads the error against the file they actually edit, not the throwaway copy.
-  console.error(`\n✗ Skill TypeScript examples do not compile against @objectstack/spec:\n`);
+  console.error(`\n✗ Prose TypeScript examples do not compile against @objectstack/spec:\n`);
   const grouped = new Map<string, string[]>();
   for (const d of diags) {
     const ex = byFile.get(d.file);
@@ -348,7 +401,7 @@ function main() {
 
   console.error(
     `\n  These are examples an AI copies verbatim. Fix the example to match the\n` +
-      `  current spec, or drop its ${MARKER} marker if it is an intentional fragment.\n`,
+      `  current spec, or drop its os:check marker if it is an intentional fragment.\n`,
   );
   if (!KEEP) fs.rmSync(BUILD_DIR, { recursive: true, force: true });
   process.exit(1);

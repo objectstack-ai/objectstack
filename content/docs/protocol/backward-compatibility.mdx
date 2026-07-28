@@ -32,6 +32,7 @@ ObjectStack follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MIN
 - **Enum values** are append-only within a MAJOR version. Existing values are never removed or renamed in MINOR/PATCH releases.
 - **Default values** in schemas are not changed in MINOR/PATCH releases unless fixing a documented bug.
 
+{/* os:check */}
 ```typescript
 // These imports are guaranteed stable within a MAJOR version
 import { FieldSchema, ObjectSchema } from '@objectstack/spec/data';

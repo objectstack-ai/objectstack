@@ -780,6 +780,7 @@ interface FormField {
 
 ### Responsive Columns
 
+{/* os:check */}
 ```typescript
 // Source: packages/spec/src/ui/responsive.zod.ts (BreakpointColumnMapSchema)
 // Grid columns (1-12) per named breakpoint. All entries optional.
@@ -801,6 +802,7 @@ layer — data fields, view form sections/fields, and page components — aligni
 the `readonlyWhen` / `requiredWhen` family. The element is shown only when the
 expression evaluates truthy.
 
+{/* os:check */}
 ```typescript
 // e.g. on a PageComponent:
 visibleWhen: "record.account_type == 'premium'"

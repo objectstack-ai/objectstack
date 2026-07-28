@@ -204,6 +204,7 @@ implementation:
 
 Widget lifecycle hooks are defined on the manifest as **code-body strings** (not function references). They follow `WidgetLifecycleSchema`:
 
+{/* os:check */}
 ```typescript
 interface WidgetLifecycle {
   onMount?: string;     // Initialization when the widget mounts
@@ -229,6 +230,7 @@ lifecycle:
 
 A widget can declare custom events it emits via `WidgetEventSchema`:
 
+{/* os:check */}
 ```typescript
 interface WidgetEvent {
   name: string;                          // lowercase, dash-separated, e.g. 'value-change'
@@ -255,6 +257,7 @@ events:
 
 A widget exposes configuration knobs through `WidgetPropertySchema`. These describe the options a builder can set when placing the widget:
 
+{/* os:check */}
 ```typescript
 interface WidgetProperty {
   name: string;          // camelCase
@@ -284,6 +287,7 @@ properties:
 
 A widget manifest carries ARIA metadata through the shared `AriaProps` schema (`packages/spec/src/ui/i18n.zod.ts`). The supported attributes are intentionally minimal:
 
+{/* os:check */}
 ```typescript
 interface AriaProps {
   ariaLabel?: string;       // Accessible label for screen readers

@@ -439,6 +439,7 @@ non-trivial column renames).
 
 #### Declarative schema (the default)
 
+{/* os:check */}
 ```typescript
 // src/objects/salesforce_account.object.ts
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -473,6 +474,7 @@ os generate migration --dry-run     # Preview without writing
 The generated TypeScript file uses plain Knex-style `up(db)` / `down(db)`
 functions — no custom migration DSL:
 
+{/* os:check */}
 ```typescript
 // migrations/20260101000000_migration.ts — auto-generated
 export async function up(db: any): Promise<void> {
@@ -735,6 +737,7 @@ await step2(); // If this fails, step1 is not reverted!
 ### 2. Version Migrations, Don't Modify Them
 Once a migration file is applied in production, **never modify it**. Generate a new one instead.
 
+{/* os:check */}
 ```typescript
 // ✗ BAD: Modifying an existing migration file
 // migrations/20260101000000_migration.ts (ALREADY APPLIED)

@@ -218,6 +218,7 @@ const zh: TranslationData = {
 An admin (or an agent using the metadata API) authors one item per locale.
 The only difference from a file bundle is the top-level `locale`:
 
+{/* os:check */}
 ```typescript
 import { defineTranslation } from '@objectstack/spec/system';
 
@@ -590,6 +591,7 @@ context.i18n.formatNumber(smallNumber, {
 
 Plugins register translation bundles in their manifest:
 
+{/* os:check */}
 ```typescript
 // plugin.manifest.ts — a plugin manifest validated by `ManifestSchema`
 // from `@objectstack/spec/kernel` (there is no `definePlugin()` helper).
@@ -646,6 +648,7 @@ const welcome = i18n.t('crm.account.welcome', 'en');
 
 ObjectQL objects and fields can be **automatically translated**:
 
+{/* os:check */}
 ```typescript
 // Object definition
 import { ObjectSchema, Field } from '@objectstack/spec/data';

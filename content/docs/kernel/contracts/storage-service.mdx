@@ -146,6 +146,7 @@ console.log(info.metadata);     // { objectType: 'task', ... }
 
 Configuration options for upload behavior.
 
+{/* os:check */}
 ```typescript
 export interface StorageUploadOptions {
   /** MIME content type */
@@ -226,6 +227,7 @@ const upload = await storageService.getPresignedUpload?.(
 
 ## Descriptor Types
 
+{/* os:check */}
 ```typescript
 export interface PresignedUploadDescriptor {
   uploadUrl: string;
@@ -273,6 +275,7 @@ const key = await storageService.completeChunkedUpload?.(uploadId, [
 
 The return type for file metadata (`getInfo`, `list`).
 
+{/* os:check */}
 ```typescript
 export interface StorageFileInfo {
   key: string;

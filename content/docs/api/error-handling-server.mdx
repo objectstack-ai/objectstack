@@ -23,6 +23,7 @@ lowercase snake_case members of `StandardErrorCode` (see
 `@objectstack/spec/api`), e.g. `validation_error`, `resource_conflict`,
 `permission_denied`.
 
+{/* os:check */}
 ```typescript
 import type { ErrorResponse, StandardErrorCode } from '@objectstack/spec/api';
 
@@ -289,6 +290,7 @@ export const EnrichTaskWithAI: Hook = {
 
 Prevent cascading failures when an external service is down:
 
+{/* os:check */}
 ```typescript
 class CircuitBreaker {
   private failures = 0;

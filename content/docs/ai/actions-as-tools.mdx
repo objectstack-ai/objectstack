@@ -70,6 +70,7 @@ Add an optional `ai:` block to give the model a precise, LLM-facing description
 spec; `list_actions` surfaces `ai.description` to the model, falling back to the
 UI `label` when it is absent.
 
+{/* os:check */}
 ```typescript
 export const triageCaseAction = {
   name: 'triage_case',

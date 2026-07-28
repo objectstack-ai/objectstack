@@ -171,6 +171,7 @@ entry renders; opening it fails permission-denied for everyone except a holder
 of the platform's built-in wildcard admin set. It works while you browse as an
 administrator and breaks for the users the app ships permission sets for.
 
+{/* os:check */}
 ```ts
 navigation: [{ id: 'nav_forecast', type: 'object', objectName: 'crm_forecast' }]
 // …and no permission set lists `crm_forecast` under `objects` → warning
