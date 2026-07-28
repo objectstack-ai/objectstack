@@ -724,6 +724,40 @@ function lookupObjectFieldAttr(
   return undefined;
 }
 
+export interface LocaleDescriptor {
+  /** BCP-47 locale code. */
+  code: string;
+  /** Display name. Falls back to the code — nothing in the tree carries one. */
+  label: string;
+  /** Whether this is the stack's default locale. */
+  isDefault: boolean;
+}
+
+/**
+ * Turn `II18nService.getLocales()` — a bare `string[]` — into the descriptor
+ * list `GetLocalesResponseSchema` declares for `GET /i18n/locales`.
+ *
+ * Shared for the same reason `resolveObjectFieldLabels` is: both the
+ * dispatcher domain and service-i18n serve this route, and when each kept its
+ * own copy they diverged. service-i18n mapped to descriptors; the dispatcher
+ * passed the raw `string[]` straight through, so the SAME endpoint returned
+ * `['en','zh-CN']` or `[{code,label,isDefault}]` depending on which provider
+ * happened to mount it — and the dispatcher's form contradicted both the
+ * declared schema and the SDK's `GetLocalesResponse` type. Exactly the split
+ * #3833 found in the field-labels derivation, one route over.
+ *
+ * `label` is the code: no locale display-name source exists in the tree, and
+ * the schema requires the field. Inventing one here (an ICU display-name
+ * table) would be a product decision, not an implementation detail.
+ */
+export function toLocaleDescriptors(
+  codes: readonly string[] | undefined,
+  defaultLocale?: string,
+): LocaleDescriptor[] {
+  if (!codes) return [];
+  return codes.map((code) => ({ code, label: code, isDefault: code === defaultLocale }));
+}
+
 /**
  * Enumerate an object's translated field labels out of ONE locale's
  * `TranslationData` — the `GET /i18n/labels/:object/:locale` body.

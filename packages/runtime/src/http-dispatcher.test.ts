@@ -1854,7 +1854,9 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
-            expect(result.response?.body?.data?.locales).toEqual(['en', 'zh-CN', 'ja']);
+            // Descriptors, not bare codes — the shape `GetLocalesResponseSchema`
+            // declares and both surfaces now emit (#3859 follow-up).
+            expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'zh-CN', 'ja']);
             expect(mockI18nService.getLocales).toHaveBeenCalled();
         });
 
@@ -2015,7 +2017,7 @@ describe('HttpDispatcher', () => {
         it('should dispatch /i18n routes via dispatch()', async () => {
             const result = await dispatcher.dispatch('GET', '/i18n/locales', undefined, {}, { request: {} });
             expect(result.handled).toBe(true);
-            expect(result.response?.body?.data?.locales).toEqual(['en', 'zh-CN', 'ja']);
+            expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'zh-CN', 'ja']);
         });
 
         it('should resolve locale via fallback (zh → zh-CN) for translations', async () => {
@@ -2107,7 +2109,7 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
-            expect(result.response?.body?.data?.locales).toEqual(['en', 'fr']);
+            expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'fr']);
         });
 
         it('should populate locale from actual i18n service', async () => {
@@ -2295,7 +2297,7 @@ describe('HttpDispatcher', () => {
             // MSW-style dispatch: full path stripped to relative
             const localesResult = await dispatcher.dispatch('GET', '/i18n/locales', undefined, {}, { request: {} });
             expect(localesResult.handled).toBe(true);
-            expect(localesResult.response?.body?.data?.locales).toEqual(['en', 'de']);
+            expect(localesResult.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'de']);
 
             const translationsResult = await dispatcher.dispatch('GET', '/i18n/translations/de', undefined, {}, { request: {} });
             expect(translationsResult.handled).toBe(true);

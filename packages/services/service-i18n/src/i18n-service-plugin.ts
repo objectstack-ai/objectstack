@@ -5,7 +5,7 @@ import { wireAuthoredTranslationSync } from '@objectstack/core';
 import type { IHttpServer, IHttpRequest, IHttpResponse } from '@objectstack/spec/contracts';
 import type { II18nService } from '@objectstack/spec/contracts';
 import type { TranslationData } from '@objectstack/spec/system';
-import { resolveObjectFieldLabels } from '@objectstack/spec/system';
+import { resolveObjectFieldLabels, toLocaleDescriptors } from '@objectstack/spec/system';
 import { FileI18nAdapter } from './file-i18n-adapter.js';
 import type { FileI18nAdapterOptions } from './file-i18n-adapter.js';
 
@@ -182,18 +182,12 @@ export class I18nServicePlugin implements Plugin {
     // GET /i18n/locales
     httpServer.get(`${basePath}/locales`, async (_req: IHttpRequest, res: IHttpResponse) => {
       try {
-        const locales = i18n.getLocales();
-        const defaultLocale = i18n.getDefaultLocale?.() ?? 'en';
-        res.json({
-          success: true,
-          data: {
-            locales: locales.map((code) => ({
-              code,
-              label: code,
-              isDefault: code === defaultLocale,
-            })),
-          },
-        });
+        // Same shared mapping the dispatcher's `/i18n` domain uses — the two
+        // surfaces serve this route interchangeably, and each holding its own
+        // copy is what let them answer in different shapes (#3833's lesson,
+        // one route over).
+        const locales = toLocaleDescriptors(i18n.getLocales(), i18n.getDefaultLocale?.() ?? 'en');
+        res.json({ success: true, data: { locales } });
       } catch (error: any) {
         sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');
       }

@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectTranslationDataSchema, TranslationDataSchema, type TranslationBundle } from './translation.zod';
-import { GetFieldLabelsResponseSchema } from '../api/protocol.zod';
+import { GetFieldLabelsResponseSchema, GetLocalesResponseSchema } from '../api/protocol.zod';
 import {
   resolveViewLabel,
   resolveViewDescription,
@@ -13,6 +13,7 @@ import {
   translateAction,
   translateMetadataDocument,
   resolveObjectFieldLabels,
+  toLocaleDescriptors,
 } from './i18n-resolver';
 
 describe('ObjectTranslationDataSchema (_views/_actions extensions)', () => {
@@ -1141,5 +1142,44 @@ describe('resolveObjectFieldLabels (objectstack#3833, #3847)', () => {
       labels: resolveObjectFieldLabels(data, 'account'),
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+// ==========================================
+// toLocaleDescriptors — the `/i18n/locales` body
+// ==========================================
+
+describe('toLocaleDescriptors', () => {
+  it('maps codes to the descriptors GetLocalesResponseSchema declares', () => {
+    expect(toLocaleDescriptors(['en', 'zh-CN'], 'en')).toEqual([
+      { code: 'en', label: 'en', isDefault: true },
+      { code: 'zh-CN', label: 'zh-CN', isDefault: false },
+    ]);
+  });
+
+  it('produces a body that satisfies GetLocalesResponseSchema', () => {
+    // Same guard as the field-labels one above: emitted value vs DECLARED
+    // contract, not vs a hand-written literal. `getLocales()` hands back a
+    // bare `string[]`, and passing it through unmapped is what made one
+    // endpoint answer in two shapes depending on the provider.
+    const parsed = GetLocalesResponseSchema.safeParse({
+      locales: toLocaleDescriptors(['en', 'ja-JP'], 'ja-JP'),
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.locales.find((l) => l.code === 'ja-JP')?.isDefault).toBe(true);
+  });
+
+  it('marks nothing default when the provider has no default locale', () => {
+    // `getDefaultLocale` is optional on `II18nService`. `isDefault` is
+    // REQUIRED by the schema, so an absent default must yield `false`, never
+    // `undefined` — which would fail the parse.
+    const out = toLocaleDescriptors(['en', 'fr'], undefined);
+    expect(out.every((l) => l.isDefault === false)).toBe(true);
+    expect(GetLocalesResponseSchema.safeParse({ locales: out }).success).toBe(true);
+  });
+
+  it('returns [] for an absent or empty locale list', () => {
+    expect(toLocaleDescriptors(undefined, 'en')).toEqual([]);
+    expect(toLocaleDescriptors([], 'en')).toEqual([]);
   });
 });

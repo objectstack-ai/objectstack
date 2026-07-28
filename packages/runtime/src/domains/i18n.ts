@@ -17,7 +17,7 @@
  */
 
 import { resolveLocale } from '@objectstack/core';
-import { CoreServiceName, resolveObjectFieldLabels } from '@objectstack/spec/system';
+import { CoreServiceName, resolveObjectFieldLabels, toLocaleDescriptors } from '@objectstack/spec/system';
 import type { TranslationData } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -48,7 +48,16 @@ export async function handleI18nRequest(
 
     // GET /i18n/locales
     if (parts[0] === 'locales' && parts.length === 1) {
-        const locales = i18nService.getLocales();
+        // Descriptors, not the raw `string[]` `getLocales()` hands back —
+        // that is what `GetLocalesResponseSchema` declares and what
+        // service-i18n already emitted for this same route. Passing the bare
+        // array through made one endpoint answer in two shapes depending on
+        // which provider mounted it, the dispatcher's contradicting the SDK's
+        // own `GetLocalesResponse` type.
+        const locales = toLocaleDescriptors(
+            i18nService.getLocales(),
+            typeof i18nService.getDefaultLocale === 'function' ? i18nService.getDefaultLocale() : undefined,
+        );
         return { handled: true, response: deps.success({ locales }) };
     }
 
