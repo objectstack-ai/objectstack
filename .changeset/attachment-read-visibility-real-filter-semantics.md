@@ -1,7 +1,7 @@
 ---
 ---
 
-test(service-storage): give the attachment read-visibility harness real Filter Protocol semantics (#3774)
+test(service-storage): give the attachment read-visibility harness real Filter Protocol semantics
 
 Test-only — releases nothing.
 
@@ -9,14 +9,7 @@ Test-only — releases nothing.
 understood implicit equality and `$in` and nothing else: no `$and`, no `$or`,
 no `$not`. Every assertion in the file could therefore only check the *shape*
 of the filter `computeParentVisibilityFilter` emits, never the rows that filter
-selects.
-
-That was a load-bearing gap. The middleware's multi-parent read scope is
-`{$or:[{parent_object, parent_id:{$in:[…]}}, …]}`, and driver-sql used to
-compile each `$or` branch's own keys with OR instead of AND (#3774, fixed in
-#3776) — widening exactly this shape into an in-tenant unauthorized read of
-other users' attachments. The suite stayed green throughout, because a fake
-that never evaluates `$or` cannot see a `$or` widening bug.
+selects — a poor bargain for a predicate whose whole job is narrowing.
 
 Changes:
 
@@ -27,12 +20,11 @@ Changes:
   ignored — a silently under-implemented test double is the failure mode this
   change exists to close.
 - A new case asserts the **rows** a multi-parent-type scope returns, not just
-  its shape: attachments whose `parent_object` matches a branch but whose
-  `parent_id` is absent from that branch's id list (including one that borrows
-  the sibling branch's id) are excluded. Under the driver-sql bug this scope
-  returned every attachment in the tenant instead of two.
+  its shape: rows whose discriminator matches a branch but whose id is absent
+  from that branch's id list (including one that borrows the sibling branch's
+  id) are excluded, so the per-branch pairing itself is pinned.
 - A conformance block pins the harness matcher against the same 2x2 fixture and
   expectations as `memory-matcher-or-semantics.test.ts`,
   `matches-filter-or-semantics.test.ts` and `sql-driver-or-filter.test.ts`, so
-  the four cannot drift apart, plus a case proving the matcher actually tells
-  the correct scope from the widened one.
+  the four cannot drift apart, plus a case proving the matcher actually
+  distinguishes a correctly paired scope from a widened one.

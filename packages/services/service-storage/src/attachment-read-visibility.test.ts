@@ -16,13 +16,14 @@ const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
  *
  * This used to understand neither logical operators nor anything but `$in`,
  * so these tests could only assert the *shape* of the filter the middleware
- * emits. That was a real blind spot: `computeParentVisibilityFilter` returns
- * `{$or:[{parent_object, parent_id:{$in:[…]}}, …]}`, and a driver-sql
- * compilation bug (#3774) OR-ed the keys *within* each branch — widening
- * exactly this shape into an in-tenant unauthorized read — while every
- * assertion here stayed green. A fake that silently under-implements the
- * protocol cannot see a widening bug, so this one implements it for real and
- * **throws** on anything it does not, rather than quietly matching.
+ * emits, never the rows that filter selects. That is a poor bargain for a
+ * predicate whose whole job is narrowing: `computeParentVisibilityFilter`
+ * pairs a discriminator with an id list per branch, and any bug that widens
+ * `$or` — the class #3774 fixed in the SQL compiler — turns that pairing into
+ * something looser while leaving every shape assertion green. A fake that
+ * silently under-implements the protocol cannot see a widening bug, so this
+ * one implements it for real and **throws** on anything it does not, rather
+ * than quietly matching.
  *
  * Values compare as strings on purpose: `computeParentVisibilityFilter`
  * stringifies every `parent_id` when it builds the `$in` list, so a numeric
@@ -186,8 +187,7 @@ describe('installAttachmentReadVisibility', () => {
     // Each parent type has a visible and an invisible record, plus a row whose
     // parent_object belongs to one branch while its parent_id appears only in
     // the OTHER branch's id list. Nothing but a genuine per-branch AND excludes
-    // all three: this is the shape driver-sql widened into an in-tenant
-    // unauthorized read by OR-ing a branch's own keys (#3774 / PR #3776).
+    // all three, so this pins the pairing itself rather than the filter's shape.
     const { mw, selectIds } = install({
       attachments: [
         { id: 'a1', parent_object: 'att_case', parent_id: 'c1' }, // visible case
@@ -338,11 +338,10 @@ describe('harness matcher — Filter Protocol $and/$or/$not semantics', () => {
     expect(ids({ $not: { a: 'x' } })).toEqual(['3', '4']);
   });
 
-  it('tells the correct attachment scope apart from the widened one (#3774)', () => {
+  it('tells a correctly paired scope apart from a widened one', () => {
     // The proof this matcher can go red: the same clauses, once AND-ed per
-    // branch and once flattened the way driver-sql compiled them. If both
-    // returned the same rows, every row assertion in this file would be
-    // decorative.
+    // branch and once flattened to key-level ORs. If both returned the same
+    // rows, every row assertion in this file would be decorative.
     const attachments = [
       { id: 'a1', parent_object: 'att_case', parent_id: 'c1' },
       { id: 'a2', parent_object: 'att_case', parent_id: 'c2' },
