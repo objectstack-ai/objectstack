@@ -288,7 +288,13 @@ curl -b cookies.txt -X POST \
 `actorId` defaults to the caller. The actor **must** be in `pending_approvers`
 or the call returns 403 (`FORBIDDEN: actor '…' is not a pending approver`); a
 request that isn't pending returns 409 (`INVALID_STATE`). Always go through
-these endpoints — never resume the flow run directly.
+these endpoints — never resume the flow run directly, and since #3801 you
+**cannot**: `POST /api/v1/automation/{flow}/runs/{runId}/resume` answers 403 for
+a run parked on an `approval` node (including via a `subflow` pause) and changes
+nothing — the request stays pending and the run stays parked, so the real
+decision still lands. The approver slate, the `sys_approval_action` row and the
+status mirror all live on this path; it is the only one that produces a
+consistent outcome.
 
 A decision may carry **file attachments** — `attachments: string[]` of `sys_file`
 ids — recorded on its audit row (e.g. a signed contract on the approve):
