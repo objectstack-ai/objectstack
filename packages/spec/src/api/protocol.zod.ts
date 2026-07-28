@@ -954,10 +954,28 @@ export const GetLocalesResponseSchema = lazySchema(() => z.object({
   })).describe('Available locales'),
 }));
 
+/**
+ * `locale` is the whole request — the endpoint returns that locale's full
+ * bundle, and there is no server-side filter to ask for.
+ *
+ * This once declared `namespace` and `keys` filters. Neither serving surface
+ * ever read them: the dispatcher domain body takes `parts[1]`/`query.locale`
+ * and service-i18n takes `req.params.locale`, so both returned the whole
+ * bundle while the SDK dutifully put both on the query string. A caller who
+ * passed `keys` to shrink the payload shrank nothing and was told nothing —
+ * Prime Directive #10's declared ≠ enforced, the shape #1475 trimmed out of
+ * the validation-rule types. Removed rather than implemented (#3676): no
+ * caller in this repo or objectui passed either one, `II18nService`
+ * (`contracts/i18n-service.ts`) takes only `locale` so a filter could only be
+ * a post-filter on an already-materialized bundle — which is precisely not
+ * the server-side work `keys` reads as saving — and against the nested
+ * `TranslationData` shape #3778 settled on, a flat `keys: string[]` has no
+ * defined meaning at all. Re-adding an optional filter is additive and
+ * non-breaking the day a consumer actually needs one; a declared-but-unread
+ * field is the exemplar the next author copies.
+ */
 export const GetTranslationsRequestSchema = lazySchema(() => z.object({
   locale: z.string().describe('BCP-47 locale code'),
-  namespace: z.string().optional().describe('Translation namespace (e.g., objects, apps, messages)'),
-  keys: z.array(z.string()).optional().describe('Specific translation keys to fetch'),
 }));
 
 export const GetTranslationsResponseSchema = lazySchema(() => z.object({

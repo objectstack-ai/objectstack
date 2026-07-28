@@ -1182,7 +1182,7 @@ export const DEFAULT_I18N_ROUTES: RestApiRouteRegistration = {
       category: 'i18n',
       public: false,
       summary: 'Get translations for a locale',
-      description: 'Returns translation strings for the specified locale and optional namespace',
+      description: "Returns the specified locale's full translation bundle",
       tags: ['i18n'],
       responseSchema: 'GetTranslationsResponseSchema',
       cacheable: true,

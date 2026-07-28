@@ -3510,15 +3510,16 @@ export class ObjectStackClient {
      * The `?locale=` query form this used to send matched no route anywhere
      * and 404'd on the wire; the dispatcher's domain body accepts it, but
      * nothing ever routes a bare `/translations` to that body (#3636).
+     *
+     * Returns the locale's full bundle. The `options.namespace` / `options.keys`
+     * this used to accept rode the query string to a server that read neither,
+     * so the filter silently did nothing — trimmed with the request schema's
+     * fields in #3676.
      */
-    getTranslations: async (locale: string, options?: { namespace?: string; keys?: string[] }): Promise<GetTranslationsResponse> => {
+    getTranslations: async (locale: string): Promise<GetTranslationsResponse> => {
       const route = this.getRoute('i18n');
-      const params = new URLSearchParams();
-      if (options?.namespace) params.set('namespace', options.namespace);
-      if (options?.keys) params.set('keys', options.keys.join(','));
-      const query = params.toString();
       const res = await this.fetch(
-        `${this.baseUrl}${route}/translations/${encodeURIComponent(locale)}${query ? `?${query}` : ''}`,
+        `${this.baseUrl}${route}/translations/${encodeURIComponent(locale)}`,
       );
       return this.unwrapResponse<GetTranslationsResponse>(res);
     },
