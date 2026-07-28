@@ -518,12 +518,39 @@ export default class Validate extends Command {
       // 3g-bis. Flow template path references (#3426): a `{record.<path>}` token
       //     in a node template that names an unknown field, or hops through a
       //     lookup relation the seeded record carries only as a scalar id, both
-      //     render a SILENT empty string at runtime. Advisory: the head object
-      //     may come from another package (skipped there), and the runtime still
-      //     produces output (a blank), so nothing is fully broken.
+      //     render a SILENT empty string at runtime. Advisory in most positions:
+      //     the head object may come from another package (skipped there), and
+      //     the runtime still produces output (a blank), so nothing is fully
+      //     broken. GATING inside a filter-guarded CRUD node's `filter`: since
+      //     #3810 an unresolved token there does not blank a value, it deletes
+      //     the condition — which WIDENS the query — so the node refuses to
+      //     execute. The build must not ship a flow whose runtime is already
+      //     decided.
       if (!flags.json) printStep('Checking flow template references...');
       const flowTemplateFindings = validateFlowTemplatePaths(normalized as Record<string, unknown>);
+      const flowTemplateErrors = flowTemplateFindings.filter((f) => f.severity === 'error');
       const flowTemplateWarnings = flowTemplateFindings.filter((f) => f.severity === 'warning');
+      if (flowTemplateErrors.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: flowTemplateErrors,
+            warnings: flowTemplateWarnings,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        console.log('');
+        printError(
+          `Flow template reference check failed (${flowTemplateErrors.length} issue${flowTemplateErrors.length > 1 ? 's' : ''})`,
+        );
+        for (const f of flowTemplateErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+        }
+        this.exit(1);
+      }
       if (!flags.json) {
         for (const w of flowTemplateWarnings.slice(0, 50)) {
           console.log(chalk.yellow(`  ⚠ ${w.where}: ${w.message}`));

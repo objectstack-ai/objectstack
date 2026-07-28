@@ -20,17 +20,27 @@
 //      and yields '' silently. Not resolved today; tracked on #3426.
 //
 // A pure `(stack) => Finding[]` rule (ADR-0019), run from `os validate` and
-// reusable by AI authoring. Both findings are warnings: the runtime still
-// produces output (a blank), nothing is fully broken, and the head object may
-// legitimately come from another installed package (skipped — see below).
+// reusable by AI authoring.
 //
-// One position is no longer merely blank at run time: inside a CRUD node's
-// `config.filter`, an unresolved token used to DELETE the condition from the
-// query, which widens it — `delete_record` with its only condition gone matched
-// every row. Since framework#3810 those nodes refuse to execute instead. This
-// rule still earns its place there: catching the typo at build time beats a
-// failed run, and it is the only signal for the other config blocks, where the
-// blank-output behaviour is unchanged.
+// SEVERITY FOLLOWS THE RUNTIME CONSEQUENCE, which differs by POSITION:
+//
+//   - Everywhere else (a message body, an http url, a write payload) an
+//     unresolved token renders a blank. The output is wrong but the run
+//     completes, and the head object may legitimately come from another
+//     installed package (skipped — see below). Advisory: WARNING.
+//
+//   - Inside a filter-guarded CRUD node's `filter`, an unresolved token used to
+//     DELETE the condition from the query, and a removed condition matches MORE
+//     rows — `delete_record` with its only condition gone matched every row.
+//     Since framework#3810 those nodes REFUSE TO EXECUTE. So a finding here is
+//     not "the output will be blank", it is "this node cannot run": the build
+//     is shipping a flow whose runtime is already decided. Gating: ERROR.
+//
+// The split is the same shift-left `validateReadonlyFlowWrites` makes — a
+// certain runtime failure gates the build, a state-dependent one advises — and
+// it keeps this rule honest about what it found. Catching the typo at build
+// time beats a failed run at 3am; catching it and calling it advisory, when the
+// runtime has already committed to refusing, understates it.
 //
 // Deliberately conservative to keep false positives near zero:
 //   - Only `record.`-prefixed tokens are checked. Other `{var}` tokens address
@@ -103,6 +113,17 @@ const RELATION_TYPES: ReadonlySet<string> = new Set([
   'master_detail',
   'user',
   'tree',
+]);
+
+// The CRUD nodes whose `filter` the runtime guards (framework#3810): each calls
+// `resolveNodeFilter`, which refuses the node when interpolation erased any
+// authored condition. `create_record` is deliberately absent — it writes a
+// payload and has no filter, so an unresolved token there is a blank value on
+// the new row, not a widened query.
+const FILTER_GUARDED_NODE_TYPES: ReadonlySet<string> = new Set([
+  'get_record',
+  'update_record',
+  'delete_record',
 ]);
 
 /** Build a `fieldName -> type` map for an object (declared fields only). */
@@ -178,6 +199,49 @@ const NODE_CONFIG_KEYS = [
   'start',
 ];
 
+/** A templated string leaf plus the one thing severity depends on: where it sits. */
+interface TemplateLeaf {
+  text: string;
+  /** Inside a filter-guarded CRUD node's `filter` — an unresolved token there is refused at runtime. */
+  inFilter: boolean;
+}
+
+/**
+ * Collect a node's templated string leaves, tagging those that sit under a
+ * `filter` key when the node type is one the runtime guards.
+ *
+ * `guarded` leaves are returned FIRST so the per-node dedupe below resolves a
+ * reference that appears in both positions at its higher severity: one typo
+ * used in a filter and echoed in a message is an error, not a warning.
+ */
+function collectNodeLeaves(node: AnyRec, guarded: boolean): TemplateLeaf[] {
+  const filterLeaves: TemplateLeaf[] = [];
+  const otherLeaves: TemplateLeaf[] = [];
+
+  for (const key of NODE_CONFIG_KEYS) {
+    if (!(key in node)) continue;
+    const block = node[key];
+    const splitFilter = guarded && !!block && typeof block === 'object' && !Array.isArray(block);
+
+    if (splitFilter) {
+      const { filter, ...rest } = block as AnyRec;
+      const inFilter: string[] = [];
+      stringLeaves(filter, inFilter);
+      for (const text of inFilter) filterLeaves.push({ text, inFilter: true });
+      const outside: string[] = [];
+      stringLeaves(rest, outside);
+      for (const text of outside) otherLeaves.push({ text, inFilter: false });
+      continue;
+    }
+
+    const plain: string[] = [];
+    stringLeaves(block, plain);
+    for (const text of plain) otherLeaves.push({ text, inFilter: false });
+  }
+
+  return [...filterLeaves, ...otherLeaves];
+}
+
 /** True when the flow is armed by a record lifecycle event. */
 function isRecordTriggered(flow: AnyRec, startConfig: AnyRec): boolean {
   if (flow.type === 'record_change') return true;
@@ -249,11 +313,11 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
       const nodeLabel =
         typeof node.type === 'string' ? node.type : typeof node.id === 'string' ? node.id : `#${nodeIndex}`;
 
-      // Collect templated string leaves from the config-bearing blocks only.
-      const leaves: string[] = [];
-      for (const key of NODE_CONFIG_KEYS) {
-        if (key in node) stringLeaves((node as AnyRec)[key], leaves);
-      }
+      // Collect templated string leaves from the config-bearing blocks only,
+      // tagging filter positions when this node type guards its filter (#3810).
+      const nodeType = typeof node.type === 'string' ? node.type : '';
+      const guarded = FILTER_GUARDED_NODE_TYPES.has(nodeType);
+      const leaves = collectNodeLeaves(node as AnyRec, guarded);
       if (leaves.length === 0) return;
 
       // Dedupe references so one repeated typo yields one finding per node.
@@ -261,7 +325,8 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
       const seenTraversal = new Set<string>();
 
       for (const leaf of leaves) {
-        for (const rest of recordRefsIn(leaf)) {
+        const inFilter = leaf.inFilter;
+        for (const rest of recordRefsIn(leaf.text)) {
           const head = rest[0];
           const hasSubPath = rest.length > 1;
           // A trailing numeric segment is an array index (#1872), not a hop.
@@ -273,16 +338,23 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
             if (seenUnknown.has(head)) continue;
             seenUnknown.add(head);
             findings.push({
-              severity: 'warning',
+              severity: inFilter ? 'error' : 'warning',
               rule: FLOW_TEMPLATE_UNKNOWN_FIELD,
               where: `flow "${flowName}" node "${nodeLabel}"`,
               path: `flows[${flowIndex}].nodes[${nodeIndex}]`,
-              message:
-                `template references '{record.${rest.join('.')}}', but '${head}' is not a field on ` +
-                `object '${objectName}' — it resolves to an empty string at runtime (silently).`,
-              hint:
-                `Check the field name against the object's field definitions (e.g. '{record.full_name}', ` +
-                `not '{record.full_naem}'). System columns like id/created_at/owner are also addressable.`,
+              message: inFilter
+                ? `${nodeType} filter references '{record.${rest.join('.')}}', but '${head}' is not a field on ` +
+                  `object '${objectName}' — the token resolves to nothing, which DROPS the condition from the ` +
+                  `query instead of narrowing it. The node refuses to run at execution time (#3810).`
+                : `template references '{record.${rest.join('.')}}', but '${head}' is not a field on ` +
+                  `object '${objectName}' — it resolves to an empty string at runtime (silently).`,
+              hint: inFilter
+                ? `Check the field name against the object's field definitions (e.g. '{record.full_name}', ` +
+                  `not '{record.full_naem}'); system columns like id/created_at/owner are also addressable. ` +
+                  `This gates the build rather than warning: an absent condition WIDENS the query, so the ` +
+                  `runtime has already decided to refuse this node.`
+                : `Check the field name against the object's field definitions (e.g. '{record.full_name}', ` +
+                  `not '{record.full_naem}'). System columns like id/created_at/owner are also addressable.`,
             });
             continue;
           }
@@ -294,18 +366,26 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
               if (seenTraversal.has(key)) continue;
               seenTraversal.add(key);
               findings.push({
-                severity: 'warning',
+                severity: inFilter ? 'error' : 'warning',
                 rule: FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
                 where: `flow "${flowName}" node "${nodeLabel}"`,
                 path: `flows[${flowIndex}].nodes[${nodeIndex}]`,
-                message:
-                  `template references '{record.${key}}', a cross-object hop through the ${headType} field ` +
-                  `'${head}' — the flow record carries '${head}' as a scalar id, not an expanded object, so ` +
-                  `this resolves to an empty string at runtime (silently).`,
-                hint:
-                  `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
-                  `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
-                  `('{record.${head}}'), or project the value via a formula field on '${objectName}'.`,
+                message: inFilter
+                  ? `${nodeType} filter references '{record.${key}}', a cross-object hop through the ` +
+                    `${headType} field '${head}' — the flow record carries '${head}' as a scalar id, not an ` +
+                    `expanded object, so the token resolves to nothing and the condition is DROPPED from the ` +
+                    `query instead of narrowing it. The node refuses to run at execution time (#3810).`
+                  : `template references '{record.${key}}', a cross-object hop through the ${headType} field ` +
+                    `'${head}' — the flow record carries '${head}' as a scalar id, not an expanded object, so ` +
+                    `this resolves to an empty string at runtime (silently).`,
+                hint: inFilter
+                  ? `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
+                    `engine re-reads it as the run's identity. Otherwise filter on the foreign-key id directly ` +
+                    `('{record.${head}}'), or project the value via a formula field on '${objectName}'. This ` +
+                    `gates the build rather than warning: an absent condition WIDENS the query.`
+                  : `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
+                    `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
+                    `('{record.${head}}'), or project the value via a formula field on '${objectName}'.`,
               });
             }
             // STRUCTURED_TYPES + any other scalar `.sub` access is left alone:
