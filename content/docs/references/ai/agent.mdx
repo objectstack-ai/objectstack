@@ -14,8 +14,8 @@ AI Model Configuration
 ## TypeScript Usage
 
 ```typescript
-import { AIKnowledge, AIModelConfig, AITool, Agent, StructuredOutputConfig, StructuredOutputFormat, TransformPipelineStep } from '@objectstack/spec/ai';
-import type { AIKnowledge, AIModelConfig, AITool, Agent, StructuredOutputConfig, StructuredOutputFormat, TransformPipelineStep } from '@objectstack/spec/ai';
+import { AIKnowledge, AIModelConfig, Agent, StructuredOutputConfig, StructuredOutputFormat, TransformPipelineStep } from '@objectstack/spec/ai';
+import type { AIKnowledge, AIModelConfig, Agent, StructuredOutputConfig, StructuredOutputFormat, TransformPipelineStep } from '@objectstack/spec/ai';
 
 // Validate data
 const result = AIKnowledge.parse(data);
@@ -51,19 +51,6 @@ const result = AIKnowledge.parse(data);
 
 ---
 
-## AITool
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'action' \| 'flow' \| 'query' \| 'vector_search'>` | ✅ |  |
-| **name** | `string` | ✅ | Reference name (Action Name, Flow Name) |
-| **description** | `string` | optional | Override description for the LLM |
-
-
----
-
 ## Agent
 
 ### Properties
@@ -79,7 +66,6 @@ const result = AIKnowledge.parse(data);
 | **lifecycle** | `{ id: string; description?: string; contextSchema?: Record<string, any>; initial: string; … }` | optional | [EXPERIMENTAL — not enforced] State machine defining the agent conversation flow and constraints. Parsed but no runtime consumer yet (liveness #1878/#1893). |
 | **surface** | `Enum<'ask' \| 'build'>` | ✅ | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
 | **skills** | `string[]` | optional | Skill names to attach (Agent→Skill→Tool architecture) |
-| **tools** | `{ type: Enum<'action' \| 'flow' \| 'query' \| 'vector_search'>; name: string; description?: string }[]` | optional | Direct tool references (legacy fallback) |
 | **knowledge** | `{ sources?: string[]; topics?: any; indexes: string[] }` | optional | RAG access |
 | **active** | `boolean` | ✅ |  |
 | **access** | `string[]` | optional | Who can chat with this agent |

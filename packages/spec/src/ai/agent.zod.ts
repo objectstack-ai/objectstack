@@ -19,16 +19,6 @@ export const AIModelConfigSchema = lazySchema(() => z.object({
 }));
 
 /**
- * AI Tool Definition
- * References to Actions, Flows, or Objects available to the Agent.
- */
-export const AIToolSchema = lazySchema(() => z.object({
-  type: z.enum(['action', 'flow', 'query', 'vector_search']),
-  name: z.string().describe('Reference name (Action Name, Flow Name)'),
-  description: z.string().optional().describe('Override description for the LLM'),
-}));
-
-/**
  * AI Knowledge Base
  * RAG configuration.
  */
@@ -110,8 +100,9 @@ export type StructuredOutputConfig = z.infer<typeof StructuredOutputConfigSchema
  * Salesforce Agentforce, Microsoft Copilot Studio, and ServiceNow
  * Now Assist metadata patterns.
  *
- * - **skills**: Primary capability model — references skill names.
- * - **tools**: Fallback / direct tool references (legacy inline format).
+ * - **skills**: THE capability model — an agent references skill names, and
+ *   its tool set is exactly the union of those skills' tools (ADR-0064).
+ *   There is no direct-tool slot and no global fall-through.
  *
  * @example Agent-Skill Architecture
  * ```ts
@@ -122,20 +113,6 @@ export type StructuredOutputConfig = z.infer<typeof StructuredOutputConfigSchema
  *   instructions: 'You are a helpful assistant. Always verify user identity first.',
  *   skills: ['case_management', 'knowledge_search'],
  *   knowledge: { sources: ['faq', 'policies'], indexes: ['support_docs'] },
- * });
- * ```
- *
- * @example Legacy Tool References (backward-compatible)
- * ```ts
- * defineAgent({
- *   name: 'support_tier_1',
- *   label: 'First Line Support',
- *   role: 'Help Desk Assistant',
- *   instructions: 'You are a helpful assistant.',
- *   tools: [
- *     { type: 'flow', name: 'reset_password', description: 'Trigger password reset email' },
- *     { type: 'query', name: 'get_order_status', description: 'Check order shipping status' },
- *   ],
  * });
  * ```
  */
@@ -166,8 +143,15 @@ export const AgentSchema = lazySchema(() => z.object({
   /** Capabilities — Skill-based (primary) */
   skills: z.array(z.string().regex(/^[a-z_][a-z0-9_]*$/)).optional().describe('Skill names to attach (Agent→Skill→Tool architecture)'),
 
-  /** Capabilities — Direct tool references (fallback / legacy) */
-  tools: z.array(AIToolSchema).optional().describe('Direct tool references (legacy fallback)'),
+  // `tools` (the legacy inline `{type,name,description}[]` fallback) was
+  // REMOVED — ADR-0064's central invariant is "an agent's tool set is the
+  // union of its surface-compatible skills' tools; nothing falls through to
+  // the global registry", and this field was the one seam that broke it: the
+  // runtime resolved `agent.tools[].name` against the FULL registry with no
+  // surface check, so an `ask`-surface agent could name an authoring tool and
+  // get it. The invariant is now structural — there is no second slot to
+  // disagree with the skills — rather than a rule every reader must remember
+  // (ADR-0049 "design+enforce or remove"). Attach capability via `skills`.
 
   /** Knowledge */
   knowledge: AIKnowledgeSchema.optional().describe('RAG access'),
@@ -271,21 +255,9 @@ export const AgentSchema = lazySchema(() => z.object({
  *   skills: ['case_management', 'knowledge_search'],
  * });
  * ```
- *
- * @example Legacy Tool References (backward-compatible)
- * ```ts
- * const supportAgent = defineAgent({
- *   name: 'support_agent',
- *   label: 'Support Agent',
- *   role: 'Senior Support Engineer',
- *   instructions: 'You help customers resolve technical issues.',
- *   tools: [{ type: 'action', name: 'create_ticket' }],
- * });
- * ```
  */
 export function defineAgent(config: z.input<typeof AgentSchema>): Agent {
   return AgentSchema.parse(config);
 }
 
 export type Agent = z.infer<typeof AgentSchema>;
-export type AITool = z.infer<typeof AIToolSchema>;

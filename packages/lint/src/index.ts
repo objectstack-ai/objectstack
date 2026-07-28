@@ -240,6 +240,15 @@ export type {
   AiToolRefSeverity,
 } from './validate-ai-tool-references.js';
 
+export {
+  validateAiAgentAuthoring,
+  AGENT_AUTHORING_WITHDRAWN,
+} from './validate-ai-agent-authoring.js';
+export type {
+  AiAgentAuthoringFinding,
+  AiAgentAuthoringSeverity,
+} from './validate-ai-agent-authoring.js';
+
 // One entry point for the reference-resolution rules above (#3583 §5 D5).
 // Adding a rule to `REFERENCE_INTEGRITY_RULES` runs it on `validate`, `lint`
 // and `compile` at once — the CLI call sites do not change.

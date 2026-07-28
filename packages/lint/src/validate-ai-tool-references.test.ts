@@ -50,20 +50,73 @@ describe('validate-ai-tool-references', () => {
     expect(validateAiToolReferences(stack)).toEqual([]);
   });
 
+  const exposed = (name: string, type = 'script') => ({
+    name,
+    label: name,
+    type,
+    target: name,
+    ai: { exposed: true, description: 'A sufficiently long LLM-facing description of the action.' },
+  });
+
   it('resolves materialised action tools from stack-level and object-level actions', () => {
     const stack = {
-      actions: [{ name: 'send_invoice', label: 'Send' }],
-      objects: [{ name: 'crm_case', actions: [{ name: 'triage_case', label: 'Triage' }] }],
+      actions: [exposed('send_invoice')],
+      objects: [{ name: 'crm_case', actions: [exposed('triage_case', 'flow')] }],
       skills: [{ name: 's', tools: ['action_send_invoice', 'action_triage_case'] }],
     };
     expect(validateAiToolReferences(stack)).toEqual([]);
+  });
+
+  // ADR-0011 — the runtime materialises `action_<name>` ONLY for an action
+  // that opted in AND has a headless path. Resolving against every declared
+  // action would bless a reference the agent can never call: the exact
+  // failure this rule exists to catch, one layer down.
+  it('does NOT resolve an action that is not AI-exposed', () => {
+    const stack = {
+      actions: [{ name: 'send_invoice', label: 'Send', type: 'script', target: 'send_invoice' }],
+      skills: [{ name: 's', tools: ['action_send_invoice'] }],
+    };
+    const findings = validateAiToolReferences(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('does not become an AI tool');
+    expect(findings[0].hint).toContain('ai: { exposed: true');
+  });
+
+  it('does NOT resolve a UI-only action type, even when opted in', () => {
+    // `modal`/`form`/`url` have no headless invocation path — staying
+    // human-driven is a legitimate design answer, and the hint says so.
+    for (const type of ['modal', 'form', 'url']) {
+      const stack = {
+        actions: [{ ...exposed('escalate_case'), type }],
+        skills: [{ name: 's', tools: ['action_escalate_case'] }],
+      };
+      const findings = validateAiToolReferences(stack);
+      expect(findings, type).toHaveLength(1);
+      expect(findings[0].hint).toContain('stays human-driven by design');
+    }
+  });
+
+  it('does NOT resolve an exposed action missing its LLM-facing description', () => {
+    const stack = {
+      actions: [{ name: 'send_invoice', type: 'script', target: 'x', ai: { exposed: true } }],
+      skills: [{ name: 's', tools: ['action_send_invoice'] }],
+    };
+    expect(validateAiToolReferences(stack)).toHaveLength(1);
+  });
+
+  it('does NOT resolve a flow/api action with no target to dispatch', () => {
+    const stack = {
+      actions: [{ name: 'run_it', type: 'flow', ai: { exposed: true, description: 'x'.repeat(45) } }],
+      skills: [{ name: 's', tools: ['action_run_it'] }],
+    };
+    expect(validateAiToolReferences(stack)).toHaveLength(1);
   });
 
   it('does NOT resolve a bare action name — the tool is the materialised action_<name>', () => {
     // The ADR-0109 default path is `action_<name>`; naming the raw action is
     // the near-miss the hint should catch, via the suggestion.
     const stack = {
-      objects: [{ name: 'crm_case', actions: [{ name: 'triage_case', label: 'Triage' }] }],
+      objects: [{ name: 'crm_case', actions: [exposed('triage_case', 'flow')] }],
       skills: [{ name: 's', tools: ['triage_case'] }],
     };
     const findings = validateAiToolReferences(stack);
@@ -73,7 +126,7 @@ describe('validate-ai-tool-references', () => {
 
   it('resolves trailing-wildcard families against the universe', () => {
     const withActions = {
-      objects: [{ name: 'crm_case', actions: [{ name: 'triage_case', label: 'T' }] }],
+      objects: [{ name: 'crm_case', actions: [exposed('triage_case', 'flow')] }],
       skills: [{ name: 's', tools: ['action_*'] }],
     };
     expect(validateAiToolReferences(withActions)).toEqual([]);

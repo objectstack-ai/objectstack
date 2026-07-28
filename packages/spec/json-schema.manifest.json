@@ -3,7 +3,6 @@
   "schemas": [
     "ai/AIKnowledge",
     "ai/AIModelConfig",
-    "ai/AITool",
     "ai/AIUsageRecord",
     "ai/Agent",
     "ai/BlueprintApp",

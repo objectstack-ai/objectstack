@@ -1,6 +1,7 @@
 # ADR-0109: The AI tool authoring model — the default third-party path needs no tool records
 
-**Status**: Proposed (2026-07-28; revised same day — see Revision note). Phase 1 (platform tool-name registry + advisory reference lint) is implemented alongside this revision; Phase 2 (the optional refinement layer) awaits acceptance.
+**Status**: **Accepted — implemented (Phase 1)** (2026-07-28; revised same day before acceptance — see Revision note).
+Evidence: `packages/spec/src/system/constants/platform-tool-names.ts` (registry + `platform-tool-names.test.ts`); `packages/lint/src/validate-ai-tool-references.ts` (+ `.test.ts`, wired into `REFERENCE_INTEGRITY_RULES`); conformance in `../cloud` `service-ai`/`service-ai-studio` (`platform-tool-names-conformance.test.ts`, cloud#908). First app on the model: `../hotcrm` skills — 22 tool references, 0 findings, down from 16 references with 10 dead (hotcrm#512). Phase 2 (the optional refinement layer) remains open and is gated on a real refinement need.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md) (skills + tools are the third-party extension primitive), [ADR-0064](./0064-tool-scoping-to-agent.md) (an agent's tools are its skills' tools), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert metadata), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove)
 **Consumers**: `@objectstack/spec` (`system/constants/platform-tool-names.ts`, `ai/tool.zod.ts`, `stack.zod.ts`), `@objectstack/lint` (`validate-ai-tool-references`), `../cloud/service-ai` + `service-ai-studio` (registry conformance)
@@ -130,5 +131,7 @@ lint could not see: no reference rule could be correct in either direction
 - [x] `PLATFORM_PROVIDED_TOOL_NAMES` + `PLATFORM_TOOL_FAMILY_PREFIXES` + invariant tests (spec — this change).
 - [x] `validate-ai-tool-references`, advisory, in `REFERENCE_INTEGRITY_RULES` (lint — this change).
 - [x] `'tools'` into `composeStacks`' concat list (spec — this change).
-- [ ] Registry conformance tests in `../cloud` `service-ai` / `service-ai-studio` (cloud PR; activates fully when the cloud `.objectstack-sha` pin advances past this change).
+- [x] Registry conformance tests in `../cloud` `service-ai` / `service-ai-studio` (cloud#908; feature-detected, activates when the `.objectstack-sha` pin advances past Phase 1).
+- [x] The lint rule resolves `action_<name>` only for actions that ACTUALLY materialise — `ai.exposed` + `ai.description` + a headless type (ADR-0011). Resolving against every declared action blessed references the agent could never call; caught while porting HotCRM, where 3 of 5 referenced actions are `type:'modal'` (UI-only).
+- [x] First app ported: `../hotcrm` (hotcrm#512) — 10 fictional tools removed, the two withdrawn agents deleted, state changes routed through `action_<name>`.
 - [ ] **Phase 2 (on acceptance + a real refinement need):** `binding` on `ToolSchema`; flow exposure; boot-mirror provenance guard; revisit `tool` metadata-type flags; ratchet the lint rule to error per ADR-0078 once the registry has soaked a release.

@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   AgentSchema,
   AIModelConfigSchema,
-  AIToolSchema,
   AIKnowledgeSchema,
   StructuredOutputFormatSchema,
   StructuredOutputConfigSchema,
@@ -68,27 +67,19 @@ describe('AIModelConfigSchema', () => {
   });
 });
 
-describe('AIToolSchema', () => {
-  it('should accept all tool types', () => {
-    const types = ['action', 'flow', 'query', 'vector_search'] as const;
-    
-    types.forEach(type => {
-      const tool = {
-        type,
-        name: 'test_tool',
-      };
-      expect(() => AIToolSchema.parse(tool)).not.toThrow();
+describe('agent.tools removal (ADR-0064 / #3820)', () => {
+  it('strips a legacy inline tools array instead of carrying it', () => {
+    // The field is gone, so Zod drops it rather than handing the runtime a
+    // second, unscoped tool slot to disagree with the skills. Authoring one
+    // is a no-op, not a parse error — an existing stack keeps parsing.
+    const parsed = AgentSchema.parse({
+      name: 'legacy',
+      label: 'Legacy',
+      role: 'r',
+      instructions: 'x',
+      tools: [{ type: 'action', name: 'create_ticket' }],
     });
-  });
-
-  it('should accept tool with description', () => {
-    const tool = {
-      type: 'action' as const,
-      name: 'create_ticket',
-      description: 'Creates a new support ticket in the system',
-    };
-
-    expect(() => AIToolSchema.parse(tool)).not.toThrow();
+    expect(parsed).not.toHaveProperty('tools');
   });
 });
 
@@ -217,30 +208,20 @@ describe('AgentSchema', () => {
   });
 
   describe('Tools and Capabilities', () => {
-    it('should accept agent with tools', () => {
+    it('carries capability through skills, the only tool-bearing slot', () => {
+      // ADR-0064 — an agent's tool set is exactly the union of its
+      // surface-compatible skills' tools. There is no direct-tool slot.
       const agent: Agent = {
         name: 'workflow_agent',
         label: 'Workflow Agent',
         role: 'Automation Specialist',
         instructions: 'Execute workflows and actions.',
-        tools: [
-          {
-            type: 'action',
-            name: 'send_email',
-            description: 'Send email to users',
-          },
-          {
-            type: 'flow',
-            name: 'approval_workflow',
-          },
-          {
-            type: 'query',
-            name: 'get_pending_tasks',
-          },
-        ],
+        skills: ['approvals', 'notifications'],
       };
 
-      expect(() => AgentSchema.parse(agent)).not.toThrow();
+      const result = AgentSchema.parse(agent);
+      expect(result.skills).toEqual(['approvals', 'notifications']);
+      expect(result).not.toHaveProperty('tools');
     });
 
     it('should accept agent with knowledge base', () => {
@@ -291,21 +272,19 @@ describe('AgentSchema', () => {
       expect(result.skills).toContain('case_management');
     });
 
-    it('should accept agent with both skills and tools fallback', () => {
-      const agent: Agent = {
+    it('keeps skills and drops a legacy inline tools array', () => {
+      const agent = {
         name: 'hybrid_agent',
         label: 'Hybrid Agent',
         role: 'Versatile Assistant',
-        instructions: 'Use skills primarily, tools as fallback.',
+        instructions: 'Skills carry the capability.',
         skills: ['case_management'],
-        tools: [
-          { type: 'action', name: 'send_email' },
-        ],
+        tools: [{ type: 'action', name: 'send_email' }],
       };
 
       const result = AgentSchema.parse(agent);
       expect(result.skills).toHaveLength(1);
-      expect(result.tools).toHaveLength(1);
+      expect(result).not.toHaveProperty('tools');
     });
 
     it('should accept agent with permissions', () => {
@@ -793,18 +772,15 @@ describe('defineAgent', () => {
     expect(result.active).toBe(true);
   });
 
-  it('should accept agent with tools', () => {
+  it('should accept agent with skills', () => {
     const result = defineAgent({
       name: 'smart_agent',
       label: 'Smart Agent',
       role: 'Analyst',
       instructions: 'Analyze data.',
-      tools: [
-        { type: 'action', name: 'create_report' },
-        { type: 'query', name: 'search_records' },
-      ],
+      skills: ['reporting', 'record_search'],
     });
-    expect(result.tools).toHaveLength(2);
+    expect(result.skills).toHaveLength(2);
   });
 
   it('should throw on invalid agent name', () => {

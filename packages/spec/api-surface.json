@@ -1845,8 +1845,6 @@
   "./ai": [
     "AIKnowledgeSchema (const)",
     "AIModelConfigSchema (const)",
-    "AITool (type)",
-    "AIToolSchema (const)",
     "AIUsageRecord (type)",
     "AIUsageRecordSchema (const)",
     "Agent (type)",

@@ -24,6 +24,7 @@ describe('reference-integrity suite — membership', () => {
       'validateFlowTemplatePaths',
       'validateAiSurfaceAffinity',
       'validateAiToolReferences',
+      'validateAiAgentAuthoring',
     ]);
   });
 
@@ -111,6 +112,8 @@ describe('reference-integrity suite — every member actually runs', () => {
     ],
     // validateAiSurfaceAffinity: an 'ask' agent binding a 'build' skill — the
     // runtime throws on this at chat time (ADR-0064 §3).
+    // validateAiAgentAuthoring: declaring an agent at all is withdrawn
+    // (ADR-0063 §2) — one fixture, two rules.
     agents: [{ name: 'helper', surface: 'ask', skills: ['metadata_authoring'] }],
     // validateAiToolReferences: a tool name nothing declares, registers, or
     // materialises (the HotCRM fictional-tool class).
@@ -149,6 +152,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('flow-template-unknown-field');
     expect(rules).toContain('ai-skill-surface-mismatch');
     expect(rules).toContain('ai-skill-tool-unresolved');
+    expect(rules).toContain('agent-authoring-withdrawn');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {
@@ -170,9 +174,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, AI tool references last.
+    // Object references run first, agent-authoring last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('ai-skill-tool-unresolved');
+    expect(findings[findings.length - 1].rule).toBe('agent-authoring-withdrawn');
   });
 
   it('returns nothing for an empty stack', () => {
