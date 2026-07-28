@@ -52,7 +52,7 @@ misconfigured name resolves to an empty subtree and **approves nothing**
 
 Writes to the governed tables (`sys_user_position`,
 `sys_position_permission_set`, `sys_user_permission_set`,
-`sys_permission_set`) pass through the `DelegatedAdminGate`:
+`sys_permission_set`, `sys_member`) pass through the `DelegatedAdminGate`:
 
 | Rule | Effect |
 |---|---|
@@ -64,6 +64,7 @@ Writes to the governed tables (`sys_user_position`,
 | Single-row writes | Delegates write single rows by id only — a broad filter-write cannot be boundary-checked |
 | Audit stamp | Every assignment a delegate creates is `granted_by`-stamped automatically |
 | Tenant-level assets stay tenant-level | The `everyone`/`guest` audience anchors and security-domain publishes are untouchable from any delegated scope |
+| Membership is not delegable | `sys_member` writes are tenant-admin-only: no `adminScope` axis expresses org membership, and an admin-grade membership row is auto-elevated to `organization_admin` — writing one would mint a tenant admin. Adding people *is* delegable, through an [invitation](#letting-a-delegate-invite-delegated_admin) |
 | No scope, no admin | Holders of plain CRUD on the RBAC tables with **no** scope are refused: administration is a scoped capability now, not a side effect of table access |
 
 Every rule above is exercised end-to-end by the showcase permission zoo

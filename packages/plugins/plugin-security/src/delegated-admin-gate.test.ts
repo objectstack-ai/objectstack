@@ -146,6 +146,76 @@ describe('DelegatedAdminGate — tenant admins and outsiders', () => {
   });
 });
 
+// ── [#3697 follow-up] Organization membership is governed, and NOT delegable ──
+//
+// A `sys_member` row whose `role` is admin-grade is auto-elevated to
+// `organization_admin` (`auto-org-admin-grant.ts`), whose wildcard
+// `modifyAllRecords` IS `isTenantAdmin()`. Writing one therefore mints a tenant
+// admin — the same escalation the invitation role cap closes on the issuance
+// path, one layer down at the table.
+//
+// Unreachable today: every writer is a better-auth path running under
+// `isSystem`, which short-circuits the whole security middleware before this
+// gate. These cases exist so the chain cannot silently reopen the day a direct
+// write surface is added — the defence has to live at the CALL SITE, not in a
+// comment (AGENTS.md Prime Directive #10).
+describe('DelegatedAdminGate — organization membership (sys_member)', () => {
+  const writeMember = (ctx: any, row: any, operation = 'insert') =>
+    h.gate.assert({ object: 'sys_member', operation, data: row, context: ctx });
+
+  it('a tenant admin still passes — delegation constrains delegates, not HQ', async () => {
+    await expect(
+      writeMember(h.ctxOf('tenant_admin'), { user_id: 'u_x', organization_id: 'org_1', role: 'admin' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('a DELEGATE holding a real adminScope is refused — membership is not a delegable axis', async () => {
+    // The escalation this closes: `role: 'admin'` here resolves to
+    // organization_admin, i.e. authority strictly greater than the delegate's.
+    await expect(
+      writeMember(h.ctxOf('delegate'), { user_id: 'u_east_1', organization_id: 'org_1', role: 'admin' }),
+    ).rejects.toThrow(/tenant-level only/);
+  });
+
+  it('a delegate is refused even for a plain member row — no adminScope axis approves any of it', async () => {
+    await expect(
+      writeMember(h.ctxOf('delegate'), { user_id: 'u_east_1', organization_id: 'org_1', role: 'member' }),
+    ).rejects.toThrow(/not a delegable capability/);
+  });
+
+  it('the refusal points at the delegable path that DOES exist', async () => {
+    await expect(
+      writeMember(h.ctxOf('delegate'), { user_id: 'u_east_1', organization_id: 'org_1', role: 'member' }),
+    ).rejects.toThrow(/invitation/);
+  });
+
+  it('plain CRUD on the table buys nothing', async () => {
+    await expect(
+      writeMember(h.ctxOf('crud_only'), { user_id: 'u_east_1', organization_id: 'org_1', role: 'admin' }),
+    ).rejects.toThrow(/tenant-level only/);
+  });
+
+  it('a principal-less non-system write fails closed', async () => {
+    await expect(
+      writeMember({}, { user_id: 'u_east_1', organization_id: 'org_1', role: 'admin' }),
+    ).rejects.toThrow(/authenticated administrator/);
+  });
+
+  it('every governed mutation verb is covered, not just insert', async () => {
+    for (const op of ['update', 'delete', 'transfer', 'restore', 'purge']) {
+      await expect(
+        writeMember(h.ctxOf('delegate'), { id: 'mem_1', role: 'admin' }, op),
+      ).rejects.toThrow(/tenant-level only/);
+    }
+  });
+
+  it('reads are untouched — this governs writes only', async () => {
+    await expect(
+      h.gate.assert({ object: 'sys_member', operation: 'find', context: h.ctxOf('delegate') }),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe('DelegatedAdminGate — assignments (sys_user_position)', () => {
   it('delegate assigns an allowlisted position inside the subtree; granted_by is stamped', async () => {
     const row: any = { user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es' };

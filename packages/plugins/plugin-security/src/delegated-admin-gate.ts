@@ -25,6 +25,13 @@
  * to an anchor are rejected for every caller (anchors are implicit — a
  * stored assignment row is a modeling error).
  *
+ * `sys_member` (organization membership) is likewise tenant-level only: no
+ * `adminScope` axis expresses membership, and an admin-grade membership row is
+ * auto-elevated to `organization_admin` — writing one mints a tenant admin
+ * (#3697 follow-up). The delegable way to add people is an INVITATION, whose
+ * placement this gate authorizes and whose role the framework caps at the
+ * issuer's own grade.
+ *
  * System/boot writes carry `isSystem` and short-circuit the security
  * middleware before this gate (seeders, publish materializer, better-auth
  * reconciliation are unaffected).
@@ -57,6 +64,19 @@ const GOVERNED_OBJECTS = new Set([
   'sys_position_permission_set',
   'sys_user_permission_set',
   'sys_permission_set',
+  // [#3697 follow-up] Organization MEMBERSHIP is an authority surface too: a
+  // row whose `role` is admin-grade is auto-elevated to `organization_admin`
+  // by `auto-org-admin-grant.ts`, whose wildcard `modifyAllRecords` IS
+  // `isTenantAdmin()`. So writing one mints a tenant admin — the same
+  // escalation the invitation role cap closes on the issuance path.
+  //
+  // Unreachable today (every writer is a better-auth path running under
+  // `isSystem`, short-circuited before this gate; the ADR-0092 D2 identity
+  // write guard refuses user-context writes to better-auth tables upstream).
+  // It is here so the chain does not silently reopen the day someone adds a
+  // direct-write surface — a `case` label is not enforcement, and the call
+  // site is what matters (AGENTS.md Prime Directive #10).
+  'sys_member',
 ]);
 const GOVERNED_OPERATIONS = new Set(['insert', 'update', 'delete', 'transfer', 'restore', 'purge']);
 const ANCHOR_POSITIONS = new Set(['everyone', 'guest']);
@@ -185,6 +205,30 @@ export class DelegatedAdminGate {
     }
 
     if (isTenantAdmin(sets)) return; // status quo — downstream CRUD/RLS decide
+
+    // ── [#3697 follow-up] Organization membership is NOT delegable ────────
+    // Every other governed object has an adminScope axis that can approve part
+    // of it (a subtree, an action flag, an allowlist). `sys_member` has none:
+    // no axis of `AdminScope` expresses "org membership", and the row's own
+    // `role` column is an authority dial — admin-grade membership is
+    // auto-elevated to `organization_admin`, i.e. to `isTenantAdmin()`. A
+    // delegate who could write one would mint authority strictly greater than
+    // their own, which is exactly what ADR-0090 D12 exists to prevent.
+    //
+    // So it is tenant-admin-only, full stop — reached only by a hypothetical
+    // future direct-write surface (better-auth's own writes are `isSystem` and
+    // never arrive here). Adding people to an organization already has a
+    // delegable path: the INVITATION, whose placement is authorized against
+    // the issuer's adminScope and whose role is held to the issuer's own grade.
+    if (opCtx.object === 'sys_member') {
+      throw new PermissionDeniedError(
+        `[Security] Access denied: '${opCtx.operation}' on 'sys_member' is tenant-level only — ` +
+          `organization membership is not a delegable capability (ADR-0090 D12), and an ` +
+          `admin-grade membership row resolves to tenant administration. Add people through an ` +
+          `invitation instead: its placement is authorized against your adminScope.`,
+        { operation: opCtx.operation, object: opCtx.object, userId: ctx.userId },
+      );
+    }
 
     // ── [ADR-0091 D3] Self-service delegation of duty (职务代理) ──────────
     // A write that STAMPS `delegated_from` is a delegation: the holder passes
