@@ -121,6 +121,20 @@ export class ApprovalsServicePlugin implements Plugin {
       engine: engine as ApprovalEngine,
       logger: ctx.logger,
       publicBaseUrl: this.options.publicBaseUrl,
+      // [ADR-0105 D9] Cross-organization approver targeting is a `group`-posture
+      // capability. Read LAZILY (not captured at start) because the tenancy
+      // service resolves its posture during its own start, which may not have
+      // run yet; an unresolvable posture reads as "unknown" and the guard
+      // stands down rather than refusing a legitimate flow on a minimal stack.
+      tenancyPosture: () => {
+        try {
+          const tenancy = ctx.getService<{ posture?: string }>('tenancy');
+          const posture = tenancy?.posture;
+          return typeof posture === 'string' && posture ? posture : undefined;
+        } catch {
+          return undefined;
+        }
+      },
     });
 
     // Record lock: block edits to a record while it has a pending request.
