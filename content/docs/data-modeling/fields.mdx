@@ -347,7 +347,13 @@ only guard. Use `requiredWhen` for new metadata; keep `conditionalRequired`
 only for older packages that already emitted it. The alias is still accepted on
 input, but it is lowered into `requiredWhen` at parse time and then removed from
 the parsed metadata, so every consumer reads one canonical slot — if a field
-declares both, `requiredWhen` wins and the alias is discarded.
+declares both, `requiredWhen` wins and the alias is discarded. Declaring both
+with *different* predicates means the `conditionalRequired` one never gates the
+field, so it raises an advisory `field-requiredwhen-conditionalrequired-conflict`
+warning naming both — from `defineStack` when it parses your config, and from
+`os build` / `os validate` for stacks that skip strict `defineStack`. It never
+fails the build; the fix is to delete `conditionalRequired`. The same predicate
+in both slots is harmless duplication and stays quiet.
 
 ## Naming Conventions
 

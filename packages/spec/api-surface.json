@@ -2,6 +2,7 @@
   ".": [
     "ACTION_TARGET_EXECUTE_CONFLICT (const)",
     "ADMIN_FULL_ACCESS (const)",
+    "AGENT_KNOWLEDGE_SOURCES_TOPICS_CONFLICT (const)",
     "ALL_CONVERSIONS (const)",
     "AUDIENCE_ANCHOR_POSITIONS (const)",
     "Agent (type)",
@@ -51,6 +52,7 @@
     "ExpressionMetaSchema (const)",
     "ExpressionSchema (const)",
     "F (const)",
+    "FIELD_REQUIREDWHEN_CONDITIONALREQUIRED_CONFLICT (const)",
     "GUEST_POSITION (const)",
     "MAP_SUPPORTED_FIELDS (const)",
     "MEMBERSHIP_ROLE_ADMIN (const)",

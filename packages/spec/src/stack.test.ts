@@ -1436,4 +1436,35 @@ describe('defineStack — deprecated alias warnings (#3743)', () => {
     const action = (stack.actions as Array<Record<string, unknown>>)[0];
     expect(action.execute).toBe('legacy_f');
   });
+
+  it('warns for every rule in the pass, not just the action one', () => {
+    // The wiring is rule-agnostic — it loops over whatever `lintDeprecatedAliases`
+    // returns — so a field alias must surface through `defineStack` on the same
+    // terms as an action alias. `FieldSchema` folds `conditionalRequired` into
+    // `requiredWhen` and drops it, which is invisible one line later.
+    const stack = defineStack({
+      manifest,
+      objects: [{
+        name: 'demo_task',
+        label: 'Task',
+        fields: {
+          title: { type: 'text' as const },
+          due_date: {
+            type: 'date' as const,
+            requiredWhen: 'record.stage == "closed"',
+            conditionalRequired: 'record.amount > 0',
+          },
+        },
+      }],
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const msg = warn.mock.calls[0][0] as string;
+    expect(msg).toContain('field-requiredwhen-conditionalrequired-conflict');
+    expect(msg).toContain(`field 'due_date' on object 'demo_task'`);
+
+    // …and the parse still drops the alias, exactly as before the warning.
+    const field = (stack.objects as Array<{ fields: Record<string, Record<string, unknown>> }>)[0].fields.due_date;
+    expect('conditionalRequired' in field).toBe(false);
+  });
 });

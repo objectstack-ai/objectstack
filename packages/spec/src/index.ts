@@ -110,7 +110,13 @@ export type { MetadataCollectionInput, MapSupportedField, NormalizeStackInputOpt
 // Pre-parse authoring lint (#3743) — the one window where a deprecated alias is
 // still visible, since the parse itself resolves and drops it. `defineStack`
 // warns from here; the CLI runs the same rules over stacks that skip it.
-export { lintDeprecatedAliases, formatDeprecatedAliasFinding, ACTION_TARGET_EXECUTE_CONFLICT } from './shared/deprecated-aliases';
+export {
+  lintDeprecatedAliases,
+  formatDeprecatedAliasFinding,
+  ACTION_TARGET_EXECUTE_CONFLICT,
+  FIELD_REQUIREDWHEN_CONDITIONALREQUIRED_CONFLICT,
+  AGENT_KNOWLEDGE_SOURCES_TOPICS_CONFLICT,
+} from './shared/deprecated-aliases';
 export type { DeprecatedAliasFinding } from './shared/deprecated-aliases';
 
 // Metadata conversion layer (ADR-0087 D2) — old-shape → canonical-shape transforms applied at load.

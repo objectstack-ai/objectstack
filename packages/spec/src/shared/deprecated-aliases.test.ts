@@ -1,7 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { lintDeprecatedAliases, ACTION_TARGET_EXECUTE_CONFLICT } from './deprecated-aliases';
+import {
+  lintDeprecatedAliases,
+  ACTION_TARGET_EXECUTE_CONFLICT,
+  FIELD_REQUIREDWHEN_CONDITIONALREQUIRED_CONFLICT,
+  AGENT_KNOWLEDGE_SOURCES_TOPICS_CONFLICT,
+} from './deprecated-aliases';
 
 // ── #3743: the discarded `execute` alias now has an author-facing warning ──
 //
@@ -154,5 +159,158 @@ describe('lintDeprecatedAliases — action-target-execute-conflict', () => {
       `action 'convert'`,
       `action 'archive'`,
     ]);
+  });
+});
+
+// ── The two sibling fold-and-drop aliases (#3743 follow-up) ──────────────────
+//
+// `execute` was never special: `FieldSchema` folds `conditionalRequired` into
+// `requiredWhen` and `AIKnowledgeSchema` folds `topics` into `sources`, both
+// dropping the alias from the parsed output exactly the same way. That makes
+// all three invisible to every post-parse check, so all three belong to this
+// pre-parse pass — which is the reason the pass exists as a rule SET rather
+// than one hard-coded rule.
+
+describe('lintDeprecatedAliases — field-requiredwhen-conditionalrequired-conflict', () => {
+  const objectWith = (field: Record<string, unknown>) => ({
+    objects: [{
+      name: 'crm_task',
+      fields: { due_date: { type: 'date', label: 'Due', ...field } },
+    }],
+  });
+
+  it('flags a field declaring both predicates with different sources', () => {
+    const findings = lintDeprecatedAliases(objectWith({
+      requiredWhen: 'record.stage == "closed"',
+      conditionalRequired: 'record.amount > 0',
+    }));
+
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.rule).toBe(FIELD_REQUIREDWHEN_CONDITIONALREQUIRED_CONFLICT);
+    expect(f.severity).toBe('warning');
+    expect(f.where).toBe(`field 'due_date' on object 'crm_task'`);
+    expect(f.message).toContain('record.stage == "closed"');
+    expect(f.message).toContain('record.amount > 0');
+    expect(f.message).toContain(`'requiredWhen' wins`);
+    expect(f.message).toContain('never gates the field');
+    expect(f.hint).toContain(`Delete 'conditionalRequired'`);
+  });
+
+  it('stays quiet when only one predicate slot is declared', () => {
+    expect(lintDeprecatedAliases(objectWith({ requiredWhen: 'record.paid' }))).toEqual([]);
+    expect(lintDeprecatedAliases(objectWith({ conditionalRequired: 'record.paid' }))).toEqual([]);
+  });
+
+  it('compares the predicate TEXT, not the wrapper', () => {
+    // A bare string and the `{ dialect, source }` envelope it lowers into are
+    // the same predicate written two ways — nothing is lost either way.
+    expect(lintDeprecatedAliases(objectWith({
+      requiredWhen: 'record.paid',
+      conditionalRequired: { dialect: 'cel', source: 'record.paid' },
+    }))).toEqual([]);
+  });
+
+  it('reads the envelope form on both slots', () => {
+    const [f] = lintDeprecatedAliases(objectWith({
+      requiredWhen: { dialect: 'cel', source: 'record.a' },
+      conditionalRequired: { dialect: 'cel', source: 'record.b' },
+    }));
+    expect(f.rule).toBe(FIELD_REQUIREDWHEN_CONDITIONALREQUIRED_CONFLICT);
+    expect(f.message).toContain('record.a');
+    expect(f.message).toContain('record.b');
+  });
+
+  it('covers fields added by an object extension', () => {
+    // An extension adds/overrides fields on another package's object through
+    // the same `FieldSchema`, so it carries the same silent discard.
+    const [f] = lintDeprecatedAliases({
+      objectExtensions: [{
+        objectName: 'sys_user',
+        fields: { nickname: { type: 'text', requiredWhen: 'record.a', conditionalRequired: 'record.b' } },
+      }],
+    });
+    expect(f.where).toBe(`field 'nickname' on object extension 'sys_user'`);
+  });
+
+  it('tolerates an object with no fields', () => {
+    expect(lintDeprecatedAliases({ objects: [{ name: 'crm_task' }] })).toEqual([]);
+  });
+});
+
+describe('lintDeprecatedAliases — agent-knowledge-sources-topics-conflict', () => {
+  const agentWith = (knowledge: Record<string, unknown>) => ({
+    agents: [{ name: 'support_bot', label: 'Support', knowledge }],
+  });
+
+  it('flags an agent declaring both source lists with different members', () => {
+    const findings = lintDeprecatedAliases(agentWith({
+      sources: ['faq', 'policies'],
+      topics: ['legacy_kb'],
+    }));
+
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.rule).toBe(AGENT_KNOWLEDGE_SOURCES_TOPICS_CONFLICT);
+    expect(f.severity).toBe('warning');
+    expect(f.where).toBe(`agent 'support_bot' knowledge`);
+    expect(f.message).toContain(`'faq', 'policies'`);
+    expect(f.message).toContain(`'legacy_kb'`);
+    expect(f.message).toContain(`'sources' wins`);
+    expect(f.message).toContain('never recruited into RAG context');
+    expect(f.hint).toContain(`Delete 'topics'`);
+  });
+
+  it('stays quiet when only one list is declared', () => {
+    expect(lintDeprecatedAliases(agentWith({ sources: ['faq'] }))).toEqual([]);
+    expect(lintDeprecatedAliases(agentWith({ topics: ['faq'] }))).toEqual([]);
+  });
+
+  it('stays quiet when the two lists have the same members in any order', () => {
+    // Order and repetition are not meaningful for either slot, so the same set
+    // written twice loses nothing.
+    expect(lintDeprecatedAliases(agentWith({
+      sources: ['faq', 'policies'],
+      topics: ['policies', 'faq', 'faq'],
+    }))).toEqual([]);
+  });
+
+  it('treats an empty list as undeclared', () => {
+    expect(lintDeprecatedAliases(agentWith({ sources: [], topics: ['faq'] }))).toEqual([]);
+  });
+
+  it('tolerates an agent with no knowledge block', () => {
+    expect(lintDeprecatedAliases({ agents: [{ name: 'support_bot' }] })).toEqual([]);
+  });
+});
+
+describe('lintDeprecatedAliases — all three rules together', () => {
+  it('reports each rule independently in one pass', () => {
+    const stack = {
+      objects: [{
+        name: 'crm_task',
+        fields: { due_date: { type: 'date', requiredWhen: 'record.a', conditionalRequired: 'record.b' } },
+        actions: [{ name: 'convert', type: 'script', target: 'preferred', execute: 'legacy' }],
+      }],
+      agents: [{ name: 'support_bot', knowledge: { sources: ['faq'], topics: ['legacy_kb'] } }],
+    };
+
+    expect(lintDeprecatedAliases(stack).map((f) => f.rule).sort()).toEqual([
+      ACTION_TARGET_EXECUTE_CONFLICT,
+      AGENT_KNOWLEDGE_SOURCES_TOPICS_CONFLICT,
+      FIELD_REQUIREDWHEN_CONDITIONALREQUIRED_CONFLICT,
+    ].sort());
+  });
+
+  it('returns nothing for a stack that uses only canonical keys', () => {
+    const stack = {
+      objects: [{
+        name: 'crm_task',
+        fields: { due_date: { type: 'date', requiredWhen: 'record.a' } },
+        actions: [{ name: 'convert', type: 'script', target: 'preferred' }],
+      }],
+      agents: [{ name: 'support_bot', knowledge: { sources: ['faq'] } }],
+    };
+    expect(lintDeprecatedAliases(stack)).toEqual([]);
   });
 });
