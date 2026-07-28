@@ -3,11 +3,46 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 
+// Why the members sit in THIS order (the generated reference renders the JSDoc
+// below; this rationale stays in source):
+//
+// A designer that derives its approver-type picker from this enum — the Studio
+// flow inspector does, via the published JSON schema minus `xEnumDeprecated` —
+// offers the members in exactly this order. So the order is a recommendation
+// the platform makes to every author, not an accident of when each member was
+// added, and it belongs here rather than in any one renderer's options array
+// (objectui#2834 put it there, where the inspector never read it).
+//
+// Indirect bindings therefore lead and the literal `user` binding comes last.
+// Naming one specific person is the least portable choice an author can make:
+// it breaks when the flow is deployed to another environment (that id does not
+// exist there), and again when that person changes team or leaves — silently
+// routing approvals to someone who should no longer see them. `manager` /
+// `position` / `department` / `team` survive both.
 /**
  * Approval Step Approver Type
+ *
+ * Declaration order is author-facing: designers derive their picker from this
+ * enum, and it leads with the portable indirect bindings (`manager`,
+ * `position`, `department`, `team`) — a literal `user` id comes last.
  */
 export const ApproverType = z.enum([
-  'user',           // Specific user(s)
+  'manager',        // Submitter's manager (sys_user.manager_id)
+  'position',       // Holders of a position (sys_user_position, ADR-0090 D3)
+  'department',     // Members of a department + all descendant departments (sys_business_unit)
+  'team',           // Members of a flat collaboration team (sys_team)
+  'field',          // User ID defined in a record field
+  /**
+   * #3447 P2: a CEL expression resolved AT NODE ENTRY against three explicit
+   * roots — `current.*` (the record's live state), `trigger.*` (the submit-time
+   * snapshot) and `vars.*` (flow variables, incl. upstream node outputs). The
+   * result (a user-id string, CSV, or string array — or intermediate ids
+   * re-expanded per `resolveAs`) becomes the approver slate. `record` and bare
+   * field names are deliberately NOT available: `record` means "the record at
+   * event time" everywhere else on the platform (flow conditions, hooks), and
+   * reusing it here would silently alias one of the two times.
+   */
+  'expression',
   // The better-auth ORG-MEMBERSHIP TIER (sys_member.role: owner / admin /
   // member), spelled with the projection name ADR-0057 D7 mandates and
   // ADR-0090 D3 assumes ("relabelled `org_membership_level` … its UI label is
@@ -19,13 +54,11 @@ export const ApproverType = z.enum([
   // surfaces; its exception covers better-auth's own `sys_member.role` column,
   // NOT this enum (which is ours). Accepted for one deprecation window: the
   // runtime resolves it identically and warns, `os lint` prescribes the
-  // rewrite. Removed in the next major.
+  // rewrite. Removed in the next major. Kept adjacent to the spelling that
+  // replaced it; `xEnumDeprecated` keeps it out of every picker regardless of
+  // where it sits.
   'role',
-  'position',       // Holders of a position (sys_user_position, ADR-0090 D3)
-  'team',           // Members of a flat collaboration team (sys_team)
-  'department',     // Members of a department + all descendant departments (sys_business_unit)
-  'manager',        // Submitter's manager (sys_user.manager_id)
-  'field',          // User ID defined in a record field
+  'user',           // A specific user id — least portable; see the note above
   // @deprecated #3508 — declared-but-unenforced: `resolveApproverSpec` in
   // `plugin-approvals` has no queue branch, so a queue approver resolves to
   // nobody (the dead `queue:<value>` fallback literal). The sharing engine
@@ -34,17 +67,6 @@ export const ApproverType = z.enum([
   // (see NON_AUTHORABLE_APPROVER_TYPES). Re-admit only together with a real
   // ownership-queue implementation (queue entity + membership + claim).
   'queue',
-  /**
-   * #3447 P2: a CEL expression resolved AT NODE ENTRY against three explicit
-   * roots — `current.*` (the record's live state), `trigger.*` (the submit-time
-   * snapshot) and `vars.*` (flow variables, incl. upstream node outputs). The
-   * result (a user-id string, CSV, or string array — or intermediate ids
-   * re-expanded per `resolveAs`) becomes the approver slate. `record` and bare
-   * field names are deliberately NOT available: `record` means "the record at
-   * event time" everywhere else on the platform (flow conditions, hooks), and
-   * reusing it here would silently alias one of the two times.
-   */
-  'expression'
 ]);
 
 /**
@@ -140,6 +162,108 @@ export const APPROVER_VALUE_BINDINGS = {
   queue: { source: 'unsupported' },
   expression: { source: 'expression', roots: APPROVER_EXPRESSION_ROOTS },
 } as const satisfies Record<z.infer<typeof ApproverType>, ApproverValueBinding>;
+
+/**
+ * {@link APPROVER_VALUE_BINDINGS}, projected onto the wire for the designer
+ * (#3508 follow-up).
+ *
+ * `xRef.map` only ever said which PICKER KIND to render — a name like `'team'`
+ * — and never where that picker's candidates come from. So the designer had to
+ * carry its own copy of the data contract, and the first copy was wrong: every
+ * directory kind was wired to `GET /api/v1/meta/:type`, the metadata registry,
+ * which does not hold `sys_user` / `sys_team` / `sys_business_unit` /
+ * `sys_position` ROWS. Candidates came back empty and the control degraded to a
+ * free-text box (#3508).
+ *
+ * Publishing the binding closes that gap at the source: a renderer reads which
+ * object to query and which column to commit off the schema instead of
+ * re-deriving it, and a new {@link ApproverType} member cannot leave a stale
+ * mirror behind — `satisfies` above already makes an undeclared member a
+ * compile error, and this projection inherits that guarantee.
+ *
+ * Presentation stays with the renderer: which field to SHOW, whether to open a
+ * people-picker, what subtitle to put under a row are objectui's calls. This
+ * carries only the data contract — where the candidates live and what the
+ * committed value is.
+ */
+export const APPROVER_VALUE_SOURCES = Object.fromEntries(
+  Object.entries(APPROVER_VALUE_BINDINGS).map(([type, binding]) => [
+    type,
+    binding.source === 'record'
+      // `data` names the DATA API, in contrast to the metadata registry the
+      // designer used to query — the whole point of the annotation.
+      ? { source: 'data', object: binding.object, valueField: binding.valueField }
+      : binding.source === 'enum'
+        ? { source: 'enum', values: [...binding.values] }
+        : { source: binding.source },
+  ]),
+) as Record<
+  z.infer<typeof ApproverType>,
+  | { source: 'data'; object: string; valueField: string }
+  | { source: 'enum'; values: string[] }
+  | { source: 'auto' | 'trigger-field' | 'expression' | 'unsupported' }
+>;
+
+// ==========================================================================
+// [ADR-0105 D9] Cross-organization approver targeting
+// ==========================================================================
+
+/**
+ * Symbolic organization references usable as an approver's `organization`
+ * (ADR-0105 D9).
+ *
+ * Flow metadata is PORTABLE — the same flow deploys to dev, staging and every
+ * customer environment — while an organization id is DATA, minted per
+ * deployment. A literal id in a flow is therefore unportable by construction,
+ * and an AI author cannot know one at authoring time. These symbols express
+ * the two common intents against the D6 grouping tree instead, so the usual
+ * cases need no deployment knowledge at all:
+ *
+ *   - `$root`   — the group organization: walk `parent_organization_id` up from
+ *                 the request's organization to the top. "Escalate to group."
+ *   - `$parent` — exactly one level up. Division-level sign-off in a three-tier
+ *                 group (group → division → plant).
+ *
+ * A slug (any other value) names a specific organization and covers the shapes
+ * the symbols cannot: a SIBLING org, e.g. a shared-services centre that
+ * approves payables for every plant. That is also why D9's legality rule is
+ * "shares a root", not "is an ancestor".
+ */
+export const APPROVER_ORG_SYMBOLS = ['$root', '$parent'] as const;
+export type ApproverOrgSymbol = (typeof APPROVER_ORG_SYMBOLS)[number];
+
+/**
+ * Whether an approver type resolves people through an ORGANIZATION-SCOPED
+ * directory — i.e. whether `organization` (ADR-0105 D9) means anything for it.
+ *
+ * `user` / `field` / `manager` name a person directly or derive one from the
+ * record, so they are org-agnostic: an `organization` on them is not a narrower
+ * routing, it is a misunderstanding, and the lint says so rather than silently
+ * ignoring it. `team` is org-agnostic too — `sys_team_member` carries no
+ * organization column and the engine never scoped it (unlike position /
+ * membership-tier / department, which all do).
+ *
+ * `satisfies` keeps this exhaustive for the same reason
+ * {@link APPROVER_VALUE_BINDINGS} is: a new {@link ApproverType} must state
+ * whether cross-org targeting applies to it, or this file fails to compile.
+ */
+export const APPROVER_ORG_SCOPED = {
+  user: false,
+  org_membership_level: true,
+  role: true,
+  position: true,
+  team: false,
+  department: true,
+  manager: false,
+  field: false,
+  queue: false,
+  expression: true,
+} as const satisfies Record<z.infer<typeof ApproverType>, boolean>;
+
+/** Does `organization` (ADR-0105 D9) apply to this approver type? */
+export function approverTypeIsOrgScoped(type: string): boolean {
+  return (APPROVER_ORG_SCOPED as Record<string, boolean>)[canonicalApproverType(type)] ?? false;
+}
 
 // ==========================================================================
 // Approval as a Flow Node (ADR-0019, canonical)
@@ -247,6 +371,11 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
         field: 'object-field',
         queue: 'queue',
       },
+      // Where each kind's candidates actually live, and what the picker
+      // commits — see {@link APPROVER_VALUE_SOURCES}. `map` alone named a
+      // picker but never its data source, which is how the designer ended up
+      // querying the metadata registry for data records (#3508).
+      sources: APPROVER_VALUE_SOURCES,
     },
   }),
   /**
@@ -269,6 +398,41 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
    * (keyed by position), so a plain per-approver list still behaves sensibly.
    */
   group: z.string().optional().describe('Group label for per_group sign-off (e.g. "legal", "finance")'),
+  /**
+   * [ADR-0105 D9] Which organization's directory this approver is resolved
+   * AGAINST. Default (omitted): the request's own organization — today's
+   * behaviour, unchanged.
+   *
+   * This separates two things one organization id used to do at once: WHERE
+   * THE REQUEST LIVES and WHERE ITS APPROVERS ARE LOOKED UP. A group CFO holds
+   * her `cfo` position in the GROUP organization while the purchase order
+   * lives in the PLANT organization; without this field
+   * `expandPositionUsers('cfo', <plant>)` finds nobody and the slot routes
+   * into `onEmptyApprovers`.
+   *
+   * Declared per APPROVER, not per node, so one node can require a plant
+   * manager AND a group CFO in parallel (`behavior: 'per_group'`). A node-level
+   * default is a strict special case of this and can be added later as sugar;
+   * the reverse is not true.
+   *
+   * Values: `$root` / `$parent` (see {@link APPROVER_ORG_SYMBOLS}) or an
+   * organization SLUG. Slugs are used rather than ids because flow metadata is
+   * portable across environments and ids are not.
+   *
+   * Bounded, not free: the target must share a `parent_organization_id` root
+   * with the request's organization (ADR-0105 D6 grouping metadata), so this is
+   * a route WITHIN one group — never a channel to an unrelated tenant. Applies
+   * only to org-scoped approver types ({@link APPROVER_ORG_SCOPED}) and only
+   * under the `group` tenancy posture; elsewhere the runtime refuses rather
+   * than silently ignoring, so a posture migration cannot quietly reroute
+   * approvals.
+   */
+  organization: z.string().optional().meta({
+    description:
+      'ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), '
+      + '`$parent` (one level up), or an organization slug. Omitted = the request\'s own organization.',
+    xRef: { kind: 'organization', symbols: [...APPROVER_ORG_SYMBOLS] },
+  }),
 }));
 export type ApprovalNodeApprover = z.infer<typeof ApprovalNodeApproverSchema>;
 

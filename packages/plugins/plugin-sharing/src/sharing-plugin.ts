@@ -144,6 +144,22 @@ export class SharingServicePlugin implements Plugin {
    * same lifecycle pipeline (awaited, so the rule is enforceable the moment
    * the authoring call returns), but never fails the write — a rebind
    * failure logs and leaves the previous bindings in place.
+   *
+   * [#3821] The rebind alone only makes the rule apply to records written
+   * FROM NOW ON. Authoring in the Setup UI therefore looked inert: an admin
+   * created a rule, switched it on, and the recipient still saw nothing —
+   * the rule only reached a record once somebody happened to touch it. Worse
+   * in the other direction, switching a rule OFF (or deleting it) left every
+   * grant it had already issued in place, and boot backfill only reconciles
+   * ACTIVE rules, so those grants survived restarts forever: the UI said
+   * "disabled" while the access was still live.
+   *
+   * So each write now also reconciles THAT rule's grants — the same
+   * `evaluateRule` the REST `/sharing/rules/:id/evaluate` endpoint runs, which
+   * is diff-based and purges when the rule is inactive. Deletes can't go
+   * through it (the row is gone, `RULE_NOT_FOUND`), so they purge directly.
+   * System-context writes are skipped: seeding and package bootstrap write
+   * with `isSystem`, and `kernel:bootstrapped` already backfills those.
    */
   private bindRuleRebindTriggers(engine: any, ctx: PluginContext): void {
     const scheduleRebind = (): Promise<void> => {
@@ -159,7 +175,27 @@ export class SharingServicePlugin implements Plugin {
       this.ruleRebindChain = run.catch(() => undefined);
       return run;
     };
-    const handler = async () => {
+    /**
+     * Reconcile the written rule's grants, chained behind the rebind so two
+     * rapid writes can't interleave their reconciles. Best-effort: a failure
+     * logs and leaves the previous grants alone — it must never fail the
+     * authoring write.
+     */
+    const scheduleReconcile = (ruleId: string, deleted: boolean): Promise<void> => {
+      const run = this.ruleRebindChain.then(async () => {
+        const ruleService = this.ruleService;
+        if (!ruleService) return;
+        if (deleted) {
+          await ruleService.revokeRuleGrants(ruleId);
+          return;
+        }
+        await ruleService.evaluateRule(ruleId, { isSystem: true } as any);
+      });
+      this.ruleRebindChain = run.catch(() => undefined);
+      return run;
+    };
+
+    const makeHandler = (deleted: boolean) => async (hookCtx: any) => {
       try {
         await scheduleRebind();
       } catch (err: any) {
@@ -167,9 +203,24 @@ export class SharingServicePlugin implements Plugin {
           error: err?.message,
         });
       }
+      // Seeding / package bootstrap write with `isSystem`; `kernel:bootstrapped`
+      // backfills those, so reconciling here would only duplicate that work.
+      if (hookCtx?.session?.isSystem) return;
+      const data = hookCtx?.result ?? hookCtx?.input?.data ?? {};
+      const ruleId = String(data?.id ?? hookCtx?.input?.id ?? '');
+      if (!ruleId) return;
+      try {
+        await scheduleReconcile(ruleId, deleted);
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: sharing-rule grant reconcile failed — grants left unchanged', {
+          rule: ruleId,
+          error: err?.message,
+        });
+      }
     };
+
     for (const event of ['afterInsert', 'afterUpdate', 'afterDelete']) {
-      engine.registerHook(event, handler, {
+      engine.registerHook(event, makeHandler(event === 'afterDelete'), {
         object: 'sys_sharing_rule',
         packageId: RULE_REBIND_TRIGGER_PACKAGE,
         priority: 200,

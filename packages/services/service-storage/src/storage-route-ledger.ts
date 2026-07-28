@@ -79,13 +79,13 @@ export const STORAGE_ROUTE_LEDGER: readonly StorageRouteLedgerEntry[] = [
 
   // ── download ──────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/storage/files/:fileId/url', family: 'download', disposition: 'sdk', client: 'storage.getDownloadUrl',
-    note: 'JSON { url } — the authorization-gated signed-URL resolve the dispatcher ledger points at (#3584)' },
+    note: 'JSON { success: true, data: { url } } — the authorization-gated signed-URL resolve the dispatcher ledger points at (#3584); the bare { url } it used to answer moved into the declared envelope in #3689' },
   { route: 'GET /api/v1/storage/files/:fileId', family: 'download', disposition: 'server-only',
     note: 'stable 302 to the same signed URL. This is the value objectql stamps into file/image field payloads (engine.ts buildFileValue), followed verbatim by <img src>/<a href> — a browser URL, not an SDK call. The SDK resolves via the /url sibling above.' },
 
   // ── local-driver loopback (LocalStorageAdapter presign targets) ───────────
   { route: 'PUT /api/v1/storage/_local/raw/:token', family: 'local-driver', disposition: 'server-only',
-    note: 'the uploadUrl LocalStorageAdapter mints for its own presign tokens. storage.upload does PUT it, but opaquely — via fetchImpl on whatever uploadUrl came back, exactly as it would an S3 presigned URL. HMAC-token-authorized, adapter-internal, never a named SDK method.' },
+    note: 'the uploadUrl LocalStorageAdapter mints for its own presign tokens. storage.upload does PUT it, but opaquely — via fetchImpl on whatever uploadUrl came back, exactly as it would an S3 presigned URL. HMAC-token-authorized, adapter-internal, never a named SDK method. Answers { success: true, data: { key } }; the { ok: true, key } it used to answer retired in #3689, `ok` being a private second word for `success`.' },
   { route: 'GET /api/v1/storage/_local/raw/:token', family: 'local-driver', disposition: 'server-only',
     note: 'ditto for download: the target of getPresignedDownload/getSignedUrl on the local adapter, handed to the browser as an opaque signed link.' },
 ];

@@ -135,6 +135,7 @@ export {
   APPROVAL_EXPRESSION_INVALID,
   APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
   APPROVAL_DECISION_OUTPUTS_RESERVED,
+  APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED,
 } from './validate-approval-approvers.js';
 export type { ApprovalApproverFinding, ApprovalApproverSeverity } from './validate-approval-approvers.js';
 
@@ -210,5 +211,37 @@ export type { ChartBindingFinding, ChartBindingSeverity } from './validate-chart
 
 export { validateNavAccess, NAV_OBJECT_UNGRANTED } from './validate-nav-access.js';
 export type { NavAccessFinding, NavAccessSeverity } from './validate-nav-access.js';
+
+export {
+  validateTranslationReferences,
+  TRANSLATION_TARGET_UNKNOWN,
+  TRANSLATION_OPTION_KEY_UNKNOWN,
+} from './validate-translation-references.js';
+export type {
+  TranslationRefFinding,
+  TranslationRefSeverity,
+} from './validate-translation-references.js';
+
+export {
+  validateAiSurfaceAffinity,
+  AI_SKILL_SURFACE_MISMATCH,
+} from './validate-ai-surface-affinity.js';
+export type {
+  AiSurfaceAffinityFinding,
+  AiSurfaceAffinitySeverity,
+} from './validate-ai-surface-affinity.js';
+
+// One entry point for the reference-resolution rules above (#3583 §5 D5).
+// Adding a rule to `REFERENCE_INTEGRITY_RULES` runs it on `validate`, `lint`
+// and `compile` at once — the CLI call sites do not change.
+export {
+  validateReferenceIntegrity,
+  REFERENCE_INTEGRITY_RULES,
+} from './reference-integrity-suite.js';
+export type {
+  ReferenceIntegrityFinding,
+  ReferenceIntegrityRule,
+  ReferenceIntegritySeverity,
+} from './reference-integrity-suite.js';
 
 export { buildAccessMatrix, diffAccessMatrix } from './build-access-matrix.js';

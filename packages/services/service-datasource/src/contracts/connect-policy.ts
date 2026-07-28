@@ -34,8 +34,28 @@ export interface DatasourceConnectContext {
 /** A policy verdict. `allow:false` leaves the datasource unconnected (metadata-only). */
 export interface DatasourceConnectDecision {
   allow: boolean;
-  /** Human-readable reason, surfaced in logs when a connect is denied. */
+  /**
+   * Human-readable reason for the operator, surfaced in **logs and the
+   * datasource-admin list** when a connect is denied.
+   *
+   * Treat this as PRIVILEGED: it is written for whoever runs the host and may
+   * name internal plans, quotas, allow-lists or hostnames. It is never included
+   * in the error an end user sees when they query an object bound to the denied
+   * datasource — use {@link publicReason} for that (framework#3828).
+   */
   reason?: string;
+  /**
+   * Optional tenant-safe explanation, opt-in. When set, it is appended to the
+   * `ERR_DATASOURCE_UNAVAILABLE` error thrown at query time, so an end user
+   * hitting an object bound to this datasource is told *why* instead of the
+   * bare "is not registered" (framework#3828).
+   *
+   * Opt-in on purpose: a policy's {@link reason} is written for operators and
+   * assuming it is safe to echo to tenants would leak host internals the moment
+   * a host writes a candid one. Say here, explicitly, what a tenant may read —
+   * e.g. `'External datasources require the Scale plan.'`
+   */
+  publicReason?: string;
 }
 
 /** The minimal datasource shape a policy inspects (never a secret). */

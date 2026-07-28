@@ -204,7 +204,7 @@ See [Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-hosting
 ```bash
 git clone https://github.com/objectstack-ai/objectstack.git
 cd objectstack
-pnpm install     # Node 18+, pnpm 8+ (corepack enable)
+pnpm install     # Node 22+, pnpm 8+ (corepack enable)
 pnpm build       # build all packages
 pnpm dev         # run the showcase example (REST + Console on :3000)
 ```

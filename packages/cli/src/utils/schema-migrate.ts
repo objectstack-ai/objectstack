@@ -14,6 +14,7 @@
  */
 import chalk from 'chalk';
 import type { ManagedDriftEntry, DriftCategory } from '@objectstack/driver-sql';
+import { describeDriverConnection } from './connection-display.js';
 
 export interface SqlDriverLike {
   detectManagedDrift(): Promise<ManagedDriftEntry[]>;
@@ -52,26 +53,19 @@ function findSqlDriver(kernel: any): SqlDriverLike | null {
   return null;
 }
 
+/**
+ * Name the database the migrate/resync commands are about to write to.
+ *
+ * Shares the startup banner's renderer (#3793): the same
+ * `{ connectionString }` shape that made the banner print `(unknown)` used to
+ * fall through here to a bare `pg` — and this string is what the
+ * `Apply N change(s) to …?` confirm shows, so it has to name the real target.
+ * Falls back to the client name only when the config carries no address at all.
+ */
 function describeDb(driver: SqlDriverLike | null): string {
   const cfg: any = driver?.config;
   if (!cfg) return 'unknown';
-  const conn = cfg.connection;
-  if (typeof conn === 'string') return redactUrl(conn);
-  if (conn && typeof conn === 'object') {
-    if (conn.filename) return `sqlite:${conn.filename}`;
-    if (conn.host) return `${cfg.client}://${conn.host}${conn.database ? '/' + conn.database : ''}`;
-  }
-  return String(cfg.client ?? 'unknown');
-}
-
-function redactUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    if (u.password) u.password = '***';
-    return u.toString();
-  } catch {
-    return url.replace(/:\/\/[^@]*@/, '://***@');
-  }
+  return describeDriverConnection(cfg) ?? String(cfg.client ?? 'unknown');
 }
 
 /** Boot the schema stack. Caller MUST call `shutdown()` when done. */

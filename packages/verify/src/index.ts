@@ -29,3 +29,9 @@ export type { ConformanceRow, ConformanceState, CheckLedgerOptions } from './con
 // Driver-agnostic — any driver, including out-of-tree ones, runs the same check.
 export { checkReadCoercion } from './read-coercion.js';
 export type { CoercibleDriver, ReadCoercionOptions } from './read-coercion.js';
+
+// Date-bucket parity conformance: a granularity a driver ADVERTISES must bucket
+// identically whether the engine pushes it down as SQL or falls back to
+// `applyInMemoryAggregation`. The seam #3773 crossed silently.
+export { checkDateBucketParity } from './date-bucket-parity.js';
+export type { BucketableDriver, DateBucketParityOptions } from './date-bucket-parity.js';

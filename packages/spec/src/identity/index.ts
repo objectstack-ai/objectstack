@@ -7,6 +7,7 @@ export { positionForm } from './position.form';
 export * from './organization.zod';
 export * from './scim.zod';
 export * from './eval-user.zod';
-// #3723 — the one membership-role list, read by both gatekeepers (better-auth's
-// role registry and the `sys_invitation`/`sys_member` role selects).
+// #3723 / ADR-0108 — the closed membership-role vocabulary, read by both
+// gatekeepers (better-auth's role registry and the `sys_invitation` /
+// `sys_member` role selects). Organization grade only; capability = position.
 export * from './membership-role';

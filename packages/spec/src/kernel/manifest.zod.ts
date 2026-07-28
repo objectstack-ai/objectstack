@@ -413,7 +413,7 @@ export const ManifestSchema = z.object({
       * 
       * @example
       * routes: [
-      *   { prefix: '/api/v1/ai', service: 'ai', methods: ['aiNlq', 'aiChat'] }
+      *   { prefix: '/api/v1/i18n', service: 'i18n', methods: ['getLocales', 'getTranslations'] }
       * ]
       */
     routes: z.array(z.object({
@@ -423,7 +423,7 @@ export const ManifestSchema = z.object({
       service: z.string().describe('Service name this plugin provides'),
       /** Protocol method names implemented */
       methods: z.array(z.string()).optional()
-        .describe('Protocol method names implemented (e.g. ["aiNlq", "aiChat"])'),
+        .describe('Protocol method names implemented (e.g. ["getLocales", "getTranslations"])'),
     })).optional().describe('API route contributions to HttpDispatcher'),
 
     /**

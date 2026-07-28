@@ -3,6 +3,7 @@
 import type { FlowParsed, FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
 import type { ExecutionLog, ActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, ScreenSpec } from '@objectstack/spec/contracts';
+import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
 import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
 import { applyConversionsToFlow } from '@objectstack/spec';
@@ -17,6 +18,7 @@ import { ConnectorSchema } from '@objectstack/spec/integration';
 // engine at module load in both ESM and CJS builds.
 import { ExpressionEngine, validateExpression } from '@objectstack/formula';
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
+import { isGuardRefusal } from './guard-refusal.js';
 
 // ─── Node Executor Interface (Plugin Extension Point) ───────────────
 
@@ -51,10 +53,37 @@ export interface NodeExecutor {
     ): Promise<NodeExecutionResult>;
 }
 
+/**
+ * Why a node failed — the question a `fault` edge's routing decision turns on
+ * (#3863).
+ *
+ *  - `runtime` — the world did not cooperate: an `http` node got a 404, a
+ *    connector rate-limited, the data engine rejected a write. The metadata is
+ *    fine and a later run could succeed. A declared `fault` edge routes it.
+ *  - `guard` — the METADATA is wrong, and a refuse-to-execute guard said so:
+ *    interpolation erased a filter condition (#3810), a data node names no
+ *    object, a run would execute unscoped (ADR-0049/#1888). Re-running changes
+ *    nothing, and the refusal IS the safety property. Not routable — it stays
+ *    fatal whether or not a `fault` edge exists.
+ *
+ * The split exists because without it a `fault` edge is a one-edge switch that
+ * turns off the platform's data-safety guarantees: attach one to a
+ * `delete_record` and #3810's protection against emptying the object is gone,
+ * while the run still reports success. Absent, this defaults to `runtime`, so
+ * every executor written before the field keeps its current routing behaviour.
+ */
+export type NodeFailureClass = 'runtime' | 'guard';
+
 export interface NodeExecutionResult {
     success: boolean;
     output?: Record<string, unknown>;
     error?: string;
+    /**
+     * #3863 — why this failed, which decides whether a `fault` edge may route it.
+     * Only meaningful when `success` is false; defaults to `runtime`.
+     * See {@link NodeFailureClass}.
+     */
+    errorClass?: NodeFailureClass;
     /**
      * #3407: advisory warnings surfaced on the step's log entry. The step still
      * SUCCEEDS — a warning flags a legal-but-surprising outcome (e.g. an
@@ -530,7 +559,13 @@ interface ExecutionLogEntry {
  */
 class FlowSuspendSignal {
     readonly __flowSuspend = true as const;
-    constructor(readonly nodeId: string, readonly correlation?: string, readonly screen?: ScreenSpec) {}
+    constructor(
+        readonly nodeId: string,
+        readonly correlation?: string,
+        readonly screen?: ScreenSpec,
+        /** Registry type of the node that suspended — the resume gate's key (#3801). */
+        readonly nodeType?: string,
+    ) {}
 }
 
 function isSuspendSignal(err: unknown): err is FlowSuspendSignal {
@@ -552,6 +587,19 @@ export interface SuspendedRun {
     flowVersion?: number;
     /** The node the run paused at; resume continues from its out-edges. */
     nodeId: string;
+    /**
+     * Registry type of the node that produced the pause (`approval`, `screen`,
+     * `wait`, …), captured at suspend time. Keys the resume gate (#3801): the
+     * descriptor's `resumeAuthority` decides whether a raw
+     * {@link AutomationEngine.resume} is a legitimate continuation.
+     *
+     * Recorded on the suspension rather than re-derived from the live flow so
+     * the gate reflects what actually paused the run — a flow republished
+     * mid-pause cannot re-type the node out from under it. Optional: rows
+     * persisted before this field existed have none, and the gate falls back
+     * to the flow definition for those.
+     */
+    nodeType?: string;
     /** Snapshot of the flow variable map at suspend time. */
     variables: Record<string, unknown>;
     steps: StepLogEntry[];
@@ -1870,6 +1918,7 @@ export class AutomationEngine implements IAutomationService {
                     flowName,
                     flowVersion: flow.version,
                     nodeId: err.nodeId,
+                    nodeType: err.nodeType,
                     variables: Object.fromEntries(variables),
                     steps,
                     context: runContext,
@@ -1954,9 +2003,156 @@ export class AutomationEngine implements IAutomationService {
      * parent. Both directions compose recursively, so arbitrarily nested
      * subflow pauses resolve from either end (UI holds the parent run id;
      * approval/wait infrastructure holds the child's).
+     *
+     * **Authorization (#3801).** This is the public door — the generic REST
+     * resume route and the SDK land here — so it is gated on WHAT THE RUN IS
+     * PARKED ON before any state is touched: a suspension whose node declares
+     * `resumeAuthority: 'service'` is refused unless the signal carries
+     * {@link RESUME_AUTHORITY_SERVICE}. The engine's own continuations
+     * (subflow delegation / up-bubble, `map` re-entry, wait-timer wake) go
+     * through {@link resumeInternal} and are not re-gated — they continue work
+     * some already-authorized call started.
      */
     async resume(runId: string, signal?: ResumeSignal): Promise<AutomationResult> {
+        const refusal = await this.refuseGatedResume(runId, signal);
+        if (refusal) return refusal;
         return this.resumeInternal(runId, signal, false);
+    }
+
+    /**
+     * The resume gate (#3801): decide whether `signal` may continue the run
+     * `runId` is parked on, returning a refusal result or `null` to allow.
+     *
+     * Keyed on the SUSPENDED NODE, not the caller or the route — an `approval`
+     * pause continues only through `ApprovalService` (which records the
+     * decision and enforces the slate), while a `screen` pause stays open to
+     * the flow-runner that owns it. The service-side resume proves itself with
+     * an in-process symbol the transport cannot mint from a JSON body.
+     *
+     * Resolves the EFFECTIVE suspension first: a run parked on a `subflow` or
+     * `map` node is really waiting on a CHILD run, so the gate follows that
+     * chain and judges the node the signal lands on (subflow) or would advance
+     * past (map) — see {@link LINKED_RUN_PREFIXES}. Anything it cannot resolve
+     * (unknown run, missing flow, unregistered node type) is left to
+     * `resumeInternal`, which reports the machine-state error — the gate only
+     * ever speaks to authorization.
+     */
+    private async refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
+        const run = await this.resolveEffectiveSuspension(runId);
+        if (!run) return null;
+
+        const nodeType = run.nodeType ?? this.flows.get(run.flowName)?.nodes.find(n => n.id === run.nodeId)?.type;
+        if (!nodeType) return null;
+        if (this.resolveResumeAuthority(nodeType) !== 'service') return null;
+        // The owning service stamped the signal — this resume IS the recorded
+        // decision's tail, not a way around it.
+        if (signal?.[RESUME_AUTHORITY_SERVICE]) return null;
+
+        const direct = run.runId === runId;
+        const at = direct ? `'${run.nodeId}'` : `'${run.nodeId}' (linked run '${run.runId}')`;
+        this.logger.warn(
+            `[automation] refused resume of run '${runId}': parked on ${nodeType} node ${at}, which is resumable ` +
+                `only through its owning service (resumeAuthority: 'service')`,
+        );
+        return {
+            success: false,
+            code: 'forbidden',
+            error: direct
+                ? `Run '${runId}' is paused at a '${nodeType}' node, which only its owning service may resume — ` +
+                  `drive it through that service's API (e.g. an approval decision), not a raw resume`
+                : `Run '${runId}' is waiting on run '${run.runId}', which is paused at a '${nodeType}' node that ` +
+                  `only its owning service may resume — resuming here would continue past a decision that has not ` +
+                  `been made; drive it through that service's API instead`,
+        };
+    }
+
+    /**
+     * The `resumeAuthority` in force for a node type, following a deprecated
+     * ADR-0018 alias to its canonical type.
+     *
+     * An alias's descriptor is synthesized by {@link registerNodeAlias} and does
+     * NOT copy the canonical's capabilities, so reading it directly would hand
+     * anyone who authors the old type name an ungated pause — the gate is
+     * declared and not enforced, one rename away. Resolving live (rather than
+     * snapshotting at alias-registration time) also keeps it correct whichever
+     * order the two register in. No alias of a pausing type exists today; this
+     * keeps it from becoming a hole the day one does.
+     */
+    private resolveResumeAuthority(nodeType: string): ActionDescriptor['resumeAuthority'] {
+        let descriptor = this.actionDescriptors.get(nodeType);
+        for (let hop = 0; descriptor?.aliasOf && hop < AutomationEngine.MAX_ALIAS_HOPS; hop++) {
+            const canonical = this.actionDescriptors.get(descriptor.aliasOf);
+            if (!canonical || canonical === descriptor) break;
+            descriptor = canonical;
+        }
+        return descriptor?.resumeAuthority ?? 'any';
+    }
+
+    /** Depth bound for the subflow chain walk — a corrupt correlation cycle
+     *  must not spin the gate. Far above any real nesting. */
+    private static readonly MAX_SUSPENSION_CHAIN_DEPTH = 32;
+
+    /** Depth bound for the alias → canonical hop in {@link resolveResumeAuthority}. */
+    private static readonly MAX_ALIAS_HOPS = 4;
+
+    /**
+     * Linked-run correlation prefixes the gate walks (#3853). Both park a
+     * parent on a child run, so in both the pending work — and therefore the
+     * authority that governs continuing it — belongs to the CHILD, even though
+     * `resumeInternal` handles the two oppositely:
+     *
+     *  - `subflow:` — the signal is DELEGATED down to the child, so the child's
+     *    node is literally where it lands.
+     *  - `map:` — the signal is not delegated; the `map` node RE-RUNS, and since
+     *    `$mapState.started` was advanced past the in-flight item before the
+     *    suspend, continuing here advances the map *past* the item whose child
+     *    is still parked. Judging the parent's own `map` node (always
+     *    `resumeAuthority: 'any'`) let a raw resume skip a pending approval in a
+     *    batch-approval flow — the gate has to read the item, not the loop.
+     */
+    private static readonly LINKED_RUN_PREFIXES = ['subflow:', 'map:'] as const;
+
+    /**
+     * Follow the linked-run chain from `runId` to the suspension whose node
+     * actually governs a resume — see {@link LINKED_RUN_PREFIXES}. The deepest
+     * reachable suspension, not the id the caller holds, is what a resume
+     * really continues (or skips past). Returns `null` when nothing is
+     * suspended under that id; stops at the last resolvable link when a child
+     * row is gone (that run is where `resumeInternal` will continue).
+     */
+    private async resolveEffectiveSuspension(runId: string): Promise<SuspendedRun | null> {
+        const seen = new Set<string>();
+        let run = await this.loadSuspendedRun(runId);
+        for (let depth = 0; run && depth < AutomationEngine.MAX_SUSPENSION_CHAIN_DEPTH; depth++) {
+            const correlation = run.correlation;
+            const prefix = typeof correlation === 'string'
+                ? AutomationEngine.LINKED_RUN_PREFIXES.find(p => correlation.startsWith(p))
+                : undefined;
+            if (!prefix) return run;
+            const childRunId = correlation!.slice(prefix.length);
+            if (!childRunId || seen.has(childRunId)) return run;
+            seen.add(childRunId);
+            const child = await this.loadSuspendedRun(childRunId);
+            if (!child) return run;
+            run = child;
+        }
+        return run;
+    }
+
+    /** Read a suspended run from the hot cache, falling back to the durable
+     *  store. Read-only — never consumes the suspension. */
+    private async loadSuspendedRun(runId: string): Promise<SuspendedRun | null> {
+        const cached = this.suspendedRuns.get(runId);
+        if (cached) return cached;
+        if (!this.store) return null;
+        try {
+            return await this.store.load(runId);
+        } catch (err) {
+            this.logger.warn(
+                `[automation] failed to load suspended run '${runId}' from durable store: ${(err as Error).message}`,
+            );
+            return null;
+        }
     }
 
     /**
@@ -1976,16 +2172,7 @@ export class AutomationEngine implements IAutomationService {
         try {
             // Hot path: suspended in this process. Cold path: rehydrate from the
             // durable store (e.g. the process restarted since the pause, ADR-0019).
-            let run = this.suspendedRuns.get(runId) ?? null;
-            if (!run && this.store) {
-                try {
-                    run = await this.store.load(runId);
-                } catch (err) {
-                    this.logger.warn(
-                        `[automation] failed to load suspended run '${runId}' from durable store: ${(err as Error).message}`,
-                    );
-                }
-            }
+            const run = await this.loadSuspendedRun(runId);
             if (!run) {
                 return { success: false, error: `No suspended run '${runId}'` };
             }
@@ -2009,9 +2196,7 @@ export class AutomationEngine implements IAutomationService {
                 const childRunId = run.correlation.slice('subflow:'.length);
                 // Capture the child's row BEFORE resuming consumes it — the
                 // output-variable mapping rides on the child's context.
-                const childRun =
-                    this.suspendedRuns.get(childRunId) ??
-                    (this.store ? await this.store.load(childRunId).catch(() => null) : null);
+                const childRun = await this.loadSuspendedRun(childRunId);
                 if (childRun) {
                     const childRes = await this.resumeInternal(childRunId, signal, true);
                     if (childRes.status === 'paused') {
@@ -2128,6 +2313,7 @@ export class AutomationEngine implements IAutomationService {
                     await this.persistSuspendedRun({
                         ...run,
                         nodeId: err.nodeId,
+                        nodeType: err.nodeType,
                         variables: Object.fromEntries(variables),
                         steps,
                         correlation: err.correlation,
@@ -2620,6 +2806,24 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * #3863 — publish a failed node's message under `<nodeId>.error` alongside
+     * the run-wide `$error`.
+     *
+     * `$error` names only the most recent failure, so a flow with more than one
+     * `fault` edge converging on a shared handler cannot tell which node it is
+     * handling. Keying by node id makes `{cleanup.error}` addressable from any
+     * downstream template, which is what a handler needs to branch or report.
+     * Merges into an existing entry so a node's earlier `output` survives.
+     */
+    private setNodeError(variables: Map<string, unknown>, nodeId: string, message: string): void {
+        const prior = variables.get(nodeId);
+        const base = prior && typeof prior === 'object' && !Array.isArray(prior)
+            ? (prior as Record<string, unknown>)
+            : {};
+        variables.set(nodeId, { ...base, error: message });
+    }
+
+    /**
      * Execute a node with timeout support, fault edge handling, and step logging.
      */
     private async executeNode(
@@ -2701,10 +2905,16 @@ export class AutomationEngine implements IAutomationService {
                     error: { code: 'EXECUTION_ERROR', message: errMsg },
                 });
 
-                // Check for fault edges
-                const faultEdge = flow.edges.find(e => e.source === node.id && e.type === 'fault');
+                // #3863 — a guard that THROWS is as un-routable as one that
+                // returns: `UnscopedRunDataAccessError` (ADR-0049/#1888) reports
+                // that the metadata would run unscoped, and rerouting it would
+                // let a `fault` edge disable the elevation check.
+                const faultEdge = isGuardRefusal(execErr)
+                    ? undefined
+                    : flow.edges.find(e => e.source === node.id && e.type === 'fault');
                 if (faultEdge) {
                     variables.set('$error', { nodeId: node.id, message: errMsg });
+                    this.setNodeError(variables, node.id, errMsg);
                     const faultTarget = flow.nodes.find(n => n.id === faultEdge.target);
                     if (faultTarget) {
                         await this.executeNode(faultTarget, flow, variables, context, steps);
@@ -2729,9 +2939,16 @@ export class AutomationEngine implements IAutomationService {
 
                 // Write error output to variable context for downstream nodes
                 variables.set('$error', { nodeId: node.id, message: errMsg, output: result.output });
+                this.setNodeError(variables, node.id, errMsg);
 
-                // Check for fault edges
-                const faultEdge = flow.edges.find(e => e.source === node.id && e.type === 'fault');
+                // #3863 — only a `runtime` failure may be routed. A `guard`
+                // refusal says the METADATA is wrong (#3810 erased a filter
+                // condition, a data node names no object); rerouting it would
+                // make a single `fault` edge a switch that turns the guard off
+                // while the run still reports success.
+                const faultEdge = result.errorClass === 'guard'
+                    ? undefined
+                    : flow.edges.find(e => e.source === node.id && e.type === 'fault');
                 if (faultEdge) {
                     const faultTarget = flow.nodes.find(n => n.id === faultEdge.target);
                     if (faultTarget) {
@@ -2772,7 +2989,7 @@ export class AutomationEngine implements IAutomationService {
             // up to execute()/resume(), which persists a continuation. Traversal
             // of this node's out-edges happens on resume, not now.
             if (result.suspend) {
-                throw new FlowSuspendSignal(node.id, result.correlation, result.screen);
+                throw new FlowSuspendSignal(node.id, result.correlation, result.screen, node.type);
             }
 
             // #3447 P2: an executor may pick its own out-edge without suspending

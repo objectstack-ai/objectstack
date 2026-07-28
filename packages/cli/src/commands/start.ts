@@ -9,6 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
+import { redactConnectionUrl } from '../utils/connection-display.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
 
 /**
@@ -209,7 +210,7 @@ export default class Start extends Command {
     } else {
       printKV('Artifact', 'none (empty kernel — install apps via the Console marketplace)', '📦');
     }
-    printKV('Database', redactDbUrl(databaseUrl), '🗄️');
+    printKV('Database', redactConnectionUrl(databaseUrl), '🗄️');
     printKV('Environment', environmentId, '🎯');
     // Resolve the port the child `serve` will actually bind, matching its
     // flag default (`--port` > $OS_PORT/$PORT > 3000). Using `flags.port`
@@ -323,14 +324,6 @@ function resolveArtifactSource(flagValue: string | undefined, homeDir: string): 
   }
 
   return undefined;
-}
-
-function redactDbUrl(url: string): string {
-  try {
-    return url.replace(/(\/\/[^/@:]+):[^/@]+@/, '$1:****@');
-  } catch {
-    return url;
-  }
 }
 
 /**

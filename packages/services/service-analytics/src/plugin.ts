@@ -499,6 +499,20 @@ export class AnalyticsServicePlugin implements Plugin {
         const obj = dataEngine()?.getObject?.(objectName);
         return !!(obj && obj.external != null);
       },
+      // [#3867] Existence probe for the cube auto-inference gate. Reads the
+      // same schema registry the data path's #3770 gate consults, through the
+      // engine accessor this bridge already uses above — so "which objects
+      // exist" has one answer across /data and /analytics.
+      //
+      // `dataEngine()` resolves lazily and may be absent entirely (analytics
+      // installed without a data engine). Reporting `false` there would 404
+      // every cube, so an unresolvable engine reports `true` — "cannot answer,
+      // do not block" — mirroring the tiering #3770 took on the data path.
+      isRegisteredObject: (name: string) => {
+        const engine = dataEngine();
+        if (!engine) return true;
+        return engine.getObject?.(name) != null;
+      },
       draftRowsResolver,
     };
 

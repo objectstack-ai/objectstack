@@ -30,6 +30,50 @@ export type ToolCategory = z.infer<typeof ToolCategorySchema>;
 // ==========================================
 
 /**
+ * Retired `ToolSchema` keys — the rejection carries the upgrade prescription,
+ * because the parse error is the one channel every consumer bumping
+ * `@objectstack/spec` is guaranteed to hit (pattern of `object.zod.ts`'s
+ * `UNKNOWN_KEY_GUIDANCE`, ADR-0049 enforce-or-remove).
+ */
+const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
+  requiresConfirmation:
+    '`tool.requiresConfirmation` was removed from @objectstack/spec in the 16.x line ' +
+    '(#3715, ADR-0033 §2) — it never had a consumer, and a SAFETY flag that is merely ' +
+    'accepted is false compliance: authors set it on destructive tools believing the ' +
+    'call would pause, and nothing ever did. No execution path read it — not the LLM ' +
+    'tool set (a tool reaches the model as name/description/parameters only), not ' +
+    '`ToolRegistry.execute`, not `POST /ai/tools/:name/execute`, and not the MCP bridge ' +
+    '(which derives `destructiveHint` from a hardcoded name list). Delete the key. For a ' +
+    'REAL gate on a destructive operation, put it behind an action and set ' +
+    '`action.ai.requiresConfirmation` — that is the flag the HITL approval queue reads ' +
+    '(packages/runtime/src/action-execution.ts), and it is the only path that actually ' +
+    'stops execution. For AI metadata mutations the ADR-0033 draft/publish workspace is ' +
+    'the gate: nothing is live until a human publishes.',
+};
+
+/**
+ * Custom zod `error` for the `.strict()` ToolSchema.
+ *
+ * `.strict()` matters more than usual here. Removing a key from a NON-strict
+ * schema replaces one silent no-op with another: the author keeps writing
+ * `requiresConfirmation: true`, zod strips it without a word, and the safety
+ * flag goes on meaning nothing — the exact "silent strip" ADR-0032 / #1535
+ * closed for objects. Rejecting loudly, with the prescription attached, is what
+ * turns the removal into a fix instead of a rename of the problem.
+ */
+const strictToolError: z.core.$ZodErrorMap = (issue) => {
+  if (issue.code !== 'unrecognized_keys') return undefined;
+  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
+  const lines = keys.map((key) =>
+    TOOL_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not a ToolSchema field.`,
+  );
+  return (
+    `Unrecognized key(s) on the tool definition: ${keys.map((k) => `\`${k}\``).join(', ')}.\n` +
+    lines.map((l) => `  • ${l}`).join('\n')
+  );
+};
+
+/**
  * Tool Schema
  *
  * First-class metadata definition for an AI-callable tool.
@@ -56,7 +100,6 @@ export type ToolCategory = z.infer<typeof ToolCategorySchema>;
  *     required: ['subject'],
  *   },
  *   objectName: 'support_case',
- *   requiresConfirmation: true,
  * });
  * ```
  */
@@ -96,24 +139,6 @@ export const ToolSchema = lazySchema(() => z.object({
    */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object name (snake_case)'),
 
-  /**
-   * Whether the tool requires human confirmation before execution.
-   *
-   * ⚠️ EXPERIMENTAL — NOT ENFORCED (#3715). No execution path reads this flag:
-   * not the LLM tool set (a tool reaches the model as name/description/
-   * parameters only), not `ToolRegistry.execute`, not
-   * `POST /ai/tools/:name/execute`, and not the MCP bridge (which derives
-   * `destructiveHint` from a hardcoded name list). Setting it `true` on a
-   * destructive tool produces NO pause.
-   *
-   * The enforced human-in-the-loop path is the ACTION-level
-   * `ai.requiresConfirmation` (+ the approval queue). For AI metadata
-   * mutations the draft/publish workspace is the real gate (ADR-0033).
-   * Whether this per-tool flag gets wired to that queue or removed is
-   * tracked in #3715.
-   */
-  requiresConfirmation: z.boolean().default(false).describe('[EXPERIMENTAL — not enforced] Require user confirmation before execution. NOTHING pauses on this flag (#3715) — use the action-level `ai.requiresConfirmation` + approval queue for a real gate.'),
-
   /** Permission-set capabilities required to use this tool */
   permissions: z.array(z.string()).optional().describe('Required permission-set capabilities'),
 
@@ -136,7 +161,7 @@ export const ToolSchema = lazySchema(() => z.object({
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
-}).describe('AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Authoring a tool as metadata does NOT make it runnable: this schema has no `implementation`/`handler` field and no framework executor loads a metadata-authored tool. The runtime executes a separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`); tool metadata is a one-way projection for Studio/discovery. Do not expect a hand-authored tool to run in the open edition (liveness audit #1878/#1892).'));
+}, { error: strictToolError }).strict().describe('AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Authoring a tool as metadata does NOT make it runnable: this schema has no `implementation`/`handler` field and no framework executor loads a metadata-authored tool. The runtime executes a separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`); tool metadata is a one-way projection for Studio/discovery. Do not expect a hand-authored tool to run in the open edition (liveness audit #1878/#1892).'));
 
 export type Tool = z.infer<typeof ToolSchema>;
 

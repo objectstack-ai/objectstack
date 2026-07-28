@@ -372,6 +372,31 @@ export class AppPlugin implements Plugin {
         // ONLY — never persisted to the runtime DB store — and stamped
         // `origin:'code'` so the admin service enforces them as read-only.
         // The engine already indexed them for the write gate via registerApp().
+        //
+        // `default` is a HOST-owned reserved name (#3826): the runtime declares
+        // and connects it (DefaultDatasourcePlugin). An app declaring it would
+        // shadow the host's metadata row and — if it passed the D2 gate —
+        // divert every unbound object to a fresh connection. Contract-first:
+        // reject at load, loudly (outside the lenient catch below), instead of
+        // letting the collision produce undefined routing.
+        {
+            const dsDefs = this.bundle.datasources;
+            const declared = Array.isArray(dsDefs)
+                ? dsDefs
+                : dsDefs && typeof dsDefs === 'object'
+                    ? Object.values(dsDefs as Record<string, unknown>)
+                    : [];
+            const names = Array.isArray(dsDefs)
+                ? declared.map((d: any) => d?.name)
+                : Object.keys((dsDefs as Record<string, unknown>) ?? {});
+            if (declared.some((d: any) => d?.name === 'default') || names.includes('default')) {
+                throw new Error(
+                    `[AppPlugin] app '${appId}' declares a datasource named 'default' — that name is ` +
+                    `reserved for the host's primary datasource. Rename it (e.g. '${appId.split('.').pop()}_primary') ` +
+                    `and route objects to it explicitly, or omit it to use the host default.`,
+                );
+            }
+        }
         try {
             const dsDefs = this.bundle.datasources;
             const dsList = Array.isArray(dsDefs)
@@ -455,11 +480,14 @@ export class AppPlugin implements Plugin {
                 }
             }
         } catch (err) {
-            // A fail-fast (external + onMismatch:'fail') connect error propagates
-            // to brick boot as intended (ADR-0062 D5); other errors are already
-            // degraded inside the connection service. Re-throw so the kernel
-            // surfaces the real cause. (Single-string message: the context
-            // logger types `error(message, error?)`, not a meta object.)
+            // A fail-fast connect error propagates to brick boot as intended
+            // (ADR-0062 D5): the datasource has no fallback path — `external` +
+            // onMismatch:'fail', or objects that bind to it explicitly and would
+            // otherwise fail every query with "Datasource 'x' is not registered"
+            // (#3758). Other errors are already degraded inside the connection
+            // service. Re-throw so the kernel surfaces the real cause.
+            // (Single-string message: the context logger types
+            // `error(message, error?)`, not a meta object.)
             ctx.logger.error(
                 `[AppPlugin] declared-datasource auto-connect failed for app '${appId}': ${(err as Error)?.message ?? String(err)}`,
             );

@@ -10,7 +10,7 @@ import type { TranslationData } from '@objectstack/spec/system';
  */
 export const en: TranslationData = {
   objects: {
-    task: {
+    todo_task: {
       label: 'Task',
       pluralLabel: 'Tasks',
       fields: {

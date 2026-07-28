@@ -4,6 +4,7 @@ import {
   DEPRECATED_APPROVER_TYPES,
   NON_AUTHORABLE_APPROVER_TYPES,
   APPROVER_VALUE_BINDINGS,
+  APPROVER_VALUE_SOURCES,
   ORG_MEMBERSHIP_LEVELS,
   canonicalApproverType,
   APPROVAL_NODE_TYPE,
@@ -113,6 +114,66 @@ describe('APPROVER_VALUE_BINDINGS (#3508)', () => {
     expect(valueNode?.xRef?.map?.manager).toBe('manager');
     // queue stays mapped so stored rows keep rendering during the window.
     expect(valueNode?.xRef?.map?.queue).toBe('queue');
+  });
+});
+
+// #3508 follow-up: `xRef.map` names a picker KIND but never said where that
+// picker's candidates live — which is how the designer came to query the
+// metadata registry for data records. The data contract now ships on the wire.
+describe('APPROVER_VALUE_SOURCES (#3508 follow-up)', () => {
+  it('covers every ApproverType member, exactly like the bindings it projects', () => {
+    for (const t of ApproverType.options) {
+      expect(APPROVER_VALUE_SOURCES[t], `no source published for '${t}'`).toBeDefined();
+      expect(APPROVER_VALUE_SOURCES[t].source).toBe(
+        APPROVER_VALUE_BINDINGS[t].source === 'record' ? 'data' : APPROVER_VALUE_BINDINGS[t].source,
+      );
+    }
+  });
+
+  it('routes the directory kinds to the DATA API, naming the object and the committed column', () => {
+    // `data`, not `meta`: these are rows in system objects, and the metadata
+    // registry (`GET /api/v1/meta/:type`) cannot list them (#3508).
+    expect(APPROVER_VALUE_SOURCES.user).toEqual({ source: 'data', object: 'sys_user', valueField: 'id' });
+    expect(APPROVER_VALUE_SOURCES.team).toEqual({ source: 'data', object: 'sys_team', valueField: 'id' });
+    expect(APPROVER_VALUE_SOURCES.department).toEqual({ source: 'data', object: 'sys_business_unit', valueField: 'id' });
+    // The one kind that commits something other than the primary key.
+    expect(APPROVER_VALUE_SOURCES.position).toEqual({ source: 'data', object: 'sys_position', valueField: 'name' });
+  });
+
+  it('keeps the non-record kinds off the lookup path and carries the closed enum inline', () => {
+    expect(APPROVER_VALUE_SOURCES.org_membership_level).toEqual({ source: 'enum', values: [...ORG_MEMBERSHIP_LEVELS] });
+    expect(APPROVER_VALUE_SOURCES.role).toEqual(APPROVER_VALUE_SOURCES.org_membership_level);
+    expect(APPROVER_VALUE_SOURCES.manager).toEqual({ source: 'auto' });
+    expect(APPROVER_VALUE_SOURCES.field).toEqual({ source: 'trigger-field' });
+    expect(APPROVER_VALUE_SOURCES.expression).toEqual({ source: 'expression' });
+    expect(APPROVER_VALUE_SOURCES.queue).toEqual({ source: 'unsupported' });
+  });
+
+  it('ships on the published JSON schema, where the designer reads it', () => {
+    const schema = getApprovalNodeConfigJsonSchema() as any;
+    const sources = schema?.properties?.approvers?.items?.properties?.value?.xRef?.sources;
+    expect(sources).toBeDefined();
+    expect(sources.department).toEqual({ source: 'data', object: 'sys_business_unit', valueField: 'id' });
+    expect(sources.position).toEqual({ source: 'data', object: 'sys_position', valueField: 'name' });
+  });
+});
+
+// objectui#2834 argued for leading with indirect bindings, but shipped the
+// order in its own options array — which the Studio inspector never reads (it
+// derives the picker from this enum via the published JSON schema). The intent
+// only takes effect if the enum itself carries it, so pin it here.
+describe('ApproverType declaration order is the authoring recommendation', () => {
+  const authorable = ApproverType.options.filter((t) => !NON_AUTHORABLE_APPROVER_TYPES.includes(t));
+
+  it('leads with indirect bindings and puts the literal `user` last', () => {
+    expect(authorable).toEqual([
+      'manager', 'position', 'department', 'team', 'field', 'expression', 'org_membership_level', 'user',
+    ]);
+  });
+
+  it('never offers a non-authorable spelling, wherever it sits in the enum', () => {
+    expect(authorable).not.toContain('role');
+    expect(authorable).not.toContain('queue');
   });
 });
 

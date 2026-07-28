@@ -27,11 +27,45 @@ export interface MessagingServiceSurface {
     }): Promise<{ notificationId: string; delivered: number; failed: number }>;
 }
 
-/** Coerce a config value (string | string[]) into a clean string[]. */
+/**
+ * Coerce a config value (string | string[]) into a clean string[].
+ *
+ * Entries that resolved to nothing are DROPPED, not stringified (framework#3582).
+ * `String(undefined)` is the six-character string `"undefined"`, which survives
+ * `.filter(Boolean)` and was handed to the messaging service as an audience
+ * member — so `to: ['{record.owner.manager}']` addressed a user id literally
+ * named "undefined": no delivery, no error, and a `sys_notification` row
+ * pointing at nobody. Dropping the entry instead lets the empty-recipients
+ * guard below report the real problem.
+ */
 function toStringList(value: unknown): string[] {
-    if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean);
+    if (Array.isArray(value)) {
+        return value
+            .filter((v) => v != null)
+            .map((v) => String(v).trim())
+            .filter(Boolean);
+    }
     if (typeof value === 'string' && value.trim()) return [value.trim()];
     return [];
+}
+
+/**
+ * The `{…}` templates an author wrote in the recipient config, for the
+ * diagnostic when none of them resolved. Reading them off the RAW config (not
+ * the interpolated result) is the whole point: after interpolation an
+ * unresolved token is indistinguishable from an author who configured nothing.
+ */
+function recipientTemplates(raw: unknown): string[] {
+    const out: string[] = [];
+    const walk = (v: unknown): void => {
+        if (typeof v === 'string') {
+            for (const m of v.matchAll(/\{[^{}]+\}/g)) out.push(m[0]);
+            return;
+        }
+        if (Array.isArray(v)) v.forEach(walk);
+    };
+    walk(raw);
+    return [...new Set(out)];
 }
 
 /** Coerce an interpolated config value to a non-empty trimmed string, else undefined. */
@@ -140,7 +174,8 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
         async execute(node, variables, context) {
             const cfg = (node.config ?? {}) as Record<string, unknown>;
 
-            const recipients = toStringList(interpolate(cfg.recipients ?? cfg.to ?? [], variables, context));
+            const recipientCfg = cfg.recipients ?? cfg.to ?? [];
+            const recipients = toStringList(interpolate(recipientCfg, variables, context));
             // stringifyForTemplate (not String()): a sole-token `{$error}` resolves
             // to the engine's error OBJECT, which String() would render as the
             // useless `[object Object]` (#3450). Serialize it readably instead.
@@ -166,7 +201,22 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
 
             if (!title) return { success: false, error: 'notify: title (or subject) is required' };
             if (recipients.length === 0) {
-                return { success: false, error: 'notify: at least one recipient is required' };
+                // Name the templates that came up empty (framework#3582). The
+                // dominant cause is a cross-object hop — `{record.owner.manager}`
+                // walks `.manager` on a scalar foreign-key id — which used to
+                // deliver to a phantom "undefined" audience instead of failing.
+                const templates = recipientTemplates(recipientCfg);
+                return {
+                    success: false,
+                    error: templates.length > 0
+                        ? `notify: at least one recipient is required, but every recipient template ` +
+                          `resolved to nothing: ${templates.join(', ')}. A flow template reads the ` +
+                          `trigger record as it was written — a relation field holds a scalar id, not ` +
+                          `an expanded record, so \`{record.<lookup>.<field>}\` resolves to nothing. ` +
+                          `Add the relation to the start node's \`config.expand\` so the engine ` +
+                          `hydrates it, or address the id directly (\`{record.<lookup>}\`).`
+                        : 'notify: at least one recipient is required',
+                };
             }
 
             const messaging = getMessaging();

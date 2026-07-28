@@ -389,10 +389,50 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
 
 | Pausing node | Suspends until… | Resumed by |
 | :--- | :--- | :--- |
-| `approval` | a human decision | the approvals service (`POST /api/v1/approvals/requests/:id/approve\|reject`) — resumes down the matching `approve` / `reject` edge. **Always decide through the approvals API**, never by calling `resume` directly: a direct resume strands the pending `sys_approval_request`, so the record stays locked and later approvals on the same record hit `DUPLICATE_REQUEST`. |
+| `approval` | a human decision | the approvals service (`POST /api/v1/approvals/requests/:id/approve\|reject`) — resumes down the matching `approve` / `reject` edge. **Decide through the approvals API**; the resume route above **refuses** an approval pause outright (see below). |
 | `screen` | a user submits the form | the UI runner posting the collected `inputs`; a `paused` response carrying the next `screen` chains multi-step wizards under one stable `runId` |
 | `wait` (timer) | an ISO-8601 duration elapses | **automatically** — a one-shot job resumes the run; after a cold boot the engine re-arms pending timers from the durable store (overdue timers resume immediately) |
 | `wait` (signal) | a named external event | any caller invoking `resume(runId)` |
+
+### Who may resume — the gate is the suspended node
+
+The resume route is generic, so **the node the run is parked on** decides
+whether a raw resume is a legitimate continuation. Every action descriptor
+carries a `resumeAuthority`:
+
+- **`'any'`** (the default — `screen`, `wait`, your own pausing nodes): the
+  caller supplies the continuation and the route is the intended door.
+- **`'service'`** (`approval`): continuing is a *side effect* of a decision
+  that some service must authorize and record first, so only that service may
+  drive it. `ApprovalService.decide` enforces the approver slate, writes the
+  `sys_approval_action` row, mirrors the status field — **then** resumes.
+
+A resume of a `'service'` pause through the route answers **403** and changes
+nothing: the request stays pending and the run stays parked, so the real
+decision can still land. (Before this gate a raw resume walked the `approve`
+edge with no decision recorded, leaving the `sys_approval_request` row and the
+run permanently disagreeing.)
+
+The gate follows a **linked-run** pause down to the child, so the run id a
+launcher happens to hold is not a way around it — in both directions it reads
+the item rather than the loop:
+
+- **`subflow`** — the signal is delegated to the suspended child, so the child's
+  node is where it lands;
+- **`map`** — the signal is not delegated (the node re-runs to start the next
+  item), so continuing here would advance the batch **past** an item whose
+  decision is still open. Refused while that item is service-gated; the map
+  moves on when the item completes through its owning service.
+
+Two related rules on the same route: **resume `inputs` may not write the
+engine's `$` namespace** (`$runId`, `$record`, `$flowName`,
+`<nodeId>.$mapItemDone`, …) — those are the engine's own handoff variables, and
+a caller who could set them could forge a map item's recorded result. Ordinary
+author-declared variables are unaffected; a reserved name answers **400**.
+
+Registering a pausing node of your own? Declare `resumeAuthority: 'service'` on
+its descriptor when the decision to continue belongs to your service rather
+than to whoever holds the run id.
 
 ### Parallel approvals — one aggregating node, not two pauses
 
@@ -452,8 +492,10 @@ the map waits for that item's decision, then moves to the next.
 
 The run holds a **single program counter** the whole time: only one item's
 approval is open at any moment; when it is decided the engine **re-enters** the
-map node to start the next item. v1 is sequential and fail-fast (the first item
-whose subflow fails fails the map). Concurrent fan-out (all items at once) is the
+map node to start the next item. Resuming the map's own run id while an item is
+still awaiting a service-gated decision is **refused** (403) — otherwise the
+batch would step past that item as if it had been decided. v1 is sequential and
+fail-fast (the first item whose subflow fails fails the map). Concurrent fan-out (all items at once) is the
 larger [ADR-0039](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0039-token-scope-tree-execution.md)
 Track B work. Worked example: `showcase_release_signoff` → `showcase_one_task_signoff`.
 
@@ -469,7 +511,8 @@ the chain resolves from either end:
   `${nodeId}.output` / `outputVariable` mapping as a synchronous subflow;
 - resuming the **parent** run id (what a UI holds from the original launch)
   **delegates** down to the suspended child — multi-screen child wizards keep
-  the parent run id stable.
+  the parent run id stable. The resume gate delegates with it: if the child is
+  parked on an `approval`, resuming the parent is refused too.
 
 A child that fails terminally after the pause fails every waiting ancestor, so
 no run is stranded as resumable-forever. See the worked example pair in the
@@ -516,6 +559,49 @@ Edges connect nodes and define the execution path:
 | `type` | `enum` | optional | `'default'` (success), `'fault'` (error), `'conditional'` (expression-guarded), or `'back'` (declared back-edge, ADR-0044); defaults to `'default'` |
 | `condition` | `string` | optional | Boolean expression for branching |
 | `label` | `string` | optional | Label displayed on the connector |
+
+### Fault edges — handling a failed node
+
+A `fault` edge routes a **failed** node to a handler instead of aborting the
+run. Without one, any node failure ends the run.
+
+```typescript
+edges: [
+  { id: 'e_ok',    source: 'charge_card', target: 'mark_paid' },
+  { id: 'e_fault', source: 'charge_card', target: 'flag_for_review', type: 'fault' },
+]
+```
+
+The handler reads what went wrong from two variables:
+
+| Variable | Scope | Use |
+| :--- | :--- | :--- |
+| `{<nodeId>.error}` | the failing node | `{charge_card.error}` — addressable by name, so one handler shared by several fault edges can tell which node it is handling |
+| `{$error}` | run-wide | `{$error.nodeId}` / `{$error.message}` — the most recent failure only |
+
+A run that takes a fault branch and completes reports **success**, but the
+failed step stays in the run trace with `status: 'failure'` and its message —
+recovery never erases the record of what failed.
+
+<Callout type="warn">
+**A fault edge does not disable a guardrail.** Failures come in two classes, and
+only one is routable.
+
+- **Runtime** — the world did not cooperate: an `http` node got a 404, a
+  connector rate-limited, the data engine rejected a write. Routed to the fault
+  edge.
+- **Guard** — the *metadata* is wrong, and a refuse-to-execute check said so: a
+  filter token resolved to nothing so the condition was dropped from the query,
+  a data node names no object, or the run would execute unscoped. **Never
+  routed.** These stay fatal whether or not a `fault` edge exists, and the run
+  fails with the guard's own message.
+
+The split is deliberate. A dropped filter condition does not narrow a query, it
+widens it — so if guards were routable, one `fault` edge on a `delete_record`
+would turn off the protection against emptying the object while the run still
+reported success. Re-running changes nothing either: the fix is to correct the
+metadata, which `objectstack validate` will point at.
+</Callout>
 
 ## Variables
 

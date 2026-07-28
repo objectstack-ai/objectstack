@@ -42,6 +42,13 @@ export type SkillTriggerCondition = z.infer<typeof SkillTriggerConditionSchema>;
  * Aligned with Salesforce Agentforce Topics, Microsoft Copilot Studio Topics,
  * and ServiceNow Skill metadata patterns.
  *
+ * NOTE — there is deliberately NO per-skill `permissions` field. Access to AI
+ * capability is gated at the AGENT level (`agent.access` / `agent.permissions`,
+ * both enforced at the chat route), and each tool enforces its own authz when
+ * invoked. A `permissions` key authored on a skill is unknown to this schema
+ * and silently stripped at parse time — it grants and restricts nothing
+ * (ADR-0049: no unenforced security-shaped fields). Do not author one.
+ *
  * @example
  * ```ts
  * const skill = defineSkill({

@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
-import { ObjectStackDefinitionSchema, normalizeStackInput, type ConversionNotice } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, normalizeStackInput, lintDeprecatedAliases, type ConversionNotice } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { validateStackExpressions } from '@objectstack/lint';
 import { validateListViewMode } from '@objectstack/lint';
@@ -14,16 +14,13 @@ import { validateViewContainers } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateFilterTokens } from '@objectstack/lint';
-import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
-import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
-import { validateNavAccess } from '@objectstack/lint';
+import { validateReferenceIntegrity } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
 import { validateVisibilityPredicates } from '@objectstack/lint';
 import { validateSecurityPosture, validateOrgAxisRedLines } from '@objectstack/lint';
 import { validateFlowTriggerReadiness } from '@objectstack/lint';
-import { validateFlowTemplatePaths } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
@@ -303,14 +300,13 @@ export default class Validate extends Command {
       //     parses, ships, and fails silently at runtime. An unprefixed miss is
       //     a typo (error); a platform-prefixed name no known package registers
       //     is advisory (a third-party package may still provide it).
+      //     Translation bundles get the same treatment in reverse: a key naming
+      //     a field/view/action/section that no longer exists — or an option
+      //     keyed by its display label instead of its stored value — resolves
+      //     to nothing and renders the source string (advisory: inert, not
+      //     broken).
       if (!flags.json) printStep('Checking object & action references (#3583)...');
-      const refFindings = [
-        ...validateObjectReferences(result.data as Record<string, unknown>),
-        ...validateActionNameRefs(result.data as Record<string, unknown>),
-        ...validatePageFieldBindings(result.data as Record<string, unknown>),
-        ...validateChartBindings(result.data as Record<string, unknown>),
-        ...validateNavAccess(result.data as Record<string, unknown>),
-      ];
+      const refFindings = validateReferenceIntegrity(result.data as Record<string, unknown>);
       const refErrors = refFindings.filter((f) => f.severity === 'error');
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');
       if (refErrors.length > 0) {
@@ -518,21 +514,13 @@ export default class Validate extends Command {
         }
       }
 
-      // 3g-bis. Flow template path references (#3426): a `{record.<path>}` token
-      //     in a node template that names an unknown field, or hops through a
-      //     lookup relation the seeded record carries only as a scalar id, both
-      //     render a SILENT empty string at runtime. Advisory: the head object
-      //     may come from another package (skipped there), and the runtime still
-      //     produces output (a blank), so nothing is fully broken.
-      if (!flags.json) printStep('Checking flow template references...');
-      const flowTemplateFindings = validateFlowTemplatePaths(normalized as Record<string, unknown>);
-      const flowTemplateWarnings = flowTemplateFindings.filter((f) => f.severity === 'warning');
-      if (!flags.json) {
-        for (const w of flowTemplateWarnings.slice(0, 50)) {
-          console.log(chalk.yellow(`  ⚠ ${w.where}: ${w.message}`));
-          console.log(chalk.dim(`      ${w.hint}`));
-        }
-      }
+      // 3g-bis. Flow template path references (#3426) used to be checked here by
+      //     hand. It is a reference rule — a `{record.<field>}` token resolved
+      //     against the bound object's declared fields — so it now runs as a
+      //     member of REFERENCE_INTEGRITY_RULES in step 3 above, which reaches
+      //     `os lint` and `os compile` at the same time. Those two accepted a
+      //     flow whose filter token the runtime refuses (#3810) for as long as
+      //     this call site was the only one.
 
       // 3e2. [#3425] Readonly flow-write guardrail. A `runAs:user` update_record
       //      that writes a static-`readonly` field is a SILENT no-op — the engine
@@ -604,12 +592,25 @@ export default class Validate extends Command {
       const viewRefErrors = viewRefLint.filter((f) => f.severity === 'error');
       const viewRefWarnings = viewRefLint.filter((f) => f.severity !== 'error');
 
-      const authoringLintErrors = [...flowLintErrors, ...autonumberErrors, ...viewRefErrors];
+      // Deprecated aliases (#3743). The ONE lint here that reads `normalized`
+      // rather than `result.data`, and it has to: the parse consumes the alias
+      // it reports (`ActionSchema` folds `execute` into `target` and drops it),
+      // so a post-parse read is structurally blind to the conflict. `os build`
+      // lints the same pre-parse input, so both surfaces see the same findings.
+      // A stack authored with strict `defineStack` was already parsed — and
+      // warned about — inside its own config module; this covers the paths that
+      // reach the CLI with the alias intact.
+      const aliasLint = lintDeprecatedAliases(normalized as Record<string, unknown>);
+      const aliasLintErrors = aliasLint.filter((f) => f.severity === 'error');
+      const aliasLintWarnings = aliasLint.filter((f) => f.severity !== 'error');
+
+      const authoringLintErrors = [...flowLintErrors, ...autonumberErrors, ...viewRefErrors, ...aliasLintErrors];
       const authoringLintWarnings = [
         ...flowLintWarnings,
         ...livenessLint,
         ...autonumberWarnings,
         ...viewRefWarnings,
+        ...aliasLintWarnings,
       ];
       if (authoringLintErrors.length > 0) {
         if (flags.json) {
@@ -725,7 +726,13 @@ export default class Validate extends Command {
           valid: true,
           manifest: config.manifest,
           stats,
-          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...flowTemplateWarnings, ...readonlyWriteWarnings, ...authoringLintWarnings, ...securityAdvisories, ...capProviderWarnings],
+          // `refWarnings` carries the whole reference-integrity suite, which now
+          // includes the flow-template-path rule this list used to name directly.
+          // It was absent here before: on a CLEAN run `--json` reported none of
+          // the suite's warnings, though the failure path (above) and the console
+          // both did. Same shape of bug as the dropped errors — computed, then
+          // discarded — so it is fixed rather than reproduced under a new name.
+          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...refWarnings, ...readonlyWriteWarnings, ...authoringLintWarnings, ...securityAdvisories, ...capProviderWarnings],
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),

@@ -5,6 +5,8 @@ import {
   WaitTimeoutBehaviorSchema,
   WaitExecutorConfigSchema,
   NodeExecutorDescriptorSchema,
+  ActionDescriptorSchema,
+  defineActionDescriptor,
   WAIT_EXECUTOR_DESCRIPTOR,
   type WaitResumePayload,
   type WaitExecutorConfig,
@@ -250,5 +252,25 @@ describe('Wait Executor — pause/resume scenario', () => {
 
     expect(resume.eventType).toBe('webhook');
     expect(resume.variables?.approval_status).toBe('approved');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ActionDescriptorSchema — resumeAuthority (#3801)
+// ---------------------------------------------------------------------------
+describe('ActionDescriptorSchema.resumeAuthority', () => {
+  const base = { type: 'demo', version: '1.0.0', name: 'Demo' };
+
+  it("defaults to 'any' — the generic resume route stays the door for screen / wait", () => {
+    expect(defineActionDescriptor(base).resumeAuthority).toBe('any');
+  });
+
+  it("accepts 'service' for a node only its owning service may resume", () => {
+    const desc = defineActionDescriptor({ ...base, supportsPause: true, resumeAuthority: 'service' });
+    expect(desc.resumeAuthority).toBe('service');
+  });
+
+  it('rejects an unknown authority rather than silently defaulting it open', () => {
+    expect(() => ActionDescriptorSchema.parse({ ...base, resumeAuthority: 'admin' })).toThrow();
   });
 });

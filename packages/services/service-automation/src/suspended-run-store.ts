@@ -358,6 +358,9 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       flow_name: run.flowName,
       flow_version: run.flowVersion ?? null,
       node_id: run.nodeId,
+      // Node TYPE, not just id — the resume gate (#3801) keys on what produced
+      // the pause, and it has to survive the restart the pause itself survives.
+      node_type: run.nodeType ?? null,
       status: 'paused',
       correlation: run.correlation ?? null,
       user_id: ctx.userId ?? null,
@@ -378,6 +381,7 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       flowName: String(row.flow_name ?? ''),
       flowVersion: row.flow_version ?? undefined,
       nodeId: String(row.node_id ?? ''),
+      nodeType: row.node_type ?? undefined,
       variables: parseJson<Record<string, unknown>>(row.variables_json, {}),
       steps: parseJson<SuspendedRun['steps']>(row.steps_json, []),
       context: parseJson<SuspendedRun['context']>(row.context_json, {}),

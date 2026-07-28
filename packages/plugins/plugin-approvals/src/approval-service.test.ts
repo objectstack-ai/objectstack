@@ -183,36 +183,38 @@ describe('ApprovalService (node era)', () => {
     expect(JSON.parse(raw.node_config_json)).toMatchObject({ behavior: 'first_response', lockRecord: true });
   });
 
-  // #3794 — the row tells a client whether THIS node locks the record, so
-  // "pending" and "locked" stop being the same signal. Read from the same
-  // snapshot key the `beforeUpdate` lock hook reads, with the same default.
-  it('rows surface locks_record from the node config (default true)', async () => {
+  // ── record-lock policy on the read row (objectui#2902) ──────────
+  //
+  // The lock is enforced in `lifecycle-hooks.ts` off `node_config_json`, but
+  // the row projection used to drop the flag entirely — so a client could see
+  // "a pending request exists" and nothing more, and had to assume every
+  // pending node locked the record. Chaining nodes with different policies
+  // made that visibly wrong. These pin the flag onto every read path.
+
+  it('lock_record: true when the node locks (the schema default)', async () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
-    expect(req.locks_record).toBe(true);
-    const [listed] = await svc.listRequests({ status: 'pending' }, SYS);
-    expect(listed.locks_record).toBe(true);
+    expect(req.lock_record).toBe(true);
+    const [listed] = await svc.listRequests({ object: 'opportunity', recordId: 'opp1' }, SYS);
+    expect(listed.lock_record).toBe(true);
+    expect((await svc.getRequest(req.id, SYS))!.lock_record).toBe(true);
   });
 
-  it('rows surface locks_record=false for a lockRecord:false node', async () => {
-    const req = await svc.openNodeRequest(
-      openInput(['u9'], {}, { lockRecord: false }),
-      CTX,
-    );
-    expect(req.locks_record).toBe(false);
-    const [listed] = await svc.listRequests({ status: 'pending' }, SYS);
-    expect(listed.locks_record).toBe(false);
-    const fetched = await svc.getRequest(req.id, SYS);
-    expect(fetched?.locks_record).toBe(false);
+  it('lock_record: false when the node opts out — the same read the hook honors', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9'], {}, { lockRecord: false }), CTX);
+    expect(req.lock_record).toBe(false);
+    const [listed] = await svc.listRequests({ object: 'opportunity', recordId: 'opp1' }, SYS);
+    expect(listed.lock_record).toBe(false);
+    expect((await svc.getRequest(req.id, SYS))!.lock_record).toBe(false);
   });
 
-  it('locks_record defaults to true when the node config omits lockRecord', async () => {
-    // A node that says nothing about locking locks — matching the hook, which
-    // only returns early on an explicit `lockRecord === false`.
+  it('lock_record: an unset lockRecord reads as locked, matching the hook default', async () => {
+    // The hook allows the write only on an explicit `=== false`; the flag must
+    // default the same way or the UI would offer an edit the server rejects.
     const req = await svc.openNodeRequest(
-      openInput(['u9'], {}, { lockRecord: undefined }),
+      { ...openInput(['u9']), config: { approvers: [{ type: 'user' as const, value: 'u9' }], behavior: 'first_response' as const } } as any,
       CTX,
     );
-    expect(req.locks_record).toBe(true);
+    expect(req.lock_record).toBe(true);
   });
 
   it('openNodeRequest: deduplicates a pending request per (object, record)', async () => {
@@ -660,6 +662,69 @@ describe('ApprovalService (node era)', () => {
       },
     }), CTX);
     expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+  });
+
+  // #3807 — an app's org tree is normally SEEDED, and a seed cannot know the
+  // organization id the runtime mints at boot, so those rows carry
+  // `organization_id = null` while every approval request carries an org. The
+  // old strict equality made each of them invisible and every `department`
+  // approver resolved to the dead `department:<id>` literal.
+  const departmentInput = (value: string) => positionInput({
+    config: {
+      approvers: [{ type: 'department' as const, value }],
+      behavior: 'first_response' as const,
+      lockRecord: true,
+    },
+  });
+
+  it('department approver: an env-wide (null-org) business unit still resolves (#3807)', async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'bu_seeded', organization_id: null, active: true },
+      { id: 'bu_seeded_child', parent_business_unit_id: 'bu_seeded', organization_id: null, active: true },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'bm1', business_unit_id: 'bu_seeded', user_id: 'u5' },
+      { id: 'bm2', business_unit_id: 'bu_seeded_child', user_id: 'u6' },
+    ];
+    const req = await svc.openNodeRequest(departmentInput('bu_seeded'), CTX);
+    // Both the seed check AND the subtree descent must see the null-org rows.
+    expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+  });
+
+  it('department approver: another organization’s unit stays invisible (#3807 keeps the wall)', async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'bu_other', organization_id: 't2', active: true },
+      { id: 'bu_other_child', parent_business_unit_id: 'bu_other', organization_id: 't2', active: true },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'bm1', business_unit_id: 'bu_other', user_id: 'intruder' },
+      { id: 'bm2', business_unit_id: 'bu_other_child', user_id: 'intruder2' },
+    ];
+    const req = await svc.openNodeRequest(departmentInput('bu_other'), CTX);
+    expect(req.pending_approvers).toEqual(['department:bu_other']);
+  });
+
+  it('department approver: a null-org subtree does not drag in another org’s child unit (#3807)', async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'bu_seeded', organization_id: null, active: true },
+      { id: 'bu_mine', parent_business_unit_id: 'bu_seeded', organization_id: 't1', active: true },
+      { id: 'bu_theirs', parent_business_unit_id: 'bu_seeded', organization_id: 't2', active: true },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'bm1', business_unit_id: 'bu_mine', user_id: 'u5' },
+      { id: 'bm2', business_unit_id: 'bu_theirs', user_id: 'intruder' },
+    ];
+    const req = await svc.openNodeRequest(departmentInput('bu_seeded'), CTX);
+    expect(req.pending_approvers).toEqual(['u5']);
+  });
+
+  it('department approver: an inactive env-wide unit still contributes nobody (#3807)', async () => {
+    engine._tables['sys_business_unit'] = [{ id: 'bu_seeded', organization_id: null, active: false }];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'bm1', business_unit_id: 'bu_seeded', user_id: 'u5' },
+    ];
+    const req = await svc.openNodeRequest(departmentInput('bu_seeded'), CTX);
+    expect(req.pending_approvers).toEqual(['department:bu_seeded']);
   });
 
   // ── decideNode ──────────────────────────────────────────────────
@@ -2297,6 +2362,66 @@ describe('ApprovalService — queue approver is unresolved (#3508)', () => {
     // which matches no real user id — the request routes to nobody.
     expect(req.pending_approvers).toEqual(['queue:q_west']);
     expect(warnings.some(([msg]) => String(msg).includes("'queue'") && String(msg).includes('#3508'))).toBe(true);
+  });
+});
+
+// #3807 follow-up: `queue` was not the only way to end up with a slot nobody
+// can act on — every GRAPH approver type falls back to the same literal when
+// its lookup finds no one, and that fallback used to happen in total silence.
+// A stuck approval was the first symptom; the log said nothing. The literal
+// stays (15.x slots and substring fixtures depend on it) — it just announces
+// itself now.
+describe('ApprovalService — a graph approver that expands to nobody warns (#3807)', () => {
+  const svcWithWarnings = (engine: any) => {
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+    });
+    return { svc, warnings };
+  };
+
+  const approverInput = (type: string, value: string) => ({
+    ...openInput([]),
+    config: { approvers: [{ type, value }], behavior: 'first_response' as const, lockRecord: false },
+  });
+
+  it.each([
+    ['team', 'team_gone'],
+    ['department', 'bu_gone'],
+    ['position', 'nobody_holds_this'],
+    ['org_membership_level', 'member'],
+  ])('%s: the dead literal is logged with its type, value and org', async (type, value) => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput(type, value), CTX);
+
+    expect(req.pending_approvers).toEqual([`${type}:${value}`]);
+    const hit = warnings.find(([msg]) => String(msg).includes('expanded to nobody'));
+    expect(hit, `no warning for ${type}`).toBeTruthy();
+    expect(String(hit[0])).toContain('#3807');
+    expect(hit[1]).toMatchObject({ type, value, organizationId: 't1' });
+  });
+
+  it('stays quiet when the graph DOES resolve someone', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_team_member'] = [{ id: 'tm1', team_id: 'team_ok', user_id: 'u5' }];
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput('team', 'team_ok'), CTX);
+
+    expect(req.pending_approvers).toEqual(['u5']);
+    expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
+  });
+
+  it('stays quiet for `user` — a literal id was never a lookup that could come back empty', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput('user', 'u_unknown'), CTX);
+
+    expect(req.pending_approvers).toEqual(['u_unknown']);
+    expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
   });
 });
 

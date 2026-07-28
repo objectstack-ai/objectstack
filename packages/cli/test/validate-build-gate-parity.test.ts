@@ -77,4 +77,30 @@ describe('os validate is the read-only superset of os build (#3782)', () => {
       expect(validateGates.has(gate), `validate.ts must call ${gate}`).toBe(true);
     }
   });
+
+  /**
+   * The same drift, one layer down and easier to miss: not "does this command
+   * run the gate" but "does it LISTEN to what the gate says". The ADR-0087 D2
+   * conversion pass runs inside `normalizeStackInput` on both commands, so both
+   * always converted — but only `os validate` passed an `onConversionNotice`
+   * sink, so `os build` silently discarded every deprecation notice. A notice
+   * is the one warning an old-shape author gets before the conversion retires
+   * and their metadata stops loading, and five conversions are live today.
+   *
+   * Source-level for the same reason as the gate check above: it fails when the
+   * sink is dropped, which is the moment it is cheap to fix.
+   */
+  it('both commands pass a conversion-notice sink to normalizeStackInput', () => {
+    for (const file of ['compile.ts', 'validate.ts']) {
+      const src = readFileSync(join(COMMANDS_DIR, file), 'utf8');
+      const call = src.match(/normalizeStackInput\([\s\S]{0,400}?\)\s*;/);
+      expect(call, `${file} must call normalizeStackInput`).not.toBeNull();
+      expect(
+        call![0].includes('onConversionNotice'),
+        `${file} calls normalizeStackInput without an onConversionNotice sink, so every ADR-0087 ` +
+          `D2 deprecation notice it raises is discarded. Pass a sink and surface the notices ` +
+          `(mirror the other command).`,
+      ).toBe(true);
+    }
+  });
 });

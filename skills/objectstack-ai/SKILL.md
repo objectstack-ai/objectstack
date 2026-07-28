@@ -303,7 +303,8 @@ Tools are the atomic operations that skills expose to agents.
 A tool authored as metadata (`type: 'tool'`, `*.tool.ts`) is validated by
 `ToolSchema`: required `name` / `label` / `description`, a **JSON Schema**
 `parameters` object, plus optional `category`, `objectName`, `outputSchema`,
-`requiresConfirmation` (default `false`), `permissions`, `active`.
+`permissions`, `active`. `ToolSchema` is **strict** — an unknown key (a typo, or
+the retired `requiresConfirmation`) is a parse error, not a silent strip.
 
 <!-- os:check -->
 ```typescript
@@ -323,7 +324,6 @@ export default defineTool({
     required: ['subject'],
   },
   objectName: 'support_case',
-  requiresConfirmation: true,
 });
 ```
 
@@ -554,8 +554,9 @@ On validation failure the runtime retries by default
    `ai.requiresConfirmation` on the **action**, or `approval: 'always'` on an
    MCP tool binding. AI metadata edits are already gated: they land as drafts a
    human must publish (ADR-0033).
-   ⚠️ Do **not** rely on `requiresConfirmation` on the **tool** — it is declared
-   but read by no execution path, so it produces no pause (#3715).
+   ⚠️ `requiresConfirmation` on the **tool** was REMOVED (#3715, ADR-0033 §2) —
+   it was read by no execution path, so it produced no pause. `ToolSchema` is
+   strict, so authoring it now fails the parse with the migration attached.
    There is no `requireApprovalFor` field.
 4. **Ignoring tool descriptions.** The LLM uses tool `description` to decide
    when to call it. Poor descriptions = wrong tool selection.

@@ -70,27 +70,6 @@ export interface ApprovalRequestRow {
     type?: 'text' | 'user' | 'department' | 'position' | 'team';
     multiple?: boolean;
   }>;
-  /**
-   * Whether THIS request's node locks the target record for writes (#3794).
-   * Mirrors the one policy the `beforeUpdate` lock hook actually enforces:
-   * the node config snapshot's `lockRecord`, defaulting to `true` when the
-   * node says nothing (`lockRecord === false` ⇒ the hook returns early and
-   * the record stays editable while the request is pending).
-   *
-   * Surfaced because "a pending request exists" and "the record is locked"
-   * are NOT the same statement, and a client that conflates them tells the
-   * user the opposite of the truth in one direction or the other: a console
-   * that renders "Locked for approval" on every pending request hides a
-   * `lockRecord: false` node's whole point (the approver is meant to edit
-   * while deciding), and one that renders nothing lets a user fill a form
-   * that the hook will reject with `RECORD_LOCKED`. Read it instead of
-   * re-deriving from the record's `approval_status` mirror — that field says
-   * "in approval", never "locked", and some flows never materialize it.
-   *
-   * Optional only for version skew (a row from an older server has no
-   * opinion); the service always emits it. Absent ⇒ assume locked.
-   */
-  locks_record?: boolean;
   completed_at?: string;
   created_at?: string;
   updated_at?: string;
@@ -160,6 +139,24 @@ export interface ApprovalRequestRow {
    * `node_config_json` snapshot (`__round`), so no schema migration.
    */
   round?: number;
+  /**
+   * Whether THIS node's pending request locks the target record from edits
+   * (objectui#2902). Mirrors the `lockRecord` policy the record-lock
+   * `beforeUpdate` hook enforces, read from the same `node_config_json`
+   * snapshot the hook reads — so a client never has to guess, and never
+   * disagrees with the server.
+   *
+   * `lockRecord` defaults to `true` (see `ApprovalNodeConfigSchema`), so this
+   * is `false` only when the node explicitly opted out. Always present on a
+   * service read; a client that gets `undefined` is talking to a pre-#3814
+   * backend and should fail closed (assume locked) rather than offer an edit
+   * the server will reject with `RECORD_LOCKED`.
+   *
+   * Node-scoped, not request-scoped in spirit: a flow chaining several
+   * approval nodes with different policies produces one request per node, and
+   * each carries its own value.
+   */
+  lock_record?: boolean;
   /**
    * Server-computed decision aggregation progress (#3266, single-request reads
    * of PENDING requests only). Present when the node's behavior aggregates

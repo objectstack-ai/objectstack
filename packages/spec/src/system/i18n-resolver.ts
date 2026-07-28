@@ -724,6 +724,104 @@ function lookupObjectFieldAttr(
   return undefined;
 }
 
+export interface LocaleDescriptor {
+  /** BCP-47 locale code. */
+  code: string;
+  /** Display name. Falls back to the code — nothing in the tree carries one. */
+  label: string;
+  /** Whether this is the stack's default locale. */
+  isDefault: boolean;
+}
+
+/**
+ * Turn `II18nService.getLocales()` — a bare `string[]` — into the descriptor
+ * list `GetLocalesResponseSchema` declares for `GET /i18n/locales`.
+ *
+ * Shared for the same reason `resolveObjectFieldLabels` is: both the
+ * dispatcher domain and service-i18n serve this route, and when each kept its
+ * own copy they diverged. service-i18n mapped to descriptors; the dispatcher
+ * passed the raw `string[]` straight through, so the SAME endpoint returned
+ * `['en','zh-CN']` or `[{code,label,isDefault}]` depending on which provider
+ * happened to mount it — and the dispatcher's form contradicted both the
+ * declared schema and the SDK's `GetLocalesResponse` type. Exactly the split
+ * #3833 found in the field-labels derivation, one route over.
+ *
+ * `label` is the code: no locale display-name source exists in the tree, and
+ * the schema requires the field. Inventing one here (an ICU display-name
+ * table) would be a product decision, not an implementation detail.
+ */
+export function toLocaleDescriptors(
+  codes: readonly string[] | undefined,
+  defaultLocale?: string,
+): LocaleDescriptor[] {
+  if (!codes) return [];
+  return codes.map((code) => ({ code, label: code, isDefault: code === defaultLocale }));
+}
+
+/**
+ * Enumerate an object's translated field labels out of ONE locale's
+ * `TranslationData` — the `GET /i18n/labels/:object/:locale` body.
+ *
+ * Distinct from `lookupObjectFieldAttr` above, which answers "what is this
+ * one field called" against a whole bundle and a locale chain. This answers
+ * "which fields does this locale translate at all", which is what the
+ * endpoint returns and what no per-field lookup can produce.
+ *
+ * Shared deliberately. Both serving surfaces derive this map — the dispatcher
+ * domain body and service-i18n's autonomous route — and they are the only
+ * path there is: `getFieldLabels` is optional on `II18nService` and NOTHING
+ * implements it (neither `memory-i18n` nor `file-i18n-adapter`), so the
+ * "dedicated method" branch both surfaces check first is dead and this
+ * derivation always runs. Keeping one copy each is how the dispatcher was
+ * left scanning the retired flat `o.<object>.fields.<field>` dialect after
+ * #3778 converged the tree on nested `objects.<object>.fields.<field>.label`
+ * and fixed only service-i18n's copy — a scan that cannot match a real bundle,
+ * so that route returned `{}` for every provider (#3833).
+ *
+ * Fields with no non-empty `label` are omitted rather than emitted blank:
+ * partial translation is the normal state (see `ObjectTranslationDataSchema`),
+ * and a caller merges what comes back over its source labels. That rule is
+ * also what lets `ResolvedFieldLabel.label` be required — an entry exists
+ * precisely because a label was found, so a field carrying only `help` yields
+ * no entry rather than one with a blank label.
+ *
+ * Each entry carries `help` and `options` alongside `label`, which is what
+ * `GetFieldLabelsResponseSchema` has always declared. Both surfaces used to
+ * emit a bare `Record<string, string>` instead, so the endpoint contradicted
+ * its own response schema AND discarded translations the bundle already
+ * carried — `FieldTranslationSchema` populates `help` and `options`, and
+ * objectui reads exactly those (as `fieldOptions.<obj>.<fld>.<value>`) off the
+ * full-bundle route, because this endpoint could not give them to it (#3847).
+ */
+export interface ResolvedFieldLabel {
+  /** Translated field label. Required — an entry exists only because it has one. */
+  label: string;
+  /** Translated help text, when the bundle carries one. */
+  help?: string;
+  /** Option value → translated option label, when the bundle carries them. */
+  options?: Record<string, string>;
+}
+
+export function resolveObjectFieldLabels(
+  data: TranslationData | undefined,
+  objectName: string,
+): Record<string, ResolvedFieldLabel> {
+  const fields = data?.objects?.[objectName]?.fields;
+  const labels: Record<string, ResolvedFieldLabel> = {};
+  if (!fields) return labels;
+  for (const [fieldName, field] of Object.entries(fields)) {
+    const label = field?.label;
+    if (typeof label !== 'string' || label.length === 0) continue;
+    const entry: ResolvedFieldLabel = { label };
+    if (typeof field.help === 'string' && field.help.length > 0) entry.help = field.help;
+    // Only a non-empty map — an empty `options: {}` would claim the field has
+    // translated options and hand back none.
+    if (field.options && Object.keys(field.options).length > 0) entry.options = { ...field.options };
+    labels[fieldName] = entry;
+  }
+  return labels;
+}
+
 function lookupObjectFieldOption(
   bundle: TranslationBundle | undefined,
   objectName: string,

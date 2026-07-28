@@ -232,4 +232,116 @@ describe('validateFlowTemplatePaths', () => {
   it('returns empty when there are no flows', () => {
     expect(validateFlowTemplatePaths({ objects: [LEAD_OBJECT] })).toHaveLength(0);
   });
+
+  // ── severity follows position (#3810) ───────────────────────────────────
+  // Outside a filter an unresolved token blanks a value (advisory); inside a
+  // filter-guarded CRUD node's filter it DELETES the condition, so the node
+  // refuses to run — the build must not ship it.
+  describe('filter-position severity (#3810)', () => {
+    /** A record-change flow with one CRUD node carrying the given config. */
+    function crudFlow(type: string, config: AnyRec): AnyRec {
+      return {
+        objects: [LEAD_OBJECT],
+        flows: [
+          {
+            name: 'crud_flow',
+            type: 'record_change',
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+              { id: 'c1', type, config },
+            ],
+          },
+        ],
+      };
+    }
+
+    it.each(['get_record', 'update_record', 'delete_record'])(
+      'raises an unknown field inside a %s filter to error',
+      (type) => {
+        const findings = validateFlowTemplatePaths(
+          crudFlow(type, { objectName: 'crm_lead', filter: { company: '{record.compnay}' } }),
+        );
+        expect(findings).toHaveLength(1);
+        expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+        expect(findings[0].severity).toBe('error');
+        expect(findings[0].message).toContain('refuses to run');
+      },
+    );
+
+    it('raises a lookup traversal inside a filter to error', () => {
+      const findings = validateFlowTemplatePaths(
+        crudFlow('delete_record', { objectName: 'crm_lead', filter: { company: '{record.crm_account.name}' } }),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
+      expect(findings[0].severity).toBe('error');
+    });
+
+    it('keeps a bad reference OUTSIDE the filter advisory on the same node', () => {
+      const findings = validateFlowTemplatePaths(
+        crudFlow('update_record', {
+          objectName: 'crm_lead',
+          filter: { company: '{record.company}' },
+          fields: { last_name: '{record.compnay}' },
+        }),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('warning');
+    });
+
+    it('reports a reference used in BOTH positions once, at error severity', () => {
+      const findings = validateFlowTemplatePaths(
+        crudFlow('update_record', {
+          objectName: 'crm_lead',
+          filter: { company: '{record.compnay}' },
+          fields: { last_name: 'echo {record.compnay}' },
+        }),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+    });
+
+    it('stays advisory for create_record, which has no filter to widen', () => {
+      const findings = validateFlowTemplatePaths(
+        crudFlow('create_record', { objectName: 'crm_lead', filter: { company: '{record.compnay}' } }),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('warning');
+    });
+
+    it('does NOT flag a valid filter reference', () => {
+      const findings = validateFlowTemplatePaths(
+        crudFlow('delete_record', {
+          objectName: 'crm_lead',
+          filter: { company: '{record.company}', owner: '{record.owner}' },
+        }),
+      );
+      expect(findings).toHaveLength(0);
+    });
+
+    it('respects declared expand for a filter traversal (#3475)', () => {
+      const findings = validateFlowTemplatePaths({
+        objects: [LEAD_OBJECT],
+        flows: [
+          {
+            name: 'expanded_filter',
+            type: 'record_change',
+            nodes: [
+              {
+                id: 'start',
+                type: 'start',
+                config: { objectName: 'crm_lead', triggerType: 'record-created', expand: ['crm_account'] },
+              },
+              {
+                id: 'c1',
+                type: 'get_record',
+                config: { objectName: 'crm_lead', filter: { company: '{record.crm_account.name}' } },
+              },
+            ],
+          },
+        ],
+      });
+      expect(findings).toHaveLength(0);
+    });
+  });
 });

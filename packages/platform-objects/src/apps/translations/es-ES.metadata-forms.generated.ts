@@ -1693,10 +1693,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Esquema de salida",
         helpText: "Esquema de salida para validación (opcional)"
       },
-      requiresConfirmation: {
-        label: "Requiere confirmación",
-        helpText: "Pide aprobación al usuario antes de ejecutar (para acciones destructivas)"
-      },
       permissions: {
         label: "Permisos",
         helpText: "Permisos necesarios para usar esta herramienta"

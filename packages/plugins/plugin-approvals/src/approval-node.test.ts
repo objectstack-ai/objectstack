@@ -154,6 +154,46 @@ describe('Approval node bridge (ADR-0019)', () => {
     expect(paused.runId).toBeDefined();
   });
 
+  // ── resume authorization gate (#3801) ───────────────────────────────
+  //
+  // `POST /automation/:name/runs/:runId/resume` reaches
+  // `AutomationEngine.resume` with a caller-supplied signal. Before the gate,
+  // the only thing between that route and the approvals rules was convention —
+  // a comment in the showcase. These pin the enforcement.
+
+  it('declares the approval node resumable only by its owning service', () => {
+    const approval = automation.getActionDescriptors().find(d => d.type === 'approval');
+    expect(approval!.resumeAuthority).toBe('service');
+  });
+
+  it('refuses a raw engine resume of an approval pause, leaving the request untouched', async () => {
+    registerDecisionFlow(automation, [{ type: 'user', value: 'u1' }]);
+    const paused = await automation.execute('deal_approval', {
+      object: 'crm_deal', record: { id: 'd1' }, userId: 'submitter',
+    });
+    const request = (await fake.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+
+    // Exactly the signal the resume route builds from `{ branchLabel }`.
+    const refused = await automation.resume(paused.runId!, {
+      branchLabel: 'approve', output: { decision: 'approve' },
+    });
+
+    expect(refused).toMatchObject({ success: false, code: 'forbidden' });
+    // The approve branch did NOT run…
+    expect(marks).toHaveLength(0);
+    // …the request is still pending, with no decision recorded…
+    const stillPending = (await fake.find('sys_approval_request', { where: { id: request.id } }))[0];
+    expect(stillPending.status).toBe('pending');
+    const actions = await fake.find('sys_approval_action', { where: { request_id: request.id } });
+    expect(actions.map((a: any) => a.action)).toEqual(['submit']);
+    // …and the run is still parked, so the real decision can still land.
+    expect(automation.listSuspendedRuns()).toHaveLength(1);
+
+    const out = await service.decide(request.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
+    expect(out).toMatchObject({ finalized: true, resumed: true });
+    expect(marks).toEqual(['on_approved']);
+  });
+
   it('resumes down the reject branch on rejection', async () => {
     registerDecisionFlow(automation, [{ type: 'user', value: 'u1' }]);
     await automation.execute('deal_approval', { object: 'crm_deal', record: { id: 'd1' } });

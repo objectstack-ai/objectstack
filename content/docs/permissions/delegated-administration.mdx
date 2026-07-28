@@ -173,10 +173,12 @@ issuance:
 - an invited role may not outrank the issuer's (`owner` > `admin` > everyone
   else);
 - an issuer below admin grade may invite as **`member` only**. Not just "not
-  admin/owner": an app-registered role projects into `current_user.positions`
-  and may be bound to permission sets, so it is a capability channel too. A
-  delegate's channel for capability is the invitation's **placement** intent,
-  which this gate allowlists position-by-position;
+  admin/owner": every value stored in `sys_member.role` projects into
+  `current_user.positions`, so any tier above plain member is a capability
+  channel too. A delegate's channel for capability is the invitation's
+  **placement** intent, which this gate allowlists position-by-position — and
+  since ADR-0108 that is the *only* way capability travels on an invitation,
+  because the tier vocabulary is closed to four framework-owned names;
 - an issuer whose membership cannot be read confers nothing above a plain
   member (fail-closed).
 

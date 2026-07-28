@@ -84,37 +84,72 @@ export class DriverConnectError extends Error {
   }
 }
 
+/** Why a declared datasource has no live driver (framework#3828). */
+export type DatasourceUnavailableKind = 'blocked' | 'failed';
+
+/** What the connection layer recorded about a datasource it could not connect. */
+export interface DatasourceUnavailableInfo {
+  kind: DatasourceUnavailableKind;
+  /**
+   * Tenant-safe detail, opt-in by the host. The operator-facing reason is
+   * deliberately NOT carried here — see `DatasourceConnectDecision.publicReason`.
+   */
+  publicDetail?: string;
+}
+
 /**
- * Emit the degraded-boot banner on a channel the host cannot accidentally
- * silence.
+ * Thrown by `getDriver()` when an object's `datasource` was **declared** but has
+ * no live driver, and the connection layer knows why (framework#3828).
  *
- * `OS_ALLOW_DRIVER_CONNECT_FAILURE` only justifies itself if the state it opts
- * into is impossible to miss — and a logger-only banner is missable: `os serve`
- * swallows ALL of stdout while the kernel boots (its "boot-quiet" capture), and
- * `Logger` routes `warn` to stdout, so the one message that matters would be
- * invisible in exactly the situation it exists for. Writing to stderr as well
- * is the same belt-and-braces the kernel already uses for plugin startup
- * failures.
+ * Before this, all four of these produced the same sentence — `Datasource 'x'
+ * is not registered.`:
  *
- * Best-effort and never throws: falls back to `console.error`, then to silence
- * on runtimes that have neither (the logger still carries the structured
- * record either way).
+ *  1. the host's connect policy refused it (plan / egress isolation),
+ *  2. it failed to connect at boot and `OS_ALLOW_DRIVER_CONNECT_FAILURE` let
+ *     the server start anyway,
+ *  3. the app misspelled the datasource name, and
+ *  4. it is declared `active: false`.
+ *
+ * (3) is an authoring bug; (1) and (2) are states of the deployment. Answering
+ * all of them identically sends the reader hunting for a typo that isn't there.
+ * Cases the connection layer never recorded keep the original message — there is
+ * genuinely nothing more to say about a name nobody declared.
+ *
+ * **The message never carries the underlying cause.** A connect failure's text
+ * routinely contains the host, port, or DSN, and a policy's `reason` is written
+ * for operators; neither is safe to hand to whoever is browsing a record. The
+ * cause stays in the startup logs and the datasource-admin list, and this error
+ * says which of those to read. A host that wants to tell tenants something
+ * specific sets `publicReason` on its connect decision.
  */
-export function emitDegradedBootBanner(message: string): void {
-  const proc = (globalThis as {
-    process?: { stderr?: { write?: (chunk: string) => unknown } };
-  }).process;
-  try {
-    if (typeof proc?.stderr?.write === 'function') {
-      proc.stderr.write(`${message}\n`);
-      return;
-    }
-  } catch {
-    /* stderr unavailable / closed — fall through to console */
-  }
-  try {
-    (globalThis as { console?: { error?: (msg: string) => void } }).console?.error?.(message);
-  } catch {
-    /* no output channel at all — the logger record is the remaining trace */
+export class DatasourceUnavailableError extends Error {
+  readonly code = 'ERR_DATASOURCE_UNAVAILABLE' as const;
+
+  constructor(
+    public readonly datasource: string,
+    public readonly objectName: string,
+    public readonly kind: DatasourceUnavailableKind,
+    publicDetail?: string,
+  ) {
+    const head =
+      `[ObjectQL] Datasource '${datasource}' configured for object '${objectName}' is declared but not connected`;
+    const why =
+      kind === 'blocked'
+        ? `: the host's datasource connect policy refused it.`
+        : `: it failed to connect at startup and the server was started with ` +
+          `OS_ALLOW_DRIVER_CONNECT_FAILURE. Nothing re-runs the connect — the server must be ` +
+          `restarted once the datasource is reachable.`;
+    const detail = publicDetail ? ` ${publicDetail}` : '';
+    super(`${head}${why}${detail} See the startup logs or Setup → Datasources for the cause.`);
+    this.name = 'DatasourceUnavailableError';
   }
 }
+
+/**
+ * The degraded-boot banner now lives in `@objectstack/types` because
+ * `DatasourceConnectionService` owes the operator the same banner for the same
+ * flag (framework#3758) and must not depend on the whole query engine to print
+ * it. Re-exported here so this module stays the single import site for
+ * engine-side driver-connect failure reporting.
+ */
+export { emitDegradedBootBanner } from '@objectstack/types';

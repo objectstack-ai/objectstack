@@ -1,6 +1,7 @@
 {
   "content/docs/ai/agents.mdx": 5,
   "content/docs/ai/index.mdx": 2,
+  "content/docs/api/client-sdk.mdx": 2,
   "content/docs/api/error-catalog.mdx": 1,
   "content/docs/automation/approvals.mdx": 1,
   "content/docs/concepts/architecture.mdx": 4,
@@ -13,7 +14,7 @@
   "content/docs/kernel/contracts/data-engine.mdx": 1,
   "content/docs/kernel/events.mdx": 1,
   "content/docs/kernel/services-checklist.mdx": 4,
-  "content/docs/permissions/authentication.mdx": 5,
+  "content/docs/permissions/authentication.mdx": 4,
   "content/docs/permissions/authorization.mdx": 3,
   "content/docs/permissions/delegated-administration.mdx": 11,
   "content/docs/permissions/index.mdx": 1,

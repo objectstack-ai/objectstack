@@ -128,7 +128,7 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **storage** | ✅ | 2 | File upload & download |
 | **i18n** | ✅ | 3 | Internationalization |
 | **notifications** | ✅ | 3 | List, mark-read, mark-all-read (inbox/receipt spine, ADR-0030) |
-| **ai** | ✅ | 3 | AI services (NLQ, suggest, insights) |
+| **ai** | ✅ | 10 | Chat (JSON + streaming), completion, model picker, conversation CRUD — the surface `service-ai` (Cloud/EE) mounts |
 
 The former `permissions`, `views`, `workflow`, and `realtime` namespaces (and
 the notifications device/preference helpers) were removed in #3612: no server
@@ -312,21 +312,40 @@ await client.notifications.markAllRead();
 // through sys_inbox_message and tracks read-state in sys_notification_receipt.
 // These helpers will be repointed during the objectui bell cut-over.
 
-// AI — the `client.ai` namespace was REMOVED in v17 (#3718).
+// AI — served by `service-ai` (Cloud/EE); 404s "AI service is not configured"
+// when the plugin is absent, so check `discovery.services` first.
+const answer = await client.ai.chat({
+  messages: [{ role: 'user', content: 'How many open orders this quarter?' }],
+  conversationId,                        // omit to have one created and echoed back
+});
+answer.content;                          // string
+answer.usage?.totalTokens;
+
+// Streaming — the Vercel UI Message Stream Protocol, frame by frame.
+for await (const frame of await client.ai.chatStream({ messages })) {
+  if (frame.type === 'text-delta') process.stdout.write(frame.delta as string);
+}
+
+await client.ai.complete({ prompt: 'Summarise this account in one line:' });
+await client.ai.models();                // plan-filtered picker list (ADR-0028)
+
+// Conversations — all six routes, scoped to the authenticated user server-side.
+const conv = await client.ai.conversations.create({ title: 'Q3 pipeline' });
+await client.ai.conversations.list({ limit: 20 });
+await client.ai.conversations.get(conv.id);
+await client.ai.conversations.addMessage(conv.id, { role: 'user', content: 'hi' });
+await client.ai.conversations.update(conv.id, { title: 'Renamed' });
+await client.ai.conversations.delete(conv.id);
+
+// In a React chat UI prefer `useChat()` (`@ai-sdk/react`) over `ai.chatStream`:
+// it speaks the same protocol and owns message state. These methods are for
+// everything that is not a component — server code, jobs, CLIs, tests.
 //
-// It held `nlq`, `suggest` and `insights`, which built
-// /api/v1/ai/{nlq,suggest,insights}. No server in any repo ever mounted those
-// paths, so every call 404ed for the whole life of the namespace. They were
-// typed and shipped, which is exactly why they looked usable.
-//
-// The AI surface that DOES exist is served by `service-ai` (Cloud/EE):
-// POST /api/v1/ai/chat and /chat/stream, POST /complete, GET /models, and six
-// /conversations routes. The SDK has no method for any of them yet — that is
-// tracked on #3718 as new API, not as a rename of what was removed.
-//
-// For chat, call the endpoint directly with the Vercel AI SDK
-// (`useChat()` from `@ai-sdk/react`); it speaks the Data Stream Protocol that
-// POST /api/v1/ai/chat serves.
+// #3718 history: `client.ai` used to hold `nlq`, `suggest` and `insights`,
+// building /api/v1/ai/{nlq,suggest,insights}. No server in any repo ever
+// mounted those paths, so every call 404ed for the whole life of the
+// namespace. They were typed and shipped, which is exactly why they looked
+// usable. v17 removed them; the methods above are the surface that exists.
 
 // i18n — Internationalization
 await client.i18n.getLocales();

@@ -95,19 +95,19 @@ The core dispatcher implements only the list / read / read-all routes above. Dev
 
 ### AI (`/ai`) — Plugin Required
 
-These are the routes `service-ai` mounts:
+These are the routes `service-ai` mounts, and the SDK method that reaches each:
 
-| Method | Endpoint | Description |
-|:-------|:---------|:------------|
-| POST | `/ai/chat` | Chat completion (Vercel Data Stream or JSON) |
-| POST | `/ai/chat/stream` | SSE streaming chat |
-| POST | `/ai/complete` | Text completion |
-| GET | `/ai/models` | Models this environment offers (ADR-0028) |
-| GET | `/ai/status` | Active adapter provenance |
-| GET | `/ai/effective-model` | Resolved model ids and their source |
-| POST / GET | `/ai/conversations` | Create / list conversations |
-| GET / PATCH / DELETE | `/ai/conversations/:id` | Read / update / delete |
-| POST | `/ai/conversations/:id/messages` | Append a message |
+| Method | Endpoint | SDK | Description |
+|:-------|:---------|:----|:------------|
+| POST | `/ai/chat` | `ai.chat` / `ai.chatStream` | Chat completion — JSON with `stream: false`, otherwise the Vercel UI Message Stream |
+| POST | `/ai/chat/stream` | — | Generic-SSE twin of `/ai/chat`: the same completion without the tool loop or persistence |
+| POST | `/ai/complete` | `ai.complete` | Text completion |
+| GET | `/ai/models` | `ai.models` | Models this environment offers (ADR-0028) |
+| GET | `/ai/status` | — | Active adapter provenance (console diagnostics) |
+| GET | `/ai/effective-model` | — | Resolved model ids and their source (console diagnostics) |
+| POST / GET | `/ai/conversations` | `ai.conversations.create` / `.list` | Create / list conversations |
+| GET / PATCH / DELETE | `/ai/conversations/:id` | `ai.conversations.get` / `.update` / `.delete` | Read / update / delete |
+| POST | `/ai/conversations/:id/messages` | `ai.conversations.addMessage` | Append a message |
 
 <Callout type="warn">
 **This table used to be inverted (#3718).** It listed `/ai/nlq`,
@@ -116,12 +116,16 @@ and its callout stated "there is no `/ai/chat` route", which was wrong.
 
 The three phantom routes were declared in `DEFAULT_AI_ROUTES` and called by
 `client.ai.nlq/suggest/insights`; every call 404ed. **v17 removed that SDK
-namespace** rather than build endpoints for it, so nothing calls them now.
+namespace** rather than build endpoints for it, and the same issue then gave
+the SDK the surface that does exist — the `ai.*` column above.
 
-No route above has a client-SDK method yet — reach them directly, or with
-`useChat()` (`@ai-sdk/react`) for chat, which speaks the Data Stream Protocol
-`POST /ai/chat` serves. Reviewed dispositions for all 12 live in the `cloud`
-repo, `packages/service-ai/src/ai-route-ledger.ts`.
+Reviewed dispositions for all 12 routes live in the `cloud` repo,
+`packages/service-ai/src/ai-route-ledger.ts`, whose conformance test reads
+`buildAIRoutes()` and drives the SDK against it. The three rows with no SDK
+method are deliberate: `/status` and `/effective-model` are operator
+diagnostics, and `/chat/stream` is superseded by `/chat`'s streaming mode.
+For a React chat UI prefer `useChat()` (`@ai-sdk/react`) — it speaks the same
+protocol `ai.chatStream` parses and owns message state for you.
 </Callout>
 
 ### i18n (`/i18n`) — Plugin Required

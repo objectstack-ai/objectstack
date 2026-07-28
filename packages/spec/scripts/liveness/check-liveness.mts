@@ -27,10 +27,20 @@
 // (see proof-registry.mts), a `live` classification MUST carry a valid proof —
 // the file must exist and declare the `@proof: <id>` tag. CI fails otherwise.
 //
+// RE-VERIFICATION CLOCK (`verifiedAt`): a ledger entry is a claim with a
+// timestamp, and code moves under it in BOTH directions — `flow.status` (#3711)
+// and `action.undoable` (#3714) were both understated by entries that were
+// accurate when written. An optional `"verifiedAt": "YYYY-MM-DD"` records when a
+// human last closed the call graph. Age never fails CI (re-verification is a
+// worklist); a MALFORMED or future date does, because it silently disables the
+// staleness check for that entry.
+//
 // Usage:
-//   tsx check-liveness.mts                 # check all governed types
-//   tsx check-liveness.mts --dump <type>   # inventory a type's properties (seeding aid)
-//   tsx check-liveness.mts --json          # machine-readable report
+//   tsx check-liveness.mts                        # check all governed types
+//   tsx check-liveness.mts --dump <type>          # inventory a type's properties (seeding aid)
+//   tsx check-liveness.mts --json                 # machine-readable report
+//   tsx check-liveness.mts --stale-verification   # print the re-verification worklist
+//   tsx check-liveness.mts --stale-verification=90  # ...with a custom staleness threshold
 
 process.env.OS_EAGER_SCHEMAS = '1';
 
@@ -47,6 +57,13 @@ import {
   parseProofRef,
   validateProofRef,
 } from './proof-registry.mts';
+import {
+  DEFAULT_STALE_DAYS,
+  buildVerificationReport,
+  type VerificationEntry,
+  type VerificationReport,
+} from './verification.mts';
+import { checkEvidence } from './evidence.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -185,7 +202,14 @@ const report: any = {
   proofErrors: [] as string[], // a `proof` ref that doesn't resolve (missing file / missing tag / malformed)
   proofMissing: [] as string[], // a bound high-risk `live` entry with no proof at all
   orphanProofs: [] as string[], // a dogfood `@proof:` tag not registered in proof-registry.mts
+  verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
+  evidenceLocal: 0, // repo-rooted evidence paths actually resolved against this checkout
+  evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here
 };
+
+// Every classified entry, for the `verifiedAt` fold below. Collected during the
+// walk so the age report sees exactly the set the gate itself classified.
+const verificationEntries: VerificationEntry[] = [];
 
 const proofFs = { existsSync, readFileSync };
 
@@ -193,9 +217,17 @@ function classify(type: string, path: string, status: string, led: any, cat: any
   cat.classified++;
   cat.byStatus[status] = (cat.byStatus[status] || 0) + 1;
   report.totals.byStatus[status] = (report.totals.byStatus[status] || 0) + 1;
+  // Framework-auto entries (`led === null`) have no ledger row to date-stamp.
+  if (led !== null) verificationEntries.push({ key: `${type}/${path}`, status, verifiedAt: led?.verifiedAt });
   if (status === 'live' && led?.evidence) {
-    const file = String(led.evidence).split(':')[0];
-    if (/\//.test(file) && !existsSync(join(repoRoot, file))) report.staleEvidence.push(`${type}/${path} → ${led.evidence}`);
+    // Extract every repo-rooted path the evidence claims and resolve the ones
+    // attributed to THIS repo. Cross-repo pointers (objectui / cloud) are
+    // counted, not resolved — see evidence.mts for why the old
+    // `split(':')[0]` heuristic reported ~100% false positives.
+    const ev = checkEvidence(led.evidence, (p) => existsSync(join(repoRoot, p)));
+    report.evidenceForeign += ev.foreign.length;
+    report.evidenceLocal += ev.local.length;
+    for (const miss of ev.missing) report.staleEvidence.push(`${type}/${path} → ${miss}`);
   }
   // ── ADR-0054 prove-it-runs ──
   const boundClass = BOUND_PROOF_PATHS.get(`${type}/${path}`);
@@ -271,9 +303,18 @@ for (const type of GOVERNED) {
 
 scanOrphanProofs();
 
+// ── verifiedAt: how old is each claim? ──
+// Age never fails the gate — re-verification is a worklist, not a merge gate.
+// A MALFORMED value does fail: it silently disables the staleness check for
+// that entry, the exact silent-no-op shape this ledger exists to catch.
+const staleDaysArg = args.find((a) => a.startsWith('--stale-verification'));
+const staleDays = Number(staleDaysArg?.split('=')[1]) || DEFAULT_STALE_DAYS;
+const showWorklist = staleDaysArg !== undefined;
+report.verification = buildVerificationReport(verificationEntries, { staleDays });
+
 const totalUnclassified = report.unclassified.length;
 const totalProofFailures = report.proofErrors.length + report.proofMissing.length;
-const failed = totalUnclassified > 0 || totalProofFailures > 0;
+const failed = totalUnclassified > 0 || totalProofFailures > 0 || report.verification.errors.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -284,6 +325,10 @@ if (asJson) {
   }
   const boundClasses = HIGH_RISK_CLASSES.filter((c) => c.bound).map((c) => c.label);
   console.log(`\nprove-it-runs (ADR-0054): proof REQUIRED for bound high-risk classes — ${boundClasses.join(', ') || 'none'}`);
+  console.log(
+    `\nevidence paths: ${report.evidenceLocal} resolved against this checkout, ` +
+    `${report.evidenceForeign} attributed to another repo (objectui / cloud — not resolvable here).`,
+  );
   if (report.staleEvidence.length) {
     console.log(`\n⚠ ${report.staleEvidence.length} 'live' entr(ies) cite a missing file:`);
     report.staleEvidence.forEach((s: string) => console.log(`    ${s}`));
@@ -303,6 +348,29 @@ if (asJson) {
   if (totalUnclassified) {
     console.log(`\n✗ ${totalUnclassified} UNCLASSIFIED — classify in packages/spec/liveness/<type>.json:`);
     report.unclassified.forEach((s: string) => console.log(`    ${s}`));
+  }
+  // ── re-verification clock ──
+  const v = report.verification!;
+  if (v.errors.length) {
+    console.log(`\n✗ ${v.errors.length} malformed \`verifiedAt\` value(s) — a bad date silently disables the staleness check:`);
+    v.errors.forEach((s: string) => console.log(`    ${s}`));
+  }
+  const dated = v.fresh + v.stale.length;
+  console.log(
+    `\nre-verification clock: ${dated} entr(ies) carry \`verifiedAt\` (${v.stale.length} older than ${staleDays}d), ` +
+    `${v.unverified.length} undated.`,
+  );
+  if (showWorklist) {
+    if (v.stale.length) {
+      console.log(`\n  stale (verified > ${staleDays}d ago) — re-verify oldest first:`);
+      v.stale.forEach((s) => console.log(`    ${s.key.padEnd(40)} ${s.verifiedAt} (${s.ageDays}d)`));
+    }
+    if (v.unverified.length) {
+      console.log(`\n  never dated (${v.unverified.length}) — predate the field; date them as you re-verify:`);
+      v.unverified.forEach((k: string) => console.log(`    ${k}`));
+    }
+  } else if (v.stale.length || v.unverified.length) {
+    console.log('  run with --stale-verification[=days] for the worklist.');
   }
   if (!failed) {
     console.log('\n✓ all governed-type properties are classified; all bound high-risk proofs resolve.');

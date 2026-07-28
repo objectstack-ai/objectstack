@@ -9,7 +9,7 @@ import type { TranslationData } from '@objectstack/spec/system';
  */
 export const jaJP: TranslationData = {
   objects: {
-    task: {
+    todo_task: {
       label: 'タスク',
       pluralLabel: 'タスク',
       fields: {

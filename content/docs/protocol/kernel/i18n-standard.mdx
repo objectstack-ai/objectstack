@@ -801,6 +801,46 @@ Output:
     ...
 ```
 
+### Orphan Keys and Option Keys
+
+`os i18n check` runs in one direction — which keys the metadata expects that no
+bundle carries. The reverse direction (keys a bundle carries that no metadata
+claims) is checked by `os validate`, `os lint`, and `os compile`, which walk
+every bundle against the stack it ships with:
+
+| Key | Must name |
+|:---|:---|
+| `objects.{object}` | an object this stack defines, or a platform object |
+| `objects.{object}.fields.{field}` | a field that object declares |
+| `objects.{object}.fields.{field}.options.{key}` | an option's stored **`value`** |
+| `objects.{object}._views.{view}` | a view's `name` |
+| `objects.{object}._actions.{action}` | an action bound to that object |
+| `objects.{object}._actions.{action}.params.{param}` | a param's `name` |
+| `objects.{object}._sections.{section}` | a `fieldGroups[].key`, or a section with a `name` |
+| `apps.{app}` / `apps.{app}.navigation.{id}` | an app's `name` / a navigation item's `id` |
+| `dashboards.{dash}` / `.widgets.{id}` / `.actions.{actionUrl}` | the dashboard's `name` / a widget `id` / a header `actionUrl` |
+| `globalActions.{action}` | an action with **no** `objectName` |
+
+An unresolvable key is a **warning**, not an error: nothing crashes, the string
+simply renders in its source locale while every neighbouring label resolves — so
+the app looks translated and one field does not.
+
+The option case is worth spelling out. Option maps are keyed by the option's
+stored `value`, never by its display label:
+
+```typescript
+// source: Field.select({ options: [{ value: 'direct_mail', label: 'Direct Mail' }] })
+
+options: { direct_mail: '直邮' }    // ✅ keyed by value
+options: { 'Direct Mail': '直邮' }  // ❌ keyed by the label — never resolves
+options: { 'direct-mail': '直邮' }  // ❌ a variant spelling of the value
+```
+
+`messages`, `validationMessages`, `settings`, `settingsCommon` and
+`metadataForms` are **not** checked: their keys are owned by application code,
+plugins, and the platform's own metadata-type registry rather than by this
+stack's metadata, so there is no set of legal names to resolve against.
+
 ### Translation Service Integration
 
 <Callout type="warn">

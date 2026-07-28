@@ -165,6 +165,17 @@ export interface AutomationResult {
     /** Execution duration in milliseconds */
     durationMs?: number;
     /**
+     * Machine-readable failure classification, set alongside `error` when the
+     * caller must distinguish *why* it failed rather than just report it.
+     *
+     * Today the one value is `'forbidden'` — {@link IAutomationService.resume}
+     * refused because the run is parked on a node whose descriptor declares
+     * `resumeAuthority: 'service'` (#3801). A transport maps it to 403; without
+     * it a resume denied on authorization grounds is indistinguishable from
+     * "no such run".
+     */
+    code?: 'forbidden';
+    /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be
      * continued later with {@link IAutomationService.resume}. Absent or
@@ -190,6 +201,24 @@ export interface AutomationResult {
     errorMessage?: string;
 }
 
+/**
+ * Marker a SERVICE stamps on its {@link ResumeSignal} to prove the resume is
+ * the tail of a decision it already authorized and recorded (#3801).
+ *
+ * A run parked on a node whose descriptor declares `resumeAuthority: 'service'`
+ * (today: `approval`) is resumable ONLY with this marker present. It is a
+ * symbol on purpose: the generic resume route builds its signal out of a JSON
+ * body, and no JSON body can produce a symbol-keyed property — so the marker
+ * is unforgeable from outside the process, while an in-process owner
+ * (`ApprovalService.decide` and friends) just sets it.
+ *
+ * Registered via `Symbol.for` so duplicate copies of this package in one
+ * process still agree on identity.
+ */
+export const RESUME_AUTHORITY_SERVICE: unique symbol = Symbol.for(
+    'objectstack.automation.resume.service',
+);
+
 /** Signal payload used to resume a paused run (ADR-0019). */
 export interface ResumeSignal {
     /**
@@ -211,6 +240,13 @@ export interface ResumeSignal {
      * `{var}` interpolation and conditions read them directly.
      */
     variables?: Record<string, unknown>;
+    /**
+     * Set by the service that OWNS the suspension to clear the resume gate on
+     * a `resumeAuthority: 'service'` node (#3801). See
+     * {@link RESUME_AUTHORITY_SERVICE} — unforgeable from an HTTP body, and
+     * ignored entirely on `'any'` nodes.
+     */
+    [RESUME_AUTHORITY_SERVICE]?: true;
 }
 
 export interface IAutomationService {
@@ -285,6 +321,15 @@ export interface IAutomationService {
      * have previously returned `{ status: 'paused', runId }` from
      * {@link execute} (or a prior `resume`). Continues traversal from the
      * suspended node's out-edges, applying `signal.output` / `signal.branchLabel`.
+     *
+     * **Gated by the suspended node (#3801).** When the run is parked on a node
+     * whose descriptor declares `resumeAuthority: 'service'`, only that node's
+     * owning service may continue it — the call is refused with
+     * `{ success: false, code: 'forbidden' }` unless `signal` carries
+     * {@link RESUME_AUTHORITY_SERVICE}. The gate follows a subflow pause down
+     * to the child the signal would actually land on, so a parent parked on a
+     * `subflow` node is no way around it.
+     *
      * @param runId - The paused run's id
      * @param signal - Optional output to merge and/or branch label to follow
      * @returns The result of continuing the run (may itself be `'paused'` again)

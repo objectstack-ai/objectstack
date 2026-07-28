@@ -725,7 +725,15 @@ describe('AnalyticsService — auto-inferred cube log level', () => {
   it('logs at debug (not warn) for a scalar metric over an unregistered cube', async () => {
     const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn().mockReturnThis() } as any;
     await makeService(logger).query({ cube: 'showcase_task', measures: ['count'] });
-    expect(logger.warn).not.toHaveBeenCalled();
+    // [#3867] Asserted against THIS message rather than "warn was never called
+    // at all". These services are built without `isRegisteredObject`, so the
+    // cube-existence gate correctly stands down and warns once about being
+    // inactive — a different message, and not what this pair is about. The
+    // contract here is the LEVEL of the no-cube-registered log, which is
+    // exactly how the sibling case below already asserts it.
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('No cube registered for "showcase_task"'),
+    );
     expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('No cube registered for "showcase_task"'));
   });
 

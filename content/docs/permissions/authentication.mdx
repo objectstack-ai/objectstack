@@ -668,39 +668,52 @@ new AuthPlugin({
 })
 ```
 
-#### Positions as membership tiers
+#### Membership tiers are a closed list
 
 `sys_member.role` is better-auth's own column and the one place ObjectStack
-keeps that vocabulary (ADR-0090 D3's single boundary exception). Beyond the
-four built-in tiers — `owner`, `admin`, `delegated_admin`, `member` — every
-[position](/docs/permissions/positions) and
-[permission set](/docs/permissions/permission-sets) your stack declares is
-registered as a valid value, so an invitation can name one directly:
+keeps that vocabulary (ADR-0090 D3's single boundary exception). It holds
+exactly four values — `owner`, `admin`, `delegated_admin`, `member` — and your
+stack cannot add to them.
+
+That is deliberate (ADR-0108). A membership tier answers *what is your standing
+in this organization*, which decides what you can **reach**: `delegated_admin`,
+for instance, is the tier that may reach `/organization/invite-member` without
+being an org admin. What you may **do** with records is a
+[position](/docs/permissions/positions), and every position assignment carries
+an audit stamp (`granted_by`), a validity window, and a scope check that a tier
+never had.
+
+To invite someone straight into a position, put it in the invitation's
+*placement* rather than its membership tier:
 
 ```http
 POST /api/v1/auth/organization/invite-member
-{ "email": "new.hire@example.com", "role": "sales_rep" }
+{
+  "email": "new.hire@example.com",
+  "role": "member",
+  "businessUnitId": "bu_field_sales",
+  "positions": ["sales_rep"]
+}
 ```
 
-On acceptance the value lands in `sys_member.role`, and the membership
-projection passes an unrecognized value through as a position name — so the
-invitee holds `sales_rep` in `current_user.positions` and resolves whatever
-permission sets are bound to it. Both `sys_invitation` and `sys_member` build
-their pickers from that same registered set, so the Setup UI offers your names
-alongside the built-ins.
+The tier stays `member`; the capability rides in `positions`. Placement is
+authorized at issuance against the issuer's `adminScope`, so a delegated admin
+can use it inside their own subtree — where the tier route was open to org
+admins only. On acceptance the positions become real `sys_user_position` rows.
 
-Two limits bound this as a provisioning path:
+<Callout type="warn">
+Earlier releases registered every declared position and permission-set name as
+a valid membership tier, so naming one directly in the invitation was accepted.
+That path is removed: because every value stored in the tier column is
+projected into `current_user.positions`, it granted capability with none of the
+controls above. Naming a position as an invitation's tier is now refused with
+`ROLE_NOT_FOUND`. Use `positions` as shown.
+</Callout>
 
-- **It never hands out more authority than the issuer has.** An issuer below
-  `admin` grade may invite as plain `member` only, and no invitation may confer
-  a tier above the issuer's own. A delegated admin grants capability through
-  the invitation's *placement* (business unit + positions), authorized against
-  their `adminScope` — not through the membership tier, which nothing scopes.
-- **Only spec-compliant names are registered.** A declared name that is not
-  lowercase snake_case (`/^[a-z][a-z0-9_]*$/`, minimum 2 characters) is skipped
-  with a boot warning, and an invitation naming it is refused with
-  `ROLE_NOT_FOUND` — better-auth never learns a name the write path could not
-  store.
+One limit still bounds invitations as a provisioning path: **they never hand out
+more authority than the issuer has.** An issuer below `admin` grade may invite
+as plain `member` only, and no invitation may confer a tier above the issuer's
+own.
 
 ### Admin User Management
 

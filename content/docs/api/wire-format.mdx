@@ -380,6 +380,28 @@ Returned when an `If-Match` / `expectedVersion` token no longer matches the stor
 }
 ```
 
+### Datasource Unavailable — `503 Service Unavailable`
+
+Returned when the object's declared `datasource` has no live driver: the host's
+connect policy refused it, or it failed to connect at startup and the server was
+started with `OS_ALLOW_DRIVER_CONNECT_FAILURE`. Nothing about the request is
+wrong, and the state may clear — so this is a `503`, not a `400` or a `500`.
+
+`reason` is the class (`blocked` | `failed`). The underlying cause is
+deliberately **not** included — it routinely contains hosts, ports and DSNs; it
+stays in the server logs and **Setup → Datasources**. See
+[External Datasources](/docs/data-modeling/external-datasources#what-a-query-against-an-unusable-datasource-says).
+
+```json
+{
+  "error": "[ObjectQL] Datasource 'analytics' configured for object 'visit' is declared but not connected: the host's datasource connect policy refused it. See the startup logs or Setup → Datasources for the cause.",
+  "code": "ERR_DATASOURCE_UNAVAILABLE",
+  "datasource": "analytics",
+  "reason": "blocked",
+  "object": "visit"
+}
+```
+
 <Callout type="info">
 **Error Codes:** See the [Error Catalog](/docs/api/error-catalog) for the complete list of error codes and their meanings.
 </Callout>

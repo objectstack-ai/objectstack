@@ -90,7 +90,7 @@ const result = ActionNavItem.parse(data);
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration |
 | **embed** | `{ enabled?: boolean; allowedOrigins?: string[]; width?: string; height?: string; … }` | optional | Iframe embedding configuration |
 | **mobileNavigation** | `{ mode?: Enum<'drawer' \| 'bottom_nav' \| 'hamburger'>; bottomNavItems?: string[] }` | optional | Mobile-specific navigation configuration |
-| **defaultAgent** | `string` | optional | Name of the default AI agent for this app (used by the ambient chat endpoint) |
+| **defaultAgent** | `string` | optional | Platform agent bound to this app's ambient chat ('ask' is the implicit default; 'build' for authoring surfaces) — ADR-0063 §1 |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the application |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this app. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |

@@ -2080,6 +2080,41 @@ describe('mapDataError — schema/constraint envelopes', () => {
   // errors through mapDataError (not sendError's `.status` passthrough), so
   // the code needs its own branch — without it the 403 degraded to the
   // catch-all 400 (caught live in the runtime smoke test).
+  // #3828: an object whose declared datasource is refused by the host policy,
+  // or failed to connect under OS_ALLOW_DRIVER_CONNECT_FAILURE. Nothing about
+  // the REQUEST is wrong, so 4xx lies; and it is a dependency/policy state that
+  // may clear, so 503 is more honest (and more actionable to a proxy) than 500.
+  it('maps ERR_DATASOURCE_UNAVAILABLE → 503 with the datasource and reason class', () => {
+    const r = mapDataError(
+      Object.assign(
+        new Error(
+          "[ObjectQL] Datasource 'analytics' configured for object 'visit' is declared but not connected: " +
+          "the host's datasource connect policy refused it. External datasources require the Scale plan. " +
+          'See the startup logs or Setup → Datasources for the cause.',
+        ),
+        { code: 'ERR_DATASOURCE_UNAVAILABLE', datasource: 'analytics', kind: 'blocked' },
+      ),
+      'visit',
+    );
+    expect(r.status).toBe(503);
+    expect(r.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
+    expect(r.body.datasource).toBe('analytics');
+    expect(r.body.reason).toBe('blocked');
+    expect(r.body.object).toBe('visit');
+    // The message is sanitised at the throw site, so it passes through as-is.
+    expect(String(r.body.error)).toContain('require the Scale plan');
+  });
+
+  it('does not downgrade ERR_DATASOURCE_UNAVAILABLE to the generic 400 catch-all', () => {
+    const r = mapDataError(
+      Object.assign(new Error("Datasource 'x' ... is declared but not connected"), {
+        code: 'ERR_DATASOURCE_UNAVAILABLE',
+        kind: 'failed',
+      }),
+    );
+    expect(r.status).toBe(503);
+  });
+
   it('maps FEEDS_DISABLED → 403 with the gated target object', () => {
     const r = mapDataError(
       Object.assign(new Error("Comments are disabled for object 'gate_probe' (enable.feeds: false)"), {
@@ -2329,6 +2364,44 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.status).toBe(400);
     expect(r.body.error).toBe('线索信息不完整');
     expect(r.body.object).toBeUndefined();
+  });
+
+  // [#3770] The protocol's registry gate is now the PRIMARY producer of the
+  // unknown-object 404 — it answers from the schema registry before the name
+  // ever becomes a table name, instead of the REST layer inferring it from a
+  // driver's error string. Both producers must land on ONE wire envelope, or
+  // a client keying on `code` sees which layer noticed rather than what
+  // happened.
+  const objectNotFound = (object: string) =>
+    Object.assign(new Error(`Object '${object}' not found`), {
+      code: 'OBJECT_NOT_FOUND',
+      status: 404,
+      object,
+    });
+
+  it('maps the protocol registry gate OBJECT_NOT_FOUND → 404 object_not_found', () => {
+    const r = mapDataError(objectNotFound('ghost'), 'ghost');
+    expect(r.status).toBe(404);
+    expect(r.body.code).toBe('object_not_found');
+    expect(r.body.object).toBe('ghost');
+  });
+
+  it('emits the identical envelope whether the gate or the driver detected it', () => {
+    const fromGate = mapDataError(objectNotFound('ghost'), 'ghost');
+    const fromDriver = mapDataError(sqliteError('no such table: ghost'), 'ghost');
+    expect(fromGate).toEqual(fromDriver);
+  });
+
+  it('names the object from the error itself when the caller passes none', () => {
+    const r = mapDataError(objectNotFound('ghost'));
+    expect(r.status).toBe(404);
+    expect(r.body.code).toBe('object_not_found');
+    expect(r.body.object).toBe('ghost');
+  });
+
+  it('does not let the generic 4xx passthrough ship the internal SCREAMING_CASE code', () => {
+    const r = mapDataError(objectNotFound('ghost'), 'ghost');
+    expect(r.body.code).not.toBe('OBJECT_NOT_FOUND');
   });
 });
 

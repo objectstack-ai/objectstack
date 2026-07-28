@@ -197,11 +197,12 @@ export const SysInvitation = ObjectSchema.create({
       description: 'Email address of the invited user',
     }),
     
-    // [#3723] Same list as `sys_member.role`, from the same constant — this is
-    // the value that lands there on acceptance, so the two can never be allowed
-    // to drift. App-declared organization roles are appended at boot by
-    // plugin-auth's `withMembershipRoleOptions`, from the same normalized array
-    // that registers them with better-auth; do not hand-add one here.
+    // [ADR-0108 / #3723] Same list as `sys_member.role`, from the same
+    // constant — this is the value that lands there on acceptance, so the two
+    // can never be allowed to drift. The vocabulary is CLOSED: an app's own
+    // business roles are positions, carried by this invitation's `positions`
+    // placement field (ADR-0105 D8), which is authorized against the issuer's
+    // `adminScope` instead of riding in un-gated on the role name.
     role: Field.select({
       label: 'Role',
       required: false,

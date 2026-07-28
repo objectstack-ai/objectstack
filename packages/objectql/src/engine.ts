@@ -19,9 +19,26 @@ import {
   isDataMigrationFlagVerified,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
-import { IDataDriver, IDataEngine, Logger, createLogger, withTransientRetry, type RetryOptions } from '@objectstack/core';
+import {
+  IDataDriver,
+  IDataEngine,
+  Logger,
+  createLogger,
+  withTransientRetry,
+  type RetryOptions,
+  filterTokenContextFrom,
+  resolveFilterTokens,
+} from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
-import { DriverConnectError, emitDegradedBootBanner, type DriverConnectFailure, type DriverHealth } from './driver-connect-errors.js';
+import {
+  DriverConnectError,
+  DatasourceUnavailableError,
+  emitDegradedBootBanner,
+  type DriverConnectFailure,
+  type DriverHealth,
+  type DatasourceUnavailableInfo,
+  type DatasourceUnavailableKind,
+} from './driver-connect-errors.js';
 import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 
 /**
@@ -345,6 +362,12 @@ export class ObjectQL implements IDataEngine {
   // ownership. Populated from manifests in registerApp and via
   // registerDatasourceDef. Absent entry ⇒ treated as managed (default DB).
   private datasourceDefs = new Map<string, { schemaMode?: string; external?: { allowWrites?: boolean } }>();
+
+  // Declared-but-unusable datasources, keyed by name (framework#3828). Written
+  // by the datasource connection layer via markDatasourceUnavailable; read only
+  // by getDriver, to explain a missing driver instead of blaming a typo. Empty
+  // is the normal state — an entry here means a connect was refused or failed.
+  private unavailableDatasources = new Map<string, DatasourceUnavailableInfo>();
 
   // Per-object hooks with priority support
   private hooks: Map<string, HookEntry[]> = new Map([
@@ -1473,6 +1496,51 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
+   * Record that a **declared** datasource has no live driver, and why
+   * (framework#3828). Called by `DatasourceConnectionService` when a connect is
+   * refused by the host policy or fails while the operator has opted into a
+   * degraded boot.
+   *
+   * The engine only needs this to answer a query well: without it
+   * {@link getDriver} cannot tell a refused datasource from a misspelled one and
+   * says `is not registered` to both. Deliberately carries no operator-facing
+   * cause — see {@link DatasourceUnavailableError}.
+   */
+  markDatasourceUnavailable(info: { name: string; kind: DatasourceUnavailableKind; publicDetail?: string }): void {
+    if (!info?.name) return;
+    this.unavailableDatasources.set(info.name, {
+      kind: info.kind,
+      ...(info.publicDetail ? { publicDetail: info.publicDetail } : {}),
+    });
+  }
+
+  /** Drop a {@link markDatasourceUnavailable} record (successful (re)connect / pool removal). */
+  clearDatasourceUnavailable(name: string): void {
+    this.unavailableDatasources.delete(name);
+  }
+
+  /**
+   * Name of the DEFAULT driver, when one is registered (#3826). The default
+   * driver keeps its natural name (`registerDriver(driver, true)` — nothing
+   * routes by `drivers.get('default')`), so the datasource connection layer's
+   * `asDefault` idempotency guard needs this rather than a name lookup.
+   */
+  getDefaultDriverName(): string | undefined {
+    return this.defaultDriver ?? undefined;
+  }
+
+  /**
+   * Datasources that were declared but are NOT usable, with the reason class.
+   *
+   * Distinct from {@link checkDriversHealth}, which answers "can a REGISTERED
+   * driver serve a query right now" and therefore cannot see these at all — a
+   * datasource that never connected was never registered (framework#3827).
+   */
+  listUnavailableDatasources(): Array<{ name: string } & DatasourceUnavailableInfo> {
+    return Array.from(this.unavailableDatasources, ([name, info]) => ({ name, ...info }));
+  }
+
+  /**
    * Write gate — Gate 3 of ADR-0015 §5.3.
    *
    * Blocks insert/update/delete against a federated datasource
@@ -1752,6 +1820,21 @@ export class ObjectQL implements IDataEngine {
       if (this.drivers.has(object.datasource)) {
         return this.drivers.get(object.datasource)!;
       }
+      // The datasource layer may have recorded WHY this one has no driver —
+      // refused by the host policy, or failed to connect under
+      // OS_ALLOW_DRIVER_CONNECT_FAILURE (framework#3828). Saying so beats
+      // sending the reader hunting for a typo that isn't there.
+      const unavailable = this.unavailableDatasources.get(object.datasource);
+      if (unavailable) {
+        throw new DatasourceUnavailableError(
+          object.datasource,
+          objectName,
+          unavailable.kind,
+          unavailable.publicDetail,
+        );
+      }
+      // No record: nothing ever tried to connect this name, so it is genuinely
+      // undeclared (or misspelled). Unchanged message — there is nothing to add.
       throw new Error(`[ObjectQL] Datasource '${object.datasource}' configured for object '${objectName}' is not registered.`);
     }
 
@@ -2519,6 +2602,53 @@ export class ObjectQL implements IDataEngine {
   // Data Access Methods (IDataEngine Interface)
   // ============================================
 
+  /**
+   * Expand `{filter-placeholder}` values in a read AST's `where` against the
+   * request (framework#3582).
+   *
+   * Filters travel as JSON, so a time- or user-scoped slice authored in a view,
+   * dashboard, related list or REST query writes `'{current_year_start}'` /
+   * `'{current_user_id}'` rather than a literal. Until now nothing on the server
+   * substituted them: the placeholder reached the driver as a string, compared
+   * as text, and matched nothing — an empty grid with no error anywhere.
+   *
+   * The engine is the right seam because it is the ONE gate every server-side
+   * read passes through (REST, SDK, related lists, flow `find_records`, sharing
+   * graph reads), so a surface that follows the filter contract works the day it
+   * ships instead of waiting for its own resolver. It runs BEFORE the middleware
+   * chain so only author-supplied filters are inspected; the RLS/sharing filters
+   * injected downstream are built from concrete context values and carry no
+   * placeholders.
+   *
+   * Cheap by construction: {@link resolveFilterTokens} returns the input by
+   * reference when the tree holds no placeholder, which is every internal query.
+   * An unresolvable placeholder throws (see the resolver's module doc) — the one
+   * outcome an author can act on.
+   */
+  private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContextInput): void {
+    if (!ast || ast.where == null) return;
+    ast.where = resolveFilterTokens(ast.where, filterTokenContextFrom(execCtx));
+  }
+
+  /**
+   * The write-path counterpart of {@link resolveWhereTokens}: return `options`
+   * with `where` placeholders expanded (#3810).
+   *
+   * Returns the SAME object when nothing resolved — `resolveFilterTokens`
+   * returns its input by reference on a placeholder-free tree, so the common
+   * path allocates nothing. When something does resolve, a shallow copy is
+   * made rather than assigning through: `options` belongs to the caller, and
+   * writing back would bake one request's user id into a filter object the
+   * caller may reuse (view metadata and flow node config both get reused).
+   */
+  private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContextInput } | undefined>(
+    options: T,
+  ): T {
+    if (!options || options.where == null) return options;
+    const resolved = resolveFilterTokens(options.where, filterTokenContextFrom(options.context));
+    return resolved === options.where ? options : ({ ...options, where: resolved } as T);
+  }
+
   async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     this.logger.debug('Find operation starting', { object, query });
@@ -2610,6 +2740,7 @@ export class ObjectQL implements IDataEngine {
       options: query,
       context: mergeReadContext(query?.context, options?.context),
     };
+    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
 
     await this.executeWithMiddleware(opCtx, async () => {
       const hookContext: HookContext = {
@@ -2697,6 +2828,7 @@ export class ObjectQL implements IDataEngine {
       options: query,
       context: mergeReadContext(query?.context, options?.context),
     };
+    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
 
     await this.executeWithMiddleware(opCtx, async () => {
       // [#3195] `findOne` fires the SAME `beforeFind`/`afterFind` hooks as
@@ -3028,7 +3160,20 @@ export class ObjectQL implements IDataEngine {
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      const driver = this.getDriver(object);
-     
+
+     // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
+     // The read path resolves them; without the same call here the SAME filter
+     // selected different rows depending on the verb — `find({owner:
+     // '{current_user_id}'})` matched the signed-in user's rows while
+     // `update`/`delete` compared the literal token text and matched none. That
+     // is the #3106 shape one layer down: the evaluator existed, but only some
+     // call sites reached it.
+     //
+     // Ordering matters: a scalar `where.id` becomes the by-id fast path below,
+     // so an unresolved `{current_user_id}` would be bound as the primary key
+     // itself. Resolve first, then extract.
+     options = this.withResolvedWhere(options);
+
      // 1. Extract ID from data or where if it's a single update by ID.
      //    Only a SCALAR `where.id` means "update one row by primary key". An
      //    operator object ({ $in: [...] }, { $ne: ... }, …) is a multi-row
@@ -3407,6 +3552,10 @@ export class ObjectQL implements IDataEngine {
     this.assertWriteAllowed(object, 'delete');
     const driver = this.getDriver(object);
 
+    // Expand `{filter-placeholder}` values before the id is extracted — same
+    // reasoning as update() above (#3810).
+    options = this.withResolvedWhere(options);
+
     // Extract ID logic mirroring update(): only a SCALAR `where.id` means
     // "delete one row by primary key". An operator object ({ $in: [...] }, …)
     // is a multi-row predicate — treating it as an id would bind the object
@@ -3546,6 +3695,11 @@ export class ObjectQL implements IDataEngine {
        options: query,
        context: mergeReadContext(query?.context, options?.context),
      };
+     this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
+     // The caller's own `where`, placeholders expanded — captured BEFORE the
+     // middleware chain scopes `opCtx.ast.where`, so the find() fallback below
+     // still passes the unscoped filter (find() applies the read filters itself).
+     const callerWhere = (opCtx.ast as QueryAST).where;
 
      await this.executeWithMiddleware(opCtx, async () => {
        const countOpts = this.buildDriverOptions(object, opCtx.context);
@@ -3554,7 +3708,7 @@ export class ObjectQL implements IDataEngine {
        }
        // Fallback to find().length — find() applies the read filters itself,
        // so pass the caller's original where, not the already-scoped ast.
-       const res = await this.find(object, { where: query?.where, fields: ['id'], context: opCtx.context });
+       const res = await this.find(object, { where: callerWhere, fields: ['id'], context: opCtx.context });
        return res.length;
      });
 
@@ -3622,6 +3776,7 @@ export class ObjectQL implements IDataEngine {
         options: query,
         context: mergeReadContext(query?.context, options?.context),
       };
+      this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
 
       await this.executeWithMiddleware(opCtx, async () => {
         const ast = opCtx.ast as QueryAST;

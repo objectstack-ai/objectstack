@@ -29,10 +29,20 @@ import {
   ListNotificationsResponse,
   MarkNotificationsReadResponse,
   MarkAllNotificationsReadResponse,
-  // Ai{Nlq,Suggest,Insights}{Request,Response} are no longer imported: the
-  // `ai` namespace that used them is gone in v17 (#3718). They are still
-  // RE-EXPORTED below, straight from `@objectstack/spec/api`, so anyone
-  // holding those types keeps them while the spec still declares them.
+  // The AI wire types (#3718). `Ai{Nlq,Suggest,Insights}{Request,Response}`
+  // used to be here; they typed three endpoints nothing has ever mounted and
+  // went with the methods that called them. These type the routes that exist.
+  AiMessage,
+  AiChatRequest,
+  AiChatResponse,
+  AiStreamChunk,
+  AiCompleteRequest,
+  AiModelsResponse,
+  AiConversation,
+  CreateAiConversationRequest,
+  ListAiConversationsRequest,
+  ListAiConversationsResponse,
+  UpdateAiConversationRequest,
   GetLocalesResponse,
   GetTranslationsResponse,
   GetFieldLabelsResponse,
@@ -228,6 +238,70 @@ export interface StandardError {
   httpStatus: number;
   retryable: boolean;
   details?: Record<string, any>;
+}
+
+/**
+ * Parse an SSE response body into the JSON frames it carries.
+ *
+ * Used by `ai.chatStream` (#3718). Both AI streaming routes write one JSON
+ * object per `data:` line and terminate with `data: [DONE]`, so this reads
+ * line-by-line rather than splitting on the `\n\n` frame separator: the
+ * encoder also emits a few single-`\n` `g:`-prefixed lines (the legacy Data
+ * Stream Protocol form for reasoning deltas) that a frame-split would glue
+ * onto the next event. Non-`data:` lines are skipped, as is a `data:` payload
+ * that is not JSON — a malformed frame mid-stream must not destroy the frames
+ * around it.
+ *
+ * A module-level function, not a client method: the SDK's URL-conformance
+ * sweep enumerates every callable on the client and demands each one either
+ * issue a request or carry an explicit non-HTTP reason. A parser is neither.
+ */
+async function* parseEventStream(res: Response): AsyncIterable<AiStreamChunk> {
+  const body = res.body as (ReadableStream<Uint8Array> & AsyncIterable<Uint8Array>) | null | undefined;
+  if (!body) {
+    throw new Error('Streaming response carried no body — this runtime\'s fetch does not expose `Response.body`');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const emit = function* (chunk: string): Generator<AiStreamChunk> {
+    buffer += chunk;
+    let nl: number;
+    while ((nl = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;      // blank separators, `g:` reasoning frames
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        yield JSON.parse(payload) as AiStreamChunk;
+      } catch {
+        // A frame the server did not finish writing, or a non-JSON payload.
+      }
+    }
+  };
+
+  // `getReader()` in the browser and modern Node; async iteration for the
+  // Node-stream bodies older fetch polyfills hand back.
+  if (typeof body.getReader === 'function') {
+    const reader = body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        yield* emit(decoder.decode(value, { stream: true }));
+      }
+    } finally {
+      reader.releaseLock?.();
+    }
+  } else {
+    for await (const value of body) {
+      yield* emit(decoder.decode(value as Uint8Array, { stream: true }));
+    }
+  }
+
+  yield* emit(decoder.decode());
 }
 
 export class ObjectStackClient {
@@ -2443,11 +2517,23 @@ export class ObjectStackClient {
         return completeJson;
     },
     
+    /**
+     * Resolve a committed file to a short-lived signed download URL.
+     *
+     * Read through `unwrapResponse` rather than off the raw body: the route
+     * answers the declared `{ success: true, data: { url } }` envelope as of
+     * #3689, and this SDK ships as its own npm package against servers it was
+     * not built with. `unwrapResponse` strips the envelope when it is there
+     * and hands back the body untouched when it is not, so a client on either
+     * side of that server upgrade resolves the same URL. That is the SDK's one
+     * standard envelope seam — every other enveloped method already goes
+     * through it — not a fallback grown for this route.
+     */
     getDownloadUrl: async (fileId: string): Promise<string> => {
         const route = this.getRoute('storage');
         const res = await this.fetch(`${this.baseUrl}${route}/files/${fileId}/url`);
-        const data = await res.json();
-        return data.url;
+        const { url } = await this.unwrapResponse<{ url: string }>(res);
+        return url;
     },
 
     /**
@@ -2720,7 +2806,7 @@ export class ObjectStackClient {
           return this.unwrapResponse(res) as Promise<T>;
       },
       /**
-       * Resume a run suspended at a `screen` (or `approval`) node — the
+       * Resume a run suspended at a `screen` (or `wait`) node — the
        * screen-flow runtime's second half (ADR-0019 durable pause).
        *
        * `execute()` returns `{ status: 'paused', runId, screen }` when a flow
@@ -2729,6 +2815,13 @@ export class ObjectStackClient {
        * NEXT `{ status: 'paused', screen }` of a multi-step wizard or the
        * terminal `AutomationResult`. Without this method a paused run can only
        * be finished by hand-rolling the HTTP call (#3528).
+       *
+       * **Not the door for an approval (#3801).** A run parked on an
+       * `approval` node — directly, or as the child of a `subflow` pause — is
+       * resumable only through the approvals API
+       * ({@link ObjectStackClient.approvals}: `approve` / `reject` / `recall`),
+       * which authorizes the decision and records it first. This call answers
+       * **403** for one and changes nothing.
        */
       resume: async <T = any>(
           flowName: string,
@@ -3459,27 +3552,173 @@ export class ObjectStackClient {
     }
   };
 
-  // The `ai` namespace is GONE in v17 (#3718).
-  //
-  // It held exactly three methods — `nlq`, `suggest`, `insights` — building
-  // `/api/v1/ai/{nlq,suggest,insights}`. Nothing in any repo ever mounted those
-  // paths: they were declared in `DEFAULT_AI_ROUTES` (which has no runtime
-  // consumer) and typed as optional protocol methods (`aiNlq?` …) nothing
-  // implements. Every call 404ed, from the first release that shipped them.
-  //
-  // What DOES exist is a different surface entirely, served by `service-ai`
-  // (Cloud/EE): `POST /ai/chat`, `/ai/chat/stream`, `/ai/complete`,
-  // `GET /ai/models`, and six `/ai/conversations` routes. The SDK expressed
-  // none of them, so its AI namespace and the real AI surface were disjoint
-  // sets. Ledgered in `cloud`: `packages/service-ai/src/ai-route-ledger.ts`.
-  //
-  // Deliberately removed rather than left deprecated: a typed method that
-  // always throws is worse than no method — it costs a runtime round-trip to
-  // discover, where absence is a compile error. Expressing the real surface is
-  // tracked separately on #3718; it is a new API, not a rename of this one.
-  //
-  // For chat specifically the answer is unchanged: use the Vercel AI SDK
-  // (`useChat()` from `@ai-sdk/react`) directly against the chat endpoint.
+  /**
+   * AI Services — the surface `service-ai` really mounts (#3718).
+   *
+   * ## What this namespace is, and what it replaced
+   *
+   * Until v17 `client.ai` held `nlq`, `suggest` and `insights`, building
+   * `/api/v1/ai/{nlq,suggest,insights}`. **No repo has ever mounted those
+   * paths**; every call 404ed from the first release that shipped them. They
+   * were deleted rather than implemented, because the AI service that was
+   * actually built serves a different surface entirely — the two sets were
+   * disjoint. The methods below are that surface: `POST /ai/chat` (JSON or
+   * streaming), `POST /ai/complete`, `GET /ai/models`, and the six
+   * `/ai/conversations` routes.
+   *
+   * ## Where the server lives
+   *
+   * `service-ai` is a **Cloud/EE package in the `cloud` repo**. This repo's
+   * dispatcher only proxies `/api/v1/ai/**` to whatever `buildAIRoutes()`
+   * mounted, and 404s `AI service is not configured` when the service is
+   * absent (the open-source default) — so treat every method here as
+   * plugin-provided and check `discovery.services` first.
+   *
+   * That split is also why the guard for these URLs lives on the other side of
+   * the repo boundary: `cloud`'s `packages/service-ai/src/ai-route-ledger.ts`
+   * enumerates the table `buildAIRoutes()` returns and drives this namespace
+   * against it, so a method here that stops resolving fails a test there.
+   *
+   * ## Chat, and `useChat`
+   *
+   * `useChat()` from `@ai-sdk/react` remains the right client for a React chat
+   * UI — it speaks the same UI Message Stream Protocol {@link chatStream}
+   * parses, and it owns message state. These methods exist for everything that
+   * is not a React component: server-side callers, jobs, CLIs, tests.
+   */
+  ai = {
+    /**
+     * Chat completion, returned as JSON.
+     *
+     * Sends `stream: false` — the endpoint streams by default, so the flag is
+     * forced here rather than left to the caller. Tools are resolved
+     * server-side before the reply comes back, and the turn is persisted to
+     * `conversationId` (auto-created and echoed back when omitted).
+     */
+    chat: async (request: AiChatRequest): Promise<AiChatResponse> => {
+      const route = this.getRoute('ai');
+      const res = await this.fetch(`${this.baseUrl}${route}/chat`, {
+        method: 'POST',
+        body: JSON.stringify({ ...request, stream: false }),
+      });
+      return this.unwrapResponse<AiChatResponse>(res);
+    },
+
+    /**
+     * Chat completion as a stream of {@link AiStreamChunk} frames (the Vercel
+     * UI Message Stream Protocol).
+     *
+     * Returns a promise for an async iterable rather than being an async
+     * generator itself, so the request is issued — and an HTTP error thrown —
+     * when you call it, not when you first iterate.
+     *
+     * ```ts
+     * for await (const frame of await client.ai.chatStream({ messages })) {
+     *   if (frame.type === 'text-delta') process.stdout.write(frame.delta);
+     * }
+     * ```
+     */
+    chatStream: async (request: AiChatRequest): Promise<AsyncIterable<AiStreamChunk>> => {
+      const route = this.getRoute('ai');
+      const res = await this.fetch(`${this.baseUrl}${route}/chat`, {
+        method: 'POST',
+        headers: { 'Accept': 'text/event-stream' },
+        body: JSON.stringify({ ...request, stream: true }),
+      });
+      return parseEventStream(res);
+    },
+
+    /** Single-shot text completion. */
+    complete: async (request: AiCompleteRequest): Promise<AiChatResponse> => {
+      const route = this.getRoute('ai');
+      const res = await this.fetch(`${this.baseUrl}${route}/complete`, {
+        method: 'POST',
+        body: JSON.stringify(request),
+      });
+      return this.unwrapResponse<AiChatResponse>(res);
+    },
+
+    /**
+     * Models this environment offers in the chat model picker (ADR-0028) —
+     * plan-filtered, with the default flagged. Populate a model picker from
+     * this rather than hard-coding ids.
+     */
+    models: async (): Promise<AiModelsResponse> => {
+      const route = this.getRoute('ai');
+      const res = await this.fetch(`${this.baseUrl}${route}/models`);
+      return this.unwrapResponse<AiModelsResponse>(res);
+    },
+
+    /**
+     * Persistent conversations.
+     *
+     * Every route is scoped to the authenticated user server-side: `create`
+     * binds the conversation to the caller and the rest 403 on someone else's.
+     * `userId` in a request body is ignored — it is not a way to act for
+     * another user.
+     */
+    conversations: {
+      /** Create a conversation. */
+      create: async (request?: CreateAiConversationRequest): Promise<AiConversation> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/conversations`, {
+          method: 'POST',
+          body: JSON.stringify(request ?? {}),
+        });
+        return this.unwrapResponse<AiConversation>(res);
+      },
+
+      /** List the caller's conversations, newest first. */
+      list: async (options?: ListAiConversationsRequest): Promise<AiConversation[]> => {
+        const route = this.getRoute('ai');
+        const params = new URLSearchParams();
+        if (options?.agentId) params.set('agentId', options.agentId);
+        if (options?.limit !== undefined) params.set('limit', String(options.limit));
+        if (options?.cursor) params.set('cursor', options.cursor);
+        const qs = params.toString();
+        const res = await this.fetch(`${this.baseUrl}${route}/conversations${qs ? `?${qs}` : ''}`);
+        const body = await this.unwrapResponse<ListAiConversationsResponse>(res);
+        return body?.conversations ?? [];
+      },
+
+      /** Get one conversation with its full message history. */
+      get: async (id: string): Promise<AiConversation> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/conversations/${encodeURIComponent(id)}`);
+        return this.unwrapResponse<AiConversation>(res);
+      },
+
+      /** Update mutable fields. At least one of `title` / `metadata` is required. */
+      update: async (id: string, patch: UpdateAiConversationRequest): Promise<AiConversation> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/conversations/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(patch),
+        });
+        return this.unwrapResponse<AiConversation>(res);
+      },
+
+      /** Delete a conversation and its messages. */
+      delete: async (id: string): Promise<{ deleted: boolean }> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/conversations/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        });
+        if (res.status === 204) return { deleted: true };
+        return this.unwrapResponse<{ deleted: boolean }>(res);
+      },
+
+      /** Append a message; returns the updated conversation. */
+      addMessage: async (id: string, message: AiMessage): Promise<AiConversation> => {
+        const route = this.getRoute('ai');
+        const res = await this.fetch(`${this.baseUrl}${route}/conversations/${encodeURIComponent(id)}/messages`, {
+          method: 'POST',
+          body: JSON.stringify(message),
+        });
+        return this.unwrapResponse<AiConversation>(res);
+      },
+    },
+  };
 
   /**
    * Internationalization Services
@@ -3503,15 +3742,16 @@ export class ObjectStackClient {
      * The `?locale=` query form this used to send matched no route anywhere
      * and 404'd on the wire; the dispatcher's domain body accepts it, but
      * nothing ever routes a bare `/translations` to that body (#3636).
+     *
+     * Returns the locale's full bundle. The `options.namespace` / `options.keys`
+     * this used to accept rode the query string to a server that read neither,
+     * so the filter silently did nothing — trimmed with the request schema's
+     * fields in #3676.
      */
-    getTranslations: async (locale: string, options?: { namespace?: string; keys?: string[] }): Promise<GetTranslationsResponse> => {
+    getTranslations: async (locale: string): Promise<GetTranslationsResponse> => {
       const route = this.getRoute('i18n');
-      const params = new URLSearchParams();
-      if (options?.namespace) params.set('namespace', options.namespace);
-      if (options?.keys) params.set('keys', options.keys.join(','));
-      const query = params.toString();
       const res = await this.fetch(
-        `${this.baseUrl}${route}/translations/${encodeURIComponent(locale)}${query ? `?${query}` : ''}`,
+        `${this.baseUrl}${route}/translations/${encodeURIComponent(locale)}`,
       );
       return this.unwrapResponse<GetTranslationsResponse>(res);
     },
@@ -4423,9 +4663,10 @@ export class ScopedProjectClient {
       return this.parent._unwrap<T>(res);
     },
     /**
-     * Resume a run suspended at a `screen` / `approval` node with the collected
+     * Resume a run suspended at a `screen` / `wait` node with the collected
      * input (ADR-0019 durable pause). Mirrors the unscoped
-     * `client.automation.resume`.
+     * `client.automation.resume` — including its refusal (403) to resume an
+     * `approval` pause, which belongs to the approvals API (#3801).
      */
     resume: async <T = any>(
       flowName: string,
@@ -4495,12 +4736,17 @@ export type {
   RegisterDeviceRequest,
   RegisterDeviceResponse,
   ListNotificationsResponse,
-  AiNlqRequest,
-  AiNlqResponse,
-  AiSuggestRequest,
-  AiSuggestResponse,
-  AiInsightsRequest,
-  AiInsightsResponse,
+  AiMessage,
+  AiChatRequest,
+  AiChatResponse,
+  AiStreamChunk,
+  AiCompleteRequest,
+  AiModelsResponse,
+  AiConversation,
+  CreateAiConversationRequest,
+  ListAiConversationsRequest,
+  ListAiConversationsResponse,
+  UpdateAiConversationRequest,
   GetLocalesResponse,
   GetTranslationsResponse,
   GetFieldLabelsResponse,

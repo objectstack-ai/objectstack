@@ -8,6 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
+import { redactConnectionUrl } from '../utils/connection-display.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 
 /**
@@ -252,7 +253,7 @@ export default class Dev extends Command {
       };
       printKV('Environment ID', environmentId, '🎯');
       printKV('Artifact', isUrl ? artifactPath : path.relative(process.cwd(), artifactPath), '📦');
-      if (effectiveDb) printKV('Database', redactDbUrl(effectiveDb), '🗄️');
+      if (effectiveDb) printKV('Database', redactConnectionUrl(effectiveDb), '🗄️');
 
       const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
       const binPath = process.argv[1];
@@ -498,13 +499,5 @@ export default class Dev extends Command {
     })().catch((e) => {
       console.error(chalk.yellow(`  ⚠ watch-recompile failed to start: ${e?.message ?? e}`));
     });
-  }
-}
-
-function redactDbUrl(url: string): string {
-  try {
-    return url.replace(/(\/\/[^/@:]+):[^/@]+@/, '$1:****@');
-  } catch {
-    return url;
   }
 }

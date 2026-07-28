@@ -107,6 +107,18 @@ export { suggestFieldType, findClosestMatches, formatSuggestion } from './shared
 export { normalizeMetadataCollection, normalizeStackInput, normalizePluginMetadata, MAP_SUPPORTED_FIELDS, METADATA_ALIASES } from './shared/metadata-collection.zod';
 export type { MetadataCollectionInput, MapSupportedField, NormalizeStackInputOptions } from './shared/metadata-collection.zod';
 
+// Pre-parse authoring lint (#3743) — the one window where a deprecated alias is
+// still visible, since the parse itself resolves and drops it. `defineStack`
+// warns from here; the CLI runs the same rules over stacks that skip it.
+export {
+  lintDeprecatedAliases,
+  formatDeprecatedAliasFinding,
+  ACTION_TARGET_EXECUTE_CONFLICT,
+  FIELD_REQUIREDWHEN_CONDITIONALREQUIRED_CONFLICT,
+  AGENT_KNOWLEDGE_SOURCES_TOPICS_CONFLICT,
+} from './shared/deprecated-aliases';
+export type { DeprecatedAliasFinding } from './shared/deprecated-aliases';
+
 // Metadata conversion layer (ADR-0087 D2) — old-shape → canonical-shape transforms applied at load.
 export * from './conversions/index.js';
 
@@ -173,8 +185,9 @@ export {
 } from './identity/eval-user.zod';
 export type { EvalUser, EvalUserInput, BuiltinIdentityName } from './identity/eval-user.zod';
 
-// #3723: organization membership roles — the ONE list read by better-auth's
-// role registry AND the `sys_invitation`/`sys_member` role selects.
+// #3723 / ADR-0108: organization membership roles — the closed, framework-owned
+// vocabulary behind better-auth's role registry AND the `sys_invitation` /
+// `sys_member` role selects. Capability travels through positions, never here.
 export {
   MEMBERSHIP_ROLE_OWNER,
   MEMBERSHIP_ROLE_ADMIN,
@@ -182,7 +195,5 @@ export {
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
   BUILTIN_MEMBERSHIP_ROLES,
   BUILTIN_MEMBERSHIP_ROLE_OPTIONS,
-  MEMBERSHIP_ROLE_NAME_PATTERN,
-  MEMBERSHIP_ROLE_NAME_MIN_LENGTH,
 } from './identity/membership-role';
 export type { BuiltinMembershipRole } from './identity/membership-role';

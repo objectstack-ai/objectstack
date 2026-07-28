@@ -593,4 +593,64 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             ).rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
         });
     });
+
+    // ═══════════════════════════════════════════════════════════════
+    // [#3770] Object-existence gate — the tiering, at unit level
+    //
+    // The gap itself (an unregistered object whose physical table exists) is
+    // pinned against a real engine in `protocol-unregistered-object.test.ts`.
+    // What this block pins is the DECISION RULE, which an engine double is the
+    // right tool for: registry present ⇒ the registry is the answer; no
+    // registry at all ⇒ there is no answer, so the gate stands down.
+    // ═══════════════════════════════════════════════════════════════
+
+    describe('object-existence gate (#3770)', () => {
+        function makeGateProtocol(known: string[]) {
+            const engine: any = {
+                find: vi.fn().mockResolvedValue([]),
+                findOne: vi.fn().mockResolvedValue(null),
+                count: vi.fn().mockResolvedValue(0),
+                insert: vi.fn().mockResolvedValue({ id: 'new-id' }),
+                update: vi.fn().mockResolvedValue({ id: 'r1' }),
+                delete: vi.fn().mockResolvedValue(undefined),
+                registry: {
+                    getObject: vi.fn((name: string) =>
+                        known.includes(name) ? { name, fields: {} } : undefined),
+                },
+            };
+            return { protocol: new ObjectStackProtocolImplementation(engine), engine };
+        }
+
+        it('consults the registry, not the driver, and never reaches the engine on a miss', async () => {
+            const { protocol, engine } = makeGateProtocol(['task']);
+            await expect(
+                protocol.findData({ object: 'ghost' }),
+            ).rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404, object: 'ghost' });
+            expect(engine.registry.getObject).toHaveBeenCalledWith('ghost');
+            expect(engine.find).not.toHaveBeenCalled();
+        });
+
+        it('lets a registered object straight through', async () => {
+            const { protocol, engine } = makeGateProtocol(['task']);
+            await protocol.findData({ object: 'task' });
+            expect(engine.find).toHaveBeenCalledOnce();
+        });
+
+        it('stands down when the engine exposes no registry at all — nothing to consult', async () => {
+            // The #3545 tiering: "whole registry unavailable" is a cold-start /
+            // embedding shape, not a security decision. Failing closed here
+            // would break every registry-less host for no gain, so the gate
+            // skips (and warns once — see assertObjectRegistered).
+            const engine: any = {
+                find: vi.fn().mockResolvedValue([]),
+                count: vi.fn().mockResolvedValue(0),
+            };
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            await expect(protocol.findData({ object: 'ghost' })).resolves.toMatchObject({
+                object: 'ghost',
+                records: [],
+            });
+            expect(engine.find).toHaveBeenCalledOnce();
+        });
+    });
 });

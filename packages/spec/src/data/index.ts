@@ -2,6 +2,10 @@
 
 export * from './query.zod';
 export * from './filter.zod';
+// Canonical conformance cases for the filter logical combinators — the shared
+// standard the four independent FilterCondition backends are each checked
+// against, so they cannot drift apart again (#3774).
+export * from './filter-logic-conformance';
 export * from './date-macros.zod';
 // Session-scoped filter placeholders ({current_user_id} / {current_org_id}) —
 // the sibling vocabulary to date macros. Presentation scope only; RLS is the

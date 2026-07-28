@@ -184,6 +184,13 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * `YYYY` / `YYYY-MM` / `YYYY-MM-DD` / `YYYY-Q[1-4]` / `YYYY-W[01-53]` (ISO-8601,
    * weeks start Monday). Any drift will misalign drill `groupKey` filters
    * between the two paths.
+   *
+   * The EMPTY bucket is part of that contract: a row with no instant MUST key as
+   * `null`, never a sentinel string (#3839). Propagating NULL through the bucket
+   * expression — what `strftime` / `date_trunc` / `to_char` already do — is the
+   * whole of it; a driver only breaks this by going out of its way to COALESCE.
+   * The same rule holds for a plain (non-date) `groupBy` column: a NULL value
+   * keys as `null`. `checkDateBucketParity` (`@objectstack/verify`) probes it.
    */
   queryDateGranularity: z.record(DateGranularity, z.boolean()).optional()
     .describe('Per-granularity native date bucketing (day/week/month/quarter/year). Missing keys fall back to in-memory bucketing.'),

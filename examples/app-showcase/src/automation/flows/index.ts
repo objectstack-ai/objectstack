@@ -186,7 +186,15 @@ export const BudgetApprovalFlow = defineFlow({
       config: {
         approvers: [{ type: 'position', value: 'manager' }],
         behavior: 'first_response',
-        lockRecord: true,
+        // Deliberately UNLOCKED, and the counterpart to `exec_review` below —
+        // together they dogfood both record-lock policies in one flow
+        // (objectui#2902). A single-approver step like this is the case the
+        // flag exists for: the manager is expected to correct the budget
+        // narrative in place rather than send the whole thing back. It also
+        // matches this node's own revise loop, which assumes the record is
+        // reworkable. The console must show "in approval · editable" here and
+        // keep inline editing live; on `exec_review` it must show the lock.
+        lockRecord: false,
         // ADR-0044: at most two send-backs; the third auto-rejects.
         maxRevisions: 2,
       },
@@ -212,6 +220,8 @@ export const BudgetApprovalFlow = defineFlow({
       config: {
         approvers: [{ type: 'position', value: 'exec' }],
         behavior: 'unanimous',
+        // Locked, unlike `manager_review` — a multi-approver sign-off must
+        // decide on a stable record, so edits are refused until it completes.
         lockRecord: true,
       },
     },
@@ -987,8 +997,10 @@ export const ResilientSyncFlow = defineFlow({
  * rejection resumes down `reject`. One node, one suspend/resume, no token tree —
  * the multi-instance pattern Camunda and Step Functions use for exactly this.
  *
- * Decide via the approvals API (never a raw engine `resume`):
- *   POST /api/v1/automation/showcase_invoice_signoff/runs/{runId}/...  ← no
+ * Decide via the approvals API — a raw engine `resume` is refused, not merely
+ * discouraged: the `approval` node declares `resumeAuthority: 'service'`, so
+ * the generic run-resume route answers 403 for a run parked on one (#3801).
+ *   POST /api/v1/automation/showcase_invoice_signoff/runs/{runId}/resume  ← 403
  *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:finance' }
  *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:legal' }   ← now it continues
  */

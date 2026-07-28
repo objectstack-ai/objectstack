@@ -316,3 +316,86 @@ describe('getDatasource', () => {
     expect(await service.getDatasource('missing')).toBeUndefined();
   });
 });
+
+// framework#3827 — `status` was the literal 'unvalidated' for every row, so a
+// datasource that died at boot looked exactly like a healthy-but-untested one.
+describe('listDatasources — status reflects the last connect verdict (framework#3827)', () => {
+  function harnessWithStates(
+    states: ReadonlyArray<{
+      name: string;
+      availability: 'available' | 'blocked' | 'failed' | 'unattempted';
+      reason?: string;
+    }>,
+  ) {
+    const config: DatasourceAdminServiceConfig = {
+      probe: async () => ({ ok: true }),
+      listDatasourceRecords: async () => [
+        { name: 'live', driver: 'sqlite', origin: 'code' },
+        { name: 'dead', driver: 'postgres', origin: 'code' },
+        { name: 'denied', driver: 'postgres', schemaMode: 'external', origin: 'code' },
+        { name: 'decorative', driver: 'sqlite', origin: 'code' },
+      ],
+      getDatasourceRecord: async () => undefined,
+      putDatasourceRecord: async () => {},
+      deleteDatasourceRecord: async () => {},
+      writeSecret: async () => 'ref',
+      countBoundObjects: async () => 0,
+      connectionStates: () => states,
+    };
+    return new DatasourceAdminService(config);
+  }
+
+  it('maps each availability class onto a distinguishable status', async () => {
+    const service = harnessWithStates([
+      { name: 'live', availability: 'available' },
+      { name: 'dead', availability: 'failed', reason: 'connect ECONNREFUSED 10.0.0.4:5432' },
+      { name: 'denied', availability: 'blocked', reason: 'plan=free; egress allow-list miss' },
+      // 'decorative' has no state at all — the D2 gate never attempted it.
+    ]);
+    const byName = Object.fromEntries((await service.listDatasources()).map((d) => [d.name, d]));
+
+    expect(byName.live!.status).toBe('ok');
+    expect(byName.dead!.status).toBe('error');
+    expect(byName.denied!.status).toBe('blocked');
+    expect(byName.decorative!.status).toBe('unvalidated');
+  });
+
+  it('carries the operator-facing reason for error/blocked only', async () => {
+    const service = harnessWithStates([
+      { name: 'live', availability: 'available', reason: 'should not be surfaced' },
+      { name: 'dead', availability: 'failed', reason: 'connect ECONNREFUSED 10.0.0.4:5432' },
+      { name: 'denied', availability: 'blocked', reason: 'plan=free; egress allow-list miss' },
+    ]);
+    const byName = Object.fromEntries((await service.listDatasources()).map((d) => [d.name, d]));
+
+    // This surface is admin-gated, so the raw cause is the useful answer here —
+    // it is the END-USER error that must stay sanitised (#3828).
+    expect(byName.dead!.statusReason).toContain('ECONNREFUSED');
+    expect(byName.denied!.statusReason).toContain('egress allow-list');
+    // A healthy datasource has nothing to explain.
+    expect(byName.live!.statusReason).toBeUndefined();
+    expect(byName.decorative!.statusReason).toBeUndefined();
+  });
+
+  it('an `unattempted` verdict reads the same as no verdict — nobody tried, nothing is known', async () => {
+    const service = harnessWithStates([{ name: 'live', availability: 'unattempted', reason: 'no driver factory' }]);
+    const live = (await service.listDatasources()).find((d) => d.name === 'live')!;
+    expect(live.status).toBe('unvalidated');
+    expect(live.statusReason).toBeUndefined();
+  });
+
+  it('falls back to `unvalidated` throughout when no connection service is wired', async () => {
+    const config: DatasourceAdminServiceConfig = {
+      probe: async () => ({ ok: true }),
+      listDatasourceRecords: async () => [{ name: 'x', driver: 'sqlite', origin: 'code' }],
+      getDatasourceRecord: async () => undefined,
+      putDatasourceRecord: async () => {},
+      deleteDatasourceRecord: async () => {},
+      writeSecret: async () => 'ref',
+      countBoundObjects: async () => 0,
+      // no `connectionStates`
+    };
+    const list = await new DatasourceAdminService(config).listDatasources();
+    expect(list[0]!.status).toBe('unvalidated');
+  });
+});

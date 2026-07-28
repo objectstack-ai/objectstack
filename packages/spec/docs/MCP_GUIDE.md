@@ -359,8 +359,11 @@ For operations with side effects, gate them with something that is enforced:
 `approval: 'always'` on the MCP tool binding, or `ai.requiresConfirmation` on
 the underlying **action** (+ the HITL approval queue).
 
-> ⚠️ `requiresConfirmation` on the **tool definition** is declared but read by
-> no execution path — it produces no pause (#3715).
+> ⚠️ The `requiresConfirmation` in these examples is an **MCP capability
+> descriptor** hint — surfaced to the client in `list_actions` so it *may* ask,
+> but nothing server-side pauses on it. Distinct from the `ToolSchema` field of
+> the same name, which was REMOVED in the 16.x line (#3715, ADR-0033 §2)
+> precisely because a safety flag no path enforces is false compliance.
 
 ### 4. Security
 

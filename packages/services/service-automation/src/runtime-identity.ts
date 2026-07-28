@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { markGuardRefusal } from './guard-refusal.js';
 
 /**
  * The IDENTITY envelope a flow's data nodes pass to ObjectQL as
@@ -90,6 +91,10 @@ export class UnscopedRunDataAccessError extends Error {
         `(a write made with a system context carries none). (ADR-0049, #1888, #3760)`,
     );
     this.name = 'UnscopedRunDataAccessError';
+    // #3863 — a guard refusal, so a `fault` edge must not route it. Elevation
+    // is the thing being refused; letting a handler swallow it would turn one
+    // declared edge into an opt-out from the ADR-0049 scoping check.
+    markGuardRefusal(this);
   }
 }
 

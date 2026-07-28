@@ -12,6 +12,8 @@ import {
   CompleteChunkedUploadRequestSchema,
   CompleteChunkedUploadResponseSchema,
   UploadProgressSchema,
+  FileDownloadUrlResponseSchema,
+  RawUploadResponseSchema,
   StorageApiContracts,
 } from './storage.zod';
 
@@ -605,6 +607,64 @@ describe('CompleteChunkedUploadResponseSchema', () => {
 });
 
 // ==========================================
+// Download / raw-loopback responses (#3689)
+//
+// Both routes existed long before they were declared, and both answered
+// outside the shared envelope while undeclared — `{ url }` and
+// `{ ok: true, key }`. The schemas below are the contract they now answer to;
+// `service-storage`'s success-envelope conformance suite parses the real
+// bodies against these exact objects.
+// ==========================================
+
+describe('FileDownloadUrlResponseSchema', () => {
+  it('should accept an absolute signed URL', () => {
+    const resp = FileDownloadUrlResponseSchema.parse({
+      success: true,
+      data: { url: 'https://bucket.s3.amazonaws.com/user/f1.png?X-Amz-Signature=abc' },
+    });
+    expect(resp.success).toBe(true);
+    expect(resp.data.url).toContain('X-Amz-Signature');
+  });
+
+  it('should accept the local adapter’s server-relative loopback URL', () => {
+    const resp = FileDownloadUrlResponseSchema.parse({
+      success: true,
+      data: { url: '/api/v1/storage/_local/raw/eyJrIjoi.c2ln' },
+    });
+    expect(resp.data.url).toBe('/api/v1/storage/_local/raw/eyJrIjoi.c2ln');
+  });
+
+  it('should reject the bare pre-#3689 shape', () => {
+    expect(() =>
+      FileDownloadUrlResponseSchema.parse({ url: 'https://cdn.example.com/f1.png' })
+    ).toThrow();
+  });
+
+  it('should reject a missing url', () => {
+    expect(() => FileDownloadUrlResponseSchema.parse({ success: true, data: {} })).toThrow();
+  });
+});
+
+describe('RawUploadResponseSchema', () => {
+  it('should accept the written key', () => {
+    const resp = RawUploadResponseSchema.parse({
+      success: true,
+      data: { key: 'user/f1.png' },
+    });
+    expect(resp.success).toBe(true);
+    expect(resp.data.key).toBe('user/f1.png');
+  });
+
+  it('should reject the pre-#3689 `{ ok, key }` shape', () => {
+    expect(() => RawUploadResponseSchema.parse({ ok: true, key: 'user/f1.png' })).toThrow();
+  });
+
+  it('should reject a missing key', () => {
+    expect(() => RawUploadResponseSchema.parse({ success: true, data: {} })).toThrow();
+  });
+});
+
+// ==========================================
 // Storage API Contracts
 // ==========================================
 
@@ -616,6 +676,9 @@ describe('StorageApiContracts', () => {
     expect(StorageApiContracts.uploadChunk).toBeDefined();
     expect(StorageApiContracts.completeChunkedUpload).toBeDefined();
     expect(StorageApiContracts.getUploadProgress).toBeDefined();
+    // #3689: the download resolve is an SDK-addressed route
+    // (`storage.getDownloadUrl`) that had been missing from the registry.
+    expect(StorageApiContracts.getDownloadUrl).toBeDefined();
   });
 
   it('should have correct HTTP methods', () => {
@@ -625,6 +688,7 @@ describe('StorageApiContracts', () => {
     expect(StorageApiContracts.uploadChunk.method).toBe('PUT');
     expect(StorageApiContracts.completeChunkedUpload.method).toBe('POST');
     expect(StorageApiContracts.getUploadProgress.method).toBe('GET');
+    expect(StorageApiContracts.getDownloadUrl.method).toBe('GET');
   });
 
   it('should have valid paths', () => {
@@ -633,6 +697,7 @@ describe('StorageApiContracts', () => {
     expect(StorageApiContracts.uploadChunk.path).toContain('/chunk/:chunkIndex');
     expect(StorageApiContracts.completeChunkedUpload.path).toContain('/complete');
     expect(StorageApiContracts.getUploadProgress.path).toContain('/progress');
+    expect(StorageApiContracts.getDownloadUrl.path).toContain('/storage/files/:fileId/url');
   });
 
   it('should have input and output schemas for each endpoint', () => {
@@ -645,5 +710,6 @@ describe('StorageApiContracts', () => {
     expect(StorageApiContracts.completeChunkedUpload.input).toBeDefined();
     expect(StorageApiContracts.completeChunkedUpload.output).toBeDefined();
     expect(StorageApiContracts.getUploadProgress.output).toBeDefined();
+    expect(StorageApiContracts.getDownloadUrl.output).toBeDefined();
   });
 });

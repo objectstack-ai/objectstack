@@ -287,6 +287,18 @@ For the exact Zod shape (and any field that may have been added since), read
 
 > **Critical:** Object names and field keys in translation bundles **must** match the `snake_case` names defined in your Object and Field schemas.
 
+Option sub-keys are the option's stored **`value`**, never its display label:
+for `options: [{ value: 'direct_mail', label: 'Direct Mail' }]` write
+`options: { direct_mail: '直邮' }` — both `'Direct Mail'` and `'direct-mail'`
+parse, ship, and resolve to nothing.
+
+`os validate` / `os lint` / `os compile` check this direction and report it as
+warnings (`translation-target-unknown`, `translation-option-key-unknown`): a key
+naming an object, field, view, action, param, section, app, nav item, dashboard
+or widget that does not exist is listed alongside the names that do. A bundle
+keyed to something since renamed still parses — the label just renders silently
+in its source locale while every neighbouring label resolves.
+
 ---
 
 ## Authoring at Runtime: the `translation` Item

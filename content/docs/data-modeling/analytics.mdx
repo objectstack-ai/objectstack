@@ -122,8 +122,15 @@ export const SalesByStageReport = {
 ```
 
 `rows` are the pivot's down-axis dimensions; `values` are measure names. A matrix
-report adds across-axis dimensions; `runtimeFilter` is the render-time scope
-(`{date-macro}` placeholders are resolved by the renderer before querying).
+report adds across-axis dimensions; `runtimeFilter` is the render-time scope.
+
+Placeholders inside a `filter` / `runtimeFilter` — `{date-macro}`s and the
+session tokens `{current_user_id}` / `{current_org_id}` — are resolved on **both**
+sides: by the renderer before it queries, and by the analytics dataset executor
+server-side. The server pass is what makes a widget work at all, since the
+native-SQL strategy compiles raw SQL and binds comparands directly without ever
+passing through a renderer. An unrecognised placeholder is a build error and a
+runtime error — never a literal string that quietly matches nothing.
 
 ## Cross-object joins
 

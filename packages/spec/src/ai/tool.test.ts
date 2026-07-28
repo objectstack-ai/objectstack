@@ -39,7 +39,6 @@ describe('ToolSchema', () => {
     expect(result.name).toBe('list_records');
     expect(result.active).toBe(true);
     expect(result.builtIn).toBe(false);
-    expect(result.requiresConfirmation).toBe(false);
   });
 
   it('should accept full tool', () => {
@@ -64,7 +63,6 @@ describe('ToolSchema', () => {
         },
       },
       objectName: 'support_case',
-      requiresConfirmation: true,
       permissions: ['case.create', 'support.agent'],
       active: true,
       builtIn: false,
@@ -74,7 +72,6 @@ describe('ToolSchema', () => {
     expect(result.name).toBe('create_case');
     expect(result.category).toBe('action');
     expect(result.objectName).toBe('support_case');
-    expect(result.requiresConfirmation).toBe(true);
     expect(result.permissions).toEqual(['case.create', 'support.agent']);
   });
 
@@ -162,7 +159,6 @@ describe('defineTool', () => {
 
     expect(tool.active).toBe(true);
     expect(tool.builtIn).toBe(false);
-    expect(tool.requiresConfirmation).toBe(false);
   });
 
   it('should throw on invalid tool name', () => {
@@ -172,5 +168,43 @@ describe('defineTool', () => {
       description: 'Test',
       parameters: {},
     })).toThrow();
+  });
+
+  // ── #3715 / ADR-0033 §2 — the retired `requiresConfirmation` safety flag ──
+  // Removing a key from a NON-strict schema would swap one silent no-op for
+  // another (zod strips it wordlessly). These pin the loud rejection AND the
+  // prescription it must carry — the parse error is the one channel a consumer
+  // bumping @objectstack/spec is guaranteed to hit.
+
+  it('REJECTS the retired `requiresConfirmation` instead of silently stripping it', () => {
+    const authored = {
+      name: 'delete_everything',
+      label: 'Delete Everything',
+      description: 'Destructive',
+      parameters: {},
+      requiresConfirmation: true,
+    };
+    expect(() => ToolSchema.parse(authored)).toThrow(/requiresConfirmation/);
+    expect(() => defineTool(authored as never)).toThrow();
+  });
+
+  it('the rejection names the REAL gate, not merely the removal', () => {
+    let message = '';
+    try {
+      ToolSchema.parse({
+        name: 't', label: 'T', description: 'd', parameters: {}, requiresConfirmation: true,
+      });
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    // FROM → TO: the action-level flag is the only path that stops execution.
+    expect(message).toMatch(/ai\.requiresConfirmation/);
+    expect(message).toMatch(/#3715/);
+  });
+
+  it('rejects an unrelated unknown key too (strictness is not special-cased)', () => {
+    expect(() => ToolSchema.parse({
+      name: 't', label: 'T', description: 'd', parameters: {}, notAToolField: 1,
+    })).toThrow(/notAToolField/);
   });
 });

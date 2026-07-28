@@ -24,6 +24,7 @@
  * | approval-expression-invalid                | error/info | #3447 P2 closed-root expressions |
  * | approval-expression-no-empty-policy        | info     | #3447 P2 empty-slate policy |
  * | approval-decision-outputs-reserved         | error    | #3447 P2 resume envelope   |
+ * | approval-approver-cross-org-unsupported    | error    | ADR-0105 D9 targeting      |
  *
  * The first two are mutually exclusive by construction — a bad *value* wins,
  * because its fix (`position`) differs from the deprecation's fix
@@ -42,10 +43,11 @@ import {
   APPROVAL_NODE_TYPE,
   DEPRECATED_APPROVER_TYPES,
   APPROVER_VALUE_BINDINGS,
+  approverTypeIsOrgScoped,
   canonicalApproverType,
   normalizeDecisionOutputs,
 } from '@objectstack/spec/automation';
-import { MEMBERSHIP_ROLE_DELEGATED_ADMIN } from '@objectstack/spec';
+import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec';
 import { collectCelRootIdentifiers } from '@objectstack/formula';
 
 export const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER = 'approval-approver-not-membership-tier';
@@ -57,6 +59,7 @@ export const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY = 'approval-approvers-may-reso
 export const APPROVAL_EXPRESSION_INVALID = 'approval-expression-invalid';
 export const APPROVAL_EXPRESSION_NO_EMPTY_POLICY = 'approval-expression-no-empty-policy';
 export const APPROVAL_DECISION_OUTPUTS_RESERVED = 'approval-decision-outputs-reserved';
+export const APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED = 'approval-approver-cross-org-unsupported';
 
 /**
  * The CLOSED root set an `expression` approver may reference (#3447 P2) —
@@ -101,21 +104,22 @@ export interface ApprovalApproverFinding {
 type AnyRec = Record<string, unknown>;
 
 /**
- * The better-auth org-membership tiers `sys_member.role` actually stores
- * (see `identity/organization.zod.ts` + `mapMembershipRole`). Anything else
- * authored as `{ type: 'org_membership_level' }` (or its deprecated `role`
- * spelling) is almost certainly a position name.
+ * The org-membership tiers `sys_member.role` actually stores — DERIVED, not
+ * transcribed (ADR-0108 / #3723).
+ *
+ * The vocabulary is closed and framework-owned, so the one source in
+ * `@objectstack/spec` is also the only correct list here. A hand-kept copy is
+ * how this list came to carry `guest`, which the `sys_member.role` select has
+ * never offered: an approver naming it resolved to nobody, and the lint that
+ * exists to catch exactly that stayed silent.
+ *
+ * Anything outside this set authored as `{ type: 'org_membership_level' }` (or
+ * its deprecated `role` spelling) is almost certainly a position name.
  */
-const MEMBERSHIP_TIERS = new Set([
-  'owner',
-  'admin',
-  'member',
-  'guest',
-  // [ADR-0105 D8 / #3697] A real tier since the framework registers it with the
-  // org plugin — the delegated issuer grade. It is storable in
-  // `sys_member.role`, so an approver naming it resolves to people, not nobody.
-  MEMBERSHIP_ROLE_DELEGATED_ADMIN,
-]);
+const MEMBERSHIP_TIERS: ReadonlySet<string> = new Set<string>(BUILTIN_MEMBERSHIP_ROLES);
+
+/** The same list, rendered for diagnostics — so no message can contradict it. */
+const MEMBERSHIP_TIER_LIST = BUILTIN_MEMBERSHIP_ROLES.join('/');
 
 /** Off-spec dialect spellings we can name a canonical fix for. */
 const TYPE_FIX: Record<string, string> = {
@@ -263,12 +267,13 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             path: `${path}.value`,
             message:
               `approver { type: '${type}', value: '${value}' } resolves against the better-auth ` +
-              `org-membership tier (sys_member.role: owner/admin/member) — '${value}' is not a ` +
-              `membership tier, so this approver matches nobody and the request stalls.`,
+              `org-membership tier (sys_member.role: ${MEMBERSHIP_TIER_LIST}) — '${value}' is not ` +
+              `a membership tier, so this approver matches nobody and the request stalls.`,
             hint:
               `If '${value}' is an org position, author { type: 'position', value: '${value}' } ` +
               `(resolved via sys_user_position, ADR-0090 D3). Keep type 'org_membership_level' ` +
-              `only for membership tiers (owner/admin/member).`,
+              `only for membership tiers (${MEMBERSHIP_TIER_LIST}) — the vocabulary is closed ` +
+              `(ADR-0108), so a business role is always a position.`,
           });
         } else if (type in DEPRECATED_APPROVER_TYPES) {
           const fix = canonicalApproverType(type);
@@ -300,6 +305,31 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             hint:
               `Route to people the engine can expand: { type: 'team' | 'department' | 'position', ... }. ` +
               `Queue approvers need a real ownership-queue implementation before they take effect.`,
+          });
+        }
+
+        // [ADR-0105 D9] Cross-organization targeting on a type that has no
+        // organization-scoped directory. `user` / `field` / `manager` name a
+        // person outright and `team` membership carries no organization, so the
+        // declaration cannot narrow anything — it is a misunderstanding of what
+        // the field does, and the runtime refuses it. Error, not warning: this
+        // is a certain authoring mistake with a certain fix, and letting it
+        // reach the runtime turns author time into an incident.
+        const declaredOrg = (a as AnyRec).organization;
+        if (typeof declaredOrg === 'string' && declaredOrg.trim() !== ''
+          && ApproverType.options.includes(canonical as never)
+          && !approverTypeIsOrgScoped(canonical)) {
+          findings.push({
+            severity: 'error',
+            rule: APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED,
+            where,
+            path: `${path}.organization`,
+            message:
+              `approver type '${type}' does not resolve through an organization directory, so ` +
+              `'organization: ${declaredOrg}' has no effect (ADR-0105 D9) — the runtime refuses it.`,
+            hint:
+              `Drop 'organization' here. Cross-organization targeting applies to ` +
+              `'position', 'org_membership_level', 'department' and 'expression' approvers.`,
           });
         }
       }

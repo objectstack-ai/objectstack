@@ -10,6 +10,8 @@ import { TranslationBundleSchema, TranslationConfigSchema } from './system/trans
 import { hasPlatformObjectPrefix } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
+import { lintDeprecatedAliases, formatDeprecatedAliasFinding } from './shared/deprecated-aliases';
+import type { ConversionNotice } from './conversions/types.js';
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
@@ -290,19 +292,29 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    *
    * Three-tier composition (Agent → Skill → Tool) aligned with Salesforce
    * Agentforce Topics, Microsoft Copilot Studio Topics, and ServiceNow Now
-   * Assist Skills:
+   * Assist Skills. Per ADR-0063, **skills (+ tools / MCP) are the only
+   * third-party extension primitive**:
    *
-   * - **agents**: Persona-bearing copilots (1-3 per app). Each agent declares
-   *   its base instructions, model, knowledge, and the set of skills it can
-   *   draw on. Users typically don't pick an agent per message — the active
-   *   app's `defaultAgent` is selected automatically.
-   * - **skills**: Reusable capability bundles ("topics" in Salesforce parlance).
-   *   Each skill groups related tools, declares trigger phrases for
+   * - **agents**: PLATFORM-INTERNAL (ADR-0063 §2). The kernel ships exactly
+   *   two agents — `ask` (data product) and `build` (authoring product) —
+   *   bound by surface, never picked from a roster. Tenant/app-package custom
+   *   agents were withdrawn (ADR-0040 §3 reversed): an agent declared here
+   *   parses, but the runtime catalog filters non-platform agent records, so
+   *   it is not a supported extension surface. Author skills instead.
+   * - **skills**: Reusable capability bundles ("topics" in Salesforce
+   *   parlance) — THE extension primitive. Each skill groups related tools,
+   *   declares its agent surface affinity (`'ask' | 'build' | 'both'`,
+   *   ADR-0063 §3 — checked by lint, enforced at load), trigger phrases for
    *   intent matching, and trigger conditions for context-aware activation.
+   * - **tools**: declaration-only metadata records today. The EXECUTABLE tool
+   *   set is runtime-registered (kernel + plugins); a `stack.tools` entry has
+   *   no handler binding and no runtime reader yet. The third-party tool
+   *   authoring model is an open decision (#3820 D0) — until it lands, a
+   *   skill's `tools[]` can only name runtime-registered tools.
    */
-  agents: z.array(AgentSchema).optional().describe('AI Agents and Assistants'),
-  tools: z.array(ToolSchema).optional().describe('AI Tools (callable functions referenced by Skills/Agents)'),
-  skills: z.array(SkillSchema).optional().describe('AI Skills (reusable capability bundles referenced by Agents)'),
+  agents: z.array(AgentSchema).optional().describe('AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents'),
+  tools: z.array(ToolSchema).optional().describe('AI Tool metadata records (declaration-only; the executable tool set is runtime-registered — see #3820 D0)'),
+  skills: z.array(SkillSchema).optional().describe('AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063)'),
 
   /**
    * ObjectQL: Data Extensions
@@ -1044,6 +1056,56 @@ function validateKnownCapabilities(config: ObjectStackDefinition): string[] {
   return errors;
 }
 
+/**
+ * Findings already reported this process, so a stack that is defined more than
+ * once (a dev-server reload, a config imported by several test files) nags once
+ * per distinct conflict. The key carries the action AND both slot values, so a
+ * genuinely different conflict is never suppressed. Mirrors the warn-once shape
+ * of `warnGenericPasswordFields` in `object.zod.ts`.
+ */
+const warnedAliasFindings = new Set<string>();
+
+/**
+ * [#3743] Surface every deprecated-alias conflict the parse is about to resolve
+ * silently. Advisory: this never throws, because the stack that comes out is
+ * well-defined — the author just loses one of the two handlers they wrote.
+ */
+function warnDeprecatedAliases(normalized: Record<string, unknown>): void {
+  for (const finding of lintDeprecatedAliases(normalized)) {
+    const key = `${finding.rule}\u0000${finding.where}\u0000${finding.message}`;
+    if (warnedAliasFindings.has(key)) continue;
+    warnedAliasFindings.add(key);
+    console.warn(`defineStack: ${formatDeprecatedAliasFinding(finding)}`);
+  }
+}
+
+/** Conversion notices already reported this process — same warn-once reason. */
+const warnedConversionNotices = new Set<string>();
+
+/**
+ * Surface the ADR-0087 D2 conversion notices raised while normalizing.
+ *
+ * A conversion is deliberately silent about *fixing* the shape — zero consumer
+ * action is the point — but it is not supposed to be silent about having HAD to.
+ * The notice is the one signal that says "this spelling retires in protocol N,
+ * and your metadata stops loading then", and `defineStack` is where the author
+ * who wrote the old shape actually is. Until now it passed no sink, so that
+ * author heard nothing unless they happened to run `os validate` — the same gap
+ * this change closes in `os build`.
+ *
+ * Advisory and warn-once: the conversion already produced a correct stack.
+ */
+function warnConversionNotice(notice: ConversionNotice): void {
+  const key = `${notice.conversionId} ${notice.path} ${notice.from} ${notice.to}`;
+  if (warnedConversionNotices.has(key)) return;
+  warnedConversionNotices.add(key);
+  console.warn(
+    `defineStack: ${notice.path}: '${notice.from}' → '${notice.to}' (converted at load; ` +
+    `conversion '${notice.conversionId}', retires in protocol ${notice.retiresIn}). ` +
+    `Update the source to the canonical shape — the conversion stops running then.`,
+  );
+}
+
 export function defineStack(
   config: ObjectStackDefinitionInput,
   options?: DefineStackOptions,
@@ -1051,13 +1113,33 @@ export function defineStack(
   // Default to strict=true for safety (validate by default)
   const strict = options?.strict !== false;
 
-  // Normalize map-formatted collections to arrays (key → name injection)
-  const normalized = normalizeStackInput(config as Record<string, unknown>);
+  // Normalize map-formatted collections to arrays (key → name injection), and
+  // surface every ADR-0087 D2 conversion the pass had to apply. Unlike the alias
+  // warning below this runs in BOTH modes: a conversion happens whether or not
+  // we go on to parse, so `strict: false` does not make the old shape any less
+  // retiring.
+  const normalized = normalizeStackInput(config as Record<string, unknown>, {
+    onConversionNotice: warnConversionNotice,
+  });
 
   if (!strict) {
-    // Non-strict mode: skip validation (advanced use cases only)
+    // Non-strict mode: skip validation (advanced use cases only).
+    // No alias warning here on purpose: with no parse there is no discard yet —
+    // the alias survives on the returned stack, and whichever layer eventually
+    // consumes it (the CLI's pre-parse pass on `os build`/`os validate`) is the
+    // one that reports it. Each layer warns for its OWN discards, so an authored
+    // conflict yields exactly one warning however the stack is compiled.
     return mergeActionsIntoObjects(normalized as ObjectStackDefinition);
   }
+
+  // [#3743] The LAST moment a deprecated alias is still visible. The parse below
+  // resolves `execute` into `target` and drops it (#3713/#3742), and this parse
+  // runs inside the author's own config module — so by the time `os build` reads
+  // the exported stack there is nothing left to lint. Warning here is what makes
+  // the discard visible to the author who wrote both handlers (Prime Directive
+  // #12); it is advisory and never blocks, since the resulting stack is
+  // well-defined — the cost is a handler that never runs.
+  warnDeprecatedAliases(normalized as Record<string, unknown>);
 
   // Strict mode (default): parse with custom error map, then cross-reference validate
   const result = ObjectStackDefinitionSchema.safeParse(normalized, {

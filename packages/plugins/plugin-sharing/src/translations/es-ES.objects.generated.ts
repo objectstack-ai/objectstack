@@ -102,7 +102,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_sharing_rule: {
     label: "Regla de compartición",
     pluralLabel: "Reglas de compartición",
-    description: "Regla de compartición declarativa que materializa automáticamente concesiones de sys_record_share. Se define mediante defineSharingRule() en código o con el generador de criterios de Studio.",
+    description: "Da acceso a un grupo de personas a los registros que cumplen una condición.",
     fields: {
       id: {
         label: "ID de regla"
@@ -113,7 +113,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Nombre",
-        help: "Nombre de regla snake_case único."
+        help: "Identifica la regla. Solo minúsculas, dígitos y guiones bajos."
       },
       label: {
         label: "Nombre visible"
@@ -123,26 +123,26 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       object_name: {
         label: "Objeto",
-        help: "Nombre corto del objeto (p. ej. opportunity, account)."
+        help: "El objeto cuyos registros comparte esta regla."
       },
       criteria_json: {
-        label: "Criterios (JSON de FilterCondition)",
-        help: "FilterCondition JSON comparado con los registros de object_name. Vacío = coincide con todos."
+        label: "Criterios",
+        help: "Qué registros se comparten. Déjalo vacío para compartir todos los registros del objeto."
       },
       recipient_type: {
         label: "Tipo de destinatario",
-        help: "Tipo de principal que recibe acceso; se expande a concesiones de usuario durante la evaluación. `department` recorre el árbol parent_business_unit_id; `team` es plano (better-auth).",
+        help: "Quién recibe el acceso. Al elegir un equipo, una unidad de negocio o un puesto, lo reciben todas las personas que lo integran. «Unidad de negocio y subordinadas» abarca además todas las unidades por debajo de la elegida.",
         options: {
           user: "Usuario",
           team: "Equipo",
           business_unit: "Unidad de negocio",
-          position: "posición",
-          unit_and_subordinates: "Rol y subordinados"
+          position: "Puesto",
+          unit_and_subordinates: "Unidad de negocio y subordinados"
         }
       },
       recipient_id: {
         label: "Destinatario",
-        help: "ID de departamento / ID de equipo / nombre del rol / nombre de la cola / ID del usuario según recipient_type."
+        help: "El usuario, equipo, unidad de negocio o puesto concreto que recibe el acceso."
       },
       access_level: {
         label: "Nivel de acceso",
@@ -154,11 +154,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "Activo",
-        help: "Solo las reglas activas participan en la evaluación del ciclo de vida."
+        help: "Desactívala para retirar el acceso que concedió, sin eliminar la regla."
       },
       managed_by: {
         label: "Gestionado por",
-        help: "Procedencia del registro (tri-estado unificado, A4 #2920): platform = integrado en el framework / package = declarado por app o paquete (sembrado al arrancar) / admin = creado por el inquilino en Setup.",
+        help: "De dónde viene esta regla: integrada en la plataforma, instalada con una app o creada aquí.",
         options: {
           platform: "Plataforma",
           package: "Paquete",
@@ -167,7 +167,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "Personalizado",
-        help: "Se establece cuando un administrador edita una regla declarada por un paquete; a partir de entonces el sembrado de arranque deja de sobrescribir la fila (las desactivaciones sobreviven a los redespliegues). Sin sentido en filas admin."
+        help: "Se marca al editar una regla que vino con una app, para conservar tus cambios cuando la app se actualice."
       },
       created_at: {
         label: "Creado el"

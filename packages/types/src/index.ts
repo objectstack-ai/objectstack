@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+export * from './degraded-boot.js';
 export * from './env.js';
+export * from './error-leak.js';
 export * from './module-not-found.js';
 
 // Placeholder for Kernel interface to avoid circular dependency

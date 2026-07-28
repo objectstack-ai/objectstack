@@ -206,6 +206,56 @@ describe('notify (baseline node)', () => {
             expect(result.success).toBe(false);
             expect(result.error).toContain('recipient');
         });
+
+        // ── framework#3582 — unresolved recipient templates ──────────────────
+        // `{record.owner.manager}` walks `.manager` on a scalar foreign-key id
+        // and resolves to nothing. `String(undefined)` used to make that the
+        // six-character audience member "undefined": the emit succeeded, the
+        // notification addressed nobody, and nothing anywhere said so.
+        it('never sends the literal "undefined" as an audience member', async () => {
+            engine.registerFlow('notify_flow', notifyFlow({
+                title: 'Escalated',
+                recipients: ['user_1', '{record.owner.manager}'],
+            }));
+
+            const result = await engine.execute('notify_flow', {
+                record: { id: 'case_1', owner: 'usr_7' },
+            } as any);
+
+            expect(result.success).toBe(true);
+            expect(messaging.emitted[0].audience).toEqual(['user_1']);
+        });
+
+        it('fails the step, naming the template, when every recipient resolves to nothing', async () => {
+            engine.registerFlow('notify_flow', notifyFlow({
+                title: 'Escalated',
+                recipients: ['{record.owner.manager}'],
+            }));
+
+            const result = await engine.execute('notify_flow', {
+                record: { id: 'case_1', owner: 'usr_7' },
+            } as any);
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('{record.owner.manager}');
+            expect(result.error).toContain('expand');
+            expect(messaging.emitted).toHaveLength(0);
+        });
+
+        it('resolves a recipient hop when the start node expanded the relation (#3475)', async () => {
+            engine.registerFlow('notify_flow', notifyFlow({
+                title: 'Escalated',
+                recipients: ['{record.owner.manager}'],
+            }));
+
+            // An expanded relation arrives on the record as a nested object.
+            const result = await engine.execute('notify_flow', {
+                record: { id: 'case_1', owner: { id: 'usr_7', manager: 'usr_9' } },
+            } as any);
+
+            expect(result.success).toBe(true);
+            expect(messaging.emitted[0].audience).toEqual(['usr_9']);
+        });
     });
 
     describe('without a messaging service', () => {

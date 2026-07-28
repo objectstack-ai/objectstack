@@ -17,9 +17,9 @@ describe('lintLivenessProperties', () => {
   // NOTE: as of #2377 the object- and field-level dead+authorWarn surface is
   // empty (enforce-or-remove complete for those types), so the positive-warn
   // assertions here run against still-dead props of OTHER governed types
-  // (flow.nodes.outputSchema, tool.permissions, permission.contextVariables,
-  // action.undoable). The object/field WALKER is still exercised by the
-  // silent-clean and default-on-suppression cases below.
+  // (flow.nodes.outputSchema, tool.permissions, agent.memory). The object/field
+  // WALKER is still exercised by the silent-clean and default-on-suppression
+  // cases below.
 
   it('does NOT warn on a default-on flag the author left alone (enable.searchable: true)', () => {
     const findings = lintLivenessProperties(objStack({ enable: { searchable: true } }));
@@ -93,9 +93,22 @@ describe('lintLivenessProperties', () => {
     expect(hits[0].where).toBe("flow 'f1'");
   });
 
-  it('warns on action.undoable (experimental — declared but not enforced)', () => {
+  it('warns on an experimental prop with no authorWarn of its own (agent.memory)', () => {
+    // `experimental` warns implicitly — shouldWarn() treats a declared-but-
+    // unenforced guarantee like an opted-in dead prop. Repointed from
+    // action.undoable in #3714, which turned out to have two objectui readers.
+    const findings = lintLivenessProperties({ agents: [{ name: 'ag1', memory: { kind: 'buffer' } }] });
+    const f = findings.find((x) => x.message.includes('`memory`'));
+    expect(f).toBeDefined();
+    expect(f!.rule).toBe('liveness-experimental-property');
+  });
+
+  it('stays silent on action.undoable — live since #3714, not experimental', () => {
+    // Regression guard for the OTHER failure direction: an understated ledger
+    // entry warns "declared but NOT enforced" on a property that works, telling
+    // authors (and AI) to skip a shipped feature.
     const findings = lintLivenessProperties({ actions: [{ name: 'a1', undoable: true }] });
-    expect(paths(findings).some((m) => m.includes('`undoable`'))).toBe(true);
+    expect(paths(findings).some((m) => m.includes('`undoable`'))).toBe(false);
   });
 
   it('warns on the security-shaped dead props (tool.permissions)', () => {

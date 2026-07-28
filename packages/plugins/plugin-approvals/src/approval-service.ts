@@ -3,6 +3,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   APPROVAL_BRANCH_LABELS,
+  approverTypeIsOrgScoped,
   canonicalApproverType,
   normalizeDecisionOutputs,
   type ApprovalNodeConfig,
@@ -31,8 +32,15 @@ import type {
   ApprovalStatus,
   SharingExecutionContext,
 } from '@objectstack/spec/contracts';
+import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { isGrantActive } from '@objectstack/core';
+import {
+  filterApproversWhoCanRead,
+  resolveApproverDirectoryOrg,
+  type ApproverOrgScopeDeps,
+  type ApproverOrgScopeEngine,
+} from './approver-org-scope.js';
 
 /**
  * Node-era approval runtime (ADR-0019).
@@ -64,7 +72,18 @@ export interface ApprovalClock { now(): Date }
  * plugin when an automation engine is present (see `approval-node.ts`).
  */
 export interface ApprovalResumeSurface {
-  resume?(runId: string, signal?: { output?: Record<string, unknown>; branchLabel?: string }): Promise<unknown>;
+  resume?(runId: string, signal?: {
+    output?: Record<string, unknown>;
+    branchLabel?: string;
+    /**
+     * #3801: the engine refuses a resume of an `approval` suspension unless
+     * the signal carries this marker — the proof that the resume is the tail
+     * of a decision THIS service already authorized and recorded, not a raw
+     * `POST …/runs/:runId/resume` around it. Every resume below stamps it via
+     * {@link ApprovalService.serviceResume}.
+     */
+    [RESUME_AUTHORITY_SERVICE]?: true;
+  }): Promise<unknown>;
   /** Flow definition lookup, used to derive step-progress display data. */
   getFlow?(name: string): Promise<any | null>;
   /**
@@ -177,6 +196,21 @@ function actingUserId(context: SharingExecutionContext | undefined): string | nu
  */
 const OOO_MAX_CHAIN = 8;
 
+/**
+ * Approver types resolved by QUERYING a graph rather than by taking `value`
+ * literally (#3807). Each can legitimately come back empty — an unstaffed
+ * position, an emptied team, a mis-pointed unit — and the caller then falls
+ * back to a `type:value` literal that no user can act on. They are listed here
+ * so that dead end gets one warning instead of passing in silence.
+ *
+ * `user` / `field` are deliberately absent: they resolve to the id they were
+ * given without a lookup, so there is no "expanded to nobody" state to report.
+ * `business_unit` / `bu` are the accepted dialects of `department`.
+ */
+const GRAPH_APPROVER_TYPES: ReadonlySet<string> = new Set([
+  'team', 'department', 'business_unit', 'bu', 'position', 'org_membership_level', 'manager',
+]);
+
 /** One OOO delegation hop applied while resolving an approver (#1322 M1/M4). */
 interface OooSubstitution {
   /** The approver who was skipped (out of office). */
@@ -280,11 +314,6 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     payload: parseJson(row.payload_json, undefined),
     flow_run_id: row.flow_run_id ?? undefined,
     flow_node_id: row.flow_node_id ?? undefined,
-    // #3794: the node's record-lock policy, read from the SAME config snapshot
-    // the `beforeUpdate` lock hook reads (`lockRecord === false` ⇒ allow), so a
-    // client can tell "pending" from "locked" instead of assuming every pending
-    // request locks. Default-true mirrors the hook's default.
-    locks_record: cfg?.lockRecord !== false,
     completed_at: row.completed_at ?? undefined,
     created_at: row.created_at ?? undefined,
     updated_at: row.updated_at ?? undefined,
@@ -295,6 +324,14 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     sla_due_at: slaDueAt(row.created_at, cfg),
     // ADR-0044 revision round (rides the config snapshot; absent ⇒ round 1).
     round: typeof cfg?.__round === 'number' ? cfg.__round : undefined,
+    // objectui#2902: the node's record-lock policy. The lock is enforced
+    // server-side in `lifecycle-hooks.ts` off THIS SAME snapshot with the
+    // same `!== false` default, so the flag a client renders and the rule the
+    // server applies can never drift. Without it a console can only see
+    // "a pending request exists" and has to assume the record is locked —
+    // which mislabels every `lockRecord: false` node as locked and hides an
+    // edit the server would have accepted.
+    lock_record: cfg?.lockRecord !== false,
     // #3447 P2: the node's author-declared decision outputs, surfaced so a
     // decision UI can render input fields for them and POST `outputs` on
     // approve/reject. Per-request (each node declares its own), which is why
@@ -406,6 +443,14 @@ export interface ApprovalServiceOptions {
    * the Console and IM webviews; outbound email needs the absolute form.
    */
   publicBaseUrl?: string;
+  /**
+   * [ADR-0105 D9] The tenancy posture in force. Cross-organization approver
+   * targeting is a `group`-posture capability; the resolver refuses the
+   * declaration under any other posture rather than silently ignoring it.
+   * Absent (a stack booted with no tenancy service) reads as "unknown" and the
+   * guard stands down.
+   */
+  tenancyPosture?: () => string | undefined;
 }
 
 export class ApprovalService implements IApprovalService {
@@ -415,6 +460,7 @@ export class ApprovalService implements IApprovalService {
   private automation?: ApprovalResumeSurface;
   private messaging?: ApprovalMessagingSurface;
   private publicBaseUrl: string;
+  private tenancyPosture?: () => string | undefined;
 
   constructor(opts: ApprovalServiceOptions) {
     this.engine = opts.engine;
@@ -423,6 +469,36 @@ export class ApprovalService implements IApprovalService {
     this.automation = opts.automation;
     this.messaging = opts.messaging;
     this.publicBaseUrl = (opts.publicBaseUrl ?? '').replace(/\/$/, '');
+    this.tenancyPosture = opts.tenancyPosture;
+  }
+
+  /** Attach (or replace) the ADR-0105 D9 posture provider. */
+  attachTenancyPosture(provider: () => string | undefined): void {
+    this.tenancyPosture = provider;
+  }
+
+  /** Deps bundle for the ADR-0105 D9 org-scope helpers. */
+  private get orgScopeDeps(): ApproverOrgScopeDeps {
+    return {
+      engine: this.engine as unknown as ApproverOrgScopeEngine,
+      posture: this.tenancyPosture,
+      logger: this.logger,
+    };
+  }
+
+  /**
+   * [ADR-0105 D9] Which organization's directory resolves ONE approver spec.
+   * Absent declaration ⇒ the request's own organization (unchanged, no reads).
+   */
+  private async directoryOrgFor(a: any, requestOrgId: string | null | undefined): Promise<string | null | undefined> {
+    const rawType = String(a?.type ?? '');
+    return resolveApproverDirectoryOrg(
+      this.orgScopeDeps,
+      a?.organization,
+      requestOrgId,
+      rawType,
+      approverTypeIsOrgScoped(rawType),
+    );
   }
 
   /** Attach (or replace) the automation surface used to resume flow runs. */
@@ -716,6 +792,23 @@ export class ApprovalService implements IApprovalService {
         { deprecated: a.type, canonical: type },
       );
     }
+    // [ADR-0105 D9] WHERE this approver is looked up — the request's own
+    // organization unless the spec targets another one in the same group.
+    //
+    // Resolved HERE, above the `user` / `field` / `manager` early returns,
+    // because refusing a declaration on a directory-less type is one of the
+    // things this resolution DOES (those types name a person outright, so
+    // `organization` on them cannot narrow anything and an author who wrote it
+    // misunderstood the field). Resolving it after those returns made the
+    // refusal unreachable and the declaration silently inert — exactly the
+    // "ignored, not refused" behaviour ADR-0105 D9 rules out, and what the
+    // cloud group-posture dogfood caught.
+    //
+    // Costs nothing on the overwhelmingly common path: with no `organization`
+    // declared, the resolver returns the request org without reading anything.
+    const directoryOrg = await this.directoryOrgFor(a, organizationId);
+    const crossOrg = directoryOrg !== organizationId;
+
     if (type === 'user') {
       return this.applyOooDelegation(String(a.value), now, organizationId, substitutions);
     }
@@ -730,18 +823,34 @@ export class ApprovalService implements IApprovalService {
       }
       return out;
     }
+    // `directoryOrg` / `crossOrg` were resolved at the TOP of this method, so
+    // the refusal reaches directory-less types too. Resolution failures
+    // propagate: they are routing bugs, and that call sits OUTSIDE the
+    // swallowing try below on purpose (see the catch's comment).
+    //
+    // A cross-org slate is filtered to the people who can actually READ the
+    // request (D2 union); same-org routing is untouched and does no extra read.
+    const bounded = async (users: string[]): Promise<string[]> => (
+      crossOrg
+        ? filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
+          approverType: type, value: a.value != null ? String(a.value) : undefined,
+          directoryOrgId: directoryOrg,
+        })
+        : users
+    );
+
     try {
       if (type === 'team') {
         const users = await this.expandTeamUsers(String(a.value));
         if (users.length) return users;
       } else if (type === 'department' || type === 'business_unit' || type === 'bu') {
-        const users = await this.expandBusinessUnitUsers(String(a.value), organizationId);
+        const users = await bounded(await this.expandBusinessUnitUsers(String(a.value), directoryOrg));
         if (users.length) return users;
       } else if (type === 'position') {
-        const users = await this.expandPositionUsers(String(a.value), organizationId);
+        const users = await bounded(await this.expandPositionUsers(String(a.value), directoryOrg));
         if (users.length) return users;
       } else if (type === 'org_membership_level') {
-        const users = await this.expandMembershipTierUsers(String(a.value), organizationId);
+        const users = await bounded(await this.expandMembershipTierUsers(String(a.value), directoryOrg));
         if (users.length) return users;
       } else if (type === 'manager' && record) {
         const subject = (record as any)[a.value] ?? (record as any).owner_id;
@@ -750,7 +859,7 @@ export class ApprovalService implements IApprovalService {
           if (mgr) return this.applyOooDelegation(mgr, now, organizationId, substitutions);
         }
       }
-    } catch { /* fall through */ }
+    } catch { /* a directory lookup failed → fall through to the literal slot */ }
     // #3508: `queue` is declared-but-unenforced — there is no queue branch
     // above, so a queue approver always lands here and the `queue:<id>` slot
     // routes to nobody. The spec marks it non-authorable
@@ -761,6 +870,21 @@ export class ApprovalService implements IApprovalService {
       this.logger?.warn?.(
         `[approvals] approver type 'queue' is not implemented — the slot resolves to nobody (#3508)`,
         { value: a.value },
+      );
+    } else if (GRAPH_APPROVER_TYPES.has(type)) {
+      // #3807 follow-up — every OTHER way to land here is a graph type whose
+      // lookup produced nobody, and the literal below is a slot no user can
+      // ever act on. That silence is what let #3807 hide: a `department`
+      // approver pointing at a seeded (env-wide) unit resolved to
+      // `department:<id>` on every request, the request opened with an empty
+      // slate, and nothing in the logs said so — the first symptom was a
+      // permanently stuck approval (#3424). The fallback itself stays (a
+      // literal keeps 15.x slots and substring fixtures working); it just
+      // stops being invisible.
+      this.logger?.warn?.(
+        `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot routes to no one `
+        + `and the request cannot advance until someone is added or the approver is re-pointed (#3807)`,
+        { type, value: a.value, organizationId: organizationId ?? null },
       );
     }
     return [`${a.type}:${a.value}`];
@@ -868,12 +992,18 @@ export class ApprovalService implements IApprovalService {
       }
       return { slots, raw };
     }
+    // [ADR-0105 D9] An expression that re-expands into a graph kind consults the
+    // same org-scoped directories the static types do, so it honours the same
+    // targeting. Resolved once for the whole slate, before the per-value loop —
+    // the declaration is a property of the spec, not of what the CEL returned.
+    const directoryOrg = await this.directoryOrgFor(a, organizationId);
+    const crossOrg = directoryOrg !== organizationId;
     const slots: Array<{ id: string; subGroup: string }> = [];
     for (const key of raw) {
       let users: string[] = [];
       try {
-        if (resolveAs === 'department') users = await this.expandBusinessUnitUsers(key, organizationId);
-        else if (resolveAs === 'position') users = await this.expandPositionUsers(key, organizationId);
+        if (resolveAs === 'department') users = await this.expandBusinessUnitUsers(key, directoryOrg);
+        else if (resolveAs === 'position') users = await this.expandPositionUsers(key, directoryOrg);
         else if (resolveAs === 'team') users = await this.expandTeamUsers(key);
         else {
           throw new Error(
@@ -884,6 +1014,11 @@ export class ApprovalService implements IApprovalService {
       } catch (err: any) {
         if (String(err?.message ?? '').startsWith('VALIDATION_FAILED')) throw err;
         users = [];
+      }
+      if (crossOrg && users.length) {
+        users = await filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
+          approverType: resolveAs, value: key, directoryOrgId: directoryOrg,
+        });
       }
       if (!users.length) {
         slots.push({ id: `${resolveAs}:${key}`, subGroup: key });
@@ -909,15 +1044,41 @@ export class ApprovalService implements IApprovalService {
     return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
   }
 
+  /**
+   * Tenant scope for a `sys_business_unit` read that may legitimately be
+   * env-wide (#3807).
+   *
+   * `organization_id = null` on a platform object means "owned by no
+   * organization" — a row written by a seed, the file layer, or bootstrap,
+   * i.e. before (or outside) any org exists. A strict
+   * `organization_id = <request org>` equality made every such row invisible:
+   * the seed check below found nothing, the whole expansion returned `[]`, and
+   * the approver fell back to the dead `department:<id>` literal that routes to
+   * nobody. That is not an edge case — an app's org tree is normally seeded
+   * (a seed cannot know the org id the runtime mints at boot) while the
+   * approval request always carries one, so EVERY department approver a
+   * designer could pick resolved to nobody.
+   *
+   * Widen to "this org ∪ env-wide", the same predicate `sys_metadata`'s
+   * pending-draft listing settled on for the identical reason. Another org's
+   * unit still fails the match, so the wall between two organizations is
+   * unchanged — only rows belonging to no org at all become visible.
+   */
+  private businessUnitOrgScope(
+    filter: Record<string, unknown>,
+    organizationId?: string | null,
+  ): Record<string, unknown> {
+    if (!organizationId) return filter;
+    return { ...filter, $or: [{ organization_id: organizationId }, { organization_id: null }] };
+  }
+
   /** Recursive department — walks `sys_business_unit.parent_business_unit_id`. */
   private async expandBusinessUnitUsers(businessUnitId: string, organizationId?: string | null): Promise<string[]> {
     if (!businessUnitId) return [];
     // Seed sanity check: skip if dept doesn't exist or is inactive within tenant.
     try {
       const seed = await this.engine.find('sys_business_unit', {
-        filter: organizationId
-          ? { id: businessUnitId, organization_id: organizationId }
-          : { id: businessUnitId },
+        filter: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
         fields: ['id', 'active'],
         limit: 1,
         context: SYSTEM_CTX,
@@ -932,8 +1093,10 @@ export class ApprovalService implements IApprovalService {
       const parent = queue.shift()!;
       let kids: any[] = [];
       try {
-        const filter: any = { parent_business_unit_id: parent, active: { $ne: false } };
-        if (organizationId) filter.organization_id = organizationId;
+        const filter = this.businessUnitOrgScope(
+          { parent_business_unit_id: parent, active: { $ne: false } },
+          organizationId,
+        );
         kids = await this.engine.find('sys_business_unit', { filter, fields: ['id'], limit: 1000, context: SYSTEM_CTX } as any);
       } catch { kids = []; }
       for (const k of kids ?? []) {
@@ -1596,6 +1759,28 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * Continue the owning flow run after an outcome this service has already
+   * authorized and written down (#3801).
+   *
+   * The `approval` node declares `resumeAuthority: 'service'`, so the engine
+   * refuses any resume of an approval suspension that does not carry
+   * {@link RESUME_AUTHORITY_SERVICE}. Every approvals-side resume goes through
+   * here so the marker is stamped in ONE place — a new outcome path cannot
+   * quietly ship a resume that the gate then rejects at runtime, and nothing
+   * in this file hands the marker to a caller-supplied signal.
+   *
+   * Callers still guard on `typeof this.automation?.resume === 'function'`
+   * (approvals runs fine with no automation attached) and keep their own
+   * try/catch, because what a failed resume means differs per path.
+   */
+  private async serviceResume(
+    runId: string,
+    signal: { output?: Record<string, unknown>; branchLabel?: string },
+  ): Promise<void> {
+    await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
+  }
+
+  /**
    * Public contract entrypoint (ADR-0019). Records a decision on a node-driven
    * request via {@link ApprovalService.decideNode} and, when it finalizes,
    * resumes the owning flow run down the matching `approve` / `reject` edge.
@@ -1613,7 +1798,7 @@ export class ApprovalService implements IApprovalService {
         ? APPROVAL_BRANCH_LABELS.approve
         : APPROVAL_BRANCH_LABELS.reject;
       try {
-        await this.automation.resume(result.runId, {
+        await this.serviceResume(result.runId, {
           branchLabel,
           // #3447 P2: accepted decision outputs ride the resume envelope and
           // land as `<nodeId>.<key>` flow variables — a later approval node's
@@ -1717,7 +1902,7 @@ export class ApprovalService implements IApprovalService {
       }
     } else if (runId && typeof this.automation?.resume === 'function') {
       try {
-        await this.automation.resume(runId, {
+        await this.serviceResume(runId, {
           branchLabel: APPROVAL_BRANCH_LABELS.reject,
           output: { decision: 'recall', requestId },
         });
@@ -1807,7 +1992,7 @@ export class ApprovalService implements IApprovalService {
       let resumed = false;
       if (runId && typeof this.automation?.resume === 'function') {
         try {
-          await this.automation.resume(runId, {
+          await this.serviceResume(runId, {
             branchLabel: APPROVAL_BRANCH_LABELS.reject,
             output: { decision: 'reject', autoRejected: true, requestId },
           });
@@ -1849,7 +2034,7 @@ export class ApprovalService implements IApprovalService {
     let resumed = false;
     if (runId && typeof this.automation?.resume === 'function') {
       try {
-        await this.automation.resume(runId, {
+        await this.serviceResume(runId, {
           branchLabel: APPROVAL_BRANCH_LABELS.revise,
           output: { decision: 'revise', requestId },
         });
@@ -1936,7 +2121,7 @@ export class ApprovalService implements IApprovalService {
     let resumed = false;
     if (runId && typeof this.automation?.resume === 'function') {
       try {
-        await this.automation.resume(runId, {
+        await this.serviceResume(runId, {
           branchLabel: APPROVAL_BRANCH_LABELS.resubmit,
           output: { resubmitted: true, requestId },
         });

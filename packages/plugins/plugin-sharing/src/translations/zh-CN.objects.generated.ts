@@ -102,7 +102,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_sharing_rule: {
     label: "共享规则",
     pluralLabel: "共享规则",
-    description: "声明式共享规则，会自动生成 sys_record_share 授权。可在代码中通过 defineSharingRule() 编写，或在 Studio 条件构建器中维护。",
+    description: "把符合条件的记录，授权给一组人访问。",
     fields: {
       id: {
         label: "规则 ID"
@@ -113,7 +113,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "名称",
-        help: "唯一的 snake_case 规则名称"
+        help: "规则的标识。只能使用小写字母、数字和下划线。"
       },
       label: {
         label: "显示标签"
@@ -123,15 +123,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       object_name: {
         label: "对象",
-        help: "短对象名（例如 opportunity、account）"
+        help: "要共享哪个对象的记录。"
       },
       criteria_json: {
-        label: "条件（FilterCondition JSON）",
-        help: "针对 object_name 记录匹配的 JSON FilterCondition。为空表示匹配全部。"
+        label: "条件",
+        help: "共享哪些记录。留空表示共享该对象的全部记录。"
       },
       recipient_type: {
         label: "接收方类型",
-        help: "接收访问权限的主体类型——求值时会展开为用户授权。`department` 会沿 parent_business_unit_id 树展开；`team` 为扁平结构（better-auth）。",
+        help: "把访问权限给谁。选择团队、业务单元或岗位时，其中的每个人都会获得访问权限；选择「业务单元及下级」还会包含该单元下属的所有单元。",
         options: {
           user: "用户",
           team: "团队",
@@ -142,7 +142,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_id: {
         label: "接收方",
-        help: "根据 recipient_type 填写 业务单元 id / 团队 id / 岗位名 / 队列名 / 用户 id"
+        help: "具体把访问权限给哪一个用户、团队、业务单元或岗位。"
       },
       access_level: {
         label: "访问级别",
@@ -154,11 +154,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "启用",
-        help: "只有启用的规则才会参与生命周期求值"
+        help: "关闭即收回本规则已授予的访问权限，规则本身保留。"
       },
       managed_by: {
         label: "管理来源",
-        help: "记录来源（统一三态，A4 #2920）：platform = 框架内置 / package = 应用包声明（启动时种入）/ admin = 租户在 Setup 中创建。",
+        help: "这条规则的来源：平台内置、随应用安装，或在此处创建。",
         options: {
           platform: "平台",
           package: "应用包",
@@ -167,7 +167,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "已定制",
-        help: "当管理员编辑应用包声明的规则时置位；此后启动种入不再覆盖该行（停用状态可跨重新部署保留）。对 admin 来源的记录无意义。"
+        help: "当你修改了随应用安装的规则后置位，应用更新时你的改动会被保留。"
       },
       created_at: {
         label: "创建时间"

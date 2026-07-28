@@ -133,9 +133,11 @@ export const objectStackMCP = MCPServerConfigSchema.parse({
       ],
       handler: 'flows.create_record',
       sideEffects: 'write',
-      // NOTE: declarative only — nothing pauses on this flag (#3715). A real
-      // human-in-the-loop gate is `ai.requiresConfirmation` on the underlying
-      // action (+ the approval queue), or `approval: 'always'` on an MCP binding.
+      // NOTE: an MCP capability-descriptor hint — surfaced to the client, but
+      // nothing server-side pauses on it. (The `ToolSchema` field of the same
+      // name was removed in 16.x — #3715, ADR-0033 §2.) A real human-in-the-loop
+      // gate is `ai.requiresConfirmation` on the underlying action (+ the
+      // approval queue), or `approval: 'always'` on an MCP binding.
       requiresConfirmation: true,
     },
     {

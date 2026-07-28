@@ -889,55 +889,151 @@ export const MarkAllNotificationsReadResponseSchema = lazySchema(() => z.object(
 // ==========================================
 // AI Operations
 // ==========================================
+//
+// THESE ARE THE SHAPES OF THE ROUTES THAT EXIST (#3718).
+//
+// What used to live here — `AiNlq*`, `AiSuggest*`, `AiInsights*` — described
+// `/api/v1/ai/{nlq,suggest,insights}`, three endpoints **no repo has ever
+// mounted**. They were declared here, registered in `DEFAULT_AI_ROUTES` (a
+// table with no runtime consumer), typed as optional protocol methods nothing
+// implements, and called by `client.ai.*`. Every call 404ed for the whole life
+// of the namespace; the SDK's AI surface and the real one were disjoint sets.
+//
+// The AI service itself is a Cloud/EE package (`service-ai`, in the `cloud`
+// repo) — this repo's dispatcher only proxies `/api/v1/ai/**` to whatever
+// `buildAIRoutes()` mounted, or 404s "AI service is not configured". So these
+// schemas deliberately describe **the wire**, not a protocol this repo serves:
+// they are the one shape `client.ai.*` and cloud's route handlers both read.
+// The mounted table's reviewed dispositions live in `cloud`
+// (`packages/service-ai/src/ai-route-ledger.ts`), which drives this SDK
+// against the routes it really returns.
 
-export const AiNlqRequestSchema = lazySchema(() => z.object({
-  query: z.string().describe('Natural language query string'),
-  object: z.string().optional().describe('Target object context'),
-  conversationId: z.string().optional().describe('Conversation ID for multi-turn queries'),
+/**
+ * One conversation message on the wire.
+ *
+ * Deliberately permissive about `content`: the AI routes accept a plain string
+ * (legacy), a content-part array, and the Vercel AI SDK v6 `parts` form where
+ * `content` may be absent entirely. `role` is the part the routes actually
+ * validate, so it is the part constrained here — narrowing `content` further
+ * would reject payloads the server accepts.
+ */
+export const AiMessageSchema = lazySchema(() => z.object({
+  role: z.enum(['system', 'user', 'assistant', 'tool']).describe('Message role'),
+  content: z.unknown().optional().describe('Message content: a string, or an array of content parts'),
+  parts: z.array(z.unknown()).optional().describe('Vercel AI SDK v6 message parts (alternative to `content`)'),
+}).passthrough()); // adapters carry extra per-message fields (id, createdAt, …)
+
+/**
+ * `POST /api/v1/ai/chat` — dual-mode. `stream: false` returns
+ * {@link AiChatResponseSchema} as JSON; anything else streams the Vercel UI
+ * Message Stream Protocol (SSE with JSON payloads).
+ *
+ * Flat `model`/`temperature`/`maxTokens` are the Vercel `useChat` shape and
+ * take precedence over the same keys nested under `options`.
+ */
+export const AiChatRequestSchema = lazySchema(() => z.object({
+  messages: z.array(AiMessageSchema).min(1).describe('Conversation messages (at least one)'),
+  system: z.string().optional().describe('System prompt, prepended as a system message'),
+  model: z.string().optional().describe('Model id override'),
+  temperature: z.number().optional().describe('Sampling temperature'),
+  maxTokens: z.number().int().positive().optional().describe('Maximum tokens to generate'),
+  stream: z.boolean().optional().describe('false → JSON response; otherwise the UI Message Stream Protocol'),
+  conversationId: z.string().optional().describe('Conversation to persist this turn into (auto-created when omitted)'),
+  turnId: z.string().optional().describe('Stable per-turn idempotency key (ADR-0013 D1)'),
+  options: z.record(z.string(), z.unknown()).optional().describe('Legacy nested request options'),
 }));
 
-export const AiNlqResponseSchema = lazySchema(() => z.object({
-  query: z.unknown().describe('Generated structured query (AST)'),
-  explanation: z.string().optional().describe('Human-readable explanation of the query'),
-  confidence: z.number().min(0).max(1).optional().describe('Confidence score (0-1)'),
-  suggestions: z.array(z.string()).optional().describe('Suggested follow-up queries'),
+/** JSON body of a non-streaming chat/completion turn — the `AIResult` shape. */
+export const AiChatResponseSchema = lazySchema(() => z.object({
+  content: z.string().describe('Generated text'),
+  model: z.string().optional().describe('Model that produced it'),
+  toolCalls: z.array(z.unknown()).optional().describe('Tool calls the model requested (Vercel `ToolCallPart`)'),
+  usage: z.object({
+    promptTokens: z.number().describe('Tokens consumed by the prompt'),
+    completionTokens: z.number().describe('Tokens generated'),
+    totalTokens: z.number().describe('prompt + completion'),
+  }).optional().describe('Token usage'),
+  conversationId: z.string().optional().describe('Conversation the turn was persisted into'),
 }));
 
-// AiChatRequestSchema and AiChatResponseSchema have been removed.
-// The AI chat wire protocol is now fully aligned with the Vercel AI SDK (`ai`).
-// Frontend consumers should use `@ai-sdk/react/useChat` directly.
-// See: https://ai-sdk.dev/docs
-
-export const AiSuggestRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name for context'),
-  field: z.string().optional().describe('Field to suggest values for'),
-  recordId: z.string().optional().describe('Record ID for context'),
-  partial: z.string().optional().describe('Partial input for completion'),
+/** `POST /api/v1/ai/complete` — single-shot text completion. */
+export const AiCompleteRequestSchema = lazySchema(() => z.object({
+  prompt: z.string().describe('Prompt text'),
+  options: z.record(z.string(), z.unknown()).optional().describe('Request options (model, temperature, maxTokens, …)'),
 }));
 
-export const AiSuggestResponseSchema = lazySchema(() => z.object({
-  suggestions: z.array(z.object({
-    value: z.unknown().describe('Suggested value'),
-    label: z.string().describe('Display label'),
-    confidence: z.number().min(0).max(1).optional().describe('Confidence score (0-1)'),
-    reason: z.string().optional().describe('Reason for this suggestion'),
-  })).describe('Suggested values'),
+/** `GET /api/v1/ai/models` — the environment's plan-filtered picker list (ADR-0028). */
+export const AiModelsResponseSchema = lazySchema(() => z.object({
+  /**
+   * Objects when the service exposes the ADR-0028 allowlist; bare ids when it
+   * falls back to the adapter's `listModels()`. Both shapes are live, so both
+   * are declared rather than one being asserted and the other 404-by-parse.
+   */
+  models: z.array(z.union([
+    z.string(),
+    z.object({
+      id: z.string().describe('Model id'),
+      label: z.string().describe('Display label for the picker'),
+      default: z.boolean().describe('Whether this is the environment default'),
+    }),
+  ])).describe('Models this environment offers'),
+  defaultModel: z.string().optional().describe('Default model id, when the service reports one'),
 }));
 
-export const AiInsightsRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name to analyze'),
-  recordId: z.string().optional().describe('Specific record to analyze'),
-  type: z.enum(['summary', 'trends', 'anomalies', 'recommendations']).optional().describe('Type of insight'),
+/** A persisted AI conversation, as the `/ai/conversations` routes return it. */
+export const AiConversationSchema = lazySchema(() => z.object({
+  id: z.string().describe('Conversation id'),
+  title: z.string().optional().describe('Title / summary'),
+  agentId: z.string().optional().describe('Agent this conversation is bound to'),
+  userId: z.string().optional().describe('Owning user'),
+  messages: z.array(AiMessageSchema).describe('Message history'),
+  createdAt: z.string().describe('Creation timestamp (ISO 8601)'),
+  updatedAt: z.string().describe('Last update timestamp (ISO 8601)'),
+  metadata: z.record(z.string(), z.unknown()).optional().describe('Conversation metadata'),
 }));
 
-export const AiInsightsResponseSchema = lazySchema(() => z.object({
-  insights: z.array(z.object({
-    type: z.string().describe('Insight type'),
-    title: z.string().describe('Insight title'),
-    description: z.string().describe('Detailed description'),
-    confidence: z.number().min(0).max(1).optional().describe('Confidence score (0-1)'),
-    data: z.record(z.string(), z.unknown()).optional().describe('Supporting data'),
-  })).describe('Generated insights'),
+/**
+ * `POST /api/v1/ai/conversations`. `userId` is NOT accepted from the caller —
+ * the route overwrites it with the authenticated actor.
+ */
+export const CreateAiConversationRequestSchema = lazySchema(() => z.object({
+  title: z.string().optional().describe('Initial title'),
+  agentId: z.string().optional().describe('Agent to bind the conversation to'),
+  metadata: z.record(z.string(), z.unknown()).optional().describe('Conversation metadata'),
+}));
+
+/** `GET /api/v1/ai/conversations` query — scoped to the authenticated user. */
+export const ListAiConversationsRequestSchema = lazySchema(() => z.object({
+  agentId: z.string().optional().describe('Filter by agent'),
+  limit: z.number().int().positive().optional().describe('Maximum conversations to return'),
+  cursor: z.string().optional().describe('Pagination cursor'),
+}));
+
+export const ListAiConversationsResponseSchema = lazySchema(() => z.object({
+  conversations: z.array(AiConversationSchema).describe('Matching conversations'),
+}));
+
+/**
+ * One frame of a streaming chat response.
+ *
+ * `POST /api/v1/ai/chat` (streaming mode) speaks the Vercel **UI Message
+ * Stream Protocol**: SSE lines carrying JSON objects that always have a
+ * `type` — `start`, `text-start`, `text-delta`, `tool-input-available`,
+ * `tool-output-available`, `error`, `finish-step`, `finish` — terminated by a
+ * literal `data: [DONE]`. `POST /api/v1/ai/chat/stream` uses the same SSE
+ * envelope for raw `TextStreamPart` events. Only `type` is guaranteed across
+ * both, so only `type` is declared; the rest of each frame passes through.
+ */
+export const AiStreamChunkSchema = lazySchema(() => z.object({
+  type: z.string().describe('Frame type (text-delta, tool-input-available, finish, error, …)'),
+}).passthrough());
+
+/** `PATCH /api/v1/ai/conversations/:id` — at least one field is required. */
+export const UpdateAiConversationRequestSchema = lazySchema(() => z.object({
+  title: z.string().optional().describe('New title'),
+  metadata: z.record(z.string(), z.unknown()).optional().describe('New metadata'),
+}).refine((p) => p.title !== undefined || p.metadata !== undefined, {
+  message: 'at least one of title or metadata is required',
 }));
 
 // ==========================================
@@ -954,10 +1050,28 @@ export const GetLocalesResponseSchema = lazySchema(() => z.object({
   })).describe('Available locales'),
 }));
 
+/**
+ * `locale` is the whole request — the endpoint returns that locale's full
+ * bundle, and there is no server-side filter to ask for.
+ *
+ * This once declared `namespace` and `keys` filters. Neither serving surface
+ * ever read them: the dispatcher domain body takes `parts[1]`/`query.locale`
+ * and service-i18n takes `req.params.locale`, so both returned the whole
+ * bundle while the SDK dutifully put both on the query string. A caller who
+ * passed `keys` to shrink the payload shrank nothing and was told nothing —
+ * Prime Directive #10's declared ≠ enforced, the shape #1475 trimmed out of
+ * the validation-rule types. Removed rather than implemented (#3676): no
+ * caller in this repo or objectui passed either one, `II18nService`
+ * (`contracts/i18n-service.ts`) takes only `locale` so a filter could only be
+ * a post-filter on an already-materialized bundle — which is precisely not
+ * the server-side work `keys` reads as saving — and against the nested
+ * `TranslationData` shape #3778 settled on, a flat `keys: string[]` has no
+ * defined meaning at all. Re-adding an optional filter is additive and
+ * non-breaking the day a consumer actually needs one; a declared-but-unread
+ * field is the exemplar the next author copies.
+ */
 export const GetTranslationsRequestSchema = lazySchema(() => z.object({
   locale: z.string().describe('BCP-47 locale code'),
-  namespace: z.string().optional().describe('Translation namespace (e.g., objects, apps, messages)'),
-  keys: z.array(z.string()).optional().describe('Specific translation keys to fetch'),
 }));
 
 export const GetTranslationsResponseSchema = lazySchema(() => z.object({
@@ -1099,12 +1213,17 @@ export type MarkAllNotificationsReadRequest = z.input<typeof MarkAllNotification
 export type MarkAllNotificationsReadResponse = z.infer<typeof MarkAllNotificationsReadResponseSchema>;
 
 // AI Types
-export type AiNlqRequest = z.input<typeof AiNlqRequestSchema>;
-export type AiNlqResponse = z.infer<typeof AiNlqResponseSchema>;
-export type AiSuggestRequest = z.input<typeof AiSuggestRequestSchema>;
-export type AiSuggestResponse = z.infer<typeof AiSuggestResponseSchema>;
-export type AiInsightsRequest = z.input<typeof AiInsightsRequestSchema>;
-export type AiInsightsResponse = z.infer<typeof AiInsightsResponseSchema>;
+export type AiMessage = z.input<typeof AiMessageSchema>;
+export type AiChatRequest = z.input<typeof AiChatRequestSchema>;
+export type AiChatResponse = z.infer<typeof AiChatResponseSchema>;
+export type AiStreamChunk = z.infer<typeof AiStreamChunkSchema>;
+export type AiCompleteRequest = z.input<typeof AiCompleteRequestSchema>;
+export type AiModelsResponse = z.infer<typeof AiModelsResponseSchema>;
+export type AiConversation = z.infer<typeof AiConversationSchema>;
+export type CreateAiConversationRequest = z.input<typeof CreateAiConversationRequestSchema>;
+export type ListAiConversationsRequest = z.input<typeof ListAiConversationsRequestSchema>;
+export type ListAiConversationsResponse = z.infer<typeof ListAiConversationsResponseSchema>;
+export type UpdateAiConversationRequest = z.input<typeof UpdateAiConversationRequestSchema>;
 
 // i18n Types
 export type GetLocalesRequest = z.input<typeof GetLocalesRequestSchema>;
@@ -1254,12 +1373,19 @@ export interface NotificationProtocol {
   markAllNotificationsRead?(request: MarkAllNotificationsReadRequest): Promise<MarkAllNotificationsReadResponse>;
 }
 
-/** AI (optional — chat is now handled by the Vercel AI SDK wire protocol). */
-export interface AiProtocol {
-  aiNlq?(request: AiNlqRequest): Promise<AiNlqResponse>;
-  aiSuggest?(request: AiSuggestRequest): Promise<AiSuggestResponse>;
-  aiInsights?(request: AiInsightsRequest): Promise<AiInsightsResponse>;
-}
+// `AiProtocol` is GONE (#3718).
+//
+// It declared exactly three optional methods — `aiNlq?` / `aiSuggest?` /
+// `aiInsights?` — and no service in any repo implemented one. Nothing
+// dispatched through it either: `/api/v1/ai/**` is proxied straight to the
+// route handlers `service-ai` (Cloud/EE, in the `cloud` repo) builds, never
+// through a protocol object. An interface whose every member is optional and
+// unimplemented does not describe a server — it only makes one look declared.
+//
+// The real server-side contract for AI is `IAIService` +
+// `IAIConversationService` in `@objectstack/spec/contracts` (`ai-service.ts`),
+// which `service-ai` actually implements. The wire shapes those routes speak
+// are the `Ai*` schemas above.
 
 /** Localization (optional). */
 export interface I18nProtocol {

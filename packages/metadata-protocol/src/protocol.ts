@@ -64,6 +64,14 @@ import {
 const TYPE_TO_FORM: Readonly<Record<string, FormView>> = METADATA_FORM_REGISTRY;
 
 /**
+ * [#3770] One-shot flag for the "engine has no schema registry" warning emitted
+ * by {@link ObjectStackProtocolImplementation.assertObjectRegistered}. The
+ * condition is a property of how the host constructed the engine, so it is
+ * constant for the process — warn once, not once per request.
+ */
+let warnedNoRegistryForDataGate = false;
+
+/**
  * Convert a Zod schema to a JSON Schema, returning `undefined` if conversion
  * fails (e.g. unsupported constructs). Cached per schema reference.
  */
@@ -2584,7 +2592,72 @@ export class ObjectStackProtocolImplementation implements
         }
     }
 
+    /**
+     * [#3770] Data-plane existence gate — the object MUST be in the schema
+     * registry before any data entry point below touches storage.
+     *
+     * ## Why this exists
+     *
+     * The REST API-exposure gate (`enforceApiAccess`, ADR-0049 / #1889) skips
+     * objects it cannot find in metadata, and justified that with "the data
+     * path will 404 anyway". It would not. `engine.find` resolves an
+     * UNREGISTERED name straight to a physical table name
+     * (`resolveObjectName` → `StorageNameMapping.resolveTableName({ name })`),
+     * so the request only 404'd as a *side effect* of the driver complaining
+     * about a missing table (which the REST layer recognises by matching the
+     * driver's error string) — and did not 404 at all when a table with that
+     * name happened to exist: out-of-band DDL, a registration that failed
+     * after `syncObjectSchema` had already run, a registration race. In that
+     * window the exposure gate was silently skipped and the rows were served.
+     *
+     * The gate lives HERE, at the protocol ingress, for the same reason
+     * `enforceApiAccess` does: this is the external API boundary. Internal
+     * callers (hooks, flows, migrations, raw ObjectQL) talk to the engine
+     * directly and are deliberately unaffected — `apiEnabled` and this check
+     * both control automatic API exposure, not data access.
+     *
+     * ## Tiering — mirrors the #3545 decision recorded in `api-exposure.ts`
+     *
+     * - **Registry present, object absent → fail CLOSED** (404
+     *   `OBJECT_NOT_FOUND`). The registry is authoritative for objects:
+     *   `object` is `allowOrgOverride: false` (ADR-0005), so no per-org
+     *   overlay can legitimately exist outside the process-wide registry, and
+     *   both boot hydration (`loadMetaFromDb`) and runtime authoring
+     *   (`applyObjectRegistryMutation`) register the schema before its table
+     *   is reachable.
+     * - **No registry on the engine at all → skip.** There is no source of
+     *   truth to consult, so the check cannot answer; failing closed would
+     *   break every registry-less host (edge/Lite embeddings, engine doubles)
+     *   for no security gain. Warned once per process so a deployment in that
+     *   state is observable rather than a silent blanket-allow — the lesson
+     *   #3545 recorded for `loadObjectItems`.
+     */
+    private assertObjectRegistered(object: string): void {
+        const registry: any = this.engine?.registry;
+        if (!registry || typeof registry.getObject !== 'function') {
+            if (!warnedNoRegistryForDataGate) {
+                warnedNoRegistryForDataGate = true;
+                console.warn(
+                    '[Protocol] engine exposes no schema registry — the data-plane object-existence '
+                    + 'gate (#3770) is INACTIVE for this process; unregistered object names reach the '
+                    + 'driver as raw table names.',
+                );
+            }
+            return;
+        }
+        if (registry.getObject(object)) return;
+        const err: any = new Error(`Object '${object}' not found`);
+        err.code = 'OBJECT_NOT_FOUND';
+        err.status = 404;
+        err.object = object;
+        throw err;
+    }
+
     async findData(request: { object: string, query?: any, context?: any }) {
+        // [#3770] Existence first: an unregistered object is a 404 before any
+        // query parameter is even parsed, so an unknown name can never be
+        // probed for query-shape validity (nor reach the driver as a table).
+        this.assertObjectRegistered(request.object);
         const options: any = { ...request.query };
         // Forward the dispatcher's ExecutionContext so RBAC/RLS middleware
         // can apply per-request enforcement. The protocol layer is purely
@@ -2838,6 +2911,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async getData(request: { object: string, id: string, expand?: string | string[], select?: string | string[], context?: any }) {
+        this.assertObjectRegistered(request.object); // [#3770]
         const queryOptions: any = {
             where: { id: request.id }
         };
@@ -2883,6 +2957,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async createData(request: { object: string, data: any, context?: any }) {
+        this.assertObjectRegistered(request.object); // [#3770]
         // [#3043] Ingress-level static-`readonly` strip — a non-system caller
         // cannot seed a read-only column (e.g. `approval_status`) on create.
         const data = stripReadonlyForInsert(
@@ -2925,17 +3000,14 @@ export class ObjectStackProtocolImplementation implements
      * clear a unique field, or reset status before insert.
      */
     async cloneData(request: { object: string, id: string, overrides?: Record<string, any>, context?: any }) {
-        const schema: any = this.engine.registry.getObject(request.object);
-        if (!schema) {
-            const err: any = new Error(`Object '${request.object}' not found`);
-            err.code = 'OBJECT_NOT_FOUND';
-            err.status = 404;
-            err.object = request.object;
-            throw err;
-        }
+        // [#3770] This object-existence check used to be open-coded here and
+        // was the ONLY one on the whole data plane; it is now the shared gate
+        // every data entry point runs. Same error envelope as before.
+        this.assertObjectRegistered(request.object);
+        const schema: any = this.engine.registry?.getObject(request.object);
         // `enable.clone` defaults to true in the spec; treat an absent block /
         // absent flag as enabled and only block on an explicit `false`.
-        if (schema.enable?.clone === false) {
+        if (schema?.enable?.clone === false) {
             const err: any = new Error(`Cloning is disabled for object '${request.object}'`);
             err.code = 'CLONE_DISABLED';
             err.status = 403;
@@ -2962,7 +3034,7 @@ export class ObjectStackProtocolImplementation implements
         // path re-derives them rather than carrying the source's values over.
         const data: Record<string, any> = { ...source };
         for (const f of CLONE_STRIP_FIELDS) delete data[f];
-        const fields: Record<string, any> = schema.fields || {};
+        const fields: Record<string, any> = schema?.fields || {};
         for (const [name, def] of Object.entries(fields)) {
             if (!def) continue;
             // Engine-/automation-owned values: injected system/audit columns,
@@ -2995,6 +3067,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async updateData(request: { object: string, id: string, data: any, expectedVersion?: string, context?: any }) {
+        this.assertObjectRegistered(request.object); // [#3770]
         await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
@@ -3016,6 +3089,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async deleteData(request: { object: string, id: string, expectedVersion?: string, context?: any }) {
+        this.assertObjectRegistered(request.object); // [#3770]
         await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
@@ -3325,6 +3399,7 @@ export class ObjectStackProtocolImplementation implements
 
     async batchData(request: { object: string, request: BatchUpdateRequest, context?: any }): Promise<BatchUpdateResponse> {
         const { object, request: batchReq, context } = request;
+        this.assertObjectRegistered(object); // [#3770]
         const { operation, records, options } = batchReq;
         const results: Array<{ id?: string; success: boolean; error?: string; record?: any; droppedFields?: DroppedFieldsEvent[] }> = [];
         let succeeded = 0;
@@ -3428,6 +3503,7 @@ export class ObjectStackProtocolImplementation implements
     }
     
     async createManyData(request: { object: string, records: any[], context?: any }): Promise<any> {
+        this.assertObjectRegistered(request.object); // [#3770]
         // [#3043] Ingress-level static-`readonly` strip (per row) — mirrors
         // createData for the bulk-create / import surface.
         const rows = stripReadonlyForInsert(
@@ -3470,6 +3546,7 @@ export class ObjectStackProtocolImplementation implements
      * fall back to createManyData.
      */
     async insertManyData(request: { object: string, records: any[], context?: any }): Promise<{ object: string; outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> }> {
+        this.assertObjectRegistered(request.object); // [#3770]
         const engineInsertMany = (this.engine as any)?.insertMany;
         if (typeof engineInsertMany !== 'function') {
             throw new Error('insertManyData requires an engine with insertMany (framework#3172)');
@@ -3507,6 +3584,7 @@ export class ObjectStackProtocolImplementation implements
     
     async updateManyData(request: UpdateManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
         const { object, records, options, context } = request;
+        this.assertObjectRegistered(object); // [#3770]
         const results: Array<{ id?: string; success: boolean; error?: string; record?: any; droppedFields?: DroppedFieldsEvent[] }> = [];
         let succeeded = 0;
         let failed = 0;
@@ -3550,6 +3628,11 @@ export class ObjectStackProtocolImplementation implements
         // cube name maps to object name; measures → aggregations; dimensions → groupBy.
         const { query, cube } = request;
         const object = cube;
+        // [#3770] A cube name IS an object name here (`getAnalyticsMeta` derives
+        // every cube from `registry.listItems('object')`), so this read surface
+        // needs the same existence gate as the CRUD ones — otherwise it stays a
+        // way to aggregate over an arbitrary physical table.
+        this.assertObjectRegistered(object);
 
         // Build groupBy from dimensions
         const groupBy = query.dimensions || [];
@@ -3723,6 +3806,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async deleteManyData(request: DeleteManyDataRequest): Promise<any> {
+        this.assertObjectRegistered(request.object); // [#3770]
         // This expects deleting by IDs.
         return this.engine.delete(request.object, {
             where: { id: { $in: request.ids } },

@@ -523,11 +523,10 @@ export class DevPlugin implements Plugin {
     if (enabled('auth')) {
       try {
         const { AuthPlugin } = await import('@objectstack/plugin-auth') as any;
-        // [#3723] App-declared organization roles need no wiring: AuthPlugin
-        // derives them from the registered metadata in its own kernel:ready
-        // hook, so DevPlugin's "equivalent to the full stack" claim holds
-        // without this host having to remember a parameter (it was one of the
-        // three hosts that forgot it).
+        // [ADR-0108 / #3723] Nothing to wire: the organization-role vocabulary
+        // is closed, so DevPlugin's "equivalent to the full stack" claim holds
+        // with no parameter to remember. A stack's `position` / `permission`
+        // names are positions, not org roles.
         const authPlugin = new AuthPlugin({
           secret: this.options.authSecret,
           baseUrl: this.options.authBaseUrl,

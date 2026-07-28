@@ -144,13 +144,17 @@ function isoWeekLabelUtc(d: Date): string {
  * `datetime` field in a reference timezone layers that on top (and, per
  * ADR-0053, a `date` field compares against these `YYYY-MM-DD` bounds directly).
  *
- * Returns `null` for the null/empty bucket, an unparseable key, or a key that
- * is shape-valid but out of range (e.g. `2026-13`, a `-W53` in a 52-week year,
+ * Returns `null` for the empty bucket, an unparseable key, or a key that is
+ * shape-valid but out of range (e.g. `2026-13`, a `-W53` in a 52-week year,
  * `2026-02-30`). Callers drop the range and fall back to an unscoped (superset)
  * drill rather than emit a wrong bound.
+ *
+ * `key` admits `null` because that IS the empty bucket's key on both aggregation
+ * paths (#3839); callers pass a grouped row's dimension value straight through
+ * rather than casting a lie.
  */
 export function bucketKeyToCalendarRange(
-  key: string,
+  key: string | null | undefined,
   granularity: BucketGranularity,
 ): { start: string; end: string } | null {
   if (typeof key !== 'string' || key.length === 0) return null;

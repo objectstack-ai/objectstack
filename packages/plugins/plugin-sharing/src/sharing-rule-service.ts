@@ -231,6 +231,17 @@ export class SharingRuleService implements ISharingRuleService {
     return this.reconcile(rule, matches, users);
   }
 
+  /**
+   * Revoke every grant this rule materialised, without needing the rule row to
+   * still exist. `evaluateRule` throws `RULE_NOT_FOUND` once the row is gone,
+   * so a rule DELETED through the plain data API (which is what the Setup UI's
+   * delete action issues — it never reaches {@link deleteRule}) would otherwise
+   * leave its grants behind forever (objectstack#3821).
+   */
+  async revokeRuleGrants(ruleId: string): Promise<number> {
+    return this.purgeRuleGrants(ruleId);
+  }
+
   async evaluateAllForRecord(
     object: string,
     recordId: string,

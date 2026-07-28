@@ -14,8 +14,8 @@ subtree. That gate is implemented, unit-proven and reachable — but no principa
 could reach it in a state where it did anything:
 
 - better-auth grants `invitation: ["create"]` to `owner` and `admin` only
-  (`memberAc` holds `invitation: []`, and roles registered through
-  `additionalOrgRoles` inherited that empty statement);
+  (`memberAc` holds `invitation: []`, which every other registered role
+  inherits);
 - under a wall-enforcing posture, owners and admins are auto-elevated to
   `organization_admin` (`auto-org-admin-grant.ts`), which carries the wildcard
   `modifyAllRecords` that makes `isTenantAdmin()` true — and the gate

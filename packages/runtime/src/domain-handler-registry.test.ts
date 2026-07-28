@@ -126,7 +126,7 @@ describe('HttpDispatcher domain registry (D11 step ③)', () => {
         const i18n = { getLocales: vi.fn().mockReturnValue(['en', 'zh-CN']), getTranslations: vi.fn().mockReturnValue({}) };
         const result = await makeDispatcher({ i18n }).dispatch('GET', '/i18n/locales', undefined, {}, {} as any);
         expect(result.response?.status).toBe(200);
-        expect(result.response?.body?.data?.locales).toEqual(['en', 'zh-CN']);
+        expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'zh-CN']);
     });
 
     it('/analytics bridges to the analytics service exactly as the legacy branch did', async () => {

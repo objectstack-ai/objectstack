@@ -124,6 +124,91 @@ A connected external datasource is also visible in **Setup → Datasources** (st
 `origin: code`, read-only in the UI) and via `GET /api/v1/datasources` and
 `GET /api/v1/meta/datasource`, where an admin can run the "Sync objects" wizard.
 
+### When auto-connect fails
+
+An object that binds explicitly via `datasource: '…'` has **no fallback** — it
+never falls through to the `default` driver, so an unconnected datasource means
+every read and write of that object fails. The boot therefore **refuses to start**
+when a datasource in that position cannot be connected
+([#3758](https://github.com/objectstack-ai/objectstack/issues/3758)), rather than
+leaving a server that looks healthy and errors only on the affected pages:
+
+| Gate | Connect fails at boot |
+|:---|:---|
+| **external** with `validation.onMismatch: 'fail'` | refuses the boot |
+| **objects bind explicitly** via `object.datasource` | refuses the boot — the error names them |
+| **`autoConnect: true`** with nothing bound | warning; left unconnected |
+
+This covers every reason a connect can fail — unreachable database, unresolvable
+`credentialsRef`, unsupported `driver` — because the bound objects are equally
+dead in each case. Every gated datasource is attempted before the boot aborts, so
+one failed start reports *all* the misconfigured ones.
+
+<Callout type="warn">
+`OS_ALLOW_DRIVER_CONNECT_FAILURE=1` boots anyway — the same flag as the
+[engine-level driver-connect guard](/docs/data-modeling/drivers#startup-a-driver-that-cannot-connect-aborts-the-boot) —
+in an explicitly degraded state announced by a `DEGRADED BOOT` banner. The
+datasource stays unconnected for the process lifetime: nothing re-runs the
+connect, so queries against its objects keep failing until the server is
+restarted. Do not set it in production.
+</Callout>
+
+### Seeing the state of a datasource
+
+Every connect attempt's verdict is retained, so a datasource that is down no
+longer has to be diagnosed by restarting the server and re-reading boot logs
+([#3827](https://github.com/objectstack-ai/objectstack/issues/3827)).
+
+**Setup → Datasources** and `GET /api/v1/datasources` report a `status` per
+datasource:
+
+| `status` | Meaning |
+|:---|:---|
+| `ok` | A live driver is registered and routable. |
+| `error` | A connect was attempted and failed. `statusReason` carries the cause. |
+| `blocked` | The host's connect policy refused it — a decision, not a fault. It will not clear on its own. |
+| `unvalidated` | No connect attempted: a `managed` datasource left metadata-only by the gate above, or a runtime row nobody has tested. |
+
+`statusReason` is **operator-facing** and may name hosts, ports, or internal
+plans — this surface is already admin-gated.
+
+Note that `checkDriversHealth()` (and therefore `/ready`) cannot see these: a
+datasource that never connected was never registered as a driver, so it is
+*absent* from the health probe rather than reported unhealthy. Readiness is
+deliberately **not** gated on them — an optional datasource being down must not
+pull an otherwise-working replica out of the load balancer.
+
+### What a query against an unusable datasource says
+
+An object bound to a datasource with no live driver fails with
+`ERR_DATASOURCE_UNAVAILABLE` (HTTP **503**), and the message says which situation
+it is ([#3828](https://github.com/objectstack-ai/objectstack/issues/3828)):
+refused by policy, or a connect that failed under
+`OS_ALLOW_DRIVER_CONNECT_FAILURE`. A datasource name that was never declared
+still gets the original `is not registered` — that one really is an authoring
+bug, and there is nothing to add.
+
+The error **never carries the underlying cause**: connect errors routinely
+contain hosts, ports and DSNs, and a policy's `reason` is written for operators.
+Both stay in the logs and the admin list. A host that wants to tell tenants
+something specific sets `publicReason` on its connect decision — opt-in, and the
+only string that reaches an end user:
+
+```typescript
+const policy: DatasourceConnectPolicy = {
+  canConnect: (ds) =>
+    allowedFor(tenant, ds)
+      ? { allow: true }
+      : {
+          allow: false,
+          // operator-facing: logs + Setup → Datasources only
+          reason: `egress allow-list miss for ${ds.name} (${tenant.id}, plan=${tenant.plan})`,
+          // tenant-facing: appended to the query-time error
+          publicReason: 'External datasources require the Scale plan.',
+        },
+};
+```
+
 ## 4. Credentials
 
 Never inline a password. Put a reference in `external.credentialsRef` and store the
@@ -133,10 +218,11 @@ cleartext **at connect, before the driver is built**.
 
 Resolution is **fail-closed**: if a `credentialsRef` is declared but no secret store
 is configured, or the secret cannot be resolved/decrypted, the datasource is left
-**unconnected with a clear error** — never connected without the credential. For a
-code-defined external datasource with `validation.onMismatch: 'fail'` this fails
-the boot; otherwise it degrades with a warning. (Credential-less drivers such as
-SQLite simply have no `credentialsRef`.)
+**unconnected with a clear error** — never connected without the credential. An
+unresolvable credential is a connect failure like any other, so it fails the boot
+for the datasources listed under [When auto-connect fails](#when-auto-connect-fails)
+and degrades with a warning otherwise. (Credential-less drivers such as SQLite
+simply have no `credentialsRef`.)
 
 ## 5. Writes (double opt-in)
 

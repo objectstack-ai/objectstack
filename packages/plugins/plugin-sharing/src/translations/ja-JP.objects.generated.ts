@@ -102,7 +102,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_sharing_rule: {
     label: "共有ルール",
     pluralLabel: "共有ルール",
-    description: "sys_record_share 付与を自動マテリアライズする宣言的共有ルール。コードの defineSharingRule() または Studio の条件ビルダーで作成します。",
+    description: "条件に一致するレコードへのアクセスを、指定した人たちに与えます。",
     fields: {
       id: {
         label: "ルール ID"
@@ -113,7 +113,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "名前",
-        help: "一意の snake_case ルール名"
+        help: "ルールの識別名。半角小文字・数字・アンダースコアのみ使用できます。"
       },
       label: {
         label: "表示名"
@@ -123,15 +123,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       object_name: {
         label: "オブジェクト",
-        help: "短いオブジェクト名（例: opportunity、account）"
+        help: "どのオブジェクトのレコードを共有するか。"
       },
       criteria_json: {
-        label: "条件（FilterCondition JSON）",
-        help: "object_name のレコードに対してマッチする JSON FilterCondition。空 = すべてにマッチ。"
+        label: "条件",
+        help: "どのレコードを共有するか。空欄にすると、そのオブジェクトのすべてのレコードを共有します。"
       },
       recipient_type: {
         label: "受信者タイプ",
-        help: "アクセスを受け取るプリンシパルの種別 — 評価時にユーザー付与に展開されます。`department` は parent_business_unit_id ツリーをたどります。`team` はフラット（better-auth）。",
+        help: "誰にアクセスを与えるか。チーム・事業単位・役職を選ぶと、そこに属する全員がアクセスできます。「事業単位と下位組織」を選ぶと、その配下のすべての単位も対象になります。",
         options: {
           user: "ユーザー",
           team: "チーム",
@@ -142,7 +142,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_id: {
         label: "受信者",
-        help: "recipient_type に応じた部門 ID / チーム ID / ロール名 / キュー名 / ユーザー ID"
+        help: "アクセスを与える具体的なユーザー・チーム・事業単位・役職。"
       },
       access_level: {
         label: "アクセスレベル",
@@ -154,11 +154,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "有効",
-        help: "有効なルールのみがライフサイクル評価に参加します"
+        help: "オフにすると、このルールが与えたアクセスをただちに取り消します（ルール自体は残ります）。"
       },
       managed_by: {
         label: "管理元",
-        help: "レコードの出所（統一三状態、A4 #2920）: platform = フレームワーク組み込み / package = アプリ・パッケージ宣言（起動時シード）/ admin = テナントが Setup で作成。",
+        help: "このルールの出所：プラットフォーム内蔵、アプリと一緒に導入、またはここで作成。",
         options: {
           platform: "プラットフォーム",
           package: "パッケージ",
@@ -167,7 +167,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "カスタマイズ済み",
-        help: "管理者がパッケージ宣言のルールを編集すると設定されます。以後、起動時シードはこの行を上書きしません（無効化は再デプロイ後も保持）。admin 行では意味を持ちません。"
+        help: "アプリ付属のルールを編集すると設定され、アプリ更新時も変更内容が保持されます。"
       },
       created_at: {
         label: "作成日時"
