@@ -10,7 +10,6 @@ import { TranslationBundleSchema, TranslationConfigSchema } from './system/trans
 import { hasPlatformObjectPrefix } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
-import { lintDeprecatedAliases, formatDeprecatedAliasFinding } from './shared/deprecated-aliases';
 import type { ConversionNotice } from './conversions/types.js';
 
 // Data Protocol
@@ -1046,29 +1045,6 @@ function validateKnownCapabilities(config: ObjectStackDefinition): string[] {
   return errors;
 }
 
-/**
- * Findings already reported this process, so a stack that is defined more than
- * once (a dev-server reload, a config imported by several test files) nags once
- * per distinct conflict. The key carries the action AND both slot values, so a
- * genuinely different conflict is never suppressed. Mirrors the warn-once shape
- * of `warnGenericPasswordFields` in `object.zod.ts`.
- */
-const warnedAliasFindings = new Set<string>();
-
-/**
- * [#3743] Surface every deprecated-alias conflict the parse is about to resolve
- * silently. Advisory: this never throws, because the stack that comes out is
- * well-defined — the author just loses one of the two handlers they wrote.
- */
-function warnDeprecatedAliases(normalized: Record<string, unknown>): void {
-  for (const finding of lintDeprecatedAliases(normalized)) {
-    const key = `${finding.rule}\u0000${finding.where}\u0000${finding.message}`;
-    if (warnedAliasFindings.has(key)) continue;
-    warnedAliasFindings.add(key);
-    console.warn(`defineStack: ${formatDeprecatedAliasFinding(finding)}`);
-  }
-}
-
 /** Conversion notices already reported this process — same warn-once reason. */
 const warnedConversionNotices = new Set<string>();
 
@@ -1114,22 +1090,9 @@ export function defineStack(
 
   if (!strict) {
     // Non-strict mode: skip validation (advanced use cases only).
-    // No alias warning here on purpose: with no parse there is no discard yet —
-    // the alias survives on the returned stack, and whichever layer eventually
-    // consumes it (the CLI's pre-parse pass on `os build`/`os validate`) is the
-    // one that reports it. Each layer warns for its OWN discards, so an authored
-    // conflict yields exactly one warning however the stack is compiled.
     return mergeActionsIntoObjects(normalized as ObjectStackDefinition);
   }
 
-  // [#3743] The LAST moment a deprecated alias is still visible. The parse below
-  // resolves `execute` into `target` and drops it (#3713/#3742), and this parse
-  // runs inside the author's own config module — so by the time `os build` reads
-  // the exported stack there is nothing left to lint. Warning here is what makes
-  // the discard visible to the author who wrote both handlers (Prime Directive
-  // #12); it is advisory and never blocks, since the resulting stack is
-  // well-defined — the cost is a handler that never runs.
-  warnDeprecatedAliases(normalized as Record<string, unknown>);
 
   // Strict mode (default): parse with custom error map, then cross-reference validate
   const result = ObjectStackDefinitionSchema.safeParse(normalized, {

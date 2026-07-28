@@ -314,7 +314,6 @@ For values that must be encrypted at rest (API keys, tokens, DB passwords), use 
 | `visibleWhen` | `string \| Expression` | CEL predicate; field is shown only when `TRUE` |
 | `readonlyWhen` | `string \| Expression` | CEL predicate; field is read-only when `TRUE` |
 | `requiredWhen` | `string \| Expression` | CEL predicate; field is required when `TRUE` |
-| `conditionalRequired` | `string \| Expression` | Deprecated alias of `requiredWhen` — lowered into it at parse time, then dropped |
 | `multiple` | `boolean` | Allow multiple values (for select, lookup, file) |
 
 ```typescript
@@ -343,17 +342,10 @@ visibility, read-only state, and required markers live as the draft record
 changes, including row-scoped rules inside inline master-detail grids. The
 server enforces `requiredWhen` on submit and ignores writes to fields whose
 `readonlyWhen` predicate is `TRUE`, so client-side affordances are not the
-only guard. Use `requiredWhen` for new metadata; keep `conditionalRequired`
-only for older packages that already emitted it. The alias is still accepted on
-input, but it is lowered into `requiredWhen` at parse time and then removed from
-the parsed metadata, so every consumer reads one canonical slot — if a field
-declares both, `requiredWhen` wins and the alias is discarded. Declaring both
-with *different* predicates means the `conditionalRequired` one never gates the
-field, so it raises an advisory `field-requiredwhen-conditionalrequired-conflict`
-warning naming both — from `defineStack` when it parses your config, and from
-`os build` / `os validate` for stacks that skip strict `defineStack`. It never
-fails the build; the fix is to delete `conditionalRequired`. The same predicate
-in both slots is harmless duplication and stays quiet.
+only guard. Use `requiredWhen`. The deprecated `conditionalRequired` alias was removed in
+protocol 17 (#3855): authoring it is rejected with an error naming the
+replacement, not silently stripped, and `os migrate meta --from 16` rewrites
+existing sources automatically.
 
 ## Naming Conventions
 

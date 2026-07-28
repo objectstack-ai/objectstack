@@ -15,7 +15,7 @@
  * Until P2 exists these remain the permanent, replayable transform history.
  */
 
-import type { MetadataConversion } from './types.js';
+import type { ConversionApplication, MetadataConversion } from './types.js';
 import { mapCollection, mapFlowNodes, mapPages, renameConfigKey, renameKey } from './walk.js';
 
 /**
@@ -607,6 +607,170 @@ const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
   },
 };
 
+/* ── Protocol 17: the three fold-and-drop aliases retire (#3855) ───────────────
+ *
+ * `execute`, `conditionalRequired` and `topics` were each folded into their
+ * canonical key by a schema transform and dropped from the parsed output. They
+ * are now removed from the spec outright, and each schema TOMBSTONES its key
+ * with a fix-it error (`retiredKey`, `shared/retired-key.ts`) so the loader
+ * cannot quietly accept it — the same shape as
+ * `object-compactLayout-to-highlightFields` above.
+ *
+ * All three are therefore `retiredFromLoadPath: true` from the day they land:
+ * there is no alias window, deliberately. What the entries buy is the two
+ * things a consumer actually needs, neither of which is an error message:
+ *
+ *   - they appear in `CONVERSIONS_BY_MAJOR[17]`, so `spec-changes.json` (D4)
+ *     carries them — and the generated upgrade guide and the `spec_changes` MCP
+ *     tool are projections of that record, composed across however many majors
+ *     the consumer is jumping;
+ *   - the step-17 chain entry references them by id, so
+ *     `os migrate meta --from 16` REWRITES the consumer's source mechanically
+ *     instead of asking them to hand-edit.
+ *
+ * The tombstone error is the backstop for someone who did neither, and it says
+ * so by pointing at `migrate meta`.
+ */
+
+// `Dict` / `isDict` are module-private in `walk.ts`. Re-declared locally rather
+// than widening that module's exports, which would grow the package API surface
+// for an internal one-line type guard.
+type Dict = Record<string, unknown>;
+const isDict = (v: unknown): v is Dict => typeof v === 'object' && v !== null && !Array.isArray(v);
+type Emit = (detail: ConversionApplication) => void;
+
+/** Rename a key on every field of every object (and object extension). Fields
+ *  are a RECORD keyed by field name, so `mapCollection` does not reach them. */
+function mapObjectFieldsKey(stack: Dict, collection: string, from: string, to: string, emit: Emit): Dict {
+  return mapCollection(stack, collection, (owner, path) => {
+    const fields = owner.fields;
+    if (!isDict(fields)) return owner;
+    let changed = false;
+    const next: Dict = {};
+    for (const [name, def] of Object.entries(fields)) {
+      if (!isDict(def)) {
+        next[name] = def;
+        continue;
+      }
+      const renamed = renameKey(def, from, to);
+      if (renamed) {
+        emit({ from, to, path: `${path}.fields.${name}.${to}` });
+        next[name] = renamed;
+        changed = true;
+      } else {
+        next[name] = def;
+      }
+    }
+    return changed ? { ...owner, fields: next } : owner;
+  });
+}
+
+/**
+ * Action `execute` → `target` (protocol 17, #3713 / #3742 / #3855).
+ *
+ * A pure key rename — the value (a handler/flow/URL ref) is unchanged. Actions
+ * appear both top-level and nested under their object, so both are walked.
+ */
+const actionExecuteToTarget: MetadataConversion = {
+  id: 'action-execute-to-target',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'action.execute',
+  summary: "action key 'execute' → 'target' (the deprecated handler alias, #3713)",
+  apply(stack, emit) {
+    const renameOn = (action: Dict, path: string): Dict => {
+      const renamed = renameKey(action, 'execute', 'target');
+      if (!renamed) return action;
+      emit({ from: 'execute', to: 'target', path: `${path}.target` });
+      return renamed;
+    };
+    const withTopLevel = mapCollection(stack, 'actions', renameOn);
+    return mapCollection(withTopLevel, 'objects', (obj, path) => {
+      const nested = mapCollection(obj, 'actions', (action, actionPath) =>
+        renameOn(action, `${path}.${actionPath}`),
+      );
+      return nested;
+    });
+  },
+  fixture: {
+    before: {
+      actions: [{ name: 'convert', label: 'Convert', type: 'script', execute: 'convertHandler' }],
+    },
+    after: {
+      actions: [{ name: 'convert', label: 'Convert', type: 'script', target: 'convertHandler' }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * Field `conditionalRequired` → `requiredWhen` (protocol 17, #3754 / #3855).
+ *
+ * A pure key rename — the value (a CEL predicate, bare or enveloped) is
+ * unchanged. Covers object fields and object-extension fields: the same
+ * `FieldSchema`, so the same alias.
+ */
+const fieldConditionalRequiredToRequiredWhen: MetadataConversion = {
+  id: 'field-conditionalRequired-to-requiredWhen',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'field.conditionalRequired',
+  summary: "field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, #3754)",
+  apply(stack, emit) {
+    const withObjects = mapObjectFieldsKey(stack, 'objects', 'conditionalRequired', 'requiredWhen', emit);
+    return mapObjectFieldsKey(withObjects, 'objectExtensions', 'conditionalRequired', 'requiredWhen', emit);
+  },
+  fixture: {
+    before: {
+      objects: [{
+        name: 'crm_task',
+        label: 'Task',
+        fields: { due_date: { type: 'date', conditionalRequired: 'record.stage == "closed"' } },
+      }],
+    },
+    after: {
+      objects: [{
+        name: 'crm_task',
+        label: 'Task',
+        fields: { due_date: { type: 'date', requiredWhen: 'record.stage == "closed"' } },
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * Agent `knowledge.topics` → `knowledge.sources` (protocol 17, #1891 / #3855).
+ *
+ * A pure key rename — the value (a list of RAG source tags) is unchanged.
+ */
+const agentKnowledgeTopicsToSources: MetadataConversion = {
+  id: 'agent-knowledge-topics-to-sources',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'agent.knowledge.topics',
+  summary: "agent knowledge key 'topics' → 'sources' (the deprecated RAG-source alias, #1891)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'agents', (agent, path) => {
+      const knowledge = agent.knowledge;
+      if (!isDict(knowledge)) return agent;
+      const renamed = renameKey(knowledge, 'topics', 'sources');
+      if (!renamed) return agent;
+      emit({ from: 'topics', to: 'sources', path: `${path}.knowledge.sources` });
+      return { ...agent, knowledge: renamed };
+    });
+  },
+  fixture: {
+    before: {
+      agents: [{ name: 'support_bot', knowledge: { topics: ['faq', 'policies'], indexes: ['docs'] } }],
+    },
+    after: {
+      agents: [{ name: 'support_bot', knowledge: { sources: ['faq', 'policies'], indexes: ['docs'] } }],
+    },
+    expectedNotices: 1,
+  },
+};
+
 /**
  * All conversions, keyed by the protocol major that introduced the canonical
  * shape. Newest majors last; ordering within a major is application order.
@@ -616,6 +780,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
   14: [bookAudienceProfileToPermissionSet],
   15: [viewVisibleOnToVisibleWhen, pageComponentVisibilityToVisibleWhen],
+  17: [actionExecuteToTarget, fieldConditionalRequiredToRequiredWhen, agentKnowledgeTopicsToSources],
 };
 
 /** Flattened, deterministic list of every conversion the loader knows about. */

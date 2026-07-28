@@ -1085,59 +1085,67 @@ describe('ActionSchema - order', () => {
 // Protocol Improvement Tests: execute → target migration & target validation
 // ============================================================================
 
-describe('ActionSchema - execute → target migration', () => {
-  it('should auto-migrate execute to target when target is not set', () => {
-    const result = ActionSchema.parse({
+describe('ActionSchema — the `execute` alias is REMOVED (#3855)', () => {
+  // #3713 → #3742 → #3855: `execute` was the deprecated alias of `target`. It
+  // was lowered into `target` at parse time and dropped from the output; as of
+  // protocol 17 it is gone from the spec entirely.
+  //
+  // It is TOMBSTONED rather than deleted, because `ActionSchema` is not
+  // `.strict()`: a plain deletion would have silently stripped the key, leaving
+  // the action with no handler bound and no diagnostic — the #2169 "Mark Done
+  // does nothing" shape. The rejection is what makes the removal audible, and
+  // it carries the fix so an upgrading agent does not have to find our docs.
+  const parseWithExecute = () =>
+    ActionSchema.parse({
       name: 'legacy_action',
       label: 'Legacy',
       type: 'script',
       execute: 'legacyHandler',
     });
-    expect(result.target).toBe('legacyHandler');
-    // #3713: the alias is consumed, not carried alongside the canonical slot.
-    expect('execute' in result).toBe(false);
+
+  it('rejects an authored `execute` instead of silently stripping it', () => {
+    expect(parseWithExecute).toThrow();
   });
 
-  it('should preserve target over execute when both are set', () => {
-    const result = ActionSchema.parse({
+  it('carries the upgrade prescription in the rejection itself', () => {
+    // This string is the one upgrade channel every consumer is guaranteed to
+    // hit — it must name the replacement AND the automated fix.
+    let message = '';
+    try {
+      parseWithExecute();
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toContain('`execute` was removed');
+    expect(message).toContain('use `target`');
+    expect(message).toContain('os migrate meta');
+  });
+
+  it('rejects `execute` even when the canonical `target` is also present', () => {
+    // The old behaviour silently discarded the alias here. Now the author is
+    // told, because one of the two handlers they wrote was going to be lost.
+    expect(() => ActionSchema.parse({
       name: 'both_fields',
       label: 'Both',
       type: 'script',
       target: 'preferredHandler',
       execute: 'legacyHandler',
-    });
-    expect(result.target).toBe('preferredHandler');
+    })).toThrow(/`execute` was removed/);
   });
 
-  it('should DROP execute from the parsed output so no consumer can disagree (#3713)', () => {
-    // The divergence this pins: the spec kept `target` when both were set, while
-    // objectui's ActionRunner did `execute || target` — so one button ran
-    // `preferredHandler` server-side and `legacyHandler` client-side, silently.
-    // Lowering the alias and removing it makes the conflict *unrepresentable*
-    // rather than merely agreed-upon — same shape as `agent.knowledge.topics`
-    // → `sources` (#1891), which asserts `'topics' in parsed === false`.
-    const both = ActionSchema.parse({
-      name: 'both_fields',
-      label: 'Both',
-      type: 'script',
-      target: 'preferredHandler',
-      execute: 'legacyHandler',
-    });
-    expect('execute' in both).toBe(false);
-    expect(Object.keys(both)).not.toContain('execute');
-    expect(JSON.parse(JSON.stringify(both)).execute).toBeUndefined();
-
-    // Authors may still WRITE `execute` — only the parsed output is canonical.
-    const aliasOnly = ActionSchema.parse({
-      name: 'alias_only',
-      label: 'Alias',
+  it('accepts the canonical `target` on its own', () => {
+    const parsed = ActionSchema.parse({
+      name: 'canonical',
+      label: 'Canonical',
       type: 'url',
-      execute: 'https://example.com/report',
+      target: 'https://example.com/report',
     });
-    expect(aliasOnly.target).toBe('https://example.com/report');
-    expect('execute' in aliasOnly).toBe(false);
+    expect(parsed.target).toBe('https://example.com/report');
+    expect('execute' in parsed).toBe(false);
   });
+});
 
+describe('ActionSchema - target validation', () => {
   it('should reject a script with neither target/execute nor body', () => {
     // #2169: a script action with no handler binding registers nothing.
     expect(() => ActionSchema.parse({
@@ -1224,14 +1232,24 @@ describe('ActionSchema - target required for non-script types', () => {
     expect(() => ActionSchema.parse({ name: 'api_ok', label: 'API', type: 'api', target: '/api/endpoint' })).not.toThrow();
   });
 
-  it('should accept non-script types when execute is provided (auto-migrated)', () => {
-    const result = ActionSchema.parse({
+  it('rejects a non-script type bound through the removed `execute` alias (#3855)', () => {
+    // Before protocol 17 this parsed: `execute` was lowered into `target`, so a
+    // flow action bound through the alias worked. The alias is gone, so the
+    // action now fails BOTH on the removed key and on its missing `target` —
+    // and the first message tells the author which key to rename.
+    expect(() => ActionSchema.parse({
       name: 'flow_legacy',
       label: 'Flow Legacy',
       type: 'flow',
       execute: 'my_flow',
-    });
-    expect(result.target).toBe('my_flow');
+    })).toThrow(/`execute` was removed/);
+
+    expect(ActionSchema.parse({
+      name: 'flow_canonical',
+      label: 'Flow Canonical',
+      type: 'flow',
+      target: 'my_flow',
+    }).target).toBe('my_flow');
   });
 });
 
@@ -1271,7 +1289,7 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
       name: 'with_locations',
       label: 'With Locations',
       type: 'script',
-      execute: 'true',
+      target: 'true',
       locations: all,
     });
     expect(action.locations).toEqual(all);
@@ -1283,7 +1301,7 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
         name: 'bad_location',
         label: 'Bad',
         type: 'script',
-        execute: 'true',
+        target: 'true',
         locations: ['record_section', 'not_a_real_location'],
       })
     ).toThrow();
@@ -1302,7 +1320,7 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
   });
 
   it('[ADR-0066 D4] requiredPermissions is optional (absent ⇒ undefined)', () => {
-    const action = ActionSchema.parse({ name: 'mark_done', label: 'Mark Done', type: 'script', execute: 'true' });
+    const action = ActionSchema.parse({ name: 'mark_done', label: 'Mark Done', type: 'script', target: 'true' });
     expect(action.requiredPermissions).toBeUndefined();
   });
 });

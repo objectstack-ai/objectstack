@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { retiredKey } from '../shared/retired-key';
 import { FieldType } from '../data/field.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
@@ -249,13 +250,10 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * - `type: 'api'`    — `target` is **required** (the API endpoint to call).
  * - `type: 'form'`   — `target` is **required** (the FormView name to open, routed to `/console/forms/:name`).
  * 
- * The `execute` field is **deprecated** and will be removed in a future version.
- * If `execute` is provided without `target`, it is lowered into `target` at parse
- * time. Either way `execute` is **dropped from the parsed output** (#3713), so
- * every consumer reads one canonical slot; when both are declared, `target` wins.
- * Declaring both with *different* values discards the `execute` handler, so it
- * raises the advisory `action-target-execute-conflict` warning (#3743) — from
- * `defineStack` and from `os build`/`os validate` — rather than passing silently.
+ * The `execute` alias was **removed in protocol 17** (#3855). `target` is the
+ * only handler slot, so no consumer has a second slot to disagree about. An
+ * authored `execute` is rejected with the rename prescription rather than
+ * silently stripped; `os migrate meta --from 16` rewrites it for you.
  * 
  * @example Good action names
  * - 'on_close_deal'
@@ -470,12 +468,16 @@ export const ActionSchema = lazySchema(() => z.object({
   body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),
 
   /**
-   * @deprecated Use `target` instead. Accepted on input, lowered into `target`
-   * during parsing, then **removed from the parsed output** (#3713) — so a
-   * renderer only ever sees the canonical `target`. When both are set, `target`
-   * wins and this value is discarded.
+   * [REMOVED in protocol 17 — #3855] The deprecated alias of `target`.
+   * Tombstoned rather than deleted: `ActionSchema` is not `.strict()`, so a
+   * plain deletion would silently strip the key and the action would bind no
+   * handler at all — the #2169 "Mark Done does nothing" shape, restored.
    */
-  execute: z.string().optional().describe('@deprecated — Use target instead. Lowered into target during parsing and dropped from the parsed output; when both are set, target wins.'),
+  execute: retiredKey(
+    '`execute` was removed in @objectstack/spec 17 (#3855) — use `target`. ' +
+    'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
   
   /** User Input Requirements */
   params: z.array(ActionParamSchema).optional().describe('Input parameters required from user'),
@@ -662,29 +664,6 @@ export const ActionSchema = lazySchema(() => z.object({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-}).transform((data) => {
-  // #3713: lower the deprecated `execute` alias into the canonical `target` AND
-  // drop it from the output — the same "canonical wins, alias disappears" shape
-  // as `agent.knowledge.topics` → `sources` (#1891).
-  //
-  // Keeping both slots on the parsed output made the conflict *representable*,
-  // and the readers resolved it in OPPOSITE directions: this transform preferred
-  // `target`, while objectui's ActionRunner did `execute || target`. An action
-  // declaring both therefore ran `target` server-side and `execute` client-side
-  // — two different scripts for one button, with no error anywhere.
-  //
-  // `target` wins, and the alias no longer reaches a renderer. The server runtime
-  // never reads `execute` at all (`isHeadlessInvokableAction` gates on
-  // `target || body`, and the dispatch candidate chain probes `target`/`name` —
-  // see runtime/src/action-execution.ts), so authoring `execute` works *solely*
-  // because it is lowered here: dropping it costs the server nothing and takes
-  // the ambiguity off the wire. Authors may still write `execute` — it stays on
-  // the input type (`ActionInput`), only the parsed output is canonical.
-  const { execute, ...rest } = data;
-  if (execute && !rest.target) {
-    return { ...rest, target: execute };
-  }
-  return rest;
 }).refine((data) => {
   // Require `target` for types that reference an external resource
   if (TARGET_REQUIRED_TYPES.has(data.type) && !data.target) {

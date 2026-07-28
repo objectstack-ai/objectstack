@@ -941,64 +941,68 @@ describe('FieldSchema - group property', () => {
   });
 });
 
-describe('FieldSchema - conditionalRequired → requiredWhen migration (#3754)', () => {
-  // These three cases used to assert that `conditionalRequired` SURVIVED parse,
-  // which pinned the alias into the output and left every consumer to invent its
-  // own precedence — the condition that produced #3713 for `action.execute`. The
-  // alias is now lowered into the canonical `requiredWhen` and dropped.
-  it('lowers a conditionalRequired formula into requiredWhen', () => {
-    const result = FieldSchema.parse({
+describe('FieldSchema — the `conditionalRequired` alias is REMOVED (#3855)', () => {
+  // #3754 lowered the alias into `requiredWhen` and dropped it from the output.
+  // Protocol 17 removes it from the spec entirely.
+  //
+  // TOMBSTONED rather than deleted, because `FieldSchema` is deliberately not
+  // `.strict()` — this object already carries a comment about the last time a
+  // key outlived its schema and got silently stripped (`dataQuality` / `cached`,
+  // #3726 / #3733). A silent strip here would mean the field is simply never
+  // required, with nothing to read anywhere.
+  it('rejects an authored `conditionalRequired` instead of silently stripping it', () => {
+    expect(() => FieldSchema.parse({
       type: 'text',
       conditionalRequired: "status = 'closed_won'",
-    });
-    expect(result.requiredWhen).toEqual({ dialect: 'cel', source: "status = 'closed_won'" });
-    expect('conditionalRequired' in result).toBe(false);
+    })).toThrow(/`conditionalRequired` was removed/);
   });
 
-  it('should accept a field without conditionalRequired (optional)', () => {
-    const result = FieldSchema.parse({
+  it('carries the upgrade prescription in the rejection itself', () => {
+    let message = '';
+    try {
+      FieldSchema.parse({ type: 'text', conditionalRequired: 'amount > 1000' });
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toContain('use `requiredWhen`');
+    expect(message).toContain('os migrate meta');
+  });
+
+  it('rejects it even when the canonical `requiredWhen` is also present', () => {
+    expect(() => FieldSchema.parse({
       type: 'text',
-    });
-    expect(result.requiredWhen).toBeUndefined();
-    expect('conditionalRequired' in result).toBe(false);
+      requiredWhen: "record.status == 'sent'",
+      conditionalRequired: 'record.amount > 1000',
+    })).toThrow(/`conditionalRequired` was removed/);
   });
 
-  it('should allow combining required and conditionalRequired', () => {
+  it('rejects it on the real authoring path — a field nested in an object', () => {
+    // The removal has to bite where authors actually write fields, not only in
+    // a bare `FieldSchema.parse()`.
+    expect(() => ObjectSchema.parse({
+      name: 'crm_deal',
+      label: 'Deal',
+      fields: {
+        amount: { type: 'currency', conditionalRequired: "record.stage == 'closing'" },
+      },
+    })).toThrow(/`conditionalRequired` was removed/);
+  });
+
+  it('accepts the canonical `requiredWhen`, alone or beside `required`', () => {
     const result = FieldSchema.parse({
       type: 'text',
       required: false,
-      conditionalRequired: 'amount > 1000',
+      requiredWhen: 'amount > 1000',
     });
     expect(result.required).toBe(false);
     expect(result.requiredWhen).toEqual({ dialect: 'cel', source: 'amount > 1000' });
     expect('conditionalRequired' in result).toBe(false);
   });
 
-  it('keeps requiredWhen when BOTH are declared, and drops the alias', () => {
-    const result = FieldSchema.parse({
-      type: 'text',
-      requiredWhen: "record.status == 'sent'",
-      conditionalRequired: 'record.amount > 1000',
-    });
-    expect(result.requiredWhen).toEqual({ dialect: 'cel', source: "record.status == 'sent'" });
+  it('accepts a field that declares neither', () => {
+    const result = FieldSchema.parse({ type: 'text' });
+    expect(result.requiredWhen).toBeUndefined();
     expect('conditionalRequired' in result).toBe(false);
-    expect(Object.keys(result)).not.toContain('conditionalRequired');
-    expect(JSON.parse(JSON.stringify(result)).conditionalRequired).toBeUndefined();
-  });
-
-  it('survives a field nested in an object (the real authoring path)', () => {
-    // The alias has to be gone from the metadata a renderer actually receives,
-    // not just from a bare FieldSchema.parse() in a unit test.
-    const parsed = ObjectSchema.parse({
-      name: 'crm_deal',
-      label: 'Deal',
-      fields: {
-        amount: { type: 'currency', conditionalRequired: "record.stage == 'closing'" },
-      },
-    });
-    const amount = parsed.fields.amount as Record<string, unknown>;
-    expect(amount.requiredWhen).toEqual({ dialect: 'cel', source: "record.stage == 'closing'" });
-    expect('conditionalRequired' in amount).toBe(false);
   });
 });
 
@@ -1022,16 +1026,18 @@ describe('FieldSchema - conditional field rules (visibleWhen / readonlyWhen / re
     expect(result.requiredWhen).toBeUndefined();
   });
 
-  it('requiredWhen and its alias conditionalRequired can NOT coexist — canonical wins, alias dropped (#3754)', () => {
-    // Inverted from the original assertion, which pinned the two keys as
-    // coexisting in the parsed output. Coexistence is the whole problem: it makes
-    // every consumer re-derive the precedence, which is how #3713 produced a
-    // button that ran one script on the server and a different one in the browser.
-    const result = FieldSchema.parse({
+  it('requiredWhen has no alias left to coexist with (#3855)', () => {
+    // The original assertion pinned the two keys as coexisting in the output;
+    // #3754 inverted it to "canonical wins, alias dropped"; #3855 removes the
+    // alias outright, so the pair is now unrepresentable at the input too — the
+    // strongest form of the same guarantee.
+    expect(() => FieldSchema.parse({
       type: 'text',
       requiredWhen: "record.status == 'sent'",
       conditionalRequired: "record.status == 'closed_won'",
-    });
+    })).toThrow(/`conditionalRequired` was removed/);
+
+    const result = FieldSchema.parse({ type: 'text', requiredWhen: "record.status == 'sent'" });
     expect(result.requiredWhen).toEqual({ dialect: 'cel', source: "record.status == 'sent'" });
     expect('conditionalRequired' in result).toBe(false);
   });

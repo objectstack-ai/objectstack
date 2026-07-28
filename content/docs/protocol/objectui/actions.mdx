@@ -51,9 +51,7 @@ The `type` field selects how an action is dispatched. The complete enum is **`sc
 | `api` | Call an API endpoint (`method` defaults to `POST`). | Yes |
 | `form` | Open a FormView by name, routed to `/console/forms/:name`. | Yes |
 
-`target` is the canonical binding for every non-`script` type. The deprecated `execute` field is lowered into `target` during parsing and then **removed from the parsed metadata**, so every consumer — server dispatch and renderer alike — reads exactly one slot. If an action declares both, `target` wins and `execute` is discarded.
-
-Declaring both with *different* values means one of the two handlers you wrote never runs, so it raises an advisory `action-target-execute-conflict` warning naming both — from `defineStack` when it parses your config, and from `os build` / `os validate` for stacks that skip strict `defineStack`. It never fails the build; the fix is to delete `execute`. The same value in both slots is harmless duplication and stays quiet.
+`target` is the canonical binding for every non-`script` type, and since protocol 17 it is the **only** one. The deprecated `execute` alias was removed (#3855): authoring it is rejected with an error naming the replacement, not silently stripped. Run `os migrate meta --from 16` to rewrite existing sources automatically — the removal also ships in the machine-readable change manifest (`spec-changes.json`), which composes across however many majors you are jumping.
 
 ### Script Actions
 
