@@ -37,7 +37,7 @@ export const SysSharingRule = ObjectSchema.create({
   // We still recommend `defineSharingRule({...})` for repo-controlled
   // baselines, but admins can safely create/edit/delete from the UI.
   userActions: { create: true, edit: true, delete: true, import: false },
-  description: 'Declarative sharing rule that auto-materialises sys_record_share grants. Authored via defineSharingRule() in code or the Studio criteria builder.',
+  description: 'Grants a group of people access to the records that match a condition.',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{label}',
@@ -99,7 +99,13 @@ export const SysSharingRule = ObjectSchema.create({
       label: 'Name',
       required: true,
       maxLength: 100,
-      description: 'Unique snake_case rule name',
+      // Field `description`s on this object are ADMIN-FACING help text rendered
+      // under each input in Setup — not notes for the next engineer. They must
+      // not name tables, columns, enum values, ADRs or third-party libraries:
+      // the reader is a tenant admin who sees only the labels in the dropdown
+      // (objectstack#3821). Implementation detail belongs in the doc comments
+      // above, where it already is.
+      description: 'Identifies the rule. Lowercase letters, digits and underscores only.',
       group: 'Identity',
     }),
 
@@ -124,12 +130,12 @@ export const SysSharingRule = ObjectSchema.create({
       // instead of a free-text machine-name input. Falls back to a text input
       // when the `field:object-ref` widget is unavailable.
       widget: 'object-ref',
-      description: 'Short object name (e.g. opportunity, account)',
+      description: 'The object whose records this rule shares.',
       group: 'Target',
     }),
 
     criteria_json: Field.textarea({
-      label: 'Criteria (FilterCondition JSON)',
+      label: 'Criteria',
       required: false,
       // Rendered as a visual criteria builder scoped to the selected object's
       // fields (dependsOn: object_name), storing the same JSON FilterCondition.
@@ -137,7 +143,7 @@ export const SysSharingRule = ObjectSchema.create({
       // editable. Falls back to a textarea when the widget is unavailable.
       widget: 'filter-condition',
       dependsOn: ['object_name'],
-      description: 'JSON FilterCondition matched against records of object_name. Empty = match all.',
+      description: 'Which records to share. Leave empty to share every record of the object.',
       group: 'Target',
     }),
 
@@ -150,7 +156,9 @@ export const SysSharingRule = ObjectSchema.create({
         label: 'Recipient Type',
         required: true,
         defaultValue: 'business_unit',
-        description: 'Kind of principal that receives access — expanded to user grants at evaluation time. `business_unit` walks the parent_business_unit_id tree; `team` is flat (better-auth); `position` expands the position\'s holders (positions are flat, ADR-0090 D3); `unit_and_subordinates` expands the named business unit PLUS every descendant unit\'s members via the sys_business_unit tree (ADR-0057 D5).',
+        // The engine detail this used to spell out (which tree is walked, which
+        // expansion is flat, the ADRs behind each) lives in the class doc above.
+        description: 'Who receives access. Picking a team, business unit or position gives access to everyone in it. "Business unit and subordinates" also covers every unit below the one you pick.',
         group: 'Recipient',
       },
     ),
@@ -166,7 +174,7 @@ export const SysSharingRule = ObjectSchema.create({
       // back to a text input when the widget is unavailable.
       widget: 'recipient-picker',
       dependsOn: ['recipient_type'],
-      description: 'business-unit id / team id / position name / user id depending on recipient_type',
+      description: 'The specific user, team, business unit or position that receives access.',
       group: 'Recipient',
     }),
 
@@ -184,7 +192,7 @@ export const SysSharingRule = ObjectSchema.create({
       label: 'Active',
       required: false,
       defaultValue: true,
-      description: 'Only active rules participate in lifecycle evaluation',
+      description: 'Turn off to withdraw the access this rule granted, without deleting the rule.',
       group: 'Lifecycle',
     }),
 
@@ -203,8 +211,7 @@ export const SysSharingRule = ObjectSchema.create({
       readonly: true,
       defaultValue: 'admin',
       description:
-        'Record provenance (unified tri-state, A4 #2920): platform = framework built-in / ' +
-        'package = app/package-declared (boot-seeded) / admin = tenant-created in Setup.',
+        'Where this rule came from: built into the platform, installed with an app, or created here in Setup.',
       options: [
         { value: 'platform', label: 'Platform' },
         { value: 'package', label: 'Package' },
@@ -219,8 +226,7 @@ export const SysSharingRule = ObjectSchema.create({
       readonly: true,
       defaultValue: false,
       description:
-        'Set when an admin edits a package-declared rule; boot seeding will no longer ' +
-        'overwrite the row (deactivations survive redeploys). Meaningless on admin rows.',
+        'Set once you edit a rule that came with an app, so your changes are kept when the app is updated.',
       group: 'System',
     }),
 

@@ -102,7 +102,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_sharing_rule: {
     label: "Sharing Rule",
     pluralLabel: "Sharing Rules",
-    description: "Declarative sharing rule that auto-materialises sys_record_share grants. Authored via defineSharingRule() in code or the Studio criteria builder.",
+    description: "Grants a group of people access to the records that match a condition.",
     fields: {
       id: {
         label: "Rule ID"
@@ -113,7 +113,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Name",
-        help: "Unique snake_case rule name"
+        help: "Identifies the rule. Lowercase letters, digits and underscores only."
       },
       label: {
         label: "Display Label"
@@ -123,15 +123,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       object_name: {
         label: "Object",
-        help: "Short object name (e.g. opportunity, account)"
+        help: "The object whose records this rule shares."
       },
       criteria_json: {
-        label: "Criteria (FilterCondition JSON)",
-        help: "JSON FilterCondition matched against records of object_name. Empty = match all."
+        label: "Criteria",
+        help: "Which records to share. Leave empty to share every record of the object."
       },
       recipient_type: {
         label: "Recipient Type",
-        help: "Kind of principal that receives access — expanded to user grants at evaluation time. `business_unit` walks the parent_business_unit_id tree; `team` is flat (better-auth); `position` expands the position's holders (positions are flat, ADR-0090 D3); `unit_and_subordinates` expands the named business unit PLUS every descendant unit's members via the sys_business_unit tree (ADR-0057 D5).",
+        help: "Who receives access. Picking a team, business unit or position gives access to everyone in it. \"Business unit and subordinates\" also covers every unit below the one you pick.",
         options: {
           user: "user",
           team: "team",
@@ -142,7 +142,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_id: {
         label: "Recipient",
-        help: "business unit id / team id / position name / user id depending on recipient_type"
+        help: "The specific user, team, business unit or position that receives access."
       },
       access_level: {
         label: "Access Level",
@@ -154,11 +154,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "Active",
-        help: "Only active rules participate in lifecycle evaluation"
+        help: "Turn off to withdraw the access this rule granted, without deleting the rule."
       },
       managed_by: {
         label: "Managed By",
-        help: "Record provenance (unified tri-state, A4 #2920): platform = framework built-in / package = app/package-declared (boot-seeded) / admin = tenant-created in Setup.",
+        help: "Where this rule came from: built into the platform, installed with an app, or created here in Setup.",
         options: {
           platform: "Platform",
           package: "Package",
@@ -167,7 +167,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "Customized",
-        help: "Set when an admin edits a package-declared rule; boot seeding will no longer overwrite the row (deactivations survive redeploys). Meaningless on admin rows."
+        help: "Set once you edit a rule that came with an app, so your changes are kept when the app is updated."
       },
       created_at: {
         label: "Created At"

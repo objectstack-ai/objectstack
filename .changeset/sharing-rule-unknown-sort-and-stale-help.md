@@ -43,6 +43,19 @@ through the plain data API used to orphan its grants. Seeding and package
 bootstrap write with `isSystem` and are skipped; `kernel:bootstrapped` already
 backfills those. Reconciliation is best-effort and never fails the write.
 
+**The dialog's help text was engineering notes, shown to tenant admins.** The
+field descriptions on `sys_sharing_rule` render under each input in Setup, and
+they cited ADR numbers, table and column names (`parent_business_unit_id`,
+`sys_business_unit`), enum machine values the dropdown never shows
+(`business_unit`, `team`), a third-party library (better-auth), and engine
+vocabulary ("evaluation", "lifecycle"). Several were also stale: they still told
+admins to type an id or hand-write a `FilterCondition` after those inputs became
+a record picker and a visual builder. Rewritten for the reader who actually sees
+them — the implementation detail was already in the object's doc comment, which
+is where it stays. `criteria_json`'s LABEL loses its "(FilterCondition JSON)"
+suffix for the same reason, and `active` can finally say what it now does:
+turning it off withdraws the access.
+
 Also refreshes the `sys_sharing_rule` help text in the zh-CN / ja-JP / es-ES
 translation bundles, which still described `recipient_type` in terms of
 `department` (the enum value is `business_unit`) and told admins to enter a
