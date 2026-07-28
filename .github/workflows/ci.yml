@@ -141,11 +141,18 @@ jobs:
       # in parallel, and it dominated this job's critical path. The exclusion
       # subtracts from the affected set (verified: turbo unions inclusive
       # filters, then applies `!` negations to the result).
+      # `set -o pipefail` is load-bearing: GitHub runs these with `bash -e`, which
+      # does NOT set it, so `turbo … | tee` would report TEE's status and a
+      # failing suite would go green. That is the same class of bug the tee is
+      # here to catch, so it must not be introduced by the catching.
       - name: Run affected tests (PR)
         if: github.event_name == 'pull_request'
         env:
           TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
-        run: pnpm turbo run test --affected --filter=!@objectstack/dogfood --concurrency=4
+        run: |
+          set -o pipefail
+          pnpm turbo run test --affected --filter=!@objectstack/dogfood --concurrency=4 \
+            2>&1 | tee "$RUNNER_TEMP/test-core.log"
 
       # Push to main: full run. Spec's suite runs here plain (uninstrumented);
       # the coverage-instrumented pass moved to the nightly Spec Coverage
@@ -155,7 +162,23 @@ jobs:
       # Dogfood job runs it.
       - name: Run all tests (push)
         if: github.event_name == 'push'
-        run: pnpm turbo run test --filter=!@objectstack/dogfood --concurrency=4
+        run: |
+          set -o pipefail
+          pnpm turbo run test --filter=!@objectstack/dogfood --concurrency=4 \
+            2>&1 | tee "$RUNNER_TEMP/test-core.log"
+
+      # Runs even when the suite failed — that is when it earns its keep. A red
+      # suite plus a GREEN completeness check means real test failures; a red
+      # suite plus a RED completeness check means a worker died and the cases it
+      # owned never ran, which reads almost identically in the log (#3812).
+      - name: Test completeness guard
+        if: always()
+        run: |
+          if [ ! -f "$RUNNER_TEMP/test-core.log" ]; then
+            echo "No test log — the test step did not get far enough to produce one."
+            exit 0
+          fi
+          node scripts/check-test-completeness.mjs "$RUNNER_TEMP/test-core.log"
 
       # Seed the shared Turbo cache from main only (see the restore step
       # above). always(): keep the seed fresh even when a test fails, matching
@@ -236,7 +259,22 @@ jobs:
       # package's `vitest run` and are hashed into the turbo task, so each
       # shard caches independently.
       - name: Boot example apps and exercise real user flows
-        run: pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/2
+        run: |
+          set -o pipefail
+          pnpm turbo run test --filter=@objectstack/dogfood -- --shard=${{ matrix.shard }}/2 \
+            2>&1 | tee "$RUNNER_TEMP/dogfood.log"
+
+      # Dogfood boots real apps in-process, so a native/OOM abort is likelier
+      # here than in the unit suites — and a shard that dies silently looks like
+      # a shard that had less work.
+      - name: Test completeness guard
+        if: always()
+        run: |
+          if [ ! -f "$RUNNER_TEMP/dogfood.log" ]; then
+            echo "No test log — the test step did not get far enough to produce one."
+            exit 0
+          fi
+          node scripts/check-test-completeness.mjs "$RUNNER_TEMP/dogfood.log"
 
       # Replaces the former auto-verify dogfood tests: runs the published
       # `objectstack verify` engine over each example app through the CLI —
