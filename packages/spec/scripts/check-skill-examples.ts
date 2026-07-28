@@ -22,6 +22,26 @@
  * still sees the block. A fence-meta tag like ` ```ts check ` would have punched
  * a hole in that gate.
  *
+ * ── Sweeping the UNMARKED blocks: two traps ─────────────────────────────────
+ * Periodically it is worth asking whether any unmarked block is genuine ROT
+ * rather than a fragment. Two things make a naive sweep report a confident
+ * "nothing found", and both bit a real attempt:
+ *
+ *   1. `tsc` reports syntactic diagnostics and then STOPS — it never runs the
+ *      semantic pass for the program. Mark every block at once and the ~200
+ *      syntactically-broken fragments suppress type-checking for ALL the rest,
+ *      so a run producing only TS1xxx codes proves nothing. Exclude the
+ *      syntax failures and re-run before concluding anything about rot.
+ *   2. A block that omits its imports resolves bare type names against the DOM
+ *      lib: `Plugin`, `Event`, `Response`, `Storage`, `Selection` all exist
+ *      there. `const p: Plugin = { version, init }` then reports "version does
+ *      not exist in type Plugin" against lib.dom's Plugin — an artefact, not
+ *      drift. Check what the name actually resolved to before filing it.
+ *
+ * The 2026-07 sweep that applied both corrections found exactly one real rot in
+ * `content/docs` (a FAQ recommending `FieldSchema.extend()`, impossible since
+ * FieldSchema became a ZodPipe); everything else was fragments.
+ *
  * Each marked block is written verbatim to a throwaway build dir and type-checked
  * with `tsc --noEmit` against the built `@objectstack/spec` declarations — the
  * exact surface a consumer's `import { … } from '@objectstack/spec'` resolves to.

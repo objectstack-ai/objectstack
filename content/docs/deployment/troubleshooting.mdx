@@ -359,15 +359,30 @@ Yes. All schemas work with plain JavaScript. You lose compile-time type checking
 
 ### How do I extend a built-in schema?
 
-Use Zod's `.extend()` or `.merge()`:
+Use Zod's `.extend()` — but reach the **object** first. Several built-in schemas
+(`FieldSchema`, `ObjectSchema`, `ActionSchema`, …) carry a `.transform()` that
+lowers author-facing sugar at parse time, which makes them a `ZodPipe` rather
+than a `ZodObject`. `.extend()` does not exist on a pipe; `.in` is the input
+object it wraps:
 
+{/* os:check */}
 ```typescript
+import { z } from 'zod';
 import { FieldSchema } from '@objectstack/spec/data';
 
-const CustomFieldSchema = FieldSchema.extend({
-  customProperty: z.string().optional()
+// `.in` — the ZodObject the pipe wraps. Calling `.extend()` on FieldSchema
+// itself throws "not a function": it is a ZodPipe.
+const CustomFieldSchema = FieldSchema.in.extend({
+  customProperty: z.string().optional(),
 });
+
+CustomFieldSchema.parse({ name: 'code', type: 'text', customProperty: 'x' });
 ```
+
+Note the extended schema no longer runs the transform, so author-facing sugar
+that the pipe would have lowered stays raw. When you only need to *validate* an
+extra key alongside the real parse, prefer parsing with the built-in schema and
+checking your own additions separately.
 
 ### Where are the JSON Schemas for IDE autocomplete?
 
