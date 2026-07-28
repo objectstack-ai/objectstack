@@ -186,8 +186,8 @@ describe('installAttachmentReadVisibility', () => {
     // Each parent type has a visible and an invisible record, plus a row whose
     // parent_object belongs to one branch while its parent_id appears only in
     // the OTHER branch's id list. Nothing but a genuine per-branch AND excludes
-    // all three: this is the shape driver-sql widened into a cross-tenant read
-    // by OR-ing a branch's own keys (#3774 / PR #3776).
+    // all three: this is the shape driver-sql widened into an in-tenant
+    // unauthorized read by OR-ing a branch's own keys (#3774 / PR #3776).
     const { mw, selectIds } = install({
       attachments: [
         { id: 'a1', parent_object: 'att_case', parent_id: 'c1' }, // visible case
