@@ -186,7 +186,15 @@ export const BudgetApprovalFlow = defineFlow({
       config: {
         approvers: [{ type: 'position', value: 'manager' }],
         behavior: 'first_response',
-        lockRecord: true,
+        // Deliberately UNLOCKED, and the counterpart to `exec_review` below —
+        // together they dogfood both record-lock policies in one flow
+        // (objectui#2902). A single-approver step like this is the case the
+        // flag exists for: the manager is expected to correct the budget
+        // narrative in place rather than send the whole thing back. It also
+        // matches this node's own revise loop, which assumes the record is
+        // reworkable. The console must show "in approval · editable" here and
+        // keep inline editing live; on `exec_review` it must show the lock.
+        lockRecord: false,
         // ADR-0044: at most two send-backs; the third auto-rejects.
         maxRevisions: 2,
       },
@@ -212,6 +220,8 @@ export const BudgetApprovalFlow = defineFlow({
       config: {
         approvers: [{ type: 'position', value: 'exec' }],
         behavior: 'unanimous',
+        // Locked, unlike `manager_review` — a multi-approver sign-off must
+        // decide on a stable record, so edits are refused until it completes.
         lockRecord: true,
       },
     },

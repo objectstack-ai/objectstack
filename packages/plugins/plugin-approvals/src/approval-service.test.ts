@@ -169,6 +169,40 @@ describe('ApprovalService (node era)', () => {
     expect(JSON.parse(raw.node_config_json)).toMatchObject({ behavior: 'first_response', lockRecord: true });
   });
 
+  // ── record-lock policy on the read row (objectui#2902) ──────────
+  //
+  // The lock is enforced in `lifecycle-hooks.ts` off `node_config_json`, but
+  // the row projection used to drop the flag entirely — so a client could see
+  // "a pending request exists" and nothing more, and had to assume every
+  // pending node locked the record. Chaining nodes with different policies
+  // made that visibly wrong. These pin the flag onto every read path.
+
+  it('lock_record: true when the node locks (the schema default)', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    expect(req.lock_record).toBe(true);
+    const [listed] = await svc.listRequests({ object: 'opportunity', recordId: 'opp1' }, SYS);
+    expect(listed.lock_record).toBe(true);
+    expect((await svc.getRequest(req.id, SYS))!.lock_record).toBe(true);
+  });
+
+  it('lock_record: false when the node opts out — the same read the hook honors', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9'], {}, { lockRecord: false }), CTX);
+    expect(req.lock_record).toBe(false);
+    const [listed] = await svc.listRequests({ object: 'opportunity', recordId: 'opp1' }, SYS);
+    expect(listed.lock_record).toBe(false);
+    expect((await svc.getRequest(req.id, SYS))!.lock_record).toBe(false);
+  });
+
+  it('lock_record: an unset lockRecord reads as locked, matching the hook default', async () => {
+    // The hook allows the write only on an explicit `=== false`; the flag must
+    // default the same way or the UI would offer an edit the server rejects.
+    const req = await svc.openNodeRequest(
+      { ...openInput(['u9']), config: { approvers: [{ type: 'user' as const, value: 'u9' }], behavior: 'first_response' as const } } as any,
+      CTX,
+    );
+    expect(req.lock_record).toBe(true);
+  });
+
   it('openNodeRequest: deduplicates a pending request per (object, record)', async () => {
     await svc.openNodeRequest(openInput(['u9']), CTX);
     await expect(svc.openNodeRequest(openInput(['u9'], { runId: 'run_2' }), CTX))

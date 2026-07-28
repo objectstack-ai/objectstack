@@ -140,6 +140,24 @@ export interface ApprovalRequestRow {
    */
   round?: number;
   /**
+   * Whether THIS node's pending request locks the target record from edits
+   * (objectui#2902). Mirrors the `lockRecord` policy the record-lock
+   * `beforeUpdate` hook enforces, read from the same `node_config_json`
+   * snapshot the hook reads — so a client never has to guess, and never
+   * disagrees with the server.
+   *
+   * `lockRecord` defaults to `true` (see `ApprovalNodeConfigSchema`), so this
+   * is `false` only when the node explicitly opted out. Always present on a
+   * service read; a client that gets `undefined` is talking to a pre-#3814
+   * backend and should fail closed (assume locked) rather than offer an edit
+   * the server will reject with `RECORD_LOCKED`.
+   *
+   * Node-scoped, not request-scoped in spirit: a flow chaining several
+   * approval nodes with different policies produces one request per node, and
+   * each carries its own value.
+   */
+  lock_record?: boolean;
+  /**
    * Server-computed decision aggregation progress (#3266, single-request reads
    * of PENDING requests only). Present when the node's behavior aggregates
    * multiple approvals: `unanimous` (got/need = approvals of total),

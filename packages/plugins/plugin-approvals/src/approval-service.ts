@@ -263,6 +263,14 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     sla_due_at: slaDueAt(row.created_at, cfg),
     // ADR-0044 revision round (rides the config snapshot; absent ⇒ round 1).
     round: typeof cfg?.__round === 'number' ? cfg.__round : undefined,
+    // objectui#2902: the node's record-lock policy. The lock is enforced
+    // server-side in `lifecycle-hooks.ts` off THIS SAME snapshot with the
+    // same `!== false` default, so the flag a client renders and the rule the
+    // server applies can never drift. Without it a console can only see
+    // "a pending request exists" and has to assume the record is locked —
+    // which mislabels every `lockRecord: false` node as locked and hides an
+    // edit the server would have accepted.
+    lock_record: cfg?.lockRecord !== false,
     // #3447 P2: the node's author-declared decision outputs, surfaced so a
     // decision UI can render input fields for them and POST `outputs` on
     // approve/reject. Per-request (each node declares its own), which is why
