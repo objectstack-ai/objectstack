@@ -95,14 +95,37 @@ The core dispatcher implements only the list / read / read-all routes above. Dev
 
 ### AI (`/ai`) — Plugin Required
 
-| Method | Endpoint | Description |
-|:-------|:---------|:------------|
-| POST | `/ai/nlq` | Natural language → query |
-| POST | `/ai/suggest` | Get value suggestions |
-| POST | `/ai/insights` | Get data insights |
+| Method | Endpoint | Description | Status |
+|:-------|:---------|:------------|:-------|
+| POST | `/ai/nlq` | Natural language → query | **Not implemented** |
+| POST | `/ai/suggest` | Get value suggestions | **Not implemented** |
+| POST | `/ai/insights` | Get data insights | **Not implemented** |
 
-<Callout type="info">
-There is no `/ai/chat` route — the AI chat route was removed so the wire protocol aligns with the Vercel AI SDK. Use `useChat()` (`@ai-sdk/react`) directly against the streaming chat endpoint rather than the client SDK's `ai` namespace, which intentionally does not expose a `chat` method.
+<Callout type="warn">
+**This table was inverted, and is corrected here (#3718).** The three routes
+above are declared in `DEFAULT_AI_ROUTES` and called by
+`client.ai.nlq/suggest/insights`, but **no plugin in any repo mounts them** —
+every call 404s. Conversely, this callout used to state "there is no
+`/ai/chat` route", which was wrong: `/ai/chat` is mounted.
+
+What the AI plugin (`service-ai`) actually serves is a different set of
+**12** routes:
+
+| Method | Endpoint |
+|:-------|:---------|
+| POST | `/ai/chat`, `/ai/chat/stream`, `/ai/complete` |
+| GET | `/ai/models`, `/ai/status`, `/ai/effective-model` |
+| POST / GET | `/ai/conversations` |
+| GET / PATCH / DELETE | `/ai/conversations/:id` |
+| POST | `/ai/conversations/:id/messages` |
+
+None of those has a client-SDK method — the SDK's `ai` namespace and the real
+AI surface do not overlap at all. Reviewed dispositions for all 12 live in the
+`cloud` repo, `packages/service-ai/src/ai-route-ledger.ts`.
+
+The original point stands on its own terms: use `useChat()` (`@ai-sdk/react`)
+directly against the streaming chat endpoint, because the client SDK exposes no
+`chat` method.
 </Callout>
 
 ### i18n (`/i18n`) — Plugin Required
