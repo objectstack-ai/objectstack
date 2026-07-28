@@ -113,6 +113,16 @@ describe('registry invariants', () => {
         'position/delegatable',
         'object/lifecycle',
         'webhook/object',
+        // Bound when the 13 orphan `@proof:` tags were registered — the five
+        // classes that had an authorable property whose `live` status they
+        // actually gate (the other eight record a blockedReason instead).
+        'object/enable.files',
+        'object/highlightFields',
+        'object/stageField',
+        'object/fieldGroups',
+        'permission/rowLevelSecurity.check',
+        'permission/objects.readScope',
+        'permission/objects.modifyAllRecords',
       ].sort(),
     );
   });

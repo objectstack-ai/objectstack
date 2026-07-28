@@ -214,14 +214,52 @@ proof gets wired in.
 once it has *both* a runtime proof *and* a governed ledger entry to carry it — the
 binding lands one class at a time (ADR-0054 §3), never as a big-bang backfill.
 
-| High-risk class | Bound? | Ledger binding | Proof |
-|---|---|---|---|
-| Field types | ✅ enforced | `field.type` | `field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip` |
-| RLS / sharing | ✅ enforced | `permission.rowLevelSecurity.using` | `rls-fixture.dogfood.test.ts#rls-by-id-write` |
-| Master-detail controlled-by-parent | ✅ enforced | `object.sharingModel` | `controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent` |
-| Flow nodes | ✅ enforced | `flow.nodes.type` | `flow-node.dogfood.test.ts#flow-node-execution` |
-| Analytics dims/measures | ✅ enforced | `dataset.dimensions.dateGranularity` | `analytics-timezone.dogfood.test.ts#analytics-tz-bucketing` |
-| Form layout/section/widget | ⛔ pending | — | none yet (`view` is governed as of #2998 Track B, so `view.form.*` can carry the binding — the dogfood proof is the missing half) |
+`proof-registry.mts` is the source of truth; the tables below mirror it.
+
+**Bound — a `live` classification on these entries REQUIRES its proof:**
+
+| High-risk class | Ledger binding | Proof (`packages/qa/dogfood/test/…`) |
+|---|---|---|
+| Field types | `field.type` | `field-zoo-roundtrip#field-type-roundtrip` |
+| RLS / sharing (pre-image) | `permission.rowLevelSecurity.using` | `rls-fixture#rls-by-id-write` |
+| RLS `check` (post-image) | `permission.rowLevelSecurity.check` | `showcase-d3-d4-capabilities` |
+| Master-detail controlled-by-parent | `object.sharingModel` | `controlled-by-parent#cbp-controlled-by-parent` |
+| Scope-depth read grants | `permission.objects.readScope` | `showcase-scope-depth` |
+| Ownership anchor + bulk writes | `permission.objects.modifyAllRecords` | `owner-anchor-and-bulk-writes` |
+| Delegation of duty | `position.delegatable` | `delegation-of-duty#delegation-of-duty` |
+| Static readonly write | `field.readonly` | `showcase-static-readonly#readonly-static-write` |
+| Attachments capability gate | `object.enable.files` | `attachments-permission-matrix` |
+| Analytics dims/measures | `dataset.dimensions.dateGranularity` | `analytics-timezone#analytics-tz-bucketing` |
+| Flow nodes | `flow.nodes.type` | `flow-node#flow-node-execution` |
+| Flow runAs identity | `flow.runAs` | `flow-runas#flow-runas-identity` |
+| Data lifecycle (ADR-0057) | `object.lifecycle` | `storage-growth#adr0057-lifecycle-bounded-growth` |
+| Webhook materialization | `webhook.object` | `webhook-materialization#webhook-materialization` |
+| Object semantic roles (ADR-0085) | `object.highlightFields`, `.stageField`, `.fieldGroups` | `semantic-roles#semantic-roles-served` |
+
+**Registered but unbound.** A proof with no authorable property to ratchet is
+still registered — otherwise its `@proof:` tag reads as an orphan — and records
+*why* rather than faking a binding:
+
+| Proof | Why unbound |
+|---|---|
+| `form-widget-resolution` | no proof written yet (ADR-0054 Phase 2); `view.form.*` is governed and can carry it |
+| `permission-set-projection` | a storage invariant (ADR-0094), not an authorable property |
+| `flow-runas-schedule` | guards `flow.runAs`, already bound to `flow-runas-identity` — one entry carries one `proof` |
+| `showcase-scope-depth-fallback` | guards `permission.objects.readScope`, already bound — this is the CLI-wiring sibling |
+| `me-apps-and-everyone-baseline` | enforces `app.requiredPermissions` / `app.tabPermissions`; `app` is not governed yet |
+| `showcase-agent-intersection` | a runtime principal-resolution invariant (`onBehalfOf`), not authorable |
+| `showcase-agent-scope-ceiling` | the OAuth-scope → ceiling-set mapping lives in the runtime resolver |
+| `showcase-bu-hierarchy-sharing` | stack-level `sharingRules`, not a governed per-type property |
+| `showcase-declarative-rbac-seeding` | stack-level `roles`/`sharingRules` seeding, same shape |
+| `showcase-permission-zoo` | a breadth guard over the whole ADR-0090 surface, not a single-property gate |
+
+Two habits this table is meant to enforce. **Register every proof**, so the
+orphan warning stays empty and means something. **Bind only what the proof
+actually authors** — `owner-anchor-and-bulk-writes` binds `modifyAllRecords`,
+which it exercises in both directions, and *not* the sibling `allowTransfer`,
+which it only mentions in a comment. Binding a property a proof does not
+exercise is the same false comfort as a preview renderer standing in for a
+runtime consumer.
 
 To bind a pending class: add its dogfood proof + `@proof:` tag, set `bound: true` and
 its `ledgerBindings` in `proof-registry.mts`, add the `proof` to the ledger entry, and

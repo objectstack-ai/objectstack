@@ -37,14 +37,17 @@
     },
     "highlightFields": {
       "status": "live",
+      "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
       "note": "ADR-0085 semantic role (renamed from compactLayout): objectui default list/grid columns (ObjectGrid/ObjectView/InterfaceListPage), child-record previews (first entry), record:details auto layout, detail highlight strip (first 4)."
     },
     "stageField": {
       "status": "live",
+      "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
       "note": "ADR-0085 semantic role: objectui plugin-detail detectStatusField drives the record:path stepper; string names the lifecycle field, false suppresses heuristic stage detection."
     },
     "fieldGroups": {
       "status": "live",
+      "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
       "note": "objectui form layout order."
     },
     "listViews": {
@@ -167,6 +170,7 @@
         },
         "files": {
           "status": "live",
+          "proof": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts#attachments-permission-matrix",
           "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts (enforceFilesCapability beforeInsert hook: sys_attachment rows may only target objects declaring enable.files true — 403 FILES_DISABLED otherwise); objectui RecordAttachmentsPanel renders the record Attachments surface (upload/list/download/delete) when the flag is true. Opt-in — spec default false (#2727)."
         },
         "feeds": {
