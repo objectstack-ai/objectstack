@@ -259,12 +259,16 @@ describe('I18nServicePlugin', () => {
       const res = createMockRes();
       await handler(req, res);
 
+      // Each entry is an object, not a bare string: that is what
+      // `GetFieldLabelsResponseSchema` has always declared, and emitting a
+      // string contradicted it while discarding the `help`/`options` the
+      // bundle carries (#3847).
       expect(res._data).toEqual({
         success: true,
         data: {
           object: 'account',
           locale: 'en',
-          labels: { name: 'Account Name' },
+          labels: { name: { label: 'Account Name' } },
         },
       });
     });

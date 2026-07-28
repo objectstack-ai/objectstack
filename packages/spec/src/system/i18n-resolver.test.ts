@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectTranslationDataSchema, TranslationDataSchema, type TranslationBundle } from './translation.zod';
+import { GetFieldLabelsResponseSchema } from '../api/protocol.zod';
 import {
   resolveViewLabel,
   resolveViewDescription,
@@ -1044,7 +1045,7 @@ describe('translateObject inline actions (objectstack#3370)', () => {
 // resolveObjectFieldLabels — the `/i18n/labels/:object/:locale` body
 // ==========================================
 
-describe('resolveObjectFieldLabels (objectstack#3833)', () => {
+describe('resolveObjectFieldLabels (objectstack#3833, #3847)', () => {
   const data = TranslationDataSchema.parse({
     objects: {
       contact: {
@@ -1052,6 +1053,10 @@ describe('resolveObjectFieldLabels (objectstack#3833)', () => {
         fields: {
           first_name: { label: 'First Name' },
           email: { label: 'Email', help: 'Primary address' },
+          status: {
+            label: 'Status',
+            options: { open: 'Open', closed: 'Closed' },
+          },
           phone: { help: 'Mobile preferred' },
         },
       },
@@ -1061,14 +1066,35 @@ describe('resolveObjectFieldLabels (objectstack#3833)', () => {
 
   it('enumerates the labels a locale actually translates', () => {
     expect(resolveObjectFieldLabels(data, 'contact')).toEqual({
-      first_name: 'First Name',
-      email: 'Email',
+      first_name: { label: 'First Name' },
+      email: { label: 'Email', help: 'Primary address' },
+      status: { label: 'Status', options: { open: 'Open', closed: 'Closed' } },
     });
+  });
+
+  it('carries the help and options the bundle holds (#3847)', () => {
+    // These are the translations the endpoint used to discard by emitting a
+    // bare string per field. objectui needs exactly them, and had to read the
+    // full-bundle route to get them.
+    const out = resolveObjectFieldLabels(data, 'contact');
+    expect(out.email?.help).toBe('Primary address');
+    expect(out.status?.options).toEqual({ open: 'Open', closed: 'Closed' });
+  });
+
+  it('omits help/options entirely rather than emitting empty ones', () => {
+    // An `options: {}` would claim the field has translated options and hand
+    // back none; `help: ''` would erase a caller's source help text.
+    const out = resolveObjectFieldLabels(data, 'contact');
+    expect(out.first_name).toEqual({ label: 'First Name' });
+    expect(Object.hasOwn(out.first_name!, 'help')).toBe(false);
+    expect(Object.hasOwn(out.first_name!, 'options')).toBe(false);
   });
 
   it('omits fields carrying no label rather than emitting a blank one', () => {
     // Partial translation is the normal state (see ObjectTranslationDataSchema),
     // and callers merge this over their source labels — a '' would erase them.
+    // `phone` has help but no label, so it yields no entry at all — which is
+    // what lets `ResolvedFieldLabel.label` be a required string.
     expect(resolveObjectFieldLabels(data, 'contact')).not.toHaveProperty('phone');
   });
 
@@ -1087,5 +1113,33 @@ describe('resolveObjectFieldLabels (objectstack#3833)', () => {
       'o.contact.label': 'Contact',
     } as unknown as Parameters<typeof resolveObjectFieldLabels>[0];
     expect(resolveObjectFieldLabels(flat, 'contact')).toEqual({});
+  });
+
+  /**
+   * The guard that would have caught #3847 on the day it was introduced:
+   * build the response the surfaces actually send and parse it with the schema
+   * that declares it. Both used to emit `Record<string, string>` against a
+   * schema declaring `Record<string, { label, help?, options? }>` — a
+   * mismatch no test compared, because none of them ever put the emitted
+   * value and the declared contract in the same assertion.
+   */
+  it('produces a body that satisfies GetFieldLabelsResponseSchema (#3847)', () => {
+    const response = {
+      object: 'contact',
+      locale: 'en-US',
+      labels: resolveObjectFieldLabels(data, 'contact'),
+    };
+    const parsed = GetFieldLabelsResponseSchema.safeParse(response);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.labels.status?.options?.open).toBe('Open');
+  });
+
+  it('an empty label map is still a valid response body', () => {
+    const parsed = GetFieldLabelsResponseSchema.safeParse({
+      object: 'account',
+      locale: 'en-US',
+      labels: resolveObjectFieldLabels(data, 'account'),
+    });
+    expect(parsed.success).toBe(true);
   });
 });

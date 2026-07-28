@@ -1932,6 +1932,7 @@ describe('HttpDispatcher', () => {
                         fields: {
                             first_name: { label: 'First Name' },
                             email: { label: 'Email', help: 'Primary address' },
+                            status: { label: 'Status', options: { open: 'Open' } },
                             // No label — partial translation is the normal
                             // state, and a blank entry would overwrite the
                             // caller's source label with an empty string.
@@ -1945,9 +1946,13 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleI18n('/labels/contact/en', 'GET', {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
+            // Entries are objects carrying help/options, per
+            // `GetFieldLabelsResponseSchema` — not the bare strings both
+            // surfaces used to emit against it (#3847).
             expect(result.response?.body?.data?.labels).toEqual({
-                first_name: 'First Name',
-                email: 'Email',
+                first_name: { label: 'First Name' },
+                email: { label: 'Email', help: 'Primary address' },
+                status: { label: 'Status', options: { open: 'Open' } },
             });
         });
 
