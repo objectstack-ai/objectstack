@@ -1,6 +1,6 @@
 # ADR-0044: Flow-level send-back-for-revision — `revise` branch + typed back-edge re-entry
 
-**Status**: Accepted — engine + model implemented; designer pending (objectui) (proposed 2026-06-12 · calibrated 2026-06-12)
+**Status**: Accepted — engine + model implemented; designer pending (objectui) (proposed 2026-06-12 · calibrated 2026-06-12 · **amended 2026-07-28 (#3823): the revise pause moves to a service-owned node — D3's generic `wait` is superseded, see the amendment below**)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0019](./0019-approval-as-flow-node.md) (approval as a durable-pause flow node), [ADR-0039](./0039-token-scope-tree-execution.md) (single-program-counter suspend model), thread interactions (#1740), [ADR-0042](./0042-approval-sla-escalation.md) (audit-first discipline)
 **Closes**: [#1744](https://github.com/objectstack-ai/objectstack/issues/1744)
@@ -72,6 +72,13 @@ The revise edge targets an ordinary **`wait` node** (signal flavor) — the
 durable pause already shipped for timers/signals. The revise window is
 therefore *visible flow state* (designer canvas, run logs, suspended-run
 stores all already understand it), not an invisible service limbo.
+
+> **Superseded 2026-07-28 (#3823).** Reusing the generic `wait` put an
+> author-placed, raw-resumable node in a service-owned position. Once #3801
+> made `resume` authorization-bearing, that became exploitable (unauthorized
+> resubmit with no audit row; a colliding request can permanently destroy the
+> run). The revise pause moves to a **dedicated service-owned node** — still
+> visible on the canvas, no longer raw-resumable. See the amendment below.
 
 Resubmit is an explicit REST verb by the submitter:
 
@@ -171,7 +178,11 @@ them, under explicit constraints:
 - **Approval node re-suspends itself in a "revise mode"** (no wait node,
   no back-edge) — hides a whole state machine inside one node, invisible
   to the canvas/run log, and still needs re-entry semantics the moment a
-  second round opens a new request.
+  second round opens a new request. *(Partially reversed 2026-07-28, #3823:
+  the objection is to hiding the state inside the approval node, and it does
+  **not** apply to a **dedicated** revise-pause node — visible on the canvas
+  like `wait`, but typed as service-owned. The real axis was reuse-vs-a-new-type,
+  not visibility-vs-enforcement. See the amendment.)*
 - **Record-change-triggered resubmit** — every draft save becomes a
   resubmission; no explicit user intent; collides with the lock hook's
   system-write exemptions.
@@ -212,3 +223,102 @@ the revise window × `maxRevisions` overflow auto-reject × flows with no
 revise edge (sendBack rejected) × engine: back-edge registration passes /
 unmarked cycle still rejected / re-entry overwrites outputs / runaway
 guard trips.
+
+---
+
+## Amendment (2026-07-28, #3823) — the revise pause must be service-owned; the generic `wait` was the wrong reuse
+
+**What reverses.** D3's "the revise edge targets an ordinary `wait` node" and the
+second *Why not* bullet's rejection of a service-owned revise pause. Both stand on
+information this ADR did not have: at authoring time `resume(runId)` had **no
+authorization model**, so *which node the run is parked on* carried no security
+weight — a `wait` was as safe as anything, and reuse was pure upside. [#3801](https://github.com/objectstack-ai/objectstack/issues/3801)
+then made the resume seam authorization-bearing (a node's descriptor declares
+`resumeAuthority`, and an `approval` pause is refused to anyone but its owning
+service). That reframes the choice: **a generic node sitting in a service-owned
+position is now precisely what a type-keyed gate cannot see.** This is new
+information reversing an earlier trade-off, not a defect in the original call.
+
+**The hole it opened** (demonstrated in #3823 — a repro on the real engine +
+`ApprovalService`, not reasoned). The revise window parks the run on an
+author-placed `wait`, which is `resumeAuthority: 'any'`. A raw
+`POST …/runs/:runId/resume` therefore:
+
+1. walks the `resubmit` back-edge into the approval node with **no submitter
+   check and no `resubmit` audit row** — an unauthorized resubmit the trail
+   never records (an empty body suffices; no `branchLabel` is needed); and
+2. worse — when a colliding pending request exists on the record, the exact case
+   `resubmit` refuses with `DUPLICATE_REQUEST` *specifically to keep the run
+   alive* (see Consequences) — the raw resume goes around that guard, the
+   approval node's re-entry fails **after** the engine has consumed the
+   suspension, and the run is **permanently destroyed**: the round-N request is
+   stuck `returned`, the run that owned it is gone, and no resubmit can ever
+   reach it.
+
+The first is unconditional; the second is opportunistic but is remote run
+destruction, not merely a missing audit row.
+
+**Why the original objection no longer decides it.** This ADR rejected the
+service-owned revise pause because it "hides a whole state machine inside one
+node, invisible to the canvas/run log." That objection is against re-suspending
+*inside the approval node*. It does **not** apply to a **dedicated revise-pause
+node type**: that node is still a first-class box on the canvas and in the run
+log — visible exactly as the generic `wait` is today — while its descriptor
+declares `resumeAuthority: 'service'`, so the existing #3801 gate covers it with
+no new machinery. The real axis was never visibility-vs-enforcement; it was
+**reuse-vs-a-new-type.** ADR-0044 chose reuse (no new node type), and reuse is
+what seated a generic node in a privileged position.
+
+**Decision of record (the short-term fix).**
+
+- The `revise` edge targets a **dedicated service-owned pause** — a distinct node
+  type whose descriptor carries `resumeAuthority: 'service'` (equivalently, the
+  approval node re-suspends in a revise mode that surfaces as its own step). It
+  stays visible on the canvas and in run logs; it is no longer raw-resumable.
+- `resubmit` remains the only door into the window, so the submitter check, the
+  latest-request check and the `resubmit` audit row are back on the only path
+  that can advance it — and the `DUPLICATE_REQUEST` run-preservation guard can no
+  longer be bypassed.
+- **Publish-time graph-lint rejects a `revise` edge wired into a bare `wait`.**
+  The previously-recommended shape becomes *un-authorable*, surfaced at authoring
+  rather than runtime — the cloud#688 pattern (fix the producer + reject the
+  wrong shape; never tolerate it at the consumer). This is the decisive property
+  for a metadata-driven platform: an AI author following the *original* D3 sketch
+  would generate the vulnerable graph verbatim, because nothing in the metadata
+  expressed that the wait sat in a privileged position. Making the wrong shape
+  unrepresentable is the only fix that survives AI authoring.
+
+**Directions recorded but deliberately not built here** (ADR-0049 posture — no
+speculative machinery ahead of a consumer):
+
+- *Fail-closed descriptor default.* `resumeAuthority` defaults to `'any'`, so
+  every future pausing node ships fail-open unless the author remembers the flag
+  — the "declared ≠ enforced" trap (AGENTS.md Prime Directive #10) one node away.
+  The long-term-correct default is that a pause is **not** raw-resumable unless it
+  opts into `'any'` (screen / wait-signal declaring it explicitly). A breaking
+  change to the descriptor default; needs a migration; tracked separately.
+- *Per-suspension owner claim.* The general answer for pauses whose authority
+  depends on runtime **position** rather than declared **type**: the pause mints a
+  capability the resumer must present (the Step Functions task-token shape — our
+  `RESUME_AUTHORITY_SERVICE` symbol, but bound to the suspension *instance* rather
+  than the node type). Not needed for the two cases we have (approval, revise),
+  both of which type + a fail-closed default resolve. It also carries a
+  non-obvious hazard: a claim must **not** be inherited by a downstream pause — an
+  approval whose `approve` branch reaches a `screen` must leave that screen
+  caller-continuable, so blanket inheritance would break screen flows. A reason
+  not to reach for it prematurely.
+
+**How mainstream approval/workflow engines inform this.** None exposes a
+generic, node-type-agnostic "resume run X at its current pause" to untrusted
+callers. Salesforce / ServiceNow make each pause a distinct authorized operation
+(approve / reject / recall). Camunda separates user-task `complete` from message
+`correlate`, with manual token moves gated as an audited admin escape hatch.
+Temporal routes through named signals the workflow itself gates. Step Functions
+mints a task token at suspend that the resumer must hold. ObjectStack's one
+generic resume door is the outlier; keying its authority on node type is a
+reasonable stopgap, but the revise `wait` is the model showing the key doesn't
+always match the trust boundary. The short-term fix realigns them for the one
+case that matters; the two deferred directions are how the platform would
+generalise if a third case appears.
+
+Refs #3801, #3853, #3879; security lineage in ADR-0019's #3801 / #3879 addenda.
