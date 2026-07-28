@@ -78,7 +78,11 @@ export default defineStack({
 
 The metadata types resolved per request are **object, view, action, app,
 dashboard, and page** — a field's labels are translated as part of its object
-document.
+document, and so are the labels of any actions the object declares inline
+(#3370). Before that, an object document went out with its authored action
+labels untouched: `sys_approval_request`'s Approve / Reject rendered in English
+in a zh-CN workspace for every consumer except the Console, which happened to
+re-resolve them client-side against its own copy of the bundle.
 
 <Callout type="info">
 **Page headers are keyed by page name (#3589).** A page's `page:header`
@@ -150,6 +154,27 @@ npx os i18n extract --locales zh-CN --fill todo --out src/translations --check
 A missing string in the **default** locale is an error; missing strings in
 other locales are warnings until you set `--strict` / `--threshold`. The Todo
 example ships a completeness test alongside its bundles — worth copying.
+
+### Which locales get checked
+
+Your project decides, and the tooling never assumes. `os lint`, `os i18n check`
+and `os i18n extract` read the `i18n` block above — `supportedLocales` is the
+set they gate, `defaultLocale` the one that must be complete. Without that
+block they fall back to whatever locales your bundles already cover, and
+finally to `en`.
+
+The consequence worth stating plainly: **a project that does not do i18n
+reports nothing.** No `i18n` block and no bundles means one active locale, the
+default one, and your inline `label:` is already that locale's text — so there
+is no gap to report and no need to reach for `--skip-i18n`. The same holds if
+your source language isn't English: declare `defaultLocale: 'zh-CN'` and the
+tooling stops asking for English you never promised.
+
+Translating is therefore opt-in, but once you opt in it covers the **whole**
+declared surface — every row of the table above, including action labels
+declared inline on an object. That surface used to be narrower than what
+`os i18n extract` would scaffold, which is how untranslated approval buttons
+shipped without any lint noticing (#3370).
 
 The two gates answer different questions, and you want both. `os i18n check`
 asks *are the strings translated?* — a coverage number about human work.
