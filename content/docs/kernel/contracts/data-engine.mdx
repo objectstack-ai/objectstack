@@ -94,9 +94,14 @@ interface EngineQueryOptions {
   search?: FullTextSearch;                   // Full-text search
   expand?: Record<string, QueryAST>;         // Recursive relation loading
   distinct?: boolean;                        // SELECT DISTINCT
-  context?: ExecutionContext;                 // Identity, tenant, transaction
+  context?: ExecutionContextInput;            // Identity, tenant, transaction — any subset
 }
 ```
+
+`ExecutionContextInput` is `ExecutionContext` with every field optional — supply
+what you have, the engine reads what it needs. A system read passes
+`{ isSystem: true }`; an automation run with no resolvable identity passes only
+its run id (`{ flowRunId }`), a context that deliberately carries no principal.
 
 ### FilterCondition (where)
 
@@ -191,7 +196,7 @@ const tasks = await engine.insert('task', [
 ```typescript
 interface DataEngineInsertOptions {
   returning?: boolean;          // Return inserted record(s)? Default: true
-  context?: ExecutionContext;    // Identity, tenant, transaction
+  context?: ExecutionContextInput;  // Identity, tenant, transaction — any subset
 }
 ```
 
@@ -218,7 +223,7 @@ interface EngineUpdateOptions {
   upsert?: boolean;             // Insert if not found? Default: false
   multi?: boolean;              // Update multiple records? Default: false
   returning?: boolean;          // Return updated record(s)? Default: false
-  context?: ExecutionContext;
+  context?: ExecutionContextInput;
 }
 ```
 
@@ -268,7 +273,7 @@ await engine.delete('task', {
 interface EngineDeleteOptions {
   where?: FilterCondition;      // Filter to identify records (WHERE)
   multi?: boolean;              // Delete multiple records? Default: false
-  context?: ExecutionContext;
+  context?: ExecutionContextInput;
 }
 ```
 
@@ -306,7 +311,7 @@ interface EngineAggregateOptions {
   where?: FilterCondition;                 // Pre-aggregation filter (WHERE)
   groupBy?: string[];                      // GROUP BY fields
   aggregations?: AggregationNode[];        // Aggregation definitions
-  context?: ExecutionContext;
+  context?: ExecutionContextInput;
 }
 
 interface AggregationNode {
