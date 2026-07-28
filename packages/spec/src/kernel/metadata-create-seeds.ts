@@ -143,6 +143,16 @@ const BUILTIN_METADATA_CREATE_SEEDS: Partial<Record<MetadataType, unknown>> = {
     // a permission set's per-object grant map; empty = no grants yet.
     objects: {},
   },
+  translation: {
+    name: 'new_translation',
+    label: 'New Translation',
+    // One item translates one locale, and `locale` is required — seeding it
+    // means a create round-trips instead of 422-ing on an empty body. The
+    // empty `objects` map is the shape hint that matters: it is where object,
+    // field, view, section, and action translations go (#3778).
+    locale: 'en',
+    objects: {},
+  },
 };
 
 /**

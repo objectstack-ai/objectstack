@@ -184,11 +184,14 @@ const FIXTURES: Record<string, Fixture> = {
     },
     translation: {
         valid: {
-            app: { sweep_app: { label: 'Sweep' } },
+            locale: 'en',
+            apps: { sweep_app: { label: 'Sweep' } },
             messages: { hello: 'Hello' },
         },
-        invalid: { app: 'not-a-record' },
-        invalidatedField: 'app',
+        // `locale` is required — omitting it is the realistic authoring miss
+        // (the sync silently skips a locale-less item, so the door catches it).
+        invalid: { apps: { sweep_app: { label: 'Sweep' } } },
+        invalidatedField: 'locale',
     },
     email_template: {
         valid: {

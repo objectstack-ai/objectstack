@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   TranslationDataSchema,
   TranslationBundleSchema,
@@ -6,8 +7,8 @@ import {
   FieldTranslationSchema,
   ObjectTranslationDataSchema,
   TranslationConfigSchema,
-  ObjectTranslationNodeSchema,
-  AppTranslationBundleSchema,
+  TranslationItemSchema,
+  defineTranslation,
   TranslationDiffStatusSchema,
   TranslationDiffItemSchema,
   TranslationCoverageResultSchema,
@@ -15,8 +16,7 @@ import {
   type TranslationBundle,
   type ObjectTranslationData,
   type TranslationConfig,
-  type ObjectTranslationNode,
-  type AppTranslationBundle,
+  type TranslationItem,
   type TranslationDiffItem,
   type TranslationCoverageResult,
   type CoverageBreakdownEntry,
@@ -546,10 +546,14 @@ describe('ObjectTranslationDataSchema', () => {
     expect(data.fields?.name.help).toBe('公司或组织的法定名称');
   });
 
-  it('should reject object translation without label', () => {
-    expect(() =>
-      ObjectTranslationDataSchema.parse({ pluralLabel: 'Accounts' }),
-    ).toThrow();
+  it('should accept a partial object translation with no label', () => {
+    // Partial translation is the normal state — see the schema's note on why
+    // `label` is optional.
+    const data = ObjectTranslationDataSchema.parse({
+      fields: { name: { label: 'Account Name' } },
+    });
+    expect(data.label).toBeUndefined();
+    expect(data.fields?.name.label).toBe('Account Name');
   });
 
   it('should compose into TranslationDataSchema via objects record', () => {
@@ -607,260 +611,113 @@ describe('TranslationConfigSchema', () => {
 });
 
 // ============================================================================
-// ObjectTranslationNodeSchema — object-first aggregated translation node
+// TranslationItemSchema — the runtime-authored `translation` metadata type
 // ============================================================================
 
-describe('ObjectTranslationNodeSchema', () => {
-  it('should accept minimal node with label only', () => {
-    const node: ObjectTranslationNode = ObjectTranslationNodeSchema.parse({
-      label: 'Account',
-    });
-    expect(node.label).toBe('Account');
-    expect(node.pluralLabel).toBeUndefined();
-    expect(node.description).toBeUndefined();
-    expect(node.helpText).toBeUndefined();
-    expect(node.fields).toBeUndefined();
-    expect(node._options).toBeUndefined();
-    expect(node._views).toBeUndefined();
-    expect(node._sections).toBeUndefined();
-    expect(node._actions).toBeUndefined();
-  });
-
-  it('should accept full object-first node with all sub-groups', () => {
-    const node: ObjectTranslationNode = ObjectTranslationNodeSchema.parse({
-      label: '客户',
-      pluralLabel: '客户',
-      description: '客户管理对象',
-      helpText: '用于管理公司的所有客户',
-      fields: {
-        name: { label: '客户名称', help: '公司或组织的法定名称' },
-        industry: {
-          label: '行业',
-          options: { tech: '科技', finance: '金融' },
-        },
-      },
-      _options: {
-        status: { active: '活跃', inactive: '停用' },
-      },
-      _views: {
-        all_accounts: { label: '全部客户', description: '查看所有客户' },
-      },
-      _sections: {
-        basic_info: { label: '基本信息' },
-      },
-      _actions: {
-        convert_lead: { label: '转换线索', confirmMessage: '确认转换？' },
-      },
-    });
-
-    expect(node.label).toBe('客户');
-    expect(node.pluralLabel).toBe('客户');
-    expect(node.description).toBe('客户管理对象');
-    expect(node.helpText).toBe('用于管理公司的所有客户');
-    expect(node.fields?.name.label).toBe('客户名称');
-    expect(node.fields?.industry.options?.tech).toBe('科技');
-    expect(node._options?.status.active).toBe('活跃');
-    expect(node._views?.all_accounts.label).toBe('全部客户');
-    expect(node._sections?.basic_info.label).toBe('基本信息');
-    expect(node._actions?.convert_lead.label).toBe('转换线索');
-    expect(node._actions?.convert_lead.confirmMessage).toBe('确认转换？');
-  });
-
-  it('should reject node without label', () => {
-    expect(() =>
-      ObjectTranslationNodeSchema.parse({ pluralLabel: 'Accounts' }),
-    ).toThrow();
-  });
-
-  it('should accept node with only fields and views', () => {
-    const node = ObjectTranslationNodeSchema.parse({
-      label: 'Opportunity',
-      fields: {
-        stage: { label: 'Stage', options: { open: 'Open', closed: 'Closed' } },
-      },
-      _views: {
-        pipeline: { label: 'Pipeline View' },
-      },
-    });
-    expect(node.fields?.stage.label).toBe('Stage');
-    expect(node._views?.pipeline.label).toBe('Pipeline View');
-  });
-
-  it('should accept node with _notifications and _errors', () => {
-    const node: ObjectTranslationNode = ObjectTranslationNodeSchema.parse({
-      label: 'Order',
-      _notifications: {
-        order_shipped: { title: 'Order Shipped', body: 'Your order has been shipped.' },
-        order_cancelled: { title: 'Order Cancelled' },
-      },
-      _errors: {
-        insufficient_stock: 'Not enough stock for this order.',
-        payment_failed: 'Payment could not be processed.',
-      },
-    });
-    expect(node._notifications?.order_shipped.title).toBe('Order Shipped');
-    expect(node._notifications?.order_shipped.body).toBe('Your order has been shipped.');
-    expect(node._notifications?.order_cancelled.title).toBe('Order Cancelled');
-    expect(node._errors?.insufficient_stock).toBe('Not enough stock for this order.');
-    expect(node._errors?.payment_failed).toBe('Payment could not be processed.');
-  });
-});
-
-// ============================================================================
-// AppTranslationBundleSchema — object-first full app bundle
-// ============================================================================
-
-describe('AppTranslationBundleSchema', () => {
-  it('should accept empty bundle', () => {
-    const bundle: AppTranslationBundle = AppTranslationBundleSchema.parse({});
-    expect(bundle).toBeDefined();
-  });
-
-  it('should accept bundle with object-first translations', () => {
-    const bundle: AppTranslationBundle = AppTranslationBundleSchema.parse({
-      o: {
+describe('TranslationItemSchema', () => {
+  it('should accept a single-locale item in the runtime `objects.` shape', () => {
+    const item: TranslationItem = defineTranslation({
+      locale: 'zh-CN',
+      objects: {
         account: {
           label: '客户',
           fields: { name: { label: '客户名称' } },
           _views: { all_accounts: { label: '全部客户' } },
-        },
-        contact: {
-          label: '联系人',
-          fields: { email: { label: '邮箱' } },
+          _actions: { merge: { label: '合并客户', confirmText: '确认合并？' } },
         },
       },
+      apps: { crm: { label: '客户关系管理' } },
+      messages: { 'common.save': '保存' },
     });
-
-    expect(bundle.o?.account.label).toBe('客户');
-    expect(bundle.o?.account.fields?.name.label).toBe('客户名称');
-    expect(bundle.o?.account._views?.all_accounts.label).toBe('全部客户');
-    expect(bundle.o?.contact.label).toBe('联系人');
+    expect(item.locale).toBe('zh-CN');
+    expect(item.objects?.account.label).toBe('客户');
+    expect(item.objects?.account._actions?.merge.confirmText).toBe('确认合并？');
+    expect(item.apps?.crm.label).toBe('客户关系管理');
   });
 
-  it('should accept bundle with global options', () => {
-    const bundle = AppTranslationBundleSchema.parse({
-      _globalOptions: {
-        currency: { usd: '美元', eur: '欧元', gbp: '英镑' },
-        country: { us: '美国', cn: '中国' },
-      },
+  it('should require a locale — an unresolvable one is silently skipped at runtime', () => {
+    const result = TranslationItemSchema.safeParse({
+      objects: { account: { label: '客户' } },
     });
-
-    expect(bundle._globalOptions?.currency.usd).toBe('美元');
-    expect(bundle._globalOptions?.country.cn).toBe('中国');
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.some((i) => i.path[0] === 'locale')).toBe(true);
   });
 
-  it('should accept bundle with all global groups', () => {
-    const bundle: AppTranslationBundle = AppTranslationBundleSchema.parse({
-      app: {
-        crm: { label: 'CRM', description: 'Customer Relationship Management' },
-      },
-      nav: { home: 'Home', settings: 'Settings' },
-      dashboard: {
-        sales_overview: { label: 'Sales Overview', description: 'Key sales metrics' },
-      },
-      reports: {
-        pipeline_report: { label: 'Pipeline Report' },
-      },
-      pages: {
-        landing: { title: 'Welcome', description: 'Landing page' },
-      },
-      messages: {
-        'common.save': 'Save',
-        'common.cancel': 'Cancel',
-      },
-      validationMessages: {
-        'discount_limit': 'Discount cannot exceed 40%',
-      },
+  it('should accept a partial item that translates one field and nothing else', () => {
+    const item = TranslationItemSchema.parse({
+      locale: 'ja-JP',
+      objects: { account: { fields: { name: { label: '取引先名' } } } },
     });
-
-    expect(bundle.app?.crm.label).toBe('CRM');
-    expect(bundle.nav?.home).toBe('Home');
-    expect(bundle.dashboard?.sales_overview.label).toBe('Sales Overview');
-    expect(bundle.reports?.pipeline_report.label).toBe('Pipeline Report');
-    expect(bundle.pages?.landing.title).toBe('Welcome');
-    expect(bundle.messages?.['common.save']).toBe('Save');
-    expect(bundle.validationMessages?.['discount_limit']).toBe('Discount cannot exceed 40%');
+    expect(item.objects?.account.label).toBeUndefined();
+    expect(item.objects?.account.fields?.name.label).toBe('取引先名');
   });
 
-  it('should accept a complete Chinese translation bundle', () => {
-    const zh: AppTranslationBundle = AppTranslationBundleSchema.parse({
-      o: {
-        account: {
-          label: '客户',
-          pluralLabel: '客户',
-          description: '客户管理对象',
-          fields: {
-            name: { label: '客户名称', help: '公司或组织的法定名称' },
-            industry: { label: '行业', options: { tech: '科技', finance: '金融' } },
-          },
-          _options: { status: { active: '活跃', inactive: '停用' } },
-          _views: { all_accounts: { label: '全部客户' } },
-          _sections: { basic_info: { label: '基本信息' } },
-          _actions: { convert: { label: '转换', confirmMessage: '确认转换？' } },
-        },
-        opportunity: {
-          label: '商机',
-          fields: {
-            stage: { label: '阶段', options: { open: '打开', closed: '关闭' } },
-          },
-        },
-      },
-      _globalOptions: { currency: { usd: '美元', eur: '欧元' } },
-      app: { crm: { label: '客户关系管理', description: '管理销售流程' } },
-      nav: { home: '首页', settings: '设置' },
-      dashboard: { sales_overview: { label: '销售概览' } },
-      reports: { pipeline_report: { label: '管道报表' } },
-      pages: { landing: { title: '欢迎' } },
-      messages: { 'common.save': '保存', 'common.cancel': '取消' },
-      validationMessages: { 'discount_limit': '折扣不能超过40%' },
+  it.each([
+    ['o', 'objects.<object_name>'],
+    ['app', 'apps.<app_name>'],
+    ['nav', 'apps.<app_name>.navigation'],
+    ['dashboard', 'dashboards.<dashboard_name>'],
+    ['_globalOptions', 'objects.<object_name>.fields.<field_name>.options'],
+    ['_meta', "top-level 'locale'"],
+    ['namespace', 'omit it'],
+  ])('should reject the retired object-first key `%s` with an actionable message', (key, hint) => {
+    const result = TranslationItemSchema.safeParse({
+      locale: 'zh-CN',
+      [key]: { account: { label: '客户' } },
     });
-
-    expect(zh.o?.account.label).toBe('客户');
-    expect(zh.o?.account._options?.status.active).toBe('活跃');
-    expect(zh.o?.opportunity.fields?.stage.options?.open).toBe('打开');
-    expect(zh._globalOptions?.currency.usd).toBe('美元');
-    expect(zh.app?.crm.label).toBe('客户关系管理');
-    expect(zh.nav?.home).toBe('首页');
-    expect(zh.messages?.['common.save']).toBe('保存');
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues.find((i) => i.path[0] === key);
+    expect(issue).toBeDefined();
+    expect(issue?.message).toContain(hint);
   });
 
-  it('should accept bundle with _meta for RTL locale', () => {
-    const bundle: AppTranslationBundle = AppTranslationBundleSchema.parse({
-      _meta: { locale: 'ar-SA', direction: 'rtl' },
-      messages: { 'common.save': 'حفظ' },
+  it('should reject the retired shape rather than silently stripping it (#3778)', () => {
+    // The pre-fix failure mode: Zod strips undeclared keys, so an `o.`-shaped
+    // item saved cleanly and then resolved to nothing. A save that succeeds
+    // must be a save that renders.
+    const result = TranslationItemSchema.safeParse({
+      locale: 'zh-CN',
+      o: { account: { label: '客户' } },
     });
-    expect(bundle._meta?.locale).toBe('ar-SA');
-    expect(bundle._meta?.direction).toBe('rtl');
+    expect(result.success).toBe(false);
   });
 
-  it('should accept bundle with namespace for plugin isolation', () => {
-    const bundle: AppTranslationBundle = AppTranslationBundleSchema.parse({
-      namespace: 'plugin-helpdesk',
-      o: { ticket: { label: 'Ticket' } },
+  it('should not leak the retired keys into a parsed item', () => {
+    const item = TranslationItemSchema.parse({
+      locale: 'en',
+      objects: { account: { label: 'Account' } },
     });
-    expect(bundle.namespace).toBe('plugin-helpdesk');
+    expect(Object.keys(item)).toEqual(expect.arrayContaining(['locale', 'objects']));
+    for (const key of ['o', 'app', 'nav', 'dashboard', '_meta', 'namespace']) {
+      expect(item).not.toHaveProperty(key);
+    }
   });
 
-  it('should accept bundle with global notifications and errors', () => {
-    const bundle: AppTranslationBundle = AppTranslationBundleSchema.parse({
-      notifications: {
-        system_update: { title: 'System Update', body: 'A new version is available.' },
-      },
-      errors: {
-        unauthorized: 'You are not authorized to perform this action.',
-        not_found: 'The requested resource was not found.',
-      },
-    });
-    expect(bundle.notifications?.system_update.title).toBe('System Update');
-    expect(bundle.errors?.unauthorized).toBe('You are not authorized to perform this action.');
+  it('should not advertise the retired keys in its generated JSON Schema', () => {
+    // The JSON Schema is what `/meta/types/:type` hands the Studio editor and
+    // any agent authoring metadata — listing a retired key there would teach
+    // the shape the refinement then rejects.
+    for (const io of ['input', 'output'] as const) {
+      const json = z.toJSONSchema(TranslationItemSchema, { io, unrepresentable: 'any' }) as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+      expect(json.required).toContain('locale');
+      expect(Object.keys(json.properties ?? {})).toEqual(
+        expect.not.arrayContaining(['o', 'app', 'nav', 'dashboard', '_meta', 'namespace']),
+      );
+      expect(json.properties).toHaveProperty('objects');
+    }
   });
 
-  it('should accept bundle with _meta direction ltr', () => {
-    const bundle = AppTranslationBundleSchema.parse({
-      _meta: { direction: 'ltr' },
+  it('should compose into a TranslationBundle entry (item == one bundle locale)', () => {
+    const item = TranslationItemSchema.parse({
+      locale: 'zh-CN',
+      objects: { account: { label: '客户' } },
     });
-    expect(bundle._meta?.direction).toBe('ltr');
-    expect(bundle._meta?.locale).toBeUndefined();
+    const { locale, ...data } = item;
+    const bundle = TranslationBundleSchema.parse({ [locale]: data });
+    expect(bundle['zh-CN'].objects?.account.label).toBe('客户');
   });
 });
 
@@ -887,12 +744,12 @@ describe('TranslationDiffStatusSchema', () => {
 describe('TranslationDiffItemSchema', () => {
   it('should accept a missing translation diff item', () => {
     const item: TranslationDiffItem = TranslationDiffItemSchema.parse({
-      key: 'o.account.fields.website.label',
+      key: 'objects.account.fields.website.label',
       status: 'missing',
       objectName: 'account',
       locale: 'zh-CN',
     });
-    expect(item.key).toBe('o.account.fields.website.label');
+    expect(item.key).toBe('objects.account.fields.website.label');
     expect(item.status).toBe('missing');
     expect(item.objectName).toBe('account');
     expect(item.locale).toBe('zh-CN');
@@ -910,7 +767,7 @@ describe('TranslationDiffItemSchema', () => {
 
   it('should accept a stale diff item', () => {
     const item = TranslationDiffItemSchema.parse({
-      key: 'o.contact.label',
+      key: 'objects.contact.label',
       status: 'stale',
       objectName: 'contact',
       locale: 'ja',
@@ -926,7 +783,7 @@ describe('TranslationDiffItemSchema', () => {
 
   it('should accept diff item with sourceHash', () => {
     const item = TranslationDiffItemSchema.parse({
-      key: 'o.account.label',
+      key: 'objects.account.label',
       status: 'stale',
       locale: 'zh-CN',
       sourceHash: 'sha256:abc123',
@@ -936,7 +793,7 @@ describe('TranslationDiffItemSchema', () => {
 
   it('should accept diff item with AI suggestion fields', () => {
     const item: TranslationDiffItem = TranslationDiffItemSchema.parse({
-      key: 'o.account.fields.website.label',
+      key: 'objects.account.fields.website.label',
       status: 'missing',
       locale: 'zh-CN',
       aiSuggested: '网站',
@@ -949,7 +806,7 @@ describe('TranslationDiffItemSchema', () => {
   it('should reject AI confidence above 1', () => {
     expect(() =>
       TranslationDiffItemSchema.parse({
-        key: 'o.account.label',
+        key: 'objects.account.label',
         status: 'missing',
         locale: 'en',
         aiConfidence: 1.5,
@@ -960,7 +817,7 @@ describe('TranslationDiffItemSchema', () => {
   it('should reject AI confidence below 0', () => {
     expect(() =>
       TranslationDiffItemSchema.parse({
-        key: 'o.account.label',
+        key: 'objects.account.label',
         status: 'missing',
         locale: 'en',
         aiConfidence: -0.1,
@@ -984,7 +841,7 @@ describe('TranslationCoverageResultSchema', () => {
       staleKeys: 0,
       coveragePercent: 87.5,
       items: [
-        { key: 'o.account.fields.website.label', status: 'missing', objectName: 'account', locale: 'zh-CN' },
+        { key: 'objects.account.fields.website.label', status: 'missing', objectName: 'account', locale: 'zh-CN' },
         { key: 'messages.old_key', status: 'redundant', locale: 'zh-CN' },
       ],
     });

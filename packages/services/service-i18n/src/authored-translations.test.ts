@@ -15,6 +15,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { translateMetadataDocument } from '@objectstack/spec/system';
+import type { TranslationBundle } from '@objectstack/spec/system';
 import { FileI18nAdapter } from './file-i18n-adapter.js';
 import { I18nServicePlugin } from './i18n-service-plugin.js';
 
@@ -136,21 +138,17 @@ describe('I18nServicePlugin authored-translation sync (#2591)', () => {
     expect(i18n.t('messages.save', 'zh-CN')).toBe('保存');
   });
 
-  it('prefers _meta.locale, then a top-level locale field, over the item name', async () => {
+  it('prefers a top-level locale field over the item name', async () => {
     const engine = {
       find: vi.fn(async (_obj: string, q: AnyRecord) =>
         q?.where?.type === 'translation'
-          ? [
-              translationRow('branding_strings', { _meta: { locale: 'fr' }, messages: { save: 'Enregistrer' } }),
-              translationRow('other_strings', { locale: 'de', messages: { save: 'Speichern' } }),
-            ]
+          ? [translationRow('other_strings', { locale: 'de', messages: { save: 'Speichern' } })]
           : []),
     };
     const { harness, i18n } = await bootPlugin({ objectql: engine });
 
     await harness.fire('kernel:ready');
 
-    expect(i18n.t('messages.save', 'fr')).toBe('Enregistrer');
     expect(i18n.t('messages.save', 'de')).toBe('Speichern');
   });
 
@@ -272,5 +270,100 @@ describe('I18nServicePlugin authored-translation sync (#2591)', () => {
     await harness.fire('kernel:ready');
 
     expect(i18n.t('messages.legacy', 'en')).toBe('Old');
+  });
+});
+
+// ── Shape convergence (#3778) ──────────────────────────────────────────────
+
+describe('authored translations render end-to-end (#3778)', () => {
+  it('renders an authored item through translateMetadataDocument', async () => {
+    // The whole point of the type: what an admin authors in the product is
+    // what a client receives. Before #3778 the `translation` type was
+    // registered against an `o.<object>` shape no resolver read, so this row
+    // saved cleanly and every consumer still rendered English.
+    const engine = {
+      find: vi.fn(async (_obj: string, q: AnyRecord) =>
+        q?.where?.type === 'translation'
+          ? [translationRow('zh_CN_crm', {
+              locale: 'zh-CN',
+              objects: {
+                crm_account: {
+                  label: '客户',
+                  pluralLabel: '客户',
+                  fields: { name: { label: '客户名称' } },
+                  _actions: { merge: { label: '合并客户', confirmText: '确认合并？' } },
+                },
+              },
+            })]
+          : []),
+    };
+    const { harness, i18n } = await bootPlugin({ objectql: engine });
+    await harness.fire('kernel:ready');
+
+    // Build the bundle the REST layer builds, then translate a document with it.
+    const bundle = { 'zh-CN': i18n.getTranslations('zh-CN') } as TranslationBundle;
+    const translated = translateMetadataDocument('object', {
+      name: 'crm_account',
+      label: 'Account',
+      pluralLabel: 'Accounts',
+      fields: { name: { label: 'Account Name' } },
+      actions: [{ name: 'merge', label: 'Merge', confirmText: 'Are you sure?' }],
+    }, bundle, { locale: 'zh-CN' });
+
+    expect(translated.label).toBe('客户');
+    expect(translated.pluralLabel).toBe('客户');
+    expect((translated.fields as AnyRecord).name.label).toBe('客户名称');
+    expect(translated.actions?.[0].label).toBe('合并客户');
+    expect(translated.actions?.[0].confirmText).toBe('确认合并？');
+  });
+
+  it('skips a row still in the retired object-first shape, naming what to do', async () => {
+    const engine = {
+      find: vi.fn(async (_obj: string, q: AnyRecord) =>
+        q?.where?.type === 'translation'
+          ? [
+              translationRow('legacy_zh', { locale: 'zh-CN', o: { crm_account: { label: '客户' } } }),
+              translationRow('good_zh', { locale: 'zh-CN', objects: { crm_task: { label: '任务' } } }),
+            ]
+          : []),
+    };
+    const { harness, i18n } = await bootPlugin({ objectql: engine });
+
+    await harness.fire('kernel:ready');
+
+    // The retired row contributes nothing and says so; the valid row still loads.
+    expect((i18n.getTranslations('zh-CN') as AnyRecord).o).toBeUndefined();
+    expect(i18n.t('objects.crm_task.label', 'zh-CN')).toBe('任务');
+    expect(harness.ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('retired object-first shape'),
+    );
+  });
+
+  it('keeps publish bookkeeping out of the translation layer', async () => {
+    const engine = {
+      find: vi.fn(async (_obj: string, q: AnyRecord) =>
+        q?.where?.type === 'translation'
+          ? [translationRow('en', {
+              locale: 'en',
+              _packageId: 'pkg_1',
+              _packageVersion: '1.2.3',
+              _provenance: 'package',
+              _lock: true,
+              _lockReason: 'managed',
+              _lockDocsUrl: 'https://example.test/lock',
+              _lockSource: 'package',
+              objects: { crm_task: { label: 'Task' } },
+            })]
+          : []),
+    };
+    const { harness, i18n } = await bootPlugin({ objectql: engine });
+
+    await harness.fire('kernel:ready');
+
+    const data = i18n.getTranslations('en') as AnyRecord;
+    expect(data.objects.crm_task.label).toBe('Task');
+    for (const key of ['_packageId', '_packageVersion', '_provenance', '_lock', '_lockReason', '_lockDocsUrl', '_lockSource', 'locale', 'name']) {
+      expect(data).not.toHaveProperty(key);
+    }
   });
 });

@@ -31,8 +31,7 @@ export type FieldTranslation = z.infer<typeof FieldTranslationSchema>;
  *
  * Translations for an action's post-success `resultDialog` (the one-shot
  * reveal of secrets like temporary passwords, client secrets, or backup
- * codes). Shared by object `_actions`, `globalActions`, and the
- * object-first `ObjectTranslationNode._actions`.
+ * codes). Shared by object `_actions` and `globalActions`.
  *
  * Convention:
  *   …_actions.<action_name>.resultDialog.title
@@ -76,8 +75,17 @@ export type ActionResultDialogTranslation = z.infer<typeof ActionResultDialogTra
  * ```
  */
 export const ObjectTranslationDataSchema = lazySchema(() => z.object({
-  /** Translated singular label for the object */
-  label: z.string().describe('Translated singular label'),
+  /**
+   * Translated singular label for the object.
+   *
+   * Optional because partial translation is the normal state — a bundle that
+   * only renames two fields is valid, and every resolver already treats each
+   * key as independently optional. Requiring it would force authors (and the
+   * AI agents that scaffold bundles) to restate the source label just to pass
+   * validation, filling bundles with fake translations that mask real
+   * coverage gaps.
+   */
+  label: z.string().optional().describe('Translated singular label'),
   /** Translated plural label for the object */
   pluralLabel: z.string().optional().describe('Translated plural label'),
   /** Translated description shown in list/detail headings */
@@ -409,222 +417,122 @@ export const TranslationConfigSchema = lazySchema(() => z.object({
 export type TranslationConfig = z.infer<typeof TranslationConfigSchema>;
 
 // ────────────────────────────────────────────────────────────────────────────
-// Object-First Translation Node (object-first aggregated structure)
+// Translation Item (the runtime-authored `translation` metadata type)
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Translatable option map: option value → translated label */
-const OptionTranslationMapSchema = z.record(z.string(), z.string())
-  .describe('Option value to translated label map');
-
 /**
- * ObjectTranslationNodeSchema
+ * Top-level keys of the retired object-first (`o.<object>`) dialect.
  *
- * Object-first aggregated translation node that groups **all** translatable
- * content for a single object under one key. Aligns with Salesforce / Dynamics
- * conventions where translations are organized per-object rather than per-category.
- *
- * Located at `o.{object_name}` inside an {@link AppTranslationBundle}.
- *
- * @example
- * ```typescript
- * const accountNode: ObjectTranslationNode = {
- *   label: '客户',
- *   pluralLabel: '客户',
- *   description: '客户管理对象',
- *   fields: {
- *     name: { label: '客户名称', help: '公司或组织的法定名称' },
- *     industry: { label: '行业', options: { tech: '科技', finance: '金融' } },
- *   },
- *   _options: { status: { active: '活跃', inactive: '停用' } },
- *   _views: { all_accounts: { label: '全部客户' } },
- *   _sections: { basic_info: { label: '基本信息' } },
- *   _actions: {
- *     convert_lead: { label: '转换线索', confirmMessage: '确认转换？' },
- *   },
- * };
- * ```
+ * {@link TranslationItemSchema} checks for them *before* parsing, because Zod
+ * strips undeclared keys silently: an item authored in the old shape would
+ * otherwise save cleanly and then resolve to nothing — exactly the failure
+ * this type is being fixed for (#3778). Guarding ahead of the parse turns
+ * that silence into a 422 naming the correct group, while keeping the retired
+ * keys out of the schema itself, so neither the generated JSON Schema nor the
+ * Studio editor advertises a shape that cannot work.
  */
-export const ObjectTranslationNodeSchema = lazySchema(() => z.object({
-  /** Translated singular label */
-  label: z.string().describe('Translated singular label'),
-  /** Translated plural label */
-  pluralLabel: z.string().optional().describe('Translated plural label'),
-  /** Translated object description */
-  description: z.string().optional().describe('Translated object description'),
-  /** Translated help text shown in tooltips or guidance panels */
-  helpText: z.string().optional().describe('Translated help text for the object'),
+export const LEGACY_OBJECT_FIRST_KEYS = [
+  'o',
+  'app',
+  'nav',
+  'dashboard',
+  'reports',
+  'notifications',
+  'errors',
+  '_globalOptions',
+  '_meta',
+  'namespace',
+] as const;
 
-  /** Field-level translations keyed by field name (snake_case) */
-  fields: z.record(z.string(), FieldTranslationSchema).optional()
-    .describe('Field translations keyed by field name'),
+export type LegacyObjectFirstKey = (typeof LEGACY_OBJECT_FIRST_KEYS)[number];
 
-  /**
-   * Global picklist / select option overrides scoped to this object.
-   * Keyed by field name → { optionValue: translatedLabel }.
-   */
-  _options: z.record(z.string(), OptionTranslationMapSchema).optional()
-    .describe('Object-scoped picklist option translations keyed by field name'),
-
-  /** View translations keyed by view name */
-  _views: z.record(z.string(), z.object({
-    label: z.string().optional().describe('Translated view label'),
-    description: z.string().optional().describe('Translated view description'),
-    emptyState: z.object({
-      title: z.string().optional().describe('Translated empty-state title'),
-      message: z.string().optional().describe('Translated empty-state message'),
-    }).optional().describe('Translated empty-state copy shown when the view has no rows'),
-  })).optional().describe('View translations keyed by view name'),
-
-  /** Section (form section / tab) translations keyed by section name */
-  _sections: z.record(z.string(), z.object({
-    label: z.string().optional().describe('Translated section label'),
-  })).optional().describe('Section translations keyed by section name'),
-
-  /** Action translations keyed by action name */
-  _actions: z.record(z.string(), z.object({
-    label: z.string().optional().describe('Translated action label'),
-    confirmMessage: z.string().optional().describe('Translated confirmation message'),
-    params: z.record(z.string(), z.object({
-      label: z.string().optional().describe('Translated action parameter label'),
-      helpText: z.string().optional().describe('Translated action parameter help/hint text'),
-      placeholder: z.string().optional().describe('Translated action parameter placeholder'),
-      options: z.record(z.string(), z.string()).optional().describe('Param select option value to translated label'),
-    })).optional().describe('Action parameter translations keyed by parameter name'),
-    resultDialog: ActionResultDialogTranslationSchema.optional()
-      .describe('Translations for the action result dialog'),
-  })).optional().describe('Action translations keyed by action name'),
-
-  /** Notification message translations keyed by notification name */
-  _notifications: z.record(z.string(), z.object({
-    title: z.string().optional().describe('Translated notification title'),
-    body: z.string().optional().describe('Translated notification body (supports ICU MessageFormat when enabled)'),
-  })).optional().describe('Notification translations keyed by notification name'),
-
-  /** Error message translations keyed by error code */
-  _errors: z.record(z.string(), z.string()).optional()
-    .describe('Error message translations keyed by error code'),
-}).describe('Object-first aggregated translation node'));
-
-export type ObjectTranslationNode = z.infer<typeof ObjectTranslationNodeSchema>;
-
-// ────────────────────────────────────────────────────────────────────────────
-// App Translation Bundle (object-first, full application)
-// ────────────────────────────────────────────────────────────────────────────
+/** Where each retired key's content belongs now (or that it has no home). */
+const LEGACY_KEY_MIGRATION: Record<LegacyObjectFirstKey, string> = {
+  o: "use 'objects.<object_name>'",
+  app: "use 'apps.<app_name>'",
+  nav: "use 'apps.<app_name>.navigation.<node_id>.label'",
+  dashboard: "use 'dashboards.<dashboard_name>'",
+  reports: 'reports have no translation group — omit them',
+  notifications: 'notifications have no translation group — omit them',
+  errors: "use 'validationMessages' for rule messages; other errors have no translation group",
+  _globalOptions: "use 'objects.<object_name>.fields.<field_name>.options'",
+  _meta: "use the top-level 'locale' field",
+  namespace: 'namespaces are not part of the translation contract — omit it',
+};
 
 /**
- * AppTranslationBundleSchema
+ * TranslationItemSchema
  *
- * Complete application translation bundle for a **single locale** using
- * the **object-first** convention. All per-object translatable content
- * is aggregated under `o.{object_name}`, while global (non-object-bound)
- * translations are kept in dedicated top-level groups.
+ * The shape of a single `translation` metadata item — one locale's worth of
+ * translations, authored either as a file (`*.translation.ts`) or at runtime
+ * through the metadata door (Studio, the metadata API, an AI agent).
  *
- * This schema is designed for:
- * - Translation workbench UIs (object-level editing & coverage)
- * - CLI skeleton generation (`objectstack i18n extract`)
- * - Automated diff/coverage detection
+ * It is deliberately the SAME set of groups the file-authored bundles use and
+ * the resolvers read (`objects.<object_name>`, `apps`, `messages`, …): one
+ * item is one entry of a {@link TranslationBundle}, plus the `locale` naming
+ * which entry it is. Before #3778 this type was registered against a second,
+ * object-first (`o.<object>`) dialect that no resolver ever read, so a
+ * translation authored in the product saved successfully and then rendered
+ * nothing. That dialect is gone, and its keys are rejected outright rather
+ * than stripped — see {@link LEGACY_OBJECT_FIRST_KEYS}.
+ *
+ * `locale` is required rather than inferred from the item name: the runtime
+ * sync skips an item whose locale it cannot resolve, and a skip is invisible
+ * to whoever — or whatever — authored it.
  *
  * @example
  * ```typescript
- * const zh: AppTranslationBundle = {
- *   o: {
+ * const zhCN = defineTranslation({
+ *   locale: 'zh-CN',
+ *   objects: {
  *     account: {
  *       label: '客户',
  *       fields: { name: { label: '客户名称' } },
- *       _options: { industry: { tech: '科技' } },
  *       _views: { all_accounts: { label: '全部客户' } },
- *       _sections: { basic_info: { label: '基本信息' } },
- *       _actions: { convert: { label: '转换' } },
+ *       _actions: { merge: { label: '合并客户', confirmText: '此操作无法撤销，确认合并？' } },
  *     },
  *   },
- *   _globalOptions: { currency: { usd: '美元', eur: '欧元' } },
- *   app: { crm: { label: '客户关系管理', description: '管理销售流程' } },
- *   nav: { home: '首页', settings: '设置' },
- *   dashboard: { sales_overview: { label: '销售概览' } },
- *   reports: { pipeline_report: { label: '管道报表' } },
- *   pages: { landing: { title: '欢迎' } },
+ *   apps: { crm: { label: '客户关系管理' } },
  *   messages: { 'common.save': '保存' },
- *   validationMessages: { 'discount_limit': '折扣不能超过40%' },
- * };
+ * });
  * ```
  */
-export const AppTranslationBundleSchema = lazySchema(() => z.object({
-  /**
-   * Bundle-level metadata.
-   * Provides locale-aware rendering hints such as text direction (bidi)
-   * and the canonical locale code this bundle represents.
-   */
-  _meta: z.object({
-    /** BCP-47 locale code this bundle represents */
-    locale: z.string().optional().describe('BCP-47 locale code for this bundle'),
-    /** Text direction for the locale */
-    direction: z.enum(['ltr', 'rtl']).optional().describe('Text direction: left-to-right or right-to-left'),
-  }).optional().describe('Bundle-level metadata (locale, bidi direction)'),
+/**
+ * The item's own shape, without the retired-key guard. Private: it exists so
+ * the guard can wrap it (and so the factory below can type its argument) —
+ * {@link TranslationItemSchema} is the schema every caller should use.
+ */
+const TranslationItemDataSchema = lazySchema(() => TranslationDataSchema.extend({
+  locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),
+}).describe('One locale of translations — the `translation` metadata type'));
 
-  /**
-   * Namespace for plugin/extension isolation.
-   * When multiple plugins contribute translations, each should use a unique
-   * namespace to avoid key collisions (e.g. "crm", "helpdesk", "plugin-xyz").
-   */
-  namespace: z.string().optional()
-    .describe('Namespace for plugin isolation to avoid translation key collisions'),
+export const TranslationItemSchema = lazySchema(() => z.preprocess((raw, ctx) => {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const key of LEGACY_OBJECT_FIRST_KEYS) {
+      if ((raw as Record<string, unknown>)[key] === undefined) continue;
+      ctx.addIssue({
+        code: 'custom',
+        path: [key],
+        message:
+          `'${key}' belongs to the retired object-first translation shape, which no resolver `
+          + `reads — ${LEGACY_KEY_MIGRATION[key]}.`,
+      });
+    }
+  }
+  return raw;
+}, TranslationItemDataSchema));
 
-  /** Object-first translations keyed by object name (snake_case) */
-  o: z.record(z.string(), ObjectTranslationNodeSchema).optional()
-    .describe('Object-first translations keyed by object name'),
+/** A single `translation` metadata item. */
+export type TranslationItem = z.infer<typeof TranslationItemDataSchema>;
 
-  /** Global picklist options not bound to any specific object */
-  _globalOptions: z.record(z.string(), OptionTranslationMapSchema).optional()
-    .describe('Global picklist option translations keyed by option set name'),
-
-  /** App-level translations */
-  app: z.record(z.string(), z.object({
-    label: z.string().describe('Translated app label'),
-    description: z.string().optional().describe('Translated app description'),
-  })).optional().describe('App translations keyed by app name'),
-
-  /** Navigation menu translations */
-  nav: z.record(z.string(), z.string()).optional()
-    .describe('Navigation item translations keyed by nav item name'),
-
-  /** Dashboard translations keyed by dashboard name */
-  dashboard: z.record(z.string(), z.object({
-    label: z.string().optional().describe('Translated dashboard label'),
-    description: z.string().optional().describe('Translated dashboard description'),
-  })).optional().describe('Dashboard translations keyed by dashboard name'),
-
-  /** Report translations keyed by report name */
-  reports: z.record(z.string(), z.object({
-    label: z.string().optional().describe('Translated report label'),
-    description: z.string().optional().describe('Translated report description'),
-  })).optional().describe('Report translations keyed by report name'),
-
-  /** Page translations keyed by page name */
-  pages: z.record(z.string(), z.object({
-    title: z.string().optional().describe('Translated page title'),
-    description: z.string().optional().describe('Translated page description'),
-  })).optional().describe('Page translations keyed by page name'),
-
-  /** UI message translations (supports ICU MessageFormat when enabled) */
-  messages: z.record(z.string(), z.string()).optional()
-    .describe('UI message translations keyed by message ID (supports ICU MessageFormat)'),
-
-  /** Validation error message translations (supports ICU MessageFormat when enabled) */
-  validationMessages: z.record(z.string(), z.string()).optional()
-    .describe('Validation error message translations keyed by rule name (supports ICU MessageFormat)'),
-
-  /** Global notification translations not bound to a specific object */
-  notifications: z.record(z.string(), z.object({
-    title: z.string().optional().describe('Translated notification title'),
-    body: z.string().optional().describe('Translated notification body (supports ICU MessageFormat when enabled)'),
-  })).optional().describe('Global notification translations keyed by notification name'),
-
-  /** Global error message translations not bound to a specific object */
-  errors: z.record(z.string(), z.string()).optional()
-    .describe('Global error message translations keyed by error code'),
-}).describe('Object-first application translation bundle for a single locale'));
-
-export type AppTranslationBundle = z.infer<typeof AppTranslationBundleSchema>;
+/**
+ * Type-safe factory for a single-locale `translation` item. Validates at
+ * authoring time via `.parse()` — preferred over a bare `: TranslationItem`
+ * literal, which cannot catch a retired key.
+ */
+export function defineTranslation(config: z.input<typeof TranslationItemDataSchema>): TranslationItem {
+  return TranslationItemSchema.parse(config);
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Translation Diff & Coverage
@@ -652,7 +560,7 @@ export type TranslationDiffStatus = z.infer<typeof TranslationDiffStatusSchema>;
  * @example
  * ```typescript
  * const item: TranslationDiffItem = {
- *   key: 'o.account.fields.website.label',
+ *   key: 'objects.account.fields.website.label',
  *   status: 'missing',
  *   objectName: 'account',
  *   locale: 'zh-CN',
@@ -660,7 +568,7 @@ export type TranslationDiffStatus = z.infer<typeof TranslationDiffStatusSchema>;
  * ```
  */
 export const TranslationDiffItemSchema = lazySchema(() => z.object({
-  /** Dot-path translation key (e.g. "o.account.fields.website.label") */
+  /** Dot-path translation key (e.g. "objects.account.fields.website.label") */
   key: z.string().describe('Dot-path translation key'),
   /** Diff status */
   status: TranslationDiffStatusSchema.describe('Diff status of this translation key'),

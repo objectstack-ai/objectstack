@@ -137,6 +137,39 @@ register. Common layouts:
   for two locales; unwieldy past that.
 - **per namespace** — split by module.
 
+## Authoring in the product
+
+Files are not the only door. A `translation` metadata item — created in the
+Studio, through the metadata API, or by an agent — carries one locale's worth
+of the **same** groups a file bundle uses, plus the `locale` it translates:
+
+```ts
+import { defineTranslation } from '@objectstack/spec/system';
+
+export default defineTranslation({
+  locale: 'zh-CN',
+  objects: {
+    crm_account: {
+      label: '客户',
+      fields: { name: { label: '客户名称' } },
+    },
+  },
+});
+```
+
+Published items are picked up at boot and again on every publish, without a
+restart. They layer **over** the file bundles, so an authored value wins over a
+shipped one for the same key, and deleting the item restores the shipped value.
+
+Two things to know:
+
+- `locale` is required. An item whose locale can't be resolved is skipped, and
+  a silent skip is the hardest kind of missing translation to diagnose.
+- Only the groups on this page are accepted. Keys from the retired `o.<object>`
+  shape (`o`, `app`, `nav`, `dashboard`, `_globalOptions`, `_meta`, …) are
+  rejected at save time with a message naming the group to use instead — they
+  used to save cleanly and then render nothing (#3778).
+
 ## Draft with the CLI, gate in CI
 
 ```bash
@@ -198,10 +231,10 @@ Honest limits worth knowing before you plan around them:
   errors are not translated through bundles yet.
 - **No ICU MessageFormat** — plural/gender formatting isn't available;
   interpolation is always simple `{variable}` substitution.
-- **Two bundle shapes exist.** File-authored bundles use the `objects.<name>`
-  shape documented here, which is what the resolver reads. The `translation`
-  metadata type authored at runtime uses an object-first (`o.<object>`) shape,
-  and the two are not bridged — author translations **as files** for now.
+- **Runtime authoring is process-wide.** The authored layer is synced across all
+  organizations into one i18n map, so a `translation` item published in one
+  tenant resolves in every tenant on the same process. Ship per-tenant
+  translations as files until this is scoped.
 - AI-suggested translation fields (`aiSuggested`, `aiConfidence`) are schema
   only.
 
