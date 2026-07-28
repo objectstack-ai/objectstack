@@ -53,6 +53,8 @@ The `type` field selects how an action is dispatched. The complete enum is **`sc
 
 `target` is the canonical binding for every non-`script` type. The deprecated `execute` field is lowered into `target` during parsing and then **removed from the parsed metadata**, so every consumer — server dispatch and renderer alike — reads exactly one slot. If an action declares both, `target` wins and `execute` is discarded.
 
+Declaring both with *different* values means one of the two handlers you wrote never runs, so it raises an advisory `action-target-execute-conflict` warning naming both — from `defineStack` when it parses your config, and from `os build` / `os validate` for stacks that skip strict `defineStack`. It never fails the build; the fix is to delete `execute`. The same value in both slots is harmless duplication and stays quiet.
+
 ### Script Actions
 
 Run logic with no server round trip via `body` (an L1 CEL expression or L2 sandboxed JS). `body` is only meaningful when `type` is `script`, and declaring one on any other type is a parse-time error — those types dispatch on `target`, so the body would never be invoked.
