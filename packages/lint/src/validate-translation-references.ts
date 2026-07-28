@@ -197,7 +197,70 @@ function emptyFacts(): ObjectFacts {
   return { fields: new Map(), views: new Set(), actions: new Map(), sections: new Set() };
 }
 
-/** The object a view binds to, across the three shapes views are authored in. */
+/**
+ * Register everything ONE view record contributes: the `_views` names it makes
+ * legal, and the `_sections` names its form views declare — each under the
+ * object that container actually binds.
+ *
+ * Two things about the real shape make this more than "read `view.name`", and
+ * both were learned from the HotCRM corpus (~18k lines of shipped metadata),
+ * where a first pass reported ~40 correct keys as orphans:
+ *
+ *  1. A view record is a CONTAINER, not a view. The default list sits at
+ *     `list`; the named tabs at `listViews.<key>` and `formViews.<key>`, each
+ *     of which may also carry its own `name`. Both the map key and the inner
+ *     `name` are accepted — authors write either, and the key is what the
+ *     console renders the tab from.
+ *  2. The object binding lives INSIDE the container (`list.data.object`), not
+ *     at the record root. A record-level lookup alone resolves to nothing on
+ *     the canonical shape, which silently drops the whole record — a rule that
+ *     then reports every view key the app ships.
+ */
+function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => ObjectFacts): void {
+  const recordObject = viewObjectName(view);
+  const bindingOf = (container: AnyRec): string | undefined =>
+    viewObjectName(container) ?? recordObject;
+
+  const addView = (objectName: string | undefined, name: string | undefined) => {
+    if (objectName && name) factsFor(objectName).views.add(name);
+  };
+
+  const listBinding = isRec(view.list) ? bindingOf(view.list) : undefined;
+  if (isRec(view.list)) addView(listBinding, strName(view.list.name));
+  addView(recordObject ?? listBinding, strName(view.name));
+
+  for (const key of ['listViews', 'formViews'] as const) {
+    const container = view[key];
+    if (!isRec(container)) continue;
+    for (const [subKey, sub] of Object.entries(container)) {
+      if (!isRec(sub)) continue;
+      const binding = bindingOf(sub) ?? listBinding;
+      addView(binding, subKey);
+      addView(binding, strName(sub.name));
+
+      // Form sections carry an OPTIONAL `name` that exists purely for the
+      // `_sections` lookup (`ui/view.zod.ts`: "Stable section identifier for
+      // i18n lookup"). A section without one cannot be translated at all, so
+      // it contributes nothing here.
+      if (binding) {
+        for (const section of asArray(sub.sections)) {
+          const sectionName = strName(section.name);
+          if (sectionName) factsFor(binding).sections.add(sectionName);
+        }
+      }
+    }
+  }
+
+  const sectionBinding = recordObject ?? listBinding;
+  if (sectionBinding) {
+    for (const section of asArray(view.sections)) {
+      const sectionName = strName(section.name);
+      if (sectionName) factsFor(sectionBinding).sections.add(sectionName);
+    }
+  }
+}
+
+/** The object a view (or one of its containers) binds to, across the shapes it is authored in. */
 function viewObjectName(view: AnyRec): string | undefined {
   return (
     strName(view.objectName) ??
@@ -269,10 +332,14 @@ function buildUniverse(stack: AnyRec): Universe {
       const actionName = strName(action.name);
       if (actionName) facts.actions.set(actionName, action);
     }
+    // An object can carry views directly, including the `objects[].listViews`
+    // container the chart rule also walks. `{ ...view, object: objectName }`
+    // pins the binding: an embedded view inherits its owner, and nothing here
+    // depends on the container repeating it.
     for (const view of asArray(obj.views)) {
-      const viewName = strName(view.name);
-      if (viewName) facts.views.add(viewName);
+      collectViewRecord({ ...view, object: strName(view.object) ?? objectName }, factsFor);
     }
+    collectViewRecord({ object: objectName, listViews: obj.listViews }, factsFor);
     // ADR-0085: `fieldGroups[].key` is the i18n anchor for `_sections`.
     for (const group of asArray(obj.fieldGroups)) {
       const key = strName(group.key) ?? strName(group.name);
@@ -282,25 +349,7 @@ function buildUniverse(stack: AnyRec): Universe {
 
   // ── Stack-level views: `_views` names + form-section names ──
   for (const view of asArray(stack.views)) {
-    const objectName = viewObjectName(view);
-    if (!objectName) continue;
-    const facts = factsFor(objectName);
-    const viewName = strName(view.name);
-    if (viewName) facts.views.add(viewName);
-
-    // Form sections carry an OPTIONAL `name` that exists purely for this lookup
-    // (`ui/view.zod.ts`: "Stable section identifier for i18n lookup"). A section
-    // without one cannot be translated at all, so it adds nothing here.
-    for (const formView of asArray(view.formViews)) {
-      for (const section of asArray(formView.sections)) {
-        const sectionName = strName(section.name);
-        if (sectionName) facts.sections.add(sectionName);
-      }
-    }
-    for (const section of asArray(view.sections)) {
-      const sectionName = strName(section.name);
-      if (sectionName) facts.sections.add(sectionName);
-    }
+    collectViewRecord(view, factsFor);
   }
 
   // ── Pages: `record:details` sections are the other `_sections` anchor ──

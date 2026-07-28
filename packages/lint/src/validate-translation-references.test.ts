@@ -401,6 +401,88 @@ describe('validateTranslationReferences — namespaces deliberately not judged',
   });
 });
 
+describe('validateTranslationReferences — the canonical view-record shape', () => {
+  // Reduced from HotCRM: a view record is a CONTAINER whose object binding
+  // lives inside `list.data.object`, with the named tabs under `listViews`.
+  // Reading `view.name` / `view.data.object` at the record root resolves
+  // nothing here, drops the record, and reports every view key the app ships —
+  // ~40 correct keys on the real corpus.
+  const leadViews = {
+    objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+    views: [
+      {
+        list: {
+          type: 'grid',
+          name: 'all_leads',
+          data: { provider: 'object', object: 'crm_lead' },
+        },
+        listViews: {
+          my_leads: { name: 'my_leads', type: 'grid', data: { provider: 'object', object: 'crm_lead' } },
+          kanban_by_status: { name: 'kanban_by_status', type: 'kanban' },
+        },
+        formViews: {
+          default: {
+            type: 'simple',
+            data: { provider: 'object', object: 'crm_lead' },
+            sections: [{ name: 'contact_info', label: 'Contact Info' }],
+          },
+        },
+      },
+    ],
+  };
+
+  it('resolves the default list, every named tab, and a form section', () => {
+    const findings = validateTranslationReferences({
+      ...leadViews,
+      translations: [
+        {
+          en: {
+            objects: {
+              crm_lead: {
+                label: 'Lead',
+                _views: {
+                  all_leads: { label: 'All Leads' },
+                  my_leads: { label: 'My Leads' },
+                  kanban_by_status: { label: 'By Status' },
+                  default: { label: 'Default Form' },
+                },
+                _sections: { contact_info: { label: 'Contact' } },
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('still flags a view key no container declares', () => {
+    const findings = validateTranslationReferences({
+      ...leadViews,
+      translations: [
+        { en: { objects: { crm_lead: { label: 'Lead', _views: { hot_leads: { label: 'Hot' } } } } } },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.hot_leads');
+    expect(findings[0].hint).toContain('all_leads');
+  });
+
+  it('resolves views embedded on the object itself', () => {
+    const findings = validateTranslationReferences({
+      objects: [
+        {
+          name: 'crm_lead',
+          fields: { name: { type: 'text' } },
+          listViews: { recent: { name: 'recent', type: 'grid' } },
+        },
+      ],
+      translations: [{ en: { objects: { crm_lead: { label: 'Lead', _views: { recent: { label: 'Recent' } } } } } }],
+    });
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — section anchors', () => {
   it('resolves a section named on a form view or a record:details page', () => {
     const stack = {
