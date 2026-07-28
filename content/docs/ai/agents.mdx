@@ -130,8 +130,11 @@ permissions, validation and audit are identical whether a human clicks or the
 assistant calls:
 
 ```typescript
+import { defineAction } from '@objectstack/spec/ui';
+import { defineSkill } from '@objectstack/spec/ai';
+
 // 1. The Action you already have — opt it in to AI.
-export const ConvertLeadAction: Action = {
+export const ConvertLeadAction = defineAction({
   name: 'convert_lead',
   label: 'Convert Lead',
   objectName: 'crm_lead',
@@ -141,7 +144,7 @@ export const ConvertLeadAction: Action = {
     exposed: true,          // ADR-0011 — opt-in, default off
     description: 'Converts a qualified lead into an account, contact and opportunity.',
   },
-};
+});
 
 // 2. The skill names its materialised tool. No defineTool anywhere.
 export const LeadQualificationSkill = defineSkill({
