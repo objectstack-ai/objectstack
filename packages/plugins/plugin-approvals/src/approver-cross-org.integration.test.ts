@@ -158,6 +158,33 @@ describe('ADR-0105 D9 — cross-org approver targeting through ApprovalService',
     expect(req.pending_approvers).toEqual(['position:cfo']);
   });
 
+  // Regression: `user` / `field` / `manager` return EARLY in
+  // `resolveApproverSpec`, before the graph-expansion branch. D9's resolution
+  // originally sat after those returns, so the declaration on a directory-less
+  // type was silently INERT rather than refused — the one behaviour ADR-0105 D9
+  // and the authoring docs both promise it is not. The resolver's own unit test
+  // could not see it (it calls the resolver directly); only a request opened
+  // through the service reaches the early return. Caught by cloud's
+  // group-posture dogfood.
+  it('refuses `organization` on a directory-less type — the early return must not skip the check', async () => {
+    for (const spec of [
+      { type: 'user', value: 'u_cfo', organization: '$root' },
+      { type: 'field', value: 'owner_id', organization: '$root' },
+      { type: 'manager', organization: '$root' },
+    ]) {
+      await expect(
+        svc.openNodeRequest(openInput([spec]), CTX),
+        `approver type '${spec.type}' must refuse a cross-org declaration`,
+      ).rejects.toThrow(/VALIDATION_FAILED.*no effect/);
+    }
+  });
+
+  it('a directory-less approver with NO declaration is untouched by D9', async () => {
+    // The guard must not cost the ordinary case anything.
+    const req = await svc.openNodeRequest(openInput([{ type: 'user', value: 'u_plant_mgr' }]), CTX);
+    expect(req.pending_approvers).toEqual(['u_plant_mgr']);
+  });
+
   it('refuses a target outside the group — loudly, and no request is created', async () => {
     engine._tables['sys_organization'].push({ id: 'o_rival', slug: 'rival-co', parent_organization_id: null });
     await expect(

@@ -784,6 +784,23 @@ export class ApprovalService implements IApprovalService {
         { deprecated: a.type, canonical: type },
       );
     }
+    // [ADR-0105 D9] WHERE this approver is looked up — the request's own
+    // organization unless the spec targets another one in the same group.
+    //
+    // Resolved HERE, above the `user` / `field` / `manager` early returns,
+    // because refusing a declaration on a directory-less type is one of the
+    // things this resolution DOES (those types name a person outright, so
+    // `organization` on them cannot narrow anything and an author who wrote it
+    // misunderstood the field). Resolving it after those returns made the
+    // refusal unreachable and the declaration silently inert — exactly the
+    // "ignored, not refused" behaviour ADR-0105 D9 rules out, and what the
+    // cloud group-posture dogfood caught.
+    //
+    // Costs nothing on the overwhelmingly common path: with no `organization`
+    // declared, the resolver returns the request org without reading anything.
+    const directoryOrg = await this.directoryOrgFor(a, organizationId);
+    const crossOrg = directoryOrg !== organizationId;
+
     if (type === 'user') {
       return this.applyOooDelegation(String(a.value), now, organizationId, substitutions);
     }
@@ -798,12 +815,11 @@ export class ApprovalService implements IApprovalService {
       }
       return out;
     }
-    // [ADR-0105 D9] WHERE this approver is looked up — the request's own
-    // organization unless the spec targets another one in the same group.
-    // Resolution failures propagate: they are routing bugs, and this call is
-    // OUTSIDE the swallowing try below on purpose (see the catch's comment).
-    const directoryOrg = await this.directoryOrgFor(a, organizationId);
-    const crossOrg = directoryOrg !== organizationId;
+    // `directoryOrg` / `crossOrg` were resolved at the TOP of this method, so
+    // the refusal reaches directory-less types too. Resolution failures
+    // propagate: they are routing bugs, and that call sits OUTSIDE the
+    // swallowing try below on purpose (see the catch's comment).
+    //
     // A cross-org slate is filtered to the people who can actually READ the
     // request (D2 union); same-org routing is untouched and does no extra read.
     const bounded = async (users: string[]): Promise<string[]> => (
