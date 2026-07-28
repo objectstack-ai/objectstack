@@ -587,14 +587,21 @@ recovery never erases the record of what failed.
 **A fault edge does not disable a guardrail.** Failures come in two classes, and
 only one is routable.
 
-- **Runtime** — the world did not cooperate: an `http` node got a 404, a
-  connector rate-limited, the data engine rejected a write. Routed to the fault
-  edge.
-- **Guard** — the *metadata* is wrong, and a refuse-to-execute check said so: a
-  filter token resolved to nothing so the condition was dropped from the query,
-  a data node names no object, or the run would execute unscoped. **Never
-  routed.** These stay fatal whether or not a `fault` edge exists, and the run
+- **Runtime** — the world did not cooperate, and a later run could succeed: an
+  `http` node got a 404, a connector rate-limited or is degraded, the data engine
+  rejected a write, a collection arrived the wrong shape, a subflow failed on its
+  own. Routed to the fault edge.
+- **Guard** — a refuse-to-execute check found the *metadata* wrong. **Never
+  routed:** these stay fatal whether or not a `fault` edge exists, and the run
   fails with the guard's own message.
+
+A failure is a guard when both hold: re-running the flow unchanged could never
+succeed, **and** the fix is to edit metadata. In practice that is a missing
+required config key (a data node with no `objectName`, an `http` node with no
+`url`, a `subflow` or `map` with no `flowName`, a `connector_action` with no
+`connectorId`/`actionId`), a filter token that resolved to nothing so the
+condition was dropped from the query, a graph that recurses past the nesting
+ceiling, or a run that would execute unscoped.
 
 The split is deliberate. A dropped filter condition does not narrow a query, it
 widens it — so if guards were routable, one `fault` edge on a `delete_record`
