@@ -173,6 +173,68 @@ submit:
   with `behavior: 'per_group'`, each intermediate value (e.g. each returned
   department) forms its own sign-off group.
 
+## Approving across organizations (ADR-0105 D9) [#cross-org-approvers]
+
+<Callout type="info">
+Requires the `group` tenancy posture. Under `single` or `isolated` the runtime
+**refuses** an approver that declares `organization`, rather than ignoring it.
+</Callout>
+
+A group-shaped deployment routinely needs a plant's document signed off by
+someone at the group: the purchase order lives in the **plant** organization,
+but the CFO holds her `cfo` position in the **group** organization. By default
+an approver is resolved against the request's own organization, so `cfo` would
+match nobody there.
+
+Declare which organization's directory resolves that approver:
+
+```typescript
+config: {
+  approvers: [
+    { type: 'position', value: 'plant_manager', group: 'plant' },
+    { type: 'position', value: 'cfo', organization: '$root', group: 'finance' },
+  ],
+  behavior: 'per_group',   // one plant sign-off AND one group sign-off
+}
+```
+
+`organization` takes a **symbol** or an organization **slug**:
+
+| Value | Resolves to |
+| :--- | :--- |
+| `$root` | the group organization — climbs `parent_organization_id` to the top |
+| `$parent` | exactly one level up (division sign-off in a three-tier group) |
+| a slug, e.g. `acme-ssc` | that organization — for a **sibling**, such as a shared-services centre approving payables for every plant |
+
+Prefer the symbols. Flow metadata is portable across environments while
+organization ids are minted per deployment, so `$root` says "the group" without
+naming anything deployment-specific. An organization **id** is rejected: pass
+the slug.
+
+Three things this deliberately does **not** do:
+
+- **It does not move the request.** Only the approver lookup changes — the
+  request, its audit trail, and its inbox rows stay in the plant's
+  organization.
+- **It is not a route to any tenant.** The target must share a
+  `parent_organization_id` root with the request's organization, so approval
+  routes *within one group*. The rule reads only the organization tree, never
+  the submitter, so a flow routes identically for everyone.
+- **It does not apply to every approver kind.** `user`, `field`, `manager` and
+  `team` name people without consulting an organization directory;
+  `organization` on those is refused at runtime and flagged by `os lint`
+  (`approval-approver-cross-org-unsupported`).
+
+<Callout type="warn">
+A cross-organization approver must also be able to **read** the request. The
+request stays in the plant's organization, so a group-side approver reaches it
+only if she also holds a membership there — the usual group shape is that group
+staff are members of every plant while holding their positions at the group.
+Approvers without that membership are dropped from the slate with a warning
+naming them, and the node's `onEmptyApprovers` policy takes over — better an
+empty slate you can see than a task the tenancy wall hides.
+</Callout>
+
 A result may legitimately be **empty** (a present-but-empty field or variable);
 the node-level `onEmptyApprovers` policy decides what that means —
 `admin_rescue` (default: the request opens, a privileged admin takes over via
@@ -230,7 +292,10 @@ hierarchy. `queue` still parses so stored flows keep loading, but it is **not
 implemented** by the runtime and is no longer offered for authoring (#3508) —
 a queue entry resolves to nobody. Route to a `team`, `department`, or
 `position` instead. `field`, `manager`, and `expression` resolve against the record's
-**live** state at node entry (#3447). An entry that resolves
+**live** state at node entry (#3447). `position`, `department`,
+`org_membership_level` and `expression` may additionally name which
+organization's directory resolves them — see
+[Approving across organizations](#cross-org-approvers). An entry that resolves
 to nobody is not an error: the request opens with an empty `pending_approvers`
 and nothing can move it, so the run parks forever.
 
