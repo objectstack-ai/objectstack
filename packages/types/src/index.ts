@@ -2,6 +2,7 @@
 
 export * from './degraded-boot.js';
 export * from './env.js';
+export * from './error-leak.js';
 export * from './module-not-found.js';
 
 // Placeholder for Kernel interface to avoid circular dependency

@@ -4,7 +4,7 @@ import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
 } from '@objectstack/core';
-import { isMcpServerEnabled } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak } from '@objectstack/types';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
@@ -401,17 +401,14 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // Default: do NOT leak raw SQL or driver internals. If the message
     // looks like a SQL/driver dump, replace it with a generic envelope
     // and rely on server logs for the full diagnostic.
-    const looksLikeSqlLeak =
-        lower.includes('sqlite_') ||
-        lower.includes('sqlstate') ||
-        lower.startsWith('insert into ') ||
-        lower.startsWith('update ') ||
-        lower.startsWith('select ') ||
-        lower.startsWith('delete from ') ||
-        lower.includes('constraint failed') ||
-        lower.includes('unique constraint') ||
-        lower.includes('foreign key');
-    if (looksLikeSqlLeak) {
+    //
+    // [#3867] The heuristic itself now lives in `@objectstack/types`
+    // (`looksLikeInternalErrorLeak`) so the OTHER HTTP boundary — the
+    // dispatcher-plugin routes (`/analytics`, `/packages`, `/i18n`, …) — can
+    // apply the same rule. Before #3867 that boundary applied none and
+    // returned raw SQL to clients. Behaviour here is unchanged; only the
+    // predicate's home moved.
+    if (looksLikeInternalErrorLeak(raw)) {
         // Surface unique-constraint violations as a structured 409 so
         // the UI can map them to "this value already exists".
         if (lower.includes('unique constraint') || lower.includes('unique violation')) {

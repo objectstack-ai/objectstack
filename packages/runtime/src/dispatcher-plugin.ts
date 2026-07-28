@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
+import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
 import {
     buildSecurityHeaders,
@@ -347,8 +348,38 @@ function sendResultBase(
     });
 }
 
+/**
+ * The single error exit for EVERY dispatcher-plugin route — `/analytics`,
+ * `/packages`, `/i18n`, `/storage`, `/automation`, `/auth`, `/notifications`,
+ * `/mcp`, … Each handler catches and calls here rather than re-throwing.
+ *
+ * [#3867] Two things were wrong with it, both invisible until a driver error
+ * actually reached this path:
+ *
+ * 1. **It only honoured `statusCode`.** Domain errors across this codebase
+ *    carry their HTTP status as `status` (the protocol layer's
+ *    `OBJECT_NOT_FOUND`/`RECORD_NOT_FOUND`/`CLONE_DISABLED`, plugin-sharing's
+ *    `FORBIDDEN`, …); `HttpDispatcher.errorFromThrown` already reads `status`
+ *    first, `statusCode` second. Here a deliberate 404 was rendered as a
+ *    **500** — the wrong code, and it dragged the message through the
+ *    sanitiser below for no reason. Now aligned with `errorFromThrown`.
+ *
+ * 2. **It returned `err.message` verbatim.** `@objectstack/rest` has guarded
+ *    its data routes against driver dumps since forever (`mapDataError`), but
+ *    this boundary had no equivalent, so `POST /analytics/query` on an
+ *    unresolvable cube answered with a real SQL statement in the body. The
+ *    shared predicate now applies here too — but ONLY on a 5xx: a 4xx message
+ *    is a deliberate business/validation answer and must reach the caller
+ *    intact.
+ *
+ * Sanitising costs no diagnostics: the untouched error is still handed to
+ * `errorReporter` through the `__obsRecordedError` side-channel below.
+ */
 function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, string>): void {
-    const code = err.statusCode || 500;
+    const code =
+        (typeof err?.status === 'number' ? err.status : undefined) ??
+        (typeof err?.statusCode === 'number' ? err.statusCode : undefined) ??
+        500;
     res.status(code);
     if (securityHeaders) {
         for (const [k, v] of Object.entries(securityHeaders)) {
@@ -366,9 +397,14 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
             // res is a frozen / proxy object — skip
         }
     }
+    const raw = err?.message;
+    const message =
+        code >= 500 && looksLikeInternalErrorLeak(raw)
+            ? INTERNAL_ERROR_MESSAGE
+            : raw || 'Internal Server Error';
     res.json({
         success: false,
-        error: { message: err.message || 'Internal Server Error', code },
+        error: { message, code },
     });
 }
 

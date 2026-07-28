@@ -184,6 +184,24 @@ export interface AnalyticsServiceConfig {
    */
   isExternalObject?: (objectName: string) => boolean;
   /**
+   * [#3867] Is `name` a registered object in this kernel's schema registry?
+   *
+   * Consulted by {@link AnalyticsService.ensureCube} on the auto-inference
+   * path only. When no Cube is registered under the queried name, the service
+   * infers a minimal one whose `sql` IS that name — the intended "metric over
+   * an object" path (an `object-metric` KPI widget queries `crm_account`
+   * without anyone authoring a Cube). Without this hook that inference accepts
+   * ANY string, so an arbitrary physical table name reached the driver: the
+   * analytics-side twin of the data-path gap closed in #3770.
+   *
+   * Optional, and absence means "skip the check" — same tiering as #3770's
+   * `assertObjectRegistered`: with no registry to consult the question cannot
+   * be answered, and failing closed would break every embedding that runs
+   * analytics without a data engine. The production bridge in `plugin.ts`
+   * always wires it.
+   */
+  isRegisteredObject?: (name: string) => boolean;
+  /**
    * ADR-0021 — optional object-graph resolver used when compiling datasets:
    * `(baseObject, relationshipName) => relatedObjectName | undefined`. When
    * provided, `queryDataset` validates that every declared `include` exists.
@@ -265,6 +283,10 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly labelResolver?: DimensionLabelDeps;
   /** ADR-0037 P3: pending-seed row resolver for draft data preview. */
   private readonly draftRowsResolver?: AnalyticsServiceConfig['draftRowsResolver'];
+  /** [#3867] Schema-registry probe gating cube auto-inference. */
+  private readonly isRegisteredObject?: AnalyticsServiceConfig['isRegisteredObject'];
+  /** [#3867] One-shot flag for the {@link assertInferableCube} stand-down warning. */
+  private warnedNoObjectRegistry = false;
   readonly cubeRegistry: CubeRegistry;
   private readonly logger: Logger;
 
@@ -282,6 +304,7 @@ export class AnalyticsService implements IAnalyticsService {
     this.measureCurrency = config.measureCurrency;
     this.labelResolver = config.labelResolver;
     this.draftRowsResolver = config.draftRowsResolver;
+    this.isRegisteredObject = config.isRegisteredObject;
 
     // Compile + register pre-defined datasets (ADR-0021).
     if (config.datasets) {
@@ -803,6 +826,13 @@ export class AnalyticsService implements IAnalyticsService {
     let cube = this.cubeRegistry.get(name);
 
     if (!cube) {
+      // [#3867] Auto-inference below sets `cube.sql = name`, so from here on
+      // the queried string IS a physical table name. Verify it names a
+      // registered object BEFORE that happens — otherwise `/analytics/query`
+      // is a way to aggregate over any table the connection can see, exactly
+      // the hole #3770 closed on the data path. A registered Cube needs no
+      // such check: it was authored, and its `sql` is whatever it declares.
+      this.assertInferableCube(name);
       cube = this.inferCubeFromQuery(query);
       this.cubeRegistry.register(cube);
       // A scalar query — only measures, no grouping (no `dimensions`/
@@ -843,6 +873,44 @@ export class AnalyticsService implements IAnalyticsService {
         `[Analytics] Augmented cube "${name}" with inferred measures: ${Object.keys(extraMeasures).join(',')}`,
       );
     }
+  }
+
+  /**
+   * [#3867] Gate on the cube auto-inference path: a name with no registered
+   * Cube may only be inferred into one if it is a registered object.
+   *
+   * Rejects with `status: 404` / `code: 'CUBE_NOT_FOUND'` so the HTTP boundary
+   * answers "no such cube" instead of letting the name reach the driver as a
+   * table and surfacing whatever the driver says about it. The message names
+   * both ways the request could be made valid, because from here the two are
+   * genuinely indistinguishable: register a Cube, or register the object.
+   *
+   * Skips when `isRegisteredObject` was not supplied — see the config field's
+   * doc for why that tier is a deliberate stand-down and not a hole.
+   */
+  private assertInferableCube(name: string): void {
+    const isRegisteredObject = this.isRegisteredObject;
+    if (!isRegisteredObject) {
+      if (!this.warnedNoObjectRegistry) {
+        this.warnedNoObjectRegistry = true;
+        this.logger.warn(
+          '[Analytics] no object-registry hook configured — the cube-inference existence gate ' +
+            '(#3867) is INACTIVE for this service; an unregistered cube name reaches the driver ' +
+            'as a raw table name.',
+        );
+      }
+      return;
+    }
+    if (isRegisteredObject(name)) return;
+    const err = new Error(
+      `Cube '${name}' not found: no cube is registered under that name, and it is not a ` +
+        `registered object either (a cube can only be auto-inferred from a registered object). ` +
+        `Define a Cube in your stack, or check the object name.`,
+    ) as Error & { code?: string; status?: number; cube?: string };
+    err.code = 'CUBE_NOT_FOUND';
+    err.status = 404;
+    err.cube = name;
+    throw err;
   }
 
   /** Build a minimal Cube from the fields referenced by an AnalyticsQuery. */
