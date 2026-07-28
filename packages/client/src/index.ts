@@ -1064,6 +1064,14 @@ export class ObjectStackClient {
     /**
      * Provision a new project. Delegates to
      * `ProjectProvisioningService.provisionProject` on the server.
+     *
+     * No `template_id`: it was removed in #3731 because no control plane has
+     * ever read it — the `blank`/`crm`/`todo` registry it addressed died with
+     * the `apps/server` templates route, and `sys_environment` has no such
+     * column, so the field was accepted, transmitted, and dropped. Starter
+     * content is installed from the App Marketplace (`sys_package` with
+     * `is_starter = true`), which `projects.packages.install` already does.
+     * Its listing counterpart went the same way in #3702.
      */
     create: async (req: {
       organization_id: string;
@@ -1078,7 +1086,6 @@ export class ObjectStackClient {
       is_system?: boolean;
       storage_limit_mb?: number;
       clone_from_environment_id?: string;
-      template_id?: string;
       metadata?: Record<string, unknown>;
     }) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments`, {

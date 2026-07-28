@@ -31,7 +31,13 @@ export default class ProjectsCreate extends Command {
     name: Flags.string({ description: 'Display name', required: true }),
     plan: Flags.string({ description: 'Billing plan', default: 'free' }),
     driver: Flags.string({ description: 'Data-plane driver id' }),
-    template: Flags.string({ description: 'Built-in template id (e.g. crm, todo, blank)' }),
+    // No `--template`. It advertised "Built-in template id (e.g. crm, todo,
+    // blank)" and sent `template_id`, which the control plane has never read —
+    // the `blank`/`crm`/`todo` registry it named died with the `apps/server`
+    // templates route. Removed in #3731: an accepted-and-dropped flag reports
+    // success for work that never happened. Starter content is installed from
+    // the App Marketplace instead (`os packages install`, `sys_package` with
+    // `is_starter = true`).
     artifact: Flags.string({
       description: 'Path to a locally-compiled objectstack.json artifact to bind into this project',
     }),
@@ -80,7 +86,6 @@ export default class ProjectsCreate extends Command {
         display_name: flags.name,
         plan: flags.plan,
         driver: flags.driver,
-        template_id: flags.template,
         clone_from_environment_id: flags['clone-from'],
         ...(metadata ? { metadata } : {}),
       });
