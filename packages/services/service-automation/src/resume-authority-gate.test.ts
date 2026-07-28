@@ -350,5 +350,76 @@ describe('resume authorization gate (#3801)', () => {
       expect(resumed.code).toBeUndefined();
       expect(resumed.success).toBe(true);
     });
+
+    // ── the signal may not write the engine's own variables ────────────
+    //
+    // The map's item handoff (`<mapNodeId>.$mapItemDone` / `$mapItemOutput`) is
+    // how a completed child tells the map to record its result and advance.
+    // A caller who can write those forges the outcome of an item nobody
+    // decided. Both signal fields reach the same variable map, and `output` is
+    // the subtle one: its keys are prefixed with the SUSPENDED NODE's id, which
+    // for a map-parked parent is the map node — so `output: { $mapItemDone }`
+    // lands on exactly the reserved key. Guarding one field is not a guard.
+
+    it.each([
+      ['variables', { variables: { 'signoffs.$mapItemDone': true, 'signoffs.$mapItemOutput': { result: 'FORGED' } } }],
+      ['output', { output: { $mapItemDone: true, $mapItemOutput: { result: 'FORGED' } } }],
+    ])('refuses a signal that forges the map item handoff via `%s`', async (_field, signal) => {
+      registerBatch(engine, 'open_pause'); // ungated items — the gate lets the parent through
+      const paused = await launch(engine);
+
+      const refused = await engine.resume(paused.runId!, signal as any);
+
+      expect(refused.code).toBe('invalid_signal');
+      expect(refused.error).toMatch(/reserved by the flow engine/);
+      // Nothing applied, nothing consumed: the map has not advanced and the
+      // pause is still live.
+      expect(mapState(engine, paused.runId!)).toEqual({ started: 1, results: [] });
+      expect(engine.listSuspendedRuns().some(r => r.runId === paused.runId)).toBe(true);
+    });
+
+    it('still lets the engine write the handoff on the legitimate bubble', async () => {
+      // The one writer allowed to set those keys — proves the guard did not
+      // break the mechanism it protects.
+      registerBatch(engine, 'open_pause');
+      await launch(engine);
+      const item1 = engine.listSuspendedRuns().find(r => r.flowName === 'one_item')!;
+
+      await engine.resume(item1.runId, {}); // item completes → bubbles to the map
+
+      const parent = engine.listSuspendedRuns().find(r => r.flowName === 'batch_flow')!;
+      expect(mapState(engine, parent.runId).started).toBe(2);
+      expect(mapState(engine, parent.runId).results).toHaveLength(1);
+    });
+  });
+
+  // ── reserved names outside the map shape ─────────────────────────────
+
+  it('refuses a bare `$runId` rewrite on an ordinary screen resume', async () => {
+    engine.registerFlow('open_flow', pauseFlow('open_flow', 'open_pause') as never);
+    const paused = await engine.execute('open_flow');
+
+    const refused = await engine.resume(paused.runId!, {
+      variables: { new_assignee: 'ada', $runId: 'someone_elses_run' },
+    });
+
+    expect(refused.code).toBe('invalid_signal');
+    // All-or-nothing: the legitimate key was not applied either.
+    expect(downstream).toEqual([]);
+    expect(engine.listSuspendedRuns()).toHaveLength(1);
+  });
+
+  it('leaves ordinary author variable names alone, `$` mid-name included', async () => {
+    engine.registerFlow('open_flow', pauseFlow('open_flow', 'open_pause') as never);
+    const paused = await engine.execute('open_flow');
+
+    const ok = await engine.resume(paused.runId!, {
+      variables: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 },
+      output: { decision: 'ok' },
+    });
+
+    expect(ok.success).toBe(true);
+    expect(ok.code).toBeUndefined();
+    expect(downstream).toEqual(['after']);
   });
 });

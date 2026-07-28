@@ -277,3 +277,43 @@ segment) with a 400. Deliberately at the transport and not in the engine: `bubbl
 writes those keys in-process, and this is the same trust split the gate itself uses — strict at the
 untrusted boundary, unrestricted for the code that already holds the authority. Refuse rather than
 silently strip, so a mis-authored screen input fails at the door instead of many nodes downstream.
+
+> **Half of this was wrong — see the addendum below (#3879).** Guarding `inputs` at the transport left
+> `output` untouched, and `output` keys land under `${nodeId}.${key}`, which for a map-parked run is
+> the map node itself — the identical reserved key, forgeable through the other field. The *placement*
+> argument above was the error: "strict at the untrusted boundary" is right about where the rule
+> BINDS, not about where it LIVES. The rule moved into the engine, at the one place a signal touches
+> the variable map.
+
+## Addendum (2026-07-28, #3879) — one chokepoint for the resume signal, because guarding a field at a time failed twice
+
+The addendum above guarded `signal.variables` **at the route**. That closed one of two equivalent
+paths into the same variable map and left the other open: `signal.output` keys are merged under
+`${run.nodeId}.${key}`, and for a run parked on a `map` node `run.nodeId` **is** the map node — so
+`{ "output": { "$mapItemDone": true, "$mapItemOutput": … } }` writes exactly the
+`<mapNodeId>.$mapItemDone` the `inputs` guard had just refused. Demonstrated, then fixed.
+
+Note what the map gate (#3853) still bought: a batch whose pending item sits on an `approval` is
+refused before any of this, so the **approval bypass stayed closed**. The residual was forging the
+recorded result of an item on an *ungated* pause — map-state corruption, not a decision bypass.
+
+Two escapes with one shape is a design signal, not two bugs. The seam had **three** open-coded writers
+into one variable map (`output` prefixed, `variables` bare, and the engine's own map handoff), so
+"guard the field that was exploited" was always going to invite the next field. The fix is structural:
+
+- **`applyResumeSignal` is the one place a resume signal reaches the variable map.** Both fields are
+  collected into a single write list — already in final, prefixed form — checked, then applied. A new
+  signal field is covered by construction rather than by remembering.
+- **All-or-nothing.** A rejected signal applies nothing, not even legitimate keys sent alongside, and
+  the check runs *before* the suspension is consumed, so the run stays parked and the real
+  continuation still lands.
+- **The engine owns the rule; the transport maps the verdict.** `resume` returns
+  `{ success: false, code: 'invalid_signal' }` and the route answers 400. This corrects the placement
+  argument in the previous addendum: "strict at the untrusted boundary" is right about where a rule
+  BINDS, not where it LIVES — implemented in the transport it protected exactly one transport and one
+  field of it, and the SDK, any future adapter, and `output` all sat outside it.
+- **Engine-built signals are exempt via a module-private symbol** (`ENGINE_BUILT_SIGNAL`), stamped by
+  `bubbleToParent` and the subflow output mapping — the only writers that legitimately set the handoff
+  keys, and unreachable from a transport. Deliberately *not* `RESUME_AUTHORITY_SERVICE`: that marker
+  answers "the owning service authorized this decision", and a service still has no business writing
+  engine internals. Two different questions, two different markers.

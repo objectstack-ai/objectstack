@@ -424,11 +424,16 @@ the item rather than the loop:
   decision is still open. Refused while that item is service-gated; the map
   moves on when the item completes through its owning service.
 
-Two related rules on the same route: **resume `inputs` may not write the
-engine's `$` namespace** (`$runId`, `$record`, `$flowName`,
-`<nodeId>.$mapItemDone`, …) — those are the engine's own handoff variables, and
-a caller who could set them could forge a map item's recorded result. Ordinary
-author-declared variables are unaffected; a reserved name answers **400**.
+A second rule on the same seam: **a resume signal may not write the engine's
+`$` namespace** (`$runId`, `$record`, `$flowName`, `<nodeId>.$mapItemDone`, …) —
+those are the engine's own handoff variables, and a caller who could set them
+could forge a map item's recorded result or re-point the run id an `approval` /
+`wait` node correlates on. It covers **both** signal fields: `inputs` land under
+their plain names, and `output` keys land under the *suspended node's* id —
+which for a map-parked run is the map node itself, i.e. the very same reserved
+key. A reserved name answers **400**, nothing is applied (not even legitimate
+keys sent alongside it), and the run stays parked. Ordinary author variables are
+unaffected, `$` mid-name (`price$`) included.
 
 Registering a pausing node of your own? Declare `resumeAuthority: 'service'` on
 its descriptor when the decision to continue belongs to your service rather
