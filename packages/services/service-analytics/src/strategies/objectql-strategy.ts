@@ -89,23 +89,29 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
 
-    // Build filter from query filters. A single field may carry MULTIPLE
-    // operators (e.g. a range `{$gte, $lte}` from `close_date` between two
-    // bounds). Merge same-field operator objects instead of overwriting, or a
-    // range would silently lose a bound (only the last operator would survive).
+    // Build the engine filter. Every predicate — the caller's `where` and the
+    // time-dimension windows alike — is contributed through
+    // `mergeFilterOperand`, because one field routinely carries MULTIPLE
+    // operators (a range `{$gte, $lte}` on `close_date`) and a plain assignment
+    // would keep only the last.
     const filter: Record<string, unknown> = {};
-    const normalizedFilters = normalizeAnalyticsFilters(query);
-    if (normalizedFilters.length > 0) {
-      for (const f of normalizedFilters) {
-        const fieldName = this.resolveFieldName(cube, f.member, 'any');
-        const converted = this.convertFilter(f.operator, f.values);
-        const existing = filter[fieldName];
-        const mergeable = (v: unknown): v is Record<string, unknown> =>
-          !!v && typeof v === 'object' && !Array.isArray(v);
-        filter[fieldName] = mergeable(existing) && mergeable(converted)
-          ? { ...existing, ...converted }
-          : converted;
-      }
+    // Operands that cannot merge into their field's entry without one silently
+    // replacing the other; ANDed in below so the engine intersects them.
+    const conjuncts: Record<string, unknown>[] = [];
+    for (const f of normalizeAnalyticsFilters(query)) {
+      const fieldName = this.resolveFieldName(cube, f.member, 'any');
+      const extra = this.mergeFilterOperand(filter, fieldName, this.convertFilter(f.operator, f.values));
+      if (extra) conjuncts.push(extra);
+    }
+    // #3650 — and the time-dimension WINDOWS, through the SAME merge, so a
+    // `dateRange` and a caller `where` bound on one field compose instead of
+    // clobbering each other.
+    for (const { field, bounds } of this.dateRangeBounds(cube, query)) {
+      const extra = this.mergeFilterOperand(filter, field, bounds);
+      if (extra) conjuncts.push(extra);
+    }
+    if (conjuncts.length > 0) {
+      filter.$and = [...(Array.isArray(filter.$and) ? filter.$and : []), ...conjuncts];
     }
 
     // #3654 — classify cross-object references. A cross-object DIMENSION within
@@ -270,11 +276,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // The cross-object guard runs here for the same reason: this must not
     // render SQL for a query `execute()` would reject outright (#3654).
     //
-    // Faithfulness cuts both ways: `execute()` does NOT apply
-    // `timeDimensions[].dateRange` on this path (only `where` reaches the
-    // engine), so neither does this. Rendering a BETWEEN here would invent a
-    // predicate the ObjectQL path never applies. That gap is real but separate
-    // — filed as #3650, not papered over here.
+    // Faithfulness cuts both ways: the time-dimension WINDOWS render too, from
+    // the same `dateRangeBounds` lowering `execute()` sends to the engine
+    // (#3650). This comment used to explain why a BETWEEN was deliberately
+    // absent — because `execute()` dropped the window and rendering one would
+    // have invented a predicate. Now that it applies the window, omitting it
+    // here would be the lie in the other direction.
     // (The cross-object envelope was already enforced by `planCrossObject` above,
     // so `/analytics/sql` rejects the same out-of-envelope set `execute()` does.)
 
@@ -287,6 +294,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         params,
       );
       if (clause) whereParts.push(clause);
+    }
+    // Bounds bind as `$n` placeholders like every other comparand: this string
+    // travels to the browser, and a window can carry tenant-derived dates.
+    for (const { field, bounds } of this.dateRangeBounds(cube, query)) {
+      params.push(bounds.$gte, bounds.$lte);
+      whereParts.push(`${field} BETWEEN $${params.length - 1} AND $${params.length}`);
     }
     // Read scope last, so it reads as the outermost constraint. Compiled by the
     // same fail-closed compiler `NativeSQLStrategy` uses — it throws rather than
@@ -388,6 +401,19 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   ): CrossObjectPlan | null {
     const baseObject = this.extractObjectName(cube);
 
+    // A date bucket over a related object's field is not supported. Checked
+    // FIRST: since #3650 a `dateRange` also lands in `filter`, so a cross-object
+    // time dimension would otherwise be reported as a "cross-object filter" —
+    // true of the lowered predicate, but not what the author wrote.
+    for (const td of query.timeDimensions ?? []) {
+      const field = this.resolveFieldName(cube, td.dimension, 'dimension');
+      if (this.isCrossObjectField(cube, field, baseObject)) {
+        throw new Error(
+          `[Analytics] ObjectQLStrategy cannot bucket a cross-object time dimension ("${field}").`,
+        );
+      }
+    }
+
     // A cross-object MEASURE or FILTER can only be evaluated with a real join.
     const nonDim = [
       ...(query.measures ?? []).map((m) => ({ where: 'measure', field: this.resolveMeasureAggregation(cube, m).field })),
@@ -415,15 +441,6 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         );
       }
       crossDims.push({ outputName: dim, fkField: alias, attr, refObject: cube.joins?.[alias]?.name ?? alias });
-    }
-    // A date bucket over a related object's field is not supported.
-    for (const td of query.timeDimensions ?? []) {
-      const field = this.resolveFieldName(cube, td.dimension, 'dimension');
-      if (this.isCrossObjectField(cube, field, baseObject)) {
-        throw new Error(
-          `[Analytics] ObjectQLStrategy cannot bucket a cross-object time dimension ("${field}").`,
-        );
-      }
     }
 
     if (crossDims.length === 0) return null;
@@ -682,6 +699,99 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
     return { field: '*', method: 'count' };
+  }
+
+  /**
+   * AND one more operand onto `filter[field]`, merging operator objects rather
+   * than overwriting them. Returns a standalone conjunct when the two cannot
+   * share one entry, or `null` when the merge absorbed the operand.
+   *
+   * Every predicate this strategy contributes goes through here — the caller's
+   * `where` and the time-dimension `dateRange` alike. Two operands on one field
+   * are the normal case (`{$gte}` from a `where` plus `{$gte,$lte}` from a
+   * window on `close_date`), and a plain assignment would keep only the last:
+   * that is how a range used to lose a bound.
+   *
+   * Spreading is sound only while the operands name DIFFERENT operators. Where
+   * they collide — two `$gte` bounds on one field, which a window makes routine
+   * and which a `where` can already produce on its own through `$and` — the
+   * spread keeps whichever came last and WIDENS the query. Same for a bare
+   * equality meeting an operator object: neither can absorb the other. Those
+   * are handed back for the caller to AND in separately, so the engine
+   * intersects them instead of the strategy picking a winner.
+   */
+  private mergeFilterOperand(
+    filter: Record<string, unknown>,
+    field: string,
+    operand: unknown,
+  ): Record<string, unknown> | null {
+    const existing = filter[field];
+    if (existing === undefined) {
+      filter[field] = operand;
+      return null;
+    }
+    const mergeable = (v: unknown): v is Record<string, unknown> =>
+      !!v && typeof v === 'object' && !Array.isArray(v);
+    if (!mergeable(existing) || !mergeable(operand)) return { [field]: operand };
+    if (Object.keys(operand).some((op) => op in existing)) return { [field]: operand };
+    filter[field] = { ...existing, ...operand };
+    return null;
+  }
+
+  /**
+   * Lower `timeDimensions[].dateRange` into resolved-field bounds (#3650).
+   *
+   * `dateRange` states a WINDOW on a time dimension; it is a SIBLING of `where`,
+   * never folded into it. `normalizeAnalyticsFilters` reads only `where`, so
+   * this path used to drop the window on the floor — no error, just every row
+   * ever recorded. Nor is that a corner case: `NativeSQLStrategy.canHandle`
+   * declines any query carrying a `granularity`, so a date-bucketed trend lands
+   * HERE on every driver — and "bucketed trend" is precisely the shape that also
+   * carries a range ("last 12 months", "this quarter").
+   *
+   * Bounds are inclusive on both ends — the same `$gte`/`$lte` pair
+   * `NativeSQLStrategy` binds as `BETWEEN` and the memory driver builds as a
+   * `$match`, so one dashboard reads the same on every driver.
+   *
+   * Comparands are coerced by the SAME helper the `where` path uses, so an
+   * epoch-ms bound recovers as a number and an ISO string stays a string. No
+   * STORAGE coercion happens here, deliberately: `NativeSQLStrategy` needs
+   * `coerceTemporal` because it binds into raw SQL and had to learn that a
+   * SQLite `Field.datetime` is an INTEGER epoch (#2034); this path goes through
+   * `engine.aggregate()`, where the driver's own CRUD filter coercion applies —
+   * the very coercion that already makes a `where` bound on that same column
+   * work today.
+   *
+   * A bare-string `dateRange` degenerates to the single point `[s, s]`, matching
+   * `NativeSQLStrategy`. Relative phrases ("Last 7 days") are NOT resolved here;
+   * neither SQL path resolves them, and inventing a second interpretation on the
+   * driver-independent path is how the two would drift apart again.
+   *
+   * An oddly-sized array (the schema types `dateRange` as a plain `string[]`)
+   * takes its first two entries, a one-entry array degenerating to a point.
+   * `NativeSQLStrategy` drops such a window entirely — but "drop the window"
+   * means "plot all of history", which is the very failure this fixes, so the
+   * fallback here errs toward the narrower query instead.
+   */
+  private dateRangeBounds(
+    cube: Cube,
+    query: AnalyticsQuery,
+  ): Array<{ field: string; bounds: Record<string, unknown> }> {
+    const out: Array<{ field: string; bounds: Record<string, unknown> }> = [];
+    for (const td of query.timeDimensions ?? []) {
+      if (!td.dateRange) continue;
+      const range = Array.isArray(td.dateRange) ? td.dateRange : [td.dateRange, td.dateRange];
+      const [start, end = start] = range;
+      if (start == null) continue;
+      out.push({
+        field: this.resolveFieldName(cube, td.dimension, 'dimension'),
+        bounds: {
+          $gte: coerceFilterValueForObjectQL(String(start)),
+          $lte: coerceFilterValueForObjectQL(String(end)),
+        },
+      });
+    }
+    return out;
   }
 
   private convertFilter(operator: string, values?: string[]): unknown {
