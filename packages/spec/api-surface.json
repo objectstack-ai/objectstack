@@ -339,6 +339,7 @@
     "FieldNodeSchema (const)",
     "FieldOperators (type)",
     "FieldOperatorsSchema (const)",
+    "FieldParseInput (type)",
     "FieldReference (type)",
     "FieldReferenceSchema (const)",
     "FieldSchema (const)",
