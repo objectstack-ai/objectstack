@@ -18,6 +18,16 @@ import { SqliteWasmDriver } from '../src/index.js';
 type Granularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
 /**
+ * Test-local key for the empty bucket, on both sides of the comparison below.
+ * `String(null)` is `'null'` — a label a TEXT column could genuinely hold — so
+ * folding the empty bucket through it makes "empty" indistinguishable from a
+ * real value. Keying it out of band is what lets a sentinel-vs-NULL divergence
+ * (#3839) show up as a difference instead of comparing equal by coincidence.
+ */
+const EMPTY = '‹empty bucket›';
+const labelOf = (v: unknown): string => (v == null ? EMPTY : String(v));
+
+/**
  * ⚠️ Keep in sync with `packages/objectql/src/in-memory-aggregation.ts#bucketDateValue`.
  *
  * This copy exists because driver-sql cannot depend on objectql. Nothing here
@@ -27,12 +37,12 @@ type Granularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
  * in `packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts`, where
  * the reference side is the REAL `applyInMemoryAggregation`.
  */
-function bucketDateValue(value: unknown, g: Granularity): string {
-  if (value == null) return '(null)';
+function bucketDateValue(value: unknown, g: Granularity): string | null {
+  if (value == null) return null;
   // A finite number is epoch milliseconds — SQLite's `Field.datetime` storage.
   const d =
     value instanceof Date ? value : typeof value === 'number' ? new Date(value) : new Date(String(value));
-  if (Number.isNaN(d.getTime())) return '(null)';
+  if (Number.isNaN(d.getTime())) return null;
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth() + 1;
   switch (g) {
@@ -109,13 +119,13 @@ describe('SqliteWasmDriver date bucket (dateGranularity)', () => {
 
         const expectedBuckets = new Map<string, number>();
         for (const r of FIXTURE) {
-          const key = bucketDateValue(r.ts, g);
+          const key = labelOf(bucketDateValue(r.ts, g));
           expectedBuckets.set(key, (expectedBuckets.get(key) ?? 0) + 1);
         }
 
         const actualBuckets = new Map<string, number>();
         for (const row of rows) {
-          actualBuckets.set(String(row.ts), Number(row.n));
+          actualBuckets.set(labelOf(row.ts), Number(row.n));
         }
 
         expect([...actualBuckets.entries()].sort()).toEqual(

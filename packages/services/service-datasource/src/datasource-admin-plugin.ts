@@ -304,6 +304,12 @@ export class DatasourceAdminServicePlugin implements Plugin {
         await this.connection?.disconnect(name);
       },
 
+      // The admin list's `status` reads the connection service's retained
+      // verdicts (framework#3827). Resolved lazily per call: the service exists
+      // by the end of this init(), but the verdicts only appear once boot
+      // auto-connect (AppPlugin.start) and any runtime pool writes have run.
+      connectionStates: () => this.connection?.listConnectionStates() ?? [],
+
       logger,
     };
 

@@ -1,6 +1,6 @@
 # ADR-0062: External Datasource Runtime — connection lifecycle, credentials, visibility & query completeness
 
-**Status**: Accepted (2026-06-22) — D1–D8 implemented (`service-datasource` connection service + opt-in-safe gate + fail-closed connect policy; native-SQL declines external per D6; D7 lint in `validate-expressions.ts`).
+**Status**: Accepted (2026-06-22) — D2–D8 implemented (`service-datasource` connection service + opt-in-safe gate + fail-closed connect policy; native-SQL declines external per D6; D7 lint in `validate-expressions.ts`). **D1 partially implemented**: declared datasources auto-connect through the one service, but the `default` driver still has its own connect + failure path — see the status correction under D1 (#3826).
 
 **Supersedes the runtime portions of**: ADR-0015 §18 addendum (kept as the historical record). ADR-0015 remains the canonical spec/binding decision; this ADR is the canonical *runtime* decision.
 
@@ -52,6 +52,21 @@ R2/R3/R8 are the same change seen from three angles — you cannot "auto-connect
 ### D1 — One `DatasourceConnectionService`; declared datasources auto-connect
 
 Introduce a single service that, given a datasource definition, builds a driver via the **injected** driver factory (the same `createDefaultDatasourceDriverFactory` used by the runtime-admin path), connects it, and registers it into the ObjectQL engine under the datasource name. `app-plugin` calls it for every declared datasource (in addition to today's `registerInMemory` for visibility); `standalone-stack`'s single-`default`-driver bootstrap is refactored to go through the same service so there is exactly one "definition → live driver" code path. `engine.registerDriver` remains the sink. The `onEnable` bridge becomes unnecessary for the common case (kept as an escape hatch — D8).
+
+> **Status correction (#3826) — the `default` refactor is NOT done; the "exactly one code path" claim is half-true.** The *construction* half converged: `standalone-stack` builds the `default` driver through `createDefaultDatasourceDriverFactory` (`standalone-stack.ts`, "the SAME `create({driver,config})` used for declared/runtime datasources"). The *connect + failure-verdict* half did not, and this ADR's header has been claiming D1 as implemented while two independent implementations coexist:
+>
+> | | `default` | declared datasource |
+> |:---|:---|:---|
+> | build | shared factory ✅ | shared factory ✅ |
+> | register | `DriverPlugin` → a `driver.*` kernel service, discovered in `ObjectQLPlugin.start()` | `engine.registerDriver()` inside `connect()` |
+> | connect | `ObjectQLEngine.init()` | `DatasourceConnectionService.connect()` |
+> | failure verdict | `DriverConnectError`, aggregate (#3741) | `handleFailure()` (#3758) |
+> | pool teardown | kernel shutdown via `DriverPlugin` | `DatasourceConnectionService.disconnect()` |
+> | connect policy | not consulted | `DatasourceConnectPolicy` |
+>
+> **Resolution (#3826, second pass) — the standalone `default` is now a declared definition.** The input-shape mismatch was resolved by making the definition the input: `createStandaloneStack` translates the database URL into a `{ driver, config }` definition (URL→config translation and `mkdir` stay host concerns) and the runtime's **`DefaultDatasourcePlugin`** — registered before `ObjectQLPlugin`, so the driver exists before boot schema-sync — connects it through `DatasourceConnectionService.connect(record, { asDefault: true })`. The definition is marked **`bootCritical`**, which adds a third fail-fast cause to D5 (the platform cannot run without it; every unbound object routes to it), sharing `OS_ALLOW_DRIVER_CONNECT_FAILURE` and the `DEGRADED BOOT` banner with the engine guard. `asDefault` keeps the driver's **natural name** (routing to `default` uses the engine's default-driver fallback, never `drivers.get('default')`) and registers with `isDefault: true`. The presumed layering inversion did not materialize: the *runtime host* orchestrates (runtime already depends on `service-datasource`); `ObjectQLPlugin` learned nothing. When the datasource-admin plugin is present its shared connection service is used (so `default` shows a real `status` in Setup → Datasources, #3827); a lite kernel instantiates the same class locally — one implementation either way. `sqlite-wasm` joined the shared factory (the last bespoke construction site), `default` became a host-reserved name (rejected in app bundles at load and in runtime-admin create), and `ObjectQLEngine.init()` keeps its #3741 fail-fast unchanged — it re-connects the already-connected default (all open-core drivers' `connect()` is idempotent), which is precisely the boot *verification* role D1 leaves it.
+>
+> **Remaining second sites, tracked in #3826:** the CLI serve **config-load fallback** (`createStorageDriver` + `DriverPlugin`, used when a host `objectstack.config.ts` supplies no driver — it also carries mysql/turso kinds the shared factory does not build, and the `telemetry` sibling-datasource provisioning is coupled to its resolution result), and the cloud stack's own composition. Until those converge, `packages/runtime/src/degraded-boot-parity.test.ts` remains load-bearing: it pins both connect paths to the same operator-visible contract (fail-fast by default, identical `OS_ALLOW_DRIVER_CONNECT_FAILURE` parsing, `DEGRADED BOOT` on stderr), so a change to one that forgets the other fails CI instead of shipping. #3741 → #3758 was exactly that miss.
 
 ### D2 — Connect is opt-in-safe: existing managed apps are byte-for-byte unchanged
 

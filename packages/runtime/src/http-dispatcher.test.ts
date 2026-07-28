@@ -358,6 +358,36 @@ describe('HttpDispatcher', () => {
             expect(result.response?.body?.data?.success).toBe(false);
         });
 
+        // #3853: `inputs` land as BARE flow variables, so a caller who could
+        // write the engine's `$` namespace could forge the `map` node's item
+        // handoff (recording a per-item result for an approval nobody made) or
+        // re-point `$runId`, which is how approval/wait nodes correlate.
+        it('should refuse resume inputs that write engine-internal variables', async () => {
+            for (const inputs of [
+                { 'signoffs.$mapItemDone': true, 'signoffs.$mapItemOutput': { forged: true } },
+                { $runId: 'someone_elses_run' },
+                { $record: { id: 'other' } },
+            ]) {
+                const result = await dispatcher.handleAutomation(
+                    'flow_a/runs/run_1/resume', 'POST', { inputs }, { request: {} },
+                );
+                expect(result.response?.status).toBe(400);
+                expect(result.response?.body?.error?.message).toMatch(/reserved by the flow engine/);
+            }
+            // Refused at the door — the engine is never asked.
+            expect(mockAutomationService.resume).not.toHaveBeenCalled();
+        });
+
+        it('should still accept ordinary screen inputs alongside the reserved-name guard', async () => {
+            await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST',
+                { inputs: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 } }, { request: {} },
+            );
+            expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
+                variables: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 },
+            });
+        });
+
         it('should return 501 when the automation service cannot resume', async () => {
             delete mockAutomationService.resume;
             const result = await dispatcher.handleAutomation(
@@ -1801,7 +1831,16 @@ describe('HttpDispatcher', () => {
         beforeEach(() => {
             mockI18nService = {
                 getLocales: vi.fn().mockReturnValue(['en', 'zh-CN', 'ja']),
-                getTranslations: vi.fn().mockReturnValue({ 'o.account.label': '客户', 'o.account.fields.name': '名称' }),
+                // The nested shape every producer writes and #3778 converged
+                // on. This used to be flat `o.account.label` keys — a dialect
+                // no bundle has ever carried.
+                getTranslations: vi.fn().mockReturnValue({
+                    objects: { account: { label: '客户', fields: { name: { label: '名称' } } } },
+                }),
+                // Declared optional on `II18nService` and implemented by NO
+                // shipped provider — the tests below that assert it is called
+                // cover the dispatcher's handling of a provider that supplies
+                // it, not a path any current stack takes. See #3833.
                 getFieldLabels: vi.fn().mockReturnValue({ name: '名称', industry: '行业' }),
             };
 
@@ -1815,7 +1854,9 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
-            expect(result.response?.body?.data?.locales).toEqual(['en', 'zh-CN', 'ja']);
+            // Descriptors, not bare codes — the shape `GetLocalesResponseSchema`
+            // declares and both surfaces now emit (#3859 follow-up).
+            expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'zh-CN', 'ja']);
             expect(mockI18nService.getLocales).toHaveBeenCalled();
         });
 
@@ -1824,7 +1865,9 @@ describe('HttpDispatcher', () => {
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data?.locale).toBe('zh-CN');
-            expect(result.response?.body?.data?.translations).toEqual({ 'o.account.label': '客户', 'o.account.fields.name': '名称' });
+            expect(result.response?.body?.data?.translations).toEqual({
+                objects: { account: { label: '客户', fields: { name: { label: '名称' } } } },
+            });
             expect(mockI18nService.getTranslations).toHaveBeenCalledWith('zh-CN');
         });
 
@@ -1897,21 +1940,64 @@ describe('HttpDispatcher', () => {
             expect((body.error as { code: unknown }).code).toBe(400);
         });
 
-        it('should fallback to deriving labels from translations when getFieldLabels is missing', async () => {
+        /**
+         * This is the path EVERY provider takes, not an edge case:
+         * `getFieldLabels` is optional on `II18nService` and nothing implements
+         * it — not `memory-i18n`, not `file-i18n-adapter` — so the dedicated-
+         * method branch above is dead in production and this derivation always
+         * runs.
+         *
+         * Its predecessor fed flat `o.contact.fields.first_name` keys and
+         * asserted labels came back. That dialect was retired by #3778 (no
+         * producer ever wrote it), so the test passed on data that cannot
+         * occur while the real path — scanning for an `o.` prefix in a bundle
+         * whose top-level keys are `objects`/`apps`/`messages` — returned `{}`
+         * for every caller. Feeding the shape real bundles actually have is
+         * the whole point of the test (#3833).
+         */
+        it('derives labels from the NESTED bundle shape every producer writes (#3833)', async () => {
             delete mockI18nService.getFieldLabels;
             mockI18nService.getTranslations.mockReturnValue({
-                'o.contact.fields.first_name': 'First Name',
-                'o.contact.fields.email': 'Email',
-                'o.contact.label': 'Contact',
+                objects: {
+                    contact: {
+                        label: 'Contact',
+                        fields: {
+                            first_name: { label: 'First Name' },
+                            email: { label: 'Email', help: 'Primary address' },
+                            status: { label: 'Status', options: { open: 'Open' } },
+                            // No label — partial translation is the normal
+                            // state, and a blank entry would overwrite the
+                            // caller's source label with an empty string.
+                            phone: { help: 'Mobile preferred' },
+                        },
+                    },
+                },
+                messages: { save: 'Save' },
             });
 
             const result = await dispatcher.handleI18n('/labels/contact/en', 'GET', {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
+            // Entries are objects carrying help/options, per
+            // `GetFieldLabelsResponseSchema` — not the bare strings both
+            // surfaces used to emit against it (#3847).
             expect(result.response?.body?.data?.labels).toEqual({
-                first_name: 'First Name',
-                email: 'Email',
+                first_name: { label: 'First Name' },
+                email: { label: 'Email', help: 'Primary address' },
+                status: { label: 'Status', options: { open: 'Open' } },
             });
+        });
+
+        it('returns {} for an object the locale does not translate, without throwing', async () => {
+            delete mockI18nService.getFieldLabels;
+            mockI18nService.getTranslations.mockReturnValue({
+                objects: { contact: { fields: { email: { label: 'Email' } } } },
+            });
+
+            const result = await dispatcher.handleI18n('/labels/account/en', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(200);
+            expect(result.response?.body?.data?.labels).toEqual({});
         });
 
         it('should return 501 when i18n service is not available', async () => {
@@ -1931,7 +2017,7 @@ describe('HttpDispatcher', () => {
         it('should dispatch /i18n routes via dispatch()', async () => {
             const result = await dispatcher.dispatch('GET', '/i18n/locales', undefined, {}, { request: {} });
             expect(result.handled).toBe(true);
-            expect(result.response?.body?.data?.locales).toEqual(['en', 'zh-CN', 'ja']);
+            expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'zh-CN', 'ja']);
         });
 
         it('should resolve locale via fallback (zh → zh-CN) for translations', async () => {
@@ -2023,7 +2109,7 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
-            expect(result.response?.body?.data?.locales).toEqual(['en', 'fr']);
+            expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'fr']);
         });
 
         it('should populate locale from actual i18n service', async () => {
@@ -2211,7 +2297,7 @@ describe('HttpDispatcher', () => {
             // MSW-style dispatch: full path stripped to relative
             const localesResult = await dispatcher.dispatch('GET', '/i18n/locales', undefined, {}, { request: {} });
             expect(localesResult.handled).toBe(true);
-            expect(localesResult.response?.body?.data?.locales).toEqual(['en', 'de']);
+            expect(localesResult.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'de']);
 
             const translationsResult = await dispatcher.dispatch('GET', '/i18n/translations/de', undefined, {}, { request: {} });
             expect(translationsResult.handled).toBe(true);

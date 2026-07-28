@@ -38,13 +38,79 @@ type back onto the registry and drop the override.
 
 | Status | Meaning |
 |---|---|
-| `live` | Has a runtime consumer. Cite it in `evidence` (`file:line`; objectui-repo paths as prose to avoid false stale-flags). |
+| `live` | Has a runtime consumer. Cite it in `evidence` as `file:line`; for another repo's path, prefix the realm — `objectui: packages/app-shell/…` (see below). |
 | `experimental` / `planned` | Declared, intentionally not enforced yet. Also read from a spec `.describe()` marker like `[EXPERIMENTAL — not enforced]`. |
 | `dead` | Parsed, no consumer. Tracked for **enforce-or-remove** (ADR-0049). |
 
 Resolution per property: **ledger entry → spec `.describe()` marker → UNCLASSIFIED**.
 Framework provenance/lock fields (`_lock*`, `_provenance`, `_packageId/Version`,
 `protection` — ADR-0010) are auto-classified `live`.
+
+### Writing `evidence` so the gate can check it
+
+The gate extracts every **repo-rooted** path from an `evidence` string (one
+starting with `packages/`, `apps/`, `content/`, …) and resolves it against this
+checkout. Prose around the paths is fine and encouraged — `packages/spec/src/stack.zod.ts
+(mergeActionsIntoObjects stable-sorts each group)` resolves the path and ignores
+the parenthetical.
+
+**A path in another repo must say so**, or the gate will report it as rot:
+
+```jsonc
+"evidence": "objectui: packages/app-shell/src/views/RecordDetailView.tsx:573"
+"evidence": "registered into ActionEngine (objectui packages/core/…/ActionEngine.ts:150) but no caller"
+```
+
+A realm marker (`objectui`, `cloud`, `ee`) attributes the paths that follow it,
+up to the next clause boundary (`;` or `)`), so a string can cite both repos —
+`framework` switches back explicitly. `packages/services/service-ai/…` is always
+treated as foreign: that is the closed cloud runtime, and `packages/services/`
+here ships every sibling service except it. A path that is not repo-rooted
+(`app-shell/MetadataProvider.tsx`, `action-button/-group`) reads as prose and is
+neither resolved nor reported.
+
+> This replaces the old advice to write objectui paths "as prose to avoid false
+> stale-flags." That was a workaround for a parser bug — the check took
+> `evidence.split(':')[0]` as the filename, so any prose made it fail. It flagged
+> **48 of 227 entries and every one was a false positive**, which buried the one
+> real rotted pointer in the list (`object.enable.clone`, whose consumer had
+> moved from `@objectstack/objectql` to `@objectstack/metadata-protocol`). A
+> permanently-noisy check is a check nobody reads — the same way a stale ledger
+> entry is a claim nobody re-tests.
+
+### `verifiedAt` — the re-verification clock
+
+An entry may carry `"verifiedAt": "YYYY-MM-DD"`: the date a human last closed the
+call graph for that property. It exists because **twice** an entry has been
+falsified by code moving under it — `flow.status` (#3711) and `action.undoable`
+(#3714), both *understated*, both found only because a sweep aimed at the
+opposite failure happened to walk past them. Nothing in the gate previously
+asked how old a claim was, so a stale entry stayed invisible until someone
+tripped over it.
+
+```jsonc
+"undoable": {
+  "status": "live",
+  "verifiedAt": "2026-07-28",
+  "evidence": "objectui @732b1bf — CALL GRAPH CLOSED BY HAND: …"
+}
+```
+
+Two rules, and the asymmetry between them is the point:
+
+- **Age never fails CI.** Re-verification is a worklist, not a merge gate. Every
+  run prints one summary line; `pnpm check:liveness --stale-verification[=days]`
+  prints the worklist (stale oldest-first, then the undated ones). Default
+  threshold 180 days.
+- **A malformed or future-dated `verifiedAt` DOES fail CI.** A date the parser
+  can't read would silently exempt that entry from every staleness window —
+  which is the same silent-no-op shape this whole ledger exists to catch. Fail
+  loudly instead.
+
+Most entries predate the field and are simply undated; date them as you
+re-verify rather than back-filling guesses. **For objectui-side evidence, pin
+the commit** (`objectui @732b1bf`) — `action.undoable`'s reader line numbers had
+already drifted by 28 lines one day after the issue citing them was filed.
 
 ### ⚠️ An authoring/preview renderer is NOT a runtime consumer
 
@@ -74,12 +140,20 @@ as `live`, 10 were wrong** — a 77% error rate for the preview-renderer standar
 Note the two failure directions the sweep exposed. Most entries **overstated**
 liveness. But `flow.status` was *understated*: the file-level note still said
 "status/active gate nothing", true when written and falsified a month later by
-`497bda853`. **A ledger entry is a claim with a timestamp; code moves under it
-in both directions.**
+`497bda853`. `action.undoable` was the same shape (#3714): marked `experimental`
+on a #1992-era "no runtime reader yet" note that objectui falsified with two
+readers. **A ledger entry is a claim with a timestamp; code moves under it
+in both directions.** An entry is worth re-verifying, not trusting indefinitely
+— see the methodology below.
 
 When in doubt, the honest status is `dead` + `authorWarn`: an author who gets a
-warning for a property that turns out to work loses nothing; an author who gets
-silence for a property that does nothing ships a bug.
+warning for a property that turns out to work loses nothing *at runtime*; an
+author who gets silence for a property that does nothing ships a bug. But the
+ledger is also read as a capability catalogue — by authors and by AI — so an
+understated entry does have a cost: `undoable` sat behind a "declared but NOT
+enforced" warning for a month while it worked, which is an invitation to skip a
+shipped feature. Erring toward `dead` is the right default *and* a debt to
+re-verify.
 
 ### How to verify a claim without fooling yourself
 
@@ -140,14 +214,52 @@ proof gets wired in.
 once it has *both* a runtime proof *and* a governed ledger entry to carry it — the
 binding lands one class at a time (ADR-0054 §3), never as a big-bang backfill.
 
-| High-risk class | Bound? | Ledger binding | Proof |
-|---|---|---|---|
-| Field types | ✅ enforced | `field.type` | `field-zoo-roundtrip.dogfood.test.ts#field-type-roundtrip` |
-| RLS / sharing | ✅ enforced | `permission.rowLevelSecurity.using` | `rls-fixture.dogfood.test.ts#rls-by-id-write` |
-| Master-detail controlled-by-parent | ✅ enforced | `object.sharingModel` | `controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent` |
-| Flow nodes | ✅ enforced | `flow.nodes.type` | `flow-node.dogfood.test.ts#flow-node-execution` |
-| Analytics dims/measures | ✅ enforced | `dataset.dimensions.dateGranularity` | `analytics-timezone.dogfood.test.ts#analytics-tz-bucketing` |
-| Form layout/section/widget | ⛔ pending | — | none yet (`view` is governed as of #2998 Track B, so `view.form.*` can carry the binding — the dogfood proof is the missing half) |
+`proof-registry.mts` is the source of truth; the tables below mirror it.
+
+**Bound — a `live` classification on these entries REQUIRES its proof:**
+
+| High-risk class | Ledger binding | Proof (`packages/qa/dogfood/test/…`) |
+|---|---|---|
+| Field types | `field.type` | `field-zoo-roundtrip#field-type-roundtrip` |
+| RLS / sharing (pre-image) | `permission.rowLevelSecurity.using` | `rls-fixture#rls-by-id-write` |
+| RLS `check` (post-image) | `permission.rowLevelSecurity.check` | `showcase-d3-d4-capabilities` |
+| Master-detail controlled-by-parent | `object.sharingModel` | `controlled-by-parent#cbp-controlled-by-parent` |
+| Scope-depth read grants | `permission.objects.readScope` | `showcase-scope-depth` |
+| Ownership anchor + bulk writes | `permission.objects.modifyAllRecords` | `owner-anchor-and-bulk-writes` |
+| Delegation of duty | `position.delegatable` | `delegation-of-duty#delegation-of-duty` |
+| Static readonly write | `field.readonly` | `showcase-static-readonly#readonly-static-write` |
+| Attachments capability gate | `object.enable.files` | `attachments-permission-matrix` |
+| Analytics dims/measures | `dataset.dimensions.dateGranularity` | `analytics-timezone#analytics-tz-bucketing` |
+| Flow nodes | `flow.nodes.type` | `flow-node#flow-node-execution` |
+| Flow runAs identity | `flow.runAs` | `flow-runas#flow-runas-identity` |
+| Data lifecycle (ADR-0057) | `object.lifecycle` | `storage-growth#adr0057-lifecycle-bounded-growth` |
+| Webhook materialization | `webhook.object` | `webhook-materialization#webhook-materialization` |
+| Object semantic roles (ADR-0085) | `object.highlightFields`, `.stageField`, `.fieldGroups` | `semantic-roles#semantic-roles-served` |
+
+**Registered but unbound.** A proof with no authorable property to ratchet is
+still registered — otherwise its `@proof:` tag reads as an orphan — and records
+*why* rather than faking a binding:
+
+| Proof | Why unbound |
+|---|---|
+| `form-widget-resolution` | no proof written yet (ADR-0054 Phase 2); `view.form.*` is governed and can carry it |
+| `permission-set-projection` | a storage invariant (ADR-0094), not an authorable property |
+| `flow-runas-schedule` | guards `flow.runAs`, already bound to `flow-runas-identity` — one entry carries one `proof` |
+| `showcase-scope-depth-fallback` | guards `permission.objects.readScope`, already bound — this is the CLI-wiring sibling |
+| `me-apps-and-everyone-baseline` | enforces `app.requiredPermissions` / `app.tabPermissions`; `app` is not governed yet |
+| `showcase-agent-intersection` | a runtime principal-resolution invariant (`onBehalfOf`), not authorable |
+| `showcase-agent-scope-ceiling` | the OAuth-scope → ceiling-set mapping lives in the runtime resolver |
+| `showcase-bu-hierarchy-sharing` | stack-level `sharingRules`, not a governed per-type property |
+| `showcase-declarative-rbac-seeding` | stack-level `roles`/`sharingRules` seeding, same shape |
+| `showcase-permission-zoo` | a breadth guard over the whole ADR-0090 surface, not a single-property gate |
+
+Two habits this table is meant to enforce. **Register every proof**, so the
+orphan warning stays empty and means something. **Bind only what the proof
+actually authors** — `owner-anchor-and-bulk-writes` binds `modifyAllRecords`,
+which it exercises in both directions, and *not* the sibling `allowTransfer`,
+which it only mentions in a comment. Binding a property a proof does not
+exercise is the same false comfort as a preview renderer standing in for a
+runtime consumer.
 
 To bind a pending class: add its dogfood proof + `@proof:` tag, set `bound: true` and
 its `ledgerBindings` in `proof-registry.mts`, add the `proof` to the ledger entry, and
@@ -259,7 +371,7 @@ EOF
 | object | 40 | – | 0 | 1 | aspirational tier (versioning/softDelete/search/recordName/keyPrefix) + tags/active/abstract REMOVED (#2377) — tombstoned in UNKNOWN_KEY_GUIDANCE; `enable.trash`/`mru` REMOVED (#2377 close-out) — tombstoned in the now-`.strict()` ObjectCapabilities; `isSystem` + `enable.searchable` CORRECTED to live (#2377 — sharing default-model + global-search opt-out; 2026-06 audit missed both readers); `tenancy.strategy`/`crossTenantAccess` REMOVED post-15.0 (#2763) |
 | field | 55 | – | 0 | – | healthy — full dead set (vectorConfig/fileAttachmentConfig/dependencies, then referenceFilters/columnName/index) REMOVED (#2377); columnName also dropped the ADR-0062 D7 lint + StorageNameMapping column helpers |
 | flow | 26 | – | 5 | – | dead = description/template/nodes.outputSchema/errorHandling.fallbackNodeId (engine uses fault edges) + `active` CORRECTED to dead 2026-07 (deprecated no-op — `status` is what gates binding/execution since 497bda853; the file `_note` claiming otherwise is fixed) |
-| action | 33 | 1 | 2 | – | `type:'form'` CORRECTED to live (objectui ActionRunner.executeForm, #2377); dead `timeout` REMOVED (#2377); `disabled` live for real since objectui#2863 (six surfaces); `shortcut` + `bulkEnabled` CORRECTED to dead 2026-07 — registered into ActionEngine but their accessors have no non-test caller (#3686 sweep) |
+| action | 34 | 0 | 2 | – | `type:'form'` CORRECTED to live (objectui ActionRunner.executeForm, #2377); dead `timeout` REMOVED (#2377); `disabled` live for real since objectui#2863 (six surfaces); `shortcut` + `bulkEnabled` CORRECTED to dead 2026-07 — registered into ActionEngine but their accessors have no non-test caller (#3686 sweep); `undoable` CORRECTED to live 2026-07 — understated, two objectui readers gate the toast's Undo and the record restore (#3714) |
 | hook | 11 | – | 2 | – | model-healthy; only label/description dead (benign) |
 | permission | 32 | – | 0 | – | CRUD/FLS/RLS live; dead `contextVariables` REMOVED (ADR-0105 D11 — RLS resolves only the `current_user.*` built-ins plus runtime-staged `rlsMembership` sets) |
 | position | 4 | – | – | – | (role's ADR-0090 successor) fully live |

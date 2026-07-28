@@ -175,9 +175,10 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
 
 /**
  * Lower a single action definition: detect a callable on `target` or on the
- * deprecated `execute` alias (canonical `target` first — #3713), register it,
- * optionally extract a metadata body, and drop the alias. Mutates a shallow
- * clone, never the input.
+ * deprecated `execute` alias, register it, optionally extract a metadata body,
+ * and drop the alias. A declared `target` — string or function — always wins
+ * over `execute` (#3713 / #3743), matching the `ActionSchema` transform. Mutates
+ * a shallow clone, never the input.
  */
 function lowerActionCallable(
   raw: unknown,
@@ -197,13 +198,32 @@ function lowerActionCallable(
   // (which keeps `target` when both are set). An author who inlined a function in
   // both slots got the `execute` one bundled while `action.target = ref` below
   // silently overwrote the `target` function they had actually declared.
+  //
+  // #3743: "`target` first" means the DECLARED target, not merely a callable one.
+  // Probing `typeof action.target === 'function'` left one combination still
+  // resolving the alias's way: a STRING `target` beside a function `execute` fell
+  // through to the alias, bundled it, and then overwrote the canonical ref the
+  // author wrote — the same inversion #3713 fixed for the function/function pair,
+  // one slot type over. `target` now wins in every combination, so the
+  // `action-target-execute-conflict` warning can state one precedence rule and
+  // have it be true everywhere.
+  const targetDeclared =
+    typeof action.target === 'function' || (typeof action.target === 'string' && action.target.length > 0);
   const handlerSlot: 'execute' | 'target' | null =
     typeof action.target === 'function'
       ? 'target'
-      : typeof action.execute === 'function'
+      : !targetDeclared && typeof action.execute === 'function'
         ? 'execute'
         : null;
-  if (!handlerSlot) return action;
+  if (!handlerSlot) {
+    // A function-valued alias that lost to a string `target` still has to go: it
+    // is not JSON-safe (`JSON.stringify` drops it from the artifact without a
+    // word) and `ActionSchema` expects a string, so leaving it would trade a
+    // silent discard for a confusing parse error. The lint above has already
+    // told the author which handler they lost.
+    if (typeof action.execute === 'function') delete action.execute;
+    return action;
+  }
   const fn = action[handlerSlot] as AnyFn;
   const ref = uniqueName(baseName, taken);
   taken.add(ref);

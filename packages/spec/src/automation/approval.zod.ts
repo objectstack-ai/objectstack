@@ -205,6 +205,67 @@ export const APPROVER_VALUE_SOURCES = Object.fromEntries(
 >;
 
 // ==========================================================================
+// [ADR-0105 D9] Cross-organization approver targeting
+// ==========================================================================
+
+/**
+ * Symbolic organization references usable as an approver's `organization`
+ * (ADR-0105 D9).
+ *
+ * Flow metadata is PORTABLE — the same flow deploys to dev, staging and every
+ * customer environment — while an organization id is DATA, minted per
+ * deployment. A literal id in a flow is therefore unportable by construction,
+ * and an AI author cannot know one at authoring time. These symbols express
+ * the two common intents against the D6 grouping tree instead, so the usual
+ * cases need no deployment knowledge at all:
+ *
+ *   - `$root`   — the group organization: walk `parent_organization_id` up from
+ *                 the request's organization to the top. "Escalate to group."
+ *   - `$parent` — exactly one level up. Division-level sign-off in a three-tier
+ *                 group (group → division → plant).
+ *
+ * A slug (any other value) names a specific organization and covers the shapes
+ * the symbols cannot: a SIBLING org, e.g. a shared-services centre that
+ * approves payables for every plant. That is also why D9's legality rule is
+ * "shares a root", not "is an ancestor".
+ */
+export const APPROVER_ORG_SYMBOLS = ['$root', '$parent'] as const;
+export type ApproverOrgSymbol = (typeof APPROVER_ORG_SYMBOLS)[number];
+
+/**
+ * Whether an approver type resolves people through an ORGANIZATION-SCOPED
+ * directory — i.e. whether `organization` (ADR-0105 D9) means anything for it.
+ *
+ * `user` / `field` / `manager` name a person directly or derive one from the
+ * record, so they are org-agnostic: an `organization` on them is not a narrower
+ * routing, it is a misunderstanding, and the lint says so rather than silently
+ * ignoring it. `team` is org-agnostic too — `sys_team_member` carries no
+ * organization column and the engine never scoped it (unlike position /
+ * membership-tier / department, which all do).
+ *
+ * `satisfies` keeps this exhaustive for the same reason
+ * {@link APPROVER_VALUE_BINDINGS} is: a new {@link ApproverType} must state
+ * whether cross-org targeting applies to it, or this file fails to compile.
+ */
+export const APPROVER_ORG_SCOPED = {
+  user: false,
+  org_membership_level: true,
+  role: true,
+  position: true,
+  team: false,
+  department: true,
+  manager: false,
+  field: false,
+  queue: false,
+  expression: true,
+} as const satisfies Record<z.infer<typeof ApproverType>, boolean>;
+
+/** Does `organization` (ADR-0105 D9) apply to this approver type? */
+export function approverTypeIsOrgScoped(type: string): boolean {
+  return (APPROVER_ORG_SCOPED as Record<string, boolean>)[canonicalApproverType(type)] ?? false;
+}
+
+// ==========================================================================
 // Approval as a Flow Node (ADR-0019, canonical)
 // ==========================================================================
 //
@@ -337,6 +398,41 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
    * (keyed by position), so a plain per-approver list still behaves sensibly.
    */
   group: z.string().optional().describe('Group label for per_group sign-off (e.g. "legal", "finance")'),
+  /**
+   * [ADR-0105 D9] Which organization's directory this approver is resolved
+   * AGAINST. Default (omitted): the request's own organization — today's
+   * behaviour, unchanged.
+   *
+   * This separates two things one organization id used to do at once: WHERE
+   * THE REQUEST LIVES and WHERE ITS APPROVERS ARE LOOKED UP. A group CFO holds
+   * her `cfo` position in the GROUP organization while the purchase order
+   * lives in the PLANT organization; without this field
+   * `expandPositionUsers('cfo', <plant>)` finds nobody and the slot routes
+   * into `onEmptyApprovers`.
+   *
+   * Declared per APPROVER, not per node, so one node can require a plant
+   * manager AND a group CFO in parallel (`behavior: 'per_group'`). A node-level
+   * default is a strict special case of this and can be added later as sugar;
+   * the reverse is not true.
+   *
+   * Values: `$root` / `$parent` (see {@link APPROVER_ORG_SYMBOLS}) or an
+   * organization SLUG. Slugs are used rather than ids because flow metadata is
+   * portable across environments and ids are not.
+   *
+   * Bounded, not free: the target must share a `parent_organization_id` root
+   * with the request's organization (ADR-0105 D6 grouping metadata), so this is
+   * a route WITHIN one group — never a channel to an unrelated tenant. Applies
+   * only to org-scoped approver types ({@link APPROVER_ORG_SCOPED}) and only
+   * under the `group` tenancy posture; elsewhere the runtime refuses rather
+   * than silently ignoring, so a posture migration cannot quietly reroute
+   * approvals.
+   */
+  organization: z.string().optional().meta({
+    description:
+      'ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), '
+      + '`$parent` (one level up), or an organization slug. Omitted = the request\'s own organization.',
+    xRef: { kind: 'organization', symbols: [...APPROVER_ORG_SYMBOLS] },
+  }),
 }));
 export type ApprovalNodeApprover = z.infer<typeof ApprovalNodeApproverSchema>;
 

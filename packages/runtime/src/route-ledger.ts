@@ -41,12 +41,14 @@
  * The last 3 were the `ai.*` methods on `* /ai/**`, and enumerating THAT
  * family settled the question of how much a `**` row is worth: not "weaker
  * evidence" but, in this case, WRONG evidence. `service-ai` (a Cloud/EE
- * package in the `cloud` repo) mounts 12 routes and not one of them is the
- * `/nlq` `/suggest` `/insights` the SDK calls — the wildcard had been
- * certifying three URLs that nothing anywhere serves (#3718). The capstone now
- * exempts `/api/v1/ai/` by prefix like the control plane, the real table is
- * ledgered in `cloud`, and the wildcard-only bound is **0**: every matched call
- * rests on an exact enumerated route.
+ * package in the `cloud` repo) mounts 12 routes and not one of them was the
+ * `/nlq` `/suggest` `/insights` the SDK called — the wildcard had been
+ * certifying three URLs that nothing anywhere serves (#3718). Those three
+ * methods are gone and the SDK now expresses the real table instead. The
+ * capstone exempts `/api/v1/ai/` by prefix like the control plane — bounded to
+ * the `ai.*` namespace, with the reachability check living in `cloud` next to
+ * the routes — and the wildcard-only bound is **0**: every matched call rests
+ * on an exact enumerated route.
  *
  * This module is runtime-internal (not exported from the package index): it is
  * the guard's data, not public API. Promotion to `@objectstack/spec` is a
@@ -193,7 +195,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
 
   // ── ai (dynamic route table, owned by another repo) ───────────────────────
   { route: '* /ai/**', domain: '/ai', disposition: 'dynamic',
-    note: 'routes come from service-ai buildAIRoutes() at plugin start — service-ai is a Cloud/EE package in the `cloud` repo, so this repo cannot enumerate them and the dispatcher only proxies (or 404s "AI service is not configured"). Enumerated on the other side of that boundary since #3718: cloud packages/service-ai/src/ai-route-ledger.ts. The previous note here claimed the client "expresses nlq/suggest/insights against the REST AI routes"; that was never verified and is FALSE — nothing mounts those three paths (#3718)' },
+    note: 'routes come from service-ai buildAIRoutes() at plugin start — service-ai is a Cloud/EE package in the `cloud` repo, so this repo cannot enumerate them and the dispatcher only proxies (or 404s "AI service is not configured"). Enumerated on the other side of that boundary since #3718: cloud packages/service-ai/src/ai-route-ledger.ts, whose conformance test drives client.ai.* against the table buildAIRoutes() really returns. The client now expresses that table — ai.chat / ai.chatStream / ai.complete / ai.models / ai.conversations.* — but do NOT read a `sdk` disposition into this row: it stays `dynamic` because THIS repo still cannot see the routes. An earlier note here claimed the client "expresses nlq/suggest/insights against the REST AI routes"; that was never verified and was FALSE — nothing has ever mounted those three paths, and both they and the methods calling them are gone (#3718)' },
 
   // ── meta (legacy chain) ───────────────────────────────────────────────────
   { route: 'GET /meta', domain: '/meta', disposition: 'sdk', client: 'meta.getTypes' },

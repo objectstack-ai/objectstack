@@ -20,9 +20,14 @@ import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod.js';
  * the wire (framework#3582): `resolveContextTokens()` in
  * `@object-ui/core` before the filter leaves the browser, and
  * `resolveFilterTokens()` in `@objectstack/core` on the ObjectQL read
- * path and the analytics dataset executor for filters that reach the
- * database without passing through a renderer. The DRIVER only ever
- * sees concrete ids, never `{tokens}`.
+ * AND write paths and the analytics dataset executor, for filters that
+ * reach the database without passing through a renderer. The DRIVER
+ * only ever sees concrete ids, never `{tokens}`.
+ *
+ * The write verbs matter as much as the read ones (#3810): a filter has
+ * to select the same rows whether `find`, `update` or `delete` consumes
+ * it, or a flow that previews with one and acts with the other operates
+ * on two different row sets.
  *
  * The server resolver reads `ExecutionContext` — `{current_user_id}` is
  * `userId`, `{current_org_id}` is `tenantId`. A request that carries

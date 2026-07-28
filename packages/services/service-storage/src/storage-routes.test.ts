@@ -241,7 +241,7 @@ describe('Storage REST Routes', () => {
       const urlRes = createMockRes();
       await urlHandler(urlReq, urlRes);
       expect(urlRes._status).toBe(200);
-      expect(urlRes._json.url).toContain('/_local/raw/');
+      expect(urlRes._json.data.url).toContain('/_local/raw/');
     });
 
     it('should 404 for non-committed file', async () => {
@@ -308,7 +308,7 @@ describe('Storage REST Routes', () => {
       await commit(s, { id: 'a3' });
       const res = await hit(server, '/api/v1/storage/files/:fileId/url', 'a3');
       expect(res._status).toBe(200);
-      expect(res._json.url).toContain('/_local/raw/');
+      expect(res._json.data.url).toContain('/_local/raw/');
       expect(authorizeFileRead).toHaveBeenCalledOnce();
     });
 
@@ -421,7 +421,11 @@ describe('Storage REST Routes', () => {
       const putRes = createMockRes();
       await putHandler(putReq, putRes);
       expect(putRes._status).toBe(200);
-      expect(putRes._json.ok).toBe(true);
+      // `{ ok: true, key }` until #3689 — `ok` was a private second word for
+      // the `success` the declared envelope already carries.
+      expect(putRes._json.success).toBe(true);
+      expect(putRes._json.ok).toBeUndefined();
+      expect(putRes._json.data.key).toBe('rawtest/file.bin');
 
       // Verify file was written
       const downloaded = await adapter.download('rawtest/file.bin');

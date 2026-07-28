@@ -13,6 +13,11 @@
  * `applyInMemoryAggregation`, and a non-UTC timezone forces the in-memory path
  * regardless. A dashboard can cross that seam mid-drill-down.
  *
+ * "Same labels" includes the EMPTY bucket: a row with no instant must key the
+ * same way on both sides (#3839). It is the one label neither side computes —
+ * each just propagates its own idea of nothing — which is exactly why it drifted
+ * apart for so long without a test to notice.
+ *
  * This is the invariant #3773 broke and nothing caught. SQLite stores a
  * `Field.datetime` as INTEGER epoch milliseconds; `strftime` read the bare
  * integer as a Julian day number, so every row bucketed as NULL and a trend
@@ -72,16 +77,19 @@ const FIELDS = {
 
 /**
  * Instants chosen to straddle every boundary the labels encode: year, quarter,
- * month, ISO week (2024-12-30 is 2025-W01), and midnight in both directions.
+ * month, ISO week (2024-12-30 is 2025-W01), and midnight in both directions —
+ * plus, at the end, a NULL instant.
  *
- * Deliberately NO null instant. A NULL group key is a known, pre-existing
- * divergence — SQL yields SQL NULL where the in-memory path yields the literal
- * `'(null)'` — that is orthogonal to bucketing correctness and equally true of a
- * TEXT column. Including it would make this check fail for a reason it is not
- * about; it is called out here so its absence reads as a decision, not an
- * oversight.
+ * That last row is here deliberately (#3839), and it used to be deliberately
+ * absent: the two paths disagreed about how to SPELL "empty" — SQL NULL against
+ * the in-memory literal `'(null)'` — so including it would have failed this
+ * check for a reason it is not about. That divergence is closed; both sides now
+ * key the empty bucket as real `null`. The row belongs here precisely because
+ * the convergence is the kind that decays silently: nothing else compares the
+ * two paths on a null input, and either side could drift back to a sentinel
+ * without a single existing test noticing.
  */
-const FIXTURE: ReadonlyArray<{ id: string; iso: string }> = [
+const FIXTURE: ReadonlyArray<{ id: string; iso: string | null }> = [
   { id: 'b1', iso: '2024-01-15T10:00:00.000Z' }, // 2024 / Q1 / Jan / W03
   { id: 'b2', iso: '2024-06-30T23:59:59.000Z' }, // last instant of Q2
   { id: 'b3', iso: '2024-07-01T00:00:00.000Z' }, // first instant of Q3
@@ -89,15 +97,46 @@ const FIXTURE: ReadonlyArray<{ id: string; iso: string }> = [
   { id: 'b5', iso: '2025-01-01T00:00:00.000Z' }, // exact midnight, year boundary
   { id: 'b6', iso: '2025-05-19T09:00:00.000Z' },
   { id: 'b7', iso: '2025-05-19T22:30:00.000Z' }, // same day bucket as b6
+  { id: 'b8', iso: null }, // the empty bucket — both paths must key it `null`
 ];
 
-/** `{label: count}` from aggregate rows keyed by `field`. */
+/**
+ * The empty bucket's label, chosen so no `String(value)` can produce it. That is
+ * what makes a sentinel visible: a side spelling "empty" as the STRING
+ * `'(null)'`, or as `'null'` from stringifying SQL NULL, lands under its own
+ * literal and reads as a different label than the other side's real `null`.
+ * Under a plain `String()` the two would have compared equal in one of those
+ * cases and this check would have blessed the divergence.
+ */
+const EMPTY_LABEL = '‹empty bucket›';
+
+/**
+ * `{label: count}` from aggregate rows keyed by `field`.
+ *
+ * A missing property counts as empty alongside `null`: a driver that omits the
+ * key for a null group is describing the same bucket, and JSON round-tripping
+ * turns one into the other anyway.
+ */
 function labelCounts(rows: any[], field: string): Record<string, number> {
   const out: Record<string, number> = {};
   for (const row of rows ?? []) {
-    out[String(row?.[field])] = Number(row?.n ?? 0);
+    const v = row?.[field];
+    out[v == null ? EMPTY_LABEL : String(v)] = Number(row?.n ?? 0);
   }
   return out;
+}
+
+/**
+ * Order-insensitive canonical form. Row ORDER is not part of this contract —
+ * `engine.aggregate` promises no ordering without an explicit `orderBy`, and the
+ * two paths naturally differ (SQL sorts its groups, the in-memory path emits
+ * first-seen order). Comparing the raw objects with `JSON.stringify` made key
+ * INSERTION order significant, so a driver whose buckets were entirely correct
+ * but ordered differently was reported as a disagreement — with an empty diff
+ * message, because {@link describeDiff} is keyed and could not name one.
+ */
+function canonical(counts: Record<string, number>): string {
+  return JSON.stringify(Object.keys(counts).sort().map((k) => [k, counts[k]]));
 }
 
 function describeDiff(a: Record<string, number>, b: Record<string, number>): string {
@@ -128,10 +167,12 @@ export async function checkDateBucketParity(
     await driver.syncSchema(object, { name: object, fields: FIELDS });
     for (const { id, iso } of FIXTURE) {
       // A real `Date` for the datetime column — the shape every normal write
-      // takes, and the one that produces epoch storage on SQLite.
+      // takes, and the one that produces epoch storage on SQLite. A null instant
+      // is written as NULL to both columns, so the empty bucket is reached the
+      // way a real record reaches it: an unset field, not a magic value.
       await driver.create(
         object,
-        { id, at: new Date(iso), on: iso.slice(0, 10), n: 1 },
+        { id, at: iso === null ? null : new Date(iso), on: iso === null ? null : iso.slice(0, 10), n: 1 },
         opts.createOptions,
       );
     }
@@ -175,7 +216,7 @@ export async function checkDateBucketParity(
         const sql = labelCounts(pushedDown, field);
         const inMemory = labelCounts(applyInMemoryAggregation(rows, ast as never), field);
 
-        if (JSON.stringify(sql) !== JSON.stringify(inMemory)) {
+        if (canonical(sql) !== canonical(inMemory)) {
           problems.push(
             `${storage} '${field}' @ ${granularity}: pushed-down SQL and in-memory bucketing disagree — ${describeDiff(sql, inMemory)}`,
           );
@@ -198,7 +239,7 @@ export async function checkDateBucketParity(
         const [byAt, byOn] = await Promise.all([mk('at'), mk('on')]);
         const a = labelCounts(byAt, 'at');
         const b = labelCounts(byOn, 'on');
-        if (JSON.stringify(a) !== JSON.stringify(b)) {
+        if (canonical(a) !== canonical(b)) {
           problems.push(
             `@ ${granularity}: the datetime and date columns describe the same days but bucket differently — ${describeDiff(a, b)}`,
           );

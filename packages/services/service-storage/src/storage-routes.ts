@@ -21,14 +21,39 @@ export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
  * real message from the dispatcher (#3675). `ObjectStackClient` papers over
  * the difference by sniffing four shapes; that shim is the consumer-side
  * symptom Prime Directive #12 says to cure at the producer.
- *
- * Only the ERROR path is normalized here. The success bodies are still three
- * shapes of their own (`{ data }`, bare `{ url }`, `{ ok, key }`, none with
- * `success: true`) — a separate, non-additive change, tracked as its own
- * issue rather than smuggled into this one.
  */
 function sendError(res: IHttpResponse, status: number, code: string, message: string): void {
   res.status(status).json({ success: false, error: { code, message } });
+}
+
+/**
+ * Emit a success body in the DECLARED envelope — `BaseResponseSchema`
+ * (`packages/spec/src/api/contract.zod.ts`), i.e. `{ success: true, data }`.
+ * That is what `storage.zod.ts` has declared for these routes all along, and
+ * what `ObjectStackClient.unwrapResponse` keys on.
+ *
+ * #3675 normalized the error path and deliberately left this one alone,
+ * because unlike the errors it is not additive. The success bodies were three
+ * shapes, none carrying `success` (#3689):
+ *
+ *   - the six upload routes:    `{ data: {…} }`     — flag missing, payload already in place
+ *   - `GET /files/:fileId/url`: `{ url }`           — no envelope at all
+ *   - `PUT /_local/raw/:token`: `{ ok: true, key }` — a second, private word for `success`
+ *
+ * so the last two MOVE their payload under `data`. The consumers were taught
+ * both shapes first — `storage.getDownloadUrl` reads through the SDK's
+ * standard `unwrapResponse`, the console's two attachment openers already read
+ * `body?.url ?? body?.data?.url` — so the repos are not coupled by merge
+ * order, the same way the error path was landed. `ok` is dropped rather than
+ * kept beside `success`: one envelope, one word for it.
+ *
+ * Every success body in this module goes through here, so the shape lives in
+ * exactly one line. `success-envelope.conformance.test.ts` drives each route,
+ * parses the result against the real spec schemas, and scans this source so a
+ * new route cannot quietly reintroduce a bare one.
+ */
+function sendOk(res: IHttpResponse, data: unknown): void {
+  res.json({ success: true, data });
 }
 
 /**
@@ -230,15 +255,13 @@ export function registerStorageRoutes(
         uploadUrl = `${basePath}/_local/raw/${fileId}`;
       }
 
-      res.json({
-        data: {
-          uploadUrl,
-          method,
-          headers,
-          fileId,
-          expiresIn,
-          downloadUrl: `${basePath}/files/${fileId}/url`,
-        },
+      sendOk(res, {
+        uploadUrl,
+        method,
+        headers,
+        fileId,
+        expiresIn,
+        downloadUrl: `${basePath}/files/${fileId}/url`,
       });
     } catch (err: any) {
       sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
@@ -268,20 +291,18 @@ export function registerStorageRoutes(
         etag: eTag ?? undefined,
       });
 
-      res.json({
-        data: {
-          // The opaque sys_file id — the value a file field stores as a
-          // reference (ADR-0104 D3). Previously omitted, so a caller could not
-          // learn the id to persist after committing an upload.
-          fileId: updated!.id ?? fileId,
-          path: updated!.key,
-          name: updated!.name,
-          size: updated!.size ?? 0,
-          mimeType: updated!.mime_type ?? 'application/octet-stream',
-          lastModified: updated!.updated_at ?? new Date().toISOString(),
-          created: updated!.created_at ?? new Date().toISOString(),
-          etag: updated!.etag,
-        },
+      sendOk(res, {
+        // The opaque sys_file id — the value a file field stores as a
+        // reference (ADR-0104 D3). Previously omitted, so a caller could not
+        // learn the id to persist after committing an upload.
+        fileId: updated!.id ?? fileId,
+        path: updated!.key,
+        name: updated!.name,
+        size: updated!.size ?? 0,
+        mimeType: updated!.mime_type ?? 'application/octet-stream',
+        lastModified: updated!.updated_at ?? new Date().toISOString(),
+        created: updated!.created_at ?? new Date().toISOString(),
+        etag: updated!.etag,
       });
     } catch (err: any) {
       sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
@@ -354,15 +375,13 @@ export function registerStorageRoutes(
         expires_at: expiresAt,
       });
 
-      res.json({
-        data: {
-          uploadId,
-          resumeToken,
-          fileId,
-          totalChunks,
-          chunkSize,
-          expiresAt,
-        },
+      sendOk(res, {
+        uploadId,
+        resumeToken,
+        fileId,
+        totalChunks,
+        chunkSize,
+        expiresAt,
       });
     } catch (err: any) {
       sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
@@ -425,12 +444,10 @@ export function registerStorageRoutes(
         parts: JSON.stringify(currentParts),
       });
 
-      res.json({
-        data: {
-          chunkIndex,
-          eTag,
-          bytesReceived: data.byteLength,
-        },
+      sendOk(res, {
+        chunkIndex,
+        eTag,
+        bytesReceived: data.byteLength,
       });
     } catch (err: any) {
       sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
@@ -467,14 +484,12 @@ export function registerStorageRoutes(
       await store.updateFile(session.file_id, { status: 'committed', key: finalKey });
       await store.updateSession(uploadId, { status: 'completed' });
 
-      res.json({
-        data: {
-          fileId: session.file_id,
-          key: finalKey,
-          size: session.total_size,
-          mimeType: session.mime_type ?? 'application/octet-stream',
-          url: `${basePath}/files/${session.file_id}/url`,
-        },
+      sendOk(res, {
+        fileId: session.file_id,
+        key: finalKey,
+        size: session.total_size,
+        mimeType: session.mime_type ?? 'application/octet-stream',
+        url: `${basePath}/files/${session.file_id}/url`,
       });
     } catch (err: any) {
       sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
@@ -500,20 +515,18 @@ export function registerStorageRoutes(
         ? Math.min(100, Math.round((uploadedSize / session.total_size) * 100))
         : 0;
 
-      res.json({
-        data: {
-          uploadId: session.id,
-          fileId: session.file_id,
-          filename: session.filename,
-          totalSize: session.total_size,
-          uploadedSize,
-          totalChunks: session.total_chunks,
-          uploadedChunks,
-          percentComplete,
-          status: session.status,
-          startedAt: session.started_at,
-          expiresAt: session.expires_at,
-        },
+      sendOk(res, {
+        uploadId: session.id,
+        fileId: session.file_id,
+        filename: session.filename,
+        totalSize: session.total_size,
+        uploadedSize,
+        totalChunks: session.total_chunks,
+        uploadedChunks,
+        percentComplete,
+        status: session.status,
+        startedAt: session.started_at,
+        expiresAt: session.expires_at,
       });
     } catch (err: any) {
       sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
@@ -550,7 +563,10 @@ export function registerStorageRoutes(
         return;
       }
 
-      res.json({ url });
+      // `{ success: true, data: { url } }` since #3689 — this route used to
+      // answer a bare `{ url }`, the one success body on the surface that
+      // carried no envelope at all.
+      sendOk(res, { url });
     } catch (err: any) {
       sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
     }
@@ -626,7 +642,13 @@ export function registerStorageRoutes(
       }
 
       await storage.upload(payload.k, data, { contentType: payload.ct });
-      res.json({ ok: true, key: payload.k });
+      // `{ ok: true, key }` until #3689. `ok` was a second, private word for
+      // `success` on a route that is mounted under `/api/v1/storage` like any
+      // other; the envelope now says it once. Nothing reads this body — the
+      // SDK and the console both PUT here opaquely, exactly as they would an
+      // S3 presigned URL, and check only the status — so the move is
+      // observable to conformance tests and to curl, not to a caller.
+      sendOk(res, { key: payload.k });
     } catch (err: any) {
       const invalidToken = err?.message?.includes('expired') || err?.message?.includes('signature');
       sendError(

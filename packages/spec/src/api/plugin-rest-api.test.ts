@@ -14,7 +14,6 @@ import {
   DEFAULT_DATA_CRUD_ROUTES,
   DEFAULT_BATCH_ROUTES,
   DEFAULT_NOTIFICATION_ROUTES,
-  DEFAULT_AI_ROUTES,
   DEFAULT_I18N_ROUTES,
   DEFAULT_ANALYTICS_ROUTES,
   DEFAULT_AUTOMATION_ROUTES,
@@ -515,15 +514,18 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_NOTIFICATION_ROUTES.endpoints).toHaveLength(7);
     });
 
-    it('should validate DEFAULT_AI_ROUTES', () => {
-      expect(DEFAULT_AI_ROUTES.prefix).toBe('/api/v1/ai');
-      expect(DEFAULT_AI_ROUTES.service).toBe('ai');
-      expect(DEFAULT_AI_ROUTES.category).toBe('ai');
-      expect(DEFAULT_AI_ROUTES.methods).toContain('aiNlq');
-      // aiChat removed — wire protocol aligned with Vercel AI SDK
-      expect(DEFAULT_AI_ROUTES.methods).toContain('aiSuggest');
-      expect(DEFAULT_AI_ROUTES.methods).toContain('aiInsights');
-      expect(DEFAULT_AI_ROUTES.endpoints).toHaveLength(3);
+    it('declares no AI routes — this table cannot vouch for a Cloud/EE surface (#3718)', () => {
+      // DEFAULT_AI_ROUTES used to sit here declaring `/nlq`, `/suggest` and
+      // `/insights`, and this test asserted its shape — three endpoints no repo
+      // has ever mounted, checked for `toHaveLength(3)`. Shape is not
+      // existence. The AI service lives in `cloud`; its real table is
+      // enumerated by the ledger there, from `buildAIRoutes()` itself.
+      const registrations = getDefaultRouteRegistrations();
+      expect(registrations.map((r) => r.prefix)).not.toContain('/api/v1/ai');
+      expect(
+        registrations.flatMap((r) => r.methods ?? []),
+        'the three handlers nothing ever implemented must not come back here',
+      ).not.toEqual(expect.arrayContaining(['aiNlq', 'aiSuggest', 'aiInsights']));
     });
 
     it('should validate DEFAULT_I18N_ROUTES', () => {
@@ -568,21 +570,20 @@ describe('plugin-rest-api.zod', () => {
       expect(actionsEndpoint?.responseSchema).toBe('AutomationActionsResponseSchema');
     });
 
-    it('should return all 9 default registrations', () => {
+    it('should return all 8 default registrations', () => {
       // Permission/View/Workflow/Realtime tables were deleted in #3612 —
-      // no server ever mounted those routes.
+      // no server ever mounted those routes. AI went the same way in #3718.
       const registrations = getDefaultRouteRegistrations();
 
-      expect(registrations).toHaveLength(9);
+      expect(registrations).toHaveLength(8);
       expect(registrations[0]).toBe(DEFAULT_DISCOVERY_ROUTES);
       expect(registrations[1]).toBe(DEFAULT_METADATA_ROUTES);
       expect(registrations[2]).toBe(DEFAULT_DATA_CRUD_ROUTES);
       expect(registrations[3]).toBe(DEFAULT_BATCH_ROUTES);
       expect(registrations[4]).toBe(DEFAULT_NOTIFICATION_ROUTES);
-      expect(registrations[5]).toBe(DEFAULT_AI_ROUTES);
-      expect(registrations[6]).toBe(DEFAULT_I18N_ROUTES);
-      expect(registrations[7]).toBe(DEFAULT_ANALYTICS_ROUTES);
-      expect(registrations[8]).toBe(DEFAULT_AUTOMATION_ROUTES);
+      expect(registrations[5]).toBe(DEFAULT_I18N_ROUTES);
+      expect(registrations[6]).toBe(DEFAULT_ANALYTICS_ROUTES);
+      expect(registrations[7]).toBe(DEFAULT_AUTOMATION_ROUTES);
     });
 
     it('should cover all protocol categories', () => {
@@ -594,7 +595,6 @@ describe('plugin-rest-api.zod', () => {
       expect(categories).toContain('data');
       expect(categories).toContain('batch');
       expect(categories).toContain('notification');
-      expect(categories).toContain('ai');
       expect(categories).toContain('i18n');
       expect(categories).toContain('analytics');
       expect(categories).toContain('automation');

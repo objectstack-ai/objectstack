@@ -38,8 +38,13 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.
-export { DriverConnectError } from './driver-connect-errors.js';
-export type { DriverConnectFailure, DriverHealth } from './driver-connect-errors.js';
+export { DriverConnectError, DatasourceUnavailableError } from './driver-connect-errors.js';
+export type {
+  DriverConnectFailure,
+  DriverHealth,
+  DatasourceUnavailableInfo,
+  DatasourceUnavailableKind,
+} from './driver-connect-errors.js';
 export type { InsertManyRowOutcome } from './engine.js';
 
 // Export in-memory aggregation fallback (used by engine.aggregate when the

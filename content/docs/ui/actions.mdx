@@ -20,12 +20,16 @@ The types you'll actually use:
 | `flow` | Launch a flow (e.g. a screen-flow wizard) | `target` names the flow |
 | `url` | Navigate / open a link | `target` is the URL (`${ctx.record.id}` interpolation supported) |
 | `modal` | Open a modal page to collect input, then submit to a handler | `target` names the modal page |
+| `api` | Call an HTTP endpoint directly | `target` is the endpoint; `method` / `bodyShape` / `bodyExtra` shape the request |
+| `form` | Open a form view, prefilled with the current record | `target` names the FormView; routed to `/forms/:target?recordId=…` |
 
 <Callout type="warn">
-The schema also accepts `api` and `form` types, but they have **no runtime
-executor / renderer today** — stick to the four above. Likewise prefer
-`confirmText`/`params` over schema properties that are not yet wired
-(`shortcut`, `bulkEnabled`).
+Prefer `confirmText`/`params` over the two action properties that are **not
+wired**: `shortcut` (nothing dispatches keydown events to actions) and
+`bulkEnabled` (the multi-select toolbar reads the list view's `bulkActions`,
+not this flag). The
+[liveness ledger](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/liveness/action.json)
+carries the per-property status of everything the action schema accepts.
 </Callout>
 
 ## Define your first action
@@ -189,6 +193,10 @@ engine still requires the action to declare the matching location (that's why
 - **`confirmText`** — confirmation dialog before running.
 - **`successMessage` / `errorMessage` / `refreshAfter`** — post-run feedback
   and an automatic data refresh.
+- **`undoable`** — on a single-record update, the success toast offers an
+  **Undo** that restores the record's prior field values (`Ctrl+Z` works too).
+  The runtime only captures the prior values when this flag is set, so an
+  action that omits it gets no Undo.
 - **`resultDialog`** — a one-time reveal dialog for output the user must copy
   (generated tokens, export links).
 - **`variant` / `icon` / `order`** — presentation and sort position.

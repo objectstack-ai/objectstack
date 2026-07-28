@@ -203,6 +203,241 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
       'projection is a storage invariant (ADR-0094), not an authorable spec property — no ledger '
       + 'entry to ratchet; the proof runs unconditionally in the dogfood suite instead.',
   },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Proofs that existed in the dogfood tree but were never registered here —
+  // the gate reported them as 13 orphan `@proof:` tags. Registering silences
+  // that warning, but silence was never the goal: each was re-read to ask "is
+  // there an authorable property whose `live` status this proof actually
+  // gates?" Five had one and are BOUND (the ratchet advances). Eight do not,
+  // and say why rather than faking a binding.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  {
+    id: 'attachments-capability',
+    label: 'Attachments capability gate',
+    summary:
+      '`enable.files` is the #2727 OPT-IN gate for attachments, enforced server-side: a sys_attachment '
+      + 'targeting an object that does not declare it is refused 403 FILES_DISABLED. Proven in both '
+      + 'directions over the real presigned three-step upload — declaring objects accept, the '
+      + '`att_nofiles` fixture is refused — alongside the non-admin permission matrix (uploader gate, '
+      + 'parent read-visibility, server-stamped uploaded_by, tenant isolation).',
+    proofId: 'attachments-permission-matrix',
+    proofRef: 'packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts#attachments-permission-matrix',
+    bound: true,
+    // A capability flag that only HIDES a UI panel is the false-compliance
+    // shape ADR-0049 closes; the fixture carries a deliberate non-declaring
+    // object so the negative direction is pinned, not assumed. The file's one
+    // `describe.skipIf` covers the ENTERPRISE cross-tenant block only — the
+    // FILES_DISABLED assertion this binding rests on runs unconditionally.
+    ledgerBindings: [{ type: 'object', path: 'enable.files' }],
+  },
+  {
+    id: 'rls-check-post-image',
+    label: 'RLS `check` post-image validation',
+    summary:
+      'an RLS `check` clause validates the write POST-IMAGE (ADR-0058 D4) — a contributor who owns an '
+      + 'invoice cannot reassign it to a different owner. Distinct from `using`, which filters the '
+      + 'pre-image: a policy that compiled but was never applied to the resulting row would leave '
+      + 'every "you may not change this away from yourself" rule decorative.',
+    proofId: 'showcase-d3-d4-capabilities',
+    proofRef: 'packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts#showcase-d3-d4-capabilities',
+    bound: true,
+    // The same file also pins the ADR-0058 D3 compound sharing `condition`
+    // (`&&`), which silently skipped the AND before #1887 — but stack-level
+    // sharing rules are not a governed metadata type, so only `check` binds.
+    ledgerBindings: [{ type: 'permission', path: 'rowLevelSecurity.check' }],
+  },
+  {
+    id: 'scope-depth-read',
+    label: 'Scope-depth read grants',
+    summary:
+      "`readScope` widens the owner-match on an owner-scoped (private) object: `unit` → the caller's "
+      + 'business-unit co-members, `unit_and_below` → that BU plus every descendant (BFS). Sharing '
+      + 'still widens on top and cross-BU stays isolated (ADR-0057 D1). Hierarchy resolution is an '
+      + 'enterprise capability, so the proof registers a reference resolver to pin the seam + '
+      + 'contract; the open edition fails closed to owner-only.',
+    proofId: 'showcase-scope-depth',
+    proofRef: 'packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts#showcase-scope-depth',
+    bound: true,
+    // An access-WIDENING grant: "declared but not applied" reads as a working
+    // restriction, so the failure is silent in the safe-looking direction.
+    ledgerBindings: [{ type: 'permission', path: 'objects.readScope' }],
+  },
+  {
+    id: 'ownership-anchor-writes',
+    label: 'Ownership anchor + bulk write scoping',
+    summary:
+      '`owner_id` is system-managed for non-privileged writers (#3004): a member can neither plant a '
+      + 'record under another name (insert forge) nor move/disown one (update transfer) — that needs '
+      + '`modifyAllRecords` (which implies transfer). Paired with #2982: bulk `update({multi:true})` '
+      + '/ delete used to rebuild the driver AST AFTER the middleware chain, so owner scoping never '
+      + 'reached them and a member\'s bulk write hit every matching row, peers included.',
+    proofId: 'owner-anchor-and-bulk-writes',
+    proofRef: 'packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts#owner-anchor-and-bulk-writes',
+    bound: true,
+    // Bound to `modifyAllRecords` — the grant the proof actually authors and
+    // exercises in BOTH directions (member denied, privileged caller allowed).
+    // NOT to the sibling `allowTransfer`: the proof never authors it, and
+    // binding a property a proof does not exercise is the same false comfort
+    // as a preview renderer standing in for a runtime consumer.
+    ledgerBindings: [{ type: 'permission', path: 'objects.modifyAllRecords' }],
+  },
+  {
+    id: 'semantic-roles',
+    label: 'Object semantic roles (ADR-0085)',
+    summary:
+      '`highlightFields` / `stageField` / `fieldGroups` survive the pipeline a real renderer consumes '
+      + '— defineStack → artifact → registry → REST serialization — served verbatim over HTTP. Parse-'
+      + 'level unit tests say nothing about that path, and it is exactly where the pre-ADR-0085 '
+      + 'dialects silently died (spec-authored `defaultExpanded` never reached the form). A serializer '
+      + 'whitelist or a boot-cached merge can drop a key with no static check noticing.',
+    proofId: 'semantic-roles-served',
+    proofRef: 'packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served',
+    bound: true,
+    // One proof, three properties: the test asserts each is served verbatim
+    // (incl. `stageField: false` surviving as a strict false, not dropped).
+    ledgerBindings: [
+      { type: 'object', path: 'highlightFields' },
+      { type: 'object', path: 'stageField' },
+      { type: 'object', path: 'fieldGroups' },
+    ],
+  },
+
+  // ── Registered, honestly unbound ────────────────────────────────────────
+
+  {
+    id: 'flow-runas-userless',
+    label: 'Flow runAs — the user-less run',
+    summary:
+      "a run with no trigger user under an effective `runAs:'user'` resolves no identity, so its CRUD "
+      + 'nodes present no ObjectQL context and the security middleware SKIPS — the run would execute '
+      + 'UNSCOPED. Until #3760 that is what happened, and this file pinned it. `runAs:\'user\'` is '
+      + 'access-NARROWING, so failing to resolve it must never resolve to a grant: the run is refused.',
+    proofId: 'flow-runas-schedule',
+    proofRef: 'packages/qa/dogfood/test/flow-runas-schedule.dogfood.test.ts#flow-runas-schedule',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      "guards `flow.runAs`, which is already bound to `flow-runas-identity` — a ledger entry carries "
+      + 'one `proof` ref, so the boundary-case sibling cannot also bind. It runs unconditionally in '
+      + 'the dogfood suite.',
+  },
+  {
+    id: 'scope-depth-cli-fallback',
+    label: 'Scope-depth via the CLI default-profile wiring',
+    summary:
+      'the app declares its default profile in METADATA, the CLI passes only its NAME as '
+      + '`fallbackPermissionSet`, and the SecurityPlugin resolves the full set (incl. `readScope`) '
+      + 'from sys_permission_set at request time. The artifact-serve path used to drop `permissions[]` '
+      + 'from the stack config, so the fallback silently degraded to the built-in owner-only '
+      + '`member_default` and a grant-less user never got the declared widening.',
+    proofId: 'showcase-scope-depth-fallback',
+    proofRef: 'packages/qa/dogfood/test/showcase-scope-depth-fallback.dogfood.test.ts#showcase-scope-depth-fallback',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'guards the same `permission.objects.readScope` entry as `showcase-scope-depth`, over the CLI '
+      + 'wiring rather than an injected bootstrap set — one entry, one `proof` ref, so it cannot also '
+      + 'bind.',
+  },
+  {
+    id: 'app-tab-permissions',
+    label: 'GET /me/apps + anchor-bindable baseline',
+    summary:
+      '/me/apps used to read `metadata.list(\'app\')` while stack apps live in the ENGINE REGISTRY, '
+      + 'returning [] for every principal — leaving `tabPermissions` and `AppSchema.requiredPermissions` '
+      + 'with no enforced consumer (#2752). Paired with #2753: the `member_default` baseline carried an '
+      + 'anchor-forbidden `allowDelete` on `*`, so the bootstrap refused to bind it to `everyone` on '
+      + 'every boot and the baseline flowed only through the fallback channel ADR-0090 D5 rejected.',
+    proofId: 'me-apps-and-everyone-baseline',
+    proofRef: 'packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts#me-apps-and-everyone-baseline',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'the properties it enforces (`app.requiredPermissions`, `app.tabPermissions`) belong to the '
+      + '`app` type, which is not yet governed by the ledger (rollout). Bind when `app` lands.',
+  },
+  {
+    id: 'agent-delegator-intersection',
+    label: 'ADR-0090 D10 agent/delegator intersection',
+    summary:
+      'the reconstructed delegator context substitutes correctly into a real compiled '
+      + '`owner_id = current_user.id` policy, and the intersection STRIPS an agent\'s View-All when the '
+      + 'delegator lacks it — an agent may not see what the user it stands in for cannot.',
+    proofId: 'showcase-agent-intersection',
+    proofRef: 'packages/qa/dogfood/test/showcase-agent-intersection.dogfood.test.ts#showcase-agent-intersection',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'the intersection is a runtime principal-resolution invariant (principalKind `agent` + '
+      + '`onBehalfOf`), not an authorable property — no `agent.*` field whose `live` status it gates.',
+  },
+  {
+    id: 'agent-scope-ceiling',
+    label: 'ADR-0090 D10 OAuth-scope agent ceiling',
+    summary:
+      'an MCP OAuth scope becomes a real data-layer boundary, not a tool-surface hint: a `data:read` '
+      + 'agent acting for a user who CAN write is blocked at the data layer, while `data:write` for the '
+      + 'same user is allowed — the intersection only ever narrows.',
+    proofId: 'showcase-agent-scope-ceiling',
+    proofRef: 'packages/qa/dogfood/test/showcase-agent-scope-ceiling.dogfood.test.ts#showcase-agent-scope-ceiling',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'the scope → ceiling-set mapping (`data:read` → mcp_agent_data_read) lives in the runtime '
+      + 'execution-context resolver, not in authorable metadata — no ledger entry to ratchet.',
+  },
+  {
+    id: 'bu-hierarchy-sharing',
+    label: 'Business-unit subtree sharing',
+    summary:
+      "a sharing rule whose recipient is a BUSINESS UNIT widens access DOWN the tree: the unit's members "
+      + 'AND every descendant unit\'s members gain access via sys_business_unit (BFS). The honest '
+      + 're-homing of the broken `unit_and_subordinates` (sys_position.parent never existed) onto the '
+      + 'working BU tree — the rule materialises sys_record_share rows and a non-owner in the subtree '
+      + 'can then read a private record.',
+    proofId: 'showcase-bu-hierarchy-sharing',
+    proofRef: 'packages/qa/dogfood/test/showcase-bu-hierarchy-sharing.dogfood.test.ts#showcase-bu-hierarchy-sharing',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'sharing rules are authored at STACK level (`sharingRules`), which is not a governed metadata '
+      + 'type — the ledger governs per-type property surfaces, and there is no `permission.*` entry '
+      + 'for the rule\'s recipient kind.',
+  },
+  {
+    id: 'declarative-rbac-seeding',
+    label: 'Declarative RBAC seeding',
+    summary:
+      'stack-declared `roles` + `sharingRules` are seeded into sys_position / sys_sharing_rule at boot, '
+      + 'so they stop being decorative — #2077 reported booting the showcase yielded a count of 0 for '
+      + 'both. Also pins the spec→runtime translation.',
+    proofId: 'showcase-declarative-rbac-seeding',
+    proofRef: 'packages/qa/dogfood/test/showcase-declarative-rbac-seeding.dogfood.test.ts#showcase-declarative-rbac-seeding',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'seeding acts on STACK-level `roles`/`sharingRules` collections, not on a per-type authorable '
+      + 'property — same shape as bu-hierarchy-sharing.',
+  },
+  {
+    id: 'permission-model-zoo',
+    label: 'ADR-0090 permission-model zoo',
+    summary:
+      'the showcase declares the FULL authoring surface (positions, CRUD/FLS/RLS sets, org-depth, VAMA, '
+      + 'system permissions, everyone/guest capability, adminScope, a seeded sys_business_unit tree, '
+      + 'BU-subtree sharing) and the SERVED runtime enforces it rather than merely storing it. Each '
+      + 'block names the ADR-0090 decision it guards.',
+    proofId: 'showcase-permission-zoo',
+    proofRef: 'packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts#showcase-permission-zoo',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'a BREADTH guard over the whole ADR-0090 surface, not a single-property gate — binding it to any '
+      + 'one entry would misrepresent both what it covers and what that entry is proven by. The '
+      + 'per-property bindings above carve out the parts that do have a single owner.',
+  },
 ];
 
 /** Bound ledger paths → the class that binds them. Key: `<type>/<path>`. */

@@ -36,6 +36,7 @@ import {
   allowAllConnectPolicy,
   type DatasourceConnectPolicy,
   type DatasourceConnectContext,
+  type DatasourceConnectDecision,
 } from './contracts/connect-policy.js';
 import type { Logger } from './logger.js';
 
@@ -58,6 +59,15 @@ export interface ConnectableDatasource {
    * unrouted datasource. Defaults to false.
    */
   autoConnect?: boolean;
+  /**
+   * The HOST declares the platform cannot run without this datasource, so a
+   * boot-time (`declared-auto`) connect failure is fatal regardless of object
+   * bindings (#3826). Set by the runtime for the standalone `default` —
+   * everything without an explicit binding routes TO it, so "no fallback path"
+   * holds by construction even though nothing binds to it *explicitly*. Not
+   * part of the app-facing datasource spec: host-composition plumbing only.
+   */
+  bootCritical?: boolean;
 }
 
 /** Minimal object shape used for the D2 routing gate + post-connect schema sync. */
@@ -84,6 +94,30 @@ export interface ConnectionEngineLike {
    * `onEnable` bridge does manually).
    */
   syncObjectSchema?: (objectName: string) => Promise<void>;
+  /**
+   * Name of the engine's DEFAULT driver, when one is set. Used by the
+   * `asDefault` connect path's idempotency guard (#3826): the default driver
+   * keeps its natural name, so `getDriverByName('default')` can never detect a
+   * prior registration.
+   */
+  getDefaultDriverName?: () => string | undefined;
+  /**
+   * Tell the engine a datasource was *declared* but is not connected, and why
+   * (framework#3828). Without this the engine cannot distinguish "the app
+   * misspelled a datasource name" from "the host's policy refused it" from "it
+   * failed to connect and the operator set OS_ALLOW_DRIVER_CONNECT_FAILURE" —
+   * all three used to surface as the same bare `is not registered`.
+   *
+   * `publicDetail` is the only part safe to echo to an end user; the operator
+   * -facing reason stays in the logs and the datasource-admin list.
+   */
+  markDatasourceUnavailable?: (info: {
+    name: string;
+    kind: 'blocked' | 'failed';
+    publicDetail?: string;
+  }) => void;
+  /** Drop a previous {@link markDatasourceUnavailable} record (reconnect / removal). */
+  clearDatasourceUnavailable?: (name: string) => void;
 }
 
 /** Secret dereference surface (the `SecretBinder.resolve`, Phase 2 / D3). */
@@ -117,6 +151,44 @@ export interface ConnectResult {
   name: string;
   status: ConnectStatus;
   reason?: string;
+}
+
+/**
+ * How a {@link ConnectStatus} reads to someone asking "can I use this
+ * datasource right now?" (framework#3827).
+ *
+ *  - `available`   — a live driver is registered (`connected`, or
+ *                    `already-registered` via the D8 `onEnable` escape hatch).
+ *  - `blocked`     — the host connect policy refused it. A decision, not a
+ *                    fault: never fail-fast, and it is expected to persist.
+ *  - `failed`      — a connect was attempted and did not produce a usable
+ *                    driver (unreachable, bad credential, unsupported driver).
+ *  - `unattempted`  — no verdict: the D2 gate left it metadata-only, or there
+ *                    was no factory/engine to try with. NOT the same as
+ *                    healthy, and NOT the same as broken.
+ */
+export type DatasourceAvailability = 'available' | 'blocked' | 'failed' | 'unattempted';
+
+/** The retained outcome of the last connect attempt for one datasource. */
+export interface DatasourceConnectionState extends ConnectResult {
+  availability: DatasourceAvailability;
+}
+
+/** Map a raw {@link ConnectStatus} onto its coarse availability class. */
+export function availabilityOf(status: ConnectStatus): DatasourceAvailability {
+  switch (status) {
+    case 'connected':
+    case 'already-registered':
+      return 'available';
+    case 'skipped-policy':
+      return 'blocked';
+    case 'skipped-unsupported':
+    case 'failed-credentials':
+    case 'failed-degraded':
+      return 'failed';
+    case 'skipped-no-infra':
+      return 'unattempted';
+  }
 }
 
 /**
@@ -160,10 +232,32 @@ export class DatasourceConnectionService {
   private readonly policy: DatasourceConnectPolicy;
   private readonly logger?: Logger;
 
+  /**
+   * Last connect verdict per datasource (framework#3827).
+   *
+   * Every `connect()` already produced a {@link ConnectResult} and every caller
+   * threw it away, which is why a datasource that failed at boot was invisible
+   * for the rest of the process: the admin list reported a hardcoded
+   * `'unvalidated'` for everything, and `checkDriversHealth()` cannot see a
+   * driver that was never registered. Retaining the verdict is what lets both
+   * the admin surface and the query-time error say something true.
+   */
+  private readonly states = new Map<string, DatasourceConnectionState>();
+
   constructor(cfg: DatasourceConnectionServiceConfig) {
     this.cfg = cfg;
     this.policy = cfg.policy ?? allowAllConnectPolicy;
     this.logger = cfg.logger;
+  }
+
+  /** The last connect verdict for one datasource, or `undefined` if never attempted. */
+  getConnectionState(name: string): DatasourceConnectionState | undefined {
+    return this.states.get(name);
+  }
+
+  /** Every retained connect verdict, in first-attempt order. */
+  listConnectionStates(): DatasourceConnectionState[] {
+    return Array.from(this.states.values());
   }
 
   /**
@@ -221,23 +315,94 @@ export class DatasourceConnectionService {
    * explicitly bound by objects. Everything else degrades with a warning so an
    * optional replica's connectivity blip never bricks boot. See
    * {@link handleFailure}.
+   *
+   * Whatever the outcome — including the fail-fast throw — it is retained in
+   * {@link getConnectionState} and, when the datasource ends up unusable,
+   * reported to the engine so a query against a bound object can say *why*
+   * instead of a bare "is not registered" (framework#3827 / #3828).
    */
   async connect(
     record: ConnectableDatasource,
-    opts: { objects?: readonly string[]; context?: DatasourceConnectContext } = {},
+    opts: {
+      objects?: readonly string[];
+      context?: DatasourceConnectContext;
+      /**
+       * Register the built driver as the engine's DEFAULT driver, under the
+       * driver's own name (#3826). Set by the runtime for the standalone
+       * `default` datasource. Two deliberate differences from a normal connect:
+       * the driver keeps its natural name (`sql`/`memory`/…) instead of being
+       * stamped with the datasource name — routing to `default` goes through
+       * the engine's default-driver fallback, never `drivers.get('default')`,
+       * and renaming would change every name-keyed log/lookup the pre-#3826
+       * boot produced — and `registerDriver` is called with `isDefault: true`.
+       */
+      asDefault?: boolean;
+    } = {},
+  ): Promise<ConnectResult> {
+    try {
+      const result = await this.attemptConnect(record, opts);
+      this.recordState(result, this.lastPublicDetail);
+      return result;
+    } catch (err) {
+      // A D5 fail-fast verdict. The boot is about to abort, but a host that
+      // catches it (tests, an embedder, a plugin that degrades on its own) must
+      // not be left with a datasource whose state says "never attempted".
+      this.recordState(
+        { name: record.name, status: 'failed-degraded', reason: errMsg(err) },
+        undefined,
+      );
+      throw err;
+    } finally {
+      this.lastPublicDetail = undefined;
+    }
+  }
+
+  /**
+   * Policy-supplied, tenant-safe detail for the connect currently in flight.
+   * Threaded through an instance field rather than the {@link ConnectResult} so
+   * the public result shape stays the operator-facing one: `reason` is
+   * privileged, and only this opt-in string may reach an end user (#3828).
+   */
+  private lastPublicDetail?: string;
+
+  /** Retain the verdict and mirror an unusable datasource into the engine. */
+  private recordState(result: ConnectResult, publicDetail: string | undefined): void {
+    const availability = availabilityOf(result.status);
+    this.states.set(result.name, { ...result, availability });
+    const engine = this.cfg.engine();
+    if (availability === 'available' || availability === 'unattempted') {
+      engine?.clearDatasourceUnavailable?.(result.name);
+      return;
+    }
+    engine?.markDatasourceUnavailable?.({
+      name: result.name,
+      kind: availability === 'blocked' ? 'blocked' : 'failed',
+      ...(publicDetail ? { publicDetail } : {}),
+    });
+  }
+
+  private async attemptConnect(
+    record: ConnectableDatasource,
+    opts: { objects?: readonly string[]; context?: DatasourceConnectContext; asDefault?: boolean } = {},
   ): Promise<ConnectResult> {
     const name = record.name;
     const engine = this.cfg.engine();
     const factory = this.cfg.factory();
 
     // Idempotent: never double-register (e.g. a legacy `onEnable` bridge already
-    // registered this driver — the D8 escape hatch).
-    if (engine?.getDriverByName?.(name)) {
+    // registered this driver — the D8 escape hatch). The default driver keeps
+    // its natural name, so its guard is "does the engine already have a
+    // default", not a name lookup.
+    if (opts.asDefault) {
+      if (engine?.getDefaultDriverName?.()) {
+        return { name, status: 'already-registered' };
+      }
+    } else if (engine?.getDriverByName?.(name)) {
       return { name, status: 'already-registered' };
     }
 
     // Policy gate (fail-closed on throw).
-    let decision;
+    let decision: DatasourceConnectDecision;
     try {
       decision = await this.policy.canConnect(
         { name, driver: record.driver, schemaMode: record.schemaMode, external: record.external },
@@ -248,6 +413,9 @@ export class DatasourceConnectionService {
     }
     if (!decision.allow) {
       this.logger?.info?.(`datasource '${name}': connect denied by policy${decision.reason ? ` (${decision.reason})` : ''}`);
+      // `reason` is operator-facing and stays in logs + the admin list;
+      // only the opt-in `publicReason` may reach a tenant (#3828).
+      this.lastPublicDetail = decision.publicReason;
       return { name, status: 'skipped-policy', reason: decision.reason };
     }
 
@@ -309,13 +477,19 @@ export class DatasourceConnectionService {
       // The engine routes a datasource to a driver by `driver.name === <datasource>`.
       // Prefer the factory's underlying engine driver (the `driver` escape hatch);
       // fall back to the handle. Stamp the name so routing resolves to this pool.
+      // The DEFAULT driver (#3826) keeps its natural name instead: routing to
+      // `default` goes through the engine's default-driver fallback, never
+      // `drivers.get('default')`, and the natural name keeps logs/lookups
+      // byte-for-byte with the pre-#3826 boot.
       const engineDriver = (handle.driver ?? handle) as { name?: string };
-      try {
-        engineDriver.name = name;
-      } catch {
-        /* frozen driver — registration may still work if name already matches */
+      if (!opts.asDefault) {
+        try {
+          engineDriver.name = name;
+        } catch {
+          /* frozen driver — registration may still work if name already matches */
+        }
       }
-      engine.registerDriver(engineDriver);
+      engine.registerDriver(engineDriver, opts.asDefault === true);
       engine.registerDatasourceDef?.({
         name,
         schemaMode: record.schemaMode,
@@ -341,7 +515,8 @@ export class DatasourceConnectionService {
 
   /** Gracefully disconnect a previously-registered datasource pool. */
   async disconnect(name: string): Promise<void> {
-    const driver = this.cfg.engine()?.getDriverByName?.(name) as { disconnect?: () => Promise<void> } | undefined;
+    const engine = this.cfg.engine();
+    const driver = engine?.getDriverByName?.(name) as { disconnect?: () => Promise<void> } | undefined;
     if (typeof driver?.disconnect === 'function') {
       try {
         await driver.disconnect();
@@ -349,13 +524,18 @@ export class DatasourceConnectionService {
         this.logger?.warn?.(`datasource '${name}': disconnect failed: ${errMsg(err)}`);
       }
     }
+    // A removed/updated pool has no verdict any more. Leaving a stale `failed`
+    // behind would make the admin list — and the query-time error — describe a
+    // datasource that no longer exists in that state.
+    this.states.delete(name);
+    engine?.clearDatasourceUnavailable?.(name);
   }
 
   /**
    * Apply the D5 connect-failure policy (also covers D3 credential failures).
    *
    * A boot-time (`declared-auto`) connect failure is **fatal** when the
-   * datasource has no fallback path, which is true in two cases:
+   * datasource has no fallback path, which is true in three cases:
    *
    *  - **(a)** it is `external` with `validation.onMismatch:'fail'` — the author
    *    asked for a hard stop explicitly; or
@@ -365,7 +545,11 @@ export class DatasourceConnectionService {
    *    (framework#3758). Leaving this at a warning produced the worst possible
    *    shape: a server that boots clean, serves most of the app, and fails every
    *    read/write of the bound objects with an error that reads nothing like
-   *    "the analytics database is unreachable".
+   *    "the analytics database is unreachable"; or
+   *  - **(c)** the host marked it {@link ConnectableDatasource.bootCritical} —
+   *    the standalone `default` (#3826): everything WITHOUT a binding routes to
+   *    it, so "no fallback" holds by construction, mirroring the engine-level
+   *    guard (#3741) this connect path replaces.
    *
    * Anything else degrades with a warning: `autoConnect:true` means "connect it
    * if you can" with nothing declaring a dependency on it, and runtime-admin
@@ -403,6 +587,12 @@ export class DatasourceConnectionService {
           `and have no fallback datasource — every read/write of them would fail`,
         );
       }
+      if (record.bootCritical === true) {
+        causes.push(
+          `declared boot-critical by the host — it is the platform's primary datasource and ` +
+          `every object without an explicit binding routes to it`,
+        );
+      }
     }
     if (causes.length === 0) {
       this.logger?.warn?.(`${msg} — degrading (datasource left unconnected)`);
@@ -418,9 +608,10 @@ export class DatasourceConnectionService {
     }
     const banner =
       `⚠️ DEGRADED BOOT: ${msg} (${why}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting ` +
-      `anyway. Queries against the objects bound to it fail with "Datasource '${record.name}' is ` +
-      `not registered" until it is reachable AND the server is restarted: nothing re-runs the ` +
-      `connect. Unset OS_ALLOW_DRIVER_CONNECT_FAILURE to restore fail-fast boot.`;
+      `anyway. Queries against the objects bound to it fail with ERR_DATASOURCE_UNAVAILABLE (HTTP ` +
+      `503) until it is reachable AND the server is restarted: nothing re-runs the connect. ` +
+      `Its state shows as 'error' in Setup → Datasources. Unset OS_ALLOW_DRIVER_CONNECT_FAILURE ` +
+      `to restore fail-fast boot.`;
     this.logger?.warn?.(banner);
     // …and again on a channel the host cannot silence — see the helper's note
     // on `os serve`'s boot-quiet stdout capture.

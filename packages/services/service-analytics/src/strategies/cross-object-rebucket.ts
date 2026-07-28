@@ -121,7 +121,12 @@ export function rebucketCrossObject(
     // Bucket key = base dims (unchanged) + resolved attributes. `` is a
     // separator no group value contains, matching the engine's own convention.
     const keyParts: string[] = [];
-    for (const f of baseDimFields) keyParts.push(`${f}=${String(row[f] ?? '(null)')}`);
+    // JSON-encoded, so the empty bucket (`null` on both aggregation paths since
+    // #3839) stays distinct from a row whose value is the literal string
+    // `"null"` — plain interpolation renders both as `null` and would merge two
+    // real groups into one. Only this composite id is affected; the emitted
+    // bucket keeps the row's own value verbatim below.
+    for (const f of baseDimFields) keyParts.push(`${f}=${JSON.stringify(row[f] ?? null)}`);
     for (const cd of crossDims) keyParts.push(`${cd.outputName}=${String(resolved[cd.outputName])}`);
     const key = keyParts.join('');
 

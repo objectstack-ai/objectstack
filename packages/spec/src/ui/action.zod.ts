@@ -253,6 +253,9 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * If `execute` is provided without `target`, it is lowered into `target` at parse
  * time. Either way `execute` is **dropped from the parsed output** (#3713), so
  * every consumer reads one canonical slot; when both are declared, `target` wins.
+ * Declaring both with *different* values discards the `execute` handler, so it
+ * raises the advisory `action-target-execute-conflict` warning (#3743) — from
+ * `defineStack` and from `os build`/`os validate` — rather than passing silently.
  * 
  * @example Good action names
  * - 'on_close_deal'

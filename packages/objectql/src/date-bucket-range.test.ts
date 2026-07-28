@@ -73,6 +73,12 @@ describe('bucketKeyToCalendarRange exact boundaries', () => {
 
 describe('bucketKeyToCalendarRange rejects unbucketable / out-of-range keys → null (superset fallback)', () => {
   it('null and empty buckets', () => {
+    // #3839 — the empty bucket's key IS `null`, on both the pushed-down and the
+    // in-memory path. It has no calendar span, so the caller drops the range and
+    // drills the unscoped superset instead of inventing a bound.
+    expect(bucketKeyToCalendarRange(null, 'month')).toBeNull();
+    expect(bucketKeyToCalendarRange(undefined, 'month')).toBeNull();
+    // The pre-#3839 sentinel, in case one survives in stored/replayed data.
     expect(bucketKeyToCalendarRange('(null)', 'month')).toBeNull();
     expect(bucketKeyToCalendarRange('', 'day')).toBeNull();
   });

@@ -249,13 +249,52 @@ the `single`-posture deployment (plant-autonomous member admission) and is the
 natural admission UX in `group` posture.
 
 **D9 — Cross-org approval targeting.**
-An approval chain node may name a **target organization** for approver
-resolution (default: the request's org, today's behavior at
-`approval-node.ts:118`). A plant document's escalation step declares
-`organization: <group org>` and resolves group-side position holders. Reads of
-the request by those approvers are covered by D2 (membership union) in `group`
-posture; in `isolated` posture this decision does not apply (cross-org
+An approval **approver** may name a **target organization** for its resolution
+(default: the request's org, today's behavior). A plant document's escalation
+step declares `organization: $root` and resolves group-side position holders.
+Reads of the request by those approvers are covered by D2 (membership union) in
+`group` posture; in `isolated` posture this decision does not apply (cross-org
 approval there remains mirroring via system context, cloud #2937 contract).
+
+*Amended during implementation (#3812). Four points the original text left
+open, each settled from what the code and the authoring model actually
+require:*
+
+1. *Per **approver**, not per node.* The node-level form cannot express the
+   commonest group shape — one node requiring a plant manager **and** a group
+   CFO in parallel (`behavior: 'per_group'`). Expressing it as two serial nodes
+   changes the semantics (parallel co-sign becomes sequential approval), so the
+   node-level form distorts the model rather than merely inconveniencing the
+   author. A node-level default is a strict special case of the per-approver
+   form and remains addable later as sugar; the reverse is not true.
+2. *Symbolic references first: `$root`, `$parent`.* Flow metadata is portable
+   across environments; an organization id is data minted per deployment. A
+   literal id in a flow is therefore unportable by construction, and an AI
+   author cannot know one at authoring time. The symbols express the two common
+   intents against D6's tree with **zero deployment knowledge**. A slug covers
+   what they cannot — notably a **sibling** organization (a shared-services
+   centre approving payables for every plant).
+3. *Legality is "shares a `parent_organization_id` root", not "is an
+   ancestor".* The sibling case above is first-class, as is downward targeting.
+   The rule depends only on the organization tree and **never on the
+   submitter**, so one flow routes identically for everyone — which is what
+   makes a routing bug reproducible. A deployment with no grouping metadata
+   gets a refusal naming D6, not a silent pass.
+4. *Non-`group` postures **refuse** at runtime rather than ignoring.* Posture is
+   environment configuration, so the same portable metadata may be deployed
+   into any posture and no static check can see which. Silently ignoring the
+   declaration would let a `group` → `isolated` migration reroute approvals
+   with no signal — an audit event, not a config detail.
+
+*Two consequences worth stating, both enforced:* an approver type that resolves
+no org-scoped directory (`user` / `field` / `manager` / `team`) **refuses** the
+declaration instead of ignoring it (an author who wrote it believed it did
+something); and a targeted approver who holds no membership in the request's
+organization is **dropped with a warning** naming them, because D2's union
+would otherwise hide the request from someone the router had already committed
+to — routing succeeds, the inbox row is written, and the approver opens a task
+she cannot open. Dropping converts that silent dead-end into the node's
+existing `onEmptyApprovers` policy.
 
 **D10 — Layered master data (group template + org override).**
 A spec-level pattern for the SAP material-master / 用友-金蝶 distribution

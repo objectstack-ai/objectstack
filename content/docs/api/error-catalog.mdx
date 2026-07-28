@@ -13,7 +13,7 @@ ObjectStack uses a structured error system with **9 error categories** and **51 
 </Callout>
 
 <Callout type="warn">
-**Spec vs. wire format:** The codes below are `StandardErrorCode` — the standardized, lowercase snake_case contract that plugin/hook authors should throw with (see [Server-Side Error Handling](/docs/api/error-handling-server)). The kernel REST server (`@objectstack/rest`) that serves `/api/v1/data/*` today emits a flatter envelope with SCREAMING_SNAKE_CASE codes instead — e.g. `VALIDATION_FAILED`, `PERMISSION_DENIED`, `RECORD_NOT_FOUND`, `CONCURRENT_UPDATE` — not the codes in this catalog. See the [API Overview](/docs/api#error-handling) for both wire formats in use and [Wire Format](/docs/api/wire-format#7-error-response-format) for JSON examples.
+**Spec vs. wire format:** The codes below are `StandardErrorCode` — the standardized, lowercase snake_case contract that plugin/hook authors should throw with (see [Server-Side Error Handling](/docs/api/error-handling-server)). The kernel REST server (`@objectstack/rest`) that serves `/api/v1/data/*` today emits a flatter envelope with SCREAMING_SNAKE_CASE codes instead — e.g. `VALIDATION_FAILED`, `PERMISSION_DENIED`, `RECORD_NOT_FOUND`, `CONCURRENT_UPDATE`, `ERR_DATASOURCE_UNAVAILABLE` — not the codes in this catalog. See the [API Overview](/docs/api#error-handling) for both wire formats in use and [Wire Format](/docs/api/wire-format#7-error-response-format) for JSON examples.
 </Callout>
 
 ---

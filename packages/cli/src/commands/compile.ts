@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
-import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, normalizeStackInput, lintDeprecatedAliases, type ConversionNotice } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { validateStackExpressions } from '@objectstack/lint';
@@ -92,8 +92,75 @@ export default class Compile extends Command {
       }
 
       // 2. Normalize map-formatted stack definition.
+      //    The ADR-0087 D2 conversion layer runs here (inside normalizeStackInput).
+      //    Each rewrite emits a structured deprecation notice, and this command
+      //    used to drop every one of them: `os validate` passed a sink and
+      //    surfaced them, `os build` passed none. That is the #3782 parity class
+      //    — the two surfaces disagreeing about what an author is told — and it
+      //    bites harder than it reads, because the notice is the ONLY warning an
+      //    old-shape author gets before the conversion retires and their metadata
+      //    stops loading. Five conversions are live today (protocol 11 and 15),
+      //    so the gap is real, not hypothetical.
       if (!flags.json) printStep('Normalizing stack definition...');
-      const normalized = normalizeStackInput(config as Record<string, unknown>);
+      const conversionNotices: ConversionNotice[] = [];
+      const normalized = normalizeStackInput(config as Record<string, unknown>, {
+        onConversionNotice: (n) => conversionNotices.push(n),
+      });
+      if (conversionNotices.length > 0 && !flags.json) {
+        console.log('');
+        for (const n of conversionNotices) {
+          printWarning(
+            `${n.path}: '${n.from}' → '${n.to}' (converted at load; conversion '${n.conversionId}', retires in protocol ${n.retiresIn})`,
+          );
+        }
+      }
+
+      // 2a. [#3743] PRE-PARSE authoring lint. Everything in the post-parse lint
+      //     block (3d and below) reads `result.data`, which is the wrong side of
+      //     the fence for an alias the pipeline itself consumes: `lowerCallables`
+      //     drops a function-valued `execute` and the `ActionSchema` transform
+      //     drops a string one (#3742), so by then "the author declared both
+      //     slots" is no longer representable. This pass runs on `normalized` —
+      //     before lowering, before parse — where both slots are still as
+      //     written, and it is the same input `os validate` lints, so the two
+      //     surfaces agree by construction (#3782).
+      //
+      //     It reports the discards THIS pipeline performs. A stack authored
+      //     with strict `defineStack` has already been parsed inside its own
+      //     config module, so its alias was consumed — and warned about — there;
+      //     this pass covers everything that skipped that gate: a plain object
+      //     default-export, `defineStack(…, { strict: false })`, and inline
+      //     function handlers (`target: z.string()` rejects those, so they can
+      //     only reach the pipeline via a non-strict path and are lowered here).
+      //
+      //     Advisory today; `severity: 'error'` is honoured so a future rule
+      //     gates the build here without further wiring.
+      if (!flags.json) printStep('Checking deprecated aliases (#3743)...');
+      const aliasLint = lintDeprecatedAliases(normalized as Record<string, unknown>);
+      const aliasLintErrors = aliasLint.filter((f) => f.severity === 'error');
+      const aliasLintWarnings = aliasLint.filter((f) => f.severity !== 'error');
+      if (aliasLintWarnings.length > 0 && !flags.json) {
+        console.log('');
+        for (const f of aliasLintWarnings) {
+          printWarning(`${f.where}: ${f.message}`);
+          console.log(chalk.dim(`    ${f.hint}`));
+          console.log(chalk.dim(`    rule: ${f.rule}`));
+        }
+      }
+      if (aliasLintErrors.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, error: 'deprecated alias check failed', issues: aliasLintErrors }, 0, { compact: true });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Deprecated alias check failed (${aliasLintErrors.length} issue${aliasLintErrors.length > 1 ? 's' : ''})`);
+        for (const f of aliasLintErrors) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}`));
+        }
+        this.exit(1);
+      }
 
       // 2b. Lower inline `function` handlers (Hook.handler, top-level
       //     `functions`) to stable string refs BEFORE Zod parse. This
@@ -744,6 +811,9 @@ export default class Compile extends Command {
           runtimeModule: runtimeBundle?.outputFileName ?? null,
           runtimeModuleSize: runtimeBundle?.size ?? 0,
           warnings: widgetWarnings,
+          // Same key `os validate --json` uses, so a CI consumer reads one shape
+          // from either command rather than learning two.
+          conversions: conversionNotices,
           specVersionGap: specGap,
           stats,
           duration: timer.elapsed(),

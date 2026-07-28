@@ -53,7 +53,10 @@ const DEAL_SCHEMA = {
 };
 
 function makeDriver() {
-  const seen: { findAst?: any; findOneAst?: any; countAst?: any; aggregateAst?: any } = {};
+  const seen: {
+    findAst?: any; findOneAst?: any; countAst?: any; aggregateAst?: any;
+    updateManyAst?: any; deleteManyAst?: any; updateId?: any; deleteId?: any;
+  } = {};
   const driver: any = {
     name: 'memory',
     supports: {},
@@ -63,9 +66,11 @@ function makeDriver() {
     findOne: vi.fn(async (_o: string, ast: any) => { seen.findOneAst = ast; return null; }),
     count: vi.fn(async (_o: string, ast: any) => { seen.countAst = ast; return 0; }),
     aggregate: vi.fn(async (_o: string, ast: any) => { seen.aggregateAst = ast; return []; }),
-    create: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
+    create: vi.fn(async (_o: string, d: any) => d),
+    update: vi.fn(async (_o: string, id: any, d: any) => { seen.updateId = id; return { id, ...d }; }),
+    updateMany: vi.fn(async (_o: string, ast: any) => { seen.updateManyAst = ast; return { modified: 0 }; }),
+    delete: vi.fn(async (_o: string, id: any) => { seen.deleteId = id; return true; }),
+    deleteMany: vi.fn(async (_o: string, ast: any) => { seen.deleteManyAst = ast; return { deleted: 0 }; }),
   };
   return { driver, seen };
 }
@@ -173,6 +178,79 @@ describe('engine filter placeholders (framework#3582)', () => {
     await ql.find('deal', { where: { title: 'acme {x} deal', owner: 'usr_2' }, context: CTX });
 
     expect(seen.findAst?.where).toEqual({ title: 'acme {x} deal', owner: 'usr_2' });
+  });
+
+  // ── Write path (framework#3810) ────────────────────────────────────────
+  // The evaluator originally reached only find/findOne/count/aggregate, so the
+  // SAME filter selected different rows depending on the verb: `find` matched
+  // the signed-in user's rows while `update`/`delete` compared the literal
+  // token text and matched none. #3106 one layer down — the switch was right,
+  // the call sites were incomplete.
+  describe('write path', () => {
+    it('updateMany: the driver receives the resolved filter, not the token', async () => {
+      const { driver, seen } = makeDriver();
+      const ql = await makeEngine(driver);
+
+      await ql.update('deal', { title: 'x' }, {
+        where: { owner: '{current_user_id}' }, multi: true, context: CTX,
+      } as any);
+
+      expect(seen.updateManyAst?.where).toEqual({ owner: 'usr_1' });
+    });
+
+    it('deleteMany: the driver receives the resolved filter, not the token', async () => {
+      const { driver, seen } = makeDriver();
+      const ql = await makeEngine(driver);
+
+      await ql.delete('deal', {
+        where: { close_date: { $lt: '{current_year_start}' } }, multi: true, context: CTX,
+      } as any);
+
+      expect(seen.deleteManyAst?.where).toEqual({ close_date: { $lt: THIS_YEAR_START } });
+    });
+
+    it('resolves BEFORE the by-id fast path claims a scalar where.id', async () => {
+      // Ordering regression: the token would otherwise be bound as the primary
+      // key itself (`WHERE id = '{current_user_id}'`).
+      const { driver, seen } = makeDriver();
+      const ql = await makeEngine(driver);
+
+      await ql.update('deal', { title: 'x' }, { where: { id: '{current_user_id}' }, context: CTX } as any);
+
+      expect(seen.updateId).toBe('usr_1');
+    });
+
+    it('read and write agree on the same filter', async () => {
+      const { driver, seen } = makeDriver();
+      const ql = await makeEngine(driver);
+      const filter = { owner: '{current_user_id}' };
+
+      await ql.find('deal', { where: filter, context: CTX });
+      await ql.update('deal', { title: 'x' }, { where: filter, multi: true, context: CTX } as any);
+
+      expect(seen.updateManyAst?.where).toEqual(seen.findAst?.where);
+    });
+
+    it('an unknown placeholder throws before anything is written', async () => {
+      const { driver } = makeDriver();
+      const ql = await makeEngine(driver);
+
+      await expect(
+        ql.delete('deal', { where: { owner: '{current_user}' }, multi: true, context: CTX } as any),
+      ).rejects.toThrow(/current_user_id/);
+      expect(driver.deleteMany).not.toHaveBeenCalled();
+      expect(driver.delete).not.toHaveBeenCalled();
+    });
+
+    it('does not mutate the caller options — flow node config is reused', async () => {
+      const { driver } = makeDriver();
+      const ql = await makeEngine(driver);
+      const options: any = { where: { owner: '{current_user_id}' }, multi: true, context: CTX };
+
+      await ql.update('deal', { title: 'x' }, options);
+
+      expect(options.where).toEqual({ owner: '{current_user_id}' });
+    });
   });
 
   it('does not mutate the caller filter — view metadata is shared across requests', async () => {

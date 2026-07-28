@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectTranslationDataSchema, TranslationDataSchema, type TranslationBundle } from './translation.zod';
+import { GetFieldLabelsResponseSchema, GetLocalesResponseSchema } from '../api/protocol.zod';
 import {
   resolveViewLabel,
   resolveViewDescription,
@@ -11,6 +12,8 @@ import {
   resolveActionResultDialog,
   translateAction,
   translateMetadataDocument,
+  resolveObjectFieldLabels,
+  toLocaleDescriptors,
 } from './i18n-resolver';
 
 describe('ObjectTranslationDataSchema (_views/_actions extensions)', () => {
@@ -1036,5 +1039,147 @@ describe('translateObject inline actions (objectstack#3370)', () => {
     });
     expect(out.label).toBe('审批请求');
     expect(Object.hasOwn(out, 'actions')).toBe(false);
+  });
+});
+
+// ==========================================
+// resolveObjectFieldLabels — the `/i18n/labels/:object/:locale` body
+// ==========================================
+
+describe('resolveObjectFieldLabels (objectstack#3833, #3847)', () => {
+  const data = TranslationDataSchema.parse({
+    objects: {
+      contact: {
+        label: 'Contact',
+        fields: {
+          first_name: { label: 'First Name' },
+          email: { label: 'Email', help: 'Primary address' },
+          status: {
+            label: 'Status',
+            options: { open: 'Open', closed: 'Closed' },
+          },
+          phone: { help: 'Mobile preferred' },
+        },
+      },
+    },
+    messages: { save: 'Save' },
+  });
+
+  it('enumerates the labels a locale actually translates', () => {
+    expect(resolveObjectFieldLabels(data, 'contact')).toEqual({
+      first_name: { label: 'First Name' },
+      email: { label: 'Email', help: 'Primary address' },
+      status: { label: 'Status', options: { open: 'Open', closed: 'Closed' } },
+    });
+  });
+
+  it('carries the help and options the bundle holds (#3847)', () => {
+    // These are the translations the endpoint used to discard by emitting a
+    // bare string per field. objectui needs exactly them, and had to read the
+    // full-bundle route to get them.
+    const out = resolveObjectFieldLabels(data, 'contact');
+    expect(out.email?.help).toBe('Primary address');
+    expect(out.status?.options).toEqual({ open: 'Open', closed: 'Closed' });
+  });
+
+  it('omits help/options entirely rather than emitting empty ones', () => {
+    // An `options: {}` would claim the field has translated options and hand
+    // back none; `help: ''` would erase a caller's source help text.
+    const out = resolveObjectFieldLabels(data, 'contact');
+    expect(out.first_name).toEqual({ label: 'First Name' });
+    expect(Object.hasOwn(out.first_name!, 'help')).toBe(false);
+    expect(Object.hasOwn(out.first_name!, 'options')).toBe(false);
+  });
+
+  it('omits fields carrying no label rather than emitting a blank one', () => {
+    // Partial translation is the normal state (see ObjectTranslationDataSchema),
+    // and callers merge this over their source labels — a '' would erase them.
+    // `phone` has help but no label, so it yields no entry at all — which is
+    // what lets `ResolvedFieldLabel.label` be a required string.
+    expect(resolveObjectFieldLabels(data, 'contact')).not.toHaveProperty('phone');
+  });
+
+  it('returns {} for an untranslated object, a bundle with no objects, and no bundle', () => {
+    expect(resolveObjectFieldLabels(data, 'account')).toEqual({});
+    expect(resolveObjectFieldLabels({ messages: { save: 'Save' } }, 'contact')).toEqual({});
+    expect(resolveObjectFieldLabels(undefined, 'contact')).toEqual({});
+  });
+
+  it('never matches the retired flat `o.<object>.fields.<field>` dialect', () => {
+    // The shape the dispatcher scanned for until #3833. It is not a bundle
+    // any producer writes, and reading it as one is what returned {} in
+    // production while a test built on the same fiction stayed green.
+    const flat = {
+      'o.contact.fields.first_name': 'First Name',
+      'o.contact.label': 'Contact',
+    } as unknown as Parameters<typeof resolveObjectFieldLabels>[0];
+    expect(resolveObjectFieldLabels(flat, 'contact')).toEqual({});
+  });
+
+  /**
+   * The guard that would have caught #3847 on the day it was introduced:
+   * build the response the surfaces actually send and parse it with the schema
+   * that declares it. Both used to emit `Record<string, string>` against a
+   * schema declaring `Record<string, { label, help?, options? }>` — a
+   * mismatch no test compared, because none of them ever put the emitted
+   * value and the declared contract in the same assertion.
+   */
+  it('produces a body that satisfies GetFieldLabelsResponseSchema (#3847)', () => {
+    const response = {
+      object: 'contact',
+      locale: 'en-US',
+      labels: resolveObjectFieldLabels(data, 'contact'),
+    };
+    const parsed = GetFieldLabelsResponseSchema.safeParse(response);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.labels.status?.options?.open).toBe('Open');
+  });
+
+  it('an empty label map is still a valid response body', () => {
+    const parsed = GetFieldLabelsResponseSchema.safeParse({
+      object: 'account',
+      locale: 'en-US',
+      labels: resolveObjectFieldLabels(data, 'account'),
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
+
+// ==========================================
+// toLocaleDescriptors — the `/i18n/locales` body
+// ==========================================
+
+describe('toLocaleDescriptors', () => {
+  it('maps codes to the descriptors GetLocalesResponseSchema declares', () => {
+    expect(toLocaleDescriptors(['en', 'zh-CN'], 'en')).toEqual([
+      { code: 'en', label: 'en', isDefault: true },
+      { code: 'zh-CN', label: 'zh-CN', isDefault: false },
+    ]);
+  });
+
+  it('produces a body that satisfies GetLocalesResponseSchema', () => {
+    // Same guard as the field-labels one above: emitted value vs DECLARED
+    // contract, not vs a hand-written literal. `getLocales()` hands back a
+    // bare `string[]`, and passing it through unmapped is what made one
+    // endpoint answer in two shapes depending on the provider.
+    const parsed = GetLocalesResponseSchema.safeParse({
+      locales: toLocaleDescriptors(['en', 'ja-JP'], 'ja-JP'),
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.locales.find((l) => l.code === 'ja-JP')?.isDefault).toBe(true);
+  });
+
+  it('marks nothing default when the provider has no default locale', () => {
+    // `getDefaultLocale` is optional on `II18nService`. `isDefault` is
+    // REQUIRED by the schema, so an absent default must yield `false`, never
+    // `undefined` — which would fail the parse.
+    const out = toLocaleDescriptors(['en', 'fr'], undefined);
+    expect(out.every((l) => l.isDefault === false)).toBe(true);
+    expect(GetLocalesResponseSchema.safeParse({ locales: out }).success).toBe(true);
+  });
+
+  it('returns [] for an absent or empty locale list', () => {
+    expect(toLocaleDescriptors(undefined, 'en')).toEqual([]);
+    expect(toLocaleDescriptors([], 'en')).toEqual([]);
   });
 });

@@ -121,61 +121,83 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
   }, BOOT_TIMEOUT);
 });
 
-// ADR-0062 (Variant A) — the standalone `default` driver's CONSTRUCTION is
-// unified: the user-facing kinds (memory / better-sqlite3 / postgres / mongodb)
-// go through the SAME `createDefaultDatasourceDriverFactory` used for
-// declared/runtime datasources, so there is one "driver kind → instance" path.
-// The pure-JS WASM sqlite driver stays bespoke (it's the standalone-specific
-// CI-safe default, not a user-creatable datasource type — its only construction
-// site). These tests extract the constructed driver from the stack's
-// `DriverPlugin` and exercise it directly (connect → syncSchema → create →
-// find), proving the right driver is built per kind AND that it actually
-// connects + does I/O — without booting the full kernel (the MetadataPlugin
-// file-artifact boot doesn't play well with vitest's module runner, and isn't
-// what this test is about). postgres/mongodb need a live server, so they're
-// covered by the factory's own usage + the runtime-admin path.
-describe('createStandaloneStack — default driver construction unified via the factory (ADR-0062)', () => {
+// ADR-0062 D1 (#3826) — the standalone `default` datasource is a DECLARATION.
+// The stack no longer constructs a driver: it translates the database URL into
+// a `{ driver, config }` definition carried by `DefaultDatasourcePlugin`, which
+// connects it at boot through the shared `DatasourceConnectionService`. These
+// tests verify (a) the URL → definition translation per kind, and (b) that the
+// definition round-trips through the SAME shared factory the plugin uses at
+// boot (connect → syncSchema → create → find) — without booting the full
+// kernel (the MetadataPlugin file-artifact boot doesn't play well with
+// vitest's module runner; the full-kernel path is covered by
+// `default-datasource-plugin.test.ts`). postgres/mongodb need a live server,
+// so they're covered by the factory's own usage + the runtime-admin path.
+describe('createStandaloneStack — default datasource declared, built via the shared factory (ADR-0062 D1)', () => {
   let dir: string;
   beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'os-standalone-driver-')); });
   afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* noop */ } });
 
   const NOTE = { name: 'note', fields: { id: { type: 'text' }, title: { type: 'text' } } };
 
-  async function driverRoundTrip(
+  function defaultDefOf(stack: Awaited<ReturnType<typeof createStandaloneStack>>): {
+    plugin: any;
+    def: { driver: string; config?: Record<string, unknown> };
+  } {
+    const plugin = stack.plugins.find((p: any) => p?.name === 'com.objectstack.runtime.default-datasource');
+    expect(plugin, 'stack must carry the DefaultDatasourcePlugin').toBeDefined();
+    return { plugin, def: (plugin as any).def };
+  }
+
+  async function definitionRoundTrip(
     cfg: Parameters<typeof createStandaloneStack>[0],
-  ): Promise<{ kind: string | undefined; titles: string[] }> {
+  ): Promise<{ driverId: string; kind: string | undefined; titles: string[] }> {
     const stack = await createStandaloneStack(cfg);
-    const plugin = stack.plugins.find(
-      (p: any) => p?.driver && typeof p.driver.find === 'function',
-    ) as { driver: any } | undefined;
-    const driver = plugin!.driver;
+    const { def } = defaultDefOf(stack);
+    const { createDefaultDatasourceDriverFactory } = await import('@objectstack/service-datasource');
+    const handle: any = await createDefaultDatasourceDriverFactory({ dev: false }).create({
+      driver: def.driver,
+      config: def.config ?? {},
+    });
+    const driver = handle.driver ?? handle;
     const kind = driver?.constructor?.name as string | undefined;
     await driver.connect?.();
     try {
       await driver.syncSchema('note', NOTE);
       await driver.create('note', { id: 'n1', title: 'hello-driver' });
       const rows = (await driver.find('note', {})) as Array<{ title?: string }>;
-      return { kind, titles: rows.map((r) => r.title as string) };
+      return { driverId: def.driver, kind, titles: rows.map((r) => r.title as string) };
     } finally {
       try { await driver.disconnect?.(); } catch { /* noop */ }
     }
   }
 
-  it('memory:// → InMemoryDriver (factory), connects + round-trips', async () => {
-    const r = await driverRoundTrip({ databaseUrl: 'memory://default-driver' });
+  it('memory:// → declares driver "memory"; factory builds InMemoryDriver that round-trips', async () => {
+    const r = await definitionRoundTrip({ databaseUrl: 'memory://default-driver' });
+    expect(r.driverId).toBe('memory');
     expect(r.kind).toMatch(/InMemoryDriver$/);
     expect(r.titles).toContain('hello-driver');
   }, BOOT_TIMEOUT);
 
-  it('file: → better-sqlite3 SqlDriver (factory), connects + round-trips', async () => {
-    const r = await driverRoundTrip({ databaseUrl: `file:${join(dir, 'better.db')}` });
+  it('file: → declares driver "sqlite" with the file path; factory builds SqlDriver that round-trips', async () => {
+    const r = await definitionRoundTrip({ databaseUrl: `file:${join(dir, 'better.db')}` });
+    expect(r.driverId).toBe('sqlite');
     expect(r.kind).toMatch(/SqlDriver$/);
     expect(r.titles).toContain('hello-driver');
   }, BOOT_TIMEOUT);
 
-  it('databaseDriver:sqlite-wasm → SqliteWasmDriver (bespoke), connects + round-trips', async () => {
-    const r = await driverRoundTrip({ databaseDriver: 'sqlite-wasm', databaseUrl: `file:${join(dir, 'wasm.db')}` });
+  it('databaseDriver:sqlite-wasm → declares driver "sqlite-wasm"; factory builds SqliteWasmDriver that round-trips', async () => {
+    const r = await definitionRoundTrip({ databaseDriver: 'sqlite-wasm', databaseUrl: `file:${join(dir, 'wasm.db')}` });
+    expect(r.driverId).toBe('sqlite-wasm');
     expect(r.kind).toMatch(/SqliteWasmDriver$/);
     expect(r.titles).toContain('hello-driver');
+  }, BOOT_TIMEOUT);
+
+  it('the DefaultDatasourcePlugin precedes ObjectQLPlugin (schema sync needs the driver)', async () => {
+    const stack = await createStandaloneStack({ databaseUrl: 'memory://default-order' });
+    const names = stack.plugins.map((p: any) => String(p?.name ?? p?.constructor?.name ?? ''));
+    const dsIdx = names.indexOf('com.objectstack.runtime.default-datasource');
+    const qlIdx = names.findIndex((n: string) => /objectql/i.test(n));
+    expect(dsIdx).toBeGreaterThanOrEqual(0);
+    expect(qlIdx).toBeGreaterThan(dsIdx);
   }, BOOT_TIMEOUT);
 });

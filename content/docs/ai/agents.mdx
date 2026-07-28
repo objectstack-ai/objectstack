@@ -137,7 +137,7 @@ own `ask` / `build` records use exactly these fields):
 | `model` | Provider + model config (`provider`: `openai` \| `azure_openai` \| `anthropic` \| `local`) |
 | `skills` | Skill names to attach (the primary Agent → Skill → Tool capability model) |
 | `tools` | Direct tool **references** `{ type, name, description }` — `type` is `action` \| `flow` \| `query` \| `vector_search`; `name` points at an existing Action/Flow/query |
-| `knowledge` | RAG access: `{ topics: string[], indexes: string[] }` |
+| `knowledge` | RAG access: `{ sources: string[], indexes: string[] }`. `sources` is the canonical key the renderer reads; `topics` is a deprecated alias folded into it at parse time |
 
 There is no `type` field and no fixed agent "type" taxonomy — behaviour comes from
 persona, instructions, skills, and tools. There are no `triggers` / `schedule`
@@ -199,9 +199,9 @@ Always be professional and data-driven.`,
     { type: 'action', name: 'generate_email', description: 'Generate a personalized email template' },
   ],
 
-  // RAG access: topics to recruit knowledge from + vector store indexes.
+  // RAG access: sources to recruit knowledge from + vector store indexes.
   knowledge: {
-    topics: ['sales-playbook', 'leads', 'opportunities'],
+    sources: ['sales-playbook', 'leads', 'opportunities'],
     indexes: ['sales_docs'],
   },
 });
@@ -239,7 +239,7 @@ Always be empathetic and solution-focused.`,
   ],
 
   knowledge: {
-    topics: ['support-kb', 'cases'],
+    sources: ['support-kb', 'cases'],
     indexes: ['support_docs'],
   },
 });
@@ -313,7 +313,7 @@ Use the data tools to query records and aggregate metrics.`,
   ],
 
   knowledge: {
-    topics: ['opportunities', 'pipeline'],
+    sources: ['opportunities', 'pipeline'],
     indexes: ['sales_docs'],
   },
 });

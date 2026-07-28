@@ -75,10 +75,12 @@
         },
         "modifyAllRecords": {
           "status": "live",
+          "proof": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts#owner-anchor-and-bulk-writes",
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:60"
         },
         "readScope": {
           "status": "live",
+          "proof": "packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts#showcase-scope-depth",
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (getEffectiveScope) + packages/plugins/plugin-sharing/src/sharing-service.ts (owner-match widened by readScope; hierarchy values delegated to IHierarchyScopeResolver)",
           "note": "ADR-0057 D1 — read access DEPTH (own/own_and_reports/unit/unit_and_below/org). own/org enforced in open edition; hierarchy values via the enterprise hierarchy-scope-resolver (fail-closed to owner-only when absent; defineStack requires 'hierarchy-security'). Proven: packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts."
         },
@@ -142,6 +144,7 @@
         },
         "check": {
           "status": "live",
+          "proof": "packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts#showcase-d3-d4-capabilities",
           "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts"
         },
         "positions": {

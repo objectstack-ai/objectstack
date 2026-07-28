@@ -149,10 +149,65 @@ one failed start reports *all* the misconfigured ones.
 [engine-level driver-connect guard](/docs/data-modeling/drivers#startup-a-driver-that-cannot-connect-aborts-the-boot) —
 in an explicitly degraded state announced by a `DEGRADED BOOT` banner. The
 datasource stays unconnected for the process lifetime: nothing re-runs the
-connect, so queries against its objects keep failing with
-`Datasource 'x' is not registered` even after the database comes back. Do not set
-it in production.
+connect, so queries against its objects keep failing until the server is
+restarted. Do not set it in production.
 </Callout>
+
+### Seeing the state of a datasource
+
+Every connect attempt's verdict is retained, so a datasource that is down no
+longer has to be diagnosed by restarting the server and re-reading boot logs
+([#3827](https://github.com/objectstack-ai/objectstack/issues/3827)).
+
+**Setup → Datasources** and `GET /api/v1/datasources` report a `status` per
+datasource:
+
+| `status` | Meaning |
+|:---|:---|
+| `ok` | A live driver is registered and routable. |
+| `error` | A connect was attempted and failed. `statusReason` carries the cause. |
+| `blocked` | The host's connect policy refused it — a decision, not a fault. It will not clear on its own. |
+| `unvalidated` | No connect attempted: a `managed` datasource left metadata-only by the gate above, or a runtime row nobody has tested. |
+
+`statusReason` is **operator-facing** and may name hosts, ports, or internal
+plans — this surface is already admin-gated.
+
+Note that `checkDriversHealth()` (and therefore `/ready`) cannot see these: a
+datasource that never connected was never registered as a driver, so it is
+*absent* from the health probe rather than reported unhealthy. Readiness is
+deliberately **not** gated on them — an optional datasource being down must not
+pull an otherwise-working replica out of the load balancer.
+
+### What a query against an unusable datasource says
+
+An object bound to a datasource with no live driver fails with
+`ERR_DATASOURCE_UNAVAILABLE` (HTTP **503**), and the message says which situation
+it is ([#3828](https://github.com/objectstack-ai/objectstack/issues/3828)):
+refused by policy, or a connect that failed under
+`OS_ALLOW_DRIVER_CONNECT_FAILURE`. A datasource name that was never declared
+still gets the original `is not registered` — that one really is an authoring
+bug, and there is nothing to add.
+
+The error **never carries the underlying cause**: connect errors routinely
+contain hosts, ports and DSNs, and a policy's `reason` is written for operators.
+Both stay in the logs and the admin list. A host that wants to tell tenants
+something specific sets `publicReason` on its connect decision — opt-in, and the
+only string that reaches an end user:
+
+```typescript
+const policy: DatasourceConnectPolicy = {
+  canConnect: (ds) =>
+    allowedFor(tenant, ds)
+      ? { allow: true }
+      : {
+          allow: false,
+          // operator-facing: logs + Setup → Datasources only
+          reason: `egress allow-list miss for ${ds.name} (${tenant.id}, plan=${tenant.plan})`,
+          // tenant-facing: appended to the query-time error
+          publicReason: 'External datasources require the Scale plan.',
+        },
+};
+```
 
 ## 4. Credentials
 

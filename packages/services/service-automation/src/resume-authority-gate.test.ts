@@ -23,6 +23,7 @@ import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { AutomationEngine } from './engine.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
+import { registerMapNode } from './builtin/map-node.js';
 
 function silentLogger(): any {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
@@ -267,6 +268,87 @@ describe('resume authorization gate (#3801)', () => {
 
       expect(resumed.success).toBe(true);
       expect(downstream).toEqual(['after']);
+    });
+  });
+
+  // ── map chains: the signal would ADVANCE PAST the child (#3853) ───────
+  //
+  // A `map` pause is the batch-approval shape, and unlike `subflow` the signal
+  // is NOT delegated — the map node re-runs, and `$mapState.started` was
+  // already advanced past the in-flight item before the suspend. So resuming
+  // the parent skips the item whose decision is still open. The run id a
+  // launcher holds is the map parent's, which made it the reachable one.
+
+  describe('through a map pause', () => {
+    /** Parent whose `map` node runs a per-item child that parks on `pauseType`. */
+    function registerBatch(e: AutomationEngine, pauseType: string): void {
+      registerMapNode(e, pluginCtx());
+      e.registerFlow('one_item', pauseFlow('one_item', pauseType) as never);
+      e.registerFlow('batch_flow', {
+        name: 'batch_flow',
+        label: 'batch_flow',
+        type: 'autolaunched',
+        variables: [{ name: 'items', type: 'list', isInput: true }],
+        nodes: [
+          { id: 'bs', type: 'start', label: 'Start' },
+          {
+            id: 'signoffs', type: 'map', label: 'Sign off each',
+            config: { collection: '{items}', iteratorVariable: 'task', flowName: 'one_item', outputVariable: 'results' },
+          },
+          { id: 'be', type: 'end', label: 'End' },
+        ],
+        edges: [
+          { id: 'b1', source: 'bs', target: 'signoffs' },
+          { id: 'b2', source: 'signoffs', target: 'be' },
+        ],
+      } as never);
+    }
+
+    const launch = (e: AutomationEngine) =>
+      e.execute('batch_flow', { params: { items: [{ id: 't1' }, { id: 't2' }] } });
+    const mapState = (e: AutomationEngine, runId: string) =>
+      (e as any).suspendedRuns.get(runId)?.variables?.['signoffs.$mapState'];
+
+    it('refuses a resume of the MAP PARENT while an item is parked on a gated node', async () => {
+      registerBatch(engine, 'gated_pause');
+      const paused = await launch(engine);
+      expect(mapState(engine, paused.runId!)).toEqual({ started: 1, results: [] });
+
+      // Exactly what the route builds from an empty body.
+      const refused = await engine.resume(paused.runId!, {});
+
+      expect(refused.code).toBe('forbidden');
+      expect(refused.error).toMatch(/waiting on run/);
+      // The map did NOT advance past item 1, and nothing was consumed.
+      expect(mapState(engine, paused.runId!)).toEqual({ started: 1, results: [] });
+      expect(engine.listSuspendedRuns()).toHaveLength(2); // parent + item 1
+      expect(downstream).toEqual([]);
+    });
+
+    it('lets the item complete through its owning service, which advances the map', async () => {
+      registerBatch(engine, 'gated_pause');
+      await launch(engine);
+      const item1 = engine.listSuspendedRuns().find(r => r.flowName === 'one_item')!;
+
+      // The service decides item 1 — the child bubbles up and the map moves on.
+      const ok = await engine.resume(item1.runId, {
+        branchLabel: 'approve', [RESUME_AUTHORITY_SERVICE]: true,
+      });
+
+      expect(ok.success).toBe(true);
+      const parent = engine.listSuspendedRuns().find(r => r.flowName === 'batch_flow')!;
+      expect(mapState(engine, parent.runId).started).toBe(2); // item 2 now in flight
+      expect(downstream).toEqual(['after']);                   // item 1 really ran through
+    });
+
+    it('leaves a map over ungated items resumable', async () => {
+      registerBatch(engine, 'open_pause');
+      const paused = await launch(engine);
+
+      const resumed = await engine.resume(paused.runId!, {});
+
+      expect(resumed.code).toBeUndefined();
+      expect(resumed.success).toBe(true);
     });
   });
 });

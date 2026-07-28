@@ -637,7 +637,9 @@ export class AnalyticsService implements IAnalyticsService {
       (result as AnalyticsResultWithDrill).drillRanges = result.rows.map((row) => {
         const ranges: Record<string, { field: string; gte: string; lt: string }> = {};
         for (const { d, granularity, instant } of rangeDims) {
-          const cal = bucketKeyToCalendarRange(row[d.name] as string, granularity);
+          // A row in the empty bucket carries `null` here (#3839) and yields no
+          // range, so that row simply gets no drill bound — the superset.
+          const cal = bucketKeyToCalendarRange(row[d.name] as string | null, granularity);
           if (cal) {
             ranges[d.name] = { field: d.field as string, gte: bound(cal.start, instant), lt: bound(cal.end, instant) };
           }

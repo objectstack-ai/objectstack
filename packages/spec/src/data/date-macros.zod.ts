@@ -21,11 +21,15 @@ import { z } from 'zod';
  * - **Client** — `resolveDateMacros()` in `@object-ui/core`, just
  *   before the filter is handed to the data source.
  * - **Server** — `resolveFilterTokens()` in `@objectstack/core`, wired
- *   into the ObjectQL read path (`find`/`findOne`/`count`/`aggregate`)
- *   and the analytics dataset executor. Filters that reach the database
- *   WITHOUT passing through a renderer — dashboard widgets, dataset
- *   definitions, REST query params — need this: before it, the token
- *   compared as a literal string and matched nothing.
+ *   into the ObjectQL read AND write paths (`find`/`findOne`/`count`/
+ *   `aggregate`/`update`/`delete`) and the analytics dataset executor.
+ *   Filters that reach the database WITHOUT passing through a renderer —
+ *   dashboard widgets, dataset definitions, REST query params, flow node
+ *   filters — need this: before it, the token compared as a literal
+ *   string and matched nothing. The write verbs are covered for the same
+ *   reason (#3810): one filter must select one row set regardless of
+ *   which verb consumes it, or a flow's `find` preview and its
+ *   `update` act on different rows.
  *
  * Either way the DRIVER only ever sees ISO date / timestamp strings,
  * never `{tokens}`. Translating an ISO comparand into a column's on-disk

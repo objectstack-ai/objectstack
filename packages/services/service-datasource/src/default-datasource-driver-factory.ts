@@ -13,8 +13,14 @@
  * stack auto-detects:
  *   - `postgres` / `pg` / `postgresql` → `@objectstack/driver-sql` (client `pg`)
  *   - `sqlite` / `sqlite3`             → `@objectstack/driver-sql` (better-sqlite3)
+ *   - `sqlite-wasm` / `wasm-sqlite`    → `@objectstack/driver-sqlite-wasm` (pure-JS)
  *   - `mongodb` / `mongo`             → `@objectstack/driver-mongodb` (peer dep)
  *   - `memory` / `inmemory`           → `@objectstack/driver-memory`
+ *
+ * `sqlite-wasm` joined for ADR-0062 D1 (#3826): the standalone stack's
+ * `default` datasource is a *declared definition* connected through the shared
+ * `DatasourceConnectionService`, and its CI-safe wasm default must therefore be
+ * a driver id this factory can build — the last bespoke construction site.
  *
  * Anything else returns `supports() === false`, so the admin service degrades
  * gracefully (testConnection → `{ ok: false }`, create skips hot pool reg).
@@ -29,7 +35,7 @@ import type {
   DatasourceDriverHandle,
 } from './contracts/index.js';
 
-type ResolvedKind = 'postgres' | 'sqlite' | 'mongodb' | 'memory';
+type ResolvedKind = 'postgres' | 'sqlite' | 'sqlite-wasm' | 'mongodb' | 'memory';
 
 const DRIVER_ID_ALIASES: Record<string, ResolvedKind> = {
   postgres: 'postgres',
@@ -38,6 +44,8 @@ const DRIVER_ID_ALIASES: Record<string, ResolvedKind> = {
   sqlite: 'sqlite',
   sqlite3: 'sqlite',
   'better-sqlite3': 'sqlite',
+  'sqlite-wasm': 'sqlite-wasm',
+  'wasm-sqlite': 'sqlite-wasm',
   mongodb: 'mongodb',
   mongo: 'mongodb',
   memory: 'memory',
@@ -165,6 +173,30 @@ export function createDefaultDatasourceDriverFactory(
           ...(schemaMode ? { schemaMode } : {}),
         });
         return toHandle(resolved.driver, () => sqlServerVersion(resolved.driver, 'sqlite'));
+      }
+
+      if (kind === 'sqlite-wasm') {
+        // Pure-JS WASM sqlite: real SQL with no native build. File-backed
+        // databases persist on write; `:memory:` stays ephemeral. Mirrors the
+        // construction the standalone stack used before its `default` became a
+        // declared datasource (#3826). Lazy + caught like mongodb: the wasm
+        // driver rides as an optional install for published consumers.
+        let SqliteWasmDriver: any;
+        try {
+          ({ SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm' as any));
+        } catch (err: any) {
+          throw new Error(
+            `sqlite-wasm driver requested but @objectstack/driver-sqlite-wasm is not installed (${err?.message ?? err}).`,
+          );
+        }
+        const conn = buildSqlConnection(spec, 'better-sqlite3') as { filename?: string };
+        const filename = conn.filename ?? ':memory:';
+        const driver = new SqliteWasmDriver({
+          filename,
+          persist: filename !== ':memory:' ? 'on-write' : undefined,
+          ...(schemaMode ? { schemaMode } : {}),
+        });
+        return toHandle(driver, () => sqlServerVersion(driver, 'sqlite'));
       }
 
       if (kind === 'mongodb') {

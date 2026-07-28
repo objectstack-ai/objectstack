@@ -21,6 +21,7 @@ describe('reference-integrity suite — membership', () => {
       'validateChartBindings',
       'validateNavAccess',
       'validateTranslationReferences',
+      'validateFlowTemplatePaths',
       'validateAiSurfaceAffinity',
     ]);
   });
@@ -111,6 +112,25 @@ describe('reference-integrity suite — every member actually runs', () => {
     // runtime throws on this at chat time (ADR-0064 §3).
     agents: [{ name: 'helper', surface: 'ask', skills: ['metadata_authoring'] }],
     skills: [{ name: 'metadata_authoring', surface: 'build', tools: [] }],
+    flows: [
+      {
+        name: 'lead_followup',
+        type: 'record_change',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+          // validateFlowTemplatePaths: `budget` is not a field on crm_lead. In a
+          // FILTER position an erased condition widens the query rather than
+          // narrowing it, so the runtime refuses the node — gating, not advisory
+          // (#3810). This member is the suite's only source of `error` findings
+          // from a flow, so it also pins that both severities survive the suite.
+          {
+            id: 'fetch',
+            type: 'get_record',
+            config: { objectName: 'crm_lead', filter: { name: '{record.budget}' } },
+          },
+        ],
+      },
+    ],
   };
 
   it('reports at least one finding from every member', () => {
@@ -123,7 +143,16 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('chart-measure-unknown');
     expect(rules).toContain('nav-object-ungranted');
     expect(rules).toContain('translation-target-unknown');
+    expect(rules).toContain('flow-template-unknown-field');
     expect(rules).toContain('ai-skill-surface-mismatch');
+  });
+
+  it('carries a gating flow-template finding through the suite (#3810)', () => {
+    const findings = validateReferenceIntegrity(stack);
+    const flow = findings.find((f) => f.rule === 'flow-template-unknown-field');
+    // A filter-position miss must reach the CLI as an ERROR, or `os lint` and
+    // `os compile` would print a yellow line and ship a flow that cannot run.
+    expect(flow?.severity).toBe('error');
   });
 
   it('concatenates in list order and carries the common finding shape', () => {

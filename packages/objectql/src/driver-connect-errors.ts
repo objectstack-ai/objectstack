@@ -84,6 +84,67 @@ export class DriverConnectError extends Error {
   }
 }
 
+/** Why a declared datasource has no live driver (framework#3828). */
+export type DatasourceUnavailableKind = 'blocked' | 'failed';
+
+/** What the connection layer recorded about a datasource it could not connect. */
+export interface DatasourceUnavailableInfo {
+  kind: DatasourceUnavailableKind;
+  /**
+   * Tenant-safe detail, opt-in by the host. The operator-facing reason is
+   * deliberately NOT carried here — see `DatasourceConnectDecision.publicReason`.
+   */
+  publicDetail?: string;
+}
+
+/**
+ * Thrown by `getDriver()` when an object's `datasource` was **declared** but has
+ * no live driver, and the connection layer knows why (framework#3828).
+ *
+ * Before this, all four of these produced the same sentence — `Datasource 'x'
+ * is not registered.`:
+ *
+ *  1. the host's connect policy refused it (plan / egress isolation),
+ *  2. it failed to connect at boot and `OS_ALLOW_DRIVER_CONNECT_FAILURE` let
+ *     the server start anyway,
+ *  3. the app misspelled the datasource name, and
+ *  4. it is declared `active: false`.
+ *
+ * (3) is an authoring bug; (1) and (2) are states of the deployment. Answering
+ * all of them identically sends the reader hunting for a typo that isn't there.
+ * Cases the connection layer never recorded keep the original message — there is
+ * genuinely nothing more to say about a name nobody declared.
+ *
+ * **The message never carries the underlying cause.** A connect failure's text
+ * routinely contains the host, port, or DSN, and a policy's `reason` is written
+ * for operators; neither is safe to hand to whoever is browsing a record. The
+ * cause stays in the startup logs and the datasource-admin list, and this error
+ * says which of those to read. A host that wants to tell tenants something
+ * specific sets `publicReason` on its connect decision.
+ */
+export class DatasourceUnavailableError extends Error {
+  readonly code = 'ERR_DATASOURCE_UNAVAILABLE' as const;
+
+  constructor(
+    public readonly datasource: string,
+    public readonly objectName: string,
+    public readonly kind: DatasourceUnavailableKind,
+    publicDetail?: string,
+  ) {
+    const head =
+      `[ObjectQL] Datasource '${datasource}' configured for object '${objectName}' is declared but not connected`;
+    const why =
+      kind === 'blocked'
+        ? `: the host's datasource connect policy refused it.`
+        : `: it failed to connect at startup and the server was started with ` +
+          `OS_ALLOW_DRIVER_CONNECT_FAILURE. Nothing re-runs the connect — the server must be ` +
+          `restarted once the datasource is reachable.`;
+    const detail = publicDetail ? ` ${publicDetail}` : '';
+    super(`${head}${why}${detail} See the startup logs or Setup → Datasources for the cause.`);
+    this.name = 'DatasourceUnavailableError';
+  }
+}
+
 /**
  * The degraded-boot banner now lives in `@objectstack/types` because
  * `DatasourceConnectionService` owes the operator the same banner for the same

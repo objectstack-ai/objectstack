@@ -151,23 +151,34 @@ function matches(verb: string, path: string): Pattern | undefined {
 const CONTROL_PLANE = '/api/v1/cloud/';
 const CONTROL_PLANE_NAMESPACE = 'projects.';
 
-/*
- * There is no AI exemption any more, and that is the end state — not an
- * omission.
+/**
+ * The AI plane. `/api/v1/ai/*` is served by `service-ai`, a Cloud/EE package in
+ * the sibling `cloud` repo; this repo's dispatcher only PROXIES the prefix to
+ * whatever `buildAIRoutes()` mounted (or 404s "AI service is not configured").
+ * No in-repo ledger can enumerate that table, so — exactly like the control
+ * plane above — the prefix is exempt HERE and guarded THERE.
  *
- * `/api/v1/ai/` was briefly exempted here the way the control plane still is:
- * `service-ai` is a Cloud/EE package in the `cloud` repo, so no ledger here can
- * enumerate its table. Before that it was a `* /ai/**` WILDCARD match, which
- * was worse — a wildcard claims the family, so all three `ai.*` methods counted
- * as matched when none of their URLs was in the real table at all (#3718).
+ * READ THE HISTORY BEFORE WIDENING THIS. `/api/v1/ai/` used to be matched by
+ * the dispatcher's `* /ai/**` wildcard row, and that was worse than no match:
+ * a wildcard claims the FAMILY, so `ai.nlq` / `ai.suggest` / `ai.insights`
+ * counted as matched when not one of their URLs was in the real table at all.
+ * Three SDK methods 404ed for years behind a green row (#3718). v17 deleted
+ * them; #3718 then expressed the surface that does exist (`ai.chat`,
+ * `ai.chatStream`, `ai.complete`, `ai.models`, `ai.conversations.*`), which is
+ * why an exemption is needed again.
  *
- * v17 removed the `ai` namespace outright, so no SDK method targets the prefix
- * and there is nothing left to exempt. If an `ai.*` method is ever added back,
- * it will match no route here and fail the `unmatched` assertion below — which
- * is correct: the real AI surface is ledgered in `cloud`
- * (`packages/service-ai/src/ai-route-ledger.ts`), and a new method should be
- * verified against it there rather than waved through by a prefix here.
+ * It is NOT a wave-through, for the same reason the control plane's is not:
+ * `cloud`'s `packages/service-ai/src/ai-route-ledger.conformance.test.ts`
+ * reads the table `buildAIRoutes()` returns and drives every `ai.*` method on
+ * this very SDK against it — so an `ai.*` URL that stops resolving fails a
+ * test in the repo that mounts the route. What this exemption says is "the
+ * evidence lives on the other side of the boundary", not "no evidence needed".
+ *
+ * Bounded from both ends below: only `ai.*` may use it, and the namespace must
+ * still be reaching it.
  */
+const AI_PLANE = '/api/v1/ai/';
+const AI_PLANE_NAMESPACE = 'ai.';
 
 // ---------------------------------------------------------------------------
 // 2. The recorder
@@ -347,6 +358,7 @@ describe('client URL conformance ↔ the union of all four route ledgers (#3642)
     const silent: string[] = [];
     const malformed: string[] = [];
     const controlPlane: string[] = [];
+    const aiPlane: string[] = [];
     const wildcardOnly: string[] = [];
 
     for (const name of METHODS) {
@@ -368,6 +380,10 @@ describe('client URL conformance ↔ the union of all four route ledgers (#3642)
         }
         const path = new URL(call.url, BASE).pathname;
         if (path.startsWith(CONTROL_PLANE)) { controlPlane.push(`${name} → ${call.verb} ${path}`); continue; }
+        // Checked BEFORE `matches()` on purpose: the dispatcher's `* /ai/**`
+        // row would otherwise absorb these into `wildcardOnly` — the exact
+        // false-positive evidence that hid three dead methods (#3718).
+        if (path.startsWith(AI_PLANE)) { aiPlane.push(`${name} → ${call.verb} ${path}`); continue; }
         const hit = matches(call.verb, path);
         if (!hit) { unmatched.push(`${name} → ${call.verb} ${path}`); continue; }
         if (hit.route.includes('**')) wildcardOnly.push(`${name} → ${call.verb} ${path} (via ${hit.route})`);
@@ -402,6 +418,20 @@ describe('client URL conformance ↔ the union of all four route ledgers (#3642)
     ).toEqual([]);
     expect(controlPlane.length, 'the projects namespace should still be reaching the control plane').toBeGreaterThan(0);
 
+    // The AI-plane hole, bounded the same way: only `ai.*` may use it. The
+    // count assertion is the half that matters most here — if the namespace
+    // stopped issuing requests, the exemption would silently become a hole
+    // with nothing behind it, which is how the wildcard row went wrong.
+    const aiTrespassers = aiPlane.filter((e) => !e.startsWith(AI_PLANE_NAMESPACE));
+    expect(
+      aiTrespassers,
+      `non-ai methods targeting /api/v1/ai/, which no in-repo ledger can vouch for:\n${aiTrespassers.join('\n')}`,
+    ).toEqual([]);
+    expect(
+      aiPlane.length,
+      'the ai namespace should be reaching the AI plane — if it stops, drop the exemption',
+    ).toBeGreaterThan(0);
+
 
     // HOW STRONG IS THIS GUARD, HONESTLY. A `**` row asserts only that a prefix
     // family is CLAIMED, not that the specific URL resolves. That was this
@@ -412,8 +442,9 @@ describe('client URL conformance ↔ the union of all four route ledgers (#3642)
     // THAT family (#3718, in `cloud`, where service-ai lives) showed the
     // wildcard had not been weak evidence but WRONG evidence: none of the three
     // URLs is in the real table, and nothing in any repo mounts them (#3718).
-    // v17 removed that namespace outright, so no SDK method targets `/ai/` and
-    // the bound is 0 with nothing exempted to get there.
+    // v17 removed that namespace; #3718 then expressed the real one, which is
+    // reached through the bounded AI-plane exemption above — NOT through the
+    // wildcard row, so the bound below still stands at 0.
     //
     // ZERO IS THE POINT: every remaining matched call rests on an exact route
     // some ledger enumerated. Raising this bound reintroduces the one kind of

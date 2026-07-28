@@ -95,6 +95,14 @@ The same guard covers **declared datasources** whose objects have no fallback �
 see [When auto-connect fails](/docs/data-modeling/external-datasources#when-auto-connect-fails)
 ([#3758](https://github.com/objectstack-ai/objectstack/issues/3758)).
 
+The standalone `default` datasource itself is now a **declared definition**
+([#3826](https://github.com/objectstack-ai/objectstack/issues/3826)): the stack
+translates `OS_DATABASE_URL` into `{ driver, config }` and connects it at boot
+through the same datasource connection path — one failure verdict, one escape
+hatch, and a real `status` for the primary DB in **Setup → Datasources**. The
+name `default` is host-reserved: an app bundle declaring a datasource with that
+name is rejected at load.
+
 <Callout type="warn">
 `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` boots anyway, in an explicitly degraded
 state announced by a `DEGRADED BOOT` banner. Queries to a failed driver fail

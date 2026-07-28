@@ -243,6 +243,14 @@ export interface IntrospectedSchema {
  * all schema-mutating DDL. Defaults to `'managed'` when omitted, preserving
  * legacy behaviour.
  */
+/**
+ * How a stored column value must be reshaped to become the value a `find()` row
+ * presents. One entry per rule `formatOutput` applies to a scalar column; the
+ * read paths that bypass `formatOutput` (`aggregate`, `distinct`) name the rule
+ * per column instead. See {@link SqlDriver.readPresentationKind}.
+ */
+export type ReadPresentationKind = 'datetime' | 'date' | 'boolean' | 'number';
+
 export type SqlDriverConfig = Knex.Config & {
   schemaMode?: SchemaMode;
   /**
@@ -1668,14 +1676,15 @@ export class SqlDriver implements IDataDriver {
     // GROUP BY bucket expression (#3773) and the result presentation (#3797).
     const table = this.coercionKey(builder);
 
-    // Result columns that carry a raw temporal VALUE, keyed by the column name
-    // the caller will read. Collected while the statement is built because that
-    // is the only point where a column name and its meaning are both known: a
-    // `min()` lands under its alias (never under the field name), and a
-    // date-BUCKETED column lands under the field name while holding a label
-    // (`'2026-01'`), not an instant. Matching on names after the fact gets both
-    // of those backwards. See {@link presentTemporalColumns}.
-    const temporalOutput = new Map<string, 'datetime' | 'date'>();
+    // Result columns that carry a raw column VALUE (rather than a count/total
+    // derived from one), keyed by the column name the caller will read.
+    // Collected while the statement is built because that is the only point
+    // where a column name and its meaning are both known: a `min()` lands under
+    // its alias (never under the field name), and a date-BUCKETED column lands
+    // under the field name while holding a label (`'2026-01'`), not a value.
+    // Matching on names after the fact gets both of those backwards.
+    // See {@link presentReadColumns}.
+    const presentedOutput = new Map<string, ReadPresentationKind>();
 
     if (query.groupBy) {
       // groupBy items may be plain strings ('region') or structured objects
@@ -1686,8 +1695,8 @@ export class SqlDriver implements IDataDriver {
         if (typeof g === 'string') {
           builder.groupBy(g);
           builder.select(g);
-          const kind = this.temporalFieldKind(table, g);
-          if (kind) temporalOutput.set(g, kind);
+          const kind = this.readPresentationKind(table, g);
+          if (kind) presentedOutput.set(g, kind);
         } else if (g && typeof g === 'object' && g.field) {
           if (g.dateGranularity) {
             const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity as any, table);
@@ -1702,8 +1711,8 @@ export class SqlDriver implements IDataDriver {
           } else {
             builder.groupBy(g.field);
             builder.select(g.field);
-            const kind = this.temporalFieldKind(table, g.field);
-            if (kind) temporalOutput.set(g.field, kind);
+            const kind = this.readPresentationKind(table, g.field);
+            if (kind) presentedOutput.set(g.field, kind);
           }
         }
       }
@@ -1724,13 +1733,14 @@ export class SqlDriver implements IDataDriver {
           }
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
-          // the only ones whose result is still an instant. `alias` is required
-          // by `AggregationNodeSchema`; the unaliased branch below lands under a
-          // dialect-dependent column name (`max("closed_at")` on SQLite, `max` on
-          // Postgres) and is defensive only, so it is deliberately not tracked.
+          // the only ones whose result still needs the column's presentation.
+          // `alias` is required by `AggregationNodeSchema`; the unaliased branch
+          // below lands under a dialect-dependent column name
+          // (`max("closed_at")` on SQLite, `max` on Postgres) and is defensive
+          // only, so it is deliberately not tracked.
           if ((funcName === 'min' || funcName === 'max') && agg.field) {
-            const kind = this.temporalFieldKind(table, agg.field);
-            if (kind) temporalOutput.set(agg.alias, kind);
+            const kind = this.readPresentationKind(table, agg.field);
+            if (kind) presentedOutput.set(agg.alias, kind);
           }
         } else {
           if (fieldExpr === '*') {
@@ -1743,7 +1753,7 @@ export class SqlDriver implements IDataDriver {
     }
 
     const rows = await builder;
-    return this.presentTemporalColumns(rows, temporalOutput);
+    return this.presentReadColumns(rows, presentedOutput);
   }
 
   // ===================================
@@ -1761,15 +1771,15 @@ export class SqlDriver implements IDataDriver {
     const results = await builder;
     const values = results.map((row: any) => row[field]);
 
-    // Same presentation `find()` gives the column (#3797) — a caller listing a
-    // datetime's values should not get epoch integers here and ISO strings
-    // there. Re-deduplicate afterwards: SQL `DISTINCT` compares STORED values,
-    // and one SQLite `Field.datetime` column holds both INTEGER epoch ms and
-    // ISO TEXT, so two rows recording the same instant survive as two rows and
-    // then collapse to the same presented value.
-    const kind = this.temporalFieldKind(this.coercionKey(builder), field);
+    // Same presentation `find()` gives the column (#3797, #3849) — a caller
+    // listing a datetime's values should not get epoch integers here and ISO
+    // strings there, nor `0`/`1` for a boolean. Re-deduplicate afterwards: SQL
+    // `DISTINCT` compares STORED values, and one SQLite `Field.datetime` column
+    // holds both INTEGER epoch ms and ISO TEXT, so two rows recording the same
+    // instant survive as two rows and then collapse to the same presented value.
+    const kind = this.readPresentationKind(this.coercionKey(builder), field);
     if (!kind) return values;
-    return [...new Set(values.map((v: any) => this.presentTemporalValue(kind, v)))];
+    return [...new Set(values.map((v: any) => this.presentReadValue(kind, v)))];
   }
 
   // ===================================
@@ -3532,23 +3542,64 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Present one temporal value exactly the way `formatOutput` presents it on a
-   * `find()` row, for the read paths that return raw builder output instead
-   * (`aggregate`, `distinct` — #3797).
+   * Which read-presentation rule, if any, a declared field takes — the same
+   * question {@link formatOutput} answers implicitly while walking a `find()`
+   * row, asked one field at a time so the paths that return raw builder output
+   * can ask it too. `null` means the stored form already IS the presented form.
    *
-   * The dialect gating mirrors `formatOutput`: the `Field.datetime` repair is
-   * SQLite-only (it is the one dialect where storage ≠ presentation), while the
-   * `Field.date` → `YYYY-MM-DD` collapse runs everywhere.
+   * The boolean / numeric rules are SQLite-only because `formatOutput` gates
+   * them that way: SQLite is the dialect without a native boolean, and the
+   * numeric repair only exists for legacy TEXT-affinity columns.
    */
-  protected presentTemporalValue(kind: 'datetime' | 'date', value: any): any {
-    if (value == null) return value;
-    if (kind === 'date') return this.toDateOnly(value);
-    return this.isSqlite ? normalizeSqliteDatetimeOutput(value) : value;
+  protected readPresentationKind(
+    table: string | null | undefined,
+    field: string,
+  ): ReadPresentationKind | null {
+    if (!table) return null;
+    const temporal = this.temporalFieldKind(table, field);
+    if (temporal) return temporal;
+    if (!this.isSqlite) return null;
+    if (this.booleanFields[table]?.includes(field)) return 'boolean';
+    if (this.numericFields[table]?.includes(field)) return 'number';
+    return null;
   }
 
   /**
-   * Apply {@link presentTemporalValue} to the result columns a caller of
-   * `aggregate()` will read as instants.
+   * Present one value exactly the way `formatOutput` presents it on a `find()`
+   * row, for the read paths that return raw builder output instead
+   * (`aggregate`, `distinct` — #3797 for instants, #3849 for scalars).
+   *
+   * The dialect gating mirrors `formatOutput`: the `Field.datetime` repair and
+   * the boolean / numeric coercions are SQLite-only (it is the one dialect where
+   * storage ≠ presentation), while the `Field.date` → `YYYY-MM-DD` collapse runs
+   * everywhere. {@link readPresentationKind} does the SQLite gating for the
+   * scalar kinds, so by the time one arrives here the dialect is settled.
+   */
+  protected presentReadValue(kind: ReadPresentationKind, value: any): any {
+    if (value == null) return value;
+    switch (kind) {
+      case 'date':
+        return this.toDateOnly(value);
+      case 'datetime':
+        return this.isSqlite ? normalizeSqliteDatetimeOutput(value) : value;
+      case 'boolean':
+        return Boolean(value);
+      case 'number': {
+        // Only strings are repaired, exactly as in `formatOutput`: a fresh
+        // REAL/INTEGER column already yields a number, and genuinely
+        // non-numeric legacy junk is left intact rather than turned into NaN.
+        if (typeof value === 'string' && value.trim() !== '') {
+          const n = Number(value);
+          if (!Number.isNaN(n)) return n;
+        }
+        return value;
+      }
+    }
+  }
+
+  /**
+   * Apply {@link presentReadValue} to the result columns a caller of
+   * `aggregate()` will read as column VALUES — group keys, and `min`/`max`.
    *
    * Which columns those are cannot be recovered from the rows — the driver has
    * to be told, because the mapping from column name to meaning is only
@@ -3556,12 +3607,12 @@ export class SqlDriver implements IDataDriver {
    * alias; a date-BUCKETED column lands under the field name but holds a label).
    * Rows are mutated in place, as `formatOutput` does.
    */
-  protected presentTemporalColumns(rows: any, columns: Map<string, 'datetime' | 'date'>): any {
+  protected presentReadColumns(rows: any, columns: Map<string, ReadPresentationKind>): any {
     if (columns.size === 0 || !Array.isArray(rows)) return rows;
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
       for (const [column, kind] of columns) {
-        if (row[column] !== undefined) row[column] = this.presentTemporalValue(kind, row[column]);
+        if (row[column] !== undefined) row[column] = this.presentReadValue(kind, row[column]);
       }
     }
     return rows;
