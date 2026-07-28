@@ -68,6 +68,8 @@ describe('SharingServicePlugin sys_sharing_rule data-change rebind (#2592)', () 
     rules = [];
     ruleService = {
       listRules: vi.fn(async () => rules),
+      evaluateRule: vi.fn(async () => ({ ruleId: 'r1', matchedRecords: 0, expandedUsers: 0, grantsCreated: 0, grantsUpdated: 0, grantsRevoked: 0 })),
+      revokeRuleGrants: vi.fn(async () => 0),
     };
     (plugin as any).ruleService = ruleService;
     (plugin as any).bindRuleRebindTriggers(engine, makeCtx());
@@ -146,5 +148,83 @@ describe('SharingServicePlugin sys_sharing_rule data-change rebind (#2592)', () 
     // The second (newest) snapshot is the one left bound.
     const bound = engine.boundFor(SHARING_RULE_HOOK_PACKAGE);
     expect(new Set(bound.map((h) => h.options.object))).toEqual(new Set(['beta']));
+  });
+});
+
+/**
+ * objectstack#3821 — rebinding alone only makes a rule apply to records written
+ * from now on. A rule authored in Setup did nothing to the records already
+ * there, and one switched OFF (or deleted) kept every grant it had issued —
+ * boot backfill only reconciles ACTIVE rules, so those grants outlived
+ * restarts while the UI showed the rule as disabled.
+ */
+describe('SharingServicePlugin reconciles grants on rule writes (#3821)', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let plugin: SharingServicePlugin;
+  let ruleService: AnyRecord;
+  let logger: AnyRecord;
+
+  beforeEach(() => {
+    engine = makeEngine();
+    plugin = new SharingServicePlugin();
+    ruleService = {
+      listRules: vi.fn(async () => []),
+      evaluateRule: vi.fn(async () => ({ ruleId: 'r1', matchedRecords: 2, expandedUsers: 1, grantsCreated: 2, grantsUpdated: 0, grantsRevoked: 0 })),
+      revokeRuleGrants: vi.fn(async () => 2),
+    };
+    (plugin as any).ruleService = ruleService;
+    const ctx = makeCtx();
+    logger = ctx.logger;
+    (plugin as any).bindRuleRebindTriggers(engine, ctx);
+  });
+
+  it('backfills existing records when a rule is created', async () => {
+    await engine.fire('afterInsert', 'sys_sharing_rule', { result: { id: 'r1' } });
+    expect(ruleService.evaluateRule).toHaveBeenCalledWith('r1', expect.objectContaining({ isSystem: true }));
+  });
+
+  it('reconciles on update — this is what withdraws access when a rule is switched off', async () => {
+    // `evaluateRule` purges the grants itself when the rule is inactive, so the
+    // plugin does not need to branch on `active` here.
+    await engine.fire('afterUpdate', 'sys_sharing_rule', { result: { id: 'r1', active: false } });
+    expect(ruleService.evaluateRule).toHaveBeenCalledWith('r1', expect.objectContaining({ isSystem: true }));
+  });
+
+  it('purges grants on delete rather than evaluating a row that no longer exists', async () => {
+    await engine.fire('afterDelete', 'sys_sharing_rule', { input: { id: 'r1' } });
+    expect(ruleService.revokeRuleGrants).toHaveBeenCalledWith('r1');
+    expect(ruleService.evaluateRule).not.toHaveBeenCalled();
+  });
+
+  it('skips system-context writes — boot backfill owns those', async () => {
+    await engine.fire('afterInsert', 'sys_sharing_rule', {
+      result: { id: 'r1' },
+      session: { isSystem: true },
+    });
+    expect(ruleService.evaluateRule).not.toHaveBeenCalled();
+  });
+
+  it('never fails the authoring write when reconciliation throws', async () => {
+    ruleService.evaluateRule = vi.fn(async () => { throw new Error('db gone'); });
+    await expect(
+      engine.fire('afterUpdate', 'sys_sharing_rule', { result: { id: 'r1' } }),
+    ).resolves.toBeUndefined();
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('does nothing when the write carries no rule id', async () => {
+    await engine.fire('afterUpdate', 'sys_sharing_rule', {});
+    expect(ruleService.evaluateRule).not.toHaveBeenCalled();
+    expect(ruleService.revokeRuleGrants).not.toHaveBeenCalled();
+  });
+
+  it('serializes reconciles behind the rebind chain', async () => {
+    const order: string[] = [];
+    ruleService.listRules = vi.fn(async () => { order.push('rebind'); return []; });
+    ruleService.evaluateRule = vi.fn(async () => { order.push('reconcile'); return {} as any; });
+
+    await engine.fire('afterInsert', 'sys_sharing_rule', { result: { id: 'r1' } });
+
+    expect(order).toEqual(['rebind', 'reconcile']);
   });
 });

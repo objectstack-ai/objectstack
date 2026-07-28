@@ -131,18 +131,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_type: {
         label: "Tipo de destinatario",
-        help: "Tipo de principal que recibe acceso; se expande a concesiones de usuario durante la evaluación. `department` recorre el árbol parent_business_unit_id; `team` es plano (better-auth).",
+        help: "Tipo de principal que recibe acceso; se expande a concesiones de usuario durante la evaluación. `business_unit` recorre el árbol parent_business_unit_id; `team` es plano (better-auth); `position` se expande a quienes ocupan el puesto (los puestos son planos, ADR-0090 D3); `unit_and_subordinates` expande la unidad de negocio indicada MÁS los miembros de todas sus unidades descendientes a través del árbol sys_business_unit (ADR-0057 D5).",
         options: {
           user: "Usuario",
           team: "Equipo",
           business_unit: "Unidad de negocio",
-          position: "posición",
-          unit_and_subordinates: "Rol y subordinados"
+          position: "Puesto",
+          unit_and_subordinates: "Unidad de negocio y subordinados"
         }
       },
       recipient_id: {
         label: "Destinatario",
-        help: "ID de departamento / ID de equipo / nombre del rol / nombre de la cola / ID del usuario según recipient_type."
+        help: "ID de unidad de negocio / ID de equipo / nombre del puesto / ID del usuario según recipient_type."
       },
       access_level: {
         label: "Nivel de acceso",

@@ -803,7 +803,8 @@ export class SqlDriver implements IDataDriver {
   async find(object: string, query: QueryAST, options?: DriverOptions): Promise<any[]> {
     // Build everything EXCEPT the SELECT list, so the unknown-column retry
     // below can rebuild without re-deriving where/order/pagination.
-    const buildBase = () => {
+    const buildBase = (opts?: { withOrderBy?: boolean }) => {
+      const withOrderBy = opts?.withOrderBy !== false;
       const b = this.getBuilder(object, options);
       this.applyTenantScope(b, object, options);
 
@@ -813,7 +814,7 @@ export class SqlDriver implements IDataDriver {
       }
 
       // ORDER BY
-      if (query.orderBy && Array.isArray(query.orderBy)) {
+      if (withOrderBy && query.orderBy && Array.isArray(query.orderBy)) {
         for (const item of query.orderBy) {
           if (item.field) {
             b.orderBy(this.remoteColumn(object, item.field, this.mapSortField(item.field)), item.order || 'asc');
@@ -858,15 +859,31 @@ export class SqlDriver implements IDataDriver {
         // only fires when the object's schema is populated in the registry —
         // this driver backstop holds even when it isn't (notably the cloud
         // multi-tenant runtime, where the projection otherwise zeroes the list).
-        if (query.fields) {
-          try {
-            results = await buildBase().select('*');
-          } catch {
-            return [];
-          }
-        } else {
-          return [];
+        //
+        // An unknown ORDER BY column is the same footgun one clause over
+        // (objectstack#3821): a client that sorts by a field the table lacks
+        // used to get an empty page with a non-zero `total` — "the rows are
+        // there but none are shown". Rows matter more than their order, so
+        // drop the sort and return them unordered rather than nothing. Ladder:
+        // projection first (it is the likelier culprit and the cheaper thing
+        // to lose), then the sort, then give up.
+        const retries: Array<() => any> = [];
+        if (query.fields) retries.push(() => buildBase().select('*'));
+        if (query.orderBy && Array.isArray(query.orderBy) && query.orderBy.length > 0) {
+          retries.push(() => buildBase({ withOrderBy: false }).select('*'));
         }
+        results = [];
+        let recovered = false;
+        for (const retry of retries) {
+          try {
+            results = await retry();
+            recovered = true;
+            break;
+          } catch {
+            // Try the next, broader fallback.
+          }
+        }
+        if (!recovered) return [];
       } else {
         throw error;
       }

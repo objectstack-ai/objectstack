@@ -131,7 +131,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_type: {
         label: "接收方类型",
-        help: "接收访问权限的主体类型——求值时会展开为用户授权。`department` 会沿 parent_business_unit_id 树展开；`team` 为扁平结构（better-auth）。",
+        help: "接收访问权限的主体类型——求值时会展开为用户授权。`business_unit` 会沿 parent_business_unit_id 树展开；`team` 为扁平结构（better-auth）；`position` 展开为该岗位的任职人（岗位为扁平结构，ADR-0090 D3）；`unit_and_subordinates` 会沿 sys_business_unit 树展开指定业务单元及其全部下级单元的成员（ADR-0057 D5）。",
         options: {
           user: "用户",
           team: "团队",
@@ -142,7 +142,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_id: {
         label: "接收方",
-        help: "根据 recipient_type 填写 业务单元 id / 团队 id / 岗位名 / 队列名 / 用户 id"
+        help: "根据 recipient_type 填写 业务单元 id / 团队 id / 岗位名 / 用户 id"
       },
       access_level: {
         label: "访问级别",

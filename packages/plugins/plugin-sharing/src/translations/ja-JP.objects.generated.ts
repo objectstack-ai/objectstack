@@ -131,7 +131,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_type: {
         label: "受信者タイプ",
-        help: "アクセスを受け取るプリンシパルの種別 — 評価時にユーザー付与に展開されます。`department` は parent_business_unit_id ツリーをたどります。`team` はフラット（better-auth）。",
+        help: "アクセスを受け取るプリンシパルの種別 — 評価時にユーザー付与に展開されます。`business_unit` は parent_business_unit_id ツリーをたどります。`team` はフラット（better-auth）。`position` はそのポジションの在任者に展開されます（ポジションはフラット、ADR-0090 D3）。`unit_and_subordinates` は指定したビジネスユニットに加え、sys_business_unit ツリー上の全下位ユニットのメンバーにも展開されます（ADR-0057 D5）。",
         options: {
           user: "ユーザー",
           team: "チーム",
@@ -142,7 +142,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_id: {
         label: "受信者",
-        help: "recipient_type に応じた部門 ID / チーム ID / ロール名 / キュー名 / ユーザー ID"
+        help: "recipient_type に応じたビジネスユニット ID / チーム ID / ポジション名 / ユーザー ID"
       },
       access_level: {
         label: "アクセスレベル",
