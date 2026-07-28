@@ -104,6 +104,15 @@ export function registerApprovalNode(
       // Human decision: the run suspends here awaiting an external reply.
       supportsPause: true,
       isAsync: true,
+      // #3801: this pause is NOT resumable through the generic run-resume
+      // route. Continuing an approval is a side effect of a DECISION, and the
+      // decision is the thing that must be authorized (the approver slate),
+      // recorded (`sys_approval_action`) and mirrored (the status field) —
+      // all of which lives in `ApprovalService.decide`. The engine now refuses
+      // any resume of an approval suspension that does not carry the service's
+      // in-process marker, so "decide via the approvals API, never a raw engine
+      // resume" is enforced rather than merely documented.
+      resumeAuthority: 'service',
       // Publish the node's config contract (ADR-0018 §configSchema) so the
       // Studio flow designer renders the Approval property form from the engine
       // rather than a hardcoded client form — the engine owns the shape.

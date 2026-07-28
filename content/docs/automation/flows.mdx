@@ -389,10 +389,33 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
 
 | Pausing node | Suspends until… | Resumed by |
 | :--- | :--- | :--- |
-| `approval` | a human decision | the approvals service (`POST /api/v1/approvals/requests/:id/approve\|reject`) — resumes down the matching `approve` / `reject` edge. **Always decide through the approvals API**, never by calling `resume` directly: a direct resume strands the pending `sys_approval_request`, so the record stays locked and later approvals on the same record hit `DUPLICATE_REQUEST`. |
+| `approval` | a human decision | the approvals service (`POST /api/v1/approvals/requests/:id/approve\|reject`) — resumes down the matching `approve` / `reject` edge. **Decide through the approvals API**; the resume route above **refuses** an approval pause outright (see below). |
 | `screen` | a user submits the form | the UI runner posting the collected `inputs`; a `paused` response carrying the next `screen` chains multi-step wizards under one stable `runId` |
 | `wait` (timer) | an ISO-8601 duration elapses | **automatically** — a one-shot job resumes the run; after a cold boot the engine re-arms pending timers from the durable store (overdue timers resume immediately) |
 | `wait` (signal) | a named external event | any caller invoking `resume(runId)` |
+
+### Who may resume — the gate is the suspended node
+
+The resume route is generic, so **the node the run is parked on** decides
+whether a raw resume is a legitimate continuation. Every action descriptor
+carries a `resumeAuthority`:
+
+- **`'any'`** (the default — `screen`, `wait`, your own pausing nodes): the
+  caller supplies the continuation and the route is the intended door.
+- **`'service'`** (`approval`): continuing is a *side effect* of a decision
+  that some service must authorize and record first, so only that service may
+  drive it. `ApprovalService.decide` enforces the approver slate, writes the
+  `sys_approval_action` row, mirrors the status field — **then** resumes.
+
+A resume of a `'service'` pause through the route answers **403** and changes
+nothing: the request stays pending and the run stays parked, so the real
+decision can still land. (Before this gate a raw resume walked the `approve`
+edge with no decision recorded, leaving the `sys_approval_request` row and the
+run permanently disagreeing.) The gate follows a **subflow** pause down to the
+child the signal would actually reach, so resuming the parent is no way around
+it. Registering a pausing node of your own? Declare
+`resumeAuthority: 'service'` on its descriptor when the decision to continue
+belongs to your service rather than to whoever holds the run id.
 
 ### Parallel approvals — one aggregating node, not two pauses
 
@@ -469,7 +492,8 @@ the chain resolves from either end:
   `${nodeId}.output` / `outputVariable` mapping as a synchronous subflow;
 - resuming the **parent** run id (what a UI holds from the original launch)
   **delegates** down to the suspended child — multi-screen child wizards keep
-  the parent run id stable.
+  the parent run id stable. The resume gate delegates with it: if the child is
+  parked on an `approval`, resuming the parent is refused too.
 
 A child that fails terminally after the pause fails every waiting ancestor, so
 no run is stranded as resumable-forever. See the worked example pair in the

@@ -260,6 +260,31 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
     .describe('Suspends the flow awaiting an external reply'),
 
   /**
+   * WHO may resume a run this node suspended (#3801). The generic resume
+   * route (`POST /automation/:name/runs/:runId/resume`) validates machine
+   * state only — the run exists, the flow exists, the suspended node still
+   * exists — so the node type that *produced* the pause is what decides
+   * whether a raw resume is a legitimate continuation or a bypass.
+   *
+   *  - `'any'` (default) — the caller supplies the continuation and the route
+   *    is the intended door: a `screen` node's collected inputs, a `wait`
+   *    node's external signal.
+   *  - `'service'` — resuming is a SIDE EFFECT of a decision some service must
+   *    authorize and record first, so only that service may drive it. An
+   *    `approval` node declares this: `ApprovalService.decide` enforces the
+   *    approver slate, writes the `sys_approval_action` row and mirrors the
+   *    status field, then resumes. A raw resume around it would walk the
+   *    `approve` edge with no decision recorded, leaving the request row and
+   *    the run permanently disagreeing.
+   *
+   * The engine enforces it: a resume of a `'service'` suspension is refused
+   * unless the signal carries the in-process `RESUME_AUTHORITY_SERVICE`
+   * marker — a symbol, so a JSON body can never carry it.
+   */
+  resumeAuthority: z.enum(['any', 'service']).default('any')
+    .describe("Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals)"),
+
+  /**
    * Runtime maturity of the capability behind this descriptor (ADR-0041 §4).
    * The platform routinely ships contracts ahead of runtimes; `reserved`
    * marks a surface whose runtime has NOT shipped, so designers (Studio)

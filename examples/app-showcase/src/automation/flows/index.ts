@@ -987,8 +987,10 @@ export const ResilientSyncFlow = defineFlow({
  * rejection resumes down `reject`. One node, one suspend/resume, no token tree —
  * the multi-instance pattern Camunda and Step Functions use for exactly this.
  *
- * Decide via the approvals API (never a raw engine `resume`):
- *   POST /api/v1/automation/showcase_invoice_signoff/runs/{runId}/...  ← no
+ * Decide via the approvals API — a raw engine `resume` is refused, not merely
+ * discouraged: the `approval` node declares `resumeAuthority: 'service'`, so
+ * the generic run-resume route answers 403 for a run parked on one (#3801).
+ *   POST /api/v1/automation/showcase_invoice_signoff/runs/{runId}/resume  ← 403
  *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:finance' }
  *   POST /api/v1/approvals/requests/{id}/approve  { actorId: 'position:legal' }   ← now it continues
  */

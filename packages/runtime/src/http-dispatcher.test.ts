@@ -328,6 +328,36 @@ describe('HttpDispatcher', () => {
             expect(result.response?.body?.data?.screen?.nodeId).toBe('step2');
         });
 
+        // #3801: a run parked on a service-gated node (an `approval` pause,
+        // resumable only through ApprovalService) comes back `forbidden` from
+        // the engine. That is an AUTHORIZATION answer and must read as one —
+        // a 200 carrying `success: false` reads as "your resume ran and the
+        // flow failed", which is the opposite of what happened.
+        it('should answer 403 when the engine refuses the resume as service-gated', async () => {
+            mockAutomationService.resume.mockResolvedValue({
+                success: false, code: 'forbidden',
+                error: "Run 'run_1' is paused at an 'approval' node, which only its owning service may resume",
+            });
+            const result = await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST', { branchLabel: 'approve' }, { request: {} },
+            );
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(403);
+            expect(result.response?.body?.error?.message ?? result.response?.body?.message)
+                .toMatch(/only its owning service may resume/);
+        });
+
+        // A run that resumed and then FAILED is not an authorization answer —
+        // it keeps the ordinary success-envelope shape.
+        it('should not 403 an ordinary failed resume', async () => {
+            mockAutomationService.resume.mockResolvedValue({ success: false, error: 'node blew up' });
+            const result = await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, { request: {} },
+            );
+            expect(result.response?.status).not.toBe(403);
+            expect(result.response?.body?.data?.success).toBe(false);
+        });
+
         it('should return 501 when the automation service cannot resume', async () => {
             delete mockAutomationService.resume;
             const result = await dispatcher.handleAutomation(

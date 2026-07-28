@@ -76,6 +76,7 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | **supportsRetry** | `boolean` | ✅ | Supports retry on failure |
 | **needsOutbox** | `boolean` | ✅ | Dispatch via service-messaging outbox (retry/idempotency/dead-letter) |
 | **isAsync** | `boolean` | ✅ | Suspends the flow awaiting an external reply |
+| **resumeAuthority** | `Enum<'any' \| 'service'>` | ✅ | Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals) |
 | **maturity** | `Enum<'ga' \| 'beta' \| 'reserved'>` | ✅ | Runtime maturity: ga (shipped), beta, or reserved (contract only — designers grey this out) |
 | **source** | `Enum<'builtin' \| 'plugin'>` | ✅ | builtin = platform baseline; plugin = third-party contributed |
 | **deprecated** | `boolean` | ✅ | Deprecated alias kept for back-compat |

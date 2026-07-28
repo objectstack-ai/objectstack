@@ -420,7 +420,10 @@ your normal `flows: [...]`.
 A decision is recorded through `ApprovalService.decide()` (or the REST routes
 `POST /api/v1/approvals/requests/:id/approve` | `/reject`). That finalizes the
 `sys_approval_request` and **resumes** the suspended run down the matching
-branch — you never resume the flow by hand.
+branch — you never resume the flow by hand, and since #3801 you *cannot*: the
+`approval` node declares `resumeAuthority: 'service'`, so
+`POST /api/v1/automation/:name/runs/:runId/resume` answers **403** for a run
+parked on one (including via a `subflow` pause) and changes nothing.
 
 A decision may also carry **structured outputs** (`{ outputs: { … } }` in the
 decide body) when the node declares the keys in `decisionOutputs` — the author

@@ -31,6 +31,7 @@ import type {
   ApprovalStatus,
   SharingExecutionContext,
 } from '@objectstack/spec/contracts';
+import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { isGrantActive } from '@objectstack/core';
 
@@ -64,7 +65,18 @@ export interface ApprovalClock { now(): Date }
  * plugin when an automation engine is present (see `approval-node.ts`).
  */
 export interface ApprovalResumeSurface {
-  resume?(runId: string, signal?: { output?: Record<string, unknown>; branchLabel?: string }): Promise<unknown>;
+  resume?(runId: string, signal?: {
+    output?: Record<string, unknown>;
+    branchLabel?: string;
+    /**
+     * #3801: the engine refuses a resume of an `approval` suspension unless
+     * the signal carries this marker — the proof that the resume is the tail
+     * of a decision THIS service already authorized and recorded, not a raw
+     * `POST …/runs/:runId/resume` around it. Every resume below stamps it via
+     * {@link ApprovalService.serviceResume}.
+     */
+    [RESUME_AUTHORITY_SERVICE]?: true;
+  }): Promise<unknown>;
   /** Flow definition lookup, used to derive step-progress display data. */
   getFlow?(name: string): Promise<any | null>;
   /**
@@ -1591,6 +1603,28 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * Continue the owning flow run after an outcome this service has already
+   * authorized and written down (#3801).
+   *
+   * The `approval` node declares `resumeAuthority: 'service'`, so the engine
+   * refuses any resume of an approval suspension that does not carry
+   * {@link RESUME_AUTHORITY_SERVICE}. Every approvals-side resume goes through
+   * here so the marker is stamped in ONE place — a new outcome path cannot
+   * quietly ship a resume that the gate then rejects at runtime, and nothing
+   * in this file hands the marker to a caller-supplied signal.
+   *
+   * Callers still guard on `typeof this.automation?.resume === 'function'`
+   * (approvals runs fine with no automation attached) and keep their own
+   * try/catch, because what a failed resume means differs per path.
+   */
+  private async serviceResume(
+    runId: string,
+    signal: { output?: Record<string, unknown>; branchLabel?: string },
+  ): Promise<void> {
+    await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
+  }
+
+  /**
    * Public contract entrypoint (ADR-0019). Records a decision on a node-driven
    * request via {@link ApprovalService.decideNode} and, when it finalizes,
    * resumes the owning flow run down the matching `approve` / `reject` edge.
@@ -1608,7 +1642,7 @@ export class ApprovalService implements IApprovalService {
         ? APPROVAL_BRANCH_LABELS.approve
         : APPROVAL_BRANCH_LABELS.reject;
       try {
-        await this.automation.resume(result.runId, {
+        await this.serviceResume(result.runId, {
           branchLabel,
           // #3447 P2: accepted decision outputs ride the resume envelope and
           // land as `<nodeId>.<key>` flow variables — a later approval node's
@@ -1712,7 +1746,7 @@ export class ApprovalService implements IApprovalService {
       }
     } else if (runId && typeof this.automation?.resume === 'function') {
       try {
-        await this.automation.resume(runId, {
+        await this.serviceResume(runId, {
           branchLabel: APPROVAL_BRANCH_LABELS.reject,
           output: { decision: 'recall', requestId },
         });
@@ -1802,7 +1836,7 @@ export class ApprovalService implements IApprovalService {
       let resumed = false;
       if (runId && typeof this.automation?.resume === 'function') {
         try {
-          await this.automation.resume(runId, {
+          await this.serviceResume(runId, {
             branchLabel: APPROVAL_BRANCH_LABELS.reject,
             output: { decision: 'reject', autoRejected: true, requestId },
           });
@@ -1844,7 +1878,7 @@ export class ApprovalService implements IApprovalService {
     let resumed = false;
     if (runId && typeof this.automation?.resume === 'function') {
       try {
-        await this.automation.resume(runId, {
+        await this.serviceResume(runId, {
           branchLabel: APPROVAL_BRANCH_LABELS.revise,
           output: { decision: 'revise', requestId },
         });
@@ -1931,7 +1965,7 @@ export class ApprovalService implements IApprovalService {
     let resumed = false;
     if (runId && typeof this.automation?.resume === 'function') {
       try {
-        await this.automation.resume(runId, {
+        await this.serviceResume(runId, {
           branchLabel: APPROVAL_BRANCH_LABELS.resubmit,
           output: { resubmitted: true, requestId },
         });

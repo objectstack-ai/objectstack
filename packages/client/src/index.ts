@@ -2720,7 +2720,7 @@ export class ObjectStackClient {
           return this.unwrapResponse(res) as Promise<T>;
       },
       /**
-       * Resume a run suspended at a `screen` (or `approval`) node — the
+       * Resume a run suspended at a `screen` (or `wait`) node — the
        * screen-flow runtime's second half (ADR-0019 durable pause).
        *
        * `execute()` returns `{ status: 'paused', runId, screen }` when a flow
@@ -2729,6 +2729,13 @@ export class ObjectStackClient {
        * NEXT `{ status: 'paused', screen }` of a multi-step wizard or the
        * terminal `AutomationResult`. Without this method a paused run can only
        * be finished by hand-rolling the HTTP call (#3528).
+       *
+       * **Not the door for an approval (#3801).** A run parked on an
+       * `approval` node — directly, or as the child of a `subflow` pause — is
+       * resumable only through the approvals API
+       * ({@link ObjectStackClient.approvals}: `approve` / `reject` / `recall`),
+       * which authorizes the decision and records it first. This call answers
+       * **403** for one and changes nothing.
        */
       resume: async <T = any>(
           flowName: string,
@@ -4423,9 +4430,10 @@ export class ScopedProjectClient {
       return this.parent._unwrap<T>(res);
     },
     /**
-     * Resume a run suspended at a `screen` / `approval` node with the collected
+     * Resume a run suspended at a `screen` / `wait` node with the collected
      * input (ADR-0019 durable pause). Mirrors the unscoped
-     * `client.automation.resume`.
+     * `client.automation.resume` — including its refusal (403) to resume an
+     * `approval` pause, which belongs to the approvals API (#3801).
      */
     resume: async <T = any>(
       flowName: string,

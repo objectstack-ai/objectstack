@@ -89,6 +89,14 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'State',
     }),
 
+    node_type: Field.text({
+      label: 'Node Type',
+      required: false,
+      maxLength: 255,
+      description: 'Registry type of the node a suspended run paused at (approval / screen / wait / …). Keys the resume authorization gate (#3801) — captured at suspend time rather than re-read from a flow that may have been republished since. Null on rows written before the gate shipped, and on terminal history rows.',
+      group: 'State',
+    }),
+
     status: Field.select(
       ['running', 'paused', 'completed', 'failed'],
       {

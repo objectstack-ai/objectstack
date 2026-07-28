@@ -195,3 +195,49 @@ not catch a *post-pause* child failure (the parent run fails terminally instead)
 does not count across a suspension; a crash exactly between child completion and the parent
 bubble leaves the parent paused — an operator can compensate with a manual
 `resume(parentRunId, { output })` (outbox-grade exactly-once chaining is future work).
+
+## Addendum (2026-07-28, #3801) — the resume seam is a trust boundary: `resumeAuthority`
+
+Collapsing approval onto the flow engine made `AutomationEngine.resume` the **one** way any pause
+continues — including an approval decision. That is the right execution model, but it left the
+authorization model behind: `POST /api/v1/automation/:name/runs/:runId/resume` forwards a
+caller-supplied `{ inputs, output, branchLabel }` straight through, and `resumeInternal` validated
+**machine state only** (the concurrent-resume latch, the run exists, the flow exists, the suspended
+node still exists). Nothing asked *who*. A raw resume with `branchLabel: 'approve'` therefore walked
+the approve edge with **no approver check, no `sys_approval_action` row and no status mirror** —
+leaving the `sys_approval_request` row and the run permanently disagreeing. The only thing standing
+between the route and the approvals rules was convention, spelled out in a showcase comment. A
+comment in an example is not an access control.
+
+Deleting the route was never an option: it is load-bearing for **screen flows** — the UI flow-runner
+posts `{ inputs }` to advance a paused `screen` node, which is its whole reason to exist. So the gate
+discriminates by **what the run is parked on**, not by the route:
+
+- **`ActionDescriptor.resumeAuthority`** (ADR-0018 registry, `'any'` | `'service'`, default `'any'`).
+  A pausing node declares who may continue it. `approval` declares `'service'`; `screen` / `wait`
+  keep the default and behave exactly as before.
+- **The suspension carries its own node type.** `SuspendedRun.nodeType` (column
+  `sys_automation_run.node_type`) is captured at suspend time rather than re-derived from the live
+  flow, so a flow republished mid-pause cannot re-type the node out from under the gate. Rows
+  written before this shipped fall back to the flow definition.
+- **The marker is a symbol.** `RESUME_AUTHORITY_SERVICE` (`@objectstack/spec/contracts`) is stamped
+  on the `ResumeSignal` by the owning service — `ApprovalService` does it in one place
+  (`serviceResume`), on the tail of a decision it already authorized and recorded. The transport
+  builds its signal out of a JSON body, and no JSON body can produce a symbol-keyed property, so the
+  route cannot forge it; the gate does not need to trust the caller's claims about itself.
+- **The gate follows the subflow chain.** A parent parked on a `subflow` node *delegates* the signal
+  to its suspended child (see the 2026-06-10 addendum), so the gate resolves the effective suspension
+  first and judges the node the signal actually lands on. Resuming the parent is not a way around it.
+- **Refusal is an authorization answer.** `resume` returns `{ success: false, code: 'forbidden' }`
+  and the route answers **403** — not a 200 carrying `success: false`, which reads as "your resume
+  ran and the flow failed". Nothing is consumed: the request stays pending and the run stays parked,
+  so the real decision still lands.
+
+Engine-internal continuations (subflow delegation and up-bubble, `map` re-entry, the wait-timer wake)
+go through the private `resumeInternal` and are **not** re-gated — they continue work an
+already-authorized call started.
+
+**Known gap, tracked separately:** ADR-0044's revise window parks the run on an ordinary `wait` node
+(signal flavor) placed by the flow author, which the type-keyed gate cannot distinguish from any
+other wait. A raw resume there still forces a resubmit without a `sys_approval_action` row. Filed as
+a follow-up — closing it needs a per-suspension owner claim rather than a node-type one.

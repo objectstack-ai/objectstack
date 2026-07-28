@@ -209,6 +209,15 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // values, applied as bare flow variables; `output`/`branchLabel` also
         // forwarded for approval-style resumes. Returns the next paused
         // `{ screen }` (multi-screen) or the completed result.
+        //
+        // The signal is built key-by-key from the JSON body on purpose (#3801):
+        // the engine gates a suspension whose node declares
+        // `resumeAuthority: 'service'` — an `approval` pause, resumable only via
+        // `ApprovalService`, which records the decision and enforces the slate —
+        // on a SYMBOL-keyed marker. Assembling the signal field-wise (never
+        // spreading the body) keeps that unforgeable even if a caller invents
+        // extra keys; a refused resume comes back `code: 'forbidden'` and is
+        // answered 403 rather than a 200 carrying `success: false`.
         if (parts[1] === 'runs' && parts[2] && parts[3] === 'resume' && m === 'POST') {
             if (typeof automationService.resume === 'function') {
                 const b = (body && typeof body === 'object') ? body : {};
@@ -218,6 +227,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 if (b.output && typeof b.output === 'object') signal.output = b.output;
                 if (typeof b.branchLabel === 'string') signal.branchLabel = b.branchLabel;
                 const result = await automationService.resume(parts[2], signal);
+                if (result?.success === false && result.code === 'forbidden') {
+                    return { handled: true, response: deps.error(result.error ?? 'Resume forbidden', 403) };
+                }
                 return { handled: true, response: deps.success(result) };
             }
             return { handled: true, response: deps.error('Resume not supported', 501) };

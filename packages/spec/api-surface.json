@@ -3632,6 +3632,7 @@
     "QueueMessageRecord (interface)",
     "QueuePublishOptions (interface)",
     "RESERVED_RLS_MEMBERSHIP_KEYS (const)",
+    "RESUME_AUTHORITY_SERVICE (const)",
     "RLS_MEMBERSHIP_RESOLVER_SERVICE (const)",
     "RealtimeEventHandler (type)",
     "RealtimeEventPayload (interface)",
