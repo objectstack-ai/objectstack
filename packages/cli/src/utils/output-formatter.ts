@@ -3,22 +3,30 @@
 import chalk from 'chalk';
 import yaml from 'yaml';
 
+import { emitText } from './format.js';
+
 /**
  * Output format options for CLI commands
  */
 export type OutputFormat = 'json' | 'table' | 'yaml';
 
 /**
- * Format and output data according to the specified format
+ * Format and output data according to the specified format.
+ *
+ * `async` because the two MACHINE formats must drain stdout before the command
+ * can exit — `os data query --format json` piped to a consumer is exactly the
+ * unbounded payload that truncates at one pipe buffer when a `this.exit(1)`
+ * follows. See `emitJson` in ./format.ts for the full mechanism. The `table`
+ * format is human-facing and stays on plain `console.log`.
  */
-export function formatOutput(data: any, format: OutputFormat = 'json'): void {
+export async function formatOutput(data: any, format: OutputFormat = 'json'): Promise<void> {
   switch (format) {
     case 'json':
-      console.log(JSON.stringify(data, null, 2));
+      await emitText(JSON.stringify(data, null, 2));
       break;
 
     case 'yaml':
-      console.log(yaml.stringify(data));
+      await emitText(yaml.stringify(data));
       break;
 
     case 'table':
@@ -34,7 +42,7 @@ export function formatOutput(data: any, format: OutputFormat = 'json'): void {
       break;
 
     default:
-      console.log(JSON.stringify(data, null, 2));
+      await emitText(JSON.stringify(data, null, 2));
   }
 }
 

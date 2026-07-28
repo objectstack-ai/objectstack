@@ -36,6 +36,8 @@ import {
   formatZodErrors,
   collectMetadataStats,
   printMetadataStats,
+  emitJson,
+  isExitSignal,
 } from '../utils/format.js';
 import { checkSpecVersionGap } from '../utils/spec-version.js';
 
@@ -85,11 +87,11 @@ export default class Validate extends Command {
 
       if (!result.success) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: (result.error as unknown as ZodError).issues,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
 
@@ -113,12 +115,12 @@ export default class Validate extends Command {
 
       if (exprErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: exprErrors,
             warnings: exprWarnings,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -142,11 +144,11 @@ export default class Validate extends Command {
 
       if (listViewErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: listViewErrors,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -170,11 +172,11 @@ export default class Validate extends Command {
 
       if (viewContainerErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: viewContainerErrors,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -199,12 +201,12 @@ export default class Validate extends Command {
 
       if (widgetErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: widgetErrors,
             warnings: widgetWarnings,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -230,12 +232,12 @@ export default class Validate extends Command {
       const actionRefWarnings = actionRefFindings.filter((f) => f.severity === 'warning');
       if (actionRefErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: actionRefErrors,
             warnings: [...widgetWarnings, ...actionRefWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -266,12 +268,12 @@ export default class Validate extends Command {
       const filterTokenErrors = filterTokenFindings.filter((f) => f.severity === 'error');
       if (filterTokenErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: filterTokenErrors,
             warnings: [...widgetWarnings, ...actionRefWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -309,12 +311,12 @@ export default class Validate extends Command {
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');
       if (refErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: refErrors,
             warnings: [...widgetWarnings, ...actionRefWarnings, ...refWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -345,12 +347,12 @@ export default class Validate extends Command {
 
       if (styleErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: styleErrors,
             warnings: [...widgetWarnings, ...styleWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -391,12 +393,12 @@ export default class Validate extends Command {
 
       if (jsxErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: jsxErrors,
             warnings: [...widgetWarnings, ...styleWarnings, ...jsxWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -417,12 +419,12 @@ export default class Validate extends Command {
       const reactErrors = reactFindings.filter((f) => f.severity === 'error');
       if (reactErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: reactErrors,
             warnings: [...widgetWarnings, ...styleWarnings, ...jsxWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -450,12 +452,12 @@ export default class Validate extends Command {
       }
       if (reactPropErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: reactPropErrors,
             warnings: [...widgetWarnings, ...styleWarnings, ...jsxWarnings, ...reactPropWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -540,11 +542,11 @@ export default class Validate extends Command {
       const readonlyWriteWarnings = readonlyWriteFindings.filter((f) => f.severity === 'warning');
       if (readonlyWriteErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: readonlyWriteErrors,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -581,11 +583,11 @@ export default class Validate extends Command {
       const securityAdvisories = securityFindings.filter((f) => f.severity !== 'error');
       if (securityErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: securityErrors,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -625,11 +627,11 @@ export default class Validate extends Command {
       }));
       if (capProviderErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: capProviderErrors.map((c) => ({ token: c.token, message: renderCapabilityMessage(c) })),
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -648,7 +650,7 @@ export default class Validate extends Command {
       const specGap = checkSpecVersionGap(config.manifest);
 
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           valid: true,
           manifest: config.manifest,
           stats,
@@ -656,7 +658,7 @@ export default class Validate extends Command {
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),
-        }, null, 2));
+        });
         return;
       }
 
@@ -745,12 +747,13 @@ export default class Validate extends Command {
 
       console.log('');
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           valid: false,
           error: error.message,
           duration: timer.elapsed(),
-        }, null, 2));
+        });
         this.exit(1);
       }
       console.log('');

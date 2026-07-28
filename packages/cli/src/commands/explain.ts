@@ -8,6 +8,7 @@ import {
   printError,
   printInfo,
   printKV,
+  emitJson,
 } from '../utils/format.js';
 
 // ─── Schema Catalog ─────────────────────────────────────────────────
@@ -332,12 +333,12 @@ export default class Explain extends Command {
     // ── No argument: list all schemas ──
     if (!schemaName) {
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           schemas: Object.entries(SCHEMAS).map(([key, s]) => ({
             name: key,
             description: s.description,
           })),
-        }, null, 2));
+        });
         return;
       }
 
@@ -357,7 +358,7 @@ export default class Explain extends Command {
     const schema = SCHEMAS[schemaName.toLowerCase()];
     if (!schema) {
       if (flags.json) {
-        console.log(JSON.stringify({ error: `Unknown schema: ${schemaName}` }));
+        await emitJson({ error: `Unknown schema: ${schemaName}` }, 0, { compact: true });
         process.exit(1);
       }
       printError(`Unknown schema: "${schemaName}"`);
@@ -369,7 +370,7 @@ export default class Explain extends Command {
 
     // ── JSON output ──
     if (flags.json) {
-      console.log(JSON.stringify(schema, null, 2));
+      await emitJson(schema);
       return;
     }
 

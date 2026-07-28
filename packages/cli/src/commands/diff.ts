@@ -11,6 +11,7 @@ import {
   printInfo,
   printStep,
   createTimer,
+  emitJson,
 } from '../utils/format.js';
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -231,14 +232,14 @@ export default class Diff extends Command {
 
       // ── Output ──
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           before: beforePath,
           after: afterPath,
           total: diffs.length,
           breaking: breakingCount,
           changes: diffs,
           duration: timer.elapsed(),
-        }, null, 2));
+        });
         return;
       }
 
@@ -283,7 +284,7 @@ export default class Diff extends Command {
 
     } catch (error: any) {
       if (flags.json) {
-        console.log(JSON.stringify({ error: error.message }));
+        await emitJson({ error: error.message }, 0, { compact: true });
         process.exit(1);
       }
       console.log('');

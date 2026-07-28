@@ -13,6 +13,7 @@ import {
   printStep,
   createTimer,
   emitJson,
+  isExitSignal,
 } from '../../utils/format.js';
 import { computeI18nCoverage } from '../../utils/i18n-coverage.js';
 
@@ -155,8 +156,9 @@ export default class I18nCheck extends Command {
 
       if (report.totals.errors > 0 || thresholdViolations.length > 0) process.exit(1);
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (flags.json) {
-        console.log(JSON.stringify({ error: error.message }));
+        await emitJson({ error: error.message }, 0, { compact: true });
         process.exit(1);
       }
       console.log('');

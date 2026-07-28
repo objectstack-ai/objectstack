@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { printHeader, printSuccess, printError, printKV } from '../utils/format.js';
+import { printHeader, printSuccess, printError, printKV, emitJson } from '../utils/format.js';
 import { writeAuthConfig, readAuthConfig } from '../utils/auth-config.js';
 import { ObjectStackClient } from '@objectstack/client';
 import * as readline from 'node:readline/promises';
@@ -122,7 +122,7 @@ export default class AuthLogin extends Command {
           const existing = await readAuthConfig();
           if (existing?.token) {
             if (flags.json) {
-              console.log(JSON.stringify({ success: false, error: 'Already logged in', email: existing.email }));
+              await emitJson({ success: false, error: 'Already logged in', email: existing.email }, 0, { compact: true });
             } else {
               printSuccess(`Already logged in as ${existing.email || existing.userId}`);
               console.log('');
@@ -171,7 +171,7 @@ export default class AuthLogin extends Command {
       await this.loginWithPassword(client, flags.url, email, password, flags.json);
     } catch (error: any) {
       if (flags.json) {
-        console.log(JSON.stringify({ success: false, error: error.message }, null, 2));
+        await emitJson({ success: false, error: error.message });
         this.exit(1);
       }
       printError(error.message || String(error));
@@ -206,7 +206,7 @@ export default class AuthLogin extends Command {
     });
 
     if (jsonOutput) {
-      console.log(JSON.stringify({ success: true, email: user?.email || email, userId: user?.id }, null, 2));
+      await emitJson({ success: true, email: user?.email || email, userId: user?.id });
     } else {
       printSuccess('Authentication successful');
       printKV('Email', user?.email || email);
@@ -252,7 +252,7 @@ export default class AuthLogin extends Command {
     const verificationUrl = verification_uri_complete || `${verification_uri}?user_code=${encodeURIComponent(user_code)}`;
 
     if (jsonOutput) {
-      console.log(JSON.stringify({ device_code, user_code, verification_uri, verification_uri_complete, expires_in }));
+      await emitJson({ device_code, user_code, verification_uri, verification_uri_complete, expires_in }, 0, { compact: true });
     } else {
       console.log('  To authorize this CLI, visit:');
       console.log('');
@@ -318,7 +318,7 @@ export default class AuthLogin extends Command {
         });
 
         if (jsonOutput) {
-          console.log(JSON.stringify({ success: true, email: user?.email, userId: user?.id }, null, 2));
+          await emitJson({ success: true, email: user?.email, userId: user?.id });
         } else {
           printSuccess('Authentication successful');
           if (user?.email) printKV('Email', user.email);
