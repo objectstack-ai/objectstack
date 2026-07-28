@@ -46,7 +46,7 @@
     {
       "id": 5,
       "prompt": "In a kind:'react' page, drop a quick one-off bar chart of tasks grouped by status. Write the block.",
-      "expected_output": "Uses the inline <ObjectChart objectName=\"task\" chartType=\"bar\" aggregate={{ function: 'count', groupBy: 'status' }} xAxisKey=\"status\" series={[{ dataKey: 'count' }]} /> block directly — an ad-hoc in-page chart does not require a dataset, and the react ObjectChart block has no dataset prop. Naming a dataset would only be for reuse/governance (Level B), not needed here. Note the axes name the aggregate's RESULT COLUMNS: `status` (its groupBy) and `count` (the fieldless-count column) — a fieldless count needs no field.",
+      "expected_output": "Uses the inline <ObjectChart objectName=\"task\" type=\"bar\" aggregate={{ function: 'count', groupBy: 'status' }} xAxis={{ field: 'status' }} series={[{ name: 'count' }]} /> block directly — an ad-hoc in-page chart does not require a dataset, and the react ObjectChart block has no dataset prop. Naming a dataset would only be for reuse/governance (Level B), not needed here. Note the axes name the aggregate's RESULT COLUMNS: `status` (its groupBy) and `count` (the fieldless-count column) — a fieldless count needs no field.",
       "files": [],
       "assertions": {
         "must_contain": ["ObjectChart", "aggregate", "groupBy"],

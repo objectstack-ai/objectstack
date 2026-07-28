@@ -105,20 +105,22 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
     schemaType: 'object-chart',
     summary: 'Chart over an object’s aggregated data. Bind objectName + aggregate; the axes name the aggregate’s RESULT COLUMNS (see chartAggregateResultKeys).',
     schema: ChartConfigSchema,
-    // `xAxis`/`yAxis`/`series` from ChartConfigSchema are deliberately NOT
-    // surfaced here (#3701): this block reads `xAxisKey` + `series[].dataKey`,
-    // so the ChartConfig axis shapes were silently inert — advertising them
-    // violated ADR-0078 (a prop the author writes is honored or rejected,
-    // never silently dropped). The real bindings are declared in the overlay
-    // below; `validate-react-page-props` rejects the ChartConfig spellings.
-    dataProps: ['title', 'colors', 'showLegend'],
+    // The spec ChartConfig shape IS the author contract again (#3729): the
+    // renderer honors `type`/`xAxis.field`/`yAxis[].field`/`series[].name`
+    // plus the axis presentation props (objectui#2880). #3701 had trimmed
+    // them out because they were silently inert — that was a record of the
+    // runtime gap, not the target state (ADR-0082 D1: spec is the protocol).
+    //
+    // `type` is the one field that cannot ride the props bag: it is the SDUI
+    // envelope's component discriminator on every FLATTENED surface, so the
+    // react-page wrapper parks an author `type` beside it and the renderer
+    // reads it back. It is published here as the spec spells it; the internal
+    // `chartType` spelling is no longer part of the author contract.
+    dataProps: ['type', 'title', 'subtitle', 'xAxis', 'yAxis', 'series', 'colors', 'showLegend', 'showDataLabels', 'annotations', 'interaction'],
     interactions: [
       OBJECT_NAME,
       { name: 'filter', type: 'FilterArray', kind: 'controlled', description: 'ObjectQL filter scoping the data; drive from React state.' },
-      { name: 'aggregate', type: "{ field?: string; function: 'count' | 'sum' | 'avg' | 'min' | 'max'; groupBy: string | { field: string; dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year' } }", kind: 'binding', description: 'Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal "count" for a fieldless count). Bind the axes to those names.' },
-      { name: 'chartType', type: "'bar' | 'column' | 'horizontal-bar' | 'line' | 'area' | 'pie' | 'donut' | 'radar' | 'scatter' | 'funnel' | 'combo' | 'treemap' | 'sankey'", kind: 'binding', description: 'Which chart to draw (default bar).' },
-      { name: 'xAxisKey', type: 'string', kind: 'binding', description: 'Result column plotted on the category axis. Defaults to the aggregate’s groupBy — set it only to be explicit, and only to that name.' },
-      { name: 'series', type: 'Array<{ dataKey: string; label?: string }>', kind: 'binding', description: 'Plotted series. Each dataKey names a result column — the aggregate’s field (or "count"), plus "<field>__comparison" when a comparison overlay is on. NOT the ChartConfig series shape.' },
+      { name: 'aggregate', type: "{ field?: string; function: 'count' | 'sum' | 'avg' | 'min' | 'max'; groupBy: string | { field: string; dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year' } }", kind: 'binding', description: 'Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal "count" for a fieldless count). Bind xAxis.field / yAxis[].field / series[].name to those names.' },
       { name: 'data', type: 'any[]', kind: 'binding', description: 'Static/precomputed data to chart directly instead of binding via objectName + aggregate.' },
     ],
   },

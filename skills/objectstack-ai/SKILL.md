@@ -549,10 +549,14 @@ On validation failure the runtime retries by default
    has 15+ tools, split it.
 3. **Missing guardrails and approval gates.** Define `blockedTopics` (plus the
    token / time budgets) in agent `guardrails`; for destructive operations put
-   a human in the loop — `requiresConfirmation: true` on the tool,
-   `approval: 'always'` on an MCP tool binding, `enableActionApproval: true`
-   (HITL queue, cloud) for auto-exposed actions. There is no
-   `requireApprovalFor` field.
+   a human in the loop with a gate that is **actually enforced** —
+   `enableActionApproval: true` (HITL queue, cloud) for auto-exposed actions,
+   `ai.requiresConfirmation` on the **action**, or `approval: 'always'` on an
+   MCP tool binding. AI metadata edits are already gated: they land as drafts a
+   human must publish (ADR-0033).
+   ⚠️ Do **not** rely on `requiresConfirmation` on the **tool** — it is declared
+   but read by no execution path, so it produces no pause (#3715).
+   There is no `requireApprovalFor` field.
 4. **Ignoring tool descriptions.** The LLM uses tool `description` to decide
    when to call it. Poor descriptions = wrong tool selection.
 5. **Not testing trigger phrases.** Ambiguous trigger phrases cause skill

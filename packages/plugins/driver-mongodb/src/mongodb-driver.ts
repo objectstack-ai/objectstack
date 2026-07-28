@@ -27,6 +27,10 @@ import {
   postProcessAggregation,
 } from './mongodb-aggregation.js';
 import { syncCollectionSchema, dropCollection } from './mongodb-schema.js';
+import {
+  assertSingleTenantPosture,
+  assertObjectsNotTenantScoped,
+} from './mongodb-tenancy-guard.js';
 
 const DEFAULT_ID_LENGTH = 16;
 
@@ -59,6 +63,14 @@ export interface MongoDBDriverConfig {
  *
  * Implements the IDataDriver contract via the official MongoDB driver.
  * Uses native MongoDB queries, aggregation pipelines, and transactions.
+ *
+ * **Single-tenant only (#3724).** This driver implements no row-level tenant
+ * isolation — it ignores `DriverOptions.tenantId`, so reads carry no tenant
+ * predicate and writes are not stamped with a tenant column. Rather than serve
+ * a multi-tenant deployment unisolated, it **refuses to start** in one: see
+ * `mongodb-tenancy-guard.ts`, wired into the constructor + {@link connect}
+ * (deployment posture) and {@link syncSchema} / {@link syncSchemasBatch}
+ * (object metadata).
  */
 export class MongoDBDriver implements IDataDriver {
   public readonly name: string = 'com.objectstack.driver.mongodb';
@@ -116,6 +128,14 @@ export class MongoDBDriver implements IDataDriver {
   private config: MongoDBDriverConfig;
 
   constructor(config: MongoDBDriverConfig) {
+    // Refuse to even EXIST in a multi-tenant deployment (#3724). The check is
+    // repeated in `connect()`, but construction is the only seam guaranteed to
+    // fail loudly: `ObjectQLEngine.init()` catches a driver's connect rejection
+    // and logs it, then boots anyway ("may recover via lazy reconnection"), so
+    // a connect-only guard would degrade from "refuses to start" to "starts,
+    // then throws at query time".
+    assertSingleTenantPosture();
+
     this.config = config;
     const clientOptions: MongoClientOptions = {
       maxPoolSize: config.maxPoolSize ?? 10,
@@ -132,6 +152,12 @@ export class MongoDBDriver implements IDataDriver {
   // ===========================================================================
 
   async connect(): Promise<void> {
+    // Fail before a socket is opened: this driver cannot isolate tenants, so a
+    // multi-tenant deployment must never get a usable connection out of it.
+    // Re-checked here (not just in the constructor) because a host may flip the
+    // posture between construction and boot.
+    assertSingleTenantPosture();
+
     await this.client.connect();
     const dbName = this.config.database || this.extractDatabaseName(this.config.url);
     this.db = this.client.db(dbName);
@@ -498,11 +524,19 @@ export class MongoDBDriver implements IDataDriver {
   // ===========================================================================
 
   async syncSchema(object: string, schema: unknown, _options?: DriverOptions): Promise<void> {
+    // An object asking for row-level tenant isolation gets none here (#3724) —
+    // refuse rather than materialise a collection that silently mixes tenants.
+    assertObjectsNotTenantScoped([{ object, schema }]);
+
     const objectDef = schema as { name: string; fields?: Record<string, any> };
     await syncCollectionSchema(this.db, object, objectDef);
   }
 
   async syncSchemasBatch(schemas: Array<{ object: string; schema: unknown }>, options?: DriverOptions): Promise<void> {
+    // Pre-scan so the failure names every tenant-scoped object at once instead
+    // of surfacing them one boot at a time.
+    assertObjectsNotTenantScoped(schemas);
+
     for (const { object, schema } of schemas) {
       await this.syncSchema(object, schema, options);
     }

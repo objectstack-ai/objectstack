@@ -1651,9 +1651,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Schemas",
         description: "Inputs the tool accepts and the shape of its output."
       },
-      access_and_safety: {
-        label: "Access & safety",
-        description: "Permissions and confirmation requirements."
+      declarative_metadata_not_enforced: {
+        label: "Declarative metadata (not enforced)",
+        description: "Recorded on the tool definition but read by no execution path — see the per-field notes for where the real gates live."
       }
     },
     fields: {

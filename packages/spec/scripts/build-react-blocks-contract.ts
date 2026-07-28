@@ -66,8 +66,15 @@ function dataProps(schema: any, allow?: string[]): Prop[] {
   }
   const props = js?.properties ?? {};
   const required: string[] = Array.isArray(js?.required) ? js.required : [];
-  const SKIP = new Set(['aria', 'type', 'id', 'className', 'style']);
-  let entries = Object.entries(props).filter(([name]) => !SKIP.has(name));
+  // Envelope/plumbing props that are never part of an author contract. `type`
+  // is the awkward one: for most blocks it IS the SDUI component discriminator,
+  // but `ChartConfig.type` is the chart family and a real author prop — so an
+  // explicit `dataProps` allow-list wins over the skip (#3729).
+  const SKIP = new Set(['aria', 'id', 'className', 'style']);
+  const allowed = new Set(allow ?? []);
+  let entries = Object.entries(props).filter(
+    ([name]) => !(SKIP.has(name) || (name === 'type' && !allowed.has('type'))),
+  );
   if (allow && allow.length) {
     const order = new Map(allow.map((n, i) => [n, i]));
     entries = entries.filter(([n]) => order.has(n)).sort((a, b) => order.get(a[0])! - order.get(b[0])!);

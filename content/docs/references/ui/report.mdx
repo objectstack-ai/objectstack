@@ -90,8 +90,8 @@ const result = JoinedReportBlock.parse(data);
 | **height** | `number` | optional | Fixed height in pixels |
 | **showLegend** | `boolean` | ✅ | Display legend |
 | **showDataLabels** | `boolean` | ✅ | Display data labels |
-| **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional |  |
-| **interaction** | `{ tooltips: boolean; zoom: boolean; brush: boolean; clickAction?: string }` | optional |  |
+| **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
+| **interaction** | `{ tooltips: boolean; zoom: boolean; brush: boolean; clickAction?: string }` | optional | Interaction toggles: `{ tooltips?, brush?, zoom?, clickAction? }` |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 

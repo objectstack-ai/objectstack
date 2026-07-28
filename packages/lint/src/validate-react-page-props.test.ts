@@ -5,7 +5,6 @@ import {
   REACT_CHART_FIELD_UNKNOWN,
   REACT_CHART_AGGREGATE_INVALID,
   REACT_CHART_AXIS_UNKNOWN,
-  REACT_CHART_AXIS_INERT,
 } from './validate-react-page-props.js';
 
 const page = (source: string) => ({ pages: [{ name: 'p', kind: 'react', source }] });
@@ -154,13 +153,42 @@ describe('validateReactPageProps — <ObjectChart> bindings (#3701)', () => {
     expect(f).toEqual([]);
   });
 
-  it('warns that the ChartConfig axis shapes are inert on this block', () => {
+  // ── the spec ChartConfig shape is the contract again (#3729) ────────────
+
+  it('accepts the spec axis shape', () => {
     const f = validateReactPageProps(
-      chartPage(chart(`objectName="invoice" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} yAxis={[{ field: 'total' }]}`)),
+      chartPage(chart(`objectName="invoice" type="bar" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxis={{ field: 'status' }} yAxis={[{ field: 'total' }]}`)),
     );
-    const inert = f.find((x) => x.rule === REACT_CHART_AXIS_INERT);
-    expect(inert?.severity).toBe('warning');
-    expect(inert?.hint).toMatch(/series=/);
+    expect(f).toEqual([]);
+  });
+
+  it('flags a spec yAxis[].field that is not a result column', () => {
+    const f = validateReactPageProps(
+      chartPage(chart(`objectName="invoice" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} yAxis={[{ field: 'sum_total' }]}`)),
+    );
+    expect(f.some((x) => x.rule === REACT_CHART_AXIS_UNKNOWN && /sum_total/.test(x.message))).toBe(true);
+  });
+
+  it('flags a spec series[].name that is not a result column', () => {
+    const f = validateReactPageProps(
+      chartPage(chart(`objectName="invoice" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} series={[{ name: 'sum_total' }]}`)),
+    );
+    const hit = f.find((x) => x.rule === REACT_CHART_AXIS_UNKNOWN);
+    expect(hit?.hint).toMatch(/series\[\]\.name/);
+  });
+
+  it('flags a spec xAxis.field bound to the VALUE column', () => {
+    const f = validateReactPageProps(
+      chartPage(chart(`objectName="invoice" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxis={{ field: 'total' }}`)),
+    );
+    expect(f.some((x) => x.rule === REACT_CHART_AXIS_UNKNOWN && /VALUE column/.test(x.message))).toBe(true);
+  });
+
+  it('still accepts the internal spelling — dashboards emit it', () => {
+    const f = validateReactPageProps(
+      chartPage(chart(`objectName="invoice" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxisKey="status" series={[{ dataKey: 'total' }]}`)),
+    );
+    expect(f).toEqual([]);
   });
 
   // ── false-positive guards ───────────────────────────────────────────────

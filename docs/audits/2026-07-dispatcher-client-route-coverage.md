@@ -320,8 +320,8 @@ tranche 3 — 90 routes, each with a reviewed disposition, enumerated for real b
 driving all 17 registrars against a capturing mock `IHttpServer`.
 
 The client half is the part that actually closes the boundary. Without it a
-route could be renamed there, the ledger updated to match, and all 23 methods
-404 with the server-side guard still green — so
+route could be renamed there, the ledger updated to match, and every
+`projects.*` method 404 with the server-side guard still green — so
 `projects-namespace-coverage.test.ts` drives the real SDK with a recording
 `fetch` and matches each URL against the ledger. Mutation-checked against
 exactly that scenario.
@@ -335,11 +335,13 @@ exactly that scenario.
 
 Two findings, both pinned by tests rather than prose:
 
-- **`projects.listTemplates` is dead** — it builds `/api/v1/cloud/templates`,
+- **`projects.listTemplates` was dead** — it built `/api/v1/cloud/templates`,
   which the string search finds exactly once in each repo: the call itself.
-  Templates exist as a filtered `sys_package` view, never as a route (#3702).
-  The sixth instance of the `#3584 / #3611 / #3636` class, and the first one
-  only a cross-repo guard could have seen.
+  Templates exist as a filtered `sys_package` view, never as a route. The
+  sixth instance of the `#3584 / #3611 / #3636` class, and the first one only
+  a cross-repo guard could have seen. **Removed in #3702** — there was no
+  route to reconcile the method against, and no caller in either repo; it
+  returns when a route exists to back it, with an `sdk` ledger row proving so.
 - **A duplicate route registration** — `POST /actions/sys_environment/:actionName`
   mounted twice with an identical path, the second commented "legacy alias"
   and aliasing nothing (cloud#887).

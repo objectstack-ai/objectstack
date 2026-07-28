@@ -2,6 +2,16 @@
 
 MongoDB driver for ObjectStack — native document database support via the official MongoDB Node.js driver.
 
+> ### ⚠️ Single-tenant only
+>
+> This driver has **no row-level tenant isolation**: it ignores
+> `DriverOptions.tenantId`, so reads carry no tenant predicate and writes are not
+> stamped with a tenant column. Rather than serve a multi-tenant deployment
+> without isolation, it **refuses to start** in one — see
+> [Multi-tenancy](#multi-tenancy) below. Use
+> [`@objectstack/driver-sql`](../driver-sql) (PostgreSQL / MySQL / SQLite) for
+> multi-tenant deployments.
+
 ## Installation
 
 ```bash
@@ -66,6 +76,39 @@ export default defineStack({
 | **Advanced** | Full-text search, JSON queries, geospatial | ✅ |
 | **Joins** | Cross-collection joins ($lookup) | ❌ |
 | **Window Functions** | ROW_NUMBER, RANK, etc. | ❌ |
+| **Multi-tenancy** | Row-level tenant isolation | ❌ (boots single-tenant only) |
+
+### Multi-tenancy
+
+The driver is a **single-tenant / embedded** driver. Unlike
+`@objectstack/driver-sql` — which resolves a tenant column per object, injects a
+`WHERE tenant_field = ?` predicate on reads and stamps that column on writes —
+this driver implements none of that layer. In a multi-tenant deployment every
+query would read, update and delete other tenants' documents.
+
+So instead of running unisolated, it fails fast at startup
+([#3724](https://github.com/objectstack-ai/objectstack/issues/3724)):
+
+| Signal | Where it is checked | Result |
+|--------|--------------------|--------|
+| Tenancy posture is not `single` — `OS_TENANCY_POSTURE=group\|isolated`, or derived from `OS_MULTI_ORG_ENABLED=true` | `new MongoDBDriver()`, re-checked in `connect()` before a socket is opened | throws `MongoDBMultiTenantUnsupportedError` |
+| An object declares `tenancy.enabled: true` | `syncSchema()` / `syncSchemasBatch()` | throws, naming every offending object |
+
+The error carries `code === 'MONGODB_MULTI_TENANT_UNSUPPORTED'` so a host can
+recognise it without matching on the message:
+
+```typescript
+import {
+  MongoDBMultiTenantUnsupportedError,
+  MULTI_TENANT_UNSUPPORTED_CODE,
+} from '@objectstack/driver-mongodb';
+```
+
+There is deliberately **no override flag** — one would restore exactly the
+silent cross-tenant access the guard exists to prevent. To run MongoDB, keep the
+deployment single-tenant (`OS_TENANCY_POSTURE=single` or unset, `OS_MULTI_ORG_ENABLED`
+unset or `false`, no object declaring `tenancy.enabled: true`); to go
+multi-tenant, switch to `@objectstack/driver-sql`.
 
 ### ID Handling
 

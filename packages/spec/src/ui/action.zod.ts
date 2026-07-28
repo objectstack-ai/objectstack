@@ -9,6 +9,7 @@ import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is
 // deliberately import-free, so this cannot introduce a cycle.
 import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/public-auth-features';
+import { findClosestMatches } from '../shared/suggestions.zod';
 
 /**
  * Action Parameter Schema
@@ -45,6 +46,86 @@ import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/publi
  * to the field name and is used as the request-body key).
  */
 import { lazySchema } from '../shared/lazy-schema';
+
+/**
+ * Keys `ActionParamSchema` declares.
+ *
+ * Kept beside the schema rather than derived from `.shape`: the schema body is
+ * allocated lazily (see `lazySchema`), and the error map below has to name a
+ * canonical key *while* that first parse is still in flight. `action.zod.test.ts`
+ * asserts every entry here is really accepted, so the list cannot rot silently.
+ */
+const ACTION_PARAM_KEYS = [
+  'name', 'field', 'objectOverride', 'label', 'type', 'required', 'options',
+  'placeholder', 'helpText', 'defaultValue', 'multiple', 'accept', 'maxSize',
+  'reference', 'defaultFromRow', 'visible', 'requiresFeature',
+] as const;
+
+/**
+ * Semantic near-misses — a different **word** for the same intent, usually
+ * borrowed from a neighbouring schema where that word is correct. Edit distance
+ * cannot reach these (`visibleWhen` → `visible` is 4 apart), so they are named
+ * explicitly; plain case/underscore slips (`help_text` → `helpText`) are left to
+ * {@link findClosestMatches}. Mirrors the `FIELD_TYPE_ALIASES` pattern in
+ * `shared/suggestions.zod.ts`.
+ *
+ * Keys are normalised by {@link aliasProbe} — lowercase, separators removed.
+ */
+const ACTION_PARAM_KEY_ALIASES: Readonly<Record<string, string>> = {
+  // The objectql/runtime field shape spells a lookup target `reference_to`, and
+  // objectui's resolved param calls it `referenceTo`. Dropping either is the
+  // exact #3405 failure: a targetless picker degrades to a raw-UUID text box.
+  referenceto: 'reference',
+  referenceobject: 'reference',
+  referencedobject: 'reference',
+  targetobject: 'reference',
+  // ADR-0089 made `visibleWhen` the canonical predicate on view/page schemas.
+  // An author who learned it there would silently lose a param's capability
+  // gate here — the param would render unconditionally.
+  visiblewhen: 'visible',
+  visibleon: 'visible',
+  visibility: 'visible',
+  description: 'helpText',
+  help: 'helpText',
+  default: 'defaultValue',
+};
+
+/** `reference_to` / `referenceTo` / `Reference-To` all collapse onto one probe. */
+const aliasProbe = (key: string): string => key.toLowerCase().replace(/[_\-\s]/g, '');
+
+/**
+ * Custom zod `error` for the `.strict()` {@link ActionParamSchema} (#3405 part 3).
+ *
+ * Before this, the schema was zod-default `.strip`: a key it does not declare was
+ * **silently discarded**, and the param went on parsing. That is how a correctly
+ * intended `reference: 'sys_user'` became a text box asking a human to paste a
+ * UUID, with no error anywhere — the config was eaten and the UI lied about why
+ * (ADR-0078 no-silently-inert-metadata, ADR-0049 enforce-or-remove).
+ *
+ * Strict alone would only say "unrecognized key". This map makes the rejection
+ * *fixable*: it names the offending key(s) and, when one is a recognisable
+ * spelling of a declared key, points at the canonical one.
+ */
+const actionParamUnknownKeyError: z.core.$ZodErrorMap = (issue) => {
+  if (issue.code !== 'unrecognized_keys') return undefined;
+  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
+  const suggestions = keys.flatMap((key) => {
+    // Length-relative bound, matching `suggestKey` in `data/object.zod.ts`: a
+    // flat distance of 3 is noise on a short key (`wibble` → `visible`).
+    const maxDistance = Math.max(2, Math.floor(key.length / 3));
+    const canonical =
+      ACTION_PARAM_KEY_ALIASES[aliasProbe(key)] ??
+      findClosestMatches(key, ACTION_PARAM_KEYS, maxDistance, 1)[0];
+    return canonical && canonical !== key ? [`\`${key}\` → \`${canonical}\``] : [];
+  });
+  const base =
+    `Unrecognized key(s) on this action param: ${keys.map((k) => `\`${k}\``).join(', ')}. ` +
+    `Until #3405 these were dropped silently — the param still parsed, so a mis-spelled ` +
+    `config shipped as a control that quietly ignored it.`;
+  return suggestions.length ? `${base} Did you mean ${suggestions.join(', ')}?` : base;
+};
+
+
 export const ActionParamSchema = lazySchema(() => z.object({
   /** Request-body key. Defaults to `field` when `field` is set. */
   name: z.string().optional(),
@@ -123,7 +204,7 @@ export const ActionParamSchema = lazySchema(() => z.object({
    * enum-checked and the gate/registry stay in lockstep.
    */
   requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe('Public auth feature flag gating this param; lowered into `visible` at parse time.'),
-}).refine(
+}, { error: actionParamUnknownKeyError }).strict().refine(
   (p) => Boolean(p.name) || Boolean(p.field),
   { message: 'ActionParam requires either "name" or "field"' },
 ).refine(

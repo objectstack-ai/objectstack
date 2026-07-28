@@ -1651,9 +1651,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Esquemas",
         description: "Entradas que acepta la herramienta y forma de su salida."
       },
-      access_and_safety: {
-        label: "Acceso y seguridad",
-        description: "Permisos y requisitos de confirmación."
+      declarative_metadata_not_enforced: {
+        label: "Declarative metadata (not enforced)",
+        description: "Recorded on the tool definition but read by no execution path — see the per-field notes for where the real gates live."
       }
     },
     fields: {

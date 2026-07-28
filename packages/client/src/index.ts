@@ -1062,6 +1062,14 @@ export class ObjectStackClient {
     /**
      * Provision a new project. Delegates to
      * `ProjectProvisioningService.provisionProject` on the server.
+     *
+     * No `template_id`: it was removed in #3731 because no control plane has
+     * ever read it — the `blank`/`crm`/`todo` registry it addressed died with
+     * the `apps/server` templates route, and `sys_environment` has no such
+     * column, so the field was accepted, transmitted, and dropped. Starter
+     * content is installed from the App Marketplace (`sys_package` with
+     * `is_starter = true`), which `projects.packages.install` already does.
+     * Its listing counterpart went the same way in #3702.
      */
     create: async (req: {
       organization_id: string;
@@ -1076,7 +1084,6 @@ export class ObjectStackClient {
       is_system?: boolean;
       storage_limit_mb?: number;
       clone_from_environment_id?: string;
-      template_id?: string;
       metadata?: Record<string, unknown>;
     }) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments`, {
@@ -1272,11 +1279,13 @@ export class ObjectStackClient {
       return this.unwrapResponse<{ drivers: Array<{ name: string; driverId: string }>; total: number }>(res);
     },
 
-    // `listTemplates` removed in v17 (#3702). It called
-    // `GET /api/v1/cloud/templates`, which no registrar in this repo or the
-    // control plane has ever mounted — the string appeared exactly once per
-    // repo, in the call itself. Templates exist as a filtered `sys_package`
-    // view (`is_starter = true`), never as an HTTP route, so every call 404ed.
+    // The former `listTemplates` was removed in #3702 — it built
+    // `GET /api/v1/cloud/templates`, which nothing mounts in this repo or in
+    // `cloud` (the string occurred exactly once in each: at the call itself),
+    // so every invocation was a 404. Templates are a DATA concept — the
+    // `sys_package_templates` view over `sys_package` (`is_starter = true`) —
+    // never a route; `cloud`'s ledger pins that absence deliberately. It comes
+    // back when a route exists to back it, with an `sdk` ledger row proving so.
 
     /**
      * Per-project package installation management (Power Apps "solution" model).

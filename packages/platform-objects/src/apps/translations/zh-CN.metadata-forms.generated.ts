@@ -1651,9 +1651,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "参数 / 返回结构",
         description: "工具接收的输入与输出形态"
       },
-      access_and_safety: {
-        label: "访问与安全",
-        description: "权限与确认要求"
+      declarative_metadata_not_enforced: {
+        label: "Declarative metadata (not enforced)",
+        description: "Recorded on the tool definition but read by no execution path — see the per-field notes for where the real gates live."
       }
     },
     fields: {

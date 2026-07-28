@@ -96,8 +96,23 @@ export const ToolSchema = lazySchema(() => z.object({
    */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object name (snake_case)'),
 
-  /** Whether the tool requires human confirmation before execution */
-  requiresConfirmation: z.boolean().default(false).describe('Require user confirmation before execution'),
+  /**
+   * Whether the tool requires human confirmation before execution.
+   *
+   * ⚠️ EXPERIMENTAL — NOT ENFORCED (#3715). No execution path reads this flag:
+   * not the LLM tool set (a tool reaches the model as name/description/
+   * parameters only), not `ToolRegistry.execute`, not
+   * `POST /ai/tools/:name/execute`, and not the MCP bridge (which derives
+   * `destructiveHint` from a hardcoded name list). Setting it `true` on a
+   * destructive tool produces NO pause.
+   *
+   * The enforced human-in-the-loop path is the ACTION-level
+   * `ai.requiresConfirmation` (+ the approval queue). For AI metadata
+   * mutations the draft/publish workspace is the real gate (ADR-0033).
+   * Whether this per-tool flag gets wired to that queue or removed is
+   * tracked in #3715.
+   */
+  requiresConfirmation: z.boolean().default(false).describe('[EXPERIMENTAL — not enforced] Require user confirmation before execution. NOTHING pauses on this flag (#3715) — use the action-level `ai.requiresConfirmation` + approval queue for a real gate.'),
 
   /** Permission-set capabilities required to use this tool */
   permissions: z.array(z.string()).optional().describe('Required permission-set capabilities'),
