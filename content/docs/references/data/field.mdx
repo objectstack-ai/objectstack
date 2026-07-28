@@ -14,8 +14,8 @@ Field Type Enum
 ## TypeScript Usage
 
 ```typescript
-import { Address, ComputedFieldCache, CurrencyConfig, CurrencyValue, DataQualityRules, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
-import type { Address, ComputedFieldCache, CurrencyConfig, CurrencyValue, DataQualityRules, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
+import { Address, ComputedFieldCache, CurrencyConfig, CurrencyValue, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
+import type { Address, ComputedFieldCache, CurrencyConfig, CurrencyValue, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
 
 // Validate data
 const result = Address.parse(data);
@@ -74,19 +74,6 @@ const result = Address.parse(data);
 | :--- | :--- | :--- | :--- |
 | **value** | `number` | ✅ | Monetary amount |
 | **currency** | `string` | ✅ | Currency code (ISO 4217) |
-
-
----
-
-## DataQualityRules
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **uniqueness** | `boolean` | ✅ | Enforce unique values across all records |
-| **completeness** | `number` | ✅ | Minimum ratio of non-null values (0-1, default: 0 = no requirement) |
-| **accuracy** | `{ source: string; threshold: number }` | optional | Accuracy validation configuration |
 
 
 ---

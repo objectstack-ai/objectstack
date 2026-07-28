@@ -181,34 +181,6 @@ export const AddressSchema = lazySchema(() => z.object({
 }));
 
 /**
- * Data Quality Rules Schema
- * Defines data quality validation and monitoring for fields
- * 
- * @example Unique SSN field with completeness requirement
- * {
- *   uniqueness: true,
- *   completeness: 0.95,  // 95% of records must have this field
- *   accuracy: {
- *     source: 'government_db',
- *     threshold: 0.98
- *   }
- * }
- */
-export const DataQualityRulesSchema = lazySchema(() => z.object({
-  /** Enforce uniqueness constraint */
-  uniqueness: z.boolean().default(false).describe('Enforce unique values across all records'),
-  
-  /** Completeness ratio (0-1) indicating minimum percentage of non-null values */
-  completeness: z.number().min(0).max(1).default(0).describe('Minimum ratio of non-null values (0-1, default: 0 = no requirement)'),
-  
-  /** Accuracy validation against authoritative source */
-  accuracy: z.object({
-    source: z.string().describe('Reference data source for validation (e.g., "api.verify.com", "master_data")'),
-    threshold: z.number().min(0).max(1).describe('Minimum accuracy threshold (0-1, e.g., 0.95 = 95% match required)'),
-  }).optional().describe('Accuracy validation configuration'),
-}));
-
-/**
  * Computed Field Caching Schema
  * Configuration for caching computed/formula field results
  * 
@@ -544,6 +516,18 @@ export const FieldSchema = lazySchema(() => z.object({
   // the real channel is type:'secret'). See
   // docs/audits/2026-06-dead-surface-disposition-plan.md (P0/P2 field prune):
   // encryptionConfig, maskingRule, auditTrail, cached, dataQuality.
+  //
+  // `dataQuality`'s value schema (`DataQualityRulesSchema` + the `DataQualityRules`
+  // / `DataQualityRulesInput` types) outlived the key by a release — the key was
+  // gone but the schema stayed on the published API surface and in the generated
+  // reference docs, so an author could still discover a `uniqueness` /
+  // `completeness` / `accuracy` shape and write it. This object is NOT `.strict()`,
+  // so that write did not fail loudly: it parsed clean and the key was silently
+  // stripped — the same ADR-0104 failure class as the pre-declaration `accept` /
+  // `maxSize` above (accepted in source, dropped in the contract, no feedback).
+  // Removed in #3726. If data-quality governance is ever built for real, re-add the
+  // key and the schema together, with a consumer (ADR-0049 enforce-or-remove). Do
+  // not restore the schema alone.
 
   /** Layout & Grouping */
   group: z.string().optional().describe('Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system")'),
@@ -642,8 +626,6 @@ export type Address = z.infer<typeof AddressSchema>;
 export type CurrencyConfig = z.infer<typeof CurrencyConfigSchema>;
 export type CurrencyConfigInput = z.input<typeof CurrencyConfigSchema>;
 export type CurrencyValue = z.infer<typeof CurrencyValueSchema>;
-export type DataQualityRules = z.infer<typeof DataQualityRulesSchema>;
-export type DataQualityRulesInput = z.input<typeof DataQualityRulesSchema>;
 export type ComputedFieldCache = z.infer<typeof ComputedFieldCacheSchema>;
 
 /**

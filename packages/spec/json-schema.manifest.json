@@ -700,7 +700,6 @@
     "data/DataEngineUpdateOptions",
     "data/DataEngineUpdateRequest",
     "data/DataEngineVectorFindRequest",
-    "data/DataQualityRules",
     "data/DataTypeMapping",
     "data/Datasource",
     "data/DatasourceCapabilities",
