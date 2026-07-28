@@ -2358,6 +2358,8 @@
     "CreateViewRequestSchema (const)",
     "CreateViewResponse (type)",
     "CreateViewResponseSchema (const)",
+    "CrossObjectBatchDroppedFields (type)",
+    "CrossObjectBatchDroppedFieldsSchema (const)",
     "CrossObjectBatchOperation (type)",
     "CrossObjectBatchOperationSchema (const)",
     "CrossObjectBatchRequest (type)",
