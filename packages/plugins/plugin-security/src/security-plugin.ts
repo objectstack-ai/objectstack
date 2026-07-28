@@ -149,6 +149,19 @@ interface ObjectSecurityMeta {
   isBetterAuthManaged: boolean;
   requiredPermissions: NormalizedRequiredPermissions;
   fieldRequiredPermissions: Record<string, string[]>;
+  /**
+   * [#3545] The object's posture could NOT be resolved — neither the live
+   * ObjectQL schema nor the metadata service returned it. Every other field is
+   * then a DEFAULT, not the author's declaration, and each default happens to be
+   * the permissive end of its axis (`isPrivate: false` is covered by a plain
+   * `'*'` wildcard; empty `requiredPermissions` skips the capability AND-gate).
+   * Consumers that turn this into an ACCESS DECISION must fail closed on it —
+   * see the call sites in the middleware, {@link canExport} and
+   * {@link getReadableFields}. Consumers that only widen scoping from it (the
+   * RLS posture exemption in {@link computeLayeredRlsFilter}) are already safe:
+   * the permissive default withholds the exemption.
+   */
+  unresolved: boolean;
 }
 
 const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze({
@@ -909,7 +922,41 @@ export class SecurityPlugin implements Plugin {
       const secMeta =
         permissionSets.length > 0
           ? await this.getObjectSecurityMeta(opCtx.object)
-          : { isPrivate: false, tenancyDisabled: false, isBetterAuthManaged: false, requiredPermissions: EMPTY_REQUIRED_PERMISSIONS, fieldRequiredPermissions: {} as Record<string, string[]> };
+          : { isPrivate: false, tenancyDisabled: false, isBetterAuthManaged: false, requiredPermissions: EMPTY_REQUIRED_PERMISSIONS, fieldRequiredPermissions: {} as Record<string, string[]>, unresolved: false };
+
+      // [#3545] Fail CLOSED when the object's own posture could not be resolved.
+      // #3545 accepted the API-exposure gate's fail-open on unresolvable metadata
+      // because that gate is a SURFACE-AREA control while THIS middleware is the
+      // authorization boundary and enforces regardless. That holds only if the
+      // boundary's own inputs are trustworthy — and two of them are read from the
+      // same metadata and default permissively: an unresolved `access.default`
+      // reads as PUBLIC (so a plain `'*'` wildcard covers an object ADR-0066 D2
+      // says it must not) and an unresolved `requiredPermissions` reads as NO
+      // CONTRACT (so the D3 capability AND-gate below is skipped entirely). Both
+      // are access-NARROWING declarations, so failing to read them must never
+      // resolve to a grant (ADR-0049) — the same stance the permission-resolution
+      // failure above and the dangling-delegator checks already take.
+      //
+      // Blast radius is bounded to exactly the risky case: system/boot writes
+      // (`isSystem`) and principal-less/anonymous contexts short-circuited above,
+      // so reaching here means an AUTHENTICATED principal with resolved grants
+      // asking for an object whose declaration is missing. Cold start therefore
+      // does NOT trip this — that window is served by the earlier short-circuits,
+      // not by the permissive default — which is why the tiered decision recorded
+      // for the exposure gate (transient unavailability → fail open) can stay
+      // fail-open there while the boundary itself fails closed here.
+      if (secMeta.unresolved) {
+        ctx.logger.error(
+          `[security] object security posture unresolvable for operation '${opCtx.operation}' on ` +
+            `object '${opCtx.object}' (user ${opCtx.context?.userId ?? 'unknown'}) — ` +
+            `denying request (fail-closed, #3545)`,
+        );
+        throw new PermissionDeniedError(
+          `[Security] Access denied: the security posture of object '${opCtx.object}' ` +
+            `could not be resolved for operation '${opCtx.operation}'`,
+          { operation: opCtx.operation, object: opCtx.object },
+        );
+      }
 
       // [#2850] $expand sub-read gate relaxation. The engine's expand path
       // re-enters `find` for a referenced object carrying `__expandRead` (a
@@ -2233,6 +2280,11 @@ export class SecurityPlugin implements Plugin {
     if (permissionSets.length === 0) return allFields;
 
     const secMeta = await this.getObjectSecurityMeta(objectName);
+    // [#3545] Posture unresolvable → expose no columns, the same fail-closed
+    // stance this method already takes on a dangling delegator below. The
+    // per-field capability contract (`fieldRequiredPermissions`) would otherwise
+    // default to empty and silently unmask every capability-gated column.
+    if (secMeta.unresolved) return [];
     let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
     fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
 
@@ -2287,7 +2339,11 @@ export class SecurityPlugin implements Plugin {
     // (`if (permissionSets.length > 0)` guards its whole CRUD gate).
     if (permissionSets.length === 0) return true;
 
-    const { isPrivate } = await this.getObjectSecurityMeta(objectName);
+    const { isPrivate, unresolved } = await this.getObjectSecurityMeta(objectName);
+    // [#3545] Posture unresolvable → deny. `isPrivate` would default to `false`,
+    // which is precisely what lets a plain wildcard reach the object; a bulk
+    // egress decision must not rest on a default we could not read.
+    if (unresolved) return false;
     if (!this.permissionEvaluator.checkObjectPermission('export', objectName, permissionSets, { isPrivate })) {
       return false;
     }
@@ -3159,8 +3215,13 @@ export class SecurityPlugin implements Plugin {
    * is `private` (access.default), platform-global (tenancy disabled), and its
    * `requiredPermissions` capability contract. Prefers the live ObjectQL schema
    * (reflects registry-time augmentation) and falls back to the metadata service.
-   * Returns the permissive default when the schema can't be resolved yet (boot) —
-   * the CRUD/RLS checks then behave as pre-0066 and the miss is retried next call.
+   *
+   * [#3545] When NEITHER source resolves the object, the returned values are
+   * defaults rather than declarations, and it is flagged `unresolved: true`. The
+   * defaults are NOT safe to make an access decision from — each is the
+   * permissive end of its axis — so callers that gate access must fail closed on
+   * the flag instead of consuming the defaults. Only positive resolutions are
+   * cached, so a transient boot miss is retried on the next call.
    */
   private async getObjectSecurityMeta(
     object: string,
@@ -3203,6 +3264,7 @@ export class SecurityPlugin implements Plugin {
       isBetterAuthManaged: (obj as any)?.managedBy === 'better-auth',
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
       fieldRequiredPermissions,
+      unresolved: !obj,
     };
     if (obj) this.objectSecurityMetaCache.set(object, meta);
     return meta;
