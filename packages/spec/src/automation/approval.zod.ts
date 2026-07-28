@@ -5,9 +5,38 @@ import { lazySchema } from '../shared/lazy-schema';
 
 /**
  * Approval Step Approver Type
+ *
+ * **Declaration order is author-facing.** A designer that derives its
+ * approver-type picker from this enum (the Studio flow inspector does, via the
+ * published JSON schema minus `xEnumDeprecated`) offers the members in exactly
+ * this order, so the order is the platform's recommendation, not an accident of
+ * when each member was added.
+ *
+ * INDIRECT bindings lead; the literal `user` binding comes last. Naming one
+ * specific person is the least portable choice an author can make — it breaks
+ * when the flow is deployed to another environment (that id does not exist
+ * there) and again when that person changes team or leaves, silently routing
+ * approvals to someone who should no longer see them. `manager` / `position` /
+ * `department` / `team` all survive both. Offering `user` first taught the
+ * opposite (objectui#2834).
  */
 export const ApproverType = z.enum([
-  'user',           // Specific user(s)
+  'manager',        // Submitter's manager (sys_user.manager_id)
+  'position',       // Holders of a position (sys_user_position, ADR-0090 D3)
+  'department',     // Members of a department + all descendant departments (sys_business_unit)
+  'team',           // Members of a flat collaboration team (sys_team)
+  'field',          // User ID defined in a record field
+  /**
+   * #3447 P2: a CEL expression resolved AT NODE ENTRY against three explicit
+   * roots — `current.*` (the record's live state), `trigger.*` (the submit-time
+   * snapshot) and `vars.*` (flow variables, incl. upstream node outputs). The
+   * result (a user-id string, CSV, or string array — or intermediate ids
+   * re-expanded per `resolveAs`) becomes the approver slate. `record` and bare
+   * field names are deliberately NOT available: `record` means "the record at
+   * event time" everywhere else on the platform (flow conditions, hooks), and
+   * reusing it here would silently alias one of the two times.
+   */
+  'expression',
   // The better-auth ORG-MEMBERSHIP TIER (sys_member.role: owner / admin /
   // member), spelled with the projection name ADR-0057 D7 mandates and
   // ADR-0090 D3 assumes ("relabelled `org_membership_level` … its UI label is
@@ -19,13 +48,11 @@ export const ApproverType = z.enum([
   // surfaces; its exception covers better-auth's own `sys_member.role` column,
   // NOT this enum (which is ours). Accepted for one deprecation window: the
   // runtime resolves it identically and warns, `os lint` prescribes the
-  // rewrite. Removed in the next major.
+  // rewrite. Removed in the next major. Kept adjacent to the spelling that
+  // replaced it; `xEnumDeprecated` keeps it out of every picker regardless of
+  // where it sits.
   'role',
-  'position',       // Holders of a position (sys_user_position, ADR-0090 D3)
-  'team',           // Members of a flat collaboration team (sys_team)
-  'department',     // Members of a department + all descendant departments (sys_business_unit)
-  'manager',        // Submitter's manager (sys_user.manager_id)
-  'field',          // User ID defined in a record field
+  'user',           // A specific user id — least portable; see the note above
   // @deprecated #3508 — declared-but-unenforced: `resolveApproverSpec` in
   // `plugin-approvals` has no queue branch, so a queue approver resolves to
   // nobody (the dead `queue:<value>` fallback literal). The sharing engine
@@ -34,17 +61,6 @@ export const ApproverType = z.enum([
   // (see NON_AUTHORABLE_APPROVER_TYPES). Re-admit only together with a real
   // ownership-queue implementation (queue entity + membership + claim).
   'queue',
-  /**
-   * #3447 P2: a CEL expression resolved AT NODE ENTRY against three explicit
-   * roots — `current.*` (the record's live state), `trigger.*` (the submit-time
-   * snapshot) and `vars.*` (flow variables, incl. upstream node outputs). The
-   * result (a user-id string, CSV, or string array — or intermediate ids
-   * re-expanded per `resolveAs`) becomes the approver slate. `record` and bare
-   * field names are deliberately NOT available: `record` means "the record at
-   * event time" everywhere else on the platform (flow conditions, hooks), and
-   * reusing it here would silently alias one of the two times.
-   */
-  'expression'
 ]);
 
 /**
@@ -140,6 +156,47 @@ export const APPROVER_VALUE_BINDINGS = {
   queue: { source: 'unsupported' },
   expression: { source: 'expression', roots: APPROVER_EXPRESSION_ROOTS },
 } as const satisfies Record<z.infer<typeof ApproverType>, ApproverValueBinding>;
+
+/**
+ * {@link APPROVER_VALUE_BINDINGS}, projected onto the wire for the designer
+ * (#3508 follow-up).
+ *
+ * `xRef.map` only ever said which PICKER KIND to render — a name like `'team'`
+ * — and never where that picker's candidates come from. So the designer had to
+ * carry its own copy of the data contract, and the first copy was wrong: every
+ * directory kind was wired to `GET /api/v1/meta/:type`, the metadata registry,
+ * which does not hold `sys_user` / `sys_team` / `sys_business_unit` /
+ * `sys_position` ROWS. Candidates came back empty and the control degraded to a
+ * free-text box (#3508).
+ *
+ * Publishing the binding closes that gap at the source: a renderer reads which
+ * object to query and which column to commit off the schema instead of
+ * re-deriving it, and a new {@link ApproverType} member cannot leave a stale
+ * mirror behind — `satisfies` above already makes an undeclared member a
+ * compile error, and this projection inherits that guarantee.
+ *
+ * Presentation stays with the renderer: which field to SHOW, whether to open a
+ * people-picker, what subtitle to put under a row are objectui's calls. This
+ * carries only the data contract — where the candidates live and what the
+ * committed value is.
+ */
+export const APPROVER_VALUE_SOURCES = Object.fromEntries(
+  Object.entries(APPROVER_VALUE_BINDINGS).map(([type, binding]) => [
+    type,
+    binding.source === 'record'
+      // `data` names the DATA API, in contrast to the metadata registry the
+      // designer used to query — the whole point of the annotation.
+      ? { source: 'data', object: binding.object, valueField: binding.valueField }
+      : binding.source === 'enum'
+        ? { source: 'enum', values: [...binding.values] }
+        : { source: binding.source },
+  ]),
+) as Record<
+  z.infer<typeof ApproverType>,
+  | { source: 'data'; object: string; valueField: string }
+  | { source: 'enum'; values: string[] }
+  | { source: 'auto' | 'trigger-field' | 'expression' | 'unsupported' }
+>;
 
 // ==========================================================================
 // Approval as a Flow Node (ADR-0019, canonical)
@@ -247,6 +304,11 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
         field: 'object-field',
         queue: 'queue',
       },
+      // Where each kind's candidates actually live, and what the picker
+      // commits — see {@link APPROVER_VALUE_SOURCES}. `map` alone named a
+      // picker but never its data source, which is how the designer ended up
+      // querying the metadata registry for data records (#3508).
+      sources: APPROVER_VALUE_SOURCES,
     },
   }),
   /**

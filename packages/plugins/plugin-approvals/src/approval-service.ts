@@ -177,6 +177,21 @@ function actingUserId(context: SharingExecutionContext | undefined): string | nu
  */
 const OOO_MAX_CHAIN = 8;
 
+/**
+ * Approver types resolved by QUERYING a graph rather than by taking `value`
+ * literally (#3807). Each can legitimately come back empty — an unstaffed
+ * position, an emptied team, a mis-pointed unit — and the caller then falls
+ * back to a `type:value` literal that no user can act on. They are listed here
+ * so that dead end gets one warning instead of passing in silence.
+ *
+ * `user` / `field` are deliberately absent: they resolve to the id they were
+ * given without a lookup, so there is no "expanded to nobody" state to report.
+ * `business_unit` / `bu` are the accepted dialects of `department`.
+ */
+const GRAPH_APPROVER_TYPES: ReadonlySet<string> = new Set([
+  'team', 'department', 'business_unit', 'bu', 'position', 'org_membership_level', 'manager',
+]);
+
 /** One OOO delegation hop applied while resolving an approver (#1322 M1/M4). */
 interface OooSubstitution {
   /** The approver who was skipped (out of office). */
@@ -756,6 +771,21 @@ export class ApprovalService implements IApprovalService {
       this.logger?.warn?.(
         `[approvals] approver type 'queue' is not implemented — the slot resolves to nobody (#3508)`,
         { value: a.value },
+      );
+    } else if (GRAPH_APPROVER_TYPES.has(type)) {
+      // #3807 follow-up — every OTHER way to land here is a graph type whose
+      // lookup produced nobody, and the literal below is a slot no user can
+      // ever act on. That silence is what let #3807 hide: a `department`
+      // approver pointing at a seeded (env-wide) unit resolved to
+      // `department:<id>` on every request, the request opened with an empty
+      // slate, and nothing in the logs said so — the first symptom was a
+      // permanently stuck approval (#3424). The fallback itself stays (a
+      // literal keeps 15.x slots and substring fixtures working); it just
+      // stops being invisible.
+      this.logger?.warn?.(
+        `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot routes to no one `
+        + `and the request cannot advance until someone is added or the approver is re-pointed (#3807)`,
+        { type, value: a.value, organizationId: organizationId ?? null },
       );
     }
     return [`${a.type}:${a.value}`];

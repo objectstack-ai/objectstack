@@ -2331,6 +2331,66 @@ describe('ApprovalService — queue approver is unresolved (#3508)', () => {
   });
 });
 
+// #3807 follow-up: `queue` was not the only way to end up with a slot nobody
+// can act on — every GRAPH approver type falls back to the same literal when
+// its lookup finds no one, and that fallback used to happen in total silence.
+// A stuck approval was the first symptom; the log said nothing. The literal
+// stays (15.x slots and substring fixtures depend on it) — it just announces
+// itself now.
+describe('ApprovalService — a graph approver that expands to nobody warns (#3807)', () => {
+  const svcWithWarnings = (engine: any) => {
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+    });
+    return { svc, warnings };
+  };
+
+  const approverInput = (type: string, value: string) => ({
+    ...openInput([]),
+    config: { approvers: [{ type, value }], behavior: 'first_response' as const, lockRecord: false },
+  });
+
+  it.each([
+    ['team', 'team_gone'],
+    ['department', 'bu_gone'],
+    ['position', 'nobody_holds_this'],
+    ['org_membership_level', 'member'],
+  ])('%s: the dead literal is logged with its type, value and org', async (type, value) => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput(type, value), CTX);
+
+    expect(req.pending_approvers).toEqual([`${type}:${value}`]);
+    const hit = warnings.find(([msg]) => String(msg).includes('expanded to nobody'));
+    expect(hit, `no warning for ${type}`).toBeTruthy();
+    expect(String(hit[0])).toContain('#3807');
+    expect(hit[1]).toMatchObject({ type, value, organizationId: 't1' });
+  });
+
+  it('stays quiet when the graph DOES resolve someone', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_team_member'] = [{ id: 'tm1', team_id: 'team_ok', user_id: 'u5' }];
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput('team', 'team_ok'), CTX);
+
+    expect(req.pending_approvers).toEqual(['u5']);
+    expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
+  });
+
+  it('stays quiet for `user` — a literal id was never a lookup that could come back empty', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput('user', 'u_unknown'), CTX);
+
+    expect(req.pending_approvers).toEqual(['u_unknown']);
+    expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
+  });
+});
+
 // ── File-access delegate (ADR-0104 D3 wave 2) ────────────────────────
 //
 // A decision attachment is OWNED by its `sys_approval_action` row, so the
