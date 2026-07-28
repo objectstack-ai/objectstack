@@ -14,6 +14,7 @@ import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
+import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
 import {
   printHeader,
   printKV,
@@ -544,18 +545,13 @@ export default class Serve extends Command {
     };
     const trackPlugin = (name: string) => { loadedPlugins.push(shortPluginName(name)); };
 
-    // Track resolved storage driver + redacted URL for the startup banner.
+    // Track resolved storage driver + connection target for the startup banner.
+    // The value lands here raw when it came from this command's own
+    // OS_DATABASE_URL fallback and already-redacted when it came from probing a
+    // registered driver, so it is redacted at print time — `redactConnectionUrl`
+    // is idempotent, so the second pass over an already-clean URL is a no-op.
     let resolvedDriverLabel: string | undefined;
     let resolvedDatabaseUrl: string | undefined;
-    const redactDbUrl = (url: string | undefined): string | undefined => {
-      if (!url) return undefined;
-      try {
-        // Redact passwords inside connection URLs: protocol://user:****@host/db
-        return url.replace(/(\/\/[^/@:]+):[^/@]+@/, '$1:****@');
-      } catch {
-        return url;
-      }
-    };
 
     // Save original console/stdout methods — we'll suppress noise during boot
     const originalConsoleLog = console.log;
@@ -2370,7 +2366,7 @@ export default class Serve extends Command {
       // never accept a request — shutdown immediately so the deploy
       // pipeline can move on.
       if (process.env.OS_MIGRATE_AND_EXIT === '1') {
-        console.log(chalk.green(`✓ Migration complete (${loadedPlugins.length} plugins started against ${redactDbUrl(resolvedDatabaseUrl) || 'configured DB'})`));
+        console.log(chalk.green(`✓ Migration complete (${loadedPlugins.length} plugins started against ${resolvedDatabaseUrl ? redactConnectionUrl(resolvedDatabaseUrl) : 'configured DB'})`));
         try {
           await kernel.shutdown();
         } catch (err: any) {
@@ -2443,7 +2439,7 @@ export default class Serve extends Command {
         uiEnabled: enableUI,
         consolePath: loadedPlugins.includes('ConsoleUI') ? CONSOLE_PATH : undefined,
         driverLabel: resolvedDriverLabel,
-        databaseUrl: redactDbUrl(resolvedDatabaseUrl),
+        databaseUrl: resolvedDatabaseUrl ? redactConnectionUrl(resolvedDatabaseUrl) : undefined,
         multiTenant: resolveMultiOrgEnabled(),
         seededAdmin,
         automation: automationSummary,
@@ -2508,8 +2504,13 @@ export default class Serve extends Command {
  * (e.g. when the example app's preset or `EnvironmentKernelFactory` wired
  * it). Returns `null` when nothing matches; the caller treats that as
  * "no driver info available" and skips the line.
+ *
+ * Reading the address out of a driver is `describeDriverConnection`'s job
+ * (#3793) — it is the one place that knows every shape a driver config
+ * arrives in, so a DSN-declared datasource no longer falls through to
+ * `(unknown)`, and no shape prints credentials.
  */
-function describeRegisteredDriver(kernel: any): { label: string; url: string } | null {
+export function describeRegisteredDriver(kernel: any): { label: string; url: string } | null {
   const candidates = [
     'driver.com.objectstack.driver.sql',
     'driver.com.objectstack.driver.mongodb',
@@ -2522,33 +2523,26 @@ function describeRegisteredDriver(kernel: any): { label: string; url: string } |
     try { driver = kernel?.getService?.(name); } catch { /* not registered */ }
     if (!driver) continue;
 
-    // SqlDriver: `{ client, connection: string | { filename, host, ... } }`
     const cfg = driver.config;
-    if (cfg) {
-      const client = cfg.client;
-      const conn = cfg.connection;
-      let url = '';
-      if (typeof conn === 'string') {
-        url = conn;
-      } else if (conn && typeof conn === 'object') {
-        url = conn.filename
-          ?? (conn.host ? `${conn.host}${conn.port ? `:${conn.port}` : ''}${conn.database ? `/${conn.database}` : ''}` : '');
-      }
-      const label = client ? `SqlDriver(${client})` : (driver.name ?? 'SqlDriver');
-      return { label, url: url || '(unknown)' };
-    }
+    // `client` is a plain string for the stock knex dialects, but a Client
+    // *class* for SqliteWasmDriver — interpolating that would paste the whole
+    // class source into the banner.
+    const label = typeof cfg?.client === 'string'
+      ? `SqlDriver(${cfg.client})`
+      : (driver.constructor?.name ?? driver.name ?? 'Driver');
 
-    // MongoDB / Turso drivers expose the URL on the instance itself.
-    if (driver.url) {
-      const label = driver.constructor?.name ?? driver.name ?? 'Driver';
-      return { label, url: String(driver.url) };
-    }
+    // Read the address by shape, not by which branch matches first. Every
+    // driver here has a `config` property — SqlDriver's is knex-shaped,
+    // MongoDBDriver's holds a top-level `url`, InMemoryDriver's is `{}` — so
+    // returning early on "has a config" meant the mongo and in-memory arms
+    // below never ran and every non-SqlDriver boot banner read `(unknown)`.
+    // `driver.url` still covers a driver that keeps its DSN on the instance.
+    const url = describeDriverConnection(cfg)
+      ?? (typeof driver.url === 'string' && driver.url ? redactConnectionUrl(driver.url) : undefined);
 
-    // InMemoryDriver — no URL.
-    return {
-      label: driver.constructor?.name ?? driver.name ?? 'Driver',
-      url: '(in-memory)',
-    };
+    // A memory driver has no address to show — say so, rather than
+    // `(unknown)`, which reads as "we looked for one and failed".
+    return { label, url: url ?? (name.endsWith('.memory') ? '(in-memory)' : '(unknown)') };
   }
   return null;
 }
