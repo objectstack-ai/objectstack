@@ -137,6 +137,20 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           options: Array.isArray(f.options) ? (f.options as Array<{ value: unknown; label: string }>) : undefined,
           defaultValue: f.defaultValue !== undefined ? interpolate(f.defaultValue, variables, context) : undefined,
           placeholder: f.placeholder != null ? String(f.placeholder) : undefined,
+          // Forwarded RAW — deliberately not interpolated. `visibleWhen` is a
+          // predicate the client re-evaluates on every keystroke against the
+          // values collected SO FAR; the server has no view of those, so
+          // resolving it here (to a constant, against flow variables) would
+          // freeze the field visible-or-hidden for the life of the screen.
+          //
+          // It was declared on the designer form from the start but never put
+          // on the wire, so no client could honour it: authors wrote a
+          // predicate, Studio offered the input, and the field rendered
+          // unconditionally. Where that field was also `required`, a runner
+          // validating the full list blocked Submit on a field the user was
+          // never shown — the run then sat paused with no resume request ever
+          // issued (#3528).
+          visibleWhen: f.visibleWhen != null ? String(f.visibleWhen) : undefined,
         })).filter((f) => f.name.length > 0);
         return {
           success: true,

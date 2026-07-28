@@ -95,6 +95,21 @@ export interface ScreenFieldSpec {
     options?: Array<{ value: unknown; label: string }>;
     defaultValue?: unknown;
     placeholder?: string;
+    /**
+     * Conditional-visibility predicate (ADR-0089's canonical key), evaluated by
+     * the CLIENT against the screen's live collected values — not by the server,
+     * which has no view of what the user has typed so far.
+     *
+     * Bare CEL over the screen's own field names, e.g. `createOpportunity ==
+     * true` shows the field only once that checkbox is ticked. Omit = always
+     * visible.
+     *
+     * A hidden field is not collected, so it must not be enforced as `required`
+     * either — a client that renders this predicate but validates over the full
+     * field list dead-ends the run: Submit blocks on a field the user was never
+     * shown, and no resume is ever issued (#3528).
+     */
+    visibleWhen?: string;
 }
 
 /**

@@ -151,3 +151,89 @@ it('resolves config.functionName as an alias for function (#1870 DX)', async () 
         expect(seen).toEqual([{ cat: 'billing', conf: 0.9 }]);
     });
 });
+
+/** A one-`screen`-node flow whose screen node carries `config`. */
+function screenFlow(config: Record<string, unknown>) {
+    return {
+        name: 'screen_flow',
+        label: 'Screen Flow',
+        type: 'screen' as const,
+        nodes: [
+            { id: 'start', type: 'start' as const, label: 'Start' },
+            { id: 'collect', type: 'screen' as const, label: 'Collect', config },
+            { id: 'end', type: 'end' as const, label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'collect' },
+            { id: 'e2', source: 'collect', target: 'end' },
+        ],
+    };
+}
+
+describe('screen node — the field wire payload (#3528)', () => {
+    let engine: AutomationEngine;
+
+    beforeEach(() => {
+        engine = new AutomationEngine(createTestLogger());
+        registerScreenNodes(engine, createCtx());
+    });
+
+    /**
+     * `visibleWhen` has been on the screen node's designer form since #3304 but
+     * was dropped when the executor built the paused payload, so it reached no
+     * client and nothing honoured it. HotCRM's lead-conversion screen is the
+     * shape that made it fatal: an optional-by-design field that is `required`
+     * *when shown*. Rendered unconditionally, it blocks Submit on input the
+     * user was never asked for, and the run never resumes.
+     */
+    it('forwards visibleWhen to the paused screen so the client can honour it', async () => {
+        engine.registerFlow('screen_flow', screenFlow({
+            title: 'Conversion Details',
+            fields: [
+                { name: 'createOpportunity', label: 'Create Opportunity?', type: 'boolean', required: true },
+                { name: 'opportunityName', label: 'Opportunity Name', type: 'text', required: true, visibleWhen: 'createOpportunity == true' },
+                { name: 'opportunityAmount', label: 'Opportunity Amount', type: 'currency', visibleWhen: 'createOpportunity == true' },
+            ],
+        }) as any);
+
+        const paused = await engine.execute('screen_flow');
+        expect(paused.status).toBe('paused');
+        const fields = paused.screen!.fields;
+        expect(fields.map((f) => f.visibleWhen)).toEqual([
+            undefined,
+            'createOpportunity == true',
+            'createOpportunity == true',
+        ]);
+        // The conditional field keeps `required` — it is required *when shown*.
+        // Honouring one without the other is what dead-ends the run.
+        expect(fields[1]).toMatchObject({ name: 'opportunityName', required: true });
+    });
+
+    it('leaves visibleWhen undefined when the author declared none', async () => {
+        engine.registerFlow('screen_flow', screenFlow({
+            fields: [{ name: 'subject', label: 'Subject', type: 'text', required: true }],
+        }) as any);
+
+        const paused = await engine.execute('screen_flow');
+        expect(paused.screen!.fields[0].visibleWhen).toBeUndefined();
+    });
+
+    /**
+     * The predicate is re-evaluated by the client on every keystroke against
+     * the values collected so far, which the server cannot see. Interpolating
+     * it here would bake in a verdict from flow variables and freeze the field.
+     */
+    it('forwards the predicate RAW — it is not interpolated against flow variables', async () => {
+        engine.registerFlow('screen_flow', screenFlow({
+            fields: [
+                { name: 'tier', label: 'Tier', type: 'text' },
+                // `{recordId}` is a live flow variable; were the predicate
+                // interpolated it would come back with the value substituted.
+                { name: 'note', label: 'Note', type: 'text', visibleWhen: 'tier == "gold" && "{recordId}" != ""' },
+            ],
+        }) as any);
+
+        const paused = await engine.execute('screen_flow', { params: { recordId: 'lead_1' } } as any);
+        expect(paused.screen!.fields[1].visibleWhen).toBe('tier == "gold" && "{recordId}" != ""');
+    });
+});
