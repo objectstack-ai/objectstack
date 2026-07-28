@@ -225,9 +225,11 @@ discriminates by **what the run is parked on**, not by the route:
   (`serviceResume`), on the tail of a decision it already authorized and recorded. The transport
   builds its signal out of a JSON body, and no JSON body can produce a symbol-keyed property, so the
   route cannot forge it; the gate does not need to trust the caller's claims about itself.
-- **The gate follows the subflow chain.** A parent parked on a `subflow` node *delegates* the signal
-  to its suspended child (see the 2026-06-10 addendum), so the gate resolves the effective suspension
-  first and judges the node the signal actually lands on. Resuming the parent is not a way around it.
+- **The gate follows the linked-run chain.** A parent parked on a `subflow` node *delegates* the
+  signal to its suspended child (see the 2026-06-10 addendum), so the gate resolves the effective
+  suspension first and judges the node the signal actually lands on. Resuming the parent is not a way
+  around it. *(As shipped this covered `subflow:` only; `map:` was added in #3853 — see the addendum
+  below.)*
 - **Refusal is an authorization answer.** `resume` returns `{ success: false, code: 'forbidden' }`
   and the route answers **403** — not a 200 carrying `success: false`, which reads as "your resume
   ran and the flow failed". Nothing is consumed: the request stays pending and the run stays parked,
@@ -241,3 +243,37 @@ already-authorized call started.
 (signal flavor) placed by the flow author, which the type-keyed gate cannot distinguish from any
 other wait. A raw resume there still forces a resubmit without a `sys_approval_action` row. Filed as
 a follow-up — closing it needs a per-suspension owner claim rather than a node-type one.
+
+## Addendum (2026-07-28, #3853) — the chain walk covers `map:` too, and the transport owns the `$` namespace
+
+Two defects in the gate the addendum above describes, both demonstrated with a repro rather than
+reasoned:
+
+**1. `map:` was not walked.** `resumeInternal` handles the two linked-run correlations *oppositely*:
+a `subflow:` pause DELEGATES the signal down to the child, while a `map:` pause RE-RUNS the map node.
+The gate's chain walk followed only the first, so a run parked on a `map` node was judged on `map`
+itself — `resumeAuthority: 'any'` — and let through even while the item it was waiting on sat on an
+`approval`. Since `$mapState.started` is advanced past the in-flight item *before* the suspend, and
+the re-entry records a result only when `$mapItemDone` is set, an empty-body resume of the map parent
+**skipped that item's approval outright**, orphaning its still-pending request; a later real decision
+then bubbled into a parent already waiting on the *next* item, cascading the misalignment. The map
+parent's run id is the one a launcher holds, which is what made it reachable.
+
+The walk now follows both prefixes. The unifying rule is that a linked-run pause is waiting on a
+CHILD, so the child's node carries the authority — the gate reads *the item, not the loop*. The two
+differ only in what continuing would mean: for `subflow` the signal lands on the child, for `map` it
+advances past it. Both are refusals for the same reason.
+
+**2. The transport could write the engine's variable namespace.** `signal.variables` are applied as
+BARE flow variables, so a caller could set the exact handoff keys `bubbleToParent` uses
+(`<nodeId>.$mapItemDone` / `$mapItemOutput`) and have the map record a per-item result for a decision
+nobody made — with the node id readable from `GET /automation/:name`. The same hole reaches `$runId`,
+which `approval` / `wait` nodes use to correlate external state back to a run. `$` is the engine's
+namespace (`$runId`, `$flowName`, `$flowLabel`, `$record`, `$error`, `$parentRunId`, `$parentMapNode`,
+`$parentOutputVariable`, `<nodeId>.$mapState`); authors never write there.
+
+The **route** now refuses a resume whose `inputs` name anything in that namespace (`$…` or a `.$`
+segment) with a 400. Deliberately at the transport and not in the engine: `bubbleToParent` legitimately
+writes those keys in-process, and this is the same trust split the gate itself uses — strict at the
+untrusted boundary, unrestricted for the code that already holds the authority. Refuse rather than
+silently strip, so a mis-authored screen input fails at the door instead of many nodes downstream.

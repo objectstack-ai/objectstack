@@ -2001,12 +2001,13 @@ export class AutomationEngine implements IAutomationService {
      * the flow-runner that owns it. The service-side resume proves itself with
      * an in-process symbol the transport cannot mint from a JSON body.
      *
-     * Resolves the EFFECTIVE suspension first: a run parked on a `subflow`
-     * node delegates the signal to its suspended child, so the gate follows
-     * that chain and judges the node the signal actually lands on. Anything it
-     * cannot resolve (unknown run, missing flow, unregistered node type) is
-     * left to `resumeInternal`, which reports the machine-state error — the
-     * gate only ever speaks to authorization.
+     * Resolves the EFFECTIVE suspension first: a run parked on a `subflow` or
+     * `map` node is really waiting on a CHILD run, so the gate follows that
+     * chain and judges the node the signal lands on (subflow) or would advance
+     * past (map) — see {@link LINKED_RUN_PREFIXES}. Anything it cannot resolve
+     * (unknown run, missing flow, unregistered node type) is left to
+     * `resumeInternal`, which reports the machine-state error — the gate only
+     * ever speaks to authorization.
      */
     private async refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
         const run = await this.resolveEffectiveSuspension(runId);
@@ -2019,7 +2020,8 @@ export class AutomationEngine implements IAutomationService {
         // decision's tail, not a way around it.
         if (signal?.[RESUME_AUTHORITY_SERVICE]) return null;
 
-        const at = run.runId === runId ? `'${run.nodeId}'` : `'${run.nodeId}' (subflow run '${run.runId}')`;
+        const direct = run.runId === runId;
+        const at = direct ? `'${run.nodeId}'` : `'${run.nodeId}' (linked run '${run.runId}')`;
         this.logger.warn(
             `[automation] refused resume of run '${runId}': parked on ${nodeType} node ${at}, which is resumable ` +
                 `only through its owning service (resumeAuthority: 'service')`,
@@ -2027,9 +2029,12 @@ export class AutomationEngine implements IAutomationService {
         return {
             success: false,
             code: 'forbidden',
-            error:
-                `Run '${runId}' is paused at a '${nodeType}' node, which only its owning service may resume — ` +
-                `drive it through that service's API (e.g. an approval decision), not a raw resume`,
+            error: direct
+                ? `Run '${runId}' is paused at a '${nodeType}' node, which only its owning service may resume — ` +
+                  `drive it through that service's API (e.g. an approval decision), not a raw resume`
+                : `Run '${runId}' is waiting on run '${run.runId}', which is paused at a '${nodeType}' node that ` +
+                  `only its owning service may resume — resuming here would continue past a decision that has not ` +
+                  `been made; drive it through that service's API instead`,
         };
     }
 
@@ -2063,20 +2068,40 @@ export class AutomationEngine implements IAutomationService {
     private static readonly MAX_ALIAS_HOPS = 4;
 
     /**
-     * Follow the subflow delegation chain from `runId` to the suspension a
-     * resume signal would actually land on. A run paused at a `subflow` node
-     * (correlation `subflow:<childRunId>`) forwards the signal down, so the
-     * deepest reachable suspension — not the id the caller holds — is what a
-     * resume really continues. Returns `null` when nothing is suspended under
-     * that id; stops at the last resolvable link when a child row is gone
-     * (that run is where `resumeInternal` will continue).
+     * Linked-run correlation prefixes the gate walks (#3853). Both park a
+     * parent on a child run, so in both the pending work — and therefore the
+     * authority that governs continuing it — belongs to the CHILD, even though
+     * `resumeInternal` handles the two oppositely:
+     *
+     *  - `subflow:` — the signal is DELEGATED down to the child, so the child's
+     *    node is literally where it lands.
+     *  - `map:` — the signal is not delegated; the `map` node RE-RUNS, and since
+     *    `$mapState.started` was advanced past the in-flight item before the
+     *    suspend, continuing here advances the map *past* the item whose child
+     *    is still parked. Judging the parent's own `map` node (always
+     *    `resumeAuthority: 'any'`) let a raw resume skip a pending approval in a
+     *    batch-approval flow — the gate has to read the item, not the loop.
+     */
+    private static readonly LINKED_RUN_PREFIXES = ['subflow:', 'map:'] as const;
+
+    /**
+     * Follow the linked-run chain from `runId` to the suspension whose node
+     * actually governs a resume — see {@link LINKED_RUN_PREFIXES}. The deepest
+     * reachable suspension, not the id the caller holds, is what a resume
+     * really continues (or skips past). Returns `null` when nothing is
+     * suspended under that id; stops at the last resolvable link when a child
+     * row is gone (that run is where `resumeInternal` will continue).
      */
     private async resolveEffectiveSuspension(runId: string): Promise<SuspendedRun | null> {
         const seen = new Set<string>();
         let run = await this.loadSuspendedRun(runId);
         for (let depth = 0; run && depth < AutomationEngine.MAX_SUSPENSION_CHAIN_DEPTH; depth++) {
-            if (typeof run.correlation !== 'string' || !run.correlation.startsWith('subflow:')) return run;
-            const childRunId = run.correlation.slice('subflow:'.length);
+            const correlation = run.correlation;
+            const prefix = typeof correlation === 'string'
+                ? AutomationEngine.LINKED_RUN_PREFIXES.find(p => correlation.startsWith(p))
+                : undefined;
+            if (!prefix) return run;
+            const childRunId = correlation!.slice(prefix.length);
             if (!childRunId || seen.has(childRunId)) return run;
             seen.add(childRunId);
             const child = await this.loadSuspendedRun(childRunId);

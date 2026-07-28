@@ -358,6 +358,36 @@ describe('HttpDispatcher', () => {
             expect(result.response?.body?.data?.success).toBe(false);
         });
 
+        // #3853: `inputs` land as BARE flow variables, so a caller who could
+        // write the engine's `$` namespace could forge the `map` node's item
+        // handoff (recording a per-item result for an approval nobody made) or
+        // re-point `$runId`, which is how approval/wait nodes correlate.
+        it('should refuse resume inputs that write engine-internal variables', async () => {
+            for (const inputs of [
+                { 'signoffs.$mapItemDone': true, 'signoffs.$mapItemOutput': { forged: true } },
+                { $runId: 'someone_elses_run' },
+                { $record: { id: 'other' } },
+            ]) {
+                const result = await dispatcher.handleAutomation(
+                    'flow_a/runs/run_1/resume', 'POST', { inputs }, { request: {} },
+                );
+                expect(result.response?.status).toBe(400);
+                expect(result.response?.body?.error?.message).toMatch(/reserved by the flow engine/);
+            }
+            // Refused at the door — the engine is never asked.
+            expect(mockAutomationService.resume).not.toHaveBeenCalled();
+        });
+
+        it('should still accept ordinary screen inputs alongside the reserved-name guard', async () => {
+            await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST',
+                { inputs: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 } }, { request: {} },
+            );
+            expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
+                variables: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 },
+            });
+        });
+
         it('should return 501 when the automation service cannot resume', async () => {
             delete mockAutomationService.resume;
             const result = await dispatcher.handleAutomation(

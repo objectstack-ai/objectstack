@@ -411,11 +411,28 @@ A resume of a `'service'` pause through the route answers **403** and changes
 nothing: the request stays pending and the run stays parked, so the real
 decision can still land. (Before this gate a raw resume walked the `approve`
 edge with no decision recorded, leaving the `sys_approval_request` row and the
-run permanently disagreeing.) The gate follows a **subflow** pause down to the
-child the signal would actually reach, so resuming the parent is no way around
-it. Registering a pausing node of your own? Declare
-`resumeAuthority: 'service'` on its descriptor when the decision to continue
-belongs to your service rather than to whoever holds the run id.
+run permanently disagreeing.)
+
+The gate follows a **linked-run** pause down to the child, so the run id a
+launcher happens to hold is not a way around it — in both directions it reads
+the item rather than the loop:
+
+- **`subflow`** — the signal is delegated to the suspended child, so the child's
+  node is where it lands;
+- **`map`** — the signal is not delegated (the node re-runs to start the next
+  item), so continuing here would advance the batch **past** an item whose
+  decision is still open. Refused while that item is service-gated; the map
+  moves on when the item completes through its owning service.
+
+Two related rules on the same route: **resume `inputs` may not write the
+engine's `$` namespace** (`$runId`, `$record`, `$flowName`,
+`<nodeId>.$mapItemDone`, …) — those are the engine's own handoff variables, and
+a caller who could set them could forge a map item's recorded result. Ordinary
+author-declared variables are unaffected; a reserved name answers **400**.
+
+Registering a pausing node of your own? Declare `resumeAuthority: 'service'` on
+its descriptor when the decision to continue belongs to your service rather
+than to whoever holds the run id.
 
 ### Parallel approvals — one aggregating node, not two pauses
 
@@ -475,8 +492,10 @@ the map waits for that item's decision, then moves to the next.
 
 The run holds a **single program counter** the whole time: only one item's
 approval is open at any moment; when it is decided the engine **re-enters** the
-map node to start the next item. v1 is sequential and fail-fast (the first item
-whose subflow fails fails the map). Concurrent fan-out (all items at once) is the
+map node to start the next item. Resuming the map's own run id while an item is
+still awaiting a service-gated decision is **refused** (403) — otherwise the
+batch would step past that item as if it had been decided. v1 is sequential and
+fail-fast (the first item whose subflow fails fails the map). Concurrent fan-out (all items at once) is the
 larger [ADR-0039](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0039-token-scope-tree-execution.md)
 Track B work. Worked example: `showcase_release_signoff` → `showcase_one_task_signoff`.
 

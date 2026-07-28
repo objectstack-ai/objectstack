@@ -223,7 +223,25 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 const b = (body && typeof body === 'object') ? body : {};
                 const inputs = (b.inputs ?? b.variables);
                 const signal: any = {};
-                if (inputs && typeof inputs === 'object') signal.variables = inputs;
+                if (inputs && typeof inputs === 'object') {
+                    // #3853: `inputs` land as BARE flow variables, and `$` is the
+                    // engine's own variable namespace (`$runId`, `$record`,
+                    // `$flowName`, `<nodeId>.$mapItemDone`/`$mapItemOutput`/
+                    // `$mapState`, …). A caller who could write those could forge
+                    // the map node's item handoff — recording a per-item result
+                    // for an approval nobody made — or re-point `$runId`, which is
+                    // how approval/wait nodes correlate external state back to a
+                    // run. Author-declared variables never live in that namespace,
+                    // so refuse rather than silently drop: a screen whose input is
+                    // quietly discarded fails much further downstream.
+                    const reserved = Object.keys(inputs).filter(k => k.startsWith('$') || k.includes('.$'));
+                    if (reserved.length) {
+                        return { handled: true, response: deps.error(
+                            `Resume inputs may not set engine-internal variables (${reserved.join(', ')}) — ` +
+                            `names starting with '$' (or containing '.$') are reserved by the flow engine`, 400) };
+                    }
+                    signal.variables = inputs;
+                }
                 if (b.output && typeof b.output === 'object') signal.output = b.output;
                 if (typeof b.branchLabel === 'string') signal.branchLabel = b.branchLabel;
                 const result = await automationService.resume(parts[2], signal);
