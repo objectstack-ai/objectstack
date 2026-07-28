@@ -191,18 +191,17 @@ column, `field` names the value column (the literal `count` for a fieldless
 two conventions up is the usual cause of a chart that renders axes and no bars.
 
 ```jsx
-<ObjectChart objectName="invoice" chartType="bar"
+<ObjectChart objectName="invoice" type="bar"
   aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }}
-  xAxisKey="status" series={[{ dataKey: 'sum_total' }]} />
-//                                     ↑ a dataset-style measure name; the rows
-//                                       are keyed `total` → error
+  xAxis={{ field: 'status' }} series={[{ name: 'sum_total' }]} />
+//                                    ↑ a dataset-style measure name; the rows
+//                                      are keyed `total` → error
 ```
 
 Both halves are checked: `aggregate.field` / `aggregate.groupBy` must be fields
-the object declares, and `xAxisKey` / `series[].dataKey` must name a column the
-aggregate actually returns (plus `<field>__comparison` when a comparison overlay
-is on). `ChartConfig`'s `xAxis` / `yAxis` shapes are **not** read by this block
-and are reported as inert (warning).
+the object declares, and the axes — `xAxis.field`, `yAxis[].field`,
+`series[].name` — must name a column the aggregate actually returns (plus
+`<field>__comparison` when a comparison overlay is on).
 
 Skipped, to keep false positives at zero: any prop whose value is not a static
 literal (it comes from React state or a variable), a usage carrying a `{...spread}`,

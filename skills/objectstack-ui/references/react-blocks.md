@@ -70,15 +70,20 @@ Chart over an object’s aggregated data. Bind objectName + aggregate; the axes 
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|
 | `objectName` | `string` | binding | ✓ | The object this block binds to (server-connected). |
-| `aggregate` | `{ field?: string; function: 'count' \| 'sum' \| 'avg' \| 'min' \| 'max'; groupBy: string \| { field: string; dateGranularity?: 'day' \| 'week' \| 'month' \| 'quarter' \| 'year' } }` | binding |  | Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal "count" for a fieldless count). Bind the axes to those names. |
-| `chartType` | `'bar' \| 'column' \| 'horizontal-bar' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'radar' \| 'scatter' \| 'funnel' \| 'combo' \| 'treemap' \| 'sankey'` | binding |  | Which chart to draw (default bar). |
-| `xAxisKey` | `string` | binding |  | Result column plotted on the category axis. Defaults to the aggregate’s groupBy — set it only to be explicit, and only to that name. |
-| `series` | `Array<{ dataKey: string; label?: string }>` | binding |  | Plotted series. Each dataKey names a result column — the aggregate’s field (or "count"), plus "<field>__comparison" when a comparison overlay is on. NOT the ChartConfig series shape. |
+| `aggregate` | `{ field?: string; function: 'count' \| 'sum' \| 'avg' \| 'min' \| 'max'; groupBy: string \| { field: string; dateGranularity?: 'day' \| 'week' \| 'month' \| 'quarter' \| 'year' } }` | binding |  | Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal "count" for a fieldless count). Bind xAxis.field / yAxis[].field / series[].name to those names. |
 | `data` | `any[]` | binding |  | Static/precomputed data to chart directly instead of binding via objectName + aggregate. |
 | `filter` | `FilterArray` | controlled |  | ObjectQL filter scoping the data; drive from React state. |
+| `type` | `'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'` | data | ✓ |  |
 | `title` | `string` | data |  | Chart title |
+| `subtitle` | `string` | data |  | Chart subtitle |
+| `xAxis` | `object` | data |  | X-Axis configuration |
+| `yAxis` | `object[]` | data |  | Y-Axis configuration (support dual axis) |
+| `series` | `object[]` | data |  | Defined series configuration |
 | `colors` | `string[] \| object` | data |  | Color palette (string[]) or value→color map ({ value: color }) |
 | `showLegend` | `boolean` | data |  | Display legend |
+| `showDataLabels` | `boolean` | data |  | Display data labels |
+| `annotations` | `object[]` | data |  | Reference lines/bands drawn over the plot: { type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? } |
+| `interaction` | `object` | data |  | Interaction toggles: { tooltips?, brush?, zoom?, clickAction? } |
 
 ## `<RecordDetails>` — `record:details`
 

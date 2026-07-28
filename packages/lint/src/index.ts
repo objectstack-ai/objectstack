@@ -80,7 +80,6 @@ export {
   REACT_CHART_FIELD_UNKNOWN,
   REACT_CHART_AGGREGATE_INVALID,
   REACT_CHART_AXIS_UNKNOWN,
-  REACT_CHART_AXIS_INERT,
 } from './validate-react-page-props.js';
 export type { ReactPropFinding, ReactPropSeverity } from './validate-react-page-props.js';
 export { validatePageSourceStyling, PAGE_SOURCE_CLASSNAME } from './validate-page-source-styling.js';

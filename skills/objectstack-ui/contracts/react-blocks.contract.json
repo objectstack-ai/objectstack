@@ -304,28 +304,7 @@
           "type": "{ field?: string; function: 'count' | 'sum' | 'avg' | 'min' | 'max'; groupBy: string | { field: string; dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year' } }",
           "kind": "binding",
           "required": false,
-          "description": "Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal \"count\" for a fieldless count). Bind the axes to those names."
-        },
-        {
-          "name": "chartType",
-          "type": "'bar' | 'column' | 'horizontal-bar' | 'line' | 'area' | 'pie' | 'donut' | 'radar' | 'scatter' | 'funnel' | 'combo' | 'treemap' | 'sankey'",
-          "kind": "binding",
-          "required": false,
-          "description": "Which chart to draw (default bar)."
-        },
-        {
-          "name": "xAxisKey",
-          "type": "string",
-          "kind": "binding",
-          "required": false,
-          "description": "Result column plotted on the category axis. Defaults to the aggregate’s groupBy — set it only to be explicit, and only to that name."
-        },
-        {
-          "name": "series",
-          "type": "Array<{ dataKey: string; label?: string }>",
-          "kind": "binding",
-          "required": false,
-          "description": "Plotted series. Each dataKey names a result column — the aggregate’s field (or \"count\"), plus \"<field>__comparison\" when a comparison overlay is on. NOT the ChartConfig series shape."
+          "description": "Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal \"count\" for a fieldless count). Bind xAxis.field / yAxis[].field / series[].name to those names."
         },
         {
           "name": "data",
@@ -342,11 +321,46 @@
           "description": "ObjectQL filter scoping the data; drive from React state."
         },
         {
+          "name": "type",
+          "type": "'bar' | 'horizontal-bar' | 'column' | 'line' | 'area' | 'pie' | 'donut' | 'funnel' | 'scatter' | 'treemap' | 'sankey' | 'gauge' | 'solid-gauge' | 'metric' | 'kpi' | 'bullet' | 'radar' | 'table' | 'pivot'",
+          "kind": "data",
+          "required": true,
+          "description": ""
+        },
+        {
           "name": "title",
           "type": "string",
           "kind": "data",
           "required": false,
           "description": "Chart title"
+        },
+        {
+          "name": "subtitle",
+          "type": "string",
+          "kind": "data",
+          "required": false,
+          "description": "Chart subtitle"
+        },
+        {
+          "name": "xAxis",
+          "type": "object",
+          "kind": "data",
+          "required": false,
+          "description": "X-Axis configuration"
+        },
+        {
+          "name": "yAxis",
+          "type": "object[]",
+          "kind": "data",
+          "required": false,
+          "description": "Y-Axis configuration (support dual axis)"
+        },
+        {
+          "name": "series",
+          "type": "object[]",
+          "kind": "data",
+          "required": false,
+          "description": "Defined series configuration"
         },
         {
           "name": "colors",
@@ -361,6 +375,27 @@
           "kind": "data",
           "required": false,
           "description": "Display legend"
+        },
+        {
+          "name": "showDataLabels",
+          "type": "boolean",
+          "kind": "data",
+          "required": false,
+          "description": "Display data labels"
+        },
+        {
+          "name": "annotations",
+          "type": "object[]",
+          "kind": "data",
+          "required": false,
+          "description": "Reference lines/bands drawn over the plot: { type: \"line\" | \"region\", axis: \"x\" | \"y\", value, endValue?, color?, label?, style? }"
+        },
+        {
+          "name": "interaction",
+          "type": "object",
+          "kind": "data",
+          "required": false,
+          "description": "Interaction toggles: { tooltips?, brush?, zoom?, clickAction? }"
         }
       ]
     },

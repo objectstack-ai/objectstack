@@ -58,6 +58,20 @@
  * `chart-measure-unknown` catches. The two paths key their rows differently
  * because only one of them has an author-chosen name to key by.
  *
+ * ## The constraint this convention rests on: inline aggregate is SINGLE-MEASURE
+ *
+ * Keying rows by the raw field name only works because an inline `aggregate`
+ * computes exactly ONE measure — one `function` over one `field`. Two measures
+ * over the same field (`sum(amount)` and `avg(amount)`) would collide on the
+ * column name, and the only way out would be a derived name (`sum_amount`) —
+ * i.e. re-inventing what a dataset `DatasetMeasure.name` already is.
+ *
+ * So do not "just add" a measures array here. Multi-measure IS the dataset
+ * path's job, and the boundary between the two is exactly this: a chart that
+ * needs more than one measure needs an author-chosen name per measure, which
+ * means it needs a dataset (ADR-0021 Level B). Widening `ChartAggregateSchema`
+ * would silently invalidate every axis binding this convention validates.
+ *
  * ## No business logic here (Prime Directive #2)
  *
  * The helpers below are pure contract derivations — they map a declaration to

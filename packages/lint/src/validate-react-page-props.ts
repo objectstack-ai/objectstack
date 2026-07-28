@@ -14,9 +14,9 @@
 //     (e.g. `onSucces` → `onSuccess`) → warning. We do NOT flag arbitrary
 //     unknown props (the contract's data props are a curated subset) — only the
 //     likely typos, to keep false positives near zero.
-//   - <ObjectChart>'s data BINDINGS, by reading the attribute VALUES (#3701).
-//     See the block comment above `checkObjectChart` for why that block, and
-//     why only now.
+//   - <ObjectChart>'s data BINDINGS, by reading the attribute VALUES (#3701,
+//     retargeted to the spec shape in #3729). See the block comment above
+//     `checkObjectChart`.
 //
 // Reading values is opt-in per block and per prop: everything below evaluates
 // only STATIC literals (`objectName="invoice"`, an `aggregate={{…}}` object
@@ -185,13 +185,20 @@ function attrValue(tsc: typeof ts, sf: ts.SourceFile, attr: ts.JsxAttribute): un
 //
 //   * `aggregate.field` / `aggregate.groupBy` are RAW FIELD names → check them
 //     against the object's declared fields.
-//   * `xAxisKey` / `series[].dataKey` are RESULT COLUMN names → check them
-//     against what this aggregate produces.
+//   * the axes are RESULT COLUMN names → check them against what this
+//     aggregate produces.
+//
+// The axes are read in the SPEC spelling — `xAxis.field`, `yAxis[].field`,
+// `series[].name` (#3729). #3701 had to read `xAxisKey`/`series[].dataKey`
+// because those were the only spellings the renderer honored; objectui#2880
+// made it honor ChartConfig, so the gate follows the protocol again. The
+// internal spellings are still accepted, silently: dashboards and the console's
+// own chart-view wiring emit them, and they remain a valid (if unpublished)
+// way to write the same binding.
 
 export const REACT_CHART_FIELD_UNKNOWN = 'react-chart-field-unknown';
 export const REACT_CHART_AGGREGATE_INVALID = 'react-chart-aggregate-invalid';
 export const REACT_CHART_AXIS_UNKNOWN = 'react-chart-axis-unknown';
-export const REACT_CHART_AXIS_INERT = 'react-chart-axis-inert';
 
 const CHART_FUNCTIONS = ['count', 'sum', 'avg', 'min', 'max'] as const;
 
@@ -260,21 +267,6 @@ function checkObjectChart(
   const { values, where, path } = attrs;
   const push = (severity: ReactPropSeverity, rule: string, message: string, hint: string) =>
     findings.push({ severity, rule, where, path, message, hint });
-
-  // The ChartConfig axis shapes reach this block but are never read by it —
-  // it consumes `xAxisKey` + `series[].dataKey`. Silently inert props are what
-  // ADR-0078 forbids, so say so rather than let the chart render blank.
-  for (const inert of ['xAxis', 'yAxis'] as const) {
-    if (!values.has(inert)) continue;
-    push(
-      'warning',
-      REACT_CHART_AXIS_INERT,
-      `<ObjectChart> prop "${inert}" is not read by this block — it renders nothing.`,
-      inert === 'xAxis'
-        ? 'Use xAxisKey="<result column>" (the aggregate\'s groupBy).'
-        : 'Use series={[{ dataKey: "<result column>" }]} (the aggregate\'s field).',
-    );
-  }
 
   // Inline `data` wins over the aggregate query: the columns then come from
   // the author's own rows, which this rule cannot see. Nothing further to say.
@@ -353,23 +345,41 @@ function checkObjectChart(
     );
   };
 
-  axisRef(strOf(values.get('xAxisKey')), 'xAxisKey');
+  // The category axis: spec `xAxis: { field }`, the report surface's bare
+  // string, or the internal `xAxisKey`. All three name the same column.
+  const xAxisRaw = values.get('xAxis');
+  const categoryAxis =
+    strOf(values.get('xAxisKey')) ??
+    strOf(xAxisRaw) ??
+    (isRec(xAxisRaw) ? strOf(xAxisRaw.field) : undefined);
+  const categoryProp = values.has('xAxisKey') ? 'xAxisKey' : 'xAxis.field';
+  axisRef(categoryAxis, categoryProp);
+
+  // The value axes: spec `yAxis: [{ field }]` (or a single object / bare
+  // string) and spec `series: [{ name }]` / internal `series: [{ dataKey }]`.
+  const yAxisRaw = values.get('yAxis');
+  const yAxisList = Array.isArray(yAxisRaw) ? yAxisRaw : yAxisRaw !== undefined ? [yAxisRaw] : [];
+  for (const a of yAxisList) {
+    axisRef(strOf(a) ?? (isRec(a) ? strOf(a.field) : undefined), 'yAxis[].field');
+  }
+
   const series = values.get('series');
   if (Array.isArray(series)) {
     for (const s of series) {
-      if (isRec(s)) axisRef(strOf(s.dataKey), 'series[].dataKey');
+      if (!isRec(s)) continue;
+      const dataKey = strOf(s.dataKey);
+      axisRef(dataKey ?? strOf(s.name), dataKey ? 'series[].dataKey' : 'series[].name');
     }
   }
 
   // A category axis bound to anything but the groupBy is always wrong, and the
   // check above lets it through when it happens to equal the VALUE column.
-  const xAxisKey = strOf(values.get('xAxisKey'));
-  if (xAxisKey && keys.category && xAxisKey !== keys.category && xAxisKey === keys.value) {
+  if (categoryAxis && keys.category && categoryAxis !== keys.category && categoryAxis === keys.value) {
     push(
       'error',
       REACT_CHART_AXIS_UNKNOWN,
-      `xAxisKey "${xAxisKey}" is the aggregate's VALUE column, not its category column.`,
-      `The category axis is keyed by groupBy — use xAxisKey="${keys.category}".`,
+      `${categoryProp} "${categoryAxis}" is the aggregate's VALUE column, not its category column.`,
+      `The category axis is keyed by groupBy — bind it to "${keys.category}".`,
     );
   }
 }

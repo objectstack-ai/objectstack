@@ -18,10 +18,11 @@ import { definePage } from '@objectstack/spec/ui';
  *     cross-object reads declaratively (zero data code).
  * (This comparison absorbed the former Account Cockpit page.)
  *
- * The chart's axes are bound explicitly (#3701) to show the object-bound
- * result-column rule: an inline `aggregate` returns rows keyed by the RAW
- * FIELD NAMES — `status` (its `groupBy`) and `total` (its `field`) — not by a
- * dataset-style measure name. `os validate` now checks both halves.
+ * The chart is written in the spec `ChartConfig` shape (#3729) and its axes are
+ * bound explicitly (#3701) to show the object-bound result-column rule: an
+ * inline `aggregate` returns rows keyed by the RAW FIELD NAMES — `status` (its
+ * `groupBy`) and `total` (its `field`) — not by a dataset-style measure name.
+ * `os validate` checks both halves.
  *
  * Styling (ADR-0065): no Tailwind — inline `style={{}}` with `hsl(var(--token))`;
  * data blocks and the drawer bring their own compiled styling. The drawer sets
@@ -119,7 +120,7 @@ function Page() {
               <Stat label="Open AR" value={related.openInvoices} accent="hsl(38 92% 50%)" />
             </div>
 
-            <ObjectChart objectName="showcase_invoice" chartType="bar" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxisKey="status" series={[{ dataKey: 'total', label: 'Invoice value' }]} title="Invoice value by status" showLegend={true} />
+            <ObjectChart objectName="showcase_invoice" type="bar" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxis={{ field: 'status' }} yAxis={[{ field: 'total', format: '$0,0' }]} series={[{ name: 'total', label: 'Invoice value' }]} title="Invoice value by status" showLegend={true} />
 
             <RecordRelatedList objectName="showcase_account" recordId={sel} relationshipField="account" columns={['name', 'status', 'total']} limit={5} showViewAll={true} title="Invoices" />
 
