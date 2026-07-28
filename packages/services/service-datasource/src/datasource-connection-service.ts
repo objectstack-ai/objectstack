@@ -59,6 +59,15 @@ export interface ConnectableDatasource {
    * unrouted datasource. Defaults to false.
    */
   autoConnect?: boolean;
+  /**
+   * The HOST declares the platform cannot run without this datasource, so a
+   * boot-time (`declared-auto`) connect failure is fatal regardless of object
+   * bindings (#3826). Set by the runtime for the standalone `default` —
+   * everything without an explicit binding routes TO it, so "no fallback path"
+   * holds by construction even though nothing binds to it *explicitly*. Not
+   * part of the app-facing datasource spec: host-composition plumbing only.
+   */
+  bootCritical?: boolean;
 }
 
 /** Minimal object shape used for the D2 routing gate + post-connect schema sync. */
@@ -85,6 +94,13 @@ export interface ConnectionEngineLike {
    * `onEnable` bridge does manually).
    */
   syncObjectSchema?: (objectName: string) => Promise<void>;
+  /**
+   * Name of the engine's DEFAULT driver, when one is set. Used by the
+   * `asDefault` connect path's idempotency guard (#3826): the default driver
+   * keeps its natural name, so `getDriverByName('default')` can never detect a
+   * prior registration.
+   */
+  getDefaultDriverName?: () => string | undefined;
   /**
    * Tell the engine a datasource was *declared* but is not connected, and why
    * (framework#3828). Without this the engine cannot distinguish "the app
@@ -307,7 +323,21 @@ export class DatasourceConnectionService {
    */
   async connect(
     record: ConnectableDatasource,
-    opts: { objects?: readonly string[]; context?: DatasourceConnectContext } = {},
+    opts: {
+      objects?: readonly string[];
+      context?: DatasourceConnectContext;
+      /**
+       * Register the built driver as the engine's DEFAULT driver, under the
+       * driver's own name (#3826). Set by the runtime for the standalone
+       * `default` datasource. Two deliberate differences from a normal connect:
+       * the driver keeps its natural name (`sql`/`memory`/…) instead of being
+       * stamped with the datasource name — routing to `default` goes through
+       * the engine's default-driver fallback, never `drivers.get('default')`,
+       * and renaming would change every name-keyed log/lookup the pre-#3826
+       * boot produced — and `registerDriver` is called with `isDefault: true`.
+       */
+      asDefault?: boolean;
+    } = {},
   ): Promise<ConnectResult> {
     try {
       const result = await this.attemptConnect(record, opts);
@@ -353,15 +383,21 @@ export class DatasourceConnectionService {
 
   private async attemptConnect(
     record: ConnectableDatasource,
-    opts: { objects?: readonly string[]; context?: DatasourceConnectContext } = {},
+    opts: { objects?: readonly string[]; context?: DatasourceConnectContext; asDefault?: boolean } = {},
   ): Promise<ConnectResult> {
     const name = record.name;
     const engine = this.cfg.engine();
     const factory = this.cfg.factory();
 
     // Idempotent: never double-register (e.g. a legacy `onEnable` bridge already
-    // registered this driver — the D8 escape hatch).
-    if (engine?.getDriverByName?.(name)) {
+    // registered this driver — the D8 escape hatch). The default driver keeps
+    // its natural name, so its guard is "does the engine already have a
+    // default", not a name lookup.
+    if (opts.asDefault) {
+      if (engine?.getDefaultDriverName?.()) {
+        return { name, status: 'already-registered' };
+      }
+    } else if (engine?.getDriverByName?.(name)) {
       return { name, status: 'already-registered' };
     }
 
@@ -441,13 +477,19 @@ export class DatasourceConnectionService {
       // The engine routes a datasource to a driver by `driver.name === <datasource>`.
       // Prefer the factory's underlying engine driver (the `driver` escape hatch);
       // fall back to the handle. Stamp the name so routing resolves to this pool.
+      // The DEFAULT driver (#3826) keeps its natural name instead: routing to
+      // `default` goes through the engine's default-driver fallback, never
+      // `drivers.get('default')`, and the natural name keeps logs/lookups
+      // byte-for-byte with the pre-#3826 boot.
       const engineDriver = (handle.driver ?? handle) as { name?: string };
-      try {
-        engineDriver.name = name;
-      } catch {
-        /* frozen driver — registration may still work if name already matches */
+      if (!opts.asDefault) {
+        try {
+          engineDriver.name = name;
+        } catch {
+          /* frozen driver — registration may still work if name already matches */
+        }
       }
-      engine.registerDriver(engineDriver);
+      engine.registerDriver(engineDriver, opts.asDefault === true);
       engine.registerDatasourceDef?.({
         name,
         schemaMode: record.schemaMode,
@@ -493,7 +535,7 @@ export class DatasourceConnectionService {
    * Apply the D5 connect-failure policy (also covers D3 credential failures).
    *
    * A boot-time (`declared-auto`) connect failure is **fatal** when the
-   * datasource has no fallback path, which is true in two cases:
+   * datasource has no fallback path, which is true in three cases:
    *
    *  - **(a)** it is `external` with `validation.onMismatch:'fail'` — the author
    *    asked for a hard stop explicitly; or
@@ -503,7 +545,11 @@ export class DatasourceConnectionService {
    *    (framework#3758). Leaving this at a warning produced the worst possible
    *    shape: a server that boots clean, serves most of the app, and fails every
    *    read/write of the bound objects with an error that reads nothing like
-   *    "the analytics database is unreachable".
+   *    "the analytics database is unreachable"; or
+   *  - **(c)** the host marked it {@link ConnectableDatasource.bootCritical} —
+   *    the standalone `default` (#3826): everything WITHOUT a binding routes to
+   *    it, so "no fallback" holds by construction, mirroring the engine-level
+   *    guard (#3741) this connect path replaces.
    *
    * Anything else degrades with a warning: `autoConnect:true` means "connect it
    * if you can" with nothing declaring a dependency on it, and runtime-admin
@@ -539,6 +585,12 @@ export class DatasourceConnectionService {
         causes.push(
           `${boundObjects.length} object(s) bind to it explicitly (${formatObjectList(boundObjects)}) ` +
           `and have no fallback datasource — every read/write of them would fail`,
+        );
+      }
+      if (record.bootCritical === true) {
+        causes.push(
+          `declared boot-critical by the host — it is the platform's primary datasource and ` +
+          `every object without an explicit binding routes to it`,
         );
       }
     }

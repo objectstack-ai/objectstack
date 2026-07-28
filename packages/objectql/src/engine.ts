@@ -1520,6 +1520,16 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
+   * Name of the DEFAULT driver, when one is registered (#3826). The default
+   * driver keeps its natural name (`registerDriver(driver, true)` — nothing
+   * routes by `drivers.get('default')`), so the datasource connection layer's
+   * `asDefault` idempotency guard needs this rather than a name lookup.
+   */
+  getDefaultDriverName(): string | undefined {
+    return this.defaultDriver ?? undefined;
+  }
+
+  /**
    * Datasources that were declared but are NOT usable, with the reason class.
    *
    * Distinct from {@link checkDriversHealth}, which answers "can a REGISTERED

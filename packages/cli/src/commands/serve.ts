@@ -872,7 +872,16 @@ export default class Serve extends Command {
       // whole dispatch is unit-testable (storage-driver.test.ts). #3276: the
       // `memory` kind now maps to the mingo InMemoryDriver instead of silently
       // falling through to the dev SQLite `:memory:` default.
-      const hasDriver = plugins.some((p: any) => p.name?.includes('driver') || p.constructor?.name?.includes('Driver'));
+      // A DefaultDatasourcePlugin counts as a driver provider (#3826): the
+      // standalone stack now DECLARES its `default` datasource and connects it
+      // at boot through the datasource connection service, so building a
+      // storage driver here would construct a duplicate pool the engine then
+      // discards as already-registered.
+      const hasDriver = plugins.some((p: any) =>
+        p.name?.includes('driver') ||
+        p.constructor?.name?.includes('Driver') ||
+        p.name === 'com.objectstack.runtime.default-datasource' ||
+        p.constructor?.name === 'DefaultDatasourcePlugin');
       if (!hasDriver && config.objects) {
          const databaseUrl = process.env.OS_DATABASE_URL;
          const driverType = resolveDriverType(process.env.OS_DATABASE_DRIVER, databaseUrl);

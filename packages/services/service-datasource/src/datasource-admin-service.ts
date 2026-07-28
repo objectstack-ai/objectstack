@@ -317,6 +317,14 @@ export class DatasourceAdminService implements IDatasourceAdminService {
         `Invalid datasource name '${name ?? ''}': must match /^[a-z_][a-z0-9_]*$/.`,
       );
     }
+    // Host-owned reserved name (#3826): the runtime declares and connects
+    // `default` itself (DefaultDatasourcePlugin); a runtime-created pool under
+    // that name would shadow the primary datasource's row and confuse routing.
+    if (name === 'default') {
+      throw new Error(
+        `Datasource name 'default' is reserved for the host's primary datasource. Pick another name.`,
+      );
+    }
   }
 
   private toRecord(input: DatasourceDraft): StoredDatasource {
