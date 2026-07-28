@@ -93,6 +93,7 @@ export const esES: TranslationData = {
       description: 'Banco de trabajo de metadatos para desarrolladores, analistas e implementadores',
       navigation: {
         group_overview: { label: 'Resumen' },
+        nav_app_builder: { label: 'Generador de aplicaciones' },
         nav_metadata_directory: { label: 'Todos los tipos de metadatos' },
         nav_packages: { label: 'Paquetes' },
         group_data_model: { label: 'Modelo de datos' },
@@ -110,7 +111,6 @@ export const esES: TranslationData = {
         nav_hooks: { label: 'Hooks' },
         group_automation: { label: 'Automatización' },
         nav_flows: { label: 'Flujos' },
-        nav_workflows: { label: 'Reglas de flujo de trabajo' },
         group_ai: { label: 'IA' },
         nav_agents: { label: 'Agentes' },
         nav_tools: { label: 'Herramientas' },

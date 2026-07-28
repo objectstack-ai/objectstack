@@ -32,6 +32,10 @@ export interface FlowLintFinding {
    * advisory. A rule is only promoted to `'error'` when the shape it flags is a
    * *guaranteed* runtime failure — then a warning would just be a slower way of
    * finding out (#3760).
+   *
+   * `os build` and `os validate` both filter on this field, so promoting a rule
+   * gates both surfaces at once — neither can report clean while the other
+   * rejects the same stack (#3782).
    */
   severity?: 'error' | 'warning';
 }

@@ -185,9 +185,9 @@ const objectDef = (name: string) => ({
  *
  * `isSystem` does NOT suppress trigger dispatch (only `skipTriggers` does), and
  * the trigger forwards `session.userId` with no fallback. So a write made with a
- * system context — any plugin/service write, the approvals status mirror, a
- * `runAs:'system'` flow's own data node — fires the record-change flows bound to
- * that object with `userId: undefined`. A flow left at the spec default
+ * system context — any plugin/service write, a `runAs:'system'` flow's own data
+ * node — fires the record-change flows bound to that object with
+ * `userId: undefined`. A flow left at the spec default
  * `runAs:'user'` then presented NO principal to ObjectQL, and the data security
  * middleware skips when there is no principal: the flow read and wrote every row.
  *
@@ -216,7 +216,10 @@ describe('a system write must not fire a record-change flow UNSCOPED (#3760)', (
     automation.registerFlow('sysw_stamp', stampFlow('sysw_stamp', 'sysw') as any);
 
     // A SYSTEM write: elevated, no userId, and NOT skipTriggers — so it still
-    // dispatches. This is the approvals-status-mirror shape.
+    // dispatches. Elevation is not what makes it user-less; presenting no
+    // principal is. A service that elevates *and* knows its actor can name one
+    // (the approvals status mirror does since #3783) and lands in the scoped
+    // branch instead — this is the shape that genuinely has nobody behind it.
     const created = await data.insert(
       'sysw',
       { status: 'new' },

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { AppTranslationBundle, TranslationCoverageResult, TranslationDiffItem } from '../system/translation.zod';
+import type { TranslationCoverageResult, TranslationDiffItem } from '../system/translation.zod';
 
 /**
  * II18nService - Internationalization Service Contract
@@ -57,26 +57,7 @@ export interface II18nService {
      */
     setDefaultLocale?(locale: string): void;
 
-    // ── Object-first aggregation & diff detection ──────────────────────
-
-    /**
-     * Get object-first translation bundle for a locale.
-     *
-     * Returns all translations aggregated under `o.{objectName}` with
-     * global groups (app, nav, dashboard, etc.) at the top level.
-     *
-     * @param locale - BCP-47 locale code
-     * @returns Object-first AppTranslationBundle, or undefined if no data
-     */
-    getAppBundle?(locale: string): AppTranslationBundle | undefined;
-
-    /**
-     * Load an object-first translation bundle for a locale.
-     *
-     * @param locale - BCP-47 locale code
-     * @param bundle - Object-first AppTranslationBundle
-     */
-    loadAppBundle?(locale: string, bundle: AppTranslationBundle): void;
+    // ── Diff detection ─────────────────────────────────────────────────
 
     /**
      * Get translation coverage for a locale, optionally scoped to a single object.

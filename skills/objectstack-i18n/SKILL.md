@@ -60,10 +60,9 @@ and integration with the I18nService.
 3. **Coverage detection**: `os i18n check` compares registered bundles against source
    metadata to report missing keys per locale.
 
-4. **Secondary format — `o.*` (`AppTranslationBundle`)**: a separate object-first,
-   single-locale format aimed at translation-workbench UIs, Studio-authored
-   `translation` metadata, and the coverage-diff schemas. It is **not** what the stack
-   `translations` array consumes — see "Secondary Format: AppTranslationBundle" below.
+4. **Runtime authoring — `TranslationItem`**: a `translation` metadata item authored
+   in the Studio / metadata API carries the **same** `objects.*` groups plus the
+   `locale` it translates. There is only one shape; see "Authoring at Runtime" below.
 
 ---
 
@@ -290,59 +289,64 @@ For the exact Zod shape (and any field that may have been added since), read
 
 ---
 
-## Secondary Format: AppTranslationBundle (`o.*`)
+## Authoring at Runtime: the `translation` Item
 
-`AppTranslationBundle` is a **separate, object-first format for a single locale**
-where per-object content lives under `o.{object_name}`. It targets translation
-workbench UIs, Studio-authored `translation` metadata, and the coverage/diff
-schemas. **Do not** use it in the files you register through
-`defineStack({ translations: [...] })` — the runtime resolvers read `objects.*`
-(`TranslationData`).
-
-Differences from the runtime format worth knowing:
-
-- Objects live under `o.*` (not `objects.*`); extra groups are `_meta`,
-  `_globalOptions`, `app`, `nav`, `dashboard`, `reports`, `pages`,
-  `notifications`, `errors`.
-- `_options` is keyed by **field name** → `{ optionValue: label }` (not by picklist name).
-- Actions use `confirmMessage` (the runtime format's `_actions` use `confirmText` / `successMessage`).
-- `namespace` is a **declared** isolation field for multi-plugin bundles; no shipped
-  code prefixes keys with it.
-- `_meta.direction: 'rtl'` lets UI frameworks apply RTL CSS for locales like Arabic.
+Translations do not have to ship as files. A **`translation` metadata item** —
+created in the Studio, through the metadata API, or by an agent — is one
+locale's worth of the **same** `objects.*` groups documented above, plus the
+`locale` it translates. There is exactly one shape; nothing converts between
+formats.
 
 <!-- os:check -->
 ```typescript
-import type { AppTranslationBundle } from '@objectstack/spec/system';
+import { defineTranslation } from '@objectstack/spec/system';
 
-const zh: AppTranslationBundle = {
-  _meta: { locale: 'zh-CN', direction: 'ltr' },
-  o: {
+export default defineTranslation({
+  locale: 'zh-CN',
+  objects: {
     account: {
       label: '客户',
       pluralLabel: '客户',
       fields: {
         name: { label: '客户名称', help: '公司或组织的法定名称' },
         industry: { label: '行业', options: { tech: '科技', finance: '金融' } },
-      },
-      _options: {
-        status: { active: '活跃', inactive: '停用' }, // keyed by FIELD name
+        status: { options: { active: '活跃', inactive: '停用' } },
       },
       _views: { all_accounts: { label: '全部客户' } },
       _sections: { basic_info: { label: '基本信息' } },
       _actions: {
-        merge: { label: '合并客户', confirmMessage: '此操作无法撤销，确认合并？' },
+        merge: { label: '合并客户', confirmText: '此操作无法撤销，确认合并？' },
       },
     },
   },
-  _globalOptions: { currency: { usd: '美元', eur: '欧元' } },
-  app: { crm: { label: '客户关系管理', description: '管理销售流程' } },
-  nav: { home: '首页', settings: '设置' },
+  apps: { crm: { label: '客户关系管理', navigation: { home: { label: '首页' } } } },
   messages: { 'common.save': '保存' },
-};
+});
 ```
 
+Rules that differ from a file bundle:
+
+- **`locale` is required.** A file bundle names its locales as map keys; an item
+  carries its own. An item whose locale cannot be resolved is skipped by the
+  runtime sync — a silent skip, which is why the field is mandatory rather
+  than inferred from the item name.
+- **One locale per item.** Author `zh-CN` and `ja-JP` as two items.
+- Published items are loaded at boot and on every publish (no restart), and
+  layer **over** the file bundles — an authored value wins over a shipped one
+  for the same key; deleting the item restores the shipped value.
+
 Exact Zod shape: `node_modules/@objectstack/spec/src/system/translation.zod.ts` —
-`AppTranslationBundleSchema` and `ObjectTranslationNodeSchema`.
+`TranslationItemSchema`.
+
+### Retired: the `o.*` dialect
+
+A second object-first shape keyed on `o.{object_name}` (with `app`, `nav`,
+`dashboard`, `reports`, `notifications`, `errors`, `_globalOptions`, `_meta`,
+`namespace`, and `_actions.confirmMessage`) was once documented for
+Studio-authored translations. **No resolver ever read it**, so items authored
+that way saved successfully and rendered nothing. It was removed in #3778 —
+those keys are now rejected at save time with a message naming the group to
+use instead. Never author them, in files or at runtime.
 
 ---
 
@@ -484,9 +488,10 @@ registers when no i18n plugin is present):
 The in-memory fallback additionally resolves locale codes
 (exact → case-insensitive → base language `zh-CN` → `zh` → variant `zh` → `zh-CN`).
 
-The contract also declares optional methods — `getAppBundle`, `loadAppBundle`,
-`getCoverage`, `suggestTranslations` — that **no shipped implementation provides**.
-Treat them as extension points for a custom workbench or TMS adapter.
+The contract also declares optional methods — `getCoverage`,
+`suggestTranslations` — that **no shipped implementation provides**. Treat them
+as extension points for a custom workbench or TMS adapter. (`getAppBundle` /
+`loadAppBundle` were removed in #3778 along with the `o.*` shape they returned.)
 
 ### Plugin Setup
 
@@ -573,18 +578,25 @@ before release.
 
 ## Common Pitfalls
 
-### ❌ Studio Shape in Runtime Bundles
+### ❌ The Retired `o.*` Shape
 
-The runtime resolvers read `objects.*` — the `o.*` shape belongs to the
-secondary `AppTranslationBundle` format only:
+Everything reads `objects.*`. The `o.*` dialect was removed in #3778 — it is
+not a "Studio format", not a secondary format, just gone. Files registered in
+that shape resolve to nothing; runtime items in that shape are rejected at
+save time.
 
 ```typescript
-// Registered via defineStack({ translations }) — WRONG
+// WRONG — in a file bundle AND in a `translation` item
 { o: { account: { label: '客户' } } }
 
 // CORRECT (TranslationData)
 { objects: { account: { label: '客户' } } }
 ```
+
+Same rule for its sibling keys: `app` → `apps`, `nav` →
+`apps.<app>.navigation.<id>.label`, `dashboard` → `dashboards`,
+`_globalOptions` → `objects.<obj>.fields.<field>.options`, `_meta.locale` →
+top-level `locale`, and `_actions.confirmMessage` → `_actions.confirmText`.
 
 ### ❌ Mismatched Object Names
 

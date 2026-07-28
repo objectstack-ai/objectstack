@@ -154,19 +154,24 @@ Fallback to: en (system default) ✓
 
 Translations are stored in **JSON files** organized by locale and namespace.
 
-### Object-First Convention (Recommended)
+### Object-First Convention
 
 ObjectStack uses an **object-first** convention where all translatable metadata
-for an object is aggregated under `o.{object_name}`. Global (non-object-bound)
-translations remain in dedicated top-level groups. This aligns with Salesforce DX
-and Dynamics conventions, enabling efficient translation workbench editing
-and automated coverage detection.
+for an object is aggregated under `objects.{object_name}`. Global
+(non-object-bound) translations remain in dedicated top-level groups. This
+aligns with Salesforce DX and Dynamics conventions, enabling efficient
+translation workbench editing and automated coverage detection.
+
+There is exactly **one** shape. A file-authored bundle is a map of locale code →
+`TranslationData`; a `translation` metadata item authored at runtime is one
+`TranslationData` plus the `locale` it translates. The resolvers, `os i18n
+extract`, `os i18n check`, and the Studio editor all read the same keys.
 
 ```typescript
-// AppTranslationBundle for a single locale (e.g. zh-CN)
-const zh: AppTranslationBundle = {
+// One locale of a TranslationBundle (e.g. zh-CN)
+const zh: TranslationData = {
   // ── Object-first translations ─────────────────────────────────
-  o: {
+  objects: {
     account: {
       label: '客户',
       pluralLabel: '客户',
@@ -174,21 +179,19 @@ const zh: AppTranslationBundle = {
       fields: {
         name: { label: '客户名称', help: '公司法定名称' },
         industry: { label: '行业', options: { tech: '科技', finance: '金融' } },
+        status: { options: { active: '活跃', inactive: '停用' } },
       },
-      _options: { status: { active: '活跃', inactive: '停用' } },
       _views:  { all_accounts: { label: '全部客户' } },
       _sections: { basic_info: { label: '基本信息' } },
-      _actions: { convert: { label: '转换', confirmMessage: '确认转换？' } },
+      _actions: { convert: { label: '转换', confirmText: '确认转换？' } },
     },
   },
 
   // ── Global translations ───────────────────────────────────────
-  _globalOptions: { currency: { usd: '美元', eur: '欧元' } },
-  app: { crm: { label: '客户关系管理' } },
-  nav: { home: '首页', settings: '设置' },
-  dashboard: { sales_overview: { label: '销售概览' } },
-  reports: { pipeline_report: { label: '管道报表' } },
+  apps: { crm: { label: '客户关系管理', navigation: { home: { label: '首页' } } } },
+  dashboards: { sales_overview: { label: '销售概览' } },
   pages: { landing: { title: '欢迎' } },
+  globalActions: { export_csv: { label: '导出 CSV' } },
   messages: { 'common.save': '保存' },
   validationMessages: { 'discount_limit': '折扣不能超过40%' },
 };
@@ -198,7 +201,42 @@ const zh: AppTranslationBundle = {
 - ✅ All translatable content for one object in one place
 - ✅ CLI can generate translation skeletons per object
 - ✅ Workbench can show per-object coverage and diffs
-- ✅ No redundant category/fieldOptions/reports nodes
+- ✅ One shape for files and runtime authoring — what you author is what renders
+
+<Callout type="info">
+  **Retired: the `o.{object}` dialect.** A second, object-first shape keyed on
+  `o.` (with `app`, `nav`, `dashboard`, `_globalOptions`, `_meta`) was once
+  documented here for runtime-authored translations. No resolver ever read it,
+  so translations authored in that shape saved successfully and rendered
+  nothing. It was removed in #3778; the metadata door now rejects those keys
+  with a message naming the group to use instead. Author everything —
+  files and runtime items alike — under `objects.`.
+</Callout>
+
+### Authoring a `translation` item at runtime
+
+An admin (or an agent using the metadata API) authors one item per locale.
+The only difference from a file bundle is the top-level `locale`:
+
+```typescript
+import { defineTranslation } from '@objectstack/spec/system';
+
+export default defineTranslation({
+  locale: 'zh-CN',
+  objects: {
+    account: {
+      label: '客户',
+      fields: { name: { label: '客户名称' } },
+    },
+  },
+  messages: { 'common.save': '保存' },
+});
+```
+
+`locale` is required — the runtime sync skips an item whose locale it cannot
+resolve, and a silent skip is exactly what makes a missing translation hard to
+diagnose. Items are merged over the static file bundles, so an authored value
+wins over a shipped one for the same key.
 
 ### Directory Structure
 

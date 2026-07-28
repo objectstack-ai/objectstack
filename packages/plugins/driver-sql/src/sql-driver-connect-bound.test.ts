@@ -32,7 +32,7 @@ afterEach(async () => {
 describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
   it('applies a default createTimeoutMillis when the host sets no pool config', () => {
     const d = make({ client: 'pg', connection: 'postgres://u:p@127.0.0.1:1/d' });
-    expect((d as any).knex.client.config.pool.createTimeoutMillis).toBe(10_000);
+    expect((d as any).knex.client.config.pool.createTimeoutMillis).toBe(15_000);
   });
 
   it('applies it alongside a host pool config without clobbering min/max', () => {
@@ -42,7 +42,7 @@ describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
       pool: { min: 0, max: 5 },
     });
     const pool = (d as any).knex.client.config.pool;
-    expect(pool).toMatchObject({ min: 0, max: 5, createTimeoutMillis: 10_000 });
+    expect(pool).toMatchObject({ min: 0, max: 5, createTimeoutMillis: 15_000 });
   });
 
   it("leaves a host's explicit createTimeoutMillis alone", () => {
@@ -54,23 +54,97 @@ describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
     expect((d as any).knex.client.config.pool.createTimeoutMillis).toBe(45_000);
   });
 
+  // The pool bound stops the wait but knex blames "the pool is probably full".
+  // Each network dialect also gets its OWN connect timeout so the message names
+  // the network instead — `timeout expired` (pg) / `connect ETIMEDOUT` (mysql2).
+  describe('per-dialect connect timeout (accurate diagnosis)', () => {
+    it('moves a pg URL into connectionString and rides the timeout alongside it', () => {
+      const d = make({ client: 'pg', connection: 'postgres://u:p@host:5432/d' });
+      expect((d as any).knex.client.config.connection).toEqual({
+        connectionString: 'postgres://u:p@host:5432/d',
+        connectionTimeoutMillis: 10_000,
+      });
+    });
+
+    it('moves a mysql2 URL into uri with the mysql2 spelling of the timeout', () => {
+      const d = make({ client: 'mysql2', connection: 'mysql://u:p@host:3306/d' });
+      expect((d as any).knex.client.config.connection).toEqual({
+        uri: 'mysql://u:p@host:3306/d',
+        connectTimeout: 10_000,
+      });
+    });
+
+    it('adds the timeout to an object connection without disturbing its fields', () => {
+      const d = make({
+        client: 'pg',
+        connection: { host: 'db.example.com', port: 5432, user: 'admin', database: 'app', ssl: true },
+      });
+      expect((d as any).knex.client.config.connection).toEqual({
+        host: 'db.example.com', port: 5432, user: 'admin', database: 'app', ssl: true,
+        connectionTimeoutMillis: 10_000,
+      });
+    });
+
+    it("leaves a host's explicit connect timeout alone", () => {
+      const d = make({
+        client: 'pg',
+        connection: { host: 'db.example.com', connectionTimeoutMillis: 60_000 },
+      });
+      expect((d as any).knex.client.config.connection.connectionTimeoutMillis).toBe(60_000);
+    });
+
+    it('injects nothing for sqlite — a file open has no handshake to time out', () => {
+      const d = make({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+      expect((d as any).knex.client.config.connection).toEqual({ filename: ':memory:' });
+    });
+
+    it('leaves a function-valued connection alone — the host builds each one itself', () => {
+      const provider = () => ({ host: 'x' });
+      const d = make({ client: 'pg', connection: provider });
+      expect((d as any).knex.client.config.connection).toBe(provider);
+    });
+  });
+
+  // `driver.config` is load-bearing for two readers that predate this change:
+  // serve.ts's startup banner (`describeRegisteredDriver` reads conn.host /
+  // conn.filename) and `createDatabase()` (parses the URL to swap in the
+  // maintenance database). Both would break on the rewritten shape, so the
+  // rewrite must apply to what knex receives — never to what the author gave us.
+  it('keeps driver.config in the shape the author passed', () => {
+    const d = make({ client: 'pg', connection: 'postgres://u:p@host:5432/d', pool: { min: 0, max: 5 } });
+    expect((d as any).config.connection).toBe('postgres://u:p@host:5432/d');
+    expect((d as any).config.pool).toEqual({ min: 0, max: 5 });
+  });
+
   it('actually bounds a query against a black-holing endpoint', async () => {
     const bh = blackHole();
     const port = await bh.listen();
     try {
-      // 700ms so the assertion is decisive: unbounded is 30s.
+      // The default is 10s; unbounded would be knex/tarn's 30s.
       const d = make({
         client: 'pg',
         connection: `postgres://u:p@127.0.0.1:${port}/d`,
-        pool: { min: 0, max: 2, createTimeoutMillis: 700 },
+        pool: { min: 0, max: 2 },
       });
       const started = Date.now();
-      await expect((d as any).knex.raw('SELECT 1')).rejects.toThrow();
-      expect(Date.now() - started).toBeLessThan(5_000);
+      const err = await (d as any).knex.raw('SELECT 1').then(
+        () => { throw new Error('query resolved but should have failed'); },
+        (e: Error) => e,
+      );
+      const elapsed = Date.now() - started;
+
+      // The pg-level timeout fires first (10s), so the message names the
+      // connection attempt rather than blaming pool sizing. Guarding against
+      // the regression is the point: knex's own wording would send an operator
+      // to tune `pool.max` while the network is what is broken.
+      expect(err.message).toContain('timeout expired');
+      expect(err.message).not.toContain('pool is probably full');
+      expect(elapsed).toBeGreaterThan(8_000);
+      expect(elapsed).toBeLessThan(20_000);
     } finally {
       bh.close();
     }
-  }, 20_000);
+  }, 40_000);
 
   it('does not disturb a working sqlite connection', async () => {
     const d = make({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });

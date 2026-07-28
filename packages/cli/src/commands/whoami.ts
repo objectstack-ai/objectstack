@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { printHeader, printError, printKV } from '../utils/format.js';
+import { printHeader, printError, printKV, emitJson } from '../utils/format.js';
 import { createApiClient, requireAuth } from '../utils/api-client.js';
 import { formatOutput } from '../utils/output-formatter.js';
 
@@ -51,9 +51,9 @@ export default class AuthWhoami extends Command {
       const sessionData = response.data || response;
 
       if (flags.format === 'json') {
-        formatOutput(sessionData, 'json');
+        await formatOutput(sessionData, 'json');
       } else if (flags.format === 'yaml') {
-        formatOutput(sessionData, 'yaml');
+        await formatOutput(sessionData, 'yaml');
       } else {
         printHeader('Current Session');
 
@@ -72,10 +72,10 @@ export default class AuthWhoami extends Command {
       }
     } catch (error: any) {
       if (flags.format === 'json') {
-        console.log(JSON.stringify({
+        await emitJson({
           success: false,
           error: error.message,
-        }, null, 2));
+        });
         this.exit(1);
       }
       printError(error.message || String(error));

@@ -112,10 +112,17 @@ export type RunDataContext = RunIdentityContext | RunProvenanceContext;
  *    provenance-only envelope and let the run proceed UNSCOPED — the #1888
  *    fail-open. A schedule is only the most obvious source of a user-less run;
  *    the commonest is a record-change flow fired by a write that carried no
- *    user (any `isSystem` plugin/service write, the approvals status mirror, or
- *    a `runAs:'system'` flow's own data node — `isSystem` does NOT suppress
- *    trigger dispatch, only `skipTriggers` does). None of those are decidable at
- *    authoring time, which is why the refusal has to live here.
+ *    user (any `isSystem` plugin/service write, or a `runAs:'system'` flow's own
+ *    data node — `isSystem` does NOT suppress trigger dispatch, only
+ *    `skipTriggers` does). None of those are decidable at authoring time, which
+ *    is why the refusal has to live here.
+ *
+ *    Elevation and anonymity are separate choices, and a service that elevates
+ *    for a reason usually still knows who it is acting for. The approvals status
+ *    mirror was the motivating example on both sides: it has to stay `isSystem`
+ *    (the record is locked while its approval is live) but it now names the
+ *    deciding user, so approvals cascades resolve here instead of being refused
+ *    (#3783). Only its machine-driven sweeps stay user-less.
  *
  * The engine sets {@link AutomationContext.runAs} on the run context at setup;
  * this function is the single place that maps it to an ObjectQL context, shared

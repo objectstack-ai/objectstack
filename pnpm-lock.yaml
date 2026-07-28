@@ -1261,6 +1261,9 @@ importers:
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../../services/service-automation
+      '@objectstack/trigger-record-change':
+        specifier: workspace:*
+        version: link:../../triggers/trigger-record-change
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1

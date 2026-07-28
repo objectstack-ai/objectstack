@@ -52,7 +52,7 @@ describe('metadata create seeds validate against their spec schemas', () => {
     // identity types legitimately have no static minimal create literal.
     const KNOWN_UNSEEDED = new Set([
       'report',        // canvas-create: dataset/measures picked interactively
-      'app', 'field', 'seed', 'job', 'datasource', 'translation', 'doc', 'book',
+      'app', 'field', 'seed', 'job', 'datasource', 'doc', 'book',
       'permission', 'position', 'agent', 'tool', 'skill', 'email_template',
     ]);
     const seeded = new Set(listMetadataCreateSeedTypes());

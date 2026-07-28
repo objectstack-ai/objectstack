@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
-import { printError, printSuccess } from '../../utils/format.js';
+import { printError, printSuccess, emitJson } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -76,18 +76,18 @@ export default class MetaRegister extends Command {
       const result = await client.meta.saveItem(args.type, name, metadata);
 
       if (flags.format === 'json') {
-        formatOutput(result, 'json');
+        await formatOutput(result, 'json');
       } else if (flags.format === 'yaml') {
-        formatOutput(result, 'yaml');
+        await formatOutput(result, 'yaml');
       } else {
         printSuccess(`Metadata registered: ${args.type}/${name}`);
       }
     } catch (error: any) {
       if (flags.format === 'json') {
-        console.log(JSON.stringify({
+        await emitJson({
           success: false,
           error: error.message,
-        }, null, 2));
+        });
         this.exit(1);
       }
       printError(error.message || String(error));

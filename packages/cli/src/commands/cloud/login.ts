@@ -13,7 +13,7 @@
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { Command, Flags } from '@oclif/core';
-import { printHeader, printKV, printSuccess, printError } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printError, emitJson } from '../../utils/format.js';
 import { loginWithBrowser, loginWithPassword } from '../../utils/auth-flows.js';
 import { DEFAULT_CLOUD_URL, readCloudConfig, writeCloudConfig } from '../../utils/cloud-config.js';
 
@@ -105,9 +105,7 @@ export default class CloudLogin extends Command {
           const existing = await readCloudConfig();
           if (existing?.token) {
             if (flags.json) {
-              console.log(
-                JSON.stringify({ success: false, error: 'Already logged in', email: existing.email, url: existing.url }),
-              );
+              await emitJson({ success: false, error: 'Already logged in', email: existing.email, url: existing.url }, 0, { compact: true });
             } else {
               printSuccess(`Already logged in to ${existing.url} as ${existing.email || existing.userId}`);
               console.log('');
@@ -145,7 +143,7 @@ export default class CloudLogin extends Command {
       });
 
       if (flags.json) {
-        console.log(JSON.stringify({ success: true, email: result.user?.email, userId: result.user?.id, url }, null, 2));
+        await emitJson({ success: true, email: result.user?.email, userId: result.user?.id, url });
       } else {
         printSuccess('Cloud authentication successful');
         if (result.user?.email) printKV('Email', result.user.email);
@@ -157,7 +155,7 @@ export default class CloudLogin extends Command {
       }
     } catch (error: any) {
       if (flags.json) {
-        console.log(JSON.stringify({ success: false, error: error.message }, null, 2));
+        await emitJson({ success: false, error: error.message });
         this.exit(1);
       }
       printError(error.message || String(error));

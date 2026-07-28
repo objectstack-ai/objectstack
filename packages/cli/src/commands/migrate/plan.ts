@@ -10,6 +10,7 @@ import {
   printInfo,
   printStep,
   createTimer,
+  emitJson,
 } from '../../utils/format.js';
 import { bootSchemaStack, renderPlan, summarize } from '../../utils/schema-migrate.js';
 
@@ -49,7 +50,7 @@ export default class MigratePlan extends Command {
     try {
       stack = await bootSchemaStack({ databaseUrl: flags['database-url'] });
     } catch (error: any) {
-      if (flags.json) { console.log(JSON.stringify({ error: error.message })); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
       return;
@@ -57,7 +58,7 @@ export default class MigratePlan extends Command {
 
     try {
       if (!stack.driver) {
-        if (flags.json) { console.log(JSON.stringify({ error: 'no_sql_driver', changes: [] })); return; }
+        if (flags.json) { await emitJson({ error: 'no_sql_driver', changes: [] }, 0, { compact: true }); return; }
         printWarning('Schema migration is only supported on SQL drivers (SQLite / Postgres). No SQL driver is active.');
         return;
       }
@@ -65,13 +66,13 @@ export default class MigratePlan extends Command {
       const drift = await stack.driver.detectManagedDrift();
 
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           database: stack.dbLabel,
           managedTables: stack.managedTableCount,
           total: drift.length,
           changes: drift,
           duration: timer.elapsed(),
-        }, null, 2));
+        });
         return;
       }
 
@@ -92,7 +93,7 @@ export default class MigratePlan extends Command {
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
     } catch (error: any) {
-      if (flags.json) { console.log(JSON.stringify({ error: error.message })); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
     } finally {
