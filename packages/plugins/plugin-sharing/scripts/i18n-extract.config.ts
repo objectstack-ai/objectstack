@@ -8,7 +8,7 @@
  * strings were seeded from @objectstack/platform-objects.)
  *
  *   os i18n extract packages/plugins/plugin-sharing/scripts/i18n-extract.config.ts \
- *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only \
+ *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only --no-metadata-forms \
  *     --out=packages/plugins/plugin-sharing/src/translations
  */
 

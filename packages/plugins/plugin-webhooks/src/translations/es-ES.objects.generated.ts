@@ -30,7 +30,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       triggers: {
         label: "Desencadenantes",
-        help: "Lista de eventos separada por comas: create,update,delete."
+        help: "Lista de eventos separada por comas: create,update,delete.",
+        options: {
+          create: "Crear",
+          update: "Actualizar",
+          delete: "Eliminar"
+        }
       },
       url: {
         label: "URL de destino",
@@ -38,7 +43,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       method: {
         label: "Método HTTP",
-        help: "GET / POST / PUT / PATCH / DELETE"
+        help: "GET / POST / PUT / PATCH / DELETE",
+        options: {
+          get: "GET",
+          post: "POST",
+          put: "PUT",
+          patch: "PATCH",
+          delete: "DELETE"
+        }
       },
       description: {
         label: "Descripción"
@@ -50,6 +62,19 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       definition_json: {
         label: "Definición",
         help: "JSON serializado de Webhook (consulte @objectstack/spec/automation/webhook): configuración completa de cabeceras/auth/reintentos/payload."
+      },
+      managed_by: {
+        label: "Gestionado por",
+        help: "Procedencia del registro: platform = integrado en el framework / package = declarado por app o paquete (sembrado al arrancar desde los webhooks de defineStack) / admin = creado en Setup.",
+        options: {
+          platform: "Plataforma",
+          package: "Paquete",
+          admin: "Administrador"
+        }
+      },
+      customized: {
+        label: "Personalizado",
+        help: "Se establece cuando un administrador edita un webhook declarado por un paquete; a partir de entonces el sembrado de arranque deja de sobrescribir la fila (un webhook ruidoso desactivado sobrevive a los redespliegues). Sin sentido en filas admin."
       },
       created_at: {
         label: "Creado el"

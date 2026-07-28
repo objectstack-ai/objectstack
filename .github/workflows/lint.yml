@@ -262,7 +262,14 @@ jobs:
       # mode, so it never asks anyone to re-translate: a fresh extract of an
       # up-to-date bundle is byte-identical to what is committed.
       #
-      # Reads the built @objectstack/spec dist through the extract config, so
+      # Now covers ALL NINE packages that own a bundle, not just
+      # platform-objects. The other eight shipped an `i18n-extract.config.ts`
+      # that nothing ever ran, and four of them had already drifted — the same
+      # rot this gate exists to catch, one directory over. Each package is
+      # checked with the exact command its own config docstring documents, so
+      # the docs and the gate cannot diverge.
+      #
+      # Reads the built @objectstack/spec dist through the extract configs, so
       # it belongs after the build step with the other consumer gates.
       - name: Check generated translation bundles are in sync with the schema
         run: pnpm check:i18n
@@ -270,13 +277,15 @@ jobs:
       # Ratchet on the OTHER i18n question. The step above asks "are the
       # generated bundles still what the schema produces?"; this one asks "did
       # anyone declare a new label and not translate it?" — the gap #3370 closed
-      # in `os lint` but which had ~765 pre-existing misses across the examples,
-      # so `--i18n-strict` cannot simply be switched on without painting CI red
-      # and getting switched back off. The debt is frozen in
+      # in `os lint`, which had ~1000 pre-existing misses across the examples and
+      # platform-objects, so `--i18n-strict` cannot simply be switched on without
+      # painting CI red and getting switched back off. The debt is frozen in
       # scripts/i18n-coverage-baseline.json; growth fails the build.
       #
-      # Runs the built CLI over each example config, so it also belongs after
-      # the build step.
+      # Eight of the twelve tracked configs sit at zero, so for those this is
+      # already the strict gate — any regression is immediately red.
+      #
+      # Runs the built CLI over each config, so it also belongs after the build.
       - name: Check no new untranslated declared labels
         run: pnpm check:i18n-coverage
 

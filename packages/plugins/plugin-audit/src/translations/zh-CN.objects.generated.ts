@@ -37,6 +37,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "执行人",
         help: "执行该操作的用户（系统操作时为 null）"
       },
+      actor: {
+        label: "操作者",
+        help: "执行该操作的主体：用户 ID、svc:<name> 或空"
+      },
       object_name: {
         label: "对象",
         help: "目标对象（例如 sys_user、project_task）"
@@ -73,7 +77,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "最近"
+        label: "最近",
+        emptyState: {
+          title: "暂无审计事件",
+          message: "用户与平台交互后，动态会显示在这里。"
+        }
       },
       writes_only: {
         label: "写入"
@@ -139,6 +147,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       record_label: {
         label: "记录标签",
         help: "写入时目标记录的显示标签"
+      },
+      source_object: {
+        label: "来源对象",
+        help: "该动态所派生自的富来源实体的对象名称（如 \"sys_email\"）。为空表示动态针对目标记录本身。"
+      },
+      source_id: {
+        label: "来源 ID",
+        help: "富来源实体的记录 ID（与 source_object 配对）—— 让时间线可以下钻到完整的邮件/通话/会议记录。"
       },
       url: {
         label: "URL",

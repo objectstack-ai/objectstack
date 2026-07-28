@@ -135,9 +135,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         options: {
           user: "Usuario",
           team: "Equipo",
-          business_unit: "business_unit",
+          business_unit: "Unidad de negocio",
           position: "posición",
-          unit_and_subordinates: "unit_and_subordinates"
+          unit_and_subordinates: "Rol y subordinados"
         }
       },
       recipient_id: {
@@ -155,6 +155,19 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       active: {
         label: "Activo",
         help: "Solo las reglas activas participan en la evaluación del ciclo de vida."
+      },
+      managed_by: {
+        label: "Gestionado por",
+        help: "Procedencia del registro (tri-estado unificado, A4 #2920): platform = integrado en el framework / package = declarado por app o paquete (sembrado al arrancar) / admin = creado por el inquilino en Setup.",
+        options: {
+          platform: "Plataforma",
+          package: "Paquete",
+          admin: "Administrador"
+        }
+      },
+      customized: {
+        label: "Personalizado",
+        help: "Se establece cuando un administrador edita una regla declarada por un paquete; a partir de entonces el sembrado de arranque deja de sobrescribir la fila (las desactivaciones sobreviven a los redespliegues). Sin sentido en filas admin."
       },
       created_at: {
         label: "Creado el"

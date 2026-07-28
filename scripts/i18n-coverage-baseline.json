@@ -1,5 +1,14 @@
 {
   "examples/app-crm/objectstack.config.ts": 97,
   "examples/app-showcase/objectstack.config.ts": 456,
-  "examples/app-todo/objectstack.config.ts": 212
+  "examples/app-todo/objectstack.config.ts": 212,
+  "packages/platform-objects/scripts/i18n-extract.config.ts": 231,
+  "packages/plugins/plugin-approvals/scripts/i18n-extract.config.ts": 0,
+  "packages/plugins/plugin-audit/scripts/i18n-extract.config.ts": 0,
+  "packages/plugins/plugin-security/scripts/i18n-extract.config.ts": 0,
+  "packages/plugins/plugin-sharing/scripts/i18n-extract.config.ts": 0,
+  "packages/plugins/plugin-webhooks/scripts/i18n-extract.config.ts": 0,
+  "packages/services/service-messaging/scripts/i18n-extract.config.ts": 0,
+  "packages/services/service-realtime/scripts/i18n-extract.config.ts": 0,
+  "packages/services/service-storage/scripts/i18n-extract.config.ts": 0
 }

@@ -12,6 +12,7 @@ import {
   printInfo,
   printStep,
   createTimer,
+  emitJson,
 } from '../../utils/format.js';
 import { computeI18nCoverage } from '../../utils/i18n-coverage.js';
 
@@ -77,12 +78,10 @@ export default class I18nCheck extends Command {
         : [];
 
       if (flags.json) {
-        console.log(JSON.stringify({
-          ...report,
-          thresholdViolations,
-          duration: timer.elapsed(),
-        }, null, 2));
-        if (report.totals.errors > 0 || thresholdViolations.length > 0) process.exit(1);
+        await emitJson(
+          { ...report, thresholdViolations, duration: timer.elapsed() },
+          report.totals.errors > 0 || thresholdViolations.length > 0 ? 1 : 0,
+        );
         return;
       }
 

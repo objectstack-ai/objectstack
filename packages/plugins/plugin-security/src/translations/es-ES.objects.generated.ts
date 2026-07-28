@@ -35,6 +35,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Puesto predeterminado",
         help: "Se asigna automáticamente a los nuevos usuarios."
       },
+      delegatable: {
+        label: "Delegable",
+        help: "ADR-0091 D3: quienes la ostentan pueden delegar esta posición por autoservicio, con límite temporal."
+      },
       managed_by: {
         label: "Gestionado por",
         help: "Procedencia del registro: platform (integrado) / package (declarado) / admin (creado por el inquilino).",
@@ -85,7 +89,16 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_position: {
         label: "Clonar rol",
-        successMessage: "Puesto clonado"
+        successMessage: "Puesto clonado",
+        params: {
+          label: {
+            label: "Nuevo nombre para mostrar"
+          },
+          name: {
+            label: "Nuevo nombre de API",
+            helpText: "Nombre de máquina snake_case único"
+          }
+        }
       }
     }
   },
@@ -94,6 +107,24 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     pluralLabel: "Capacidades",
     description: "Definiciones de capacidades de autorización referenciadas por nombre desde conjuntos de permisos y requisitos de recursos.",
     fields: {
+      label: {
+        label: "Nombre visible"
+      },
+      name: {
+        label: "Nombre de API",
+        help: "Clave única de capacidad referenciada por systemPermissions / requiredPermissions (p. ej. manage_users, setup.access)."
+      },
+      description: {
+        label: "Descripción"
+      },
+      scope: {
+        label: "Ámbito",
+        help: "platform = potestad de toda la plataforma; org = limitada a una organización.",
+        options: {
+          platform: "Plataforma",
+          org: "Organización"
+        }
+      },
       managed_by: {
         label: "Gestionado por",
         help: "Procedencia del registro: platform / package (distribuido, no eliminable por el usuario) / admin (creado en Configuración).",
@@ -103,12 +134,43 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           admin: "Administrador"
         }
       },
-      scope: {
-        label: "Ámbito",
-        options: {
-          platform: "Plataforma",
-          org: "Organización"
-        }
+      package_id: {
+        label: "Paquete propietario",
+        help: "Paquete que distribuye esta capacidad (ausente = curada por la plataforma o creada por un administrador)."
+      },
+      active: {
+        label: "Activo"
+      },
+      id: {
+        label: "ID de capacidad"
+      },
+      created_at: {
+        label: "Creado el"
+      },
+      updated_at: {
+        label: "Actualizado el"
+      }
+    },
+    _views: {
+      platform: {
+        label: "Plataforma"
+      },
+      org: {
+        label: "Organización"
+      },
+      all_capabilities: {
+        label: "Todos"
+      }
+    },
+    _actions: {
+      activate_capability: {
+        label: "Activar",
+        successMessage: "Capacidad activada"
+      },
+      deactivate_capability: {
+        label: "Desactivar",
+        confirmText: "¿Desactivar esta capacidad? Las concesiones y los requisitos de recursos que la referencian dejarán de resolverse hasta que se reactive.",
+        successMessage: "Capacidad desactivada"
       }
     }
   },
@@ -147,8 +209,16 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Permisos de pestañas",
         help: "Mapa serializado en JSON de la visibilidad de las pestañas de la app (visible | hidden | default_on | default_off)"
       },
+      admin_scope: {
+        label: "Alcance de administración delegada",
+        help: "[ADR-0090 D12] AdminScope serializado en JSON: { businessUnit, includeSubtree, manageAssignments, manageBindings, authorEnvironmentSets, assignablePermissionSets[] }. Poseer este conjunto convierte al usuario en administrador ACOTADO dentro del subárbol de unidad de negocio declarado; lo aplica la barrera de escritura de administración delegada."
+      },
       active: {
         label: "Activo"
+      },
+      package_id: {
+        label: "Paquete propietario",
+        help: "Paquete que distribuye este conjunto de permisos (ausente = creado en el entorno). Lo rellena bootstrapDeclaredPermissions; hace que la desinstalación/actualización del paquete quede bien definida."
       },
       managed_by: {
         label: "Gestionado por",
@@ -158,6 +228,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           package: "Paquete",
           admin: "Administrador"
         }
+      },
+      customized: {
+        label: "Personalizado",
+        help: "Este conjunto de permisos empaquetado tiene una superposición de personalización del entorno (ADR-0094). Reinícialo (elimínalo por la puerta de datos) para volver a la línea base distribuida."
       },
       id: {
         label: "ID de conjunto de permisos"
@@ -192,7 +266,16 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_permission_set: {
         label: "Clonar",
-        successMessage: "Conjunto de permisos clonado"
+        successMessage: "Conjunto de permisos clonado",
+        params: {
+          label: {
+            label: "Nuevo nombre para mostrar"
+          },
+          name: {
+            label: "Nuevo nombre de API",
+            helpText: "Nombre de máquina snake_case único"
+          }
+        }
       }
     }
   },
@@ -220,6 +303,30 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       granted_by: {
         label: "Concedido por",
         help: "Usuario que concedió este conjunto de permisos."
+      },
+      valid_from: {
+        label: "Válido desde",
+        help: "[ADR-0091 D1] La concesión está inactiva antes de este instante. Nulo = activa de inmediato. Se aplica en modo fail-closed en el momento de resolución (D2), nunca mediante un trabajo en segundo plano."
+      },
+      valid_until: {
+        label: "Válido hasta",
+        help: "[ADR-0091 D1] La concesión queda inactiva DESDE este instante inclusive (intervalo semiabierto [from, until), UTC). Null = nunca expira. Obligatorio en activaciones de emergencia (D4) y concesiones de agente (D6). Se aplica en el momento de la resolución (D2)."
+      },
+      reason: {
+        label: "Motivo",
+        help: "[ADR-0091 D1] Por qué existe esta concesión. Texto libre; OBLIGATORIO en filas de delegación (D3) y de acceso de emergencia (D4). Las concesiones de agente registran aquí la atribución de tarea/ejecución (D6)."
+      },
+      delegated_from: {
+        label: "Delegado desde",
+        help: "[ADR-0091 D3] El delegante cuya autoridad porta esta fila. Una fila con delegated_from no es a su vez delegable ni autorrenovable."
+      },
+      last_certified_at: {
+        label: "Última certificación",
+        help: "[ADR-0091 D5] Cuándo se atestiguó por última vez esta concesión en una revisión de recertificación. Nulo = nunca certificada."
+      },
+      certified_by: {
+        label: "Certificado por",
+        help: "[ADR-0091 D5] Revisor que atestiguó por última vez esta concesión."
       },
       created_at: {
         label: "Creado el"

@@ -156,6 +156,19 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Active",
         help: "Only active rules participate in lifecycle evaluation"
       },
+      managed_by: {
+        label: "Managed By",
+        help: "Record provenance (unified tri-state, A4 #2920): platform = framework built-in / package = app/package-declared (boot-seeded) / admin = tenant-created in Setup.",
+        options: {
+          platform: "Platform",
+          package: "Package",
+          admin: "Admin"
+        }
+      },
+      customized: {
+        label: "Customized",
+        help: "Set when an admin edits a package-declared rule; boot seeding will no longer overwrite the row (deactivations survive redeploys). Meaningless on admin rows."
+      },
       created_at: {
         label: "Created At"
       },

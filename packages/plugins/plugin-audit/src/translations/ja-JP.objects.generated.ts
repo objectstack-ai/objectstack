@@ -37,6 +37,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "操作者",
         help: "アクションを実行したユーザー（システム操作の場合は null）"
       },
+      actor: {
+        label: "実行者",
+        help: "操作を実行したプリンシパル: ユーザー ID、svc:<name>、または null"
+      },
       object_name: {
         label: "オブジェクト",
         help: "対象オブジェクト（例: sys_user、project_task）"
@@ -73,7 +77,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "最近"
+        label: "最近",
+        emptyState: {
+          title: "監査イベントはありません",
+          message: "ユーザーがプラットフォームを操作すると、ここにアクティビティが表示されます。"
+        }
       },
       writes_only: {
         label: "書き込み"
@@ -139,6 +147,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       record_label: {
         label: "レコード表示名",
         help: "書き込み時点の対象レコードの表示名"
+      },
+      source_object: {
+        label: "ソースオブジェクト",
+        help: "このアクティビティの派生元となったリッチソースエンティティのオブジェクト名（例: \"sys_email\"）。null の場合、アクティビティは対象レコード自体に関するものです。"
+      },
+      source_id: {
+        label: "ソース ID",
+        help: "リッチソースエンティティのレコード ID（source_object と対で使用）。タイムラインからメール／通話／会議の完全なレコードへドリルダウンできます。"
       },
       url: {
         label: "URL",

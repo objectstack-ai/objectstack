@@ -37,6 +37,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Actor",
         help: "User who performed the action (null for system actions)"
       },
+      actor: {
+        label: "Actor",
+        help: "Principal that performed the action: a user id, svc:<name>, or null"
+      },
       object_name: {
         label: "Object",
         help: "Target object (e.g. sys_user, project_task)"
@@ -73,7 +77,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "Recent"
+        label: "Recent",
+        emptyState: {
+          title: "No audit events",
+          message: "Activity will appear here as users interact with the platform."
+        }
       },
       writes_only: {
         label: "Writes"
@@ -139,6 +147,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       record_label: {
         label: "Record Label",
         help: "Display label of the target record at write time"
+      },
+      source_object: {
+        label: "Source Object",
+        help: "Object name of the rich source entity this activity was derived from (e.g. \"sys_email\"). Null when the activity is about the target record itself."
+      },
+      source_id: {
+        label: "Source ID",
+        help: "Record id of the rich source entity (paired with source_object) — lets the timeline drill to the full email/call/meeting record."
       },
       url: {
         label: "URL",

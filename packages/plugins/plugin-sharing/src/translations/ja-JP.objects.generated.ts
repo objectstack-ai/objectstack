@@ -135,9 +135,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         options: {
           user: "ユーザー",
           team: "チーム",
-          business_unit: "business_unit",
+          business_unit: "ビジネスユニット",
           position: "ポジション",
-          unit_and_subordinates: "unit_and_subordinates"
+          unit_and_subordinates: "ビジネスユニットと下位階層"
         }
       },
       recipient_id: {
@@ -155,6 +155,19 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       active: {
         label: "有効",
         help: "有効なルールのみがライフサイクル評価に参加します"
+      },
+      managed_by: {
+        label: "管理元",
+        help: "レコードの出所（統一三状態、A4 #2920）: platform = フレームワーク組み込み / package = アプリ・パッケージ宣言（起動時シード）/ admin = テナントが Setup で作成。",
+        options: {
+          platform: "プラットフォーム",
+          package: "パッケージ",
+          admin: "管理者"
+        }
+      },
+      customized: {
+        label: "カスタマイズ済み",
+        help: "管理者がパッケージ宣言のルールを編集すると設定されます。以後、起動時シードはこの行を上書きしません（無効化は再デプロイ後も保持）。admin 行では意味を持ちません。"
       },
       created_at: {
         label: "作成日時"

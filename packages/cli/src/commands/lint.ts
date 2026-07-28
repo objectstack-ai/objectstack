@@ -25,6 +25,7 @@ import {
   printInfo,
   printStep,
   createTimer,
+  emitJson,
 } from '../utils/format.js';
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -672,7 +673,7 @@ export default class Lint extends Command {
         const errors = issues.filter((i) => i.severity === 'error');
         const warnings = issues.filter((i) => i.severity === 'warning');
         const suggestions = issues.filter((i) => i.severity === 'suggestion');
-        console.log(JSON.stringify({
+        await emitJson({
           passed: errors.length === 0,
           total: issues.length,
           errors: errors.length,
@@ -682,8 +683,7 @@ export default class Lint extends Command {
           ...(score ? { score: score.score, grade: score.grade } : {}),
           issues,
           duration: timer.elapsed(),
-        }, null, 2));
-        if (errors.length > 0) process.exit(1);
+        }, errors.length > 0 ? 1 : 0);
         return;
       }
 

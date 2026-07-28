@@ -35,6 +35,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Default Position",
         help: "Automatically assigned to new users"
       },
+      delegatable: {
+        label: "Delegatable",
+        help: "ADR-0091 D3: holders may self-service delegate this position, time-boxed."
+      },
       managed_by: {
         label: "Managed By",
         help: "Record provenance: platform (built-in) / package (declared) / admin (tenant-created).",
@@ -85,7 +89,16 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_position: {
         label: "Clone Position",
-        successMessage: "Position cloned"
+        successMessage: "Position cloned",
+        params: {
+          label: {
+            label: "New Display Name"
+          },
+          name: {
+            label: "New API Name",
+            helpText: "Unique snake_case machine name"
+          }
+        }
       }
     }
   },
@@ -94,6 +107,24 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     pluralLabel: "Capabilities",
     description: "Authorization capability definitions referenced by name from permission sets and resource requirements.",
     fields: {
+      label: {
+        label: "Display Name"
+      },
+      name: {
+        label: "API Name",
+        help: "Unique capability key referenced by systemPermissions / requiredPermissions (e.g. manage_users, setup.access)."
+      },
+      description: {
+        label: "Description"
+      },
+      scope: {
+        label: "Scope",
+        help: "platform = a platform-wide power; org = scoped to an organization.",
+        options: {
+          platform: "Platform",
+          org: "Organization"
+        }
+      },
       managed_by: {
         label: "Managed By",
         help: "Record provenance: platform / package (shipped, not user-deletable) / admin (created in Setup).",
@@ -103,12 +134,43 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           admin: "Admin"
         }
       },
-      scope: {
-        label: "Scope",
-        options: {
-          platform: "Platform",
-          org: "Organization"
-        }
+      package_id: {
+        label: "Owning Package",
+        help: "Package that ships this capability (absent = platform-curated or admin-created)."
+      },
+      active: {
+        label: "Active"
+      },
+      id: {
+        label: "Capability ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      platform: {
+        label: "Platform"
+      },
+      org: {
+        label: "Organization"
+      },
+      all_capabilities: {
+        label: "All"
+      }
+    },
+    _actions: {
+      activate_capability: {
+        label: "Activate",
+        successMessage: "Capability activated"
+      },
+      deactivate_capability: {
+        label: "Deactivate",
+        confirmText: "Deactivate this capability? Grants and resource requirements that reference it stop resolving until re-activated.",
+        successMessage: "Capability deactivated"
       }
     }
   },
@@ -147,8 +209,16 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Tab Permissions",
         help: "JSON-serialized map of app tab visibility (visible | hidden | default_on | default_off)"
       },
+      admin_scope: {
+        label: "Delegated Admin Scope",
+        help: "[ADR-0090 D12] JSON-serialized AdminScope: { businessUnit, includeSubtree, manageAssignments, manageBindings, authorEnvironmentSets, assignablePermissionSets[] }. Holding this set makes the user a SCOPED administrator within the declared business-unit subtree; enforced by the delegated-admin write gate."
+      },
       active: {
         label: "Active"
+      },
+      package_id: {
+        label: "Owning Package",
+        help: "Package that ships this permission set (absent = environment-authored). Populated by bootstrapDeclaredPermissions; makes package uninstall/upgrade well-defined."
       },
       managed_by: {
         label: "Managed By",
@@ -158,6 +228,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           package: "Package",
           admin: "Admin"
         }
+      },
+      customized: {
+        label: "Customized",
+        help: "This packaged permission set has an environment customization overlay (ADR-0094). Reset it (delete through the data door) to return to the shipped baseline."
       },
       id: {
         label: "Permission Set ID"
@@ -192,7 +266,16 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_permission_set: {
         label: "Clone",
-        successMessage: "Permission set cloned"
+        successMessage: "Permission set cloned",
+        params: {
+          label: {
+            label: "New Display Name"
+          },
+          name: {
+            label: "New API Name",
+            helpText: "Unique snake_case machine name"
+          }
+        }
       }
     }
   },
@@ -220,6 +303,30 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       granted_by: {
         label: "Granted By",
         help: "User who granted this permission set."
+      },
+      valid_from: {
+        label: "Valid From",
+        help: "[ADR-0091 D1] Grant is inactive before this instant. Null = active immediately. Enforced fail-closed at resolution time (D2) — never by a background job."
+      },
+      valid_until: {
+        label: "Valid Until",
+        help: "[ADR-0091 D1] Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires. Mandatory on break-glass activations (D4) and agent grants (D6). Enforced at resolution time (D2)."
+      },
+      reason: {
+        label: "Reason",
+        help: "[ADR-0091 D1] Why this grant exists. Free text; REQUIRED on delegation (D3) and break-glass (D4) rows. Agent grants carry the task/run attribution here (D6)."
+      },
+      delegated_from: {
+        label: "Delegated From",
+        help: "[ADR-0091 D3] The delegator whose authority this row carries. A row with delegated_from set is not itself delegatable and not self-renewable."
+      },
+      last_certified_at: {
+        label: "Last Certified At",
+        help: "[ADR-0091 D5] When this grant was last attested in a recertification review. Null = never certified."
+      },
+      certified_by: {
+        label: "Certified By",
+        help: "[ADR-0091 D5] Reviewer who last attested this grant."
       },
       created_at: {
         label: "Created At"

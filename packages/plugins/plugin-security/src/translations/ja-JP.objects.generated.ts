@@ -35,6 +35,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "デフォルトポジション",
         help: "新規ユーザーに自動的に割り当てられます"
       },
+      delegatable: {
+        label: "委任可能",
+        help: "ADR-0091 D3: 保持者はこのポジションを期限付きでセルフサービス委任できます。"
+      },
       managed_by: {
         label: "管理元",
         help: "レコードの出所：platform（組み込み）/ package（宣言済み）/ admin（テナント作成）。",
@@ -85,7 +89,16 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_position: {
         label: "ポジションを複製",
-        successMessage: "ポジションを複製しました"
+        successMessage: "ポジションを複製しました",
+        params: {
+          label: {
+            label: "新しい表示名"
+          },
+          name: {
+            label: "新しい API 名",
+            helpText: "一意の snake_case マシン名"
+          }
+        }
       }
     }
   },
@@ -94,6 +107,24 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     pluralLabel: "ケイパビリティ",
     description: "権限セットおよびリソース要件から名前で参照される認可ケイパビリティ定義。",
     fields: {
+      label: {
+        label: "表示名"
+      },
+      name: {
+        label: "API 名",
+        help: "systemPermissions / requiredPermissions から参照される一意のケーパビリティキー（例: manage_users、setup.access）。"
+      },
+      description: {
+        label: "説明"
+      },
+      scope: {
+        label: "スコープ",
+        help: "platform = プラットフォーム全体の権限、org = 組織単位に限定。",
+        options: {
+          platform: "プラットフォーム",
+          org: "組織"
+        }
+      },
       managed_by: {
         label: "管理元",
         help: "レコードの出所：platform / package（配布物、ユーザー削除不可）/ admin（設定で作成）。",
@@ -103,12 +134,43 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           admin: "管理者"
         }
       },
-      scope: {
-        label: "スコープ",
-        options: {
-          platform: "プラットフォーム",
-          org: "組織"
-        }
+      package_id: {
+        label: "所有パッケージ",
+        help: "このケーパビリティを提供するパッケージ（未設定はプラットフォーム標準または管理者作成）。"
+      },
+      active: {
+        label: "有効"
+      },
+      id: {
+        label: "ケーパビリティ ID"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      }
+    },
+    _views: {
+      platform: {
+        label: "プラットフォーム"
+      },
+      org: {
+        label: "組織"
+      },
+      all_capabilities: {
+        label: "すべて"
+      }
+    },
+    _actions: {
+      activate_capability: {
+        label: "有効化",
+        successMessage: "ケーパビリティを有効化しました"
+      },
+      deactivate_capability: {
+        label: "無効化",
+        confirmText: "このケーパビリティを無効化しますか？これを参照する付与とリソース要件は、再度有効化するまで解決されなくなります。",
+        successMessage: "ケーパビリティを無効化しました"
       }
     }
   },
@@ -147,8 +209,16 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "タブ権限",
         help: "アプリのタブ表示のJSONシリアライズマップ（visible | hidden | default_on | default_off）"
       },
+      admin_scope: {
+        label: "委任管理スコープ",
+        help: "[ADR-0090 D12] JSON シリアライズされた AdminScope: { businessUnit, includeSubtree, manageAssignments, manageBindings, authorEnvironmentSets, assignablePermissionSets[] }。このセットを保持すると、宣言されたビジネスユニット配下に限定されたスコープ付き管理者になります。委任管理の書き込みゲートで強制されます。"
+      },
       active: {
         label: "有効"
+      },
+      package_id: {
+        label: "所有パッケージ",
+        help: "この権限セットを提供するパッケージ（未設定は環境で作成）。bootstrapDeclaredPermissions が設定し、パッケージのアンインストール／アップグレードの挙動を明確にします。"
       },
       managed_by: {
         label: "管理元",
@@ -158,6 +228,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           package: "パッケージ",
           admin: "管理者"
         }
+      },
+      customized: {
+        label: "カスタマイズ済み",
+        help: "このパッケージ権限セットには環境カスタマイズのオーバーレイがあります（ADR-0094）。リセット（データドア経由で削除）すると出荷時のベースラインに戻ります。"
       },
       id: {
         label: "権限セット ID"
@@ -192,7 +266,16 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_permission_set: {
         label: "複製",
-        successMessage: "権限セットを複製しました"
+        successMessage: "権限セットを複製しました",
+        params: {
+          label: {
+            label: "新しい表示名"
+          },
+          name: {
+            label: "新しい API 名",
+            helpText: "一意の snake_case マシン名"
+          }
+        }
       }
     }
   },
@@ -220,6 +303,30 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       granted_by: {
         label: "付与者",
         help: "この権限セットを付与したユーザー。"
+      },
+      valid_from: {
+        label: "有効開始",
+        help: "[ADR-0091 D1] この時点より前は付与が無効です。Null = 即時有効。解決時にフェイルクローズで適用されます（D2）——バックグラウンドジョブでは行いません。"
+      },
+      valid_until: {
+        label: "有効終了",
+        help: "[ADR-0091 D1] この時点以降（当該時点を含む）、付与は無効になります（半開区間 [from, until)、UTC）。null は無期限。ブレークグラス発動（D4）とエージェント付与（D6）では必須。解決時に強制されます（D2）。"
+      },
+      reason: {
+        label: "理由",
+        help: "[ADR-0091 D1] この付与が存在する理由。自由記述。委任（D3）とブレークグラス（D4）の行では必須。エージェント付与はここにタスク／実行の帰属を記録します（D6）。"
+      },
+      delegated_from: {
+        label: "委任元",
+        help: "[ADR-0091 D3] この行が引き継ぐ権限の委任元。delegated_from が設定された行は、それ自体を再委任することも自己更新することもできません。"
+      },
+      last_certified_at: {
+        label: "最終認証日時",
+        help: "[ADR-0091 D5] この付与が再認証レビューで最後に証明された日時。Null = 未認証。"
+      },
+      certified_by: {
+        label: "認証者",
+        help: "[ADR-0091 D5] この付与を最後に証明したレビュアー。"
       },
       created_at: {
         label: "作成日時"

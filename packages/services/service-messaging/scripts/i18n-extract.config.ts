@@ -7,7 +7,7 @@
  * `--merge` preserves every hand-translated string.
  *
  *   os i18n extract packages/services/service-messaging/scripts/i18n-extract.config.ts \
- *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only \
+ *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only --no-metadata-forms \
  *     --out=packages/services/service-messaging/src/translations
  */
 

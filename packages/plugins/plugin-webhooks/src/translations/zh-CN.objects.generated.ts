@@ -30,7 +30,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       triggers: {
         label: "触发器",
-        help: "以逗号分隔的事件列表：create,update,delete"
+        help: "以逗号分隔的事件列表：create,update,delete",
+        options: {
+          create: "创建",
+          update: "更新",
+          delete: "删除"
+        }
       },
       url: {
         label: "目标 URL",
@@ -38,7 +43,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       method: {
         label: "HTTP 方法",
-        help: "GET / POST / PUT / PATCH / DELETE"
+        help: "GET / POST / PUT / PATCH / DELETE",
+        options: {
+          get: "GET",
+          post: "POST",
+          put: "PUT",
+          patch: "PATCH",
+          delete: "DELETE"
+        }
       },
       description: {
         label: "描述"
@@ -50,6 +62,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       definition_json: {
         label: "定义",
         help: "序列化的 Webhook JSON（参见 @objectstack/spec/automation/webhook）——包含完整的 headers/auth/retry/payload 配置"
+      },
+      managed_by: {
+        label: "管理来源",
+        help: "记录来源：platform = 框架内置 / package = 应用包声明（由 defineStack 的 webhooks 在启动时种入）/ admin = 在 Setup 中创建。",
+        options: {
+          platform: "平台",
+          package: "包",
+          admin: "管理员"
+        }
+      },
+      customized: {
+        label: "已定制",
+        help: "当管理员编辑应用包声明的 webhook 时置位；此后启动种入不再覆盖该行（被停用的嘈杂 webhook 可跨重新部署保留）。对 admin 来源的记录无意义。"
       },
       created_at: {
         label: "创建时间"

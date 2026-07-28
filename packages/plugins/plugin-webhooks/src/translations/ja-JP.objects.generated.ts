@@ -30,7 +30,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       triggers: {
         label: "トリガー",
-        help: "カンマ区切りのイベントリスト: create,update,delete"
+        help: "カンマ区切りのイベントリスト: create,update,delete",
+        options: {
+          create: "作成",
+          update: "更新",
+          delete: "削除"
+        }
       },
       url: {
         label: "ターゲット URL",
@@ -38,7 +43,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       method: {
         label: "HTTP メソッド",
-        help: "GET / POST / PUT / PATCH / DELETE"
+        help: "GET / POST / PUT / PATCH / DELETE",
+        options: {
+          get: "GET",
+          post: "POST",
+          put: "PUT",
+          patch: "PATCH",
+          delete: "DELETE"
+        }
       },
       description: {
         label: "説明"
@@ -50,6 +62,19 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       definition_json: {
         label: "定義",
         help: "シリアライズされた Webhook JSON（@objectstack/spec/automation/webhook 参照）— ヘッダー/認証/リトライ/ペイロード設定を含む"
+      },
+      managed_by: {
+        label: "管理元",
+        help: "レコードの出所: platform = フレームワーク組み込み / package = アプリ・パッケージ宣言（defineStack の webhooks から起動時シード）/ admin = Setup で作成。",
+        options: {
+          platform: "プラットフォーム",
+          package: "パッケージ",
+          admin: "管理者"
+        }
+      },
+      customized: {
+        label: "カスタマイズ済み",
+        help: "管理者がパッケージ宣言の webhook を編集すると設定されます。以後、起動時シードはこの行を上書きしません（無効化したノイジーな webhook は再デプロイ後も保持）。admin 行では意味を持ちません。"
       },
       created_at: {
         label: "作成日時"

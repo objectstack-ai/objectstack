@@ -13,6 +13,7 @@ import {
   printInfo,
   printStep,
   createTimer,
+  emitJson,
 } from '../../utils/format.js';
 import { extractTranslations, renderTranslationModule, type FillStrategy } from '../../utils/i18n-extract.js';
 
@@ -159,7 +160,7 @@ export default class I18nExtract extends Command {
         flags['metadata-forms'] && (metadataFormsCounts[locale] ?? 0) > 0;
 
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           totalExpected: result.totalExpected,
           counts: result.counts,
           metadataFormsCounts,
@@ -167,7 +168,7 @@ export default class I18nExtract extends Command {
             ? Object.fromEntries(localesEmitted.map((l) => [l, result.bundles[l].objects ?? {}]))
             : result.bundles,
           duration: timer.elapsed(),
-        }, null, 2));
+        });
         return;
       }
 

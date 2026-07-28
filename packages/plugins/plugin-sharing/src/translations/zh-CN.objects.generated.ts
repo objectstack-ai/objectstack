@@ -135,9 +135,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         options: {
           user: "用户",
           team: "团队",
-          business_unit: "business_unit",
+          business_unit: "业务单元",
           position: "岗位",
-          unit_and_subordinates: "unit_and_subordinates"
+          unit_and_subordinates: "业务单元及下级"
         }
       },
       recipient_id: {
@@ -155,6 +155,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       active: {
         label: "启用",
         help: "只有启用的规则才会参与生命周期求值"
+      },
+      managed_by: {
+        label: "管理来源",
+        help: "记录来源（统一三态，A4 #2920）：platform = 框架内置 / package = 应用包声明（启动时种入）/ admin = 租户在 Setup 中创建。",
+        options: {
+          platform: "平台",
+          package: "应用包",
+          admin: "管理员"
+        }
+      },
+      customized: {
+        label: "已定制",
+        help: "当管理员编辑应用包声明的规则时置位；此后启动种入不再覆盖该行（停用状态可跨重新部署保留）。对 admin 来源的记录无意义。"
       },
       created_at: {
         label: "创建时间"

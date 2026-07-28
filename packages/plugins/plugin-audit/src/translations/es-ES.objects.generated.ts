@@ -37,6 +37,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Actor",
         help: "Usuario que realizó la acción (null para acciones del sistema)."
       },
+      actor: {
+        label: "Actor",
+        help: "Principal que realizó la acción: un id de usuario, svc:<name> o null"
+      },
       object_name: {
         label: "Objeto",
         help: "Objeto de destino (p. ej. sys_user, project_task)."
@@ -73,7 +77,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       recent: {
-        label: "Recientes"
+        label: "Recientes",
+        emptyState: {
+          title: "Sin eventos de auditoría",
+          message: "La actividad aparecerá aquí a medida que los usuarios interactúen con la plataforma."
+        }
       },
       writes_only: {
         label: "Escrituras"
@@ -139,6 +147,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       record_label: {
         label: "Nombre visible del registro",
         help: "Nombre visible del registro de destino en el momento de escritura."
+      },
+      source_object: {
+        label: "Objeto de origen",
+        help: "Nombre de objeto de la entidad de origen enriquecida de la que deriva esta actividad (p. ej. \"sys_email\"). Null cuando la actividad trata sobre el propio registro de destino."
+      },
+      source_id: {
+        label: "ID de origen",
+        help: "Id de registro de la entidad de origen enriquecida (emparejado con source_object): permite que la línea de tiempo profundice hasta el registro completo de correo/llamada/reunión."
       },
       url: {
         label: "URL",

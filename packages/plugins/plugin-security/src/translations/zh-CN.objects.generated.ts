@@ -35,6 +35,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "默认岗位",
         help: "自动分配给新用户"
       },
+      delegatable: {
+        label: "可委派",
+        help: "ADR-0091 D3：持有者可自助委派该岗位，且有时限。"
+      },
       managed_by: {
         label: "管理来源",
         help: "记录来源：platform（平台内置）/ package（应用包声明）/ admin（租户创建）。",
@@ -85,7 +89,16 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_position: {
         label: "克隆岗位",
-        successMessage: "已克隆岗位"
+        successMessage: "已克隆岗位",
+        params: {
+          label: {
+            label: "新显示名称"
+          },
+          name: {
+            label: "新 API 名称",
+            helpText: "唯一的 snake_case 机器名称"
+          }
+        }
       }
     }
   },
@@ -94,6 +107,24 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     pluralLabel: "能力",
     description: "授权能力定义，由权限集和资源需求按名称引用。",
     fields: {
+      label: {
+        label: "显示名称"
+      },
+      name: {
+        label: "API 名称",
+        help: "唯一的能力键，由 systemPermissions / requiredPermissions 按名称引用（如 manage_users、setup.access）。"
+      },
+      description: {
+        label: "描述"
+      },
+      scope: {
+        label: "范围",
+        help: "platform = 平台级权能；org = 限定于某个组织。",
+        options: {
+          platform: "平台",
+          org: "组织"
+        }
+      },
       managed_by: {
         label: "管理来源",
         help: "记录来源：platform / package（随包发布，不可用户删除）/ admin（在设置中创建）。",
@@ -103,12 +134,43 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           admin: "管理员"
         }
       },
-      scope: {
-        label: "范围",
-        options: {
-          platform: "平台",
-          org: "组织"
-        }
+      package_id: {
+        label: "所属应用包",
+        help: "发布该能力的应用包（为空表示平台内置或管理员创建）。"
+      },
+      active: {
+        label: "启用"
+      },
+      id: {
+        label: "能力 ID"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      }
+    },
+    _views: {
+      platform: {
+        label: "平台"
+      },
+      org: {
+        label: "组织"
+      },
+      all_capabilities: {
+        label: "全部"
+      }
+    },
+    _actions: {
+      activate_capability: {
+        label: "激活",
+        successMessage: "已启用能力"
+      },
+      deactivate_capability: {
+        label: "停用",
+        confirmText: "停用该能力？引用它的授权和资源要求将无法解析，直到重新启用。",
+        successMessage: "已停用能力"
       }
     }
   },
@@ -147,8 +209,16 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "标签页权限",
         help: "应用标签页可见性的 JSON 序列化映射（visible | hidden | default_on | default_off）"
       },
+      admin_scope: {
+        label: "委派管理范围",
+        help: "[ADR-0090 D12] JSON 序列化的 AdminScope：{ businessUnit, includeSubtree, manageAssignments, manageBindings, authorEnvironmentSets, assignablePermissionSets[] }。持有该权限集会使用户成为所声明业务单元子树内的「受限范围」管理员，由委派管理写入门禁强制执行。"
+      },
       active: {
         label: "启用"
+      },
+      package_id: {
+        label: "所属应用包",
+        help: "发布该权限集的应用包（为空表示环境内编写）。由 bootstrapDeclaredPermissions 填充，使应用包的卸载/升级行为有明确定义。"
       },
       managed_by: {
         label: "管理来源",
@@ -158,6 +228,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           package: "应用包",
           admin: "管理员"
         }
+      },
+      customized: {
+        label: "已定制",
+        help: "该打包权限集存在环境定制覆盖层（ADR-0094）。重置它（通过数据入口删除）即可回到随包发布的基线。"
       },
       id: {
         label: "权限集 ID"
@@ -192,7 +266,16 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       clone_permission_set: {
         label: "克隆",
-        successMessage: "已克隆权限集"
+        successMessage: "已克隆权限集",
+        params: {
+          label: {
+            label: "新显示名称"
+          },
+          name: {
+            label: "新 API 名称",
+            helpText: "唯一的 snake_case 机器名称"
+          }
+        }
       }
     }
   },
@@ -220,6 +303,30 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       granted_by: {
         label: "授权人",
         help: "授予该权限集的用户。"
+      },
+      valid_from: {
+        label: "生效时间",
+        help: "[ADR-0091 D1] 在此时刻之前授予无效。为空 = 立即生效。在解析时以 fail-closed 方式强制执行（D2）——绝不依赖后台任务。"
+      },
+      valid_until: {
+        label: "失效时间",
+        help: "[ADR-0091 D1] 授权自该时刻起（含）失效（半开区间 [from, until)，UTC）。为空表示永不过期。紧急提权（D4）和智能体授权（D6）必填。在解析时强制执行（D2）。"
+      },
+      reason: {
+        label: "原因",
+        help: "[ADR-0091 D1] 该授权存在的原因。自由文本；委派（D3）和紧急提权（D4）记录必填。智能体授权在此记录任务/运行归属（D6）。"
+      },
+      delegated_from: {
+        label: "委派自",
+        help: "[ADR-0091 D3] 该记录所承载权限的委派人。设置了 delegated_from 的记录本身不可再委派，也不可自助续期。"
+      },
+      last_certified_at: {
+        label: "最近认证时间",
+        help: "[ADR-0091 D5] 此授予在重新认证复核中最近一次被认证的时间。为空 = 从未认证。"
+      },
+      certified_by: {
+        label: "认证人",
+        help: "[ADR-0091 D5] 最近一次认证此授予的复核人。"
       },
       created_at: {
         label: "创建时间"

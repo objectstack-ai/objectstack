@@ -30,7 +30,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       triggers: {
         label: "Triggers",
-        help: "Comma-separated event list: create,update,delete"
+        help: "Comma-separated event list: create,update,delete",
+        options: {
+          create: "create",
+          update: "update",
+          delete: "delete"
+        }
       },
       url: {
         label: "Target URL",
@@ -38,7 +43,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       method: {
         label: "HTTP Method",
-        help: "GET / POST / PUT / PATCH / DELETE"
+        help: "GET / POST / PUT / PATCH / DELETE",
+        options: {
+          get: "GET",
+          post: "POST",
+          put: "PUT",
+          patch: "PATCH",
+          delete: "DELETE"
+        }
       },
       description: {
         label: "Description"
@@ -50,6 +62,19 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       definition_json: {
         label: "Definition",
         help: "Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — full headers/auth/retry/payload config"
+      },
+      managed_by: {
+        label: "Managed By",
+        help: "Record provenance: platform = framework built-in / package = app/package-declared (boot-seeded from defineStack webhooks) / admin = created in Setup.",
+        options: {
+          platform: "platform",
+          package: "package",
+          admin: "admin"
+        }
+      },
+      customized: {
+        label: "Customized",
+        help: "Set when an admin edits a package-declared webhook; boot seeding will no longer overwrite the row (a deactivated noisy webhook survives redeploys). Meaningless on admin rows."
       },
       created_at: {
         label: "Created At"

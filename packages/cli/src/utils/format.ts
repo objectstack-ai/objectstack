@@ -7,6 +7,31 @@ import type { ZodError } from 'zod';
 export const CLI_NAME = 'objectstack';
 export const CLI_ALIAS = 'os';
 
+// ─── Machine-readable output ────────────────────────────────────────
+
+/**
+ * Emit a `--json` payload and record the exit code, without truncating.
+ *
+ * `console.log(big)` followed by `process.exit(1)` looks correct and is not:
+ * when stdout is a **pipe**, Node buffers the write asynchronously and
+ * `process.exit` tears the process down with the buffer only partly drained.
+ * `os lint packages/platform-objects/scripts/i18n-extract.config.ts --json`
+ * came out of a pipe at exactly 65536 bytes — one pipe buffer — so every
+ * scripted consumer got invalid JSON while an interactive run (stdout is a TTY,
+ * written synchronously) looked perfect. Silent, and invisible to the author.
+ *
+ * Waiting for the write callback drains the buffer first, and setting
+ * `process.exitCode` instead of calling `process.exit` lets Node exit on its
+ * own once nothing is pending.
+ */
+export async function emitJson(payload: unknown, exitCode = 0): Promise<void> {
+  const text = JSON.stringify(payload, null, 2) + '\n';
+  await new Promise<void>((resolve, reject) => {
+    process.stdout.write(text, (err) => (err ? reject(err) : resolve()));
+  });
+  if (exitCode !== 0) process.exitCode = exitCode;
+}
+
 // ─── Banner ─────────────────────────────────────────────────────────
 
 export function printBanner(version: string) {
