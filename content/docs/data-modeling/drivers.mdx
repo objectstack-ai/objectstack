@@ -71,6 +71,49 @@ actually connect to Turso.
 > Knex client name (`pg` / `mysql2` / `better-sqlite3`) when you instantiate
 > `SqlDriver`.
 
+## Startup: a driver that cannot connect aborts the boot
+
+`ObjectQLEngine.init()` connects every registered driver during kernel
+bootstrap. If any `connect()` rejects, the boot is **refused**
+([#3741](https://github.com/objectstack-ai/objectstack/issues/3741)) — the error
+names each failed driver and its cause, and `objectstack serve` exits 1.
+
+There is no lazy reconnection. A driver that did not connect at startup stays
+disconnected for the process lifetime, so booting anyway would produce a server
+that reports itself started, answers health checks, and then fails every request
+with an error nothing like *the database is unreachable* — while the schema sync
+that follows `init()` issues DDL against a datasource that isn't there.
+
+<Callout type="warn">
+`OS_ALLOW_DRIVER_CONNECT_FAILURE=1` boots anyway, in an explicitly degraded
+state announced by a `DEGRADED BOOT` banner. The failed drivers are never
+retried and never reconnected: every query and every schema sync routed to them
+fails until the process restarts. Do not set it in production.
+</Callout>
+
+### Writing a driver: `connect()` is where you refuse to start
+
+Because the rejection now propagates, throwing from `connect()` is the supported
+way for a driver to **veto the boot** — not only for an unreachable socket, but
+for any fatal startup condition: an unsupported server version, a missing
+capability, an incompatible deployment mode, a licence check. Validation that
+needs a live connection belongs here rather than in the constructor.
+
+```typescript
+async connect(): Promise<void> {
+  await this.pool.connect();
+  const { version } = await this.probeServerVersion();
+  if (major(version) < 14) {
+    // Aborts bootstrap — the operator sees this message, not a 500 per request.
+    throw new Error(`PostgreSQL ${version} is unsupported; this driver requires 14+.`);
+  }
+}
+```
+
+Checks that need no connection can still run in the constructor, which fails
+even earlier — that is where `MongoDBDriver` puts its
+[tenancy guard](#multi-tenancy-not-supported).
+
 ## PostgreSQL (via `@objectstack/driver-sql`)
 
 ```bash
