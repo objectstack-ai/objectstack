@@ -112,7 +112,10 @@ export function lintDeprecatedAliases(stack: AnyRec): DeprecatedAliasFinding[] {
     if (target === execute) return;
 
     const actionName = typeof action.name === 'string' && action.name ? action.name : '(unnamed)';
-    const dedupeKey = `${actionName} ${describeHandler(target)} ${describeHandler(execute)}`;
+    // `\u0000` written as an escape, never as a raw byte: a literal NUL makes
+    // ripgrep treat the whole file as binary and silently drop it from every
+    // grep-based lint (`scripts/check-nul-bytes.mjs` enforces this).
+    const dedupeKey = `${actionName}\u0000${describeHandler(target)}\u0000${describeHandler(execute)}`;
     if (seen.has(dedupeKey)) return;
     seen.add(dedupeKey);
 

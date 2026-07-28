@@ -1,5 +1,6 @@
 {
   ".": [
+    "ACTION_TARGET_EXECUTE_CONFLICT (const)",
     "ADMIN_FULL_ACCESS (const)",
     "ALL_CONVERSIONS (const)",
     "AUDIENCE_ANCHOR_POSITIONS (const)",
@@ -35,6 +36,7 @@
     "DatasourceMappingRule (type)",
     "DatasourceMappingRuleSchema (const)",
     "DefineStackOptions (interface)",
+    "DeprecatedAliasFinding (interface)",
     "EVERYONE_POSITION (const)",
     "EvalUser (type)",
     "EvalUserInput (type)",
@@ -144,11 +146,13 @@
     "expandViewContainerWithDiagnostics (function)",
     "expression (function)",
     "findClosestMatches (function)",
+    "formatDeprecatedAliasFinding (function)",
     "formatSuggestion (function)",
     "formatZodError (function)",
     "formatZodIssue (function)",
     "isAggregatedViewContainer (function)",
     "isKnownPlatformCapability (function)",
+    "lintDeprecatedAliases (function)",
     "mapMembershipRole (function)",
     "normalizeMetadataCollection (function)",
     "normalizePluginMetadata (function)",

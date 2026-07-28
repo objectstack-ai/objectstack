@@ -1061,7 +1061,7 @@ const warnedAliasFindings = new Set<string>();
  */
 function warnDeprecatedAliases(normalized: Record<string, unknown>): void {
   for (const finding of lintDeprecatedAliases(normalized)) {
-    const key = `${finding.rule} ${finding.where} ${finding.message}`;
+    const key = `${finding.rule}\u0000${finding.where}\u0000${finding.message}`;
     if (warnedAliasFindings.has(key)) continue;
     warnedAliasFindings.add(key);
     console.warn(`defineStack: ${formatDeprecatedAliasFinding(finding)}`);
