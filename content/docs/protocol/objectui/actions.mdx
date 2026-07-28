@@ -184,7 +184,7 @@ interface Action {
   confirmText?: string;         // Confirmation message before execution
   successMessage?: string;      // Toast shown after success
   errorMessage?: string;        // Toast shown on failure (overrides the raw error)
-  undoable?: boolean;           // Offer an Undo affordance after a single-record update succeeds (experimental — see note below)
+  undoable?: boolean;           // Offer an Undo affordance after a single-record update succeeds
   refreshAfter?: boolean;       // Reload the view after execution (default false)
   resultDialog?: ResultDialog;  // One-shot reveal of API response values
   shortcut?: string;            // Keyboard shortcut, e.g. "Ctrl+S"
@@ -334,7 +334,7 @@ refreshAfter: true
 - `confirmText` — message shown in a confirm dialog before the action runs.
 - `successMessage` — toast shown after a successful run. When omitted the UI shows a generic "Action completed" toast, so set this for any action whose outcome isn't self-evident.
 - `errorMessage` — toast shown when the action fails; overrides the raw server error with author-controlled copy.
-- `undoable` — marks a single-record update action as offering an **Undo** affordance in the success toast to restore the record's prior values. **Experimental:** the flag is declared in the schema but no runtime consumer keys off it yet (objectui ships an `UndoManager` but does not read this field), so setting it currently has no effect.
+- `undoable` — marks a single-record update action as offering an **Undo** affordance in the success toast, which restores the record's prior field values. The action runtime snapshots the record before the update and only builds the undo operation when this flag is set, so an action that omits it gets no Undo. Single-record updates only: there is nothing to snapshot when the action isn't scoped to one record.
 - `refreshAfter` — reload the current view after success.
 - `mode` — a semantic hint (`create` / `edit` / `delete` / `custom`). Pure metadata with no runtime branching: today only the AI confirmation heuristic reads it (a `delete` mode nudges an AI invocation toward requiring approval), while the UI does not branch on it.
 

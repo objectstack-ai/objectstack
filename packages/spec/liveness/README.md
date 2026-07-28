@@ -74,12 +74,20 @@ as `live`, 10 were wrong** — a 77% error rate for the preview-renderer standar
 Note the two failure directions the sweep exposed. Most entries **overstated**
 liveness. But `flow.status` was *understated*: the file-level note still said
 "status/active gate nothing", true when written and falsified a month later by
-`497bda853`. **A ledger entry is a claim with a timestamp; code moves under it
-in both directions.**
+`497bda853`. `action.undoable` was the same shape (#3714): marked `experimental`
+on a #1992-era "no runtime reader yet" note that objectui falsified with two
+readers. **A ledger entry is a claim with a timestamp; code moves under it
+in both directions.** An entry is worth re-verifying, not trusting indefinitely
+— see the methodology below.
 
 When in doubt, the honest status is `dead` + `authorWarn`: an author who gets a
-warning for a property that turns out to work loses nothing; an author who gets
-silence for a property that does nothing ships a bug.
+warning for a property that turns out to work loses nothing *at runtime*; an
+author who gets silence for a property that does nothing ships a bug. But the
+ledger is also read as a capability catalogue — by authors and by AI — so an
+understated entry does have a cost: `undoable` sat behind a "declared but NOT
+enforced" warning for a month while it worked, which is an invitation to skip a
+shipped feature. Erring toward `dead` is the right default *and* a debt to
+re-verify.
 
 ### How to verify a claim without fooling yourself
 
@@ -259,7 +267,7 @@ EOF
 | object | 40 | – | 0 | 1 | aspirational tier (versioning/softDelete/search/recordName/keyPrefix) + tags/active/abstract REMOVED (#2377) — tombstoned in UNKNOWN_KEY_GUIDANCE; `enable.trash`/`mru` REMOVED (#2377 close-out) — tombstoned in the now-`.strict()` ObjectCapabilities; `isSystem` + `enable.searchable` CORRECTED to live (#2377 — sharing default-model + global-search opt-out; 2026-06 audit missed both readers); `tenancy.strategy`/`crossTenantAccess` REMOVED post-15.0 (#2763) |
 | field | 55 | – | 0 | – | healthy — full dead set (vectorConfig/fileAttachmentConfig/dependencies, then referenceFilters/columnName/index) REMOVED (#2377); columnName also dropped the ADR-0062 D7 lint + StorageNameMapping column helpers |
 | flow | 26 | – | 5 | – | dead = description/template/nodes.outputSchema/errorHandling.fallbackNodeId (engine uses fault edges) + `active` CORRECTED to dead 2026-07 (deprecated no-op — `status` is what gates binding/execution since 497bda853; the file `_note` claiming otherwise is fixed) |
-| action | 33 | 1 | 2 | – | `type:'form'` CORRECTED to live (objectui ActionRunner.executeForm, #2377); dead `timeout` REMOVED (#2377); `disabled` live for real since objectui#2863 (six surfaces); `shortcut` + `bulkEnabled` CORRECTED to dead 2026-07 — registered into ActionEngine but their accessors have no non-test caller (#3686 sweep) |
+| action | 34 | 0 | 2 | – | `type:'form'` CORRECTED to live (objectui ActionRunner.executeForm, #2377); dead `timeout` REMOVED (#2377); `disabled` live for real since objectui#2863 (six surfaces); `shortcut` + `bulkEnabled` CORRECTED to dead 2026-07 — registered into ActionEngine but their accessors have no non-test caller (#3686 sweep); `undoable` CORRECTED to live 2026-07 — understated, two objectui readers gate the toast's Undo and the record restore (#3714) |
 | hook | 11 | – | 2 | – | model-healthy; only label/description dead (benign) |
 | permission | 32 | – | 0 | – | CRUD/FLS/RLS live; dead `contextVariables` REMOVED (ADR-0105 D11 — RLS resolves only the `current_user.*` built-ins plus runtime-staged `rlsMembership` sets) |
 | position | 4 | – | – | – | (role's ADR-0090 successor) fully live |
