@@ -2443,11 +2443,23 @@ export class ObjectStackClient {
         return completeJson;
     },
     
+    /**
+     * Resolve a committed file to a short-lived signed download URL.
+     *
+     * Read through `unwrapResponse` rather than off the raw body: the route
+     * answers the declared `{ success: true, data: { url } }` envelope as of
+     * #3689, and this SDK ships as its own npm package against servers it was
+     * not built with. `unwrapResponse` strips the envelope when it is there
+     * and hands back the body untouched when it is not, so a client on either
+     * side of that server upgrade resolves the same URL. That is the SDK's one
+     * standard envelope seam — every other enveloped method already goes
+     * through it — not a fallback grown for this route.
+     */
     getDownloadUrl: async (fileId: string): Promise<string> => {
         const route = this.getRoute('storage');
         const res = await this.fetch(`${this.baseUrl}${route}/files/${fileId}/url`);
-        const data = await res.json();
-        return data.url;
+        const { url } = await this.unwrapResponse<{ url: string }>(res);
+        return url;
     },
 
     /**

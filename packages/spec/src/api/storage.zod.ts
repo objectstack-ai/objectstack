@@ -49,10 +49,49 @@ export const FileUploadResponseSchema = lazySchema(() => BaseResponseSchema.exte
   data: FileMetadataSchema.describe('Uploaded file metadata'),
 }));
 
+/**
+ * Download URL Response
+ *
+ * `GET /api/v1/storage/files/:fileId/url` — resolves a committed file to a
+ * short-lived signed URL (absolute for S3/GCS, server-relative for the local
+ * adapter's `_local/raw` loopback).
+ *
+ * Declared here as of #3689. The route always existed and was always ledgered
+ * `disposition: 'sdk'` (`storage.getDownloadUrl`), but it had no schema — so
+ * it answered a bare `{ url }` with nothing to answer to, the only success
+ * body on this surface outside the envelope. Both are now fixed together:
+ * the shape is declared, and the route emits it.
+ */
+export const FileDownloadUrlResponseSchema = lazySchema(() => BaseResponseSchema.extend({
+  data: z.object({
+    url: z.string().describe('Short-lived signed download URL; may be server-relative'),
+  }),
+}));
+
+/**
+ * Raw Upload Response
+ *
+ * `PUT /api/v1/storage/_local/raw/:token` — the loopback target
+ * `LocalStorageAdapter` mints for its own presign tokens, standing in for the
+ * S3 presigned PUT a cloud adapter would hand out. Callers PUT to it opaquely
+ * and read only the status, so the body exists for conformance and for curl.
+ *
+ * Declared as of #3689, which also retired the `{ ok: true, key }` shape it
+ * used to answer: `ok` was a second word for the `success` the envelope
+ * already carries.
+ */
+export const RawUploadResponseSchema = lazySchema(() => BaseResponseSchema.extend({
+  data: z.object({
+    key: z.string().describe('Storage key the bytes were written to'),
+  }),
+}));
+
 export type GetPresignedUrlRequest = z.infer<typeof GetPresignedUrlRequestSchema>;
 export type CompleteUploadRequest = z.infer<typeof CompleteUploadRequestSchema>;
 export type PresignedUrlResponse = z.infer<typeof PresignedUrlResponseSchema>;
 export type FileUploadResponse = z.infer<typeof FileUploadResponseSchema>;
+export type FileDownloadUrlResponse = z.infer<typeof FileDownloadUrlResponseSchema>;
+export type RawUploadResponse = z.infer<typeof RawUploadResponseSchema>;
 
 // ==========================================
 // Chunked / Resumable Upload Protocol
@@ -238,5 +277,18 @@ export const StorageApiContracts = {
     method: 'GET' as const,
     path: '/api/v1/storage/upload/chunked/:uploadId/progress',
     output: UploadProgressSchema,
+  },
+  // The download resolve. An SDK-addressed route (`storage.getDownloadUrl`)
+  // that had been missing from this registry, which is how its response shape
+  // went undeclared long enough to drift outside the envelope (#3689).
+  //
+  // The two `_local/raw/:token` routes stay out on purpose: they are the local
+  // adapter's own presign loopback, ledgered `server-only`, addressed as an
+  // opaque signed URL rather than as an API. `RawUploadResponseSchema` above
+  // declares what the PUT answers without promoting it to a client contract.
+  getDownloadUrl: {
+    method: 'GET' as const,
+    path: '/api/v1/storage/files/:fileId/url',
+    output: FileDownloadUrlResponseSchema,
   },
 };
