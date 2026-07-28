@@ -90,7 +90,36 @@ export interface DatasourceAdminServiceConfig {
   registerPool?: (record: StoredDatasource) => Promise<void> | void;
   /** Tear down a runtime datasource's pool on remove. */
   unregisterPool?: (name: string) => Promise<void> | void;
+  /**
+   * Last connect verdict per datasource, from `DatasourceConnectionService`
+   * (framework#3827). Absent (a host without the connection service) means the
+   * list reports `unvalidated` throughout — the pre-#3827 behavior, and honest:
+   * with nothing attempting connects there is genuinely no verdict to report.
+   */
+  connectionStates?: () => ReadonlyArray<{
+    name: string;
+    availability: 'available' | 'blocked' | 'failed' | 'unattempted';
+    reason?: string;
+  }>;
   logger?: Logger;
+}
+
+/** Map a connection verdict onto the admin list's `status` field. */
+function summaryStatus(
+  availability: 'available' | 'blocked' | 'failed' | 'unattempted' | undefined,
+): DatasourceSummary['status'] {
+  switch (availability) {
+    case 'available':
+      return 'ok';
+    case 'blocked':
+      return 'blocked';
+    case 'failed':
+      return 'error';
+    // `unattempted` and "no record at all" are the same answer to the only
+    // question this field asks: nobody has tried, so nothing is known.
+    default:
+      return 'unvalidated';
+  }
 }
 
 export class DatasourceAdminService implements IDatasourceAdminService {
@@ -113,10 +142,19 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       byName.set(rec.name, slot);
     }
 
+    // Last connect verdict per datasource (framework#3827). Without this the
+    // `status` below was a constant, so a datasource that died at boot looked
+    // exactly like one nobody had tested.
+    const states = new Map(
+      (this.config.connectionStates?.() ?? []).map((s) => [s.name, s]),
+    );
+
     const summaries: DatasourceSummary[] = [];
     for (const [name, slot] of byName) {
       const effective = slot.code ?? slot.runtime;
       if (!effective) continue;
+      const state = states.get(name);
+      const status = summaryStatus(state?.availability);
       summaries.push({
         name,
         label: effective.label,
@@ -124,7 +162,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
         schemaMode: effective.schemaMode ?? 'managed',
         origin: slot.code ? 'code' : 'runtime',
         active: effective.active ?? true,
-        status: 'unvalidated',
+        status,
+        ...(status !== 'ok' && status !== 'unvalidated' && state?.reason
+          ? { statusReason: state.reason }
+          : {}),
         ...(slot.code?.definedIn ? { definedIn: slot.code.definedIn } : {}),
         ...(slot.code && slot.runtime ? { conflictsWithCode: true } : {}),
       });
@@ -292,6 +333,12 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   }
 
   private toSummary(record: StoredDatasource): DatasourceSummary {
+    // Returned from create/update, i.e. right after `tryRegisterPool` — so the
+    // connect verdict for this write is already recorded and worth reporting:
+    // a "Save" that silently failed to open the pool is exactly the case the
+    // wizard must not present as success (framework#3827).
+    const state = this.config.connectionStates?.().find((s) => s.name === record.name);
+    const status = summaryStatus(state?.availability);
     return {
       name: record.name,
       label: record.label,
@@ -299,7 +346,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       schemaMode: record.schemaMode ?? 'managed',
       origin: record.origin ?? 'runtime',
       active: record.active ?? true,
-      status: 'unvalidated',
+      status,
+      ...(status !== 'ok' && status !== 'unvalidated' && state?.reason
+        ? { statusReason: state.reason }
+        : {}),
     };
   }
 

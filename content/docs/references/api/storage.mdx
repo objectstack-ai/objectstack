@@ -20,8 +20,8 @@ rather than proxying bytes through the API server.
 ## TypeScript Usage
 
 ```typescript
-import { CompleteChunkedUploadRequest, CompleteChunkedUploadResponse, CompleteUploadRequest, FileTypeValidation, FileUploadResponse, GetPresignedUrlRequest, InitiateChunkedUploadRequest, InitiateChunkedUploadResponse, PresignedUrlResponse, UploadChunkRequest, UploadChunkResponse, UploadProgress } from '@objectstack/spec/api';
-import type { CompleteChunkedUploadRequest, CompleteChunkedUploadResponse, CompleteUploadRequest, FileTypeValidation, FileUploadResponse, GetPresignedUrlRequest, InitiateChunkedUploadRequest, InitiateChunkedUploadResponse, PresignedUrlResponse, UploadChunkRequest, UploadChunkResponse, UploadProgress } from '@objectstack/spec/api';
+import { CompleteChunkedUploadRequest, CompleteChunkedUploadResponse, CompleteUploadRequest, FileDownloadUrlResponse, FileTypeValidation, FileUploadResponse, GetPresignedUrlRequest, InitiateChunkedUploadRequest, InitiateChunkedUploadResponse, PresignedUrlResponse, RawUploadResponse, UploadChunkRequest, UploadChunkResponse, UploadProgress } from '@objectstack/spec/api';
+import type { CompleteChunkedUploadRequest, CompleteChunkedUploadResponse, CompleteUploadRequest, FileDownloadUrlResponse, FileTypeValidation, FileUploadResponse, GetPresignedUrlRequest, InitiateChunkedUploadRequest, InitiateChunkedUploadResponse, PresignedUrlResponse, RawUploadResponse, UploadChunkRequest, UploadChunkResponse, UploadProgress } from '@objectstack/spec/api';
 
 // Validate data
 const result = CompleteChunkedUploadRequest.parse(data);
@@ -63,6 +63,20 @@ const result = CompleteChunkedUploadRequest.parse(data);
 | :--- | :--- | :--- | :--- |
 | **fileId** | `string` | ✅ | File ID returned from presigned request |
 | **eTag** | `string` | optional | S3 ETag verification |
+
+
+---
+
+## FileDownloadUrlResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | Operation success status |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ url: string }` | ✅ |  |
 
 
 ---
@@ -152,6 +166,20 @@ const result = CompleteChunkedUploadRequest.parse(data);
 | **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ uploadUrl: string; downloadUrl?: string; fileId: string; method: Enum<'PUT' \| 'POST'>; … }` | ✅ |  |
+
+
+---
+
+## RawUploadResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | Operation success status |
+| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ key: string }` | ✅ |  |
 
 
 ---

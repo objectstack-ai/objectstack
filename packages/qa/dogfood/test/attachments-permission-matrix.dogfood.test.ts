@@ -327,10 +327,14 @@ describe('attachments permission matrix (#2755)', () => {
     expect(denied.status).toBe(403);
     expect(((await denied.json()) as any).error?.code).toBe('ATTACHMENT_DOWNLOAD_DENIED');
 
-    // The owner (admin) → 200 with a signed URL.
+    // The owner (admin) → 200 with a signed URL, in the declared
+    // `{ success: true, data: { url } }` envelope (#3689 — this route answered
+    // a bare `{ url }` until then).
     const owner = await stack.apiAs(adminTok, 'GET', `/storage/files/${adminFile}/url`);
     expect(owner.status).toBe(200);
-    expect(((await owner.json()) as any).url).toBeTruthy();
+    const ownerBody = (await owner.json()) as any;
+    expect(ownerBody.success).toBe(true);
+    expect(ownerBody.data?.url).toBeTruthy();
 
     // Parent-inherited read: a file on the PUBLIC att_case record is
     // downloadable by any member who can read that record — even a

@@ -12,6 +12,7 @@ import {
   APPROVAL_EXPRESSION_INVALID,
   APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
   APPROVAL_DECISION_OUTPUTS_RESERVED,
+  APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED,
 } from './validate-approval-approvers.js';
 
 function stackWithApprovers(approvers: unknown[]): Record<string, unknown> {
@@ -332,5 +333,41 @@ describe('expression approvers (#3447 P2)', () => {
       approvers: [{ type: 'user', value: 'u1' }],
       decisionOutputs: ['next_reviewers', 'note'],
     }))).toEqual([]);
+  });
+});
+
+describe('cross-organization targeting (ADR-0105 D9)', () => {
+  it('is clean when `organization` sits on an org-scoped approver type', () => {
+    // The whole point of D9: a group CFO resolved against the group directory.
+    const findings = validateApprovalApprovers(
+      stackWithApprovers([{ type: 'position', value: 'cfo', organization: '$root' }]),
+    );
+    expect(findings.filter(f => f.rule === APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED)).toEqual([]);
+  });
+
+  it('errors when `organization` sits on a type with no organization directory', () => {
+    // `user` names a person outright — the declaration cannot narrow anything,
+    // and the runtime refuses it. Catch it at author time instead.
+    const findings = validateApprovalApprovers(
+      stackWithApprovers([{ type: 'user', value: 'u1', organization: '$root' }]),
+    );
+    const f = findings.find(x => x.rule === APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED);
+    expect(f?.severity).toBe('error');
+    expect(f?.path).toBe('flows[0].nodes[1].config.approvers[0].organization');
+    expect(f?.hint).toMatch(/position.*org_membership_level.*department.*expression/);
+  });
+
+  it('errors for `team` too — team membership carries no organization', () => {
+    const findings = validateApprovalApprovers(
+      stackWithApprovers([{ type: 'team', value: 't1', organization: 'acme-ssc' }]),
+    );
+    expect(findings.some(f => f.rule === APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED)).toBe(true);
+  });
+
+  it('stays silent when no organization is declared — the default path', () => {
+    const findings = validateApprovalApprovers(
+      stackWithApprovers([{ type: 'user', value: 'u1' }]),
+    );
+    expect(findings.filter(f => f.rule === APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED)).toEqual([]);
   });
 });

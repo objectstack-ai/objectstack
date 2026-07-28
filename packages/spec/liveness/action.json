@@ -74,8 +74,9 @@
       "note": "objectui toast (error counterpart of successMessage; added #1990)."
     },
     "undoable": {
-      "status": "experimental",
-      "note": "Declared + demoed in #1992 (example-crm reassign) but no runtime reader yet: neither service-automation nor objectui consume the action's `undoable` flag (objectui has an UndoManager but does not key off this field). Promote to live once a consumer is wired."
+      "status": "live",
+      "evidence": "objectui: app-shell useConsoleActionRuntime.tsx:409 gates building the undo operation the success toast's Undo button invokes (:147); app-shell RecordDetailView.tsx:545 gates restoring the record's prior values (:404); plumbed through by components action/action-button.tsx:113",
+      "note": "STATUS CORRECTED 2026-07 (#3714) — this entry UNDERSTATED liveness, the mirror image of the preview-renderer over-claims #3686/#3711 fixed. The #1992-era note (\"no runtime reader yet ... objectui has an UndoManager but does not key off this field\") was true when written and has since been falsified: objectui wired two readers, both gating real behaviour, and action-button.tsx:113 forwards the flag precisely because — per its own comment — \"without this the flag is dropped and the handler never builds the undo operation\". Authoring side: ActionDefaultInspector.tsx \"Offer undo\" checkbox. Consequence while the entry stood: the CLI liveness lint warns on `experimental` too, so authoring a WORKING property produced a \"declared but NOT enforced\" warning."
     },
     "refreshAfter": {
       "status": "live",

@@ -30,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: '22'
 
       - name: Enable Corepack
         run: corepack enable
@@ -106,6 +106,19 @@ jobs:
       - name: Release-notes drift guard
         run: pnpm check:release-notes
 
+      # #3825 Node-version drift guard: a runtime pin is 18 separate string
+      # literals across .github/workflows, so a split is invisible until someone
+      # greps for it. One did open — every PR gate sat on Node 20 (EOL
+      # 2026-04-30) while release.yml and publish-smoke.yml ran 22, so code was
+      # verified on one runtime and shipped from another. Nobody chose that; one
+      # workflow got bumped to clear one error and the rest stayed behind. It
+      # surfaced only when a dependency needing >=22 aborted the vitest worker
+      # at the process level, which vitest reported as a PASSING suite with 17
+      # cases silently skipped (#3812). .nvmrc is now the single source of
+      # truth, and this holds every workflow to it.
+      - name: Node-version drift guard
+        run: pnpm check:node-version
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest
@@ -119,7 +132,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Enable Corepack
         run: corepack enable

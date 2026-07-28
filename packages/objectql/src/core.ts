@@ -42,8 +42,13 @@ export type { ObjectQLHostContext, HookHandler, HookEntry, OperationContext, Eng
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Embedders that boot the engine themselves can catch
 // it to render their own "database unreachable" message.
-export { DriverConnectError } from './driver-connect-errors.js';
-export type { DriverConnectFailure, DriverHealth } from './driver-connect-errors.js';
+export { DriverConnectError, DatasourceUnavailableError } from './driver-connect-errors.js';
+export type {
+  DriverConnectFailure,
+  DriverHealth,
+  DatasourceUnavailableInfo,
+  DatasourceUnavailableKind,
+} from './driver-connect-errors.js';
 
 // In-memory aggregation fallback
 export { applyInMemoryAggregation, bucketDateValue } from './in-memory-aggregation.js';

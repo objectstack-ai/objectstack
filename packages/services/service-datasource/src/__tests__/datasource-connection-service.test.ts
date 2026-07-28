@@ -10,15 +10,28 @@ import {
 import type { IDatasourceDriverFactory } from '../contracts/datasource-driver-factory.js';
 import type { DatasourceConnectPolicy } from '../contracts/connect-policy.js';
 
-/** A fake engine recording driver registration + schema syncs. */
+/** One `markDatasourceUnavailable` call, as the engine would receive it. */
+type UnavailableCall = { name: string; kind: 'blocked' | 'failed'; publicDetail?: string };
+
+/** A fake engine recording driver registration, schema syncs + availability records. */
 function fakeEngine() {
   const drivers = new Map<string, { name?: string }>();
   const defs: Array<{ name: string; schemaMode?: string }> = [];
   const synced: string[] = [];
-  const engine: ConnectionEngineLike & { drivers: typeof drivers; defs: typeof defs; synced: string[] } = {
+  const unavailable = new Map<string, UnavailableCall>();
+  const cleared: string[] = [];
+  const engine: ConnectionEngineLike & {
+    drivers: typeof drivers;
+    defs: typeof defs;
+    synced: string[];
+    unavailable: typeof unavailable;
+    cleared: string[];
+  } = {
     drivers,
     defs,
     synced,
+    unavailable,
+    cleared,
     registerDriver: (driver: any) => {
       if (drivers.has(driver.name)) return; // mirror engine's skip-if-present
       drivers.set(driver.name, driver);
@@ -29,6 +42,13 @@ function fakeEngine() {
     getDriverByName: (name) => drivers.get(name),
     syncObjectSchema: async (name) => {
       synced.push(name);
+    },
+    markDatasourceUnavailable: (info) => {
+      unavailable.set(info.name, info);
+    },
+    clearDatasourceUnavailable: (name) => {
+      unavailable.delete(name);
+      cleared.push(name);
     },
   };
   return engine;
@@ -484,5 +504,152 @@ describe('DatasourceConnectionService.connectDeclared', () => {
       if (saved === undefined) delete process.env[ENV];
       else process.env[ENV] = saved;
     }
+  });
+});
+
+// framework#3827 / #3828 — every connect already produced a verdict and every
+// caller threw it away, so a datasource that died at boot was invisible for the
+// rest of the process and a query against it could only say "is not registered".
+describe('retained connection state (framework#3827)', () => {
+  const analytics: ConnectableDatasource = {
+    name: 'analytics',
+    driver: 'sqlite',
+    schemaMode: 'managed',
+    config: {},
+  };
+
+  it('records `available` on a successful connect and clears any stale unavailability', async () => {
+    const { service, engine } = svc();
+    await service.connect(externalDs);
+    expect(service.getConnectionState('warehouse')).toMatchObject({
+      name: 'warehouse',
+      status: 'connected',
+      availability: 'available',
+    });
+    // A previously-failed datasource that later connects must stop explaining
+    // itself as broken.
+    expect(engine!.cleared).toContain('warehouse');
+    expect(engine!.unavailable.has('warehouse')).toBe(false);
+  });
+
+  it('records `available` for the onEnable escape hatch (already-registered counts as usable)', async () => {
+    const { service, engine } = svc();
+    engine!.drivers.set('warehouse', { name: 'warehouse' });
+    await service.connect(externalDs);
+    expect(service.getConnectionState('warehouse')?.availability).toBe('available');
+  });
+
+  it('records `failed` with the cause, and tells the engine — without leaking the cause to it', async () => {
+    const { service, engine } = svc({ factory: fakeFactory({ connectThrows: true }) });
+    await service.connect(analytics, { context: { trigger: 'runtime-admin' } });
+
+    const state = service.getConnectionState('analytics');
+    expect(state).toMatchObject({ status: 'failed-degraded', availability: 'failed' });
+    expect(state!.reason).toContain('connection refused'); // operator-facing, retained
+
+    // The engine gets the CLASS, never the raw cause: its copy is what reaches
+    // an end user, and a connect error routinely names hosts/ports/DSNs.
+    expect(engine!.unavailable.get('analytics')).toEqual({ name: 'analytics', kind: 'failed' });
+  });
+
+  it('records `blocked` for a policy denial and passes ONLY the opt-in publicReason on', async () => {
+    const policy: DatasourceConnectPolicy = {
+      canConnect: () => ({
+        allow: false,
+        reason: 'tenant plan=free; egress allow-list miss for warehouse.internal:5432',
+        publicReason: 'External datasources require the Scale plan.',
+      }),
+    };
+    const { service, engine } = svc({ policy });
+    await service.connect(externalDs);
+
+    const state = service.getConnectionState('warehouse');
+    expect(state).toMatchObject({ status: 'skipped-policy', availability: 'blocked' });
+    // The privileged reason is retained for the admin list…
+    expect(state!.reason).toContain('warehouse.internal:5432');
+    // …but only the tenant-safe string crosses into the engine.
+    expect(engine!.unavailable.get('warehouse')).toEqual({
+      name: 'warehouse',
+      kind: 'blocked',
+      publicDetail: 'External datasources require the Scale plan.',
+    });
+  });
+
+  it('omits publicDetail entirely when the policy did not opt in', async () => {
+    const policy: DatasourceConnectPolicy = {
+      canConnect: () => ({ allow: false, reason: 'internal: quota exceeded for org_42' }),
+    };
+    const { service, engine } = svc({ policy });
+    await service.connect(externalDs);
+    expect(engine!.unavailable.get('warehouse')).toEqual({ name: 'warehouse', kind: 'blocked' });
+  });
+
+  it('does not carry a publicReason from one connect into the next', async () => {
+    let first = true;
+    const policy: DatasourceConnectPolicy = {
+      canConnect: () => {
+        const decision = first
+          ? { allow: false, reason: 'r1', publicReason: 'Only for the first one.' }
+          : { allow: false, reason: 'r2' };
+        first = false;
+        return decision;
+      },
+    };
+    const { service, engine } = svc({ policy });
+    await service.connect({ ...externalDs, name: 'ds_a' });
+    await service.connect({ ...externalDs, name: 'ds_b' });
+    expect(engine!.unavailable.get('ds_a')?.publicDetail).toBe('Only for the first one.');
+    expect(engine!.unavailable.get('ds_b')?.publicDetail).toBeUndefined();
+  });
+
+  it('records the verdict even when the D5 fail-fast throws', async () => {
+    const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
+    const saved = process.env[ENV];
+    delete process.env[ENV];
+    try {
+      const { service, engine } = svc({ factory: fakeFactory({ connectThrows: true }) });
+      await expect(
+        service.connect(analytics, { objects: ['visit'], context: { trigger: 'declared-auto' } }),
+      ).rejects.toThrow(/fail-fast/);
+      // The boot is aborting, but a host that catches the throw must not be left
+      // with a datasource whose state claims it was never attempted.
+      expect(service.getConnectionState('analytics')?.availability).toBe('failed');
+      expect(engine!.unavailable.get('analytics')?.kind).toBe('failed');
+    } finally {
+      if (saved === undefined) delete process.env[ENV];
+      else process.env[ENV] = saved;
+    }
+  });
+
+  it('leaves `unattempted` (not "broken") when there is no factory/engine to try with', async () => {
+    const service = new DatasourceConnectionService({
+      factory: () => undefined,
+      engine: () => fakeEngine(),
+    });
+    await service.connect(externalDs);
+    expect(service.getConnectionState('warehouse')).toMatchObject({
+      status: 'skipped-no-infra',
+      availability: 'unattempted',
+    });
+  });
+
+  it('drops the verdict on disconnect — a removed pool must not keep explaining itself', async () => {
+    const { service, engine } = svc({ factory: fakeFactory({ connectThrows: true }) });
+    await service.connect(analytics, { context: { trigger: 'runtime-admin' } });
+    expect(service.getConnectionState('analytics')).toBeDefined();
+
+    await service.disconnect('analytics');
+    expect(service.getConnectionState('analytics')).toBeUndefined();
+    expect(engine!.unavailable.has('analytics')).toBe(false);
+  });
+
+  it('lists every retained verdict for the admin surface', async () => {
+    const { service } = svc({ factory: fakeFactory({ connectThrows: true }) });
+    await service.connect({ ...analytics, name: 'a' }, { context: { trigger: 'runtime-admin' } });
+    await service.connect({ ...analytics, name: 'b' }, { context: { trigger: 'runtime-admin' } });
+    expect(service.listConnectionStates().map((s) => [s.name, s.availability])).toEqual([
+      ['a', 'failed'],
+      ['b', 'failed'],
+    ]);
   });
 });

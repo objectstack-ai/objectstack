@@ -64,6 +64,7 @@ const result = ApprovalDecision.parse(data);
 | **value** | `string` | optional | User id / membership tier / position / team / department / field — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
 | **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
 | **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
+| **organization** | `string` | optional | ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), `$parent` (one level up), or an organization slug. Omitted = the request's own organization. |
 
 
 ---
@@ -74,7 +75,7 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| 'org_membership_level' \| 'role' \| 'user' \| 'queue'>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string }[]` | ✅ | Allowed approvers for this node |
+| **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| 'org_membership_level' \| 'role' \| 'user' \| 'queue'>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Allowed approvers for this node |
 | **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | ✅ | How to combine multiple approvers |
 | **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Default 1 |
 | **lockRecord** | `boolean` | ✅ | Lock the record from editing while pending |

@@ -302,7 +302,14 @@ describe('ObjectStack Protocol', () => {
         { code: 'es-ES', label: 'Spanish (Spain)' },
       ],
     }).success).toBe(true);
-    expect(GetTranslationsRequestSchema.safeParse({ locale: 'en-US', namespace: 'objects' }).success).toBe(true);
+    expect(GetTranslationsRequestSchema.safeParse({ locale: 'en-US' }).success).toBe(true);
+    // The request is locale-only. `namespace`/`keys` were declared here but read
+    // by no serving surface, so they were trimmed (#3676). Asserting on the
+    // PARSED OUTPUT is the point: `safeParse` still succeeds on a payload
+    // carrying them (z.object strips unknown keys), so a success-only assertion
+    // would keep passing green whether the fields were trimmed or not.
+    const trimmed = GetTranslationsRequestSchema.parse({ locale: 'en-US', namespace: 'objects', keys: ['a'] });
+    expect(trimmed).toEqual({ locale: 'en-US' });
     expect(GetTranslationsResponseSchema.safeParse({
       locale: 'en-US',
       translations: { objects: { task: { label: 'Task', pluralLabel: 'Tasks' } }, messages: { save: 'Save' } },

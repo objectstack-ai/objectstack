@@ -656,15 +656,23 @@ describe('i18n namespace', () => {
         );
     });
 
-    it('i18n.getTranslations keeps namespace/keys as query params on the path form', async () => {
+    it('i18n.getTranslations sends no filter query — the server reads none (#3676)', async () => {
         const { client, fetchMock } = createMockClient({
             success: true,
             data: { locale: 'zh-CN', translations: { hello: '你好' } }
         });
-        await client.i18n.getTranslations('zh-CN', { namespace: 'common', keys: ['a', 'b'] });
-        expect(String(fetchMock.mock.calls[0][0])).toBe(
-            'http://localhost:3000/api/v1/i18n/translations/zh-CN?namespace=common&keys=a%2Cb',
+        // This used to accept `{ namespace, keys }` and append them as query
+        // params. Neither serving surface ever read them (the dispatcher takes
+        // parts[1]/query.locale, service-i18n takes params.locale), so the
+        // filter was inert and the caller got the full bundle either way. The
+        // predecessor of this test asserted the query string was BUILT, which
+        // pinned the phantom in place rather than the behaviour.
+        await (client.i18n.getTranslations as (l: string, o?: unknown) => Promise<unknown>)(
+            'zh-CN', { namespace: 'common', keys: ['a', 'b'] },
         );
+        const url = String(fetchMock.mock.calls[0][0]);
+        expect(url).toBe('http://localhost:3000/api/v1/i18n/translations/zh-CN');
+        expect(url).not.toContain('?');
     });
 
     it('i18n.getFieldLabels puts both object and locale on the path (#3636)', async () => {

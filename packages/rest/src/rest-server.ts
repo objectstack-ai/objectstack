@@ -97,6 +97,26 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             },
         };
     }
+    // A declared datasource that is refused by the host policy, or failed to
+    // connect under OS_ALLOW_DRIVER_CONNECT_FAILURE → 503 (framework#3828).
+    // Handled before the catch-alls because nothing about the REQUEST is wrong:
+    // the deployment cannot serve this object right now. 503 (not 500) is the
+    // honest answer — it is a dependency outage or a policy state, it may clear,
+    // and it tells a caller/proxy that retrying elsewhere or later is sensible.
+    // The message is already sanitised at the throw site (no DSN, host, or
+    // operator-facing policy reason), so it is safe to pass through verbatim.
+    if (error?.code === 'ERR_DATASOURCE_UNAVAILABLE') {
+        return {
+            status: 503,
+            body: {
+                error: error?.message ?? 'The datasource for this object is not available',
+                code: 'ERR_DATASOURCE_UNAVAILABLE',
+                ...(error?.datasource ? { datasource: error.datasource } : {}),
+                ...(error?.kind ? { reason: error.kind } : {}),
+                ...(object ? { object } : {}),
+            },
+        };
+    }
     // Validation failures → 400 with per-field envelope. Handled FIRST
     // because the validator throws a typed error before any SQL ever
     // runs, and we want callers to differentiate "your payload was

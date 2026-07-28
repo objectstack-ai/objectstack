@@ -73,8 +73,30 @@ export interface DatasourceSummary {
   schemaMode: 'managed' | 'external' | 'validate-only';
   origin: DatasourceOrigin;
   active: boolean;
-  /** Validation health: `unvalidated` until the first validate/test runs. */
-  status: 'ok' | 'error' | 'unvalidated';
+  /**
+   * Current availability, taken from the last connect attempt (framework#3827):
+   *
+   *  - `ok`          — a live driver is registered and routable.
+   *  - `error`       — a connect was attempted and failed (unreachable, bad
+   *                    credential, unsupported driver). See {@link statusReason}.
+   *  - `blocked`     — the host's connect policy refused it. A decision, not a
+   *                    fault; it will not clear on its own.
+   *  - `unvalidated` — no connect attempted. Includes a `managed` datasource
+   *                    left metadata-only by the ADR-0062 D2 gate, and a runtime
+   *                    row nobody has tested yet.
+   *
+   * This was hardcoded to `unvalidated` for every row, which made a dead
+   * datasource indistinguishable from a healthy-but-untested one — the reason a
+   * failed boot connect stayed invisible for the rest of the process.
+   */
+  status: 'ok' | 'error' | 'blocked' | 'unvalidated';
+  /**
+   * Operator-facing detail behind `error` / `blocked`. PRIVILEGED: it is the raw
+   * connect error or the policy's `reason`, so it can name hosts, ports and
+   * internal plans. This surface is already admin-gated; the end-user
+   * query-time error deliberately carries none of it (framework#3828).
+   */
+  statusReason?: string;
   /** Package id that defines a code-origin datasource (omitted for runtime). */
   definedIn?: string;
   /** True when a runtime row is shadowed by a code definition of the same name. */

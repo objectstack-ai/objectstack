@@ -24,6 +24,7 @@
  * | approval-expression-invalid                | error/info | #3447 P2 closed-root expressions |
  * | approval-expression-no-empty-policy        | info     | #3447 P2 empty-slate policy |
  * | approval-decision-outputs-reserved         | error    | #3447 P2 resume envelope   |
+ * | approval-approver-cross-org-unsupported    | error    | ADR-0105 D9 targeting      |
  *
  * The first two are mutually exclusive by construction — a bad *value* wins,
  * because its fix (`position`) differs from the deprecation's fix
@@ -42,6 +43,7 @@ import {
   APPROVAL_NODE_TYPE,
   DEPRECATED_APPROVER_TYPES,
   APPROVER_VALUE_BINDINGS,
+  approverTypeIsOrgScoped,
   canonicalApproverType,
   normalizeDecisionOutputs,
 } from '@objectstack/spec/automation';
@@ -57,6 +59,7 @@ export const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY = 'approval-approvers-may-reso
 export const APPROVAL_EXPRESSION_INVALID = 'approval-expression-invalid';
 export const APPROVAL_EXPRESSION_NO_EMPTY_POLICY = 'approval-expression-no-empty-policy';
 export const APPROVAL_DECISION_OUTPUTS_RESERVED = 'approval-decision-outputs-reserved';
+export const APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED = 'approval-approver-cross-org-unsupported';
 
 /**
  * The CLOSED root set an `expression` approver may reference (#3447 P2) —
@@ -302,6 +305,31 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             hint:
               `Route to people the engine can expand: { type: 'team' | 'department' | 'position', ... }. ` +
               `Queue approvers need a real ownership-queue implementation before they take effect.`,
+          });
+        }
+
+        // [ADR-0105 D9] Cross-organization targeting on a type that has no
+        // organization-scoped directory. `user` / `field` / `manager` name a
+        // person outright and `team` membership carries no organization, so the
+        // declaration cannot narrow anything — it is a misunderstanding of what
+        // the field does, and the runtime refuses it. Error, not warning: this
+        // is a certain authoring mistake with a certain fix, and letting it
+        // reach the runtime turns author time into an incident.
+        const declaredOrg = (a as AnyRec).organization;
+        if (typeof declaredOrg === 'string' && declaredOrg.trim() !== ''
+          && ApproverType.options.includes(canonical as never)
+          && !approverTypeIsOrgScoped(canonical)) {
+          findings.push({
+            severity: 'error',
+            rule: APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED,
+            where,
+            path: `${path}.organization`,
+            message:
+              `approver type '${type}' does not resolve through an organization directory, so ` +
+              `'organization: ${declaredOrg}' has no effect (ADR-0105 D9) — the runtime refuses it.`,
+            hint:
+              `Drop 'organization' here. Cross-organization targeting applies to ` +
+              `'position', 'org_membership_level', 'department' and 'expression' approvers.`,
           });
         }
       }

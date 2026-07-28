@@ -272,4 +272,60 @@ describe('ADR-0062 connect policy seam', () => {
       try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
     }
   }, BOOT_TIMEOUT);
+
+  // framework#3828 — the denial is deliberate and stays non-fatal, but the
+  // tenant used to be told `Datasource 'autoconn_ext' is not registered`, which
+  // reads like "you misconfigured your app" rather than "your plan blocks this".
+  it('a query against a denied datasource explains WHY, without leaking the operator reason', async () => {
+    const denyExternal: DatasourceConnectPolicy = {
+      canConnect: (ds) =>
+        ds.schemaMode === 'external'
+          ? {
+              allow: false,
+              reason: 'egress allow-list miss for warehouse.internal:5432 (org_42, plan=free)',
+              publicReason: 'External datasources require the Scale plan.',
+            }
+          : { allow: true },
+    };
+    const kernel = await boot({ connectPolicy: denyExternal });
+    try {
+      const engine = kernel.getService<{ find(o: string): Promise<unknown> }>('data');
+      const err: any = await engine.find('ext_note').then(
+        () => { throw new Error('find() resolved but should have thrown'); },
+        (e: unknown) => e,
+      );
+      expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
+      expect(err.message).toContain('connect policy refused it');
+      expect(err.message).toContain('require the Scale plan');
+      // The operator-facing reason must never cross into a tenant-visible error.
+      expect(err.message).not.toContain('warehouse.internal');
+      expect(err.message).not.toContain('org_42');
+    } finally {
+      try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
+
+  // framework#3827 — the admin list is the one place an operator can see this
+  // without redeploying and re-reading boot logs.
+  it('surfaces the denial in the datasource-admin list, with the operator reason', async () => {
+    const denyExternal: DatasourceConnectPolicy = {
+      canConnect: (ds) =>
+        ds.schemaMode === 'external'
+          ? { allow: false, reason: 'egress allow-list miss for warehouse.internal:5432' }
+          : { allow: true },
+    };
+    const kernel = await boot({ connectPolicy: denyExternal });
+    try {
+      const admin = kernel.getService<{ listDatasources(): Promise<any[]> }>('datasource-admin');
+      const list = await admin.listDatasources();
+      const ext = list.find((d) => d.name === 'autoconn_ext')!;
+      expect(ext.status).toBe('blocked');
+      // Admin-gated surface: the raw reason is the useful answer here.
+      expect(ext.statusReason).toContain('warehouse.internal:5432');
+      // A datasource nothing tried to connect stays honestly unknown.
+      expect(list.find((d) => d.name === 'decorative')!.status).toBe('unvalidated');
+    } finally {
+      try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
 });
