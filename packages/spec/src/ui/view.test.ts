@@ -1687,6 +1687,55 @@ describe('ListColumnSchema pinned and summary', () => {
   });
 });
 
+describe('ListColumnSchema summary object form and prefix (objectui#2231)', () => {
+  it('should accept the { type, field } summary form aggregating another field', () => {
+    const column: ListColumn = {
+      field: 'amount',
+      summary: { type: 'sum', field: 'amount_in_base_currency' },
+    };
+
+    expect(ListColumnSchema.parse(column)).toMatchObject({
+      summary: { type: 'sum', field: 'amount_in_base_currency' },
+    });
+  });
+
+  it('should accept the object form without a field override', () => {
+    expect(() => ListColumnSchema.parse({ field: 'amount', summary: { type: 'avg' } })).not.toThrow();
+  });
+
+  it('should share one aggregation vocabulary across both summary forms', () => {
+    for (const fn of ColumnSummarySchema.options) {
+      expect(() => ListColumnSchema.parse({ field: 'amount', summary: fn })).not.toThrow();
+      expect(() => ListColumnSchema.parse({ field: 'amount', summary: { type: fn } })).not.toThrow();
+    }
+  });
+
+  it('should reject an unknown aggregation in either form', () => {
+    expect(() => ListColumnSchema.parse({ field: 'amount', summary: 'median' })).toThrow();
+    expect(() => ListColumnSchema.parse({ field: 'amount', summary: { type: 'median' } })).toThrow();
+  });
+
+  it('should accept a compound-cell prefix and default its render type to text', () => {
+    expect(ListColumnSchema.parse({ field: 'name', prefix: { field: 'status' } })).toMatchObject({
+      prefix: { field: 'status', type: 'text' },
+    });
+  });
+
+  it('should accept a badge prefix', () => {
+    const column: ListColumn = {
+      field: 'name',
+      prefix: { field: 'status', type: 'badge' },
+    };
+
+    expect(() => ListColumnSchema.parse(column)).not.toThrow();
+  });
+
+  it('should reject a prefix with no field or an unknown render type', () => {
+    expect(() => ListColumnSchema.parse({ field: 'name', prefix: {} })).toThrow();
+    expect(() => ListColumnSchema.parse({ field: 'name', prefix: { field: 'status', type: 'chip' } })).toThrow();
+  });
+});
+
 describe('Airtable-style ListView enhancements', () => {
   it('should accept list view with row height', () => {
     const listView: ListView = {

@@ -177,6 +177,34 @@ export const ColumnSummarySchema = lazySchema(() => z.enum([
 ]).describe('Aggregation function for column footer summary'));
 
 /**
+ * Column Summary Configuration Schema
+ *
+ * The object form of `ListColumn.summary`. Use it when the footer aggregates a
+ * field OTHER than the column's own — e.g. an `amount` column whose footer sums
+ * `amount_in_base_currency`. The shorthand (`summary: 'sum'`) stays the common
+ * case and always aggregates the column's own `field`.
+ *
+ * `type` reuses `ColumnSummarySchema`, so both forms share one aggregation
+ * vocabulary and cannot drift apart.
+ */
+export const ColumnSummaryConfigSchema = lazySchema(() => z.object({
+  type: ColumnSummarySchema.describe('Aggregation function'),
+  field: z.string().optional().describe('Field to aggregate (defaults to the column field)'),
+}).describe('Column footer summary configuration'));
+
+/**
+ * Column Prefix Configuration Schema (Airtable-style compound cells)
+ *
+ * Renders a second field's value inline before the cell value — e.g. a status
+ * badge in front of the record name — so a list can carry two signals in one
+ * column without spending a second column on it.
+ */
+export const ColumnPrefixSchema = lazySchema(() => z.object({
+  field: z.string().describe('Field whose value renders before the cell value'),
+  type: z.enum(['badge', 'text']).default('text').describe('How the prefix value is rendered'),
+}).describe('Compound-cell prefix configuration'));
+
+/**
  * List Column Configuration Schema
  * Detailed configuration for individual list view columns
  */
@@ -195,7 +223,11 @@ export const ListColumnSchema = lazySchema(() => z.object({
   pinned: z.enum(['left', 'right']).optional().describe('Pin/freeze column to left or right side'),
 
   /** Column Footer Summary (Airtable-style aggregation) */
-  summary: ColumnSummarySchema.optional().describe('Footer aggregation function for this column'),
+  summary: z.union([ColumnSummarySchema, ColumnSummaryConfigSchema]).optional()
+    .describe('Footer aggregation for this column — the function alone, or { type, field } to aggregate another field'),
+
+  /** Compound cell (Airtable-style): render another field inline before the value */
+  prefix: ColumnPrefixSchema.optional().describe('Field rendered inline before this cell value'),
 
   /** Interaction */
   link: z.boolean().optional().describe('Functions as the primary navigation link (triggers View navigation)'),
@@ -1709,6 +1741,8 @@ export type ViewData = z.infer<typeof ViewDataSchema>;
 export type HttpRequest = z.infer<typeof HttpRequestSchema>;
 export type HttpMethod = z.infer<typeof HttpMethodSchema>;
 export type ColumnSummary = z.infer<typeof ColumnSummarySchema>;
+export type ColumnSummaryConfig = z.infer<typeof ColumnSummaryConfigSchema>;
+export type ColumnPrefix = z.infer<typeof ColumnPrefixSchema>;
 export type RowHeight = z.infer<typeof RowHeightSchema>;
 export type GroupingConfig = z.infer<typeof GroupingConfigSchema>;
 export type GalleryConfig = z.infer<typeof GalleryConfigSchema>;
