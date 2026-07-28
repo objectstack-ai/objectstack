@@ -116,7 +116,7 @@ Field-level checks inside a cross-package object stay S3 (skip) — we cannot ju
 - **D2 — runtime-registered skills/tools vs. static lint.** `ask`/`build` kernel agents register skills/tools via service at boot (same invisibility as plugin objects). Extend the Phase-1 registry with official skill/tool names, or run R7 at S2 advisory severity. Small decision; take it when R7 starts.
 - **D3 — where does nav-access belong?** R5-as-lint-warning (proposed) vs. folding into `compile`'s access-matrix snapshot gate. Lint wins on path symmetry (ADR-0078); the snapshot gate stays the drift detector.
 - **D4 — hook body writes are not statically checkable, say so.** The write set lives in opaque JS (`hook-body.zod.ts`). Options: (a) accept the gap and document it (hook writes are the one HotCRM category with no static answer); (b) a structured `writes: [field]` declaration on `HookSchema` that the runtime enforces (contract-first, but new spec surface + runtime work); (c) registration-time dev diagnostics (ADR-0078 §4, deferred/evidence-gated there). Recommendation: (a) now, file (b) as its own issue — do not let this category stall the other eight. **Decided 2026-07-27 (#3700): (a); revised 2026-07-28 — (b) dropped, #3700 closed as not planned.** The gap stays documented at the authoring surfaces (`content/docs/automation/hook-bodies.mdx` "Not statically checked: the write set"; `ScriptBodySchema` TSDoc); the documentation is the whole disposition, so ADR-0107, which only recorded it, was withdrawn. (b) will not be built — the declaration duplicates the write set in a second place the author must keep in sync, adding authoring friction and a new error surface (worst for AI authors); in practice, exercising hooks against a SQL driver (in-memory SQLite) covers the failure mode that schemaless `memory://` green lights hide. (c) remains deferred under ADR-0078 §4, unchanged.
-- **D5 — rule-suite wiring drift.** `validate`/`lint`/`compile`/`doctor` each hand-pick rule subsets. A shared "run the reference-integrity suite" entry point in `@objectstack/lint` would make the next rule's wiring a one-liner and end the drift. Worth doing with Phase 2, not before.
+- **D5 — rule-suite wiring drift. Done 2026-07-28.** `validateReferenceIntegrity` + `REFERENCE_INTEGRITY_RULES` (`packages/lint/src/reference-integrity-suite.ts`) is the single entry point; `validate`/`lint`/`compile` each call it once, so a new rule is a one-line edit to the list. Membership is a written-out list mirrored by a test (a rule joins by review, not by accident), and the suite test runs one live instance per member so a member that stops being invoked fails loudly instead of reading as a clean stack. `doctor` is deliberately NOT converted — it runs only `validateWidgetBindings` and is an environment health check, not an authoring gate, so adopting the suite there is a product decision rather than a wiring cleanup; the asymmetry is named in the module doc so it stays visible.
 
 ---
 
@@ -127,7 +127,38 @@ Per ADR-0078 §5 and the audit discipline (`2026-06-metadata-functional-complete
 1. **HotCRM is the regression corpus.** Each of the ~20 shipped instances becomes a fixture in the owning rule's `.test.ts` (reduced to minimal stacks — HotCRM itself isn't vendored). A rule ships only when it catches its instances *and* runs clean over `examples/`, the showcase app, and the platform seed apps (zero false positives — the ADR-0072 D1 trust contract: one dead finding and authors stop trusting the linter).
 2. **Each Phase-2/3 rule lands separately** (one PR each), behind its verification pass. No omnibus "reference integrity" mega-PR.
 3. **Phase 1's registry gets conformance tests in the owning packages** the same day the list lands — an unhonest registry is worse than the prefix heuristic it replaces.
-4. Re-run the HotCRM audit (or its fixture corpus) after Phase 2 and record the residual: what still passes cleanly and *why* (D1/D2/D4 categories), so the issue can be closed with an explicit accepted-gap statement instead of silence.
+4. Re-run the HotCRM audit (or its fixture corpus) after Phase 2 and record the residual: what still passes cleanly and *why* (D1/D2/D4 categories), so the issue can be closed with an explicit accepted-gap statement instead of silence. **Done 2026-07-28 — see §6a.**
+
+## 6a. Residual after Phases 0–3 (the §6.4 re-run, 2026-07-28)
+
+**Method.** `objectstack-ai/hotcrm` @ `8b28fa2` (v2.2.2 — the same repo the original audit read, ~18k lines of shipped metadata), checked with the workspace build of the suite via `os lint` (the raw-config path). `os validate` cannot be the vehicle: HotCRM trips **24 Zod errors** against the current dev spec — `enable.trash` / `enable.mru` (removed in the 16.x line, #2377/ADR-0049) and `body` on non-`script` actions — so the parse aborts before any rule runs. That drift is pre-existing and unrelated to this work, but it is worth naming: **an app pinned to a published spec can be un-`validate`-able against `main`**, which is exactly why the lint path takes raw config.
+
+**What the suite now catches on the real corpus — 23 findings, no false positives:**
+
+| Rule | Findings | Issue category | The shipped instance |
+|---|---|---|---|
+| `object-reference-unknown` | 4 | 1b | `optionsFrom.object: 'user'` on four dashboards (the platform object is `sys_user`) |
+| `action-name-undefined` | 5 | 3 | `bulkActions: ['mass_update','mass_delete','assign_owner']` + `rowActions: ['edit','delete']` |
+| `chart-measure-unknown` | 4 | 7 | report `yAxis` naming raw fields (`amount`, `case_number`) instead of dataset measures |
+| `translation-target-unknown` | 6 | 9 | `apps.crm_enterprise.navigation.group_products` / `.group_analytics` × 3 locales; the app declares `group_sales` / `group_work` / `group_marketing` / `group_service` / `group_insights` |
+| `object-reference-unregistered-platform` | 2 | 2 | navigation `objectName` + `requiresObject` on `sys_approval_process`, which nothing registers |
+| `nav-object-ungranted` | 2 | 8 | `crm_knowledge_article`, `crm_forecast` exposed in navigation, granted by none of the 6 declared permission sets |
+
+Categories **4** (page field bindings) and **5a** (hook conditions) report **zero** — and that zero is real, not an empty walk: injecting one bogus field into HotCRM's `record:highlights` components moves `validate-page-field-bindings` from 0 to 3 findings, so the walk reaches the pages and the corpus is simply clean there today (HotCRM has moved on since the audit).
+
+**A false positive the corpus caught before release.** The first cut of R6 reported ~40 `_views` keys as orphans — all correct. A view record is a *container* (`list`, `listViews.<key>`, `formViews.<key>`) whose object binding lives at `list.data.object`, not at the record root, so the record resolved to nothing and was skipped whole. The examples missed it because none of their bundles carry `_views` keys at all: the walk ran, but that branch of the universe never did. **The §6.1 false-positive floor has to be read per branch, not per rule** — "zero findings on examples/" is only evidence for the branches those examples actually exercise.
+
+**What still passes silently — the accepted gaps:**
+
+| Gap | Status | Evidence on HotCRM |
+|---|---|---|
+| **5b — hook body write set** | Accepted, documented (§5 D4). Not statically checkable: the write set lives in an opaque JS body. Marked at the authoring surfaces (`content/docs/automation/hook-bodies.mdx`, `ScriptBodySchema` TSDoc). | 24 hooks, write sets unchecked by construction |
+| **6 — AI references** (R7 unbuilt) | **The one category with resolvable references and no rule.** | 2 agents / 6 skills declaring **8** agent→skill refs and **16** skill→tool refs — against a stack that declares **zero tools**, so every one of those 16 is dead today, exactly as the original audit reported |
+| **6 — knowledge indexes** | Blocked on **D1**: `agent.knowledge.indexes` has no definition site in a stack (`KnowledgeSourceSchema` is never referenced by `stack.zod.ts`), so a rule would institutionalise the gap. | 2 knowledge refs, unresolvable by construction |
+| **6 — skill hand-off** | Non-goal (§7): the hand-off lives in free-form prompt text, which has no structure to check. | — |
+| **R8 — option-value literals in other metadata** | Tier-B candidate, unbuilt: kanban group values, `ChartConfig.colors` keys, filter literals. Needs a verification note before it becomes a rule (high false-positive surface — filters legitimately hold dynamic values). | not measured |
+
+**Disposition for #3583.** Eight of the nine categories are now gated on `validate` / `lint` / `compile`; the ninth (5b) is an accepted, documented gap. The remaining buildable work is **R7** — and it is worth its own issue rather than keeping this one open, because it needs decision **D1** (a spec change or an `[EXPERIMENTAL]` marker) and **D2** (runtime-registered kernel skills/tools vs. static lint) first, neither of which is a lint question.
 
 ## 7. Non-goals
 
