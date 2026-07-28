@@ -35,11 +35,33 @@ export const SharingRuleType = z.enum([
 /**
  * Sharing Level
  * What access is granted?
+ *
+ * Both members map onto an enforced runtime behaviour: `read` widens the read
+ * filter (`buildReadFilter`), `edit` additionally opens the write gate
+ * (`buildWriteFilter` / `canEdit`).
+ *
+ * Removed (never enforced): `full`, documented as "Full Access (Transfer,
+ * Share, Delete)". NO code path granted transfer, re-share, or delete because
+ * of it — both enforcement sites matched `access_level in ('edit','full')`,
+ * making it byte-equivalent to `edit`. An admin picking it in Setup was told
+ * they had granted delete rights and had not; a level that validates and then
+ * silently does nothing is an authoring trap (ADR-0078, ADR-0049) — the same
+ * reason `ShareRecipientType` below dropped `queue` / `guest`.
+ *
+ * This is also where the industry model lands: record sharing widens WHICH
+ * ROWS a principal reaches, never WHICH VERBS they may use. Salesforce sharing
+ * rules stop at Read-Only / Read-Write (its Full Access is owner / hierarchy /
+ * Modify All only, never grantable by a rule); Dataverse AND-s any shared
+ * access right against the security role's own privilege. Delete and transfer
+ * belong to ownership, the hierarchy DEPTH scopes (ADR-0057), and admin scope
+ * — not to a sharing level. Re-share additionally presupposes a
+ * share-administration model that does not exist yet. Reviving `full` means
+ * designing a capability mask AND-ed with object CRUD, not re-adding an enum
+ * member (#3865).
  */
 export const SharingLevel = z.enum([
   'read',      // Read Only
   'edit',      // Read / Write
-  'full'       // Full Access (Transfer, Share, Delete)
 ]);
 
 /**

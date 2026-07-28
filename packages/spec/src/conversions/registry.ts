@@ -608,6 +608,67 @@ const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
 };
 
 /**
+ * Sharing-rule `accessLevel: 'full'` → `'edit'` (protocol 16, #3865).
+ *
+ * `full` was documented as "Full Access (Transfer, Share, Delete)" but no code
+ * path ever granted transfer, re-share, or delete because of it: both
+ * enforcement sites matched `access_level in ('edit','full')`, so it behaved as
+ * `edit` while telling admins it granted more (ADR-0078 declared-but-unenforced;
+ * ADR-0049). It was removed from `SharingLevel`, which makes this rewrite
+ * strictly **lossless** — unlike the OWD `sharingModel: 'full'` alias, which had
+ * no equivalent target and was delegated to a step-13 semantic TODO. Here the
+ * old and new shapes are already behaviourally identical, so the loader can
+ * convert with zero consumer action.
+ *
+ * **Live window**: the protocol-16 loader accepts the deprecated value so a
+ * stack still authoring `'full'` keeps loading (the zod enum now rejects it at
+ * parse, and this entry runs at `normalizeStackInput` *before* that). The
+ * runtime counterpart for already-persisted rows lives in `plugin-sharing`
+ * (grant-time normalisation + a boot backfill over `sys_sharing_rule` /
+ * `sys_record_share`).
+ */
+const sharingRuleAccessLevelFullToEdit: MetadataConversion = {
+  id: 'sharing-rule-access-level-full-to-edit',
+  toMajor: 16,
+  surface: 'sharingRule.accessLevel',
+  summary: "sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'sharingRules', (rule, path) => {
+      if (rule.accessLevel !== 'full') return rule;
+      emit({ from: 'full', to: 'edit', path: `${path}.accessLevel` });
+      return { ...rule, accessLevel: 'edit' };
+    });
+  },
+  fixture: {
+    before: {
+      sharingRules: [
+        {
+          name: 'share_open_deals',
+          type: 'criteria',
+          object: 'crm_deal',
+          accessLevel: 'full',
+          condition: 'record.status == "open"',
+          sharedWith: { type: 'business_unit', value: 'bu_sales' },
+        },
+      ],
+    },
+    after: {
+      sharingRules: [
+        {
+          name: 'share_open_deals',
+          type: 'criteria',
+          object: 'crm_deal',
+          accessLevel: 'edit',
+          condition: 'record.status == "open"',
+          sharedWith: { type: 'business_unit', value: 'bu_sales' },
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
  * All conversions, keyed by the protocol major that introduced the canonical
  * shape. Newest majors last; ordering within a major is application order.
  */
@@ -616,6 +677,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
   14: [bookAudienceProfileToPermissionSet],
   15: [viewVisibleOnToVisibleWhen, pageComponentVisibilityToVisibleWhen],
+  16: [sharingRuleAccessLevelFullToEdit],
 };
 
 /** Flattened, deterministic list of every conversion the loader knows about. */

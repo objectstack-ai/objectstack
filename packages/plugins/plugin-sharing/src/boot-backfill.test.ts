@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
-import { backfillRuleGrants } from './sharing-plugin.js';
+import { backfillRuleGrants, backfillRetiredAccessLevels } from './sharing-plugin.js';
 
 interface Row { [k: string]: any }
 
@@ -124,5 +124,85 @@ describe('backfillRuleGrants (#2926 ③ — seed rows materialize at boot)', () 
     expect(warn).toHaveBeenCalledOnce();
     // The healthy rule still materialized.
     expect((engine._tables.sys_record_share ?? []).some((s) => s.record_id === 'inq_new')).toBe(true);
+  });
+});
+
+describe("backfillRetiredAccessLevels (#3865 — stored 'full' normalises to 'edit')", () => {
+  let engine: ReturnType<typeof makeEngine>;
+
+  beforeEach(() => {
+    engine = makeEngine();
+  });
+
+  it("rewrites 'full' to 'edit' on both sharing rules and record shares", async () => {
+    engine._tables.sys_sharing_rule = [
+      { id: 'rule_full', name: 'legacy', access_level: 'full', managed_by: 'package' },
+      { id: 'rule_read', name: 'keep', access_level: 'read' },
+    ];
+    engine._tables.sys_record_share = [
+      { id: 'shr_full', object_name: 'account', record_id: 'a1', access_level: 'full' },
+      { id: 'shr_edit', object_name: 'account', record_id: 'a2', access_level: 'edit' },
+    ];
+
+    const counts = await backfillRetiredAccessLevels(engine as any);
+
+    expect(counts).toEqual({ rules: 1, shares: 1 });
+    expect(engine._tables.sys_sharing_rule.map((r) => r.access_level).sort()).toEqual(['edit', 'read']);
+    expect(engine._tables.sys_record_share.map((r) => r.access_level)).toEqual(['edit', 'edit']);
+  });
+
+  it('leaves the provenance columns alone (a package rule must not become customized)', async () => {
+    // The provenance stamp hook skips isSystem writes, and this backfill uses
+    // one — if a seeded rule came out `customized: true`, the seeder would stop
+    // updating it forever (#2909 T1).
+    engine._tables.sys_sharing_rule = [
+      { id: 'rule_full', name: 'legacy', access_level: 'full', managed_by: 'package', customized: false },
+    ];
+    await backfillRetiredAccessLevels(engine as any);
+    expect(engine._tables.sys_sharing_rule[0]).toMatchObject({
+      access_level: 'edit',
+      managed_by: 'package',
+      customized: false,
+    });
+  });
+
+  it('is idempotent — a second boot finds nothing to do', async () => {
+    engine._tables.sys_record_share = [
+      { id: 'shr_full', object_name: 'account', record_id: 'a1', access_level: 'full' },
+    ];
+    expect(await backfillRetiredAccessLevels(engine as any)).toEqual({ rules: 0, shares: 1 });
+    expect(await backfillRetiredAccessLevels(engine as any)).toEqual({ rules: 0, shares: 0 });
+  });
+
+  it('is a no-op on a clean database', async () => {
+    expect(await backfillRetiredAccessLevels(engine as any)).toEqual({ rules: 0, shares: 0 });
+  });
+
+  it('never blocks boot when the tables are missing or the driver refuses', async () => {
+    const broken = {
+      ...engine,
+      async find() { throw new Error('no such table: sys_sharing_rule'); },
+    };
+    const warn = vi.fn();
+    await expect(backfillRetiredAccessLevels(broken as any, { warn })).resolves.toEqual({ rules: 0, shares: 0 });
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('stops instead of spinning when updates silently fail to stick', async () => {
+    // Guards the re-query loop: it selects on the very column it mutates, so an
+    // update that does not persist would otherwise re-select the same batch
+    // forever and hang boot.
+    engine._tables.sys_record_share = [
+      { id: 'shr_full', object_name: 'account', record_id: 'a1', access_level: 'full' },
+    ];
+    const stuck = {
+      ...engine,
+      find: engine.find,
+      async update() { throw new Error('read-only replica'); },
+    };
+    const warn = vi.fn();
+    await expect(backfillRetiredAccessLevels(stuck as any, { warn })).resolves.toEqual({ rules: 0, shares: 0 });
+    expect(warn).toHaveBeenCalled();
+    expect(engine._tables.sys_record_share[0].access_level).toBe('full');
   });
 });

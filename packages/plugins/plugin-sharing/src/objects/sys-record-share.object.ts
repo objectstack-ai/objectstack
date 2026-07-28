@@ -16,7 +16,9 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *     into every `find` against that object.
  *   - For objects with `sharingModel: 'private' | 'read'`, the same
  *     middleware enforces edit/delete by checking ownership OR a share
- *     row with `access_level in ('edit','full')`.
+ *     row with `access_level in ('edit','full')`. `full` is no longer
+ *     authorable (#3865 — it never granted more than `edit`); the gates
+ *     keep matching it so not-yet-normalised rows stay honoured.
  *
  * Conventions:
  *  - `object_name` is the short object name (e.g. `account`, `lead`).
@@ -154,12 +156,18 @@ export const SysRecordShare = ObjectSchema.create({
     }),
 
     access_level: Field.select(
-      ['read', 'edit', 'full'],
+      // `full` ("Full Access — transfer/share/delete") was removed: no code
+      // path granted any of those verbs because of it — the read and write
+      // gates matched `access_level in ('edit','full')`, making it identical to
+      // `edit` while claiming more (ADR-0078 declared-but-unenforced; #3865).
+      // Rows persisted with `full` are normalised to `edit` (grant-time + boot
+      // backfill) and stay honoured by the gates until they are.
+      ['read', 'edit'],
       {
         label: 'Access Level',
         required: true,
         defaultValue: 'read',
-        description: 'What the recipient can do — read | edit | full (transfer/share/delete)',
+        description: 'What the recipient can do — read, or read and edit',
         group: 'Recipient',
       },
     ),

@@ -179,11 +179,21 @@ export const SysSharingRule = ObjectSchema.create({
     }),
 
     access_level: Field.select(
-      ['read', 'edit', 'full'],
+      // `full` was removed for the same reason as `queue` above: it was
+      // declared-but-unenforced. Labelled "Full Access (Transfer, Share,
+      // Delete)", it was matched only as `access_level in ('edit','full')` by
+      // the two enforcement sites, so it granted exactly what `edit` grants —
+      // offering it told an admin they had granted delete rights they had not
+      // (ADR-0078; #3865). Record sharing widens WHICH ROWS a principal
+      // reaches, never WHICH VERBS: delete/transfer come from ownership, the
+      // ADR-0057 DEPTH scopes, and admin scope. Stored `full` rows are
+      // normalised to `edit` on write and by the boot backfill.
+      ['read', 'edit'],
       {
         label: 'Access Level',
         required: true,
         defaultValue: 'read',
+        description: 'What the recipients may do with the matching records — read them, or read and edit them.',
         group: 'Recipient',
       },
     ),

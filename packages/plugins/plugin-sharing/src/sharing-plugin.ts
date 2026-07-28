@@ -76,6 +76,100 @@ export async function backfillRuleGrants(
 }
 
 /**
+ * [#3865] Boot backfill: normalise stored `access_level: 'full'` rows to
+ * `'edit'` on `sys_sharing_rule` and `sys_record_share`.
+ *
+ * `full` was declared "Full Access (Transfer, Share, Delete)" but no code path
+ * granted any of those verbs because of it — both enforcement gates matched
+ * `access_level in ('edit','full')`, so it was byte-equivalent to `edit`
+ * (ADR-0078 declared-but-unenforced). Having retired it from the authoring
+ * surface, this closes the loop on rows already persisted.
+ *
+ * **Behaviour-preserving by construction**: the two levels were already
+ * equivalent, so no principal gains or loses access. Contrast the OWD
+ * `sharingModel: 'full'` retirement (ADR-0090 D4), which changed posture and
+ * therefore had to be delegated to the author rather than auto-migrated.
+ *
+ * Writes with `isSystem` so the provenance stamp hook treats this as the
+ * package door, not an admin edit — a package-seeded rule must NOT come out of
+ * this marked `customized`, or the seeder would stop updating it forever
+ * (#2909 T1).
+ *
+ * Best-effort and idempotent: a missing table or a failed row is logged and
+ * skipped, never fatal to boot, and a second run finds nothing to do.
+ */
+export async function backfillRetiredAccessLevels(
+  engine: SharingEngine,
+  logger?: { info?: (msg: string, meta?: any) => void; warn?: (msg: string, meta?: any) => void },
+): Promise<{ rules: number; shares: number }> {
+  const BATCH = 500;
+  const SYS = { isSystem: true, positions: [], permissions: [] } as any;
+  const counts = { rules: 0, shares: 0 };
+
+  const normalizeObject = async (object: 'sys_sharing_rule' | 'sys_record_share'): Promise<number> => {
+    let migrated = 0;
+    // Re-query per batch rather than paginating: each pass mutates the very
+    // predicate it selects on, so offsets would skip rows. Bounded by a
+    // no-progress break so a silently-failing update can't spin forever.
+    for (;;) {
+      const rows = await engine.find(object, {
+        where: { access_level: 'full' },
+        fields: ['id'],
+        limit: BATCH,
+        context: SYS,
+      });
+      const batch = Array.isArray(rows) ? rows : [];
+      if (batch.length === 0) break;
+
+      let updatedThisPass = 0;
+      for (const row of batch) {
+        const id = (row as any)?.id;
+        if (!id) continue;
+        try {
+          await engine.update(object, { id, access_level: 'edit' }, { context: SYS });
+          updatedThisPass += 1;
+        } catch (err: any) {
+          logger?.warn?.('SharingServicePlugin: access-level backfill failed for row', {
+            object,
+            id,
+            error: err?.message,
+          });
+        }
+      }
+      migrated += updatedThisPass;
+      if (updatedThisPass === 0) {
+        logger?.warn?.('SharingServicePlugin: access-level backfill made no progress — stopping', {
+          object,
+          remaining: batch.length,
+        });
+        break;
+      }
+    }
+    return migrated;
+  };
+
+  for (const object of ['sys_sharing_rule', 'sys_record_share'] as const) {
+    try {
+      const migrated = await normalizeObject(object);
+      if (object === 'sys_sharing_rule') counts.rules = migrated;
+      else counts.shares = migrated;
+    } catch (err: any) {
+      // Table absent (plugin loaded without its objects) or driver refusing the
+      // filter — never fatal, the gates still honour `full` meanwhile.
+      logger?.warn?.('SharingServicePlugin: access-level backfill skipped', {
+        object,
+        error: err?.message,
+      });
+    }
+  }
+
+  if (counts.rules > 0 || counts.shares > 0) {
+    logger?.info?.("SharingServicePlugin: normalised retired access_level 'full' → 'edit'", counts);
+  }
+  return counts;
+}
+
+/**
  * SharingServicePlugin — registers `sys_record_share`, the `sharing`
  * service, and the engine middleware that enforces
  * `object.sharingModel`.
@@ -84,7 +178,7 @@ export async function backfillRuleGrants(
  *
  *   - `sharingModel: 'private'` → reads filtered to `(owner_id == me) OR
  *     (record explicitly shared with me)`. Writes require ownership or
- *     an `edit`/`full` share.
+ *     an `edit` share.
  *   - `sharingModel: 'public_read'` → reads unrestricted; writes gated as
  *     above (typical "everyone can see, only owner can edit").
  *   - any other value (or no value) → no enforcement. This keeps
@@ -115,6 +209,8 @@ export class SharingServicePlugin implements Plugin {
   private service?: SharingService;
   private ruleService?: SharingRuleService;
   private linkService?: ShareLinkService;
+  /** Resolved once in `kernel:ready`; reused by the `kernel:bootstrapped` backfills. */
+  private engine?: SharingEngine;
 
   constructor(options: SharingPluginOptions = {}) {
     this.options = options;
@@ -283,6 +379,7 @@ export class SharingServicePlugin implements Plugin {
         ctx.logger.warn('SharingServicePlugin: no ObjectQL engine — service NOT registered');
         return;
       }
+      this.engine = engine as SharingEngine;
 
       this.service = new SharingService({
         engine: engine as SharingEngine,
@@ -453,6 +550,16 @@ export class SharingServicePlugin implements Plugin {
     // has settled — so the reconcile sees the seeded rows. Idempotent: a runtime
     // write that already materialized a grant is reconciled to the same state.
     ctx.hook('kernel:bootstrapped', async () => {
+      // [#3865] Normalise retired `access_level: 'full'` rows FIRST, so the
+      // rule reconcile below materialises grants from already-canonical rules
+      // (and any `full` share rows it re-grants land as `edit` in one pass
+      // instead of being rewritten on the next boot).
+      try {
+        if (this.engine) await backfillRetiredAccessLevels(this.engine, ctx.logger as any);
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: access-level backfill (kernel:bootstrapped) failed', { error: err?.message });
+      }
+
       if (!this.ruleService) return;
       try {
         const rules = await this.ruleService.listRules({ activeOnly: true }, { isSystem: true } as any);

@@ -8,6 +8,7 @@ import type {
   SharingExecutionContext,
   ShareAccessLevel,
 } from '@objectstack/spec/contracts';
+import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
 
 /**
  * Shape of the data engine the service actually needs. Kept narrow so
@@ -188,9 +189,9 @@ export class SharingService implements ISharingService {
    * restriction applies (system/bypass, public objects, no owner field).
    *
    * Editable-set = owner-match (widened by write DEPTH) OR records shared to
-   * the caller at `edit`/`full`. Unlike reads, this applies to BOTH `private`
-   * and `read` (public_read) models — public_read is read-open but write-owned;
-   * only a fully `public` object is write-open.
+   * the caller at a {@link WRITE_ACCESS_LEVELS} level. Unlike reads, this
+   * applies to BOTH `private` and `read` (public_read) models — public_read is
+   * read-open but write-owned; only a fully `public` object is write-open.
    */
   async buildWriteFilter(
     object: string,
@@ -220,7 +221,7 @@ export class SharingService implements ISharingService {
         object_name: object,
         recipient_type: 'user',
         recipient_id: context.userId,
-        access_level: { $in: ['edit', 'full'] },
+        access_level: { $in: [...WRITE_ACCESS_LEVELS] },
       },
       fields: ['record_id'],
       limit: 5000,
@@ -268,14 +269,14 @@ export class SharingService implements ISharingService {
       if (owners.includes(String(owner))) return true;
     }
 
-    // 2) Explicit edit / full share.
+    // 2) Explicit write-level share (`edit`, plus not-yet-normalised `full`).
     const editGrants = await this.engine.find('sys_record_share', {
       where: {
         object_name: object,
         record_id: recordId,
         recipient_type: 'user',
         recipient_id: context.userId,
-        access_level: { $in: ['edit', 'full'] },
+        access_level: { $in: [...WRITE_ACCESS_LEVELS] },
       },
       fields: ['id'],
       limit: 1,
@@ -297,7 +298,12 @@ export class SharingService implements ISharingService {
     if (!input.recipientId) throw new Error('VALIDATION_FAILED: recipientId is required');
 
     const recipientType = input.recipientType ?? 'user';
-    const accessLevel: ShareAccessLevel = input.accessLevel ?? 'read';
+    // Validate BEFORE any write. Previously anything at all was persisted
+    // verbatim, so a typo'd level became a grant that no gate ever matched — a
+    // share row that looks granted and enforces nothing (#3865). `full`
+    // normalises to `edit` (what it always meant); everything unrecognised is a
+    // loud VALIDATION_FAILED the REST layer maps to 400.
+    const accessLevel: ShareAccessLevel = normalizeAccessLevel(input.accessLevel, 'read');
     const source = input.source ?? 'manual';
 
     // Upsert: if a row with same (object, record, recipient) exists,

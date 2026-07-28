@@ -31,8 +31,18 @@ export type ShareRecipientType =
   | 'unit_and_subordinates'
   | 'guest';
 
-/** Access level on a single record. */
-export type ShareAccessLevel = 'read' | 'edit' | 'full';
+/**
+ * Access level on a single record — the authorable subset, mirroring
+ * `SharingLevel` in spec/security.
+ *
+ * `full` ("Full Access (Transfer, Share, Delete)") was REMOVED: no code path
+ * ever granted transfer / re-share / delete because of it, so it was
+ * byte-equivalent to `edit` while telling admins otherwise (ADR-0078; #3865).
+ * Stored `'full'` rows are normalised to `'edit'` by the sharing plugin
+ * (grant-time + a boot backfill) and remain honoured by the read/write gates
+ * meanwhile, so widening this type back is never needed for compatibility.
+ */
+export type ShareAccessLevel = 'read' | 'edit';
 
 /** Why a share row exists (used by the rule evaluator to reconcile). */
 export type ShareSource = 'manual' | 'rule' | 'team' | 'inherited';

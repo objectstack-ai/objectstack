@@ -42,11 +42,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       access_level: {
         label: "Nivel de acceso",
-        help: "Lo que puede hacer el destinatario: read | edit | full (transfer/share/delete).",
+        help: "Lo que puede hacer el destinatario: leer, o leer y editar.",
         options: {
           read: "Leer",
-          edit: "Editar",
-          full: "Total"
+          edit: "Editar"
         }
       },
       source: {
@@ -146,10 +145,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       access_level: {
         label: "Nivel de acceso",
+        help: "Lo que los destinatarios pueden hacer con los registros coincidentes: leerlos, o leerlos y editarlos.",
         options: {
           read: "Leer",
-          edit: "Editar",
-          full: "Total"
+          edit: "Editar"
         }
       },
       active: {

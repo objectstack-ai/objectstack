@@ -42,11 +42,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       access_level: {
         label: "访问级别",
-        help: "接收方可以执行的操作——read | edit | full（转移 / 共享 / 删除）",
+        help: "接收方可以执行的操作——读取，或读取并编辑",
         options: {
           read: "读取",
-          edit: "编辑",
-          full: "完全访问"
+          edit: "编辑"
         }
       },
       source: {
@@ -146,10 +145,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       access_level: {
         label: "访问级别",
+        help: "接收方可以对匹配到的记录执行的操作——读取，或读取并编辑。",
         options: {
           read: "读取",
-          edit: "编辑",
-          full: "完全访问"
+          edit: "编辑"
         }
       },
       active: {

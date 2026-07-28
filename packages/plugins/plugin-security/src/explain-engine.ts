@@ -188,7 +188,15 @@ export interface ExplainEngineDeps {
   fetchRecord?: (object: string, recordId: string, engineOperation: string) => Promise<Record<string, unknown> | null>;
   /** The sharing service's own read-filter contribution for the object (owner-match OR granted-ids), same as enforcement AND-s in. */
   sharingReadFilter?: (object: string, context: any) => Promise<unknown | null>;
-  /** The concrete `sys_record_share` rows attached to the record (for `rules[]` attribution). */
+  /**
+   * The concrete `sys_record_share` rows attached to the record (for `rules[]`
+   * attribution).
+   *
+   * `access_level` stays wider than the authorable `read`/`edit`: explain
+   * REPORTS stored rows, and a `full` row written before #3865 retired that
+   * level (normalised to `edit` by the sharing plugin's boot backfill) must
+   * still be explainable rather than crash the panel.
+   */
   listRecordShares?: (
     object: string,
     recordId: string,

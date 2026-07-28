@@ -11,6 +11,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
+import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
 import { TeamGraphService } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
@@ -50,7 +51,11 @@ function rowFromRule(row: any): SharingRuleRow {
     criteria: parseCriteria(row.criteria_json),
     recipient_type: row.recipient_type as SharingRuleRecipientType,
     recipient_id: row.recipient_id,
-    access_level: row.access_level as ShareAccessLevel,
+    // Projected through the normaliser, not cast: a rule row stored before
+    // `full` was retired (#3865) must report the level it actually enforces.
+    // This also makes reconciliation self-healing — a `full` rule now differs
+    // from its `full` share rows, so the next pass re-grants them as `edit`.
+    access_level: normalizeStoredAccessLevel(row.access_level),
     active: row.active !== false,
     managed_by: row.managed_by ?? null,
     customized: row.customized === true,
@@ -93,7 +98,9 @@ export class SharingRuleService implements ISharingRuleService {
 
     const orgId = (context as any)?.organizationId ?? (context as any)?.tenantId ?? null;
     const now = new Date().toISOString();
-    const accessLevel: ShareAccessLevel = input.accessLevel ?? 'read';
+    // Authoring path — `full` normalises to `edit`, anything unrecognised is a
+    // loud VALIDATION_FAILED alongside the required-field checks above (#3865).
+    const accessLevel: ShareAccessLevel = normalizeAccessLevel(input.accessLevel, 'read');
     const active = input.active !== false;
     const criteriaJson = input.criteria == null
       ? null

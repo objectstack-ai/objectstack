@@ -96,11 +96,18 @@ export const ExplainMatchedRuleSchema = lazySchema(() => z.object({
   /** Identifier of the concrete rule/share/policy (sharing-rule name, policy id, share row id). */
   name: z.string().describe('Stable identifier of the concrete rule, share, or policy that was evaluated.'),
   /**
-   * For sharing sources: the access level this rule grants on the record
-   * (mirrors `SharingLevel` — read/edit/full).
+   * For sharing sources: the access level this rule grants on the record.
+   *
+   * Deliberately WIDER than the authorable `SharingLevel` (`read`/`edit`): this
+   * is a REPORTING surface over rows that already exist, and a not-yet-migrated
+   * `'full'` row (removed as authorable in #3865, normalised to `'edit'` by the
+   * sharing plugin's boot backfill) must still be explainable. Reporting a
+   * stored value must never throw — an explain panel that crashes on legacy
+   * data is worse than one that shows the legacy label. Do NOT copy this
+   * widening onto an authoring surface.
    */
   grants: z.enum(['read', 'edit', 'full']).optional()
-    .describe('Access level a sharing source grants on the record (mirrors SharingLevel).'),
+    .describe('Access level a sharing source grants on the record (authorable: read/edit; `full` appears only for legacy rows pending normalisation).'),
   /** How the rule reached the principal (e.g. `group:sales_team`, `position:approver`, `owner`, `criteria: status == open`). */
   via: z.string().optional()
     .describe('How the rule reached the principal — recipient group/position, ownership, or the matching criteria.'),

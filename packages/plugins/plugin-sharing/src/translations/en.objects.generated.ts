@@ -42,11 +42,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       access_level: {
         label: "Access Level",
-        help: "What the recipient can do — read | edit | full (transfer/share/delete)",
+        help: "What the recipient can do — read, or read and edit",
         options: {
           read: "read",
-          edit: "edit",
-          full: "full"
+          edit: "edit"
         }
       },
       source: {
@@ -146,10 +145,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       access_level: {
         label: "Access Level",
+        help: "What the recipients may do with the matching records — read them, or read and edit them.",
         options: {
           read: "read",
-          edit: "edit",
-          full: "full"
+          edit: "edit"
         }
       },
       active: {

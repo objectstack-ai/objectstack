@@ -299,8 +299,14 @@ const step16: MigrationStep = {
     '(`object`+`categoryField`+`valueField`+`aggregate`, pivot ' +
     '`rowField`/`columnField`) was already removed at protocol 9, so no mechanical ' +
     'rewrite applies; the residue is the strictness itself, delegated to the author ' +
-    'because an arbitrary unknown key has no lossless canonical target.',
-  conversionIds: [],
+    'because an arbitrary unknown key has no lossless canonical target.\n\n' +
+    'It also removed the sharing-rule access level `full` (#3865): declared as ' +
+    '"Full Access (Transfer, Share, Delete)" but never enforced as anything but ' +
+    '`edit`. Unlike the OWD `sharingModel: \'full\'` alias retired at step 13, this ' +
+    'one HAS a lossless target precisely because it was inert — old and new shapes ' +
+    'are behaviourally identical — so it converts mechanically and leaves no ' +
+    'semantic residue.',
+  conversionIds: ['sharing-rule-access-level-full-to-edit'],
   semantic: [
     {
       id: 'dashboard-widget-strict-unknown-keys',

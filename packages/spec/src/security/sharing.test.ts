@@ -43,7 +43,7 @@ describe('ShareRecipientType', () => {
 
 describe('SharingLevel', () => {
   it('should accept valid sharing levels', () => {
-    const validLevels = ['read', 'edit', 'full'];
+    const validLevels = ['read', 'edit'];
 
     validLevels.forEach(level => {
       expect(() => SharingLevel.parse(level)).not.toThrow();
@@ -53,6 +53,17 @@ describe('SharingLevel', () => {
   it('should reject invalid sharing levels', () => {
     expect(() => SharingLevel.parse('write')).toThrow();
     expect(() => SharingLevel.parse('delete')).toThrow();
+  });
+
+  it("rejects the retired 'full' level", () => {
+    // [#3865] `full` was declared "Full Access (Transfer, Share, Delete)" but
+    // no code path granted any of those verbs — both gates matched
+    // `edit`/`full` alike, so it was byte-equivalent to `edit` while telling
+    // admins otherwise. Declared-but-unenforced (ADR-0078 / ADR-0049), same
+    // reason `queue` and `guest` are rejected above. Stacks still authoring it
+    // are rewritten at load by the `sharing-rule-access-level-full-to-edit`
+    // conversion, so this rejection is reachable only via a direct parse.
+    expect(() => SharingLevel.parse('full')).toThrow();
   });
 });
 
@@ -229,7 +240,7 @@ describe('SharingRuleSchema', () => {
   });
 
   it('should accept different access levels', () => {
-    const levels: Array<SharingRule['accessLevel']> = ['read', 'edit', 'full'];
+    const levels: Array<SharingRule['accessLevel']> = ['read', 'edit'];
 
     levels.forEach(level => {
       const rule = SharingRuleSchema.parse({

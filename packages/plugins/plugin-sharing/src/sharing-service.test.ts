@@ -269,6 +269,19 @@ describe('SharingService.canEdit', () => {
     expect(await svc.canEdit('account', 'a1', { userId: 'bob' })).toBe(true);
   });
 
+  // [#3865] Enforcement stays deliberately WIDER than authoring: `full` is no
+  // longer grantable, but a row persisted before the boot backfill ran still
+  // means `edit`. Dropping it from the gate would silently REVOKE access.
+  it("still honours a stored 'full' share written before it was retired", async () => {
+    engine._tables.sys_record_share = [
+      {
+        id: 'shr_legacy', object_name: 'account', record_id: 'a1',
+        recipient_type: 'user', recipient_id: 'bob', access_level: 'full',
+      },
+    ];
+    expect(await svc.canEdit('account', 'a1', { userId: 'bob' })).toBe(true);
+  });
+
   it('enforces canEdit for sharingModel=read', async () => {
     expect(await svc.canEdit('lead', 'l1', { userId: 'alice' })).toBe(true);
     expect(await svc.canEdit('lead', 'l1', { userId: 'bob' })).toBe(false);
@@ -305,11 +318,38 @@ describe('SharingService.grant / listShares / revoke', () => {
 
   it('upserts on second call with same (object, record, recipient)', async () => {
     const a = await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob' }, { userId: 'admin' });
-    const b = await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'full' }, { userId: 'admin' });
+    const b = await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' }, { userId: 'admin' });
     expect(engine._tables.sys_record_share.length).toBe(1);
     expect(b.id).toBe(a.id);
-    expect(b.access_level).toBe('full');
+    expect(b.access_level).toBe('edit');
   });
+
+  // [#3865] `full` claimed "Full Access (Transfer, Share, Delete)" while both
+  // gates matched `edit`/`full` alike — it granted exactly `edit`. Retired from
+  // the authoring surface; an older client still sending it is normalised
+  // rather than rejected (that would revoke access it already had).
+  it("normalises the retired 'full' level to 'edit' instead of persisting it", async () => {
+    const r = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'full' as any },
+      { userId: 'admin' },
+    );
+    expect(r.access_level).toBe('edit');
+    expect(engine._tables.sys_record_share[0].access_level).toBe('edit');
+  });
+
+  it('rejects an unrecognised access level instead of silently persisting it', async () => {
+    // A level no gate matches is a grant that looks issued and enforces
+    // nothing — the same declared-but-inert trap `full` was (ADR-0078).
+    await expect(
+      svc.grant(
+        { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'admin' as any },
+        { userId: 'admin' },
+      ),
+    ).rejects.toThrow(/VALIDATION_FAILED/);
+    // Rejected before the upsert even queries — the table is never touched.
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
 
   it('listShares returns all grants on a record', async () => {
     await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob' }, { userId: 'admin' });

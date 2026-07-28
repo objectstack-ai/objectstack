@@ -42,11 +42,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       access_level: {
         label: "アクセスレベル",
-        help: "受信者に許可される操作 — read | edit | full（転送/共有/削除）",
+        help: "受信者に許可される操作 — 閲覧、または閲覧と編集",
         options: {
           read: "閲覧",
-          edit: "編集",
-          full: "フルアクセス"
+          edit: "編集"
         }
       },
       source: {
@@ -146,10 +145,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       access_level: {
         label: "アクセスレベル",
+        help: "対象レコードに対して受信者に許可される操作 — 閲覧、または閲覧と編集。",
         options: {
           read: "閲覧",
-          edit: "編集",
-          full: "フルアクセス"
+          edit: "編集"
         }
       },
       active: {

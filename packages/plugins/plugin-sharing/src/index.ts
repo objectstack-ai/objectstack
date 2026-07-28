@@ -40,8 +40,16 @@ export {
   SharingServicePlugin,
   buildSharingMiddleware,
   backfillRuleGrants,
+  backfillRetiredAccessLevels,
   type SharingPluginOptions,
 } from './sharing-plugin.js';
+export {
+  ACCESS_LEVELS,
+  WRITE_ACCESS_LEVELS,
+  isKnownAccessLevel,
+  normalizeAccessLevel,
+  normalizeStoredAccessLevel,
+} from './access-level.js';
 export type {
   ISharingService,
   ISharingRuleService,
