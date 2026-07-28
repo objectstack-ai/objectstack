@@ -323,7 +323,14 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
         },
       });
 
-      expect(results.length).toBeGreaterThan(0);
+      // Was `toBeGreaterThan(0)`, which any non-empty result satisfies. This
+      // particular shape was never miscompiled by #3774 — each `$or` branch
+      // holds a single `$and` key, so there were no sibling keys to wrongly OR
+      // — but the assertion was too weak to have noticed either way, which is
+      // the only reason it is worth tightening. Branch one is completed AND
+      // over 100 (Laptop 1200, Monitor 350); branch two is Alice AND pending
+      // (Keyboard).
+      expect(results.map((r: any) => r.id).sort()).toEqual(['1', '3', '4']);
     });
 
     it('should handle contains filter', async () => {
