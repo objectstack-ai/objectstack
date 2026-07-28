@@ -37,12 +37,12 @@ const GRANULARITIES: Granularity[] = ['day', 'month', 'quarter', 'year'];
  * in `packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts`, where
  * the reference side is the REAL `applyInMemoryAggregation`.
  */
-function bucketDateValue(value: unknown, g: Granularity): string {
-  if (value == null) return '(null)';
+function bucketDateValue(value: unknown, g: Granularity): string | null {
+  if (value == null) return null;
   // A finite number is epoch milliseconds — SQLite's `Field.datetime` storage.
   const d =
     value instanceof Date ? value : typeof value === 'number' ? new Date(value) : new Date(String(value));
-  if (Number.isNaN(d.getTime())) return '(null)';
+  if (Number.isNaN(d.getTime())) return null;
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth() + 1;
   switch (g) {
@@ -73,11 +73,21 @@ const FIXTURE: Array<{ id: string; iso: string; amount: number }> = [
   { id: 'r7', iso: '2026-07-01T00:00:00.000Z', amount: 64 }, // first instant of Q3
 ];
 
+/**
+ * Test-local key for the empty bucket. `String(null)` is `'null'` — a label a
+ * TEXT column could genuinely hold, and the coercion that used to hide the
+ * #3839 divergence: it made the SQL side's NULL and a sentinel string compare
+ * as different strings only by luck. Keying it out of band keeps "empty"
+ * unmistakable on both sides.
+ */
+const EMPTY = '‹empty bucket›';
+const labelOf = (v: unknown): string => (v == null ? EMPTY : String(v));
+
 /** The labels the in-memory path would produce, folded into bucket → sum. */
 function expectedBuckets(g: Granularity): Record<string, number> {
   const out: Record<string, number> = {};
   for (const row of FIXTURE) {
-    const key = bucketDateValue(row.iso, g);
+    const key = labelOf(bucketDateValue(row.iso, g));
     out[key] = (out[key] ?? 0) + row.amount;
   }
   return out;
@@ -88,7 +98,7 @@ async function bucketSums(driver: SqlDriver, field: string, g: Granularity) {
     groupBy: [{ field, dateGranularity: g }],
     aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
   } as any);
-  return Object.fromEntries(rows.map((r: any) => [String(r[field]), Number(r.total)]));
+  return Object.fromEntries(rows.map((r: any) => [labelOf(r[field]), Number(r.total)]));
 }
 
 describe('SqlDriver date bucketing is storage-form independent (#3773)', () => {
@@ -218,9 +228,11 @@ describe('SqlDriver date bucketing over a MIXED-form datetime column (#3773)', (
 
   it('leaves a NULL instant in its own bucket', async () => {
     const byMonth = await bucketSums(driver, 'closed_at', 'month');
-    // SQL NULL aliases to the string 'null' through `String(r[field])` — a
-    // pre-existing divergence from the in-memory label `'(null)'`, unchanged
-    // here and equally true of a TEXT-stored column.
-    expect(byMonth.null).toBe(8);
+    // SQL NULL propagates through the bucket expression, so the row lands in the
+    // empty bucket instead of under some real month. Since #3839 the in-memory
+    // path keys that bucket as `null` as well, so the two paths agree on it —
+    // the executable proof is `checkDateBucketParity`, whose fixture now carries
+    // a null instant for exactly this.
+    expect(byMonth[EMPTY]).toBe(8);
   });
 });

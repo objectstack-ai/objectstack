@@ -66,6 +66,7 @@ describe('checkDateBucketParity detects a driver whose SQL bucketing is wrong', 
       { id: 'b5', at: '2025-01-01T00:00:00.000Z', on: '2025-01-01', n: 1 },
       { id: 'b6', at: '2025-05-19T09:00:00.000Z', on: '2025-05-19', n: 1 },
       { id: 'b7', at: '2025-05-19T22:30:00.000Z', on: '2025-05-19', n: 1 },
+      { id: 'b8', at: null, on: null, n: 1 }, // the empty bucket (#3839)
     ];
     return {
       async connect() {},
@@ -117,9 +118,10 @@ describe('checkDateBucketParity detects a driver whose SQL bucketing is wrong', 
             return [
               { on: '2024', n: 4 },
               { on: '2025', n: 3 },
+              { on: null, n: 1 },
             ];
           }
-          return [{ at: null, n: 7 }];
+          return [{ at: null, n: 8 }];
         },
         supports: { queryDateGranularity: { year: true } },
       }) as never,
@@ -128,6 +130,33 @@ describe('checkDateBucketParity detects a driver whose SQL bucketing is wrong', 
     expect(problems.join('\n')).toMatch(
       /describe the same days but bucket differently/,
     );
+  });
+
+  // #3839's shape, and the reason the fixture now carries a null instant. This
+  // driver buckets every real instant correctly and disagrees on ONE row: the
+  // empty one, which it spells as a sentinel string instead of NULL. That is
+  // precisely what the in-memory path did before #3839 — and with the old
+  // `String(row[field])` keying, `'null'` would have compared EQUAL to a real
+  // `null` and this check would have passed a driver that is out of step.
+  it.each([
+    ['the legacy in-memory sentinel', '(null)'],
+    ['a stringified SQL NULL', 'null'],
+  ])('flags a driver that spells the empty bucket as %s', async (_label, sentinel) => {
+    const problems = await checkDateBucketParity(
+      brokenDriver({
+        async aggregate(_object: string, query: any) {
+          const field = query.groupBy[0].field;
+          return [
+            { [field]: '2024', n: 4 },
+            { [field]: '2025', n: 3 },
+            { [field]: sentinel, n: 1 },
+          ];
+        },
+        supports: { queryDateGranularity: { year: true } },
+      }) as never,
+    );
+    expect(problems.join('\n')).toMatch(/pushed-down SQL and in-memory bucketing disagree/);
+    expect(problems.join('\n')).toContain(sentinel);
   });
 
   it('stays quiet on a driver that advertises nothing', async () => {

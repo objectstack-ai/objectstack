@@ -21,9 +21,25 @@
 //     possible; the in-memory fallback ignores the per-aggregation filter and
 //     logs a warning if one is present.
 //
-// Date bucketing uses ISO-8601 conventions (weeks start Monday). Null /
-// invalid values bucket as the literal string `'(null)'` to remain
-// consistent with the client `useReportData` hook.
+// Date bucketing uses ISO-8601 conventions (weeks start Monday).
+//
+// THE EMPTY BUCKET'S KEY IS REAL `null` — not a sentinel string (#3839). A
+// grouped row whose value is null/absent (or, for a date bucket, unparseable)
+// carries `null` for that dimension, which is what the pushed-down SQL path
+// emits for the same row: the group column is SQL NULL, or `strftime(...)` /
+// `date_trunc(...)` returns NULL for a NULL input. Both paths therefore
+// describe "empty" the same way, and `engine.aggregate` picking one per query
+// — by driver, granularity, or reference timezone — can no longer change the
+// TYPE of a bucket key under a dashboard that drills across the seam.
+//
+// This previously emitted the literal `'(null)'` "to remain consistent with
+// the client `useReportData` hook". That hook was deleted with ADR-0021 (its
+// epitaph is objectui `packages/plugin-report/src/index.tsx`), and the string
+// never appeared in it anyway. What the string DID do was defeat every
+// downstream `== null` check: consumers render their own empty label ('—',
+// '(empty)', a localized "Uncategorized") and build drill filters as
+// `field = null`, so a sentinel leaked a raw English debug string into the UI
+// and turned the empty bucket's drill-through into a zero-row query.
 
 import { calendarPartsInTzOrUtc } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
@@ -59,7 +75,11 @@ export function applyInMemoryAggregation(
       const fieldName = typeof g === 'string' ? g : (g.alias ?? g.field);
       const value = projectGroupValue(row, g, timezone);
       key[fieldName] = value;
-      parts.push(`${fieldName}=${value}`);
+      // JSON-encoded so the empty bucket's `null` key cannot collide with a row
+      // whose value is the literal STRING `"null"` — plain interpolation renders
+      // both as `null` and would merge two distinct groups. This id is internal
+      // to the bucketing loop; only `key` is emitted.
+      parts.push(`${fieldName}=${JSON.stringify(value)}`);
     }
     const id = parts.join('\u0001');
     let bucket = buckets.get(id);
@@ -78,13 +98,15 @@ export function applyInMemoryAggregation(
   return out;
 }
 
-function projectGroupValue(row: any, g: GroupByNode, timezone?: string): string {
+function projectGroupValue(row: any, g: GroupByNode, timezone?: string): string | null {
   const field = typeof g === 'string' ? g : g.field;
   const v = row?.[field];
   if (typeof g !== 'string' && g.dateGranularity) {
     return bucketDateValue(v, g.dateGranularity, timezone);
   }
-  return v == null ? '(null)' : String(v);
+  // `null`, not a sentinel string — same key the pushed-down SQL gives a NULL
+  // group column (#3839). See the empty-bucket note at the top of this file.
+  return v == null ? null : String(v);
 }
 
 function aggregateBucket(rows: any[], aggregations: AggregationNode[]): Record<string, any> {
@@ -199,23 +221,29 @@ function toNumber(v: any): number {
  * A finite NUMBER is read as epoch milliseconds — the form SQLite stores a
  * `Field.datetime` in, and what any driver that hands back raw storage values
  * yields. `new Date(String(1767225600000))` is an Invalid Date, so without this
- * branch such a row bucketed as `'(null)'` while the pushed-down SQL bucketed it
- * correctly (#3773) — the two paths must label the same instant identically or a
- * drill-down built on one breaks against the other.
+ * branch such a row landed in the empty bucket while the pushed-down SQL
+ * bucketed it correctly (#3773) — the two paths must label the same instant
+ * identically or a drill-down built on one breaks against the other.
+ *
+ * Returns `null` for a null/absent or unparseable instant — the same key the
+ * pushed-down SQL yields, where the bucket expression propagates NULL (#3839).
+ * Null and unparseable deliberately share one bucket: SQL cannot tell them
+ * apart either (`strftime('%Y-%m', 'not-a-date')` is NULL), and splitting them
+ * here would re-open the seam this function exists to close.
  */
 export function bucketDateValue(
   value: unknown,
   granularity: DateGranularityValue,
   timezone?: string,
-): string {
-  if (value == null) return '(null)';
+): string | null {
+  if (value == null) return null;
   const d =
     value instanceof Date
       ? value
       : typeof value === 'number'
         ? new Date(value)
         : new Date(String(value));
-  if (Number.isNaN(d.getTime())) return '(null)';
+  if (Number.isNaN(d.getTime())) return null;
   const { year: y, month: m, day } = calendarPartsInTzOrUtc(d, timezone);
   switch (granularity) {
     case 'year':

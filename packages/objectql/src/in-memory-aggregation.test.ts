@@ -76,13 +76,44 @@ describe('applyInMemoryAggregation', () => {
     expect(east!.owner_str).toBe('alice,alice,bob');
   });
 
-  it('treats null group values as the literal (null) bucket', () => {
-    const dataset = [{ stage: null, amount: 10 }, { stage: 'won', amount: 5 }];
+  // #3839 — this used to be the literal string `'(null)'`, which the pushed-down
+  // SQL path never produced (a NULL group column stays SQL NULL). The engine
+  // picks between the two paths per query, so the bucket key's TYPE changed
+  // under a dashboard when the driver, the granularity or the timezone changed.
+  it('keys the empty bucket as real null, like the pushed-down SQL', () => {
+    const dataset = [
+      { stage: null, amount: 10 },
+      { stage: undefined, amount: 1 },
+      { stage: 'won', amount: 5 },
+      { amount: 2 }, // field absent entirely
+    ];
     const out = applyInMemoryAggregation(dataset, {
       groupBy: ['stage'],
       aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
     });
-    expect(out.find((r) => r.stage === '(null)')!.total).toBe(10);
+    // null / undefined / absent all describe the same emptiness → one bucket.
+    const empty = out.filter((r) => r.stage === null);
+    expect(empty).toHaveLength(1);
+    expect(empty[0].total).toBe(13);
+    // …and it is a real null, not a string that happens to read like one.
+    expect(out.some((r) => typeof r.stage === 'string' && /null/i.test(r.stage))).toBe(false);
+  });
+
+  // The empty bucket's key is now `null`, and `${null}` is the string 'null' —
+  // so a row whose value IS the string "null" would merge into the empty bucket
+  // if the internal bucket id were built by plain interpolation.
+  it('keeps the empty bucket distinct from the literal string "null"', () => {
+    const dataset = [
+      { stage: null, amount: 10 },
+      { stage: 'null', amount: 5 },
+    ];
+    const out = applyInMemoryAggregation(dataset, {
+      groupBy: ['stage'],
+      aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+    });
+    expect(out).toHaveLength(2);
+    expect(out.find((r) => r.stage === null)!.total).toBe(10);
+    expect(out.find((r) => r.stage === 'null')!.total).toBe(5);
   });
 });
 
@@ -101,9 +132,13 @@ describe('bucketDateValue', () => {
     expect(bucketDateValue('2024-12-30', 'week')).toBe('2025-W01');
   });
 
-  it('returns (null) for null / invalid dates', () => {
-    expect(bucketDateValue(null, 'month')).toBe('(null)');
-    expect(bucketDateValue('not-a-date', 'month')).toBe('(null)');
+  // #3839 — `null`, not a sentinel string. SQL propagates NULL through the
+  // bucket expression for both of these (`strftime('%Y-%m', 'not-a-date')` is
+  // NULL), so the two paths agree on the empty bucket as well as the full ones.
+  it('returns null for null / invalid dates', () => {
+    expect(bucketDateValue(null, 'month')).toBeNull();
+    expect(bucketDateValue(undefined, 'month')).toBeNull();
+    expect(bucketDateValue('not-a-date', 'month')).toBeNull();
   });
 
   // #3773 — parity with the pushed-down SQL. SQLite stores a `Field.datetime`
