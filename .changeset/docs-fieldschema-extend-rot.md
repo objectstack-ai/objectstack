@@ -20,10 +20,21 @@ time, which makes it a **`ZodPipe`, not a `ZodObject`** — `.extend` is `undefi
 on it (verified against the built package). Anyone following the FAQ got a
 `not a function` throw. The example also used `z` without importing it.
 
-Rewritten to `FieldSchema.in.extend({ … })` — `.in` is the input object the pipe
-wraps — verified to parse, and marked so the gate holds it. It also now names why
-(the same applies to `ObjectSchema` / `ActionSchema`) and warns that the extended
-schema no longer runs the transform.
+Rewritten to **compose** — parse with `FieldSchema`, validate your additions
+alongside it — verified to both type-check and run. `.in.extend()` is mentioned in
+prose as the merged-schema route, with the caveat that it skips the transform.
+
+**A divergence worth knowing about, found while fixing this.** The first fix used
+`FieldSchema.in.extend(…)` in the checked block. It passed locally and failed in
+CI with `Property 'in' does not exist on type 'ZodObject<…>'` — the two builds
+emit **different declarations for the same source**: locally
+`z.ZodPipe<z.ZodObject<…>>`, in CI a plain `z.ZodObject`. The runtime is
+unambiguous (`bound ZodPipe`, `.extend === undefined`, verified after a clean
+`rm -rf dist && pnpm build`), so **CI's declaration contradicts the value it
+describes** — `.extend()` type-checks there and throws at runtime. Probably
+inference instability in the DTS bundling of these very large zod types; worth its
+own investigation. The example now uses only `.parse()`, so it is correct under
+either declaration and the doc is not hostage to which one you get.
 
 **The sweep's method is recorded in the gate's docstring**, because two traps make
 a naive pass report a confident "nothing found":
