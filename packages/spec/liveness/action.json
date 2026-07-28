@@ -44,8 +44,8 @@
     },
     "execute": {
       "status": "live",
-      "evidence": "objectui packages/core/src/actions/ActionRunner.ts:704 (executeScript reads action.execute) + framework packages/spec/src/ui/action.zod.ts:577-580 (.transform lowers execute -> target)",
-      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Verdict stands but for a different reason: TWO independent runtime readers exist. NOTE a live divergence — the spec transform keeps `target` when both are set (action.test.ts:1032), while ActionRunner does `execute || target`, so an action declaring both runs different code client- vs server-side."
+      "evidence": "packages/spec/src/ui/action.zod.ts:581 — the .transform lowers execute -> target and DROPS the alias, so authoring it changes what the runtime dispatches; `target` is the one slot every consumer reads",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Verdict stands, but the real reader is the parse-time lowering, not a second field reader. DIVERGENCE RESOLVED in #3713: the alias is now consumed at parse time and removed from the output, so the 'both declared' conflict is unrepresentable rather than merely agreed-upon (mirrors agent.knowledge.topics -> sources, #1891). Before that fix three readers disagreed in two directions — this transform kept `target`, objectui ActionRunner did `execute || target`, and the CLI compile step (packages/cli/src/utils/lower-callables.ts) preferred a function on `execute`; all now prefer `target`. Note the server runtime never read `execute` at all (runtime/src/action-execution.ts gates on `target || body` and dispatches on `target`/`name`), which is why lowering is the whole of this property's liveness."
     },
     "params": {
       "status": "live",

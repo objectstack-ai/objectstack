@@ -87,7 +87,7 @@ const result = Action.parse(data);
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
 | **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'crypto.hash' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. |
-| **execute** | `string` | optional | @deprecated — Use target instead. Auto-migrated to target during parsing. |
+| **execute** | `string` | optional | @deprecated — Use target instead. Lowered into target during parsing and dropped from the parsed output; when both are set, target wins. |
 | **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string; … }[]` | optional | Input parameters required from user |
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent) |
 | **order** | `number` | optional | Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order. |

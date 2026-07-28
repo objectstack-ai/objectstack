@@ -51,7 +51,7 @@ The `type` field selects how an action is dispatched. The complete enum is **`sc
 | `api` | Call an API endpoint (`method` defaults to `POST`). | Yes |
 | `form` | Open a FormView by name, routed to `/console/forms/:name`. | Yes |
 
-`target` is the canonical binding for every non-`script` type. The deprecated `execute` field is auto-migrated to `target` during parsing.
+`target` is the canonical binding for every non-`script` type. The deprecated `execute` field is lowered into `target` during parsing and then **removed from the parsed metadata**, so every consumer — server dispatch and renderer alike — reads exactly one slot. If an action declares both, `target` wins and `execute` is discarded.
 
 ### Script Actions
 
