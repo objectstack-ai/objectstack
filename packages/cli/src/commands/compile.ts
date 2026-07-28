@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
-import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, normalizeStackInput, lintDeprecatedAliases } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { validateStackExpressions } from '@objectstack/lint';
@@ -94,6 +94,53 @@ export default class Compile extends Command {
       // 2. Normalize map-formatted stack definition.
       if (!flags.json) printStep('Normalizing stack definition...');
       const normalized = normalizeStackInput(config as Record<string, unknown>);
+
+      // 2a. [#3743] PRE-PARSE authoring lint. Everything in the post-parse lint
+      //     block (3d and below) reads `result.data`, which is the wrong side of
+      //     the fence for an alias the pipeline itself consumes: `lowerCallables`
+      //     drops a function-valued `execute` and the `ActionSchema` transform
+      //     drops a string one (#3742), so by then "the author declared both
+      //     slots" is no longer representable. This pass runs on `normalized` —
+      //     before lowering, before parse — where both slots are still as
+      //     written, and it is the same input `os validate` lints, so the two
+      //     surfaces agree by construction (#3782).
+      //
+      //     It reports the discards THIS pipeline performs. A stack authored
+      //     with strict `defineStack` has already been parsed inside its own
+      //     config module, so its alias was consumed — and warned about — there;
+      //     this pass covers everything that skipped that gate: a plain object
+      //     default-export, `defineStack(…, { strict: false })`, and inline
+      //     function handlers (`target: z.string()` rejects those, so they can
+      //     only reach the pipeline via a non-strict path and are lowered here).
+      //
+      //     Advisory today; `severity: 'error'` is honoured so a future rule
+      //     gates the build here without further wiring.
+      if (!flags.json) printStep('Checking deprecated aliases (#3743)...');
+      const aliasLint = lintDeprecatedAliases(normalized as Record<string, unknown>);
+      const aliasLintErrors = aliasLint.filter((f) => f.severity === 'error');
+      const aliasLintWarnings = aliasLint.filter((f) => f.severity !== 'error');
+      if (aliasLintWarnings.length > 0 && !flags.json) {
+        console.log('');
+        for (const f of aliasLintWarnings) {
+          printWarning(`${f.where}: ${f.message}`);
+          console.log(chalk.dim(`    ${f.hint}`));
+          console.log(chalk.dim(`    rule: ${f.rule}`));
+        }
+      }
+      if (aliasLintErrors.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, error: 'deprecated alias check failed', issues: aliasLintErrors }, 0, { compact: true });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Deprecated alias check failed (${aliasLintErrors.length} issue${aliasLintErrors.length > 1 ? 's' : ''})`);
+        for (const f of aliasLintErrors) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}`));
+        }
+        this.exit(1);
+      }
 
       // 2b. Lower inline `function` handlers (Hook.handler, top-level
       //     `functions`) to stable string refs BEFORE Zod parse. This

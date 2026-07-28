@@ -92,6 +92,33 @@ describe('lowerCallables — action handler slot precedence (#3713)', () => {
     expect(result.count).toBe(0);
   });
 
+  // #3743: "`target` first" meant "a CALLABLE `target` first", which left one
+  // combination still resolving the alias's way — a string `target` beside a
+  // function `execute` bundled the alias and then overwrote the canonical ref
+  // the author wrote. Same inversion as above, one slot type over.
+  it('keeps a string `target` when the alias holds an inline function', () => {
+    const result = lowerCallables({
+      actions: [{
+        name: 'mixed',
+        label: 'Mixed',
+        type: 'script',
+        target: 'preferredHandler',
+        execute: function legacyHandler() { return 'legacy'; },
+      }],
+    });
+
+    const [action] = actionsOf(result);
+    expect(action.target).toBe('preferredHandler');
+    expect(result.count).toBe(0);
+    // The losing alias still has to go: a function value is not JSON-safe and
+    // `ActionSchema` expects a string, so leaving it would trade the silent
+    // discard for a confusing parse error. `lintDeprecatedAliases` is what
+    // tells the author which handler they lost (#3743).
+    expect('execute' in action).toBe(false);
+    expect(() => JSON.stringify(result.lowered)).not.toThrow();
+    expect(JSON.stringify(result.lowered)).not.toContain('legacy');
+  });
+
   it('applies the same precedence to actions nested under an object', () => {
     const result = lowerCallables({
       objects: [{

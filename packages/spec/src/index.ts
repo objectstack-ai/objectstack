@@ -107,6 +107,12 @@ export { suggestFieldType, findClosestMatches, formatSuggestion } from './shared
 export { normalizeMetadataCollection, normalizeStackInput, normalizePluginMetadata, MAP_SUPPORTED_FIELDS, METADATA_ALIASES } from './shared/metadata-collection.zod';
 export type { MetadataCollectionInput, MapSupportedField, NormalizeStackInputOptions } from './shared/metadata-collection.zod';
 
+// Pre-parse authoring lint (#3743) — the one window where a deprecated alias is
+// still visible, since the parse itself resolves and drops it. `defineStack`
+// warns from here; the CLI runs the same rules over stacks that skip it.
+export { lintDeprecatedAliases, formatDeprecatedAliasFinding, ACTION_TARGET_EXECUTE_CONFLICT } from './shared/deprecated-aliases';
+export type { DeprecatedAliasFinding } from './shared/deprecated-aliases';
+
 // Metadata conversion layer (ADR-0087 D2) — old-shape → canonical-shape transforms applied at load.
 export * from './conversions/index.js';
 
