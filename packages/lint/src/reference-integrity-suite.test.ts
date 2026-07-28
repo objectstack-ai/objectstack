@@ -21,6 +21,7 @@ describe('reference-integrity suite — membership', () => {
       'validateChartBindings',
       'validateNavAccess',
       'validateTranslationReferences',
+      'validateAiSurfaceAffinity',
     ]);
   });
 
@@ -106,6 +107,10 @@ describe('reference-integrity suite — every member actually runs', () => {
       // validateTranslationReferences: a field the object does not declare.
       { en: { objects: { crm_lead: { label: 'Lead', fields: { assigned_to: { label: 'Owner' } } } } } },
     ],
+    // validateAiSurfaceAffinity: an 'ask' agent binding a 'build' skill — the
+    // runtime throws on this at chat time (ADR-0064 §3).
+    agents: [{ name: 'helper', surface: 'ask', skills: ['metadata_authoring'] }],
+    skills: [{ name: 'metadata_authoring', surface: 'build', tools: [] }],
   };
 
   it('reports at least one finding from every member', () => {
@@ -118,6 +123,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('chart-measure-unknown');
     expect(rules).toContain('nav-object-ungranted');
     expect(rules).toContain('translation-target-unknown');
+    expect(rules).toContain('ai-skill-surface-mismatch');
   });
 
   it('concatenates in list order and carries the common finding shape', () => {
@@ -131,9 +137,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, translations last.
+    // Object references run first, AI surface affinity last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('translation-target-unknown');
+    expect(findings[findings.length - 1].rule).toBe('ai-skill-surface-mismatch');
   });
 
   it('returns nothing for an empty stack', () => {

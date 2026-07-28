@@ -36,7 +36,7 @@ export const appForm = defineForm({
       fields: [
         { field: 'objects', widget: 'object-selector', multiple: true, helpText: 'Object names this app exposes' },
         { field: 'apis', type: 'composite', helpText: 'API endpoint definitions' },
-        { field: 'defaultAgent', type: 'text', helpText: 'AI agent for the ambient assistant button' },
+        { field: 'defaultAgent', type: 'text', helpText: "Platform agent for the ambient assistant ('ask' by default; 'build' for authoring surfaces)" },
       ],
     },
     {

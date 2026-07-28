@@ -290,19 +290,29 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    *
    * Three-tier composition (Agent → Skill → Tool) aligned with Salesforce
    * Agentforce Topics, Microsoft Copilot Studio Topics, and ServiceNow Now
-   * Assist Skills:
+   * Assist Skills. Per ADR-0063, **skills (+ tools / MCP) are the only
+   * third-party extension primitive**:
    *
-   * - **agents**: Persona-bearing copilots (1-3 per app). Each agent declares
-   *   its base instructions, model, knowledge, and the set of skills it can
-   *   draw on. Users typically don't pick an agent per message — the active
-   *   app's `defaultAgent` is selected automatically.
-   * - **skills**: Reusable capability bundles ("topics" in Salesforce parlance).
-   *   Each skill groups related tools, declares trigger phrases for
+   * - **agents**: PLATFORM-INTERNAL (ADR-0063 §2). The kernel ships exactly
+   *   two agents — `ask` (data product) and `build` (authoring product) —
+   *   bound by surface, never picked from a roster. Tenant/app-package custom
+   *   agents were withdrawn (ADR-0040 §3 reversed): an agent declared here
+   *   parses, but the runtime catalog filters non-platform agent records, so
+   *   it is not a supported extension surface. Author skills instead.
+   * - **skills**: Reusable capability bundles ("topics" in Salesforce
+   *   parlance) — THE extension primitive. Each skill groups related tools,
+   *   declares its agent surface affinity (`'ask' | 'build' | 'both'`,
+   *   ADR-0063 §3 — checked by lint, enforced at load), trigger phrases for
    *   intent matching, and trigger conditions for context-aware activation.
+   * - **tools**: declaration-only metadata records today. The EXECUTABLE tool
+   *   set is runtime-registered (kernel + plugins); a `stack.tools` entry has
+   *   no handler binding and no runtime reader yet. The third-party tool
+   *   authoring model is an open decision (#3820 D0) — until it lands, a
+   *   skill's `tools[]` can only name runtime-registered tools.
    */
-  agents: z.array(AgentSchema).optional().describe('AI Agents and Assistants'),
-  tools: z.array(ToolSchema).optional().describe('AI Tools (callable functions referenced by Skills/Agents)'),
-  skills: z.array(SkillSchema).optional().describe('AI Skills (reusable capability bundles referenced by Agents)'),
+  agents: z.array(AgentSchema).optional().describe('AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents'),
+  tools: z.array(ToolSchema).optional().describe('AI Tool metadata records (declaration-only; the executable tool set is runtime-registered — see #3820 D0)'),
+  skills: z.array(SkillSchema).optional().describe('AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063)'),
 
   /**
    * ObjectQL: Data Extensions

@@ -221,6 +221,15 @@ export type {
   TranslationRefSeverity,
 } from './validate-translation-references.js';
 
+export {
+  validateAiSurfaceAffinity,
+  AI_SKILL_SURFACE_MISMATCH,
+} from './validate-ai-surface-affinity.js';
+export type {
+  AiSurfaceAffinityFinding,
+  AiSurfaceAffinitySeverity,
+} from './validate-ai-surface-affinity.js';
+
 // One entry point for the reference-resolution rules above (#3583 §5 D5).
 // Adding a rule to `REFERENCE_INTEGRITY_RULES` runs it on `validate`, `lint`
 // and `compile` at once — the CLI call sites do not change.
