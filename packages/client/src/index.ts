@@ -1274,14 +1274,13 @@ export class ObjectStackClient {
       return this.unwrapResponse<{ drivers: Array<{ name: string; driverId: string }>; total: number }>(res);
     },
 
-    /**
-     * List available project templates. Templates are seeded into the project
-     * database once at provisioning time when `template_id` is supplied.
-     */
-    listTemplates: async () => {
-      const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/templates`);
-      return this.unwrapResponse<{ templates: Array<{ id: string; label: string; description: string; category?: string }>; total: number }>(res);
-    },
+    // The former `listTemplates` was removed in #3702 — it built
+    // `GET /api/v1/cloud/templates`, which nothing mounts in this repo or in
+    // `cloud` (the string occurred exactly once in each: at the call itself),
+    // so every invocation was a 404. Templates are a DATA concept — the
+    // `sys_package_templates` view over `sys_package` (`is_starter = true`) —
+    // never a route; `cloud`'s ledger pins that absence deliberately. It comes
+    // back when a route exists to back it, with an `sdk` ledger row proving so.
 
     /**
      * Per-project package installation management (Power Apps "solution" model).

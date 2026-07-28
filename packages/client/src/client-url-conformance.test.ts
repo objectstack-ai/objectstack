@@ -139,7 +139,10 @@ function matches(verb: string, path: string): Pattern | undefined {
  * it is a statement about where the coverage lives, not that there is none.
  *
  * That guard immediately found `projects.listTemplates` building
- * `/api/v1/cloud/templates`, which no registrar in either repo mounts (#3702).
+ * `/api/v1/cloud/templates`, which no registrar in either repo mounts — the
+ * sixth instance of the class above, and the first one only a cross-repo guard
+ * could see. The method has since been deleted (#3702): the route was never
+ * mounted anywhere, so there was nothing to reconcile it against.
  *
  * Exempt by PREFIX, and bounded from both ends: the assertions below pin which
  * methods are allowed to use it, so the hole cannot quietly widen into a place
