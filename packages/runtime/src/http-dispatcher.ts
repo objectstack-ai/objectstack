@@ -171,6 +171,15 @@ export class HttpDispatcher {
      */
     private readonly domainRegistry = new DomainHandlerRegistry();
     /**
+     * Short-TTL memo for `/ready`'s driver probe (framework#3756). Kubernetes
+     * polls readiness every few seconds per replica; without this, every poll
+     * would be a database round-trip. One second is short enough that the
+     * verdict tracks an outage within a single probe interval and long enough
+     * that concurrent probes collapse onto one query.
+     */
+    private driverHealthMemo?: { at: number; unhealthy: string[] };
+    private static readonly DRIVER_HEALTH_TTL_MS = 1_000;
+    /**
      * When `true`, scoped data-plane routes enforce a
      * `sys_environment_member` lookup and return 403 for non-members.
      * Defaults to `true` when a environmentId is resolvable — legacy callers
@@ -281,6 +290,15 @@ export class HttpDispatcher {
      */
     private registerBuiltinDomains(): void {
         // GET /health — liveness probe (was branch "0b").
+        //
+        // Deliberately checks NOTHING beyond "this process is executing code",
+        // and must stay that way (framework#3756). A failing liveness probe
+        // makes the orchestrator RESTART the pod — which cannot fix an
+        // unreachable database, but would put every replica into a restart
+        // storm for the duration of the outage and kill in-flight requests
+        // that had nothing to do with the data layer. The dependency check
+        // belongs on `/ready`, whose failure mode (leave the LB rotation) is
+        // the one that actually helps.
         this.domainRegistry.register({
             prefix: '/health', match: 'exact', methods: ['GET'],
             handler: async () => ({
@@ -294,19 +312,32 @@ export class HttpDispatcher {
             }),
         });
         // GET /ready — k8s / load-balancer readiness probe (was branch "0b2").
-        // 200 only when the kernel is fully running; 503 while booting
-        // (idle/initializing) or shutting down (stopping/stopped) so a load
-        // balancer stops routing to this replica BEFORE in-flight requests
-        // are drained and the server closes (graceful rolling restart).
+        // 200 only when the kernel is fully running AND the data drivers can
+        // serve a query. 503 while booting (idle/initializing) or shutting down
+        // (stopping/stopped) so a load balancer stops routing to this replica
+        // BEFORE in-flight requests are drained and the server closes (graceful
+        // rolling restart) — and 503 when a driver is down, so a replica that
+        // would fail 100% of its requests leaves the rotation instead of
+        // absorbing traffic (framework#3756).
         this.domainRegistry.register({
             prefix: '/ready', match: 'exact', methods: ['GET'],
             handler: async () => {
                 const state: string = typeof (this.kernel as any)?.getState === 'function'
                     ? (this.kernel as any).getState()
                     : 'running';
-                return state === 'running'
+                if (state !== 'running') {
+                    return { handled: true, response: this.error('Service not ready', 503, { state }) };
+                }
+                const unhealthy = await this.unhealthyDrivers();
+                return unhealthy.length === 0
                     ? { handled: true, response: this.success({ status: 'ready', state }) }
-                    : { handled: true, response: this.error('Service not ready', 503, { state }) };
+                    : {
+                        handled: true,
+                        response: this.error('Data driver unavailable', 503, {
+                            state,
+                            drivers: unhealthy,
+                        }),
+                    };
             },
         });
         this.domainRegistry.register(createAnalyticsDomain(this.domainDeps));
@@ -335,6 +366,46 @@ export class HttpDispatcher {
      */
     registerDomainHandler(route: DomainRoute): void {
         this.domainRegistry.register(route);
+    }
+
+    /**
+     * Names of the data drivers that cannot serve a query right now, for
+     * `/ready` (framework#3756). Empty means "no reason to leave the LB
+     * rotation" — which includes every case where we cannot tell.
+     *
+     * Fails OPEN by design, and the asymmetry is deliberate: readiness gates
+     * whether this replica receives ANY traffic, so an inconclusive probe must
+     * not black-hole a working deployment. A kernel with no data engine (lite
+     * kernels, edge, metadata-only hosts), an engine predating
+     * `checkDriversHealth`, or a probe that itself throws all read as ready —
+     * exactly as they did before this check existed. Only a driver that
+     * positively reports itself unhealthy takes the replica out.
+     */
+    private async unhealthyDrivers(): Promise<string[]> {
+        const memo = this.driverHealthMemo;
+        if (memo && Date.now() - memo.at < HttpDispatcher.DRIVER_HEALTH_TTL_MS) {
+            return memo.unhealthy;
+        }
+        let unhealthy: string[] = [];
+        try {
+            let engine: any;
+            try {
+                engine = (this.kernel as any)?.getService?.('data');
+            } catch {
+                // 'data' not registered — no data plane to gate readiness on.
+            }
+            if (typeof engine?.checkDriversHealth === 'function') {
+                const results = await engine.checkDriversHealth();
+                unhealthy = (Array.isArray(results) ? results : [])
+                    .filter((r: any) => r && r.healthy === false)
+                    .map((r: any) => String(r.driverName));
+            }
+        } catch {
+            // The probe itself failed — inconclusive, not unhealthy. See above.
+            unhealthy = [];
+        }
+        this.driverHealthMemo = { at: Date.now(), unhealthy };
+        return unhealthy;
     }
 
     private resolveDefaultProject(): { environmentId: string; orgId?: string } | undefined {

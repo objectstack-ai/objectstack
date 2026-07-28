@@ -39,7 +39,7 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.
 export { DriverConnectError } from './driver-connect-errors.js';
-export type { DriverConnectFailure } from './driver-connect-errors.js';
+export type { DriverConnectFailure, DriverHealth } from './driver-connect-errors.js';
 export type { InsertManyRowOutcome } from './engine.js';
 
 // Export in-memory aggregation fallback (used by engine.aggregate when the

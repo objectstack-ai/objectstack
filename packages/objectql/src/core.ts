@@ -43,7 +43,7 @@ export type { ObjectQLHostContext, HookHandler, HookEntry, OperationContext, Eng
 // fails (framework#3741). Embedders that boot the engine themselves can catch
 // it to render their own "database unreachable" message.
 export { DriverConnectError } from './driver-connect-errors.js';
-export type { DriverConnectFailure } from './driver-connect-errors.js';
+export type { DriverConnectFailure, DriverHealth } from './driver-connect-errors.js';
 
 // In-memory aggregation fallback
 export { applyInMemoryAggregation, bucketDateValue } from './in-memory-aggregation.js';

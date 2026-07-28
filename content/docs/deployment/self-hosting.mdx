@@ -231,7 +231,21 @@ Every runtime exposes two probe endpoints — wire them into Docker
 | Endpoint | Meaning | Use as |
 |:---|:---|:---|
 | `GET /api/v1/health` | Process is up and serving HTTP | Liveness probe |
-| `GET /api/v1/ready` | Kernel booted, ready for traffic | Readiness probe |
+| `GET /api/v1/ready` | Kernel booted **and the data drivers answer** | Readiness probe |
+
+Wire each to the probe it is named for — they answer deliberately different
+questions:
+
+- **`/health` checks nothing but the process.** It never touches the database,
+  on purpose: a failing liveness probe makes the orchestrator *restart the pod*,
+  which cannot fix an unreachable database but would put every replica into a
+  restart storm for the length of the outage.
+- **`/ready` pings the data drivers** (bounded, and cached ~1s so frequent
+  polling costs no extra round-trips). A replica whose driver is down fails 100%
+  of its requests, so it returns 503 with the failing driver names and leaves
+  the load-balancer rotation until the database comes back. If the check is
+  inconclusive — no data engine at all, or the probe itself errors — the replica
+  stays ready rather than black-holing a working deployment.
 
 ### Kubernetes
 
@@ -278,9 +292,20 @@ spec:
       targetPort: 8080
 ```
 
-`/api/v1/ready` returns 503 while the kernel is booting *and* during graceful
-shutdown, so rolling restarts drain cleanly. Before setting `replicas > 1`,
-read the multi-node note below.
+`/api/v1/ready` returns 503 while the kernel is booting, during graceful
+shutdown, and whenever a data driver stops answering — so rolling restarts drain
+cleanly and a replica that lost its database stops receiving traffic instead of
+serving 500s. Before setting `replicas > 1`, read the multi-node note below.
+
+<Callout type="info">
+Drivers do **not** reconnect on their own
+([#3759](https://github.com/objectstack-ai/objectstack/issues/3759)). Once a
+connection is lost the process stays broken until it restarts, so on Kubernetes
+the readiness probe above is what removes the replica — pair it with your
+normal restart policy. Without an orchestrator (bare `os serve`, systemd, a
+single container with no health check), plan for a supervisor that restarts on
+a failing `/api/v1/ready`.
+</Callout>
 
 ## Reverse proxy & TLS
 

@@ -6,6 +6,19 @@ export interface DriverConnectFailure {
   error: unknown;
 }
 
+/**
+ * One driver's verdict from `ObjectQL.checkDriversHealth()` (framework#3756) —
+ * whether it can serve a query right now, not whether it connected at boot.
+ */
+export interface DriverHealth {
+  driverName: string;
+  healthy: boolean;
+  /** Why it is unhealthy: `checkHealth()` returned false, threw, or timed out. */
+  error?: string;
+  /** True when the driver implements no `checkHealth()` and was assumed healthy. */
+  skipped?: boolean;
+}
+
 /** `error.message` when it is an Error, its string form otherwise. */
 function failureMessage(error: unknown): string {
   if (error instanceof Error) return error.message || error.name;

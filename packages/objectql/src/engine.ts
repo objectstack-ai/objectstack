@@ -21,7 +21,7 @@ import {
 import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import { IDataDriver, IDataEngine, Logger, createLogger, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
-import { DriverConnectError, emitDegradedBootBanner, type DriverConnectFailure } from './driver-connect-errors.js';
+import { DriverConnectError, emitDegradedBootBanner, type DriverConnectFailure, type DriverHealth } from './driver-connect-errors.js';
 import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 
 /**
@@ -1945,6 +1945,65 @@ export class ObjectQL implements IDataEngine {
     }
 
     this.logger.info('ObjectQL engine initialization complete');
+  }
+
+  /**
+   * Ping every registered driver and report which ones are usable RIGHT NOW
+   * (framework#3756).
+   *
+   * `init()` answers "could the drivers connect at boot"; this answers "can
+   * they serve a query at this instant", which is a different question the
+   * moment the database restarts, fails over, or drops the pool. Readiness
+   * probes are the intended caller — a replica whose driver is down fails 100%
+   * of its requests and must leave the load-balancer rotation.
+   *
+   * Every check is bounded by `timeoutMs` (default 2s) and settled
+   * independently. The bound is not optional: `IDataDriver.checkHealth()`
+   * swallows its own errors and returns `false`, but on a dead pool it does
+   * not return at all — knex's `SELECT 1` waits out `acquireConnectionTimeout`
+   * (60s by default). A probe that hangs is as useless as one that lies, so a
+   * timed-out driver is reported unhealthy rather than awaited.
+   *
+   * A driver that implements no `checkHealth()` is reported healthy: absence of
+   * a probe is not evidence of failure, and reporting "unhealthy" would take a
+   * working deployment out of rotation over a driver that simply never had the
+   * optional method.
+   */
+  async checkDriversHealth(opts?: { timeoutMs?: number }): Promise<DriverHealth[]> {
+    const timeoutMs = opts?.timeoutMs ?? 2_000;
+
+    return Promise.all(
+      Array.from(this.drivers, async ([driverName, driver]): Promise<DriverHealth> => {
+        if (typeof driver.checkHealth !== 'function') {
+          return { driverName, healthy: true, skipped: true };
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const healthy = await Promise.race([
+            Promise.resolve(driver.checkHealth()),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error(`checkHealth did not settle within ${timeoutMs}ms`)),
+                timeoutMs,
+              );
+              // Never hold the event loop open for a probe.
+              (timer as { unref?: () => void }).unref?.();
+            }),
+          ]);
+          return healthy
+            ? { driverName, healthy: true }
+            : { driverName, healthy: false, error: 'checkHealth() returned false' };
+        } catch (e) {
+          return {
+            driverName,
+            healthy: false,
+            error: e instanceof Error ? e.message : String(e),
+          };
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }),
+    );
   }
 
   /**
