@@ -3721,6 +3721,22 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
+  /**
+   * Compiles a Filter Protocol condition onto `builder`.
+   *
+   * `logicalOp` controls only how this condition attaches to `builder`
+   * (`where` vs `orWhere`) — never how its contents combine. It is never
+   * `'or'` on any in-repo path: the sole caller passes `'and'` and every
+   * combinator recurses with `'and'`, because all keys in one filter object
+   * AND at every depth. The `orWhere` that OR-s `$or`'s branches is applied
+   * to each branch's own sub-builder; handing `'or'` down instead is exactly
+   * what widened every `$or` filter (#3774 — see sql-driver-or-filter.test.ts).
+   *
+   * So the `logicalOp === 'or'` arms below are unreachable **by design**, not
+   * dead weight to prune: the method is `protected`, i.e. subclass API, and
+   * the flag is the seam an override needs to attach a condition into an OR
+   * group. Do not "fix" them by making a branch propagate `'or'` again.
+   */
   protected applyFilterCondition(builder: Knex.QueryBuilder, condition: any, logicalOp: 'and' | 'or' = 'and', tableHint?: string | null) {
     if (!condition || typeof condition !== 'object') return;
     const table = tableHint ?? this.coercionKey(builder);
