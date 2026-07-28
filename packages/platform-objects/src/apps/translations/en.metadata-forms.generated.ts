@@ -1693,10 +1693,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Output Schema",
         helpText: "Output schema for validation (optional)"
       },
-      requiresConfirmation: {
-        label: "Requires Confirmation",
-        helpText: "Ask user to approve before executing (for destructive actions)"
-      },
       permissions: {
         label: "Permissions",
         helpText: "Required permissions to use this tool"

@@ -1693,10 +1693,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "出力スキーマ",
         helpText: "検証用出力スキーマ（任意）"
       },
-      requiresConfirmation: {
-        label: "確認が必要",
-        helpText: "実行前にユーザー承認を求める（破壊的アクション用）"
-      },
       permissions: {
         label: "権限",
         helpText: "このツールの使用に必要な権限"

@@ -38,13 +38,6 @@
       "authorHint": "Display-only — no runtime groups, filters or routes tools by category.",
       "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed."
     },
-    "requiresConfirmation": {
-      "status": "dead",
-      "evidence": "zero reads off any TOOL definition in any repo; every requiresConfirmation read is action.ai.requiresConfirmation (a different, live property). Ignored by the LLM tool set (vercel-adapter.ts:263-272), ToolRegistry.execute (tool-registry.ts:183-210), POST /ai/tools/:name/execute (tool-routes.ts:91,105) and the MCP bridge (framework packages/mcp/src/mcp-server-runtime.ts:176, which uses a hardcoded destructive-name list)",
-      "authorWarn": true,
-      "authorHint": "NOT ENFORCED — nothing pauses for confirmation on this flag, on any path. To gate a destructive operation, put it behind an action with `ai.requiresConfirmation` + the HITL approval queue, which is the only path that actually stops execution.",
-      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. SAFETY-SHAPED: tool.form.ts:36-42 places it in a section titled 'Access & safety' with helpText 'Ask user to approve before executing (for destructive actions)', and skills/objectstack-ai/SKILL.md:547 tells authors to rely on it — so the authoring surface actively teaches a guarantee nothing delivers. ADR-0033 (:31, :60) already recorded it as never-enforced and resolved to DELETE the placeholder (the draft/publish workspace is the real approval gate); that deletion was never executed. OWNER CALL 2026-07: the prune-or-wire decision is DEFERRED (#3715), but the false promise stops now — the spec `.describe()`, the Studio form section (formerly titled \"Access & safety\", whose copy told authors to use it for destructive operations) and the SKILL.md / MCP_GUIDE / README guidance all now say NOT ENFORCED and point at the action-level gate."
-    },
     "permissions": {
       "status": "dead",
       "evidence": "tool.form.ts only; not on AIToolDefinition, no consumer",

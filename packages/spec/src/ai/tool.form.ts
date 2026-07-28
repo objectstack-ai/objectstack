@@ -43,7 +43,9 @@ export const toolForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'requiresConfirmation', helpText: 'NOT ENFORCED (#3715) — nothing pauses for confirmation on this flag. For a real gate use the action-level `ai.requiresConfirmation` + approval queue; AI metadata edits are already gated by draft/publish.' },
+        // `requiresConfirmation` was REMOVED from ToolSchema (#3715, ADR-0033
+        // §2). A safety flag no path enforced is false compliance; the real
+        // gate is the action-level `ai.requiresConfirmation` + approval queue.
         { field: 'permissions', widget: 'string-tags', helpText: 'NOT ENFORCED — tool invocation is not permission-gated by this list. Gate the underlying action via permission sets (ADR-0066), or restrict the agent that exposes the tool.' },
       ],
     },

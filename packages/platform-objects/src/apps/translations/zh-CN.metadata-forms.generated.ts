@@ -1693,10 +1693,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "输出 Schema",
         helpText: "用于校验的输出结构（可选）"
       },
-      requiresConfirmation: {
-        label: "需要确认",
-        helpText: "在执行前请求用户确认（用于破坏性操作）"
-      },
       permissions: {
         label: "权限",
         helpText: "使用此工具所需的权限"
