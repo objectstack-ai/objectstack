@@ -181,8 +181,8 @@ DATA MODEL field, not in the form view. ObjectUI forms consume:
 | `requiredWhen` | Mark required when true | ObjectQL validates requiredness on submit |
 
 Inline master-detail grids evaluate these rules row-by-row against the child
-row. Use `requiredWhen` for new metadata; `conditionalRequired` is only a
-back-compat alias. Load **objectstack-formula** when authoring non-trivial CEL.
+row. Use `requiredWhen` — the `conditionalRequired` alias was REMOVED in
+protocol 17 and is now a parse error. Load **objectstack-formula** when authoring non-trivial CEL.
 
 ---
 

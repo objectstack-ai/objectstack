@@ -197,8 +197,8 @@ export const Invoice = ObjectSchema.create({
   removing `readonly`. Writing a `readonly` field from a `runAs:'user'`
   `update_record` node is a build-time **error** (`os validate` / `os build`).
 - Use `requiredWhen` for conditional requiredness; the ObjectQL validator
-  enforces it on submit. `conditionalRequired` is a deprecated compatibility
-  alias, not the preferred authoring field.
+  enforces it on submit. The `conditionalRequired` alias was REMOVED in
+  protocol 17 — emitting it is a parse error.
 - For inline `master_detail` grids, predicates are evaluated row-by-row against
   the child row's `record`, so line-item rules should live on child fields.
 - For complex predicates, load **objectstack-formula** and emit CEL via
