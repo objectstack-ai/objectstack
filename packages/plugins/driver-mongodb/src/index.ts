@@ -7,6 +7,13 @@ export type { MongoDBDriverConfig } from './mongodb-driver.js';
 export { translateFilter } from './mongodb-filter.js';
 export { buildAggregationPipeline, postProcessAggregation } from './mongodb-aggregation.js';
 export type { AggregationInput } from './mongodb-aggregation.js';
+export {
+  MongoDBMultiTenantUnsupportedError,
+  MULTI_TENANT_UNSUPPORTED_CODE,
+  assertSingleTenantPosture,
+  assertObjectsNotTenantScoped,
+  declaresTenantScope,
+} from './mongodb-tenancy-guard.js';
 
 export default {
   id: 'com.objectstack.driver.mongodb',

@@ -23,8 +23,14 @@ interface FieldDef {
    * tenant stamp on write), so there is no tenant column to compose with. A
    * `(tenant, field)` index would advertise an isolation this driver does not
    * deliver — worse than the single-field index, because it would read as
-   * fixed. The tenancy gap itself is tracked separately; when it lands, this
-   * must adopt the same scoping rule as `SqlDriver.uniqueIndexesFromFields`.
+   * fixed.
+   *
+   * Settled by #3724: the driver is now explicitly single-tenant and refuses to
+   * boot into a multi-tenant deployment (see `mongodb-tenancy-guard.ts`), so a
+   * single-field unique index is exactly right — there is no second tenant for
+   * it to over-constrain. Should row-level tenancy ever land here (option A of
+   * that issue), this must adopt the same scoping rule as
+   * `SqlDriver.uniqueIndexesFromFields`.
    */
   unique?: boolean | 'global';
   indexed?: boolean;

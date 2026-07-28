@@ -62,7 +62,7 @@ export type ExpressionBody = z.infer<typeof ExpressionBodySchema>;
  * - `process`, `globalThis`, `eval`, `new Function`
  * - any identifier resolved from a value-only top-level import
  *
- * **Write-set opacity — accepted static-analysis gap (ADR-0107, #3700).**
+ * **Write-set opacity — accepted static-analysis gap.**
  * `source` is opaque to static analysis: no lint verifies that the fields the
  * body writes (`ctx.input.x = …`, `ctx.api.object('y').update(id, { x })`)
  * exist on the target object(s). Only the read side (`hook.condition`) and

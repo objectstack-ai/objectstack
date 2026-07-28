@@ -40,7 +40,7 @@ AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Auth
 | **parameters** | `Record<string, any>` | ✅ | JSON Schema for tool parameters |
 | **outputSchema** | `Record<string, any>` | optional | [EXPERIMENTAL — not enforced] JSON Schema for tool output. Keys are folded into the tool description only; outputs are not validated (liveness #1878/#1893). |
 | **objectName** | `string` | optional | Target object name (snake_case) |
-| **requiresConfirmation** | `boolean` | ✅ | Require user confirmation before execution |
+| **requiresConfirmation** | `boolean` | ✅ | [EXPERIMENTAL — not enforced] Require user confirmation before execution. NOTHING pauses on this flag (#3715) — use the action-level `ai.requiresConfirmation` + approval queue for a real gate. |
 | **permissions** | `string[]` | optional | Required permission-set capabilities |
 | **active** | `boolean` | ✅ | Whether the tool is enabled |
 | **builtIn** | `boolean` | ✅ | Platform built-in tool flag |

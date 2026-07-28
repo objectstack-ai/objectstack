@@ -1076,6 +1076,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       mongodb:
         specifier: ^7.5.0
         version: 7.5.0(socks@2.8.9)

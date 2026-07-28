@@ -640,6 +640,30 @@ dataset, so Level B only surfaces in Studio previews and hand-coded react-page
 - Dataset-bound widgets need at least one `values` entry, and every
   `dataset`/`dimensions`/`values` name must resolve to its `defineDataset` —
   `os validate` fails on an unresolved name (an empty chart otherwise).
+- **The two paths key their result rows differently — this is the #1 way a
+  chart renders blank.** A DATASET returns rows keyed by the declared measure
+  NAME (`sum_amount`), because a measure has an author-chosen `name`. An
+  OBJECT-bound inline `aggregate` has no such name, so its rows are keyed by
+  the RAW FIELD NAMES it was given: `groupBy` for the category column, `field`
+  for the value column (the literal `count` for a fieldless `count`). Bind
+  `<ObjectChart>`'s `xAxis.field` / `yAxis[].field` / `series[].name` to *those*
+  names — never to a `sum_`-style measure name, and never to a field the
+  aggregate did not select. `os validate` checks both halves
+  (`react-chart-field-unknown`, `react-chart-axis-unknown`).
+
+  ```jsx
+  <ObjectChart objectName="showcase_invoice" type="bar"
+    aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }}
+    xAxis={{ field: 'status' }} yAxis={[{ field: 'total', format: '$0,0' }]}
+    series={[{ name: 'total' }]} />
+  // rows: [{ status: 'open', total: 1200 }, …]  ← keyed by the raw field names
+  ```
+- **Charts speak the spec `ChartConfig` shape on every surface** — the same
+  `type` / `xAxis` / `yAxis` / `series` you write on a dashboard widget or a
+  report. Axis presentation rides on the axis (`format`, `min`/`max`,
+  `logarithmic`, `title`); a second `yAxis` entry plus `series[].yAxis: 'right'`
+  gives a dual axis; `series[].stack` groups a stacked bar; `annotations` draw
+  reference lines/bands.
 - Studio's Dashboard Widget Inspector can author per-widget `dataset`,
   `dimensions`, and `values`; curated metadata-admin forms merge
   server-only fields back into the payload, so saving through Studio should

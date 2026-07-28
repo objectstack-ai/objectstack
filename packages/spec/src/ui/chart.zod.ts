@@ -61,12 +61,18 @@ export const ChartTypeSchema = lazySchema(() => z.enum([
 //    (choropleth/bubble-map/gl-map), or extra renderers (sunburst, heatmap,
 //    word-cloud, waterfall).
 // 2. VARIANTS that only render as their base chart, so advertising them lies
-//    about the output: grouped-bar / stacked-bar / bi-polar-bar (→ bar, no
-//    multi-series grouping/stacking), stacked-area (→ area), step-line / spline
-//    (→ line), pyramid (→ funnel), bubble (→ scatter, no size encoding).
+//    about the output: bi-polar-bar (→ bar), step-line / spline (→ line),
+//    pyramid (→ funnel), bubble (→ scatter, no size encoding).
 //
 // Both can return via an opt-in renderer once there is a real renderer and a
-// data model to back them. (`metric`/`kpi` are kept as honest single-value
+// data model to back them.
+//
+// Grouped/stacked bar and stacked area are absent for a DIFFERENT reason, and
+// a better one: stacking is not a chart family, it is a property of the series
+// (`ChartSeries.stack` — series sharing a group id stack, otherwise they
+// group). One `bar` family plus a series-level stack group expresses all three
+// without multiplying the taxonomy. The renderer honors it (objectui#2880);
+// before that it did not, which is why they once sat in the list above. (`metric`/`kpi` are kept as honest single-value
 // synonyms; `gauge`/`solid-gauge`/`bullet` render a value today and gain a dial
 // when a gauge renderer lands.)
 
@@ -159,9 +165,15 @@ export const ChartAnnotationSchema = lazySchema(() => z.object({
  * Chart Interaction Schema
  */
 export const ChartInteractionSchema = lazySchema(() => z.object({
-  tooltips: z.boolean().default(true),
-  zoom: z.boolean().default(false),
-  brush: z.boolean().default(false),
+  tooltips: z.boolean().default(true).describe('Show the hover tooltip'),
+  /**
+   * ⚠️ Declared, not delivered. The default Recharts renderer has no zoom
+   * primitive, so this draws nothing today — `brush` is the shipped way to
+   * narrow a range. Kept in the schema because an opt-in renderer can honor it;
+   * tracked with the rest of the chart-contract work in framework#3729.
+   */
+  zoom: z.boolean().default(false).describe('Pan/zoom the plot — NOT implemented by the default renderer; use `brush`'),
+  brush: z.boolean().default(false).describe('Show the range selector under the plot'),
   clickAction: z.string().optional().describe('Action ID to trigger on click'),
 }));
 
@@ -201,16 +213,104 @@ export const ChartConfigSchema = lazySchema(() => z.object({
   showDataLabels: z.boolean().default(false).describe('Display data labels'),
   
   /** Annotations & Reference Lines */
-  annotations: z.array(ChartAnnotationSchema).optional(),
+  annotations: z.array(ChartAnnotationSchema).optional()
+    .describe('Reference lines/bands drawn over the plot: { type: "line" | "region", axis: "x" | "y", value, endValue?, color?, label?, style? }'),
   
   /** Interactions */
-  interaction: ChartInteractionSchema.optional(),
+  interaction: ChartInteractionSchema.optional()
+    .describe('Interaction toggles: { tooltips?, brush?, zoom?, clickAction? }'),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 
+/**
+ * Object-bound chart aggregation
+ *
+ * A chart binds its data one of two ways: DATASET-bound (ADR-0021 — `dataset`
+ * + `dimensions` + `values`), or OBJECT-bound (`objectName` + the inline
+ * `aggregate` below, run as one ad-hoc `IDataEngine.aggregate()` call).
+ *
+ * The two key their result rows DIFFERENTLY, and that difference is the usual
+ * cause of a chart that draws axes and no data. `./chart-aggregate.ts` records
+ * the object-bound rule and exports the helpers that derive the columns
+ * (`chartAggregateResultKeys`) — read it before binding an axis.
+ */
+
+/**
+ * Aggregation functions an object-bound chart may ask for.
+ *
+ * A deliberate subset of the engine's `AggregationFunction`: these are the five
+ * the chart renderers implement in every path, including the client-side
+ * fallback. `count_distinct` / `array_agg` / `string_agg` are engine-level
+ * capabilities with no chart renderer behind them — advertising them here would
+ * be a declared-but-not-delivered claim (Prime Directive #10).
+ */
+export const ChartAggregateFunctionSchema = lazySchema(() =>
+  z.enum(['count', 'sum', 'avg', 'min', 'max']),
+);
+
+/**
+ * What the rows are grouped by — the chart's category axis.
+ *
+ * Either a bare field name, or the structured node the date-bucketing engine
+ * takes (`{ field, dateGranularity }`, see `data/query.zod.ts`
+ * `GroupByNodeSchema`). Mirrored rather than imported so the UI protocol does
+ * not depend on the query AST module; the two shapes are kept identical on
+ * purpose — the structured form is passed straight through to
+ * `IDataEngine.aggregate()`.
+ */
+export const ChartGroupBySchema = lazySchema(() =>
+  z.union([
+    z.string().describe('Field to group by'),
+    z.object({
+      field: z.string().describe('Field to group by'),
+      dateGranularity: z
+        .enum(['day', 'week', 'month', 'quarter', 'year'])
+        .optional()
+        .describe('Bucket date values into uniform periods'),
+      alias: z
+        .string()
+        .optional()
+        .describe('Alias for the projected group value (defaults to `field`) — this becomes the category column'),
+    }),
+  ]),
+);
+
+/**
+ * Inline aggregation for an OBJECT-bound chart (`objectName` + `aggregate`).
+ *
+ * `field` is optional only because `count` counts rows rather than a column;
+ * every other function needs something to aggregate, which the refinement
+ * enforces rather than leaving to a renderer to shrug off (it used to reach the
+ * renderer as `sum(undefined)` and render blank).
+ */
+export const ChartAggregateSchema = lazySchema(() =>
+  z
+    .object({
+      field: z
+        .string()
+        .optional()
+        .describe('Field to aggregate — required for sum/avg/min/max, optional for count'),
+      function: ChartAggregateFunctionSchema.describe('Aggregation function'),
+      groupBy: ChartGroupBySchema.describe('Field the rows are grouped by — the chart category axis'),
+    })
+    .superRefine((agg, ctx) => {
+      if (agg.function !== 'count' && !agg.field) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['field'],
+          message: `aggregate.function "${agg.function}" needs a "field" to aggregate (only "count" may omit it).`,
+        });
+      }
+    })
+    .describe('Inline aggregation for an object-bound chart'),
+);
+
 export type ChartConfig = z.infer<typeof ChartConfigSchema>;
+export type ChartAggregate = z.infer<typeof ChartAggregateSchema>;
+export type ChartAggregateFunction = z.infer<typeof ChartAggregateFunctionSchema>;
+export type ChartGroupBy = z.infer<typeof ChartGroupBySchema>;
 export type ChartAxis = z.infer<typeof ChartAxisSchema>;
 export type ChartSeries = z.infer<typeof ChartSeriesSchema>;
 export type ChartAnnotation = z.infer<typeof ChartAnnotationSchema>;

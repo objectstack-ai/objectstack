@@ -103,13 +103,24 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
   {
     tag: 'ObjectChart',
     schemaType: 'object-chart',
-    summary: 'Chart over an object’s aggregated data. Config props come from the spec Chart config schema.',
+    summary: 'Chart over an object’s aggregated data. Bind objectName + aggregate; the axes name the aggregate’s RESULT COLUMNS (see chartAggregateResultKeys).',
     schema: ChartConfigSchema,
-    dataProps: ['title', 'series', 'xAxis', 'yAxis', 'colors', 'showLegend'],
+    // The spec ChartConfig shape IS the author contract again (#3729): the
+    // renderer honors `type`/`xAxis.field`/`yAxis[].field`/`series[].name`
+    // plus the axis presentation props (objectui#2880). #3701 had trimmed
+    // them out because they were silently inert — that was a record of the
+    // runtime gap, not the target state (ADR-0082 D1: spec is the protocol).
+    //
+    // `type` is the one field that cannot ride the props bag: it is the SDUI
+    // envelope's component discriminator on every FLATTENED surface, so the
+    // react-page wrapper parks an author `type` beside it and the renderer
+    // reads it back. It is published here as the spec spells it; the internal
+    // `chartType` spelling is no longer part of the author contract.
+    dataProps: ['type', 'title', 'subtitle', 'xAxis', 'yAxis', 'series', 'colors', 'showLegend', 'showDataLabels', 'annotations', 'interaction'],
     interactions: [
       OBJECT_NAME,
       { name: 'filter', type: 'FilterArray', kind: 'controlled', description: 'ObjectQL filter scoping the data; drive from React state.' },
-      { name: 'aggregate', type: '{ field, function, groupBy }', kind: 'binding', description: 'Aggregation: function (sum/avg/count) over field, grouped by groupBy.' },
+      { name: 'aggregate', type: "{ field?: string; function: 'count' | 'sum' | 'avg' | 'min' | 'max'; groupBy: string | { field: string; dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year' } }", kind: 'binding', description: 'Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal "count" for a fieldless count). Bind xAxis.field / yAxis[].field / series[].name to those names.' },
       { name: 'data', type: 'any[]', kind: 'binding', description: 'Static/precomputed data to chart directly instead of binding via objectName + aggregate.' },
     ],
   },

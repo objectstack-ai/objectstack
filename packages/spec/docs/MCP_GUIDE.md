@@ -355,7 +355,12 @@ export const salesAgent = AgentSchema.parse({
 - `write`: Modifies data
 - `delete`: Deletes data
 
-For operations with side effects, consider setting `requiresConfirmation: true`
+For operations with side effects, gate them with something that is enforced:
+`approval: 'always'` on the MCP tool binding, or `ai.requiresConfirmation` on
+the underlying **action** (+ the HITL approval queue).
+
+> ⚠️ `requiresConfirmation` on the **tool definition** is declared but read by
+> no execution path — it produces no pause (#3715).
 
 ### 4. Security
 

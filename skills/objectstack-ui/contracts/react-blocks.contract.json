@@ -289,7 +289,7 @@
     {
       "tag": "ObjectChart",
       "schemaType": "object-chart",
-      "summary": "Chart over an object’s aggregated data. Config props come from the spec Chart config schema.",
+      "summary": "Chart over an object’s aggregated data. Bind objectName + aggregate; the axes name the aggregate’s RESULT COLUMNS (see chartAggregateResultKeys).",
       "specSchema": true,
       "props": [
         {
@@ -301,10 +301,10 @@
         },
         {
           "name": "aggregate",
-          "type": "{ field, function, groupBy }",
+          "type": "{ field?: string; function: 'count' | 'sum' | 'avg' | 'min' | 'max'; groupBy: string | { field: string; dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year' } }",
           "kind": "binding",
           "required": false,
-          "description": "Aggregation: function (sum/avg/count) over field, grouped by groupBy."
+          "description": "Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal \"count\" for a fieldless count). Bind xAxis.field / yAxis[].field / series[].name to those names."
         },
         {
           "name": "data",
@@ -321,6 +321,13 @@
           "description": "ObjectQL filter scoping the data; drive from React state."
         },
         {
+          "name": "type",
+          "type": "'bar' | 'horizontal-bar' | 'column' | 'line' | 'area' | 'pie' | 'donut' | 'funnel' | 'scatter' | 'treemap' | 'sankey' | 'gauge' | 'solid-gauge' | 'metric' | 'kpi' | 'bullet' | 'radar' | 'table' | 'pivot'",
+          "kind": "data",
+          "required": true,
+          "description": ""
+        },
+        {
           "name": "title",
           "type": "string",
           "kind": "data",
@@ -328,11 +335,11 @@
           "description": "Chart title"
         },
         {
-          "name": "series",
-          "type": "object[]",
+          "name": "subtitle",
+          "type": "string",
           "kind": "data",
           "required": false,
-          "description": "Defined series configuration"
+          "description": "Chart subtitle"
         },
         {
           "name": "xAxis",
@@ -349,6 +356,13 @@
           "description": "Y-Axis configuration (support dual axis)"
         },
         {
+          "name": "series",
+          "type": "object[]",
+          "kind": "data",
+          "required": false,
+          "description": "Defined series configuration"
+        },
+        {
           "name": "colors",
           "type": "string[] | object",
           "kind": "data",
@@ -361,6 +375,27 @@
           "kind": "data",
           "required": false,
           "description": "Display legend"
+        },
+        {
+          "name": "showDataLabels",
+          "type": "boolean",
+          "kind": "data",
+          "required": false,
+          "description": "Display data labels"
+        },
+        {
+          "name": "annotations",
+          "type": "object[]",
+          "kind": "data",
+          "required": false,
+          "description": "Reference lines/bands drawn over the plot: { type: \"line\" | \"region\", axis: \"x\" | \"y\", value, endValue?, color?, label?, style? }"
+        },
+        {
+          "name": "interaction",
+          "type": "object",
+          "kind": "data",
+          "required": false,
+          "description": "Interaction toggles: { tooltips?, brush?, zoom?, clickAction? }"
         }
       ]
     },

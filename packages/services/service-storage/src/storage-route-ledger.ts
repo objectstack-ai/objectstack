@@ -25,8 +25,13 @@
  * SCOPE & SHAPE. Rows carry full wire paths at the DEFAULT base
  * (`/api/v1/storage`); `StorageRoutesOptions.basePath` can move the whole
  * family, and the conformance test enumerates at the same default so the two
- * stay comparable. `GET {base}/_local/file/:key` is deliberately ABSENT — three
- * call sites build that URL but no registrar has ever mounted it (#3641).
+ * stay comparable. `GET {base}/_local/file/:key` is ABSENT because nothing
+ * mounts it — and since #3641 nothing BUILDS it either. The three call sites
+ * that used to are gone: the local adapter's upload descriptor simply omits
+ * the optional `downloadUrl` (it cannot construct the real capability URL,
+ * which is keyed by `sys_file.id` rather than the storage key), and the two
+ * download routes now answer 501 when the adapter can produce no URL at all,
+ * instead of handing back one that 404s.
  *
  * This module is package-internal (not exported from the index): it is the
  * guard's data, not public API. It must stay import-free — the client-side

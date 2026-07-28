@@ -939,6 +939,14 @@ export default class Serve extends Command {
            // actionable message, and exits 1 (in dev AND prod). All OTHER driver
            // construction errors keep the prior best-effort silent behavior.
            if (e instanceof UnsupportedDriverError) throw e;
+           // Same class of fatal (#3724): a driver that refuses to run in this
+           // deployment's tenancy mode — driver-mongodb has no row-level tenant
+           // isolation and rejects a non-`single` posture. Swallowing it would
+           // boot the server with NO driver at all, burying "your database
+           // cannot isolate tenants" under a later, unrelated failure. Matched
+           // by `code` (duck-typed) so the CLI keeps no dependency on the
+           // driver package and cross-realm `instanceof` can't bite.
+           if (e?.code === 'MONGODB_MULTI_TENANT_UNSUPPORTED') throw e;
            // silent
          }
       }

@@ -1651,9 +1651,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "スキーマ",
         description: "ツールが受け取る入力と出力の形状。"
       },
-      access_and_safety: {
-        label: "アクセスと安全性",
-        description: "権限と確認要件。"
+      declarative_metadata_not_enforced: {
+        label: "Declarative metadata (not enforced)",
+        description: "Recorded on the tool definition but read by no execution path — see the per-field notes for where the real gates live."
       }
     },
     fields: {

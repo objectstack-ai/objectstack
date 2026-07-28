@@ -251,6 +251,14 @@ Trigger engine, event triggers from ObjectQL hooks, flow executor, scheduled tri
 ### 10. ai — 3 methods
 `aiNlq`, `aiSuggest`, `aiInsights`
 
+<Callout type="warn">
+Declared only. All three are **optional** protocol methods (`aiNlq?` …) and no
+service in any repo implements them, so the `/ai/{nlq,suggest,insights}` routes
+they back are mounted by nothing and the matching `client.ai.*` calls 404
+(#3718). The AI service that does exist (`service-ai`) serves a different set
+— chat, complete, models, conversations — through none of these methods.
+</Callout>
+
 ### 11. i18n — 3 methods
 `getLocales`, `getTranslations`, `getFieldLabels`
 

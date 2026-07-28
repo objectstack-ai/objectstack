@@ -133,6 +133,9 @@ export const objectStackMCP = MCPServerConfigSchema.parse({
       ],
       handler: 'flows.create_record',
       sideEffects: 'write',
+      // NOTE: declarative only — nothing pauses on this flag (#3715). A real
+      // human-in-the-loop gate is `ai.requiresConfirmation` on the underlying
+      // action (+ the approval queue), or `approval: 'always'` on an MCP binding.
       requiresConfirmation: true,
     },
     {

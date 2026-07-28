@@ -62,7 +62,7 @@ actually connect to Turso.
 | **MySQL** | `@objectstack/driver-sql` (peer: `mysql2`) | `SqlDriver` | `mysql` \| `mysql2` |
 | **SQLite** | `@objectstack/driver-sql` (peer: `better-sqlite3`) | `SqlDriver` | `sqlite` \| `sql` |
 | **SQLite (WASM)** | `@objectstack/driver-sqlite-wasm` | `SqliteWasmDriver` | `sqlite-wasm` \| `wasm-sqlite` \| `wasm` |
-| **MongoDB** | `@objectstack/driver-mongodb` | `MongoDBDriver` | `mongodb` \| `mongo` |
+| **MongoDB** | `@objectstack/driver-mongodb` | `MongoDBDriver` | `mongodb` \| `mongo` (single-tenant only — see [below](#multi-tenancy-not-supported)) |
 | **Memory** | `@objectstack/driver-memory` | `InMemoryDriver` | `memory` |
 
 > All SQL flavours (PostgreSQL / MySQL / SQLite) are served by a single
@@ -138,6 +138,28 @@ pnpm dev
 The CLI infers the MongoDB driver from the `mongodb://` (or `mongodb+srv://`)
 URL scheme automatically — no `OS_DATABASE_DRIVER` needed. Set
 `OS_DATABASE_DRIVER=mongodb` only if you want to be explicit.
+
+### Multi-tenancy: not supported
+
+<Callout type="warn">
+The MongoDB driver is **single-tenant only**. It implements no row-level tenant
+isolation — unlike `SqlDriver`, it ignores `DriverOptions.tenantId`, so reads
+carry no tenant predicate and writes are not stamped with a tenant column.
+</Callout>
+
+Rather than serve a multi-tenant deployment without isolation, the driver
+**refuses to start** in one ([#3724](https://github.com/objectstack-ai/objectstack/issues/3724)):
+
+| Signal | Checked in | Result |
+| :--- | :--- | :--- |
+| Tenancy posture is not `single` — `OS_TENANCY_POSTURE=group`/`isolated`, or derived from `OS_MULTI_ORG_ENABLED=true` | `new MongoDBDriver()`, re-checked in `connect()` | throws `MongoDBMultiTenantUnsupportedError`; `objectstack serve` exits 1 |
+| An object declares `tenancy.enabled: true` | `syncSchema()` / `syncSchemasBatch()` | throws, naming every offending object |
+
+The error carries `code === 'MONGODB_MULTI_TENANT_UNSUPPORTED'`. There is no
+override flag — one would restore exactly the silent cross-tenant access the
+guard prevents. For multi-tenant deployments use `@objectstack/driver-sql`
+(PostgreSQL / MySQL / SQLite), which enforces tenant scoping at the driver
+level.
 
 ## SQLite (via `@objectstack/driver-sql`)
 

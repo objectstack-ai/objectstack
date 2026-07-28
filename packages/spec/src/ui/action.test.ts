@@ -108,6 +108,73 @@ describe('ActionParamSchema', () => {
       expect(ActionParamSchema.parse({ name: 'note', type: 'textarea' as const }).reference).toBeUndefined();
     });
   });
+
+  // #3405 part 3 — the root cause behind the `reference` bug was not the missing
+  // key, it was that an undeclared key was dropped *silently*: the param went on
+  // parsing and shipped a control that ignored the author's config. Strict mode
+  // turns that class of typo into a loud, fixable parse error
+  // (ADR-0078 no-silently-inert-metadata, ADR-0049 enforce-or-remove).
+  describe('unknown keys are rejected, not stripped (#3405 part 3)', () => {
+    const unknownKeyIssue = (param: Record<string, unknown>) => {
+      const result = ActionParamSchema.safeParse(param);
+      expect(result.success).toBe(false);
+      return result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    };
+
+    it('rejects an undeclared key instead of silently dropping it', () => {
+      const issue = unknownKeyIssue({ name: 'p', type: 'text', notAKey: 'x' });
+      expect(issue).toBeDefined();
+      expect(issue!.message).toContain('`notAKey`');
+    });
+
+    it('points a snake_case mis-spelling at the declared camelCase key', () => {
+      // FieldSchema-adjacent metadata is snake_case, so this is the likely slip.
+      expect(unknownKeyIssue({ name: 'p', type: 'text', help_text: 'hi' })!.message)
+        .toContain('`help_text` → `helpText`');
+      expect(unknownKeyIssue({ name: 'p', type: 'text', default_value: 1 })!.message)
+        .toContain('`default_value` → `defaultValue`');
+    });
+
+    it('points the runtime lookup-target spellings at `reference` (the #3405 slip)', () => {
+      for (const key of ['reference_to', 'referenceTo', 'targetObject']) {
+        expect(unknownKeyIssue({ name: 'p', type: 'lookup', reference: 'sys_user', [key]: 'sys_user' })!.message)
+          .toContain(`\`${key}\` → \`reference\``);
+      }
+    });
+
+    it('points `visibleWhen` at `visible` so a capability gate cannot go inert', () => {
+      // ADR-0089 made `visibleWhen` canonical on view/page schemas; borrowing it
+      // here used to strip the gate and render the param unconditionally.
+      expect(unknownKeyIssue({ name: 'p', type: 'text', visibleWhen: 'features.x == true' })!.message)
+        .toContain('`visibleWhen` → `visible`');
+    });
+
+    it('still reports an unrecognisable key without a bogus suggestion', () => {
+      const message = unknownKeyIssue({ name: 'p', type: 'text', wibble: 1 })!.message;
+      expect(message).toContain('`wibble`');
+      expect(message).not.toContain('Did you mean');
+    });
+
+    it('accepts every key the schema declares (guards ACTION_PARAM_KEYS drift)', () => {
+      // If a declared key were missing from the suggestion list, or a listed key
+      // were removed from the schema, one of these probes would be rejected.
+      const probes: Record<string, unknown> = {
+        name: 'p', field: 'inspector', objectOverride: 'sys_member', label: 'P',
+        type: 'lookup', required: true, options: [{ label: 'A', value: 'a' }],
+        placeholder: 'ph', helpText: 'help', defaultValue: 'd', multiple: true,
+        accept: ['image/*'], maxSize: 1024, reference: 'sys_user',
+        defaultFromRow: true, visible: 'features.phoneNumber == true',
+        requiresFeature: 'phoneNumber',
+      };
+      for (const [key, value] of Object.entries(probes)) {
+        const result = ActionParamSchema.safeParse({ name: 'p', [key]: value });
+        const unknown = result.success
+          ? undefined
+          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(unknown, `\`${key}\` should be a declared ActionParam key`).toBeUndefined();
+      }
+    });
+  });
 });
 
 // #2874 P1 — declarative `requiresFeature` sugar, lowered at parse time into

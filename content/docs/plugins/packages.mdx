@@ -185,7 +185,8 @@ const driver = new SqliteWasmDriver({ filename: ':memory:' });
 **MongoDB Driver** — Document-oriented storage backend.
 
 - **Purpose**: Native MongoDB driver for ObjectQL with document-flavored objects
-- **When to use**: Existing MongoDB infrastructure, document-shaped data
+- **When to use**: Existing MongoDB infrastructure, document-shaped data — **single-tenant deployments only**
+- **Not supported**: row-level tenant isolation. The driver refuses to boot when the tenancy posture is not `single` — see [Drivers → Multi-tenancy](/docs/data-modeling/drivers#multi-tenancy-not-supported)
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/driver-mongodb/README.md)
 
 ---
