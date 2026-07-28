@@ -3574,9 +3574,14 @@ export class SqlDriver implements IDataDriver {
 
     for (const [key, value] of Object.entries(condition)) {
       if (key === '$and' && Array.isArray(value)) {
-        builder.where((qb) => {
+        // Attach this group to the parent the way `logicalOp` asks, matching
+        // `$or`/`$not` below. Nothing passes 'or' today (the sole caller uses
+        // 'and' and no branch propagates 'or' any more), but leaving one of the
+        // four combinators deaf to the flag is how the rules drift apart again.
+        const method = logicalOp === 'or' ? 'orWhere' : 'where';
+        (builder as any)[method]((qb: any) => {
           for (const sub of value) {
-            qb.where((subQb) => {
+            qb.where((subQb: any) => {
               this.applyFilterCondition(subQb, sub, 'and', table);
             });
           }
@@ -3585,8 +3590,16 @@ export class SqlDriver implements IDataDriver {
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
         (builder as any)[method]((qb: any) => {
           for (const sub of value) {
+            // The `orWhere` on THIS line is what OR-s the branches together.
+            // The branch body is still compiled with 'and', because every key
+            // inside one filter object is AND-ed at every depth (Filter
+            // Protocol / Mongo). Passing 'or' down instead made a branch's own
+            // field keys OR each other, so `{$or:[{a,b}]}` compiled to
+            // `a = ? OR b = ?`. That widens the result set, so an RLS/sharing
+            // read scope of the shape `{$or:[{owner,status},{shared_with}]}`
+            // returned rows the scope excluded — see sql-driver-or-filter.test.ts.
             qb.orWhere((subQb: any) => {
-              this.applyFilterCondition(subQb, sub, 'or', table);
+              this.applyFilterCondition(subQb, sub, 'and', table);
             });
           }
         });
