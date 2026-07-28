@@ -115,6 +115,69 @@ describe('applyInMemoryAggregation', () => {
     expect(out.find((r) => r.stage === null)!.total).toBe(10);
     expect(out.find((r) => r.stage === 'null')!.total).toBe(5);
   });
+
+  // #3849 — these rows ARE `driver.find()` output, so a key that is not the
+  // value verbatim is a key that disagrees with every other read of the column.
+  // This used to `String()` everything, which the pushed-down path never did.
+  it('keys a non-empty bucket with the value verbatim, not a string of it', () => {
+    const dataset = [
+      { qty: 3, won: true, amount: 1 },
+      { qty: 3, won: false, amount: 2 },
+      { qty: 7, won: false, amount: 4 },
+    ];
+    const agg = [{ function: 'sum' as const, field: 'amount', alias: 'total' }];
+
+    const byQty = applyInMemoryAggregation(dataset, { groupBy: ['qty'], aggregations: agg });
+    expect(byQty.map((r) => r.qty).sort()).toEqual([3, 7]);
+    expect(byQty.find((r) => r.qty === 3)!.total).toBe(3);
+
+    const byWon = applyInMemoryAggregation(dataset, { groupBy: ['won'], aggregations: agg });
+    expect(byWon.map((r) => r.won).sort()).toEqual([false, true]);
+    expect(byWon.find((r) => r.won === false)!.total).toBe(6);
+  });
+
+  // The bucket id is built from the key, so preserving the key's type is only
+  // half of it — the id has to preserve it too, or `1` and `'1'` merge on the
+  // way in and the surviving key is whichever row happened to arrive first.
+  it('keeps values of different types in different buckets', () => {
+    const dataset = [
+      { v: 1, amount: 1 },
+      { v: '1', amount: 2 },
+      { v: true, amount: 4 },
+      { v: 'true', amount: 8 },
+      { v: null, amount: 16 },
+      { v: 'null', amount: 32 },
+    ];
+    const out = applyInMemoryAggregation(dataset, {
+      groupBy: ['v'],
+      aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+    });
+    expect(out).toHaveLength(6);
+    const total = (v: unknown) => out.find((r) => Object.is(r.v, v))!.total;
+    expect(total(1)).toBe(1);
+    expect(total('1')).toBe(2);
+    expect(total(true)).toBe(4);
+    expect(total('true')).toBe(8);
+    expect(total(null)).toBe(16);
+    expect(total('null')).toBe(32);
+  });
+
+  // `JSON.stringify` throws on a BigInt, and the id builder runs on every row of
+  // every grouped query — a shape that used to bucket fine under `String()` must
+  // not start crashing the aggregate.
+  it('buckets a BigInt key without throwing', () => {
+    const dataset = [
+      { v: 9007199254740993n, amount: 1 },
+      { v: 9007199254740993n, amount: 2 },
+      { v: 9007199254740994n, amount: 4 },
+    ];
+    const out = applyInMemoryAggregation(dataset, {
+      groupBy: ['v'],
+      aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+    });
+    expect(out).toHaveLength(2);
+    expect(out.find((r) => r.v === 9007199254740993n)!.total).toBe(3);
+  });
 });
 
 describe('bucketDateValue', () => {

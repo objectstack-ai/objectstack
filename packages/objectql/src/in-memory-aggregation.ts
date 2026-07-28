@@ -40,6 +40,20 @@
 // '(empty)', a localized "Uncategorized") and build drill filters as
 // `field = null`, so a sentinel leaked a raw English debug string into the UI
 // and turned the empty bucket's drill-through into a zero-row query.
+//
+// A NON-EMPTY KEY IS THE VALUE AS `find()` PRESENTS IT — no `String()` (#3849).
+// The rows this function groups come straight from `driver.find()`, so passing
+// the value through is what makes a bucket key equal the column's own read
+// shape: a `number` stays a number, a `boolean` stays a boolean. This used to
+// `String()` every key, which the pushed-down path never did, so `1` became
+// `'1'` and `true` became `'true'` depending only on which path ran.
+//
+// That was not cosmetic. Several consumers probe a raw `Map` keyed by the
+// value's own type — the select-option label table, the lookup FK → record-name
+// table, the cross-object FK → attribute table — and `Map` lookup is
+// SameValueZero, so `'1'` never finds `1`. A stringified key silently missed
+// every entry: labels fell back to raw ids, and cross-object rebucketing filed
+// every row under `'(restricted)'` while the grand total still reconciled.
 
 import { calendarPartsInTzOrUtc } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
@@ -75,11 +89,11 @@ export function applyInMemoryAggregation(
       const fieldName = typeof g === 'string' ? g : (g.alias ?? g.field);
       const value = projectGroupValue(row, g, timezone);
       key[fieldName] = value;
-      // JSON-encoded so the empty bucket's `null` key cannot collide with a row
-      // whose value is the literal STRING `"null"` — plain interpolation renders
-      // both as `null` and would merge two distinct groups. This id is internal
-      // to the bucketing loop; only `key` is emitted.
-      parts.push(`${fieldName}=${JSON.stringify(value)}`);
+      // Type-preserving, because the key no longer is: `1` and `'1'`, `true` and
+      // `'true'`, `null` and `'null'` are all distinct groups and must not merge
+      // just because they interpolate the same. This id is internal to the
+      // bucketing loop; only `key` is emitted.
+      parts.push(`${fieldName}=${bucketIdPart(value)}`);
     }
     const id = parts.join('\u0001');
     let bucket = buckets.get(id);
@@ -98,15 +112,29 @@ export function applyInMemoryAggregation(
   return out;
 }
 
-function projectGroupValue(row: any, g: GroupByNode, timezone?: string): string | null {
+/**
+ * Stable, TYPE-PRESERVING encoding of one group value, for the internal bucket
+ * id only. `JSON.stringify` gives that for every shape a column can hold —
+ * `1` → `1`, `'1'` → `"1"`, `true` → `true`, `null` → `null` — except the two
+ * it refuses, which are handled explicitly so a value that used to bucket fine
+ * under `String()` cannot start throwing mid-aggregate.
+ */
+function bucketIdPart(v: unknown): string {
+  if (typeof v === 'bigint') return `bigint:${v}`; // JSON.stringify throws on these
+  return JSON.stringify(v) ?? `${typeof v}:${String(v)}`; // undefined / symbol / function
+}
+
+function projectGroupValue(row: any, g: GroupByNode, timezone?: string): unknown {
   const field = typeof g === 'string' ? g : g.field;
   const v = row?.[field];
   if (typeof g !== 'string' && g.dateGranularity) {
     return bucketDateValue(v, g.dateGranularity, timezone);
   }
-  // `null`, not a sentinel string — same key the pushed-down SQL gives a NULL
-  // group column (#3839). See the empty-bucket note at the top of this file.
-  return v == null ? null : String(v);
+  // The value as `driver.find()` presented it — these rows ARE find() output, so
+  // passing it through is what makes the bucket key equal the column's own read
+  // shape (#3849). `undefined` (absent field) folds into the empty bucket's
+  // `null` (#3839). See both notes at the top of this file.
+  return v ?? null;
 }
 
 function aggregateBucket(rows: any[], aggregations: AggregationNode[]): Record<string, any> {
