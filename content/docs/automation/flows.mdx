@@ -560,6 +560,49 @@ Edges connect nodes and define the execution path:
 | `condition` | `string` | optional | Boolean expression for branching |
 | `label` | `string` | optional | Label displayed on the connector |
 
+### Fault edges — handling a failed node
+
+A `fault` edge routes a **failed** node to a handler instead of aborting the
+run. Without one, any node failure ends the run.
+
+```typescript
+edges: [
+  { id: 'e_ok',    source: 'charge_card', target: 'mark_paid' },
+  { id: 'e_fault', source: 'charge_card', target: 'flag_for_review', type: 'fault' },
+]
+```
+
+The handler reads what went wrong from two variables:
+
+| Variable | Scope | Use |
+| :--- | :--- | :--- |
+| `{<nodeId>.error}` | the failing node | `{charge_card.error}` — addressable by name, so one handler shared by several fault edges can tell which node it is handling |
+| `{$error}` | run-wide | `{$error.nodeId}` / `{$error.message}` — the most recent failure only |
+
+A run that takes a fault branch and completes reports **success**, but the
+failed step stays in the run trace with `status: 'failure'` and its message —
+recovery never erases the record of what failed.
+
+<Callout type="warn">
+**A fault edge does not disable a guardrail.** Failures come in two classes, and
+only one is routable.
+
+- **Runtime** — the world did not cooperate: an `http` node got a 404, a
+  connector rate-limited, the data engine rejected a write. Routed to the fault
+  edge.
+- **Guard** — the *metadata* is wrong, and a refuse-to-execute check said so: a
+  filter token resolved to nothing so the condition was dropped from the query,
+  a data node names no object, or the run would execute unscoped. **Never
+  routed.** These stay fatal whether or not a `fault` edge exists, and the run
+  fails with the guard's own message.
+
+The split is deliberate. A dropped filter condition does not narrow a query, it
+widens it — so if guards were routable, one `fault` edge on a `delete_record`
+would turn off the protection against emptying the object while the run still
+reported success. Re-running changes nothing either: the fix is to correct the
+metadata, which `objectstack validate` will point at.
+</Callout>
+
 ## Variables
 
 Flows use variables to pass data between nodes and to/from callers:

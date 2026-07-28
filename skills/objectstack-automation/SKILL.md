@@ -138,6 +138,20 @@ variables: [
 > (a single call updates *every* matching row — no per-row loop needed).
 > `label` is **required** on the flow and on every node.
 
+> **Handling a failed node: a `fault` edge.** `{ source, target, type: 'fault' }`
+> routes a failed node to a handler instead of ending the run; the handler reads
+> `{<nodeId>.error}` (or run-wide `{$error}`). The run then reports success, and
+> the failed step stays in the trace.
+>
+> **It is not a way past a guardrail.** Only *runtime* failures route — a 404, a
+> rate-limit, a rejected write. A *guard* refusal means the metadata is wrong (a
+> filter token resolved to nothing so the condition was dropped; a data node
+> names no object; the run would execute unscoped) and stays fatal with or
+> without a fault edge. Never add one to silence such an error: a dropped filter
+> condition **widens** the query, so routing it would let a `delete_record`
+> empty the object while the run reported success. Fix the metadata —
+> `objectstack validate` names the offending template.
+
 > **Writing a `readonly` field? Set `runAs: 'system'`.** `readonly: true`
 > governs the end-user surface: under the default `runAs: 'user'`, the engine
 > **silently strips** a `readonly` field from an `update_record` payload

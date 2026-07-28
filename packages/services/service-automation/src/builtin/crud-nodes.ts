@@ -161,7 +161,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 const objectName = String(readAliasedConfig(cfg, 'get_record', 'objectName', ['object'], ctx.logger) ?? '');
-                if (!objectName) return { success: false, error: 'get_record: objectName required' };
+                if (!objectName) return { success: false, error: 'get_record: objectName required', errorClass: 'guard' };
 
                 // `filters` → `filter` is now handled at load by the ADR-0087 D2
                 // conversion layer ('flow-node-crud-filter-alias'), so the executor
@@ -170,7 +170,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     cfg.filter, variables, context, 'get_record',
                     'would have read rows the filter was written to exclude',
                 );
-                if ('error' in filterResult) return { success: false, error: filterResult.error };
+                if ('error' in filterResult) return { success: false, error: filterResult.error, errorClass: 'guard' };
                 const filter = filterResult.filter;
                 const fields = cfg.fields as string[] | undefined;
                 const limit = typeof cfg.limit === 'number' ? cfg.limit : undefined;
@@ -222,7 +222,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 const objectName = String(readAliasedConfig(cfg, 'create_record', 'objectName', ['object'], ctx.logger) ?? '');
-                if (!objectName) return { success: false, error: 'create_record: objectName required' };
+                if (!objectName) return { success: false, error: 'create_record: objectName required', errorClass: 'guard' };
 
                 const fields = interpolate(cfg.fields ?? {}, variables, context) as Record<string, unknown>;
                 const outputVariable = cfg.outputVariable as string | undefined;
@@ -303,14 +303,14 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 const objectName = String(readAliasedConfig(cfg, 'update_record', 'objectName', ['object'], ctx.logger) ?? '');
-                if (!objectName) return { success: false, error: 'update_record: objectName required' };
+                if (!objectName) return { success: false, error: 'update_record: objectName required', errorClass: 'guard' };
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
                 const filterResult = resolveNodeFilter(
                     cfg.filter, variables, context, 'update_record',
                     'would have matched — and overwritten — rows the filter was written to exclude',
                 );
-                if ('error' in filterResult) return { success: false, error: filterResult.error };
+                if ('error' in filterResult) return { success: false, error: filterResult.error, errorClass: 'guard' };
                 const filter = filterResult.filter;
                 // `fields` is the single canonical write-map key — no alias (the wrong key
                 // `fieldValues` is corrected at the authoring source + rejected by graph-lint).
@@ -376,7 +376,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 const objectName = String(readAliasedConfig(cfg, 'delete_record', 'objectName', ['object'], ctx.logger) ?? '');
-                if (!objectName) return { success: false, error: 'delete_record: objectName required' };
+                if (!objectName) return { success: false, error: 'delete_record: objectName required', errorClass: 'guard' };
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
                 // The highest-stakes of the three: an erased condition here is the
@@ -385,7 +385,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     cfg.filter, variables, context, 'delete_record',
                     'would have matched every remaining row and deleted it',
                 );
-                if ('error' in filterResult) return { success: false, error: filterResult.error };
+                if ('error' in filterResult) return { success: false, error: filterResult.error, errorClass: 'guard' };
                 const filter = filterResult.filter;
 
                 const data = getData();

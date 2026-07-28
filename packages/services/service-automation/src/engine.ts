@@ -18,6 +18,7 @@ import { ConnectorSchema } from '@objectstack/spec/integration';
 // engine at module load in both ESM and CJS builds.
 import { ExpressionEngine, validateExpression } from '@objectstack/formula';
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
+import { isGuardRefusal } from './guard-refusal.js';
 
 // ─── Node Executor Interface (Plugin Extension Point) ───────────────
 
@@ -52,10 +53,37 @@ export interface NodeExecutor {
     ): Promise<NodeExecutionResult>;
 }
 
+/**
+ * Why a node failed — the question a `fault` edge's routing decision turns on
+ * (#3863).
+ *
+ *  - `runtime` — the world did not cooperate: an `http` node got a 404, a
+ *    connector rate-limited, the data engine rejected a write. The metadata is
+ *    fine and a later run could succeed. A declared `fault` edge routes it.
+ *  - `guard` — the METADATA is wrong, and a refuse-to-execute guard said so:
+ *    interpolation erased a filter condition (#3810), a data node names no
+ *    object, a run would execute unscoped (ADR-0049/#1888). Re-running changes
+ *    nothing, and the refusal IS the safety property. Not routable — it stays
+ *    fatal whether or not a `fault` edge exists.
+ *
+ * The split exists because without it a `fault` edge is a one-edge switch that
+ * turns off the platform's data-safety guarantees: attach one to a
+ * `delete_record` and #3810's protection against emptying the object is gone,
+ * while the run still reports success. Absent, this defaults to `runtime`, so
+ * every executor written before the field keeps its current routing behaviour.
+ */
+export type NodeFailureClass = 'runtime' | 'guard';
+
 export interface NodeExecutionResult {
     success: boolean;
     output?: Record<string, unknown>;
     error?: string;
+    /**
+     * #3863 — why this failed, which decides whether a `fault` edge may route it.
+     * Only meaningful when `success` is false; defaults to `runtime`.
+     * See {@link NodeFailureClass}.
+     */
+    errorClass?: NodeFailureClass;
     /**
      * #3407: advisory warnings surfaced on the step's log entry. The step still
      * SUCCEEDS — a warning flags a legal-but-surprising outcome (e.g. an
@@ -2778,6 +2806,24 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * #3863 — publish a failed node's message under `<nodeId>.error` alongside
+     * the run-wide `$error`.
+     *
+     * `$error` names only the most recent failure, so a flow with more than one
+     * `fault` edge converging on a shared handler cannot tell which node it is
+     * handling. Keying by node id makes `{cleanup.error}` addressable from any
+     * downstream template, which is what a handler needs to branch or report.
+     * Merges into an existing entry so a node's earlier `output` survives.
+     */
+    private setNodeError(variables: Map<string, unknown>, nodeId: string, message: string): void {
+        const prior = variables.get(nodeId);
+        const base = prior && typeof prior === 'object' && !Array.isArray(prior)
+            ? (prior as Record<string, unknown>)
+            : {};
+        variables.set(nodeId, { ...base, error: message });
+    }
+
+    /**
      * Execute a node with timeout support, fault edge handling, and step logging.
      */
     private async executeNode(
@@ -2859,10 +2905,16 @@ export class AutomationEngine implements IAutomationService {
                     error: { code: 'EXECUTION_ERROR', message: errMsg },
                 });
 
-                // Check for fault edges
-                const faultEdge = flow.edges.find(e => e.source === node.id && e.type === 'fault');
+                // #3863 — a guard that THROWS is as un-routable as one that
+                // returns: `UnscopedRunDataAccessError` (ADR-0049/#1888) reports
+                // that the metadata would run unscoped, and rerouting it would
+                // let a `fault` edge disable the elevation check.
+                const faultEdge = isGuardRefusal(execErr)
+                    ? undefined
+                    : flow.edges.find(e => e.source === node.id && e.type === 'fault');
                 if (faultEdge) {
                     variables.set('$error', { nodeId: node.id, message: errMsg });
+                    this.setNodeError(variables, node.id, errMsg);
                     const faultTarget = flow.nodes.find(n => n.id === faultEdge.target);
                     if (faultTarget) {
                         await this.executeNode(faultTarget, flow, variables, context, steps);
@@ -2887,9 +2939,16 @@ export class AutomationEngine implements IAutomationService {
 
                 // Write error output to variable context for downstream nodes
                 variables.set('$error', { nodeId: node.id, message: errMsg, output: result.output });
+                this.setNodeError(variables, node.id, errMsg);
 
-                // Check for fault edges
-                const faultEdge = flow.edges.find(e => e.source === node.id && e.type === 'fault');
+                // #3863 — only a `runtime` failure may be routed. A `guard`
+                // refusal says the METADATA is wrong (#3810 erased a filter
+                // condition, a data node names no object); rerouting it would
+                // make a single `fault` edge a switch that turns the guard off
+                // while the run still reports success.
+                const faultEdge = result.errorClass === 'guard'
+                    ? undefined
+                    : flow.edges.find(e => e.source === node.id && e.type === 'fault');
                 if (faultEdge) {
                     const faultTarget = flow.nodes.find(n => n.id === faultEdge.target);
                     if (faultTarget) {
