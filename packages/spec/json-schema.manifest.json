@@ -671,7 +671,6 @@
     "data/BaseEngineOptions",
     "data/CalendarDateValue",
     "data/ClockTimeValue",
-    "data/ComputedFieldCache",
     "data/ConditionalValidation",
     "data/ConsistencyLevel",
     "data/ContextToken",

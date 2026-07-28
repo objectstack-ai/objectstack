@@ -192,8 +192,6 @@
     "ClockTimeValueSchema (const)",
     "ComparisonOperatorSchema (const)",
     "Compatibility (type)",
-    "ComputedFieldCache (type)",
-    "ComputedFieldCacheSchema (const)",
     "ConditionalValidation (type)",
     "ConditionalValidationSchema (const)",
     "ConsistencyLevel (type)",
