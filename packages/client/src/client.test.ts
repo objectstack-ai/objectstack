@@ -604,29 +604,131 @@ describe('Notifications namespace', () => {
     });
 });
 
-describe('AI namespace (removed in v17 — #3718)', () => {
+describe('AI namespace (#3718)', () => {
     /**
+     * READ THIS BEFORE ADDING A TEST HERE.
+     *
      * This block used to hold four passing tests for `ai.nlq`, `ai.suggest`
      * and `ai.insights`. Every one of them mocked `fetch` and asserted the URL
      * the client BUILT — never that anything answered it. All three endpoints
-     * were mounted by nothing, in any repo, for the whole life of those tests.
+     * were mounted by nothing, in any repo, for the whole life of those tests
+     * (#3584, #3611, #3636, #3702 are the same shape).
      *
-     * That is the shape of test this audit family kept finding behind green
-     * suites (#3584, #3611, #3636, #3702), so the replacement asserts the one
-     * thing that is actually true and worth defending: the namespace is gone
-     * and must not come back without a route behind it.
+     * So the assertions below are deliberately the *narrow* half — verb, path,
+     * and the body decisions this SDK makes on the caller's behalf. The claim
+     * that these paths RESOLVE is not made here and cannot be: the AI service
+     * is a Cloud/EE package in the `cloud` repo. It is made where the routes
+     * are, by `packages/service-ai/src/ai-route-ledger.conformance.test.ts`,
+     * which reads `buildAIRoutes()` and drives this very namespace against it.
      */
-    it('is gone — no method may return without an endpoint to answer it', () => {
-        const { client } = createMockClient({ success: true, data: {} });
-        expect((client as unknown as Record<string, unknown>).ai).toBeUndefined();
+    it('chat forces stream:false — the endpoint streams by default', async () => {
+        const { client, fetchMock } = createMockClient({ content: 'hello', model: 'gpt-4o-mini' });
+        const result = await client.ai.chat({ messages: [{ role: 'user', content: 'hi' }] });
+        expect(result.content).toBe('hello');
+        const [url, opts] = fetchMock.mock.calls[0];
+        expect(url).toBe('http://localhost:3000/api/v1/ai/chat');
+        expect(opts.method).toBe('POST');
+        // Without this the "JSON" method would come back as an SSE stream and
+        // `res.json()` would throw on the first frame.
+        expect(JSON.parse(opts.body).stream).toBe(false);
     });
 
-    it('still directs chat at the Vercel AI SDK', () => {
-        // Unchanged guidance, and the reason no `chat` method is being added
-        // back with the real surface: `useChat()` (`@ai-sdk/react`) speaks the
-        // Data Stream Protocol against POST /api/v1/ai/chat directly.
-        const { client } = createMockClient({ success: true, data: {} });
-        expect((client as unknown as Record<string, unknown>).ai).toBeUndefined();
+    it('complete posts the prompt', async () => {
+        const { client, fetchMock } = createMockClient({ content: '42' });
+        const result = await client.ai.complete({ prompt: 'answer:' });
+        expect(result.content).toBe('42');
+        const [url, opts] = fetchMock.mock.calls[0];
+        expect(url).toBe('http://localhost:3000/api/v1/ai/complete');
+        expect(JSON.parse(opts.body)).toEqual({ prompt: 'answer:' });
+    });
+
+    it('models reads the picker allowlist', async () => {
+        const { client, fetchMock } = createMockClient({
+            models: [{ id: 'gpt-4o-mini', label: 'GPT-4o mini', default: true }],
+            defaultModel: 'gpt-4o-mini',
+        });
+        const result = await client.ai.models();
+        expect(result.defaultModel).toBe('gpt-4o-mini');
+        expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/ai/models');
+    });
+
+    it('conversations CRUD targets the six mounted routes', async () => {
+        const conv = { id: 'c1', messages: [], createdAt: 'now', updatedAt: 'now' };
+
+        const created = createMockClient(conv);
+        await created.client.ai.conversations.create({ title: 'Q3' });
+        expect(created.fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/ai/conversations');
+        expect(created.fetchMock.mock.calls[0][1].method).toBe('POST');
+
+        const listed = createMockClient({ conversations: [conv] });
+        const list = await listed.client.ai.conversations.list({ limit: 10 });
+        expect(list).toHaveLength(1);
+        expect(listed.fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/ai/conversations?limit=10');
+
+        const got = createMockClient(conv);
+        await got.client.ai.conversations.get('c 1');
+        expect(got.fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/ai/conversations/c%201');
+
+        const patched = createMockClient(conv);
+        await patched.client.ai.conversations.update('c1', { title: 'Renamed' });
+        expect(patched.fetchMock.mock.calls[0][1].method).toBe('PATCH');
+
+        const messaged = createMockClient(conv);
+        await messaged.client.ai.conversations.addMessage('c1', { role: 'user', content: 'hi' });
+        expect(messaged.fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/ai/conversations/c1/messages');
+    });
+
+    it('conversations.delete reports the 204 the route returns', async () => {
+        // DELETE answers 204 with no body; unwrapping it would throw in json().
+        const { client, fetchMock } = createMockClient(undefined, 204);
+        expect(await client.ai.conversations.delete('c1')).toEqual({ deleted: true });
+        expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+    });
+
+    it('chatStream parses the UI Message Stream frames, ignoring [DONE] and `g:` lines', async () => {
+        const sse = [
+            'data: {"type":"start"}\n\n',
+            'data: {"type":"text-delta","id":"0","delta":"Hel"}\n\n',
+            'g:{"text":"thinking"}\n',                       // legacy Data Stream line, single \n
+            'data: {"type":"text-delta","id":"0","delta":"lo"}\n\n',
+            'data: {"type":"finish","finishReason":"stop"}\n\ndata: [DONE]\n\n',
+        ];
+        const encoder = new TextEncoder();
+        let i = 0;
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            headers: new Headers({ 'content-type': 'text/event-stream' }),
+            // Chunk boundaries deliberately fall mid-frame in the last entry.
+            body: { getReader: () => ({
+                read: async () => (i < sse.length
+                    ? { done: false, value: encoder.encode(sse[i++]) }
+                    : { done: true, value: undefined }),
+            }) },
+        });
+        const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000', fetch: fetchMock });
+
+        const frames: any[] = [];
+        for await (const frame of await client.ai.chatStream({ messages: [{ role: 'user', content: 'hi' }] })) {
+            frames.push(frame);
+        }
+
+        expect(frames.map((f) => f.type)).toEqual(['start', 'text-delta', 'text-delta', 'finish']);
+        expect(frames.filter((f) => f.type === 'text-delta').map((f) => f.delta).join('')).toBe('Hello');
+        const [url, opts] = fetchMock.mock.calls[0];
+        expect(url).toBe('http://localhost:3000/api/v1/ai/chat');
+        expect(JSON.parse(opts.body).stream).toBe(true);
+        expect(opts.headers.Accept).toBe('text/event-stream');
+    });
+
+    it('chatStream fails loudly when the runtime exposes no response body', async () => {
+        // The request still goes out — the failure is on the first read, which
+        // is where a fetch polyfill without `Response.body` reveals itself.
+        const { client, fetchMock } = createMockClient({});
+        const stream = await client.ai.chatStream({ messages: [{ role: 'user', content: 'hi' }] });
+        expect(fetchMock).toHaveBeenCalledOnce();
+        await expect((async () => { for await (const _frame of stream) { /* drain */ } })())
+            .rejects.toThrow(/no body/i);
     });
 });
 

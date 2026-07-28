@@ -50,12 +50,13 @@ import {
   ListNotificationsResponseSchema,
   MarkNotificationsReadRequestSchema,
   // AI
-  AiNlqRequestSchema,
-  AiNlqResponseSchema,
-  AiSuggestRequestSchema,
-  AiSuggestResponseSchema,
-  AiInsightsRequestSchema,
-  AiInsightsResponseSchema,
+  AiChatRequestSchema,
+  AiChatResponseSchema,
+  AiCompleteRequestSchema,
+  AiModelsResponseSchema,
+  CreateAiConversationRequestSchema,
+  ListAiConversationsResponseSchema,
+  UpdateAiConversationRequestSchema,
   // i18n
   GetLocalesResponseSchema,
   GetTranslationsRequestSchema,
@@ -278,21 +279,52 @@ describe('ObjectStack Protocol', () => {
     expect(MarkNotificationsReadRequestSchema.safeParse({ ids: ['n1', 'n2'] }).success).toBe(true);
   });
 
+  /**
+   * These replace the `AiNlq*` / `AiSuggest*` / `AiInsights*` cases (#3718).
+   * Those parsed cleanly for years against endpoints no repo has ever mounted
+   * — a schema is a shape, never evidence that anything serves it. What is
+   * asserted here is the shape of the routes `service-ai` really mounts, which
+   * `cloud`'s ledger checks against `buildAIRoutes()` itself.
+   */
   it('validates AI operations', () => {
-    expect(AiNlqRequestSchema.safeParse({ query: 'show me all open tasks', object: 'task' }).success).toBe(true);
-    expect(AiNlqResponseSchema.safeParse({
-      query: { object: 'task', where: { status: 'open' } },
-      explanation: 'Find all tasks with open status', confidence: 0.92,
+    // chat — Vercel `useChat` flat form, and the JSON (stream:false) reply
+    expect(AiChatRequestSchema.safeParse({
+      messages: [{ role: 'user', content: 'how many open orders?' }],
+      system: 'You are a helpful assistant', model: 'gpt-4o-mini', stream: false,
     }).success).toBe(true);
-    // AiChatRequestSchema/AiChatResponseSchema removed — chat protocol aligned with Vercel AI SDK
-    expect(AiSuggestRequestSchema.safeParse({ object: 'task', field: 'priority', partial: 'hi' }).success).toBe(true);
-    expect(AiSuggestResponseSchema.safeParse({
-      suggestions: [{ value: 'high', label: 'High', confidence: 0.95, reason: 'Matches partial input' }],
+    // v6 `parts` messages carry no `content` at all — the routes accept them
+    expect(AiChatRequestSchema.safeParse({
+      messages: [{ role: 'assistant', parts: [{ type: 'text', text: 'hi' }] }],
     }).success).toBe(true);
-    expect(AiInsightsRequestSchema.safeParse({ object: 'task', type: 'trends' }).success).toBe(true);
-    expect(AiInsightsResponseSchema.safeParse({
-      insights: [{ type: 'trends', title: 'Task Completion Rate', description: 'Completion rate increased by 15% this month', confidence: 0.88 }],
+    expect(AiChatRequestSchema.safeParse({ messages: [] }).success, 'the routes 400 an empty message list').toBe(false);
+    expect(AiChatResponseSchema.safeParse({
+      content: '42 open orders', model: 'gpt-4o-mini',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }, conversationId: 'conv_1',
     }).success).toBe(true);
+
+    // complete
+    expect(AiCompleteRequestSchema.safeParse({ prompt: 'Summarise:', options: { maxTokens: 64 } }).success).toBe(true);
+    expect(AiCompleteRequestSchema.safeParse({}).success).toBe(false);
+
+    // models — both live shapes: the ADR-0028 allowlist and the bare-id fallback
+    expect(AiModelsResponseSchema.safeParse({
+      models: [{ id: 'gpt-4o-mini', label: 'GPT-4o mini', default: true }], defaultModel: 'gpt-4o-mini',
+    }).success).toBe(true);
+    expect(AiModelsResponseSchema.safeParse({ models: ['gpt-4o-mini'] }).success).toBe(true);
+
+    // conversations
+    expect(CreateAiConversationRequestSchema.safeParse({ title: 'Q3 pipeline', metadata: { source: 'sdk' } }).success).toBe(true);
+    expect(ListAiConversationsResponseSchema.safeParse({
+      conversations: [{
+        id: 'conv_1', messages: [{ role: 'user', content: 'hi' }],
+        createdAt: '2026-07-27T10:00:00Z', updatedAt: '2026-07-27T10:00:00Z',
+      }],
+    }).success).toBe(true);
+    expect(UpdateAiConversationRequestSchema.safeParse({ title: 'Renamed' }).success).toBe(true);
+    expect(
+      UpdateAiConversationRequestSchema.safeParse({}).success,
+      'PATCH with neither title nor metadata is a 400 on the wire',
+    ).toBe(false);
   });
 
   it('validates i18n operations', () => {

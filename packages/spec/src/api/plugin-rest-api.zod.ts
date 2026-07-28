@@ -1083,69 +1083,26 @@ export const DEFAULT_NOTIFICATION_ROUTES: RestApiRouteRegistration = {
 // AI Routes
 // ==========================================
 
-/**
- * Default AI Routes
- * Standard routes for AI operations (NLQ, Chat, Suggest, Insights)
- */
-export const DEFAULT_AI_ROUTES: RestApiRouteRegistration = {
-  prefix: '/api/v1/ai',
-  service: 'ai',
-  category: 'ai',
-  methods: ['aiNlq', 'aiSuggest', 'aiInsights'],
-  authRequired: true,
-  endpoints: [
-    {
-      method: 'POST',
-      path: '/nlq',
-      handler: 'aiNlq',
-      category: 'ai',
-      public: false,
-      summary: 'Natural language query',
-      description: 'Converts a natural language query to a structured query AST',
-      tags: ['AI'],
-      requestSchema: 'AiNlqRequestSchema',
-      responseSchema: 'AiNlqResponseSchema',
-      timeout: 30000,
-      cacheable: false,
-    },
-    // AI chat route removed — wire protocol aligned with Vercel AI SDK.
-    // The chat endpoint should use Vercel's `toDataStreamResponse()` directly.
-    {
-      method: 'POST',
-      path: '/suggest',
-      handler: 'aiSuggest',
-      category: 'ai',
-      public: false,
-      summary: 'Get AI-powered suggestions',
-      description: 'Returns AI-generated field value suggestions based on context',
-      tags: ['AI'],
-      requestSchema: 'AiSuggestRequestSchema',
-      responseSchema: 'AiSuggestResponseSchema',
-      timeout: 15000,
-      cacheable: false,
-    },
-    {
-      method: 'POST',
-      path: '/insights',
-      handler: 'aiInsights',
-      category: 'ai',
-      public: false,
-      summary: 'Get AI-generated insights',
-      description: 'Returns AI-generated insights (summaries, trends, anomalies, recommendations)',
-      tags: ['AI'],
-      requestSchema: 'AiInsightsRequestSchema',
-      responseSchema: 'AiInsightsResponseSchema',
-      timeout: 60000,
-      cacheable: false,
-    },
-  ],
-  middleware: [
-    { name: 'auth', type: 'authentication', enabled: true, order: 10 },
-    { name: 'validation', type: 'validation', enabled: true, order: 20 },
-    { name: 'response_envelope', type: 'transformation', enabled: true, order: 100 },
-    { name: 'error_handler', type: 'error', enabled: true, order: 200 },
-  ],
-};
+// `DEFAULT_AI_ROUTES` is GONE (#3718).
+//
+// It declared `POST /api/v1/ai/{nlq,suggest,insights}` with handlers
+// `aiNlq` / `aiSuggest` / `aiInsights`. Nothing ever mounted those paths and
+// nothing ever implemented those handlers, so all three 404ed for the whole
+// life of the declaration — while `client.ai.nlq/suggest/insights` called them
+// and this table made them look registered.
+//
+// It could not have been otherwise: this registration table has **no runtime
+// consumer**. Only `getDefaultRouteRegistrations()` returned it, and only this
+// package's own tests read that. Re-declaring the routes that DO exist here
+// would recreate the same illusion, because the AI service is a Cloud/EE
+// package (`service-ai`, in the `cloud` repo) and this repo's dispatcher only
+// proxies `/api/v1/ai/**` to whatever `buildAIRoutes()` mounted.
+//
+// The real table is enumerated where it is mounted — `cloud`'s
+// `packages/service-ai/src/ai-route-ledger.ts`, whose conformance test reads
+// `buildAIRoutes()` directly and drives `client.ai.*` against it. The wire
+// shapes are `Ai*Schema` in `protocol.zod.ts`; the docs table is
+// `content/docs/api/plugin-endpoints.mdx`.
 
 // ==========================================
 // i18n Routes
@@ -1336,16 +1293,19 @@ export const RestApiRouteRegistration = Object.assign(RestApiRouteRegistrationSc
  * Get all default route registrations.
  * Returns the complete set of standard REST API routes covering all protocol namespaces.
  * 
- * Route groups (13 total):
+ * Route groups (8 total):
  * 1. Discovery - API capabilities and routing info
  * 2. Metadata - Object/field schema CRUD
  * 3. Data CRUD - Record operations
  * 4. Batch - Bulk operations
  * 5. Notification - Push notifications and preferences
- * 6. AI - NLQ, chat, suggestions, insights
- * 7. i18n - Locales and translations
- * 8. Analytics - BI queries and metadata
- * 9. Automation - Trigger flows and scripts
+ * 6. i18n - Locales and translations
+ * 7. Analytics - BI queries and metadata
+ * 8. Automation - Trigger flows and scripts
+ *
+ * AI is deliberately absent: its routes are mounted by a Cloud/EE package in
+ * the `cloud` repo, never from here, and the group that used to sit at #6
+ * declared three endpoints nothing has ever served (#3718).
  */
 export function getDefaultRouteRegistrations(): RestApiRouteRegistration[] {
   return [
@@ -1354,7 +1314,6 @@ export function getDefaultRouteRegistrations(): RestApiRouteRegistration[] {
     DEFAULT_DATA_CRUD_ROUTES,
     DEFAULT_BATCH_ROUTES,
     DEFAULT_NOTIFICATION_ROUTES,
-    DEFAULT_AI_ROUTES,
     DEFAULT_I18N_ROUTES,
     DEFAULT_ANALYTICS_ROUTES,
     DEFAULT_AUTOMATION_ROUTES,
