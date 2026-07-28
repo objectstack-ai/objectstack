@@ -13,7 +13,7 @@ type TaskTranslation = StrictObjectTranslation<typeof Task>;
  */
 export const zhCN: TranslationData = {
   objects: {
-    task: {
+    todo_task: {
       label: '任务',
       pluralLabel: '任务',
       fields: {

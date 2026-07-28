@@ -12,7 +12,14 @@ import type { TranslationData } from '@objectstack/spec/system';
  *
  * Validates that every field and every select option in the Task object
  * definition has a corresponding translation in each locale.
+ *
+ * The object key comes from `Task.name`, not a literal: this suite used to
+ * hard-code `objects.task` while the object is `todo_task`, so it stayed green
+ * against a bundle the resolver could never find — a completeness test that
+ * agreed with the bundle instead of with the metadata (issue #3583).
  */
+
+const objectName = Task.name;
 
 const fieldNames = Object.keys(Task.fields);
 
@@ -31,14 +38,14 @@ describe.each([
   ['ja-JP', jaJP],
 ] as [string, TranslationData][])('%s translation completeness', (locale, t) => {
 
-  it('should have task object translation', () => {
-    expect(t.objects?.task).toBeDefined();
-    expect(t.objects?.task?.label).toBeTruthy();
+  it(`should have "${objectName}" object translation`, () => {
+    expect(t.objects?.[objectName]).toBeDefined();
+    expect(t.objects?.[objectName]?.label).toBeTruthy();
   });
 
   it.each(fieldNames)('field: %s', (name) => {
     expect(
-      t.objects?.task?.fields?.[name]?.label,
+      t.objects?.[objectName]?.fields?.[name]?.label,
       `[${locale}] Missing label for field "${name}"`,
     ).toBeTruthy();
   });
@@ -46,7 +53,7 @@ describe.each([
   it.each(selectFields)('options: $name', ({ name, values }) => {
     for (const v of values) {
       expect(
-        t.objects?.task?.fields?.[name]?.options?.[v],
+        t.objects?.[objectName]?.fields?.[name]?.options?.[v],
         `[${locale}] Missing option "${v}" for field "${name}"`,
       ).toBeTruthy();
     }

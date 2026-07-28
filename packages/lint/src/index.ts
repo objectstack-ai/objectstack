@@ -211,4 +211,14 @@ export type { ChartBindingFinding, ChartBindingSeverity } from './validate-chart
 export { validateNavAccess, NAV_OBJECT_UNGRANTED } from './validate-nav-access.js';
 export type { NavAccessFinding, NavAccessSeverity } from './validate-nav-access.js';
 
+export {
+  validateTranslationReferences,
+  TRANSLATION_TARGET_UNKNOWN,
+  TRANSLATION_OPTION_KEY_UNKNOWN,
+} from './validate-translation-references.js';
+export type {
+  TranslationRefFinding,
+  TranslationRefSeverity,
+} from './validate-translation-references.js';
+
 export { buildAccessMatrix, diffAccessMatrix } from './build-access-matrix.js';

@@ -19,8 +19,6 @@ export const CrmTranslationBundle = defineTranslationBundle({
           industry: { label: 'Industry' },
           annual_revenue: { label: 'Annual Revenue' },
           website: { label: 'Website' },
-          phone: { label: 'Phone' },
-          billing_address: { label: 'Billing Address' },
           owner_id: { label: 'Account Owner' },
         },
       },
@@ -30,10 +28,9 @@ export const CrmTranslationBundle = defineTranslationBundle({
         fields: {
           first_name: { label: 'First Name' },
           last_name: { label: 'Last Name' },
+          full_name: { label: 'Full Name' },
           email: { label: 'Email' },
-          phone: { label: 'Phone' },
-          title: { label: 'Job Title' },
-          account_id: { label: 'Account' },
+          account: { label: 'Account' },
         },
       },
       crm_opportunity: {
@@ -48,17 +45,12 @@ export const CrmTranslationBundle = defineTranslationBundle({
           discount_percent: { label: 'Discount (%)' },
           owner_id: { label: 'Owner' },
         },
-        _sections: {
-          deal_info: { label: 'Deal Information' },
-          finance: { label: 'Financial Details' },
-        },
       },
       crm_lead: {
         label: 'Lead',
         pluralLabel: 'Leads',
         fields: {
-          first_name: { label: 'First Name' },
-          last_name: { label: 'Last Name' },
+          name: { label: 'Lead Name' },
           email: { label: 'Email' },
           company: { label: 'Company' },
           status: { label: 'Status' },
@@ -74,18 +66,18 @@ export const CrmTranslationBundle = defineTranslationBundle({
           type: { label: 'Activity Type' },
           status: { label: 'Status' },
           due_date: { label: 'Due Date' },
-          contact_id: { label: 'Contact' },
-          opportunity_id: { label: 'Opportunity' },
+          contact: { label: 'Contact' },
+          opportunity: { label: 'Opportunity' },
         },
       },
     },
     apps: {
-      crm: {
+      crm_app: {
         label: 'CRM',
         description: 'Customer Relationship Management',
         navigation: {
-          sales: { label: 'Sales' },
-          admin: { label: 'Administration' },
+          group_sales: { label: 'Sales' },
+          group_analytics: { label: 'Analytics' },
         },
       },
     },
@@ -108,8 +100,6 @@ export const CrmTranslationBundle = defineTranslationBundle({
           industry: { label: '行业' },
           annual_revenue: { label: '年营收' },
           website: { label: '官网' },
-          phone: { label: '电话' },
-          billing_address: { label: '账单地址' },
           owner_id: { label: '负责人' },
         },
       },
@@ -119,10 +109,9 @@ export const CrmTranslationBundle = defineTranslationBundle({
         fields: {
           first_name: { label: '名' },
           last_name: { label: '姓' },
+          full_name: { label: '姓名' },
           email: { label: '邮箱' },
-          phone: { label: '电话' },
-          title: { label: '职位' },
-          account_id: { label: '所属客户' },
+          account: { label: '所属客户' },
         },
       },
       crm_opportunity: {
@@ -137,17 +126,12 @@ export const CrmTranslationBundle = defineTranslationBundle({
           discount_percent: { label: '折扣 (%)' },
           owner_id: { label: '负责人' },
         },
-        _sections: {
-          deal_info: { label: '商机信息' },
-          finance: { label: '财务明细' },
-        },
       },
       crm_lead: {
         label: '线索',
         pluralLabel: '线索列表',
         fields: {
-          first_name: { label: '名' },
-          last_name: { label: '姓' },
+          name: { label: '线索名称' },
           email: { label: '邮箱' },
           company: { label: '公司' },
           status: { label: '状态' },
@@ -163,18 +147,18 @@ export const CrmTranslationBundle = defineTranslationBundle({
           type: { label: '活动类型' },
           status: { label: '状态' },
           due_date: { label: '截止日期' },
-          contact_id: { label: '联系人' },
-          opportunity_id: { label: '商机' },
+          contact: { label: '联系人' },
+          opportunity: { label: '商机' },
         },
       },
     },
     apps: {
-      crm: {
+      crm_app: {
         label: '客户管理',
         description: '客户关系管理系统',
         navigation: {
-          sales: { label: '销售管理' },
-          admin: { label: '系统管理' },
+          group_sales: { label: '销售管理' },
+          group_analytics: { label: '数据分析' },
         },
       },
     },

@@ -16,6 +16,7 @@ import { validateFilterTokens } from '@objectstack/lint';
 import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
 import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
 import { validateNavAccess } from '@objectstack/lint';
+import { validateTranslationReferences } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateSecurityPosture, validateOrgAxisRedLines, buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
@@ -334,7 +335,10 @@ export default class Compile extends Command {
       //     All plain strings in the schema, so a name resolving to nothing
       //     ships and fails silently. Errors fail the build; the
       //     platform-prefixed-but-unregistered case is advisory (a third-party
-      //     package may still provide it).
+      //     package may still provide it). Translation bundles are checked in
+      //     the reverse direction (keys naming metadata that does not exist,
+      //     option keys written as the display label) — advisory throughout,
+      //     since an orphan key is inert rather than broken.
       if (!flags.json) printStep('Checking object & action references (#3583)...');
       const refFindings = [
         ...validateObjectReferences(result.data as Record<string, unknown>),
@@ -342,6 +346,7 @@ export default class Compile extends Command {
         ...validatePageFieldBindings(result.data as Record<string, unknown>),
         ...validateChartBindings(result.data as Record<string, unknown>),
         ...validateNavAccess(result.data as Record<string, unknown>),
+        ...validateTranslationReferences(result.data as Record<string, unknown>),
       ];
       const refErrors = refFindings.filter((f) => f.severity === 'error');
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');

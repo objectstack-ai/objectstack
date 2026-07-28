@@ -13,6 +13,7 @@ import { validateRecordTitle, validateSemanticRoles, validateCapabilityReference
 import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
 import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
 import { validateNavAccess } from '@objectstack/lint';
+import { validateTranslationReferences } from '@objectstack/lint';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
@@ -559,6 +560,22 @@ export function lintConfig(config: any): LintIssue[] {
   // fails permission-denied for every user, including admins. Advisory — the
   // grant may come from a set another installed package ships.
   for (const t of validateNavAccess(config)) {
+    issues.push({
+      severity: t.severity,
+      rule: t.rule,
+      message: `${t.where}: ${t.message}`,
+      path: t.path,
+      fix: t.hint,
+    });
+  }
+
+  // ── Translation-bundle references & option keys (issue #3583) ──
+  // The i18n gate only ever asked "which expected keys are missing?". This is
+  // the reverse the spec already names (`TranslationDiffStatus 'redundant'`):
+  // keys pointing at metadata that no longer exists, and select-option keys
+  // written as the display label instead of the stored value. Advisory — an
+  // orphan key is inert, it just leaves one string untranslated.
+  for (const t of validateTranslationReferences(config)) {
     issues.push({
       severity: t.severity,
       rule: t.rule,

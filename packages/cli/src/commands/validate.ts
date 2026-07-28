@@ -17,6 +17,7 @@ import { validateFilterTokens } from '@objectstack/lint';
 import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
 import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
 import { validateNavAccess } from '@objectstack/lint';
+import { validateTranslationReferences } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
@@ -297,6 +298,11 @@ export default class Validate extends Command {
       //     parses, ships, and fails silently at runtime. An unprefixed miss is
       //     a typo (error); a platform-prefixed name no known package registers
       //     is advisory (a third-party package may still provide it).
+      //     Translation bundles get the same treatment in reverse: a key naming
+      //     a field/view/action/section that no longer exists — or an option
+      //     keyed by its display label instead of its stored value — resolves
+      //     to nothing and renders the source string (advisory: inert, not
+      //     broken).
       if (!flags.json) printStep('Checking object & action references (#3583)...');
       const refFindings = [
         ...validateObjectReferences(result.data as Record<string, unknown>),
@@ -304,6 +310,7 @@ export default class Validate extends Command {
         ...validatePageFieldBindings(result.data as Record<string, unknown>),
         ...validateChartBindings(result.data as Record<string, unknown>),
         ...validateNavAccess(result.data as Record<string, unknown>),
+        ...validateTranslationReferences(result.data as Record<string, unknown>),
       ];
       const refErrors = refFindings.filter((f) => f.severity === 'error');
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');
