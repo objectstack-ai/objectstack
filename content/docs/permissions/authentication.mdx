@@ -684,7 +684,7 @@ an audit stamp (`granted_by`), a validity window, and a scope check that a tier
 never had.
 
 To invite someone straight into a position, put it in the invitation's
-*placement* rather than its role:
+*placement* rather than its membership tier:
 
 ```http
 POST /api/v1/auth/organization/invite-member
@@ -703,10 +703,10 @@ admins only. On acceptance the positions become real `sys_user_position` rows.
 
 <Callout type="warn">
 Earlier releases registered every declared position and permission-set name as
-a valid `role` value, so `{ "role": "sales_rep" }` was accepted. That path is
-removed: because every value stored in `sys_member.role` is projected into
-`current_user.positions`, it granted capability with none of the controls
-above. An invitation naming a position as its `role` is now refused with
+a valid membership tier, so naming one directly in the invitation was accepted.
+That path is removed: because every value stored in the tier column is
+projected into `current_user.positions`, it granted capability with none of the
+controls above. Naming a position as an invitation's tier is now refused with
 `ROLE_NOT_FOUND`. Use `positions` as shown.
 </Callout>
 
