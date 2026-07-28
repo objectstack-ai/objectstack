@@ -1,38 +1,134 @@
-# ADR-0109: The AI tool authoring model — third-party tools are bindings to executable primitives
+# ADR-0109: The AI tool authoring model — the default third-party path needs no tool records
 
-**Status**: Proposed (2026-07-28) — the "D0" decision of issue #3820; blocks the `skill.tools` branch of the R7 reference-integrity rule.
+**Status**: Proposed (2026-07-28; revised same day — see Revision note). Phase 1 (platform tool-name registry + advisory reference lint) is implemented alongside this revision; Phase 2 (the optional refinement layer) awaits acceptance.
 **Deciders**: ObjectStack Protocol Architects
-**Builds on**: [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md) (skills + tools are the third-party extension primitive), [ADR-0064](./0064-tool-scoping-to-agent.md) (an agent's tools are its skills' tools), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert metadata)
-**Consumers**: `@objectstack/spec` (`ai/tool.zod.ts`, `stack.zod.ts`), `@objectstack/lint` (the R7 rule), `../cloud/service-ai` (ToolRegistry), `../cloud/service-ai-studio`
+**Builds on**: [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md) (skills + tools are the third-party extension primitive), [ADR-0064](./0064-tool-scoping-to-agent.md) (an agent's tools are its skills' tools), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert metadata), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove)
+**Consumers**: `@objectstack/spec` (`system/constants/platform-tool-names.ts`, `ai/tool.zod.ts`, `stack.zod.ts`), `@objectstack/lint` (`validate-ai-tool-references`), `../cloud/service-ai` + `service-ai-studio` (registry conformance)
+
+> **Revision note.** The first draft framed third-party tools as *bindings to
+> actions/flows that authors declare as tool records*. Review surfaced the
+> stronger conclusion: the runtime **already materialises** a tool per
+> declarative action (`action_<name>`, the family `actions_executor`
+> subscribes to with `action_*`), so in the default path a third party needs
+> **no tool record at all** — the binding the draft proposed already exists
+> implicitly for every action. The tool record is thereby demoted from "the
+> authoring artifact" to an *optional refinement layer*, and Phase 1 shrinks
+> to what today's mechanisms already support.
 
 ---
 
 ## TL;DR
 
-`stack.tools` today is a **declaration with no executable half and no reader**: `ToolSchema` carries no handler binding, the metadata `tool` type is written once at boot (Studio visibility mirror, `service-ai-studio/plugin.ts`) and read by **nothing**, `'tools'` is missing from `composeStacks`' `CONCAT_ARRAY_FIELDS`, and the executable tool set lives exclusively in the runtime-registered in-process `ToolRegistry`. ADR-0063 §2 says third parties extend via "skills **and tools**" — but only the skills half is real. That is the ADR-0078 prohibited state, and it makes any reference-integrity rule over `skill.tools[]` unbuildable: there is no registry of facts to resolve against (16/16 of HotCRM's skill→tool references miss `stack.tools`; 6 of those 16 nonetheless resolve — against the runtime registry lint cannot see).
+**Third parties extend AI by authoring skills — and only skills.** A skill's
+`tools[]` names either a platform-registered tool (curated in
+`PLATFORM_PROVIDED_TOOL_NAMES`) or a tool the runtime materialises from the
+app's own declarative actions (`action_<name>`). The executable, its authz,
+and its audit trail are the action/flow the app already ships for its UI —
+the AI can do exactly what the application can already do, under the same
+permissions, and nothing else.
 
-Decision: **a third-party tool is a *binding* to an executable primitive the platform already has — an action or a flow — never a free-floating executable of its own.** Kernel/plugin tools stay runtime-registered, and their names become facts via a curated, conformance-tested registry in spec.
+`stack.tools` records are an **optional AI-presentation refinement layer**
+(Phase 2): needed only when the AI-facing surface must differ from the raw
+executable. They are never required, and never a place business logic lives.
+
+## Context
+
+`stack.tools` before this ADR was the ADR-0078 prohibited state: a
+declaration with no executable half and no reader. `ToolSchema` carries no
+handler binding; the metadata `tool` type is written once at boot (Studio
+visibility mirror) and read by nothing; `'tools'` was missing from
+`composeStacks`' concat list; the executable tool set lives exclusively in
+the runtime-registered in-process `ToolRegistry`. Meanwhile ADR-0063 §2
+promised "skills **and tools**" as the third-party primitive — only the
+skills half was real. On the HotCRM corpus, 16/16 `skill.tools` references
+missed `stack.tools` while 6 of them resolved against the runtime registry
+lint could not see: no reference rule could be correct in either direction
+(#3820 D0/D2).
 
 ## Decision
 
-1. **Third-party tools bind, they don't implement.** `ToolSchema` gains a required-for-app-packages `binding` (`{ type: 'action' | 'flow', name: string }`). The runtime materialises a callable from the bound primitive (the same mechanism that already materialises `action_<name>` tools from object action lists); `parameters` may narrow, but never widen, what the bound primitive accepts. Handlers, authz, and audit stay where they already are — on the action/flow. A tool record without a `binding` is legal only for runtime-registered (kernel/plugin) tools, whose record is a visibility mirror, not a definition.
-2. **Platform tool names become facts, not guesses.** Spec exports a curated `PLATFORM_PROVIDED_TOOL_NAMES: ReadonlySet<string>` (the `PLATFORM_PROVIDED_OBJECT_NAMES` / #3657 precedent), kept honest by conformance tests in the *owning* packages (service-ai / service-ai-studio assert "every tool I register is listed; every listed name with my prefix is registered"). The lint → spec dependency direction is preserved.
-3. **Reference integrity becomes decidable, and R7's tool branch unblocks.** `skill.tools[]` (wildcard-aware) resolves against: bound tools declared in-stack (→ checkable through to the action/flow, which existing rules already resolve) ∪ `PLATFORM_PROVIDED_TOOL_NAMES` ∪ wildcard families. Resolution ladder per ADR-0072: unknown name → **warning** at first (ADR-0078 ratchet), **error** once the registry has soaked one release.
-4. **The inert surface is closed.** `'tools'` joins `CONCAT_ARRAY_FIELDS`; the boot-time mirror writes gain provenance so a stack-declared record cannot shadow a platform tool's mirror (today `if (exists) skip` lets it); the runtime's "silently dropped" posture for unresolved references stays (graceful degradation) but logs, because the *authoring-time* signal now comes from lint — loud at the producer, tolerant at the consumer (Prime Directive #12).
+1. **The default path is skills-only.** A third party gives the AI a new
+   capability by (a) declaring the executable as a normal action/flow — which
+   the app needs for its UI anyway — and (b) authoring a skill whose
+   `tools[]` names the materialised `action_<name>` tool or a platform tool.
+   Zero tool records; permissions and audit are inherited from the executable
+   by construction. This is also one less namespace an AI author can
+   hallucinate into.
 
-## Rejected alternative
+2. **Platform tool names are facts, not guesses.**
+   `PLATFORM_PROVIDED_TOOL_NAMES` in `@objectstack/spec`
+   (`system/constants/platform-tool-names.ts`, the
+   `PLATFORM_PROVIDED_OBJECT_NAMES` precedent) curates every statically-named
+   tool the cloud AI runtime registers, grouped by owning package;
+   `PLATFORM_TOOL_FAMILY_PREFIXES` names the dynamically-materialised
+   families (today exactly `action_`). The owning cloud packages carry
+   conformance tests — the same split as `CLOUD_PROVIDED_OBJECT_NAMES`,
+   whose conformance half also lives outside this repo.
 
-**Tools as first-class executables** (a `handler` on ToolSchema): re-invents actions/flows inside the AI layer, splits authz/audit across two systems, and turns every tool into a second place to define business logic. The platform's ontology is already executable; the AI layer needs a *view* of it, not a rival.
+3. **`skill.tools[]` reference integrity is decidable and linted** —
+   `validate-ai-tool-references` in `@objectstack/lint`, a member of
+   `REFERENCE_INTEGRITY_RULES`. Resolution universe: `stack.tools` names ∪
+   the platform registry ∪ the materialised `action_<name>` family (from
+   `stack.actions` and every object's `actions`), wildcard-aware. Severity
+   **warning** first (ADR-0078 ratchet): a runtime plugin outside the
+   registry remains statically invisible, and the runtime deliberately
+   tolerates unresolved names. On the HotCRM corpus the rule yields exactly
+   the 10 fictional references and 0 false positives.
+
+4. **Tool records become the optional refinement layer (Phase 2).** A tool
+   record earns its place only when the AI-facing surface must differ from
+   the raw executable: LLM-directed description, parameter narrowing (expose
+   3 of 20 params, tighten enums), exposing a *flow* (no materialised family
+   yet), a stable AI-facing name decoupled from the action's, or execution
+   policy (a confirm-before-run flag — note `requiresConfirmation` was
+   *removed* in #3715/#3876 as unenforced per ADR-0049; it returns only
+   together with its enforcement, as part of this layer). When Phase 2
+   lands, a third-party tool record MUST carry a `binding`
+   (`{ type: 'action' | 'flow', name }`) to the executable it refines —
+   handlers never live on the tool. Until Phase 2 lands, third-party tool
+   records remain inert-and-documented (the `stack.tools` doc says so), and
+   the refinement needs above are the acceptance trigger.
+
+5. **The inert-surface holes close.** `'tools'` joins `composeStacks`'
+   concat list (this revision — a declared record must at least survive
+   composition). Phase 2 adds provenance to the boot-time metadata mirror so
+   a stack-declared record cannot shadow a platform tool's entry (today
+   `if (exists) skip` lets it), and revisits the `tool` metadata-type flags
+   (`allowRuntimeCreate`/`allowOrgOverride`) which currently advertise an
+   authoring surface with no reader.
+
+## Rejected alternatives
+
+- **Tools as first-class executables** (a `handler` on ToolSchema):
+  re-invents actions/flows inside the AI layer, splits authz/audit across two
+  systems, and turns every tool into a second place to define business logic.
+  The platform's ontology is already executable; the AI layer needs a *view*
+  of it, not a rival.
+- **A required tool record per exposed action** (the first draft's implicit
+  shape): the materialised `action_<name>` family already provides the
+  binding implicitly, so a mandatory record would add a second authoring
+  step, a second namespace to keep consistent, and a second surface for AI
+  authors to hallucinate into — for zero added capability.
 
 ## Consequences
 
-- "Skills + tools" (ADR-0063 §2) becomes a shipped contract: a third party can author a skill whose tools are real, checkable, and governed by the same authz as the UI button that runs the same action.
-- AI-authored metadata gets a closed vocabulary: a hallucinated tool name fails lint at draft time instead of shipping as a dead capability the copilot claims to have (the HotCRM failure, 10 fictional tools across 6 skills).
-- Costs: a spec change (`binding`), the registry + conformance tests, a materialisation path in the runtime; the R7 tool-branch rule stays blocked until 1–2 land.
+- "Third-party AI extension = write a skill" becomes the whole story — one
+  concept to document, teach, and generate. ADR-0063 §2's "skills and tools"
+  reads as: skills are the primitive, tools are its optional refinement.
+- AI capability ≡ application capability: same executables, same
+  permissions, same audit. There is no second security system to review and
+  no way for the AI to do what the app cannot.
+- A hallucinated tool name fails lint at draft time (advisory now, gating
+  after the ratchet) instead of shipping as a copilot that claims abilities
+  it does not have — the HotCRM failure, 10 fictional tools across 6 skills.
+- Cost honestly stated: the registry is a curated list that can go stale;
+  the conformance tests in the owning packages are the mechanism that keeps
+  it true, and they live in a different repository than the list.
 
 ## Follow-up
 
-- [ ] `binding` on `ToolSchema` + `'tools'` into `CONCAT_ARRAY_FIELDS` (spec).
-- [ ] `PLATFORM_PROVIDED_TOOL_NAMES` + owning-package conformance tests (spec, cloud).
-- [ ] Materialise bound tools in the ToolRegistry; provenance-guard the boot mirror (cloud).
-- [ ] R7 tool branch: `validate-ai-references` skill→tool resolution, warning-first (lint; #3820).
+- [x] `PLATFORM_PROVIDED_TOOL_NAMES` + `PLATFORM_TOOL_FAMILY_PREFIXES` + invariant tests (spec — this change).
+- [x] `validate-ai-tool-references`, advisory, in `REFERENCE_INTEGRITY_RULES` (lint — this change).
+- [x] `'tools'` into `composeStacks`' concat list (spec — this change).
+- [ ] Registry conformance tests in `../cloud` `service-ai` / `service-ai-studio` (cloud PR; activates fully when the cloud `.objectstack-sha` pin advances past this change).
+- [ ] **Phase 2 (on acceptance + a real refinement need):** `binding` on `ToolSchema`; flow exposure; boot-mirror provenance guard; revisit `tool` metadata-type flags; ratchet the lint rule to error per ADR-0078 once the registry has soaked a release.

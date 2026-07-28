@@ -306,14 +306,17 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    *   declares its agent surface affinity (`'ask' | 'build' | 'both'`,
    *   ADR-0063 §3 — checked by lint, enforced at load), trigger phrases for
    *   intent matching, and trigger conditions for context-aware activation.
-   * - **tools**: declaration-only metadata records today. The EXECUTABLE tool
-   *   set is runtime-registered (kernel + plugins); a `stack.tools` entry has
-   *   no handler binding and no runtime reader yet. The third-party tool
-   *   authoring model is an open decision (#3820 D0) — until it lands, a
-   *   skill's `tools[]` can only name runtime-registered tools.
+   * - **tools**: OPTIONAL refinement layer, never required (ADR-0109). The
+   *   default third-party path declares no tool records: a skill's `tools[]`
+   *   names a platform-registered tool (`PLATFORM_PROVIDED_TOOL_NAMES`) or a
+   *   tool the runtime materialises from the app's own declarative actions
+   *   (`action_<name>`) — the executable, its authz and its audit stay on the
+   *   action/flow the app already ships. A `stack.tools` record exists only
+   *   for AI-presentation refinement (Phase 2: LLM description, parameter
+   *   narrowing, flow exposure) and has no runtime reader until that lands.
    */
   agents: z.array(AgentSchema).optional().describe('AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents'),
-  tools: z.array(ToolSchema).optional().describe('AI Tool metadata records (declaration-only; the executable tool set is runtime-registered — see #3820 D0)'),
+  tools: z.array(ToolSchema).optional().describe('AI Tool metadata records — optional refinement layer, never required: the default path is skills referencing platform tools or materialised action_<name> tools (ADR-0109)'),
   skills: z.array(SkillSchema).optional().describe('AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063)'),
 
   /**
@@ -1260,6 +1263,7 @@ const CONCAT_ARRAY_FIELDS = [
   'webhooks',
   'agents',
   'skills',
+  'tools',
   'hooks',
   'mappings',
   'analyticsCubes',

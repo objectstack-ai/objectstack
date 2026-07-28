@@ -53,6 +53,7 @@ import { validateNavAccess } from './validate-nav-access.js';
 import { validateTranslationReferences } from './validate-translation-references.js';
 import { validateFlowTemplatePaths } from './validate-flow-template-paths.js';
 import { validateAiSurfaceAffinity } from './validate-ai-surface-affinity.js';
+import { validateAiToolReferences } from './validate-ai-tool-references.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
 
@@ -96,6 +97,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateTranslationReferences', run: validateTranslationReferences },
   { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },
+  { name: 'validateAiToolReferences', run: validateAiToolReferences },
 ];
 
 /**
