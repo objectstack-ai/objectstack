@@ -267,6 +267,19 @@ jobs:
       - name: Check generated translation bundles are in sync with the schema
         run: pnpm check:i18n
 
+      # Ratchet on the OTHER i18n question. The step above asks "are the
+      # generated bundles still what the schema produces?"; this one asks "did
+      # anyone declare a new label and not translate it?" — the gap #3370 closed
+      # in `os lint` but which had ~765 pre-existing misses across the examples,
+      # so `--i18n-strict` cannot simply be switched on without painting CI red
+      # and getting switched back off. The debt is frozen in
+      # scripts/i18n-coverage-baseline.json; growth fails the build.
+      #
+      # Runs the built CLI over each example config, so it also belongs after
+      # the build step.
+      - name: Check no new untranslated declared labels
+        run: pnpm check:i18n-coverage
+
       # Seed the shared Turbo cache from main only (see the restore step above).
       - name: Save Turbo cache (main only)
         if: always() && github.event_name == 'push'

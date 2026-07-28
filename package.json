@@ -28,6 +28,7 @@
     "lint": "eslint . --no-inline-config",
     "i18n:extract": "tsx packages/cli/bin/run-dev.js i18n extract packages/platform-objects/scripts/i18n-extract.config.ts --locales=zh-CN,ja-JP,es-ES --fill=default --out=packages/platform-objects/src/apps/translations",
     "check:i18n": "pnpm i18n:extract --check",
+    "check:i18n-coverage": "node scripts/check-i18n-coverage.mjs",
     "check:nul-bytes": "node scripts/check-nul-bytes.mjs",
     "check:doc-authoring": "node scripts/check-doc-authoring.mjs",
     "check:role-word": "node scripts/check-role-word.mjs",
