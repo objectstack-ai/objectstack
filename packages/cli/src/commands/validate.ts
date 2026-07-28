@@ -21,7 +21,6 @@ import { validateCapabilityReferences } from '@objectstack/lint';
 import { validateVisibilityPredicates } from '@objectstack/lint';
 import { validateSecurityPosture, validateOrgAxisRedLines } from '@objectstack/lint';
 import { validateFlowTriggerReadiness } from '@objectstack/lint';
-import { validateFlowTemplatePaths } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
@@ -515,48 +514,13 @@ export default class Validate extends Command {
         }
       }
 
-      // 3g-bis. Flow template path references (#3426): a `{record.<path>}` token
-      //     in a node template that names an unknown field, or hops through a
-      //     lookup relation the seeded record carries only as a scalar id, both
-      //     render a SILENT empty string at runtime. Advisory in most positions:
-      //     the head object may come from another package (skipped there), and
-      //     the runtime still produces output (a blank), so nothing is fully
-      //     broken. GATING inside a filter-guarded CRUD node's `filter`: since
-      //     #3810 an unresolved token there does not blank a value, it deletes
-      //     the condition — which WIDENS the query — so the node refuses to
-      //     execute. The build must not ship a flow whose runtime is already
-      //     decided.
-      if (!flags.json) printStep('Checking flow template references...');
-      const flowTemplateFindings = validateFlowTemplatePaths(normalized as Record<string, unknown>);
-      const flowTemplateErrors = flowTemplateFindings.filter((f) => f.severity === 'error');
-      const flowTemplateWarnings = flowTemplateFindings.filter((f) => f.severity === 'warning');
-      if (flowTemplateErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({
-            valid: false,
-            errors: flowTemplateErrors,
-            warnings: flowTemplateWarnings,
-            duration: timer.elapsed(),
-          });
-          this.exit(1);
-        }
-        console.log('');
-        printError(
-          `Flow template reference check failed (${flowTemplateErrors.length} issue${flowTemplateErrors.length > 1 ? 's' : ''})`,
-        );
-        for (const f of flowTemplateErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
-        this.exit(1);
-      }
-      if (!flags.json) {
-        for (const w of flowTemplateWarnings.slice(0, 50)) {
-          console.log(chalk.yellow(`  ⚠ ${w.where}: ${w.message}`));
-          console.log(chalk.dim(`      ${w.hint}`));
-        }
-      }
+      // 3g-bis. Flow template path references (#3426) used to be checked here by
+      //     hand. It is a reference rule — a `{record.<field>}` token resolved
+      //     against the bound object's declared fields — so it now runs as a
+      //     member of REFERENCE_INTEGRITY_RULES in step 3 above, which reaches
+      //     `os lint` and `os compile` at the same time. Those two accepted a
+      //     flow whose filter token the runtime refuses (#3810) for as long as
+      //     this call site was the only one.
 
       // 3e2. [#3425] Readonly flow-write guardrail. A `runAs:user` update_record
       //      that writes a static-`readonly` field is a SILENT no-op — the engine
@@ -762,7 +726,13 @@ export default class Validate extends Command {
           valid: true,
           manifest: config.manifest,
           stats,
-          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...flowTemplateWarnings, ...readonlyWriteWarnings, ...authoringLintWarnings, ...securityAdvisories, ...capProviderWarnings],
+          // `refWarnings` carries the whole reference-integrity suite, which now
+          // includes the flow-template-path rule this list used to name directly.
+          // It was absent here before: on a CLEAN run `--json` reported none of
+          // the suite's warnings, though the failure path (above) and the console
+          // both did. Same shape of bug as the dropped errors — computed, then
+          // discarded — so it is fixed rather than reproduced under a new name.
+          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...refWarnings, ...readonlyWriteWarnings, ...authoringLintWarnings, ...securityAdvisories, ...capProviderWarnings],
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),

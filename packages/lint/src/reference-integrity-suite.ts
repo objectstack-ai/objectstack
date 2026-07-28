@@ -24,6 +24,14 @@
  * shipping broken: every instance parsed, validated, and failed silently at
  * runtime because nothing checked that the name pointed at anything.
  *
+ * `validateFlowTemplatePaths` is a member for exactly that reason: a
+ * `{record.<field>}` token is a field name written in metadata, resolved
+ * against the bound object's declared fields. It was wired by hand into
+ * `os validate` alone — the drift this suite exists to end — so `os lint` and
+ * `os compile` accepted a flow the runtime refuses. Its findings carry BOTH
+ * severities (see that module: a filter-position miss gates, every other
+ * position advises), which is why the suite's contract is severity-agnostic.
+ *
  * Rules that check SHAPE rather than reference (view containers, responsive
  * styles, seed replay safety, seed state machines, seed/security posture) stay
  * out — they answer a different question and have their own call sites.
@@ -43,6 +51,7 @@ import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
 import { validateNavAccess } from './validate-nav-access.js';
 import { validateTranslationReferences } from './validate-translation-references.js';
+import { validateFlowTemplatePaths } from './validate-flow-template-paths.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
 
@@ -84,6 +93,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateChartBindings', run: validateChartBindings },
   { name: 'validateNavAccess', run: validateNavAccess },
   { name: 'validateTranslationReferences', run: validateTranslationReferences },
+  { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
 ];
 
 /**

@@ -21,6 +21,7 @@ describe('reference-integrity suite — membership', () => {
       'validateChartBindings',
       'validateNavAccess',
       'validateTranslationReferences',
+      'validateFlowTemplatePaths',
     ]);
   });
 
@@ -106,6 +107,25 @@ describe('reference-integrity suite — every member actually runs', () => {
       // validateTranslationReferences: a field the object does not declare.
       { en: { objects: { crm_lead: { label: 'Lead', fields: { assigned_to: { label: 'Owner' } } } } } },
     ],
+    flows: [
+      {
+        name: 'lead_followup',
+        type: 'record_change',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+          // validateFlowTemplatePaths: `budget` is not a field on crm_lead. In a
+          // FILTER position an erased condition widens the query rather than
+          // narrowing it, so the runtime refuses the node — gating, not advisory
+          // (#3810). This member is the suite's only source of `error` findings
+          // from a flow, so it also pins that both severities survive the suite.
+          {
+            id: 'fetch',
+            type: 'get_record',
+            config: { objectName: 'crm_lead', filter: { name: '{record.budget}' } },
+          },
+        ],
+      },
+    ],
   };
 
   it('reports at least one finding from every member', () => {
@@ -118,6 +138,15 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('chart-measure-unknown');
     expect(rules).toContain('nav-object-ungranted');
     expect(rules).toContain('translation-target-unknown');
+    expect(rules).toContain('flow-template-unknown-field');
+  });
+
+  it('carries a gating flow-template finding through the suite (#3810)', () => {
+    const findings = validateReferenceIntegrity(stack);
+    const flow = findings.find((f) => f.rule === 'flow-template-unknown-field');
+    // A filter-position miss must reach the CLI as an ERROR, or `os lint` and
+    // `os compile` would print a yellow line and ship a flow that cannot run.
+    expect(flow?.severity).toBe('error');
   });
 
   it('concatenates in list order and carries the common finding shape', () => {
@@ -131,9 +160,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, translations last.
+    // Object references run first, flow template paths last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('translation-target-unknown');
+    expect(findings[findings.length - 1].rule).toBe('flow-template-unknown-field');
   });
 
   it('returns nothing for an empty stack', () => {
