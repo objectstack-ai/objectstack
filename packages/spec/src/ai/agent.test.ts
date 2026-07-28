@@ -67,18 +67,31 @@ describe('AIModelConfigSchema', () => {
   });
 });
 
-describe('agent.tools removal (ADR-0064 / #3820)', () => {
-  it('strips a legacy inline tools array instead of carrying it', () => {
-    // The field is gone, so Zod drops it rather than handing the runtime a
-    // second, unscoped tool slot to disagree with the skills. Authoring one
-    // is a no-op, not a parse error — an existing stack keeps parsing.
+describe('agent.tools retirement (ADR-0064 / #3820, tombstoned in #3894)', () => {
+  it('REJECTS a legacy inline tools array, with the fix in the message', () => {
+    // Tombstoned, not deleted: AgentSchema is not `.strict()`, so a plain
+    // deletion would silently strip the key and the agent would quietly reach
+    // none of the tools its author listed. `retiredKey()` makes it audible.
+    expect(() =>
+      AgentSchema.parse({
+        name: 'legacy',
+        label: 'Legacy',
+        role: 'r',
+        instructions: 'x',
+        tools: [{ type: 'action', name: 'create_ticket' }],
+      }),
+    ).toThrow(/agent\.tools.*removed.*use `skills`/s);
+  });
+
+  it('parses cleanly once the capability moves into skills', () => {
     const parsed = AgentSchema.parse({
       name: 'legacy',
       label: 'Legacy',
       role: 'r',
       instructions: 'x',
-      tools: [{ type: 'action', name: 'create_ticket' }],
+      skills: ['case_management'],
     });
+    expect(parsed.skills).toEqual(['case_management']);
     expect(parsed).not.toHaveProperty('tools');
   });
 });
@@ -239,16 +252,13 @@ describe('AgentSchema', () => {
       expect(() => AgentSchema.parse(agent)).not.toThrow();
     });
 
-    it('should accept agent with both tools and knowledge', () => {
+    it('should accept agent with both skills and knowledge', () => {
       const agent: Agent = {
         name: 'full_agent',
         label: 'Complete Agent',
         role: 'Full-Stack Assistant',
         instructions: 'Comprehensive assistant with all capabilities.',
-        tools: [
-          { type: 'action', name: 'create_record' },
-          { type: 'flow', name: 'process_data' },
-        ],
+        skills: ['record_management', 'reporting'],
         knowledge: {
           sources: ['everything'],
           indexes: ['master_index'],
@@ -272,19 +282,17 @@ describe('AgentSchema', () => {
       expect(result.skills).toContain('case_management');
     });
 
-    it('keeps skills and drops a legacy inline tools array', () => {
-      const agent = {
-        name: 'hybrid_agent',
-        label: 'Hybrid Agent',
-        role: 'Versatile Assistant',
-        instructions: 'Skills carry the capability.',
-        skills: ['case_management'],
-        tools: [{ type: 'action', name: 'send_email' }],
-      };
-
-      const result = AgentSchema.parse(agent);
-      expect(result.skills).toHaveLength(1);
-      expect(result).not.toHaveProperty('tools');
+    it('rejects an agent that still carries a legacy inline tools array', () => {
+      expect(() =>
+        AgentSchema.parse({
+          name: 'hybrid_agent',
+          label: 'Hybrid Agent',
+          role: 'Versatile Assistant',
+          instructions: 'Skills carry the capability.',
+          skills: ['case_management'],
+          tools: [{ type: 'action', name: 'send_email' }],
+        }),
+      ).toThrow();
     });
 
     it('should accept agent with permissions', () => {
@@ -377,28 +385,7 @@ Always be polite, empathetic, and solution-oriented.`,
           temperature: 0.7,
           maxTokens: 2048,
         },
-        tools: [
-          {
-            type: 'action',
-            name: 'create_support_ticket',
-            description: 'Create a new support ticket',
-          },
-          {
-            type: 'action',
-            name: 'escalate_to_human',
-            description: 'Transfer conversation to human agent',
-          },
-          {
-            type: 'query',
-            name: 'search_tickets',
-            description: 'Search existing support tickets',
-          },
-          {
-            type: 'vector_search',
-            name: 'kb_search',
-            description: 'Search knowledge base',
-          },
-        ],
+        skills: ['record_management', 'reporting'],
         knowledge: {
           sources: ['product_docs', 'faq', 'troubleshooting', 'api_reference'],
           indexes: ['support_kb_v2'],
@@ -431,28 +418,7 @@ Be persuasive but honest. Focus on value creation.`,
           model: 'claude-3-sonnet-20240229',
           temperature: 0.8,
         },
-        tools: [
-          {
-            type: 'query',
-            name: 'get_account_info',
-            description: 'Retrieve account details',
-          },
-          {
-            type: 'action',
-            name: 'update_opportunity',
-            description: 'Update opportunity fields',
-          },
-          {
-            type: 'action',
-            name: 'send_email',
-            description: 'Send email via template',
-          },
-          {
-            type: 'flow',
-            name: 'create_follow_up_task',
-            description: 'Schedule follow-up activity',
-          },
-        ],
+        skills: ['record_management', 'reporting'],
         knowledge: {
           sources: ['sales_playbooks', 'product_features', 'case_studies', 'competitor_analysis'],
           indexes: ['sales_intelligence'],
@@ -484,18 +450,7 @@ Be precise, data-driven, and clear in your explanations.`,
           temperature: 0.3,
           maxTokens: 4096,
         },
-        tools: [
-          {
-            type: 'query',
-            name: 'execute_sql',
-            description: 'Run SQL queries on the data warehouse',
-          },
-          {
-            type: 'action',
-            name: 'create_dashboard',
-            description: 'Generate dashboard from metrics',
-          },
-        ],
+        skills: ['record_management', 'reporting'],
         knowledge: {
           sources: ['sql_guides', 'metrics_definitions'],
           indexes: ['analytics_kb'],

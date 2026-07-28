@@ -143,15 +143,28 @@ export const AgentSchema = lazySchema(() => z.object({
   /** Capabilities — Skill-based (primary) */
   skills: z.array(z.string().regex(/^[a-z_][a-z0-9_]*$/)).optional().describe('Skill names to attach (Agent→Skill→Tool architecture)'),
 
-  // `tools` (the legacy inline `{type,name,description}[]` fallback) was
-  // REMOVED — ADR-0064's central invariant is "an agent's tool set is the
-  // union of its surface-compatible skills' tools; nothing falls through to
-  // the global registry", and this field was the one seam that broke it: the
-  // runtime resolved `agent.tools[].name` against the FULL registry with no
-  // surface check, so an `ask`-surface agent could name an authoring tool and
-  // get it. The invariant is now structural — there is no second slot to
-  // disagree with the skills — rather than a rule every reader must remember
-  // (ADR-0049 "design+enforce or remove"). Attach capability via `skills`.
+  /**
+   * [REMOVED in protocol 17 — #3894] The legacy inline
+   * `{type,name,description}[]` fallback.
+   *
+   * ADR-0064's central invariant is "an agent's tool set is the union of its
+   * surface-compatible skills' tools; nothing falls through to the global
+   * registry", and this field was the one seam that broke it: the runtime
+   * resolved `agent.tools[].name` against the FULL registry with no surface
+   * check, so an `ask`-surface agent could name an authoring tool and get it.
+   *
+   * Tombstoned rather than deleted: `AgentSchema` is not `.strict()`, so a
+   * plain deletion would silently strip the key and the agent would quietly
+   * reach none of the tools its author listed — the same silent-capability-loss
+   * shape this whole issue is about (#3820), restored one layer down.
+   */
+  tools: retiredKey(
+    '`agent.tools` was removed in @objectstack/spec 17 (#3894) — use `skills`. ' +
+    'An agent reaches exactly the tools its surface-compatible skills declare ' +
+    '(ADR-0064), so move each reference into a skill: a platform tool by its ' +
+    'registered name, or `action_<name>` for one of your own AI-exposed Actions. ' +
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
 
   /** Knowledge */
   knowledge: AIKnowledgeSchema.optional().describe('RAG access'),

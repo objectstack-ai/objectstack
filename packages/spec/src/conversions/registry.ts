@@ -772,6 +772,57 @@ const agentKnowledgeTopicsToSources: MetadataConversion = {
 };
 
 /**
+ * Agent `tools` → dropped (protocol 17, #3894 / #3820).
+ *
+ * NOT a rename — there is no key to move the value to. ADR-0064 says an
+ * agent's tool set is exactly the union of its surface-compatible skills'
+ * tools, and `agent.tools[]` was the seam that broke it (it resolved names
+ * against the FULL registry with no surface check). Each entry has to become
+ * a reference inside a SKILL, which needs a human decision about which skill
+ * — so this conversion drops the dead key and emits one notice per agent
+ * naming what was lost, rather than guessing a destination.
+ *
+ * Dropping is safe: the cloud runtime stopped reading the field entirely
+ * (cloud#910), so by protocol 17 it contributes nothing at load time. What
+ * the notice preserves is the AUTHOR's knowledge of which tools they meant.
+ */
+const agentToolsToSkills: MetadataConversion = {
+  id: 'agent-tools-to-skills',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'agent.tools',
+  summary: "agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'agents', (agent, path) => {
+      if (!('tools' in agent) || agent.tools == null) return agent;
+      const next: Dict = { ...agent };
+      delete next.tools;
+      // The notice carries `tools → skills` at the agent's path: the author
+      // sees WHICH agent lost inline references and where the capability has
+      // to be re-declared. The tool names themselves stay in their git
+      // history, which is where a judgement call should be read from.
+      emit({ from: 'tools', to: 'skills', path: `${path}.skills` });
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      agents: [
+        {
+          name: 'support_bot',
+          skills: ['case_management'],
+          tools: [{ type: 'action', name: 'create_ticket' }],
+        },
+      ],
+    },
+    after: {
+      agents: [{ name: 'support_bot', skills: ['case_management'] }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
  * Sharing-rule `accessLevel: 'full'` → `'edit'` (protocol 17, #3865).
  *
  * `full` was documented as "Full Access (Transfer, Share, Delete)" but no code
@@ -849,6 +900,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     actionExecuteToTarget,
     fieldConditionalRequiredToRequiredWhen,
     agentKnowledgeTopicsToSources,
+    agentToolsToSkills,
     sharingRuleAccessLevelFullToEdit,
   ],
 };

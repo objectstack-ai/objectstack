@@ -357,11 +357,22 @@ const step17: MigrationStep = {
     'mechanically and leaves no semantic residue. It is the one protocol-17 ' +
     'conversion that keeps a load-path acceptance window: it had no prior ' +
     'deprecation, and a removed enum value cannot carry the fix-it error the three ' +
-    'key renames tombstone theirs with.',
+    'key renames tombstone theirs with.\n\n' +
+    'Finally it removes agent `tools` (#3894): the legacy inline ' +
+    '`{type,name,description}[]` fallback, which the runtime resolved against the ' +
+    'FULL tool registry with no surface check — the one seam that broke ADR-0064\'s ' +
+    '"an agent reaches exactly its surface-compatible skills\' tools, nothing falls ' +
+    'through to the global registry". Unlike the renames above this has NO lossless ' +
+    'target: each entry has to become a reference inside a skill, which is a human ' +
+    'decision about which skill. The conversion therefore drops the dead key (the ' +
+    'runtime stopped reading it in cloud#910, so it already contributes nothing) and ' +
+    'emits a notice per agent so the author knows where capability must be ' +
+    're-declared; the schema tombstones the key with a fix-it error naming `skills`.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
     'agent-knowledge-topics-to-sources',
+    'agent-tools-to-skills',
     'sharing-rule-access-level-full-to-edit',
   ],
   semantic: [],
