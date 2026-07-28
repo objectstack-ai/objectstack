@@ -42,13 +42,42 @@ function makeQl(overrides: Partial<Record<'insert' | 'update' | 'delete', any>> 
   return ql;
 }
 
+/**
+ * A fake `createData` standing in for the protocol's create ingress (#3835):
+ * the batch's create ops go through it rather than calling `ql.insert`, so the
+ * #3043 static-`readonly` strip applies to a batch create exactly as it does to
+ * `POST /data/:object`. Delegates to the same `ql.insert` the other ops use, so
+ * assertions about what reached the engine still read off `ql.insert`.
+ */
+function makeCreateData(ql: any, opts: { readonlyFields?: string[] } = {}) {
+  const readonlyFields = opts.readonlyFields ?? [];
+  return vi.fn(async (request: any) => {
+    const supplied = request?.data ?? {};
+    const stripped: string[] = readonlyFields.filter((f) => f in supplied);
+    const data = { ...supplied };
+    for (const f of stripped) delete data[f];
+    const record = await ql.insert(request.object, data, { context: request.context });
+    return {
+      object: request.object,
+      id: record?.id,
+      record,
+      ...(stripped.length > 0
+        ? { droppedFields: [{ object: request.object, fields: stripped, reason: 'readonly' }] }
+        : {}),
+    };
+  });
+}
+
 /** Build a RestServer with an optional ObjectQL provider and object metadata. */
-function buildServer(opts: { ql?: any; objects?: any[] } = {}) {
+function buildServer(opts: { ql?: any; objects?: any[]; readonlyFields?: string[] } = {}) {
   const server = mockServer();
   const protocol: any = {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: {} }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn().mockResolvedValue(opts.objects ?? []),
+    createData: opts.ql
+      ? makeCreateData(opts.ql, { readonlyFields: opts.readonlyFields ?? [] })
+      : vi.fn(),
   };
   const objectQLProvider = opts.ql ? async () => opts.ql : undefined;
   const rest = new RestServer(
@@ -256,6 +285,64 @@ describe('POST {basePath}/batch — cross-object transactional batch', () => {
     const res = await post(route, { operations: [{ object: 'account', data: { name: 'Acme' } }] });
     expect(res.statusCode).toBe(200);
     expect(res.body).not.toHaveProperty('droppedFields');
+  });
+
+  // ── create ingress parity (#3835) ─────────────────────────────────────────
+  //
+  // The engine's INSERT path is static-`readonly`-exempt by design (#3413), so
+  // the #3043 strip that stops a non-system caller from seeding a read-only
+  // column lives at the protocol's create ingress. This route used to call
+  // `ql.insert` directly and skip it, so `readonly` meant two different things
+  // depending on which create endpoint you used.
+
+  it('routes create ops through the protocol create ingress, not ql.insert', async () => {
+    const ql = makeQl();
+    const { route, protocol } = buildServer({ ql });
+    const res = await post(route, {
+      operations: [{ object: 'account', action: 'create', data: { name: 'Acme' } }],
+    });
+    expect(res.statusCode).toBe(200);
+    expect(protocol.createData).toHaveBeenCalledTimes(1);
+    const request = protocol.createData.mock.calls[0][0];
+    expect(request).toMatchObject({ object: 'account', data: { name: 'Acme' } });
+    // The ingress must run INSIDE this transaction — same context the other ops
+    // bind, or the create would commit independently of the rollback.
+    expect(request.context).toMatchObject({ __trx: true });
+  });
+
+  it('strips a caller-forged readonly column on a batch create and reports it', async () => {
+    const ql = makeQl();
+    const { route } = buildServer({ ql, readonlyFields: ['approval_status'] });
+    const res = await post(route, {
+      operations: [
+        { object: 'account', action: 'create', data: { name: 'Acme', approval_status: 'approved' } },
+      ],
+    });
+    expect(res.statusCode).toBe(200);
+    // Never reached the engine…
+    expect(ql.insert).toHaveBeenCalledWith('account', { name: 'Acme' }, expect.anything());
+    // …and the caller is told, tagged with the op that dropped it.
+    expect(res.body.droppedFields).toEqual([
+      { object: 'account', fields: ['approval_status'], reason: 'readonly', index: 0 },
+    ]);
+  });
+
+  it('keeps $ref resolution working through the ingress', async () => {
+    // `results` now holds the ingress's echoed record rather than the raw
+    // engine return — a later op must still resolve `{ $ref: 0 }` to its id.
+    const ql = makeQl();
+    const { route } = buildServer({ ql });
+    const res = await post(route, {
+      operations: [
+        { object: 'project', action: 'create', data: { name: 'Apollo' } },
+        { object: 'task', action: 'create', data: { title: 'Kickoff', project: { $ref: 0 } } },
+      ],
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.results[0].id).toBe('id_1');
+    expect(ql.insert).toHaveBeenLastCalledWith(
+      'task', { title: 'Kickoff', project: 'id_1' }, expect.anything(),
+    );
   });
 
   // ── request validation ────────────────────────────────────────────────────

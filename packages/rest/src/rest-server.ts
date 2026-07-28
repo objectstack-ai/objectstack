@@ -6609,10 +6609,36 @@ export class RestServer {
                         const out: any[] = [];
                         for (const [index, op] of ops.entries()) {
                             const data = resolveRefs(op.data, out);
-                            const onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push({ ...e, index }); };
                             if (op.action === 'create') {
-                                out.push(await ql.insert(op.object, data, { context: trxCtx, onFieldsDropped }));
+                                // [#3835] Go through the protocol's create ingress —
+                                // the SAME one `POST /data/:object` uses — rather than
+                                // calling `ql.insert` directly. The engine's INSERT path
+                                // is static-`readonly`-exempt by design (#3413), so the
+                                // #3043 strip that stops a non-system caller from seeding
+                                // a read-only column lives at that ingress. Bypassing it
+                                // here made `readonly` mean two different things on two
+                                // create paths: rejected on the single route, written
+                                // through the batch. `createData` also owns the platform-
+                                // object carve-out (a `sys_`/`managedBy` object's own
+                                // guard must REJECT a forged value, not silently swallow
+                                // it), which is why this routes to the ingress instead of
+                                // re-implementing the strip here — one create ingress,
+                                // and a future change to its policy covers the batch for
+                                // free. `trxCtx` carries the caller's context (including
+                                // `isSystem`) plus the open transaction, so the strip
+                                // decides exactly as it does on the single route and the
+                                // insert still joins this transaction.
+                                const created: any = await p.createData({ object: op.object, data, context: trxCtx } as any);
+                                for (const e of (created?.droppedFields ?? []) as DroppedFieldsEvent[]) {
+                                    dropped.push({ ...e, index });
+                                }
+                                out.push(created?.record);
                             } else if (op.action === 'update') {
+                                // Update needs no ingress detour: the engine enforces
+                                // both static `readonly` (#2948) and `readonlyWhen`
+                                // (#3042) on its own update path, and reports them
+                                // through this listener.
+                                const onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push({ ...e, index }); };
                                 const id = op.id ?? data?.id;
                                 out.push(await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped }));
                             } else { // 'delete'
