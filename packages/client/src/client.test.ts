@@ -604,51 +604,29 @@ describe('Notifications namespace', () => {
     });
 });
 
-describe('AI namespace', () => {
-    it('should execute natural language query', async () => {
-        const { client, fetchMock } = createMockClient({
-            success: true,
-            data: { query: { object: 'customer', where: {} }, confidence: 0.95 }
-        });
-        const result = await client.ai.nlq({ query: 'find all active customers' });
-        expect(result.confidence).toBe(0.95);
-        const [url, opts] = fetchMock.mock.calls[0];
-        expect(url).toContain('/api/v1/ai/nlq');
-        expect(opts.method).toBe('POST');
-    });
-
-    it('should not expose chat method (use Vercel AI SDK useChat directly)', () => {
+describe('AI namespace (removed in v17 — #3718)', () => {
+    /**
+     * This block used to hold four passing tests for `ai.nlq`, `ai.suggest`
+     * and `ai.insights`. Every one of them mocked `fetch` and asserted the URL
+     * the client BUILT — never that anything answered it. All three endpoints
+     * were mounted by nothing, in any repo, for the whole life of those tests.
+     *
+     * That is the shape of test this audit family kept finding behind green
+     * suites (#3584, #3611, #3636, #3702), so the replacement asserts the one
+     * thing that is actually true and worth defending: the namespace is gone
+     * and must not come back without a route behind it.
+     */
+    it('is gone — no method may return without an endpoint to answer it', () => {
         const { client } = createMockClient({ success: true, data: {} });
-        // ai.chat was removed — consumers should use @ai-sdk/react useChat() directly
-        expect(client.ai).not.toHaveProperty('chat');
+        expect((client as unknown as Record<string, unknown>).ai).toBeUndefined();
     });
 
-    it('should get AI suggestions', async () => {
-        const { client, fetchMock } = createMockClient({
-            success: true,
-            data: { suggestions: ['Alice Corp', 'Alpha Inc'] }
-        });
-        const result = await client.ai.suggest({
-            object: 'customer',
-            field: 'name',
-            partial: 'Al'
-        });
-        expect(result.suggestions).toHaveLength(2);
-    });
-
-    it('should get AI insights', async () => {
-        const { client, fetchMock } = createMockClient({
-            success: true,
-            data: { type: 'summary', insights: [] }
-        });
-        const result = await client.ai.insights({
-            object: 'order',
-            type: 'summary'
-        });
-        expect(result.type).toBe('summary');
-        const [url, opts] = fetchMock.mock.calls[0];
-        expect(url).toContain('/api/v1/ai/insights');
-        expect(opts.method).toBe('POST');
+    it('still directs chat at the Vercel AI SDK', () => {
+        // Unchanged guidance, and the reason no `chat` method is being added
+        // back with the real surface: `useChat()` (`@ai-sdk/react`) speaks the
+        // Data Stream Protocol against POST /api/v1/ai/chat directly.
+        const { client } = createMockClient({ success: true, data: {} });
+        expect((client as unknown as Record<string, unknown>).ai).toBeUndefined();
     });
 });
 

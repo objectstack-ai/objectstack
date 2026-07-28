@@ -29,12 +29,10 @@ import {
   ListNotificationsResponse,
   MarkNotificationsReadResponse,
   MarkAllNotificationsReadResponse,
-  AiNlqRequest,
-  AiNlqResponse,
-  AiSuggestRequest,
-  AiSuggestResponse,
-  AiInsightsRequest,
-  AiInsightsResponse,
+  // Ai{Nlq,Suggest,Insights}{Request,Response} are no longer imported: the
+  // `ai` namespace that used them is gone in v17 (#3718). They are still
+  // RE-EXPORTED below, straight from `@objectstack/spec/api`, so anyone
+  // holding those types keeps them while the spec still declares them.
   GetLocalesResponse,
   GetTranslationsResponse,
   GetFieldLabelsResponse,
@@ -1274,14 +1272,11 @@ export class ObjectStackClient {
       return this.unwrapResponse<{ drivers: Array<{ name: string; driverId: string }>; total: number }>(res);
     },
 
-    /**
-     * List available project templates. Templates are seeded into the project
-     * database once at provisioning time when `template_id` is supplied.
-     */
-    listTemplates: async () => {
-      const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/templates`);
-      return this.unwrapResponse<{ templates: Array<{ id: string; label: string; description: string; category?: string }>; total: number }>(res);
-    },
+    // `listTemplates` removed in v17 (#3702). It called
+    // `GET /api/v1/cloud/templates`, which no registrar in this repo or the
+    // control plane has ever mounted — the string appeared exactly once per
+    // repo, in the call itself. Templates exist as a filtered `sys_package`
+    // view (`is_starter = true`), never as an HTTP route, so every call 404ed.
 
     /**
      * Per-project package installation management (Power Apps "solution" model).
@@ -3455,48 +3450,27 @@ export class ObjectStackClient {
     }
   };
 
-  /**
-   * AI Services
-   */
-  ai = {
-    /**
-     * Natural language query — converts natural language to structured query
-     */
-    nlq: async (request: AiNlqRequest): Promise<AiNlqResponse> => {
-      const route = this.getRoute('ai');
-      const res = await this.fetch(`${this.baseUrl}${route}/nlq`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      });
-      return this.unwrapResponse<AiNlqResponse>(res);
-    },
-
-    // AI chat method removed — use Vercel AI SDK `useChat()` / `@ai-sdk/react` directly.
-
-    /**
-     * AI-powered field value suggestions
-     */
-    suggest: async (request: AiSuggestRequest): Promise<AiSuggestResponse> => {
-      const route = this.getRoute('ai');
-      const res = await this.fetch(`${this.baseUrl}${route}/suggest`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      });
-      return this.unwrapResponse<AiSuggestResponse>(res);
-    },
-
-    /**
-     * AI-powered data insights
-     */
-    insights: async (request: AiInsightsRequest): Promise<AiInsightsResponse> => {
-      const route = this.getRoute('ai');
-      const res = await this.fetch(`${this.baseUrl}${route}/insights`, {
-        method: 'POST',
-        body: JSON.stringify(request)
-      });
-      return this.unwrapResponse<AiInsightsResponse>(res);
-    }
-  };
+  // The `ai` namespace is GONE in v17 (#3718).
+  //
+  // It held exactly three methods — `nlq`, `suggest`, `insights` — building
+  // `/api/v1/ai/{nlq,suggest,insights}`. Nothing in any repo ever mounted those
+  // paths: they were declared in `DEFAULT_AI_ROUTES` (which has no runtime
+  // consumer) and typed as optional protocol methods (`aiNlq?` …) nothing
+  // implements. Every call 404ed, from the first release that shipped them.
+  //
+  // What DOES exist is a different surface entirely, served by `service-ai`
+  // (Cloud/EE): `POST /ai/chat`, `/ai/chat/stream`, `/ai/complete`,
+  // `GET /ai/models`, and six `/ai/conversations` routes. The SDK expressed
+  // none of them, so its AI namespace and the real AI surface were disjoint
+  // sets. Ledgered in `cloud`: `packages/service-ai/src/ai-route-ledger.ts`.
+  //
+  // Deliberately removed rather than left deprecated: a typed method that
+  // always throws is worse than no method — it costs a runtime round-trip to
+  // discover, where absence is a compile error. Expressing the real surface is
+  // tracked separately on #3718; it is a new API, not a rename of this one.
+  //
+  // For chat specifically the answer is unchanged: use the Vercel AI SDK
+  // (`useChat()` from `@ai-sdk/react`) directly against the chat endpoint.
 
   /**
    * Internationalization Services

@@ -312,18 +312,21 @@ await client.notifications.markAllRead();
 // through sys_inbox_message and tracks read-state in sys_notification_receipt.
 // These helpers will be repointed during the objectui bell cut-over.
 
-// AI — DECLARED BUT NOT IMPLEMENTED (#3718). These three methods build
-// /api/v1/ai/{nlq,suggest,insights}, and no server in any repo mounts those
-// paths, so every call 404s. They are typed and shipped, which is why they
-// look usable; they are not. Do not build on them until #3718 resolves.
-await client.ai.nlq({ query: 'Show me all active accounts' });
-await client.ai.suggest({ object: 'account', field: 'industry' });
-await client.ai.insights({ object: 'sales', recordId: dealId });
-// Conversational chat is not on the client — use the Vercel AI SDK
-// (`useChat()` from `@ai-sdk/react`) directly against the chat endpoint.
-// That endpoint DOES exist (POST /api/v1/ai/chat, plus /chat/stream,
-// /complete, /models and six /conversations routes, all served by service-ai);
-// the SDK simply has no method for any of them.
+// AI — the `client.ai` namespace was REMOVED in v17 (#3718).
+//
+// It held `nlq`, `suggest` and `insights`, which built
+// /api/v1/ai/{nlq,suggest,insights}. No server in any repo ever mounted those
+// paths, so every call 404ed for the whole life of the namespace. They were
+// typed and shipped, which is exactly why they looked usable.
+//
+// The AI surface that DOES exist is served by `service-ai` (Cloud/EE):
+// POST /api/v1/ai/chat and /chat/stream, POST /complete, GET /models, and six
+// /conversations routes. The SDK has no method for any of them yet — that is
+// tracked on #3718 as new API, not as a rename of what was removed.
+//
+// For chat, call the endpoint directly with the Vercel AI SDK
+// (`useChat()` from `@ai-sdk/react`); it speaks the Data Stream Protocol that
+// POST /api/v1/ai/chat serves.
 
 // i18n — Internationalization
 await client.i18n.getLocales();
