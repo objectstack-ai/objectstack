@@ -573,18 +573,31 @@ ObjectStack includes **built-in health monitoring** to validate system state.
 ```
 GET /health
   → 200 with { status, version, uptime } if the process is alive (liveness)
+  → never fails on a dependency — see below
 
 GET /ready
-  → 200 if the kernel is running and ready to accept requests (readiness)
+  → 200 if the kernel is running AND every data driver answers (readiness)
   → 503 while still booting or shutting down
+  → 503 with { state, drivers: [...] } when a data driver stops answering
 ```
+
+The two probes answer deliberately different questions (#3756). `/health`
+checks nothing but the process, because a failing *liveness* probe makes the
+orchestrator restart the pod — which cannot fix an unreachable database, but
+would put every replica into a restart storm for the length of the outage.
+`/ready` pings the data drivers (bounded, memoized ~1s) because its failure mode
+— leave the load-balancer rotation — is the one that helps a replica that would
+otherwise fail 100% of its requests. The readiness check fails **open**: a
+kernel with no data engine, or a probe that itself errors, still reads as ready
+rather than black-holing a working deployment.
 
 <Callout type="info">
 `GET /health` returns a compact liveness body (`status`, `version`, `uptime`) and
 `GET /ready` returns readiness. The richer per-subsystem report and the
 plugin-declared custom checks below describe the internal health-monitor model
-(`PluginHealthMonitor`) — they are **not yet** exposed as a dedicated HTTP
-endpoint or as a declarative plugin field.
+(`PluginHealthMonitor`), which covers **plugins, not driver connections** — they
+are **not yet** exposed as a dedicated HTTP endpoint or as a declarative plugin
+field.
 </Callout>
 
 ### Health Status Response
