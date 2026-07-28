@@ -179,8 +179,9 @@
         },
         "clone": {
           "status": "live",
-          "evidence": "packages/objectql/src/protocol.ts:2259",
-          "note": "cloneData() gates on schema.enable.clone (explicit false ⇒ 403 CLONE_DISABLED); exposed at POST /data/:object/:id/clone (rest-server.ts registerDataActionEndpoints)."
+          "verifiedAt": "2026-07-28",
+          "evidence": "packages/metadata-protocol/src/protocol.ts:2938",
+          "note": "cloneData() gates on schema.enable.clone (explicit false ⇒ 403 CLONE_DISABLED); exposed at POST /data/:object/:id/clone (rest-server.ts registerDataActionEndpoints). POINTER REPAIRED 2026-07 — cited packages/objectql/src/protocol.ts:2259 until the protocol moved to @objectstack/metadata-protocol. The claim never stopped being true, but the stale-evidence check could not surface the rot: 47 parse-artefact false positives were burying it (fixed in the same pass). Behaviour guarded by packages/objectql/src/protocol-clone-real-engine.test.ts."
         }
       }
     },

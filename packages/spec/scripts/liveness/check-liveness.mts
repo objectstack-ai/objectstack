@@ -63,6 +63,7 @@ import {
   type VerificationEntry,
   type VerificationReport,
 } from './verification.mts';
+import { checkEvidence } from './evidence.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -202,6 +203,8 @@ const report: any = {
   proofMissing: [] as string[], // a bound high-risk `live` entry with no proof at all
   orphanProofs: [] as string[], // a dogfood `@proof:` tag not registered in proof-registry.mts
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
+  evidenceLocal: 0, // repo-rooted evidence paths actually resolved against this checkout
+  evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here
 };
 
 // Every classified entry, for the `verifiedAt` fold below. Collected during the
@@ -217,8 +220,14 @@ function classify(type: string, path: string, status: string, led: any, cat: any
   // Framework-auto entries (`led === null`) have no ledger row to date-stamp.
   if (led !== null) verificationEntries.push({ key: `${type}/${path}`, status, verifiedAt: led?.verifiedAt });
   if (status === 'live' && led?.evidence) {
-    const file = String(led.evidence).split(':')[0];
-    if (/\//.test(file) && !existsSync(join(repoRoot, file))) report.staleEvidence.push(`${type}/${path} → ${led.evidence}`);
+    // Extract every repo-rooted path the evidence claims and resolve the ones
+    // attributed to THIS repo. Cross-repo pointers (objectui / cloud) are
+    // counted, not resolved — see evidence.mts for why the old
+    // `split(':')[0]` heuristic reported ~100% false positives.
+    const ev = checkEvidence(led.evidence, (p) => existsSync(join(repoRoot, p)));
+    report.evidenceForeign += ev.foreign.length;
+    report.evidenceLocal += ev.local.length;
+    for (const miss of ev.missing) report.staleEvidence.push(`${type}/${path} → ${miss}`);
   }
   // ── ADR-0054 prove-it-runs ──
   const boundClass = BOUND_PROOF_PATHS.get(`${type}/${path}`);
@@ -316,6 +325,10 @@ if (asJson) {
   }
   const boundClasses = HIGH_RISK_CLASSES.filter((c) => c.bound).map((c) => c.label);
   console.log(`\nprove-it-runs (ADR-0054): proof REQUIRED for bound high-risk classes — ${boundClasses.join(', ') || 'none'}`);
+  console.log(
+    `\nevidence paths: ${report.evidenceLocal} resolved against this checkout, ` +
+    `${report.evidenceForeign} attributed to another repo (objectui / cloud — not resolvable here).`,
+  );
   if (report.staleEvidence.length) {
     console.log(`\n⚠ ${report.staleEvidence.length} 'live' entr(ies) cite a missing file:`);
     report.staleEvidence.forEach((s: string) => console.log(`    ${s}`));

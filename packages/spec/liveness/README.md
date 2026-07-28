@@ -38,13 +38,45 @@ type back onto the registry and drop the override.
 
 | Status | Meaning |
 |---|---|
-| `live` | Has a runtime consumer. Cite it in `evidence` (`file:line`; objectui-repo paths as prose to avoid false stale-flags). |
+| `live` | Has a runtime consumer. Cite it in `evidence` as `file:line`; for another repo's path, prefix the realm — `objectui: packages/app-shell/…` (see below). |
 | `experimental` / `planned` | Declared, intentionally not enforced yet. Also read from a spec `.describe()` marker like `[EXPERIMENTAL — not enforced]`. |
 | `dead` | Parsed, no consumer. Tracked for **enforce-or-remove** (ADR-0049). |
 
 Resolution per property: **ledger entry → spec `.describe()` marker → UNCLASSIFIED**.
 Framework provenance/lock fields (`_lock*`, `_provenance`, `_packageId/Version`,
 `protection` — ADR-0010) are auto-classified `live`.
+
+### Writing `evidence` so the gate can check it
+
+The gate extracts every **repo-rooted** path from an `evidence` string (one
+starting with `packages/`, `apps/`, `content/`, …) and resolves it against this
+checkout. Prose around the paths is fine and encouraged — `packages/spec/src/stack.zod.ts
+(mergeActionsIntoObjects stable-sorts each group)` resolves the path and ignores
+the parenthetical.
+
+**A path in another repo must say so**, or the gate will report it as rot:
+
+```jsonc
+"evidence": "objectui: packages/app-shell/src/views/RecordDetailView.tsx:573"
+"evidence": "registered into ActionEngine (objectui packages/core/…/ActionEngine.ts:150) but no caller"
+```
+
+A realm marker (`objectui`, `cloud`, `ee`) attributes the paths that follow it,
+up to the next clause boundary (`;` or `)`), so a string can cite both repos —
+`framework` switches back explicitly. `packages/services/service-ai/…` is always
+treated as foreign: that is the closed cloud runtime, and `packages/services/`
+here ships every sibling service except it. A path that is not repo-rooted
+(`app-shell/MetadataProvider.tsx`, `action-button/-group`) reads as prose and is
+neither resolved nor reported.
+
+> This replaces the old advice to write objectui paths "as prose to avoid false
+> stale-flags." That was a workaround for a parser bug — the check took
+> `evidence.split(':')[0]` as the filename, so any prose made it fail. It flagged
+> **48 of 227 entries and every one was a false positive**, which buried the one
+> real rotted pointer in the list (`object.enable.clone`, whose consumer had
+> moved from `@objectstack/objectql` to `@objectstack/metadata-protocol`). A
+> permanently-noisy check is a check nobody reads — the same way a stale ledger
+> entry is a claim nobody re-tests.
 
 ### `verifiedAt` — the re-verification clock
 
