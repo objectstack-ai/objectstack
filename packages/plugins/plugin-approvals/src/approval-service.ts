@@ -144,6 +144,27 @@ export type ActionTokenOutcome =
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
+ * Who is acting, for the purpose of a data write made on their behalf (#3783).
+ *
+ * Reads the AUTHENTICATED principal off the execution context — deliberately not
+ * `input.actorId`. Every public entrypoint takes `actorId` from the request body
+ * (`body.actorId ?? context.userId`, see the REST approval routes) and the
+ * service only checks that it names a pending approver, never that it is the
+ * caller. Tolerable on an audit row; promoting it to the identity of an
+ * RLS-scoped write would turn a mislabelled audit trail into identity spoofing.
+ * A caller holding a trustworthy actor with no session behind it — the ADR-0043
+ * action link, whose token cryptographically binds exactly one approver — puts
+ * that actor ON the context instead of relying on this.
+ *
+ * `null` for a machine caller (the SLA sweep passes {@link SYSTEM_CTX}), so a
+ * reserved sentinel like {@link SLA_ACTOR_ID} can never surface as a `userId`.
+ */
+function actingUserId(context: SharingExecutionContext | undefined): string | null {
+  const userId = (context as { userId?: unknown } | undefined)?.userId;
+  return typeof userId === 'string' && userId ? userId : null;
+}
+
+/**
  * Max hops when following an OOO delegation chain (#1322 M1): A out → B, B out
  * → C, … Bounds the walk so a mis-configured chain can't loop or resolve
  * unboundedly; a cycle or self-reference also stops it early.
@@ -971,10 +992,50 @@ export class ApprovalService implements IApprovalService {
     return active[0];
   }
 
-  /** Mirror a request status onto a business-object field, if configured. */
-  private async mirrorStatusField(object: string, recordId: string, field: string, status: string): Promise<void> {
+  /**
+   * Mirror a request status onto a business-object field, if configured.
+   *
+   * **Elevated, but not anonymous (#3783).** The write stays `isSystem`: the
+   * record is normally LOCKED while its approval is live and the submitter
+   * cannot edit it, so only a platform write can land the status — that is what
+   * the lock hook's system exemption (`lifecycle-hooks.ts`) is for. What it must
+   * NOT do is throw away *who* caused the transition. Every status below is
+   * something a specific human just did — a submitter submitting or recalling,
+   * an approver deciding or sending back — and this write is what fires the
+   * target object's record-change flows. With no `userId` on it those cascades
+   * inherit no trigger user, and since #3760 a `runAs:'user'` run with no trigger
+   * user has its data ops REFUSED — so "when the invoice is approved, do X", the
+   * most natural approvals automation there is, had to declare `runAs:'system'`
+   * and take blanket elevation for a case where a perfectly good scoped identity
+   * existed. Re-attaching the actor lets those cascades run as the deciding user
+   * with RLS enforced. Same shape the approval node already uses when it calls
+   * into this service (`approval-node.ts`).
+   *
+   * `actorId` is `null` for the genuinely machine-driven transitions (the SLA
+   * escalation's auto-decision, the dead-run sweep). There is no human to name
+   * there, and naming a sentinel would put a non-user in `updated_by` and in
+   * every downstream flow's identity. Those cascades stay user-less — a flow
+   * that wants to react to them still has to declare `runAs:'system'`, which is
+   * the honest answer rather than an oversight.
+   *
+   * Deliberately carries `userId` ONLY, not the request's org. On an
+   * ExecutionContext `tenantId` is a driver-scoping knob, not attribution
+   * (`buildDriverOptions` turns it into a tenant predicate on the update), so
+   * passing it would newly org-scope this write and silently no-op the mirror on
+   * a record whose org differs from the request's — while buying nothing: the
+   * automation engine back-fills the run's `tenantId` from the resolved user's
+   * own grants.
+   */
+  private async mirrorStatusField(
+    object: string,
+    recordId: string,
+    field: string,
+    status: string,
+    actorId: string | null,
+  ): Promise<void> {
     try {
-      await this.engine.update(object, { id: recordId, [field]: status }, { context: SYSTEM_CTX });
+      const context = actorId ? { ...SYSTEM_CTX, userId: actorId } : SYSTEM_CTX;
+      await this.engine.update(object, { id: recordId, [field]: status }, { context });
     } catch (err: any) {
       this.logger?.warn?.(`[approvals] mirrorStatusField failed: ${err?.message ?? err}`);
     }
@@ -1227,7 +1288,17 @@ export class ApprovalService implements IApprovalService {
     // Record lock (when `lockRecord !== false`) is enforced by the beforeUpdate
     // hook keyed on the now-pending request; no extra write needed here.
     if (input.config.approvalStatusField) {
-      await this.mirrorStatusField(input.object, input.recordId, input.config.approvalStatusField, 'pending');
+      // Attributed to whoever the row itself calls the submitter (#3783), so
+      // there is exactly one answer to "who submitted this". Not the
+      // {@link actingUserId} route: `submitterId` is server-supplied here (the
+      // approval node passes the run's own trigger user) and unreachable from a
+      // request body, so it carries none of the caller-controlled risk that rule
+      // exists for — and it already resolves to `context.userId` in every
+      // first-party path.
+      await this.mirrorStatusField(
+        input.object, input.recordId, input.config.approvalStatusField, 'pending',
+        row.submitter_id ?? null,
+      );
     }
 
     return rowFromRequest(row);
@@ -1429,7 +1500,10 @@ export class ApprovalService implements IApprovalService {
     }, { context: SYSTEM_CTX });
     await this.syncApproverIndex(requestId, [], org, now);
     if (config.approvalStatusField) {
-      await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, finalStatus);
+      await this.mirrorStatusField(
+        raw.object_name, raw.record_id, config.approvalStatusField, finalStatus,
+        actingUserId(context),
+      );
     }
     const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh!, runId, nodeId, finalized: true, decision: input.decision, outputs: mergedOutputs };
@@ -1536,7 +1610,10 @@ export class ApprovalService implements IApprovalService {
     }, { context: SYSTEM_CTX });
     await this.syncApproverIndex(requestId, [], org, now);
     if (config.approvalStatusField) {
-      await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'recalled');
+      await this.mirrorStatusField(
+        raw.object_name, raw.record_id, config.approvalStatusField, 'recalled',
+        actingUserId(context),
+      );
     }
 
     let resumed = false;
@@ -1636,7 +1713,10 @@ export class ApprovalService implements IApprovalService {
       }, { context: SYSTEM_CTX });
       await this.syncApproverIndex(requestId, [], org, now);
       if (config.approvalStatusField) {
-        await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'rejected');
+        await this.mirrorStatusField(
+          raw.object_name, raw.record_id, config.approvalStatusField, 'rejected',
+          actingUserId(context),
+        );
       }
       let resumed = false;
       if (runId && typeof this.automation?.resume === 'function') {
@@ -1674,7 +1754,10 @@ export class ApprovalService implements IApprovalService {
     }, { context: SYSTEM_CTX });
     await this.syncApproverIndex(requestId, [], org, now);
     if (config.approvalStatusField) {
-      await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'returned');
+      await this.mirrorStatusField(
+        raw.object_name, raw.record_id, config.approvalStatusField, 'returned',
+        actingUserId(context),
+      );
     }
 
     let resumed = false;
@@ -2087,7 +2170,14 @@ export class ApprovalService implements IApprovalService {
       decision: res.token.action,
       actorId: res.token.approver_id,
       comment: 'Via action link',
-    }, SYSTEM_CTX as unknown as SharingExecutionContext);
+      // The token IS the authentication (#3783): it is single-use, hashed at
+      // rest and bound to one approver, who `resolveActionToken` has just
+      // re-checked still holds a pending slot. So this decision has a real
+      // acting user even though no session carried it — name them on the
+      // context, so the status mirror and every flow it cascades into are
+      // attributed exactly like a decision made through the UI. Elevation is
+      // unchanged: `isSystem` still stands in for the missing session.
+    }, { ...SYSTEM_CTX, userId: res.token.approver_id } as unknown as SharingExecutionContext);
     return { ok: true, action: res.token.action, request: out.request, approverId: res.token.approver_id };
   }
 
@@ -2332,7 +2422,11 @@ export class ApprovalService implements IApprovalService {
       raw.node_config_json, { approvers: [], behavior: 'first_response' } as any,
     );
     if (config.approvalStatusField) {
-      await this.mirrorStatusField(raw.object_name, raw.record_id, config.approvalStatusField, 'recalled');
+      // No human did this — a sweep did. Left user-less on purpose (#3783): a
+      // flow that wants to react to a dead-run release declares runAs:'system'.
+      await this.mirrorStatusField(
+        raw.object_name, raw.record_id, config.approvalStatusField, 'recalled', null,
+      );
     }
 
     this.logger?.warn?.('[approvals] released a record held by a dead approval run', {

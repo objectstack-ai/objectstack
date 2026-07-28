@@ -45,9 +45,13 @@ function makeFakeEngine() {
     return true;
   }
 
+  /** Every `update` the service made, with the context it presented (#3783). */
+  const writes: Array<{ object: string; data: any; context: any }> = [];
+
   return {
     _tables: tables,
     _hooks: hooks,
+    _writes: writes,
     async find(object: string, options?: any) {
       const rows = ensure(object).filter(r => matches(r, options?.filter ?? options?.where));
       if (options?.orderBy?.[0]) {
@@ -73,6 +77,7 @@ function makeFakeEngine() {
     async update(object: string, idOrData: any, _opts?: any) {
       const data = typeof idOrData === 'object' ? idOrData : _opts;
       const id = typeof idOrData === 'object' ? idOrData.id : idOrData;
+      writes.push({ object, data, context: _opts?.context });
       const table = ensure(object);
       const i = table.findIndex(r => r.id === id);
       if (i >= 0) table[i] = { ...table[i], ...data };
@@ -2536,5 +2541,137 @@ describe('in-band transitions finalise before they resume (#3456 invariant)', ()
     handoffs = [];                                   // isolate the resubmit's own hand-back
     await svc.resubmit(req.id, { actorId: 'u1' }, CTX);
     expectCleanHandoffs();
+  });
+});
+
+/**
+ * #3783 — the status mirror names the human who caused the transition.
+ *
+ * The mirror write lands on the CUSTOMER's object, so it is what fires that
+ * object's record-change flows. It has to stay `isSystem` (the record is locked
+ * while its approval is live), but dropping the actor left every one of those
+ * cascades with no trigger user — which #3760 now refuses outright, forcing
+ * "when the invoice is approved, do X" to declare `runAs:'system'`.
+ *
+ * Each case therefore asserts BOTH halves: the elevation survives (or the lock
+ * hook stops mirroring at all) and the identity is present.
+ */
+describe('status mirror identity (#3783)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-01-15T10:00:00Z').getTime();
+
+  const REVISE_FLOW = {
+    name: 'deal_approval',
+    edges: [{ id: 'e_rev', source: 'approve_step', target: 'wait_revision', label: 'revise' }],
+  };
+
+  /** The context the service presented on the mirror write, or undefined. */
+  const mirrorContext = () =>
+    engine._writes.filter(w => w.object === 'opportunity').at(-1)?.context as any;
+
+  const open = (configExtra: Record<string, any> = {}, ctx: any = CTX) =>
+    svc.openNodeRequest(openInput(['u9'], {}, { approvalStatusField: 'approval_status', ...configExtra }), ctx);
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
+    svc.attachAutomation({
+      async resume() {},
+      async cancelRun() {},
+      async getFlow() { return REVISE_FLOW; },
+    } as any);
+    engine._tables['opportunity'] = [{ id: 'opp1', amount: 100 }];
+  });
+
+  it('submit: mirrors as the submitter, still elevated', async () => {
+    await open();
+    expect(mirrorContext()).toMatchObject({ isSystem: true, userId: 'u1' });
+  });
+
+  it('decide: mirrors as the deciding user', async () => {
+    const req = await open();
+    const approver = { ...CTX, userId: 'u9' };
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, approver as any);
+    expect(engine._tables['opportunity'][0].approval_status).toBe('approved');
+    expect(mirrorContext()).toMatchObject({ isSystem: true, userId: 'u9' });
+  });
+
+  it('recall: mirrors as the recalling user', async () => {
+    const req = await open();
+    await svc.recall(req.id, { actorId: 'u1' }, CTX);
+    expect(mirrorContext()).toMatchObject({ isSystem: true, userId: 'u1' });
+  });
+
+  it('sendBack: mirrors as the approver who returned it', async () => {
+    const req = await open();
+    const approver = { ...CTX, userId: 'u9' };
+    await svc.sendBack(req.id, { actorId: 'u9', comment: 'redo the totals' }, approver as any);
+    expect(engine._tables['opportunity'][0].approval_status).toBe('returned');
+    expect(mirrorContext()).toMatchObject({ isSystem: true, userId: 'u9' });
+  });
+
+  it('sendBack past the revision budget: the auto-reject mirror names the approver too', async () => {
+    const req = await open({ maxRevisions: 0 });
+    const approver = { ...CTX, userId: 'u9' };
+    const out = await svc.sendBack(req.id, { actorId: 'u9' }, approver as any);
+    expect(out.autoRejected, 'expected the auto-reject branch').toBe(true);
+    expect(engine._tables['opportunity'][0].approval_status).toBe('rejected');
+    expect(mirrorContext()).toMatchObject({ isSystem: true, userId: 'u9' });
+  });
+
+  it('action link: mirrors as the approver the token is bound to', async () => {
+    // ADR-0043 email approval — no session at all, but the single-use hashed
+    // token names exactly one approver, and `resolveActionToken` has just
+    // re-checked they still hold a pending slot. That IS an authenticated act.
+    const req = await open();
+    const { approve } = await svc.issueActionTokens(req.id, 'u9');
+    expect(await svc.redeemActionToken(approve)).toMatchObject({ ok: true });
+    expect(mirrorContext()).toMatchObject({ isSystem: true, userId: 'u9' });
+  });
+
+  it('never takes the identity from the caller-supplied actorId', async () => {
+    // `actorId` arrives in the REST body (`body.actorId ?? context.userId`) and
+    // is only checked against the pending slate, never against the caller. It is
+    // fine on an audit row; making it the identity of an RLS-scoped write would
+    // let any authenticated caller borrow a slot holder's identity.
+    const req = await open();
+    const someoneElse = { ...CTX, userId: 'intruder' };
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, someoneElse as any);
+    expect(mirrorContext()?.userId).toBe('intruder');
+  });
+
+  it('SLA auto-decision: stays user-less — no human did it', async () => {
+    const req = await open({ escalation: { timeoutHours: 1, action: 'auto_approve', notifySubmitter: false } });
+    const raw = engine._tables['sys_approval_request'].find((r: any) => r.id === req.id)!;
+    raw.created_at = new Date(baseTime - 3 * 60 * 60 * 1000).toISOString();
+    await svc.runEscalations();
+    expect(engine._tables['opportunity'][0].approval_status).toBe('approved');
+    // `system:sla` is a reserved audit actor, not a user — it must never be
+    // presented as one. The cascade stays user-less on purpose; a flow that
+    // wants to react to an SLA auto-decision declares runAs:'system'.
+    expect(mirrorContext()?.userId).toBeUndefined();
+    expect(mirrorContext()).toMatchObject({ isSystem: true });
+  });
+
+  it('dead-run sweep: stays user-less — no human did it', async () => {
+    await open();
+    svc.attachAutomation({ getRun: async () => ({ status: 'failed' }) } as any);
+    expect(await svc.releaseDeadRunRequests()).toMatchObject({ released: 1 });
+    expect(engine._tables['opportunity'][0].approval_status).toBe('recalled');
+    expect(mirrorContext()?.userId).toBeUndefined();
+    expect(mirrorContext()).toMatchObject({ isSystem: true });
+  });
+
+  it('carries the actor WITHOUT org-scoping the write', async () => {
+    // `tenantId` on an ExecutionContext is a driver-scoping knob, not
+    // attribution: ObjectQL turns it into a tenant predicate on the update. The
+    // submitter's org (`t1` on CTX) must therefore not ride along, or the mirror
+    // would silently no-op on a record whose org differs from the request's.
+    await open();
+    expect(mirrorContext()).not.toHaveProperty('tenantId');
+    expect(mirrorContext()).not.toHaveProperty('organizationId');
   });
 });
