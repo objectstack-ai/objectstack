@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
-import { printError, printSuccess } from '../../utils/format.js';
+import { printError, printSuccess, emitJson } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -58,18 +58,18 @@ export default class MetaDelete extends Command {
       const result = await client.meta.deleteItem(args.type, args.name);
 
       if (flags.format === 'json') {
-        formatOutput({ success: true, type: args.type, name: args.name, deleted: result.deleted }, 'json');
+        await formatOutput({ success: true, type: args.type, name: args.name, deleted: result.deleted }, 'json');
       } else if (flags.format === 'yaml') {
-        formatOutput({ success: true, type: args.type, name: args.name, deleted: result.deleted }, 'yaml');
+        await formatOutput({ success: true, type: args.type, name: args.name, deleted: result.deleted }, 'yaml');
       } else {
         printSuccess(`Metadata deleted: ${args.type}/${args.name}`);
       }
     } catch (error: any) {
       if (flags.format === 'json') {
-        console.log(JSON.stringify({
+        await emitJson({
           success: false,
           error: error.message,
-        }, null, 2));
+        });
         this.exit(1);
       }
       printError(error.message || String(error));

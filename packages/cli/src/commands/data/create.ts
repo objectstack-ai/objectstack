@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
-import { printError, printSuccess } from '../../utils/format.js';
+import { printError, printSuccess, emitJson } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -85,22 +85,22 @@ export default class DataCreate extends Command {
       const result = await client.data.create(args.object, recordData);
 
       if (flags.format === 'json') {
-        formatOutput(result, 'json');
+        await formatOutput(result, 'json');
       } else if (flags.format === 'yaml') {
-        formatOutput(result, 'yaml');
+        await formatOutput(result, 'yaml');
       } else {
         printSuccess(`Record created: ${result.id}`);
         if (result.record) {
           console.log('');
-          formatOutput(result.record, 'table');
+          await formatOutput(result.record, 'table');
         }
       }
     } catch (error: any) {
       if (flags.format === 'json') {
-        console.log(JSON.stringify({
+        await emitJson({
           success: false,
           error: error.message,
-        }, null, 2));
+        });
         this.exit(1);
       }
       printError(error.message || String(error));

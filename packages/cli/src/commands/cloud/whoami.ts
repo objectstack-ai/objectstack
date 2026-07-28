@@ -7,7 +7,7 @@
  */
 
 import { Command, Flags } from '@oclif/core';
-import { printHeader, printKV, printSuccess, printError } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printError, emitJson, isExitSignal } from '../../utils/format.js';
 import { tryReadCloudConfig } from '../../utils/cloud-config.js';
 
 export default class CloudWhoami extends Command {
@@ -26,7 +26,7 @@ export default class CloudWhoami extends Command {
       const config = await tryReadCloudConfig();
       if (!config?.token) {
         if (flags.json) {
-          console.log(JSON.stringify({ logged_in: false }, null, 2));
+          await emitJson({ logged_in: false });
         } else {
           printError('Not logged in to ObjectStack Cloud. Run `os cloud login` first.');
         }
@@ -54,7 +54,7 @@ export default class CloudWhoami extends Command {
       const valid = !!sessionUser;
 
       if (flags.json) {
-        console.log(JSON.stringify({ logged_in: true, valid, url: config.url, email, userId }, null, 2));
+        await emitJson({ logged_in: true, valid, url: config.url, email, userId });
       } else {
         printHeader('ObjectStack Cloud Identity');
         printKV('Server', config.url);
@@ -70,8 +70,9 @@ export default class CloudWhoami extends Command {
         console.log('');
       }
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (flags.json) {
-        console.log(JSON.stringify({ success: false, error: error.message }, null, 2));
+        await emitJson({ success: false, error: error.message });
         this.exit(1);
       }
       printError(error.message || String(error));

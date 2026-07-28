@@ -69,6 +69,46 @@ describe('rebucketCrossObject (#3654)', () => {
     ]);
   });
 
+  // #3797 — a min/max measure over a `Field.datetime` arrives as an ISO string
+  // (SQLite, since the driver stopped leaking its epoch storage) or as a `Date`
+  // (Postgres/MySQL, where knex maps a native timestamp). Coercing either with
+  // `Number()` gave `NaN` and epoch-int respectively; min/max must order by the
+  // instant and hand back the winning value in the shape it arrived in.
+  it('recombines a temporal min/max by instant, preserving the value shape', () => {
+    const base = [
+      { account: 'acc_w1', first: '2026-03-01T00:00:00.000Z', last: '2026-03-09T00:00:00.000Z' },
+      { account: 'acc_w2', first: '2026-01-10T09:00:00.000Z', last: '2026-02-14T09:00:00.000Z' },
+      { account: 'acc_e1', first: '2025-12-31T23:59:59.000Z', last: '2025-12-31T23:59:59.000Z' },
+    ];
+    const dims: CrossObjectDim[] = [{ outputName: 'region', fkField: 'account', fkToAttr: fkToRegion }];
+    const measures: MeasureRecombine[] = [
+      { alias: 'first', method: 'min' },
+      { alias: 'last', method: 'max' },
+    ];
+    const out = rebucketCrossObject(base, [], dims, measures);
+    expect(out).toEqual([
+      // West merges the two accounts: earliest first, latest last — and the
+      // values come back as the ISO strings they went in as, not as epochs.
+      { region: 'West', first: '2026-01-10T09:00:00.000Z', last: '2026-03-09T00:00:00.000Z' },
+      { region: 'East', first: '2025-12-31T23:59:59.000Z', last: '2025-12-31T23:59:59.000Z' },
+    ]);
+  });
+
+  it('recombines a temporal min/max delivered as Date objects', () => {
+    const d = (iso: string) => new Date(iso);
+    const base = [
+      { account: 'acc_w1', last: d('2026-03-09T00:00:00.000Z') },
+      { account: 'acc_w2', last: d('2026-02-14T09:00:00.000Z') },
+    ];
+    const out = rebucketCrossObject(
+      base,
+      [],
+      [{ outputName: 'region', fkField: 'account', fkToAttr: fkToRegion }],
+      [{ alias: 'last', method: 'max' }],
+    );
+    expect(out).toEqual([{ region: 'West', last: d('2026-03-09T00:00:00.000Z') }]);
+  });
+
   it('keeps a base dimension alongside the cross-object dimension', () => {
     const base = [
       { stage: 'won', account: 'acc_w1', revenue: 100 },

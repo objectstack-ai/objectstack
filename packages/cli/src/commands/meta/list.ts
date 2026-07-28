@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
-import { printError } from '../../utils/format.js';
+import { printError, emitJson } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -55,9 +55,9 @@ export default class MetaList extends Command {
         const types = await client.meta.getTypes();
 
         if (flags.format === 'json') {
-          formatOutput(types, 'json');
+          await formatOutput(types, 'json');
         } else if (flags.format === 'yaml') {
-          formatOutput(types, 'yaml');
+          await formatOutput(types, 'yaml');
         } else {
           console.log('\nAvailable metadata types:\n');
           if (Array.isArray(types)) {
@@ -72,9 +72,9 @@ export default class MetaList extends Command {
         const items = await client.meta.getItems(args.type);
 
         if (flags.format === 'json') {
-          formatOutput(items, 'json');
+          await formatOutput(items, 'json');
         } else if (flags.format === 'yaml') {
-          formatOutput(items, 'yaml');
+          await formatOutput(items, 'yaml');
         } else {
           console.log(`\n${args.type} items:\n`);
           if (Array.isArray(items)) {
@@ -92,10 +92,10 @@ export default class MetaList extends Command {
       }
     } catch (error: any) {
       if (flags.format === 'json') {
-        console.log(JSON.stringify({
+        await emitJson({
           success: false,
           error: error.message,
-        }, null, 2));
+        });
         this.exit(1);
       }
       printError(error.message || String(error));

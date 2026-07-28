@@ -27,6 +27,7 @@ import {
   printStep,
   createTimer,
   emitJson,
+  isExitSignal,
 } from '../utils/format.js';
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -784,8 +785,9 @@ export default class Lint extends Command {
       if (errors.length > 0) process.exit(1);
 
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (flags.json) {
-        console.log(JSON.stringify({ error: error.message }));
+        await emitJson({ error: error.message }, 0, { compact: true });
         process.exit(1);
       }
       console.log('');
@@ -831,7 +833,7 @@ export default class Lint extends Command {
         generate = fn;
       } catch (error: any) {
         const msg = `Failed to load generator "${flags.generator}": ${error?.message || error}`;
-        if (flags.json) console.log(JSON.stringify({ error: msg }));
+        if (flags.json) await emitJson({ error: msg }, 0, { compact: true });
         else printError(msg);
         process.exit(1);
       }
@@ -843,7 +845,7 @@ export default class Lint extends Command {
     });
 
     if (flags.json) {
-      console.log(JSON.stringify({ ...report, duration: timer.elapsed() }, null, 2));
+      await emitJson({ ...report, duration: timer.elapsed() });
       if (!report.ok) process.exit(1);
       return;
     }

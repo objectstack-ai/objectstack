@@ -21,6 +21,7 @@ import {
   printInfo,
   printStep,
   createTimer,
+  emitJson,
 } from '../../utils/format.js';
 
 /**
@@ -95,9 +96,7 @@ export default class MigrateMeta extends Command {
       const specChanges = composeSpecChanges(flags.from, toMajor);
 
       if (flags.json) {
-        console.log(
-          JSON.stringify(
-            {
+        await emitJson({
               from: result.fromMajor,
               to: result.toMajor,
               runtime: PROTOCOL_VERSION,
@@ -114,11 +113,7 @@ export default class MigrateMeta extends Command {
               specChanges,
               schemaValid: parsed.success,
               duration: timer.elapsed(),
-            },
-            null,
-            2,
-          ),
-        );
+            });
         if (flags.out) writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));
         return;
       }
@@ -179,7 +174,7 @@ export default class MigrateMeta extends Command {
     } catch (error: any) {
       if (error instanceof MigrationFloorError) {
         if (flags.json) {
-          console.log(JSON.stringify({ error: 'unsupported_from_major', message: error.message }));
+          await emitJson({ error: 'unsupported_from_major', message: error.message }, 0, { compact: true });
           this.exit(1);
         }
         printError(error.message);
@@ -187,7 +182,7 @@ export default class MigrateMeta extends Command {
         return;
       }
       if (flags.json) {
-        console.log(JSON.stringify({ error: error.message }));
+        await emitJson({ error: error.message }, 0, { compact: true });
         this.exit(1);
       }
       printError(error.message || String(error));

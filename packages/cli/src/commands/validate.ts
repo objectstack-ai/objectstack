@@ -26,6 +26,10 @@ import { validateSecurityPosture, validateOrgAxisRedLines } from '@objectstack/l
 import { validateFlowTriggerReadiness } from '@objectstack/lint';
 import { validateFlowTemplatePaths } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
+import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
+import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
+import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
+import { lintViewRefs } from '../utils/lint-view-refs.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import {
   printHeader,
@@ -37,6 +41,8 @@ import {
   formatZodErrors,
   collectMetadataStats,
   printMetadataStats,
+  emitJson,
+  isExitSignal,
 } from '../utils/format.js';
 import { checkSpecVersionGap } from '../utils/spec-version.js';
 
@@ -86,11 +92,11 @@ export default class Validate extends Command {
 
       if (!result.success) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: (result.error as unknown as ZodError).issues,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
 
@@ -114,12 +120,12 @@ export default class Validate extends Command {
 
       if (exprErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: exprErrors,
             warnings: exprWarnings,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -143,11 +149,11 @@ export default class Validate extends Command {
 
       if (listViewErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: listViewErrors,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -171,11 +177,11 @@ export default class Validate extends Command {
 
       if (viewContainerErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: viewContainerErrors,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -200,12 +206,12 @@ export default class Validate extends Command {
 
       if (widgetErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: widgetErrors,
             warnings: widgetWarnings,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -231,12 +237,12 @@ export default class Validate extends Command {
       const actionRefWarnings = actionRefFindings.filter((f) => f.severity === 'warning');
       if (actionRefErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: actionRefErrors,
             warnings: [...widgetWarnings, ...actionRefWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -267,12 +273,12 @@ export default class Validate extends Command {
       const filterTokenErrors = filterTokenFindings.filter((f) => f.severity === 'error');
       if (filterTokenErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: filterTokenErrors,
             warnings: [...widgetWarnings, ...actionRefWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -316,12 +322,12 @@ export default class Validate extends Command {
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');
       if (refErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: refErrors,
             warnings: [...widgetWarnings, ...actionRefWarnings, ...refWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -352,12 +358,12 @@ export default class Validate extends Command {
 
       if (styleErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: styleErrors,
             warnings: [...widgetWarnings, ...styleWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -398,12 +404,12 @@ export default class Validate extends Command {
 
       if (jsxErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: jsxErrors,
             warnings: [...widgetWarnings, ...styleWarnings, ...jsxWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -424,12 +430,12 @@ export default class Validate extends Command {
       const reactErrors = reactFindings.filter((f) => f.severity === 'error');
       if (reactErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: reactErrors,
             warnings: [...widgetWarnings, ...styleWarnings, ...jsxWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -457,12 +463,12 @@ export default class Validate extends Command {
       }
       if (reactPropErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: reactPropErrors,
             warnings: [...widgetWarnings, ...styleWarnings, ...jsxWarnings, ...reactPropWarnings],
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -547,11 +553,11 @@ export default class Validate extends Command {
       const readonlyWriteWarnings = readonlyWriteFindings.filter((f) => f.severity === 'warning');
       if (readonlyWriteErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: readonlyWriteErrors,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -565,6 +571,73 @@ export default class Validate extends Command {
       }
       if (!flags.json) {
         for (const f of readonlyWriteWarnings.slice(0, 50)) {
+          console.log(chalk.yellow(`  ⚠ ${f.where}: ${f.message}`));
+          console.log(chalk.dim(`      ${f.hint}`));
+        }
+      }
+
+      // 3e3. [#3782] The four authoring lints that live in the CLI itself rather
+      //      than in `@objectstack/lint`. Every other gate on this command is a
+      //      `@objectstack/lint` import, so these four were only ever reachable
+      //      from `compile.ts` — `os build` ran them, `os validate` did not, and
+      //      the drift went unnoticed while all of their findings were advisory.
+      //      Two of them already GATE the build (`lintAutonumberFormats`,
+      //      `lintViewRefs` emit `severity: 'error'`), which made this command
+      //      report a clean stack that `os build` then rejected — exactly the
+      //      contract this command exists to uphold. Severity handling mirrors
+      //      `compile.ts` per lint, so the two surfaces agree by construction.
+      if (!flags.json) printStep('Running authoring lints (#3782)...');
+
+      // Flow authoring anti-patterns (#1874). Advisory today; `severity: 'error'`
+      // is honoured so a blocking rule (#3760's `flow-runas-unscoped`) gates here
+      // the moment it gates the build, with no further wiring.
+      const flowLint = lintFlowPatterns(result.data as Record<string, unknown>);
+      const flowLintErrors = flowLint.filter((f) => f.severity === 'error');
+      const flowLintWarnings = flowLint.filter((f) => f.severity !== 'error');
+
+      // Liveness author-warnings — an authored property the ledger marks
+      // dead-and-misleading or experimental. Advisory only, never fatal.
+      const livenessLint = lintLivenessProperties(result.data as Record<string, unknown>);
+
+      // Autonumber `{field}` interpolation — an unknown field is broken (error);
+      // an optional one is fragile (warning).
+      const autonumberLint = lintAutonumberFormats(result.data as Record<string, unknown>);
+      const autonumberErrors = autonumberLint.filter((f) => f.severity === 'error');
+      const autonumberWarnings = autonumberLint.filter((f) => f.severity !== 'error');
+
+      // View references (#2554) — a form action target naming a missing or LIST
+      // view, and list/form view-key collisions. Both are broken → error.
+      const viewRefLint = lintViewRefs(result.data as Record<string, unknown>);
+      const viewRefErrors = viewRefLint.filter((f) => f.severity === 'error');
+      const viewRefWarnings = viewRefLint.filter((f) => f.severity !== 'error');
+
+      const authoringLintErrors = [...flowLintErrors, ...autonumberErrors, ...viewRefErrors];
+      const authoringLintWarnings = [
+        ...flowLintWarnings,
+        ...livenessLint,
+        ...autonumberWarnings,
+        ...viewRefWarnings,
+      ];
+      if (authoringLintErrors.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: authoringLintErrors,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Authoring lint failed (${authoringLintErrors.length} issue${authoringLintErrors.length > 1 ? 's' : ''})`);
+        for (const f of authoringLintErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}`));
+        }
+        this.exit(1);
+      }
+      if (!flags.json) {
+        for (const f of authoringLintWarnings.slice(0, 50)) {
           console.log(chalk.yellow(`  ⚠ ${f.where}: ${f.message}`));
           console.log(chalk.dim(`      ${f.hint}`));
         }
@@ -588,11 +661,11 @@ export default class Validate extends Command {
       const securityAdvisories = securityFindings.filter((f) => f.severity !== 'error');
       if (securityErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: securityErrors,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -632,11 +705,11 @@ export default class Validate extends Command {
       }));
       if (capProviderErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: capProviderErrors.map((c) => ({ token: c.token, message: renderCapabilityMessage(c) })),
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');
@@ -655,15 +728,15 @@ export default class Validate extends Command {
       const specGap = checkSpecVersionGap(config.manifest);
 
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           valid: true,
           manifest: config.manifest,
           stats,
-          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...flowTemplateWarnings, ...readonlyWriteWarnings, ...securityAdvisories, ...capProviderWarnings],
+          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...flowTemplateWarnings, ...readonlyWriteWarnings, ...authoringLintWarnings, ...securityAdvisories, ...capProviderWarnings],
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),
-        }, null, 2));
+        });
         return;
       }
 
@@ -752,12 +825,13 @@ export default class Validate extends Command {
 
       console.log('');
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           valid: false,
           error: error.message,
           duration: timer.elapsed(),
-        }, null, 2));
+        });
         this.exit(1);
       }
       console.log('');

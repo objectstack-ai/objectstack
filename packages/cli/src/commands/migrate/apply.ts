@@ -11,6 +11,7 @@ import {
   printInfo,
   printStep,
   createTimer,
+  emitJson,
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
@@ -74,7 +75,7 @@ export default class MigrateApply extends Command {
     try {
       stack = await bootSchemaStack({ databaseUrl: flags['database-url'] });
     } catch (error: any) {
-      if (flags.json) { console.log(JSON.stringify({ error: error.message })); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
       return;
@@ -82,7 +83,7 @@ export default class MigrateApply extends Command {
 
     try {
       if (!stack.driver) {
-        if (flags.json) { console.log(JSON.stringify({ error: 'no_sql_driver' })); return; }
+        if (flags.json) { await emitJson({ error: 'no_sql_driver' }, 0, { compact: true }); return; }
         printWarning('Schema migration is only supported on SQL drivers (SQLite / Postgres). No SQL driver is active.');
         return;
       }
@@ -91,7 +92,7 @@ export default class MigrateApply extends Command {
       const grouped = groupByCategory(drift);
 
       if (drift.length === 0) {
-        if (flags.json) { console.log(JSON.stringify({ applied: [], skipped: [], message: 'in_sync' })); return; }
+        if (flags.json) { await emitJson({ applied: [], skipped: [], message: 'in_sync' }, 0, { compact: true }); return; }
         printSuccess('Physical schema is already in sync with metadata — nothing to apply.');
         return;
       }
@@ -114,7 +115,7 @@ export default class MigrateApply extends Command {
       }
 
       if (intended.length === 0) {
-        if (flags.json) { console.log(JSON.stringify({ applied: [], skipped: deferred, message: 'nothing_safe_to_apply' })); return; }
+        if (flags.json) { await emitJson({ applied: [], skipped: deferred, message: 'nothing_safe_to_apply' }, 0, { compact: true }); return; }
         printWarning('No changes to apply without --allow-destructive.');
         return;
       }
@@ -122,7 +123,7 @@ export default class MigrateApply extends Command {
       // Confirmation gate.
       if (!flags.yes) {
         if (flags.json || !process.stdin.isTTY) {
-          if (flags.json) { console.log(JSON.stringify({ applied: [], skipped: drift, message: 'confirmation_required', hint: 'pass --yes' })); return; }
+          if (flags.json) { await emitJson({ applied: [], skipped: drift, message: 'confirmation_required', hint: 'pass --yes' }, 0, { compact: true }); return; }
           printWarning('Confirmation required. Re-run with --yes to apply, or use "os migrate plan" to preview.');
           return;
         }
@@ -133,12 +134,12 @@ export default class MigrateApply extends Command {
       const { applied, skipped } = await stack.driver.applyMigrationEntries(drift, { allowDestructive });
 
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           database: stack.dbLabel,
           applied,
           skipped,
           duration: timer.elapsed(),
-        }, null, 2));
+        });
         return;
       }
 
@@ -150,7 +151,7 @@ export default class MigrateApply extends Command {
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
     } catch (error: any) {
-      if (flags.json) { console.log(JSON.stringify({ error: error.message })); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
     } finally {

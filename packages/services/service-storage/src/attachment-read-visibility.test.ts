@@ -7,6 +7,77 @@ import type { AttachmentLifecycleEngine, AttachmentReadMiddlewareCtx } from './a
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
 
 /**
+ * Filter Protocol evaluator for the fake engine below — real `$and` / `$or` /
+ * `$not` semantics, not a shape check.
+ *
+ * Mirrors `driver-memory`'s `memory-matcher.ts` and `formula`'s
+ * `matches-filter.ts`: **every key inside one filter object ANDs**, a `$or`
+ * array ORs its branches, and a branch's own contents still AND.
+ *
+ * This used to understand neither logical operators nor anything but `$in`,
+ * so these tests could only assert the *shape* of the filter the middleware
+ * emits, never the rows that filter selects. That is a poor bargain for a
+ * predicate whose whole job is narrowing: `computeParentVisibilityFilter`
+ * pairs a discriminator with an id list per branch, and any bug that widens
+ * `$or` — the class #3774 fixed in the SQL compiler — turns that pairing into
+ * something looser while leaving every shape assertion green. A fake that
+ * silently under-implements the protocol cannot see a widening bug, so this
+ * one implements it for real and **throws** on anything it does not, rather
+ * than quietly matching.
+ *
+ * Values compare as strings on purpose: `computeParentVisibilityFilter`
+ * stringifies every `parent_id` when it builds the `$in` list, so a numeric
+ * row value still has to match its stringified filter value.
+ */
+function matchWhere(row: any, where: any): boolean {
+  if (where === null || where === undefined) return true;
+  if (typeof where !== 'object' || Array.isArray(where)) {
+    throw new Error(`harness matcher: a filter must be an object, got ${JSON.stringify(where)}`);
+  }
+  // A filter object is the AND of every one of its entries.
+  return Object.entries(where).every(([key, val]) => {
+    if (key === '$and') {
+      if (!Array.isArray(val)) throw new Error('harness matcher: $and expects an array');
+      return val.every((branch) => matchWhere(row, branch));
+    }
+    if (key === '$or') {
+      if (!Array.isArray(val)) throw new Error('harness matcher: $or expects an array');
+      // Each branch is evaluated whole — the keys inside it still AND.
+      return val.some((branch) => matchWhere(row, branch));
+    }
+    if (key === '$not') return !matchWhere(row, val);
+    if (key.startsWith('$')) {
+      throw new Error(`harness matcher: unsupported logical operator ${key}`);
+    }
+    return matchField(row[key], val);
+  });
+}
+
+/** One `field: <spec>` entry. Multiple operators on the same field AND together. */
+function matchField(actual: any, spec: any): boolean {
+  if (spec === null || spec === undefined) return actual === null || actual === undefined;
+  if (Array.isArray(spec)) {
+    throw new Error('harness matcher: a bare array is not a field spec — use { $in: [...] }');
+  }
+  if (typeof spec !== 'object') return String(actual) === String(spec);
+  return Object.entries(spec).every(([op, target]) => {
+    switch (op) {
+      case '$eq':
+        return String(actual) === String(target);
+      case '$ne':
+        return String(actual) !== String(target);
+      case '$in':
+        return (target as unknown[]).map(String).includes(String(actual));
+      case '$nin':
+        return !(target as unknown[]).map(String).includes(String(actual));
+      default:
+        // Loud on purpose — an ignored operator is how the original blind spot happened.
+        throw new Error(`harness matcher: unsupported operator ${op} — implement it, don't let it match silently`);
+    }
+  });
+}
+
+/**
  * Fake engine modelling: a sys_attachment table (system pre-scan) + a
  * per-parent-object visibility map keyed by userId. A parent find under a
  * caller context returns only the ids that user can see.
@@ -18,16 +89,6 @@ function install(opts: {
 }) {
   let mw!: (ctx: AttachmentReadMiddlewareCtx, next: () => Promise<void>) => Promise<void>;
   const calls = { parentFinds: [] as Array<{ object: string; ids: string[]; userId?: string }> };
-
-  const matchWhere = (row: any, where: any): boolean => {
-    if (!where || typeof where !== 'object') return true;
-    return Object.entries(where).every(([k, v]) => {
-      if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
-        return (v as any).$in.map(String).includes(String(row[k]));
-      }
-      return String(row[k]) === String(v);
-    });
-  };
 
   const engine: AttachmentLifecycleEngine = {
     registerHook: () => {},
@@ -51,7 +112,18 @@ function install(opts: {
     update: async () => ({}),
   };
   installAttachmentReadVisibility(engine, silentLogger());
-  return { mw, calls };
+  return {
+    mw,
+    calls,
+    /**
+     * Ids the given `where` actually selects from the fixture — i.e. what a
+     * spec-conformant driver would return once the middleware has narrowed
+     * the query. Asserting on this (not just on the filter's shape) is what
+     * makes a widened scope visible.
+     */
+    selectIds: (where: unknown): string[] =>
+      opts.attachments.filter((r) => matchWhere(r, where)).map((r) => String(r.id)),
+  };
 }
 
 /** Drive a read op through the middleware and return the resulting where. */
@@ -109,6 +181,34 @@ describe('installAttachmentReadVisibility', () => {
         { parent_object: 'att_todo', parent_id: { $in: ['t1'] } },
       ],
     });
+  });
+
+  it('the multi-parent $or admits only rows matching BOTH keys of one branch', async () => {
+    // Each parent type has a visible and an invisible record, plus a row whose
+    // parent_object belongs to one branch while its parent_id appears only in
+    // the OTHER branch's id list. Nothing but a genuine per-branch AND excludes
+    // all three, so this pins the pairing itself rather than the filter's shape.
+    const { mw, selectIds } = install({
+      attachments: [
+        { id: 'a1', parent_object: 'att_case', parent_id: 'c1' }, // visible case
+        { id: 'a2', parent_object: 'att_case', parent_id: 'c2' }, // case u1 cannot read
+        { id: 'a3', parent_object: 'att_todo', parent_id: 't1' }, // visible todo
+        { id: 'a4', parent_object: 'att_todo', parent_id: 't2' }, // todo u1 cannot read
+        { id: 'a5', parent_object: 'att_case', parent_id: 't1' }, // object of branch 1, id of branch 2
+      ],
+      visible: { att_case: { u1: ['c1'] }, att_todo: { u1: ['t1'] } },
+    });
+    const { where } = await runRead(mw, {});
+
+    expect(where).toEqual({
+      $or: [
+        { parent_object: 'att_case', parent_id: { $in: ['c1'] } },
+        { parent_object: 'att_todo', parent_id: { $in: ['t1'] } },
+      ],
+    });
+    // The rows that filter actually returns — a2/a4 (right parent type, wrong
+    // id) and a5 (right type, an id borrowed from the sibling branch) are out.
+    expect(selectIds(where)).toEqual(['a1', 'a3']);
   });
 
   it('denies all when no candidate parent is visible', async () => {
@@ -176,5 +276,102 @@ describe('installAttachmentReadVisibility', () => {
     // probe was issued against sys_attachment.
     expect(where).toEqual({ id: '__attachment_parent_denied__' });
     expect(calls.parentFinds).toHaveLength(0);
+  });
+});
+
+/**
+ * Who tests the test double? The row assertions above are only worth as much
+ * as the matcher evaluating them, so it gets the same 2x2 fixture and the same
+ * expectations as the three production backends:
+ * `driver-memory/memory-matcher-or-semantics.test.ts`,
+ * `formula/matches-filter-or-semantics.test.ts`, and
+ * `driver-sql/sql-driver-or-filter.test.ts`. If this harness ever drifts from
+ * them, a read scope it declares safe would not be safe in the engine.
+ */
+describe('harness matcher — Filter Protocol $and/$or/$not semantics', () => {
+  const ROWS = [
+    { id: '1', a: 'x', b: 'y', c: 'z' },
+    { id: '2', a: 'x', b: 'zz', c: 'z' },
+    { id: '3', a: 'qq', b: 'y', c: 'z' },
+    { id: '4', a: 'qq', b: 'zz', c: 'z' },
+  ];
+  const ids = (filter: any): string[] => ROWS.filter((r) => matchWhere(r, filter)).map((r) => r.id);
+
+  it('ANDs the keys of a single multi-key branch', () => {
+    expect(ids({ $or: [{ a: 'x', b: 'y' }] })).toEqual(['1']);
+  });
+
+  it('ANDs the keys of each branch independently', () => {
+    expect(ids({ $or: [{ a: 'x', b: 'y' }, { a: 'qq', b: 'zz' }] })).toEqual(['1', '4']);
+  });
+
+  it('ANDs operator-object keys within a branch', () => {
+    expect(ids({ $or: [{ a: { $eq: 'x' }, b: { $ne: 'zz' } }] })).toEqual(['1']);
+  });
+
+  it('ANDs keys inside a $or nested in a $or branch', () => {
+    expect(ids({ $or: [{ $or: [{ a: 'x', b: 'zz' }] }] })).toEqual(['2']);
+  });
+
+  it('ANDs multiple operators on ONE field within a branch', () => {
+    expect(ids({ $or: [{ a: { $ne: 'qq', $eq: 'x' }, b: 'y' }] })).toEqual(['1']);
+  });
+
+  it('OR-s a $and branch against a sibling multi-key branch', () => {
+    expect(ids({ $or: [{ $and: [{ a: 'x' }, { b: 'y' }] }, { a: 'qq', b: 'zz' }] })).toEqual(['1', '4']);
+  });
+
+  it('ANDs a $and with a sibling key in the same branch, either order', () => {
+    expect(ids({ $or: [{ c: 'nope' }, { $and: [{ a: 'qq' }], b: 'y' }] })).toEqual(['3']);
+    expect(ids({ $or: [{ c: 'nope' }, { b: 'y', $and: [{ a: 'qq' }] }] })).toEqual(['3']);
+  });
+
+  it('keeps single-key $or branches as a plain OR', () => {
+    expect(ids({ $or: [{ a: 'x' }, { b: 'y' }] })).toEqual(['1', '2', '3']);
+  });
+
+  it('ANDs a $or with a sibling top-level field key', () => {
+    expect(ids({ $or: [{ a: 'x' }, { b: 'y' }], b: 'zz' })).toEqual(['2']);
+  });
+
+  it('negates with $not', () => {
+    expect(ids({ $not: { a: 'x' } })).toEqual(['3', '4']);
+  });
+
+  it('tells a correctly paired scope apart from a widened one', () => {
+    // The proof this matcher can go red: the same clauses, once AND-ed per
+    // branch and once flattened to key-level ORs. If both returned the same
+    // rows, every row assertion in this file would be decorative.
+    const attachments = [
+      { id: 'a1', parent_object: 'att_case', parent_id: 'c1' },
+      { id: 'a2', parent_object: 'att_case', parent_id: 'c2' },
+      { id: 'a3', parent_object: 'att_todo', parent_id: 't1' },
+      { id: 'a4', parent_object: 'att_todo', parent_id: 't2' },
+    ];
+    const pick = (f: any) => attachments.filter((r) => matchWhere(r, f)).map((r) => r.id);
+
+    const correct = {
+      $or: [
+        { parent_object: 'att_case', parent_id: { $in: ['c1'] } },
+        { parent_object: 'att_todo', parent_id: { $in: ['t1'] } },
+      ],
+    };
+    const widened = {
+      $or: [
+        { parent_object: 'att_case' },
+        { parent_id: { $in: ['c1'] } },
+        { parent_object: 'att_todo' },
+        { parent_id: { $in: ['t1'] } },
+      ],
+    };
+    expect(pick(correct)).toEqual(['a1', 'a3']);
+    expect(pick(widened)).toEqual(['a1', 'a2', 'a3', 'a4']); // every row in the tenant
+  });
+
+  it('throws instead of silently ignoring an operator it does not implement', () => {
+    // The original blind spot in one line: an unimplemented operator must not
+    // quietly evaluate to a match.
+    expect(() => ids({ a: { $gt: 'x' } })).toThrow(/unsupported operator \$gt/);
+    expect(() => ids({ $nor: [{ a: 'x' }] })).toThrow(/unsupported logical operator \$nor/);
   });
 });

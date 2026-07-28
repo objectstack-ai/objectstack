@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
-import { printError, printSuccess } from '../../utils/format.js';
+import { printError, printSuccess, emitJson } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -58,23 +58,23 @@ export default class DataDelete extends Command {
       const result = await client.data.delete(args.object, args.id);
 
       if (flags.format === 'json') {
-        console.log(JSON.stringify({
+        await emitJson({
           success: true,
           object: result.object,
           id: result.id,
           deleted: result.deleted,
-        }, null, 2));
+        });
       } else if (flags.format === 'yaml') {
-        formatOutput({ success: true, object: result.object, id: result.id, deleted: result.deleted }, 'yaml');
+        await formatOutput({ success: true, object: result.object, id: result.id, deleted: result.deleted }, 'yaml');
       } else {
         printSuccess(`Record deleted: ${result.id}`);
       }
     } catch (error: any) {
       if (flags.format === 'json') {
-        console.log(JSON.stringify({
+        await emitJson({
           success: false,
           error: error.message,
-        }, null, 2));
+        });
         this.exit(1);
       }
       printError(error.message || String(error));

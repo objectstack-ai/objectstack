@@ -52,20 +52,44 @@ export interface MeasureRecombine {
   method: RecombinableMethod;
 }
 
-/** Combine two measure values under an aggregation method (either may be undefined). */
+/**
+ * Order two measure values. A number orders as itself; a `Date` or an ISO
+ * timestamp orders as its instant, so a `min`/`max` over a temporal measure
+ * compares correctly instead of collapsing to `NaN` (#3797). `NaN` means "not
+ * orderable" and the caller keeps the other side.
+ */
+function orderableValue(v: unknown): number {
+  if (v == null) return NaN;
+  if (typeof v === 'number') return v;
+  if (v instanceof Date) return v.getTime();
+  const n = Number(v);
+  if (Number.isFinite(n)) return n;
+  return Date.parse(String(v));
+}
+
+/**
+ * Combine two measure values under an aggregation method (either may be
+ * undefined).
+ *
+ * `sum`/`count` are numeric by construction and stay so. `min`/`max` return the
+ * winning ORIGINAL value rather than a number: the value they pick is a value
+ * OF the column, so a temporal measure has to come back out in the same shape
+ * the driver presented it (#3797) — coercing it to a number here would put the
+ * epoch leak back one layer up, and on any dialect whose driver returns an ISO
+ * string it would produce `NaN` outright.
+ */
 function recombine(method: RecombinableMethod, acc: unknown, next: unknown): unknown {
-  const n = Number(next ?? 0);
-  if (acc === undefined) return method === 'min' || method === 'max' ? Number(next ?? 0) : n;
-  const a = Number(acc);
-  switch (method) {
-    case 'sum':
-    case 'count':
-      return a + n;
-    case 'min':
-      return Math.min(a, n);
-    case 'max':
-      return Math.max(a, n);
+  if (method === 'min' || method === 'max') {
+    if (acc === undefined) return next ?? 0;
+    const a = orderableValue(acc);
+    const n = orderableValue(next);
+    if (Number.isNaN(n)) return acc;
+    if (Number.isNaN(a)) return next;
+    const nextWins = method === 'min' ? n < a : n > a;
+    return nextWins ? next : acc;
   }
+  const n = Number(next ?? 0);
+  return acc === undefined ? n : Number(acc) + n;
 }
 
 /**

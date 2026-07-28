@@ -14,6 +14,7 @@ import {
   printStep,
   createTimer,
   emitJson,
+  isExitSignal,
 } from '../../utils/format.js';
 import { extractTranslations, renderTranslationModule, type FillStrategy } from '../../utils/i18n-extract.js';
 
@@ -271,8 +272,9 @@ export default class I18nExtract extends Command {
       console.log('');
       printSuccess(`Generated ${written} file(s) ${chalk.dim(`(${timer.display()})`)}`);
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (flags.json) {
-        console.log(JSON.stringify({ error: error.message }));
+        await emitJson({ error: error.message }, 0, { compact: true });
         process.exit(1);
       }
       console.log('');

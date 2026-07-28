@@ -11,6 +11,8 @@ import {
   printInfo,
   printStep,
   createTimer,
+  emitJson,
+  isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { loadConfig } from '../../utils/config.js';
@@ -128,7 +130,7 @@ export default class MigrateFilesToReferences extends Command {
     if (apply && !flags.yes) {
       if (flags.json || !process.stdin.isTTY) {
         if (flags.json) {
-          console.log(JSON.stringify({ error: 'confirmation_required', hint: 'pass --yes' }));
+          await emitJson({ error: 'confirmation_required', hint: 'pass --yes' }, 0, { compact: true });
           this.exit(1);
         }
         printWarning('Apply mode rewrites record data. Re-run with --yes to confirm, or run without --apply to preview.');
@@ -155,7 +157,7 @@ export default class MigrateFilesToReferences extends Command {
         extraPlugins: await buildDataMigrationPlugins(),
       });
     } catch (error: any) {
-      if (flags.json) { console.log(JSON.stringify({ error: error.message })); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
       return;
@@ -208,7 +210,7 @@ export default class MigrateFilesToReferences extends Command {
       });
 
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           database: stack.dbLabel,
           apply,
           backfill: {
@@ -237,7 +239,7 @@ export default class MigrateFilesToReferences extends Command {
           gateFailures: result.gateFailures,
           flag: result.flag,
           duration: timer.elapsed(),
-        }, null, 2));
+        });
         if (!result.gatePassed) this.exit(1);
         return;
       }
@@ -281,7 +283,8 @@ export default class MigrateFilesToReferences extends Command {
       console.log('');
       if (!result.gatePassed) this.exit(1);
     } catch (error: any) {
-      if (flags.json) { console.log(JSON.stringify({ error: error.message })); this.exit(1); }
+      if (isExitSignal(error)) throw error;
+      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
     } finally {
