@@ -29,8 +29,9 @@
     },
     "type": {
       "status": "live",
-      "evidence": "packages/runtime/src/http-dispatcher.ts",
-      "note": "api/script/flow wired; url thinner; modal PARTIAL (maps to serverActionHandler, not a real modal); form LIVE via objectui ActionRunner.executeForm (routes a type:'form' action to the FormView at /forms/:target, forwarding the current record id) — the 2026-06 audit mis-classified as dead (objectui renderer not re-verified; fixed the 'Log Time does nothing' report). Build-time lint-view-refs.ts validates the form target resolves to a form view."
+      "verifiedAt": "2026-07-28",
+      "evidence": "packages/runtime/src/http-dispatcher.ts; objectui @732b1bf core ActionRunner.ts:513-541 switches every variant to its own executor (executeScript/Url/Modal/Flow/API/Form/Navigation)",
+      "note": "api/script/flow wired; url thinner; modal PARTIAL (maps to serverActionHandler, not a real modal); form LIVE via objectui ActionRunner.executeForm (routes a type:'form' action to the FormView at /forms/:target, forwarding the current record id) — the 2026-06 audit mis-classified as dead (objectui renderer not re-verified; fixed the 'Log Time does nothing' report). Build-time lint-view-refs.ts validates the form target resolves to a form view. RE-VERIFIED 2026-07 (#3714 follow-up): `api` -> executeAPI (:974, string-or-ApiConfig endpoint, method/headers/queryParams/responseType) and `form` -> executeForm (:920) both resolve; content/docs/ui/actions.mdx had been telling authors the opposite (\"no runtime executor / renderer today\") and was corrected in the same pass."
     },
     "target": {
       "status": "live",
@@ -75,8 +76,9 @@
     },
     "undoable": {
       "status": "live",
-      "evidence": "objectui: app-shell useConsoleActionRuntime.tsx:409 gates building the undo operation the success toast's Undo button invokes (:147); app-shell RecordDetailView.tsx:545 gates restoring the record's prior values (:404); plumbed through by components action/action-button.tsx:113",
-      "note": "STATUS CORRECTED 2026-07 (#3714) — this entry UNDERSTATED liveness, the mirror image of the preview-renderer over-claims #3686/#3711 fixed. The #1992-era note (\"no runtime reader yet ... objectui has an UndoManager but does not key off this field\") was true when written and has since been falsified: objectui wired two readers, both gating real behaviour, and action-button.tsx:113 forwards the flag precisely because — per its own comment — \"without this the flag is dropped and the handler never builds the undo operation\". Authoring side: ActionDefaultInspector.tsx \"Offer undo\" checkbox. Consequence while the entry stood: the CLI liveness lint warns on `experimental` too, so authoring a WORKING property produced a \"declared but NOT enforced\" warning."
+      "verifiedAt": "2026-07-28",
+      "evidence": "objectui @732b1bf — CALL GRAPH CLOSED BY HAND: app-shell useConsoleActionRuntime.tsx:409 and RecordDetailView.tsx:573 each gate `if (action.undoable ...)` on building `result.undo`; core ActionRunner.ts:640-643 pushes it onto globalUndoManager AND passes `undo` to the toast handler; the toast's Undo button calls undoCtl.undo() (useConsoleActionRuntime.tsx:147, RecordDetailView.tsx:432) -> useGlobalUndo -> UndoManager -> dataSource. Plumbed through by components action/action-button.tsx:113",
+      "note": "STATUS CORRECTED 2026-07 (#3714) — this entry UNDERSTATED liveness, the mirror image of the preview-renderer over-claims #3686/#3711 fixed. The #1992-era note (\"no runtime reader yet ... objectui has an UndoManager but does not key off this field\") was true when written and has since been falsified: objectui wired two readers, both gating real behaviour, and action-button.tsx:113 forwards the flag precisely because — per its own comment — \"without this the flag is dropped and the handler never builds the undo operation\". Authoring side: ActionDefaultInspector.tsx \"Offer undo\" checkbox. Consequence while the entry stood: the CLI liveness lint warns on `experimental` too, so authoring a WORKING property produced a \"declared but NOT enforced\" warning. RE-VERIFIED against objectui HEAD in #3714 follow-up: both readers stand, but RecordDetailView had drifted 545->573 / 404->432 in the ~1 day since the issue was filed — which is why this entry now carries `verifiedAt` and an objectui sha."
     },
     "refreshAfter": {
       "status": "live",

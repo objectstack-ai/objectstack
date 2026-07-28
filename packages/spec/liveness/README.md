@@ -46,6 +46,40 @@ Resolution per property: **ledger entry → spec `.describe()` marker → UNCLAS
 Framework provenance/lock fields (`_lock*`, `_provenance`, `_packageId/Version`,
 `protection` — ADR-0010) are auto-classified `live`.
 
+### `verifiedAt` — the re-verification clock
+
+An entry may carry `"verifiedAt": "YYYY-MM-DD"`: the date a human last closed the
+call graph for that property. It exists because **twice** an entry has been
+falsified by code moving under it — `flow.status` (#3711) and `action.undoable`
+(#3714), both *understated*, both found only because a sweep aimed at the
+opposite failure happened to walk past them. Nothing in the gate previously
+asked how old a claim was, so a stale entry stayed invisible until someone
+tripped over it.
+
+```jsonc
+"undoable": {
+  "status": "live",
+  "verifiedAt": "2026-07-28",
+  "evidence": "objectui @732b1bf — CALL GRAPH CLOSED BY HAND: …"
+}
+```
+
+Two rules, and the asymmetry between them is the point:
+
+- **Age never fails CI.** Re-verification is a worklist, not a merge gate. Every
+  run prints one summary line; `pnpm check:liveness --stale-verification[=days]`
+  prints the worklist (stale oldest-first, then the undated ones). Default
+  threshold 180 days.
+- **A malformed or future-dated `verifiedAt` DOES fail CI.** A date the parser
+  can't read would silently exempt that entry from every staleness window —
+  which is the same silent-no-op shape this whole ledger exists to catch. Fail
+  loudly instead.
+
+Most entries predate the field and are simply undated; date them as you
+re-verify rather than back-filling guesses. **For objectui-side evidence, pin
+the commit** (`objectui @732b1bf`) — `action.undoable`'s reader line numbers had
+already drifted by 28 lines one day after the issue citing them was filed.
+
 ### ⚠️ An authoring/preview renderer is NOT a runtime consumer
 
 `live` means **authoring the property changes runtime behaviour**. A Studio
