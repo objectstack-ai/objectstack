@@ -598,21 +598,68 @@ export class SqlDriver implements IDataDriver {
    * knows better (a deliberately slow cross-region replica) sets its own
    * `pool.createTimeoutMillis` and this leaves it alone.
    *
-   * NOTE this bounds the wait but not the diagnosis: knex reports it as
-   * "Timeout acquiring a connection. The pool is probably full", which points
-   * at pool sizing rather than the network. Making the message accurate needs a
-   * dialect-specific connect timeout (pg's `connectionTimeoutMillis`), which
-   * changes the shape of `connection` — tracked in #3769.
+   * Applied in two layers, because the outer one bounds the wait but misstates
+   * the cause. Knex reports its own timeout as "Timeout acquiring a connection.
+   * The pool is probably full" — which sends an operator to tune `pool.max`
+   * while the actual problem is the network. So each network dialect ALSO gets
+   * its own connect timeout, which fails with a message that names what really
+   * happened (`timeout expired` from pg, `connect ETIMEDOUT` from mysql2).
+   *
+   * **The two bounds must not be equal.** They race, and knex wins a tie — set
+   * to the same value, the pool timeout fires first and the accurate message is
+   * never seen (caught by the black-hole test, which asserts the wording). So
+   * the dialect timeout is the effective bound at 10s and the pool timeout is a
+   * strictly looser backstop at 15s, reached only by a dialect that has no
+   * connect-timeout knob (SQLite) or ignores the one we set.
    */
-  private static readonly DEFAULT_CREATE_TIMEOUT_MS = 10_000;
+  private static readonly DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+  private static readonly DEFAULT_CREATE_TIMEOUT_MS = 15_000;
+
+  /**
+   * Per-dialect connect timeout: how the driver spells "how long may
+   * establishing ONE connection take", and where a URL goes once `connection`
+   * has to become an object to carry it.
+   *
+   * SQLite (`better-sqlite3` / `sqlite3`) is deliberately absent — it opens a
+   * file, so there is no handshake to time out and nothing to inject.
+   */
+  private static readonly DIALECT_CONNECT_TIMEOUT: Record<string, { key: string; urlKey: string }> = {
+    pg: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
+    postgres: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
+    postgresql: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
+    cockroachdb: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
+    mysql: { key: 'connectTimeout', urlKey: 'uri' },
+    mysql2: { key: 'connectTimeout', urlKey: 'uri' },
+  };
 
   private static withConnectBound(knexConfig: Record<string, any>): Record<string, any> {
     const pool = knexConfig.pool as Record<string, any> | undefined;
-    if (pool?.createTimeoutMillis !== undefined) return knexConfig; // host chose its own
-    return {
-      ...knexConfig,
-      pool: { ...(pool ?? {}), createTimeoutMillis: SqlDriver.DEFAULT_CREATE_TIMEOUT_MS },
-    };
+    const bounded: Record<string, any> =
+      pool?.createTimeoutMillis === undefined
+        ? {
+          ...knexConfig,
+          pool: { ...(pool ?? {}), createTimeoutMillis: SqlDriver.DEFAULT_CREATE_TIMEOUT_MS },
+        }
+        : { ...knexConfig }; // host chose its own bound — respect it
+
+    const dialect = SqlDriver.DIALECT_CONNECT_TIMEOUT[String(knexConfig.client ?? '')];
+    if (!dialect) return bounded; // sqlite / unknown client — nothing to inject
+
+    const conn = knexConfig.connection;
+    if (typeof conn === 'string') {
+      // The URL must move into the dialect's own URL slot so the timeout can
+      // ride alongside it. Verified for both dialects: the connection attempt
+      // still goes to the URL's host/port, `?sslmode=` is still honoured.
+      bounded.connection = {
+        [dialect.urlKey]: conn,
+        [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS,
+      };
+    } else if (conn && typeof conn === 'object' && (conn as any)[dialect.key] === undefined) {
+      bounded.connection = { ...(conn as object), [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS };
+    }
+    // A function-valued `connection` (knex's per-acquire provider) is left
+    // alone: the host is building each connection itself and owns its timeouts.
+    return bounded;
   }
 
   /**
@@ -4123,7 +4170,10 @@ export class SqlDriver implements IDataDriver {
       return; // Unsupported dialect for auto-creation
     }
 
-    const adminKnex = knex(adminConfig);
+    // Same connect bound as the main pool (#3769) — this admin connection is
+    // opened during boot against the very server we already suspect might be
+    // unreachable, so it must not be the one place that waits 30s.
+    const adminKnex = knex(SqlDriver.withConnectBound(adminConfig));
     try {
       if (this.isPostgres) {
         await adminKnex.raw(`CREATE DATABASE "${dbName}"`);
