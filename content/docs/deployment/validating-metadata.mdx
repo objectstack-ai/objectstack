@@ -223,11 +223,17 @@ another package defines.
 | Chart bindings outside dashboards (#3583) | ✓ | ✓ |
 | Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ |
+| Autonumber `{field}` interpolation | ✓ | ✓ |
+| View references — form targets, view-key collisions (#2554) | ✓ | ✓ |
+| Flow authoring anti-patterns (#1874) | ✓ | ✓ |
+| Liveness author-warnings | ✓ | ✓ |
 | Emits `dist/objectstack.json` | — | ✓ |
 
 So `os validate` is the fast inner-loop check (no artifact); `os build` is what
 you run when you need the deployable artifact. A config that passes `os validate`
-will not fail `os build` on schema/predicate/binding grounds. Both entry points
+will not fail `os build` on schema/predicate/binding grounds — a test in the CLI
+asserts that every gate `os build` runs is also run by `os validate`, so the two
+cannot drift apart again (#3782). Both entry points
 also check SDUI styling (ADR-0065), and `os validate` additionally runs a set of
 view- and page-shape checks — list-view navigation modes (ADR-0053), view
 container shape, and JSX/React page sources (ADR-0080/0081) — that catch UI
@@ -254,6 +260,7 @@ A clean run walks each gate and reports timing:
   → Checking source-page styling (ADR-0065)...
   → Checking capability references (ADR-0066)...
   → Checking flow trigger wiring...
+  → Running authoring lints (#3782)...
   → Checking security posture (ADR-0090 D7)...
 
   ✓ Validation passed (64ms)

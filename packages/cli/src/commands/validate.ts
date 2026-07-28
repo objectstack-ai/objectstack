@@ -25,6 +25,10 @@ import { validateSecurityPosture, validateOrgAxisRedLines } from '@objectstack/l
 import { validateFlowTriggerReadiness } from '@objectstack/lint';
 import { validateFlowTemplatePaths } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
+import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
+import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
+import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
+import { lintViewRefs } from '../utils/lint-view-refs.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import {
   printHeader,
@@ -563,6 +567,73 @@ export default class Validate extends Command {
         }
       }
 
+      // 3e3. [#3782] The four authoring lints that live in the CLI itself rather
+      //      than in `@objectstack/lint`. Every other gate on this command is a
+      //      `@objectstack/lint` import, so these four were only ever reachable
+      //      from `compile.ts` — `os build` ran them, `os validate` did not, and
+      //      the drift went unnoticed while all of their findings were advisory.
+      //      Two of them already GATE the build (`lintAutonumberFormats`,
+      //      `lintViewRefs` emit `severity: 'error'`), which made this command
+      //      report a clean stack that `os build` then rejected — exactly the
+      //      contract this command exists to uphold. Severity handling mirrors
+      //      `compile.ts` per lint, so the two surfaces agree by construction.
+      if (!flags.json) printStep('Running authoring lints (#3782)...');
+
+      // Flow authoring anti-patterns (#1874). Advisory today; `severity: 'error'`
+      // is honoured so a blocking rule (#3760's `flow-runas-unscoped`) gates here
+      // the moment it gates the build, with no further wiring.
+      const flowLint = lintFlowPatterns(result.data as Record<string, unknown>);
+      const flowLintErrors = flowLint.filter((f) => f.severity === 'error');
+      const flowLintWarnings = flowLint.filter((f) => f.severity !== 'error');
+
+      // Liveness author-warnings — an authored property the ledger marks
+      // dead-and-misleading or experimental. Advisory only, never fatal.
+      const livenessLint = lintLivenessProperties(result.data as Record<string, unknown>);
+
+      // Autonumber `{field}` interpolation — an unknown field is broken (error);
+      // an optional one is fragile (warning).
+      const autonumberLint = lintAutonumberFormats(result.data as Record<string, unknown>);
+      const autonumberErrors = autonumberLint.filter((f) => f.severity === 'error');
+      const autonumberWarnings = autonumberLint.filter((f) => f.severity !== 'error');
+
+      // View references (#2554) — a form action target naming a missing or LIST
+      // view, and list/form view-key collisions. Both are broken → error.
+      const viewRefLint = lintViewRefs(result.data as Record<string, unknown>);
+      const viewRefErrors = viewRefLint.filter((f) => f.severity === 'error');
+      const viewRefWarnings = viewRefLint.filter((f) => f.severity !== 'error');
+
+      const authoringLintErrors = [...flowLintErrors, ...autonumberErrors, ...viewRefErrors];
+      const authoringLintWarnings = [
+        ...flowLintWarnings,
+        ...livenessLint,
+        ...autonumberWarnings,
+        ...viewRefWarnings,
+      ];
+      if (authoringLintErrors.length > 0) {
+        if (flags.json) {
+          console.log(JSON.stringify({
+            valid: false,
+            errors: authoringLintErrors,
+            duration: timer.elapsed(),
+          }, null, 2));
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Authoring lint failed (${authoringLintErrors.length} issue${authoringLintErrors.length > 1 ? 's' : ''})`);
+        for (const f of authoringLintErrors.slice(0, 50)) {
+          console.log(`  • ${f.where}: ${f.message}`);
+          console.log(chalk.dim(`      ${f.hint}`));
+          console.log(chalk.dim(`      rule: ${f.rule}`));
+        }
+        this.exit(1);
+      }
+      if (!flags.json) {
+        for (const f of authoringLintWarnings.slice(0, 50)) {
+          console.log(chalk.yellow(`  ⚠ ${f.where}: ${f.message}`));
+          console.log(chalk.dim(`      ${f.hint}`));
+        }
+      }
+
       // 3f. [ADR-0090 D7] Security posture — the same gate `os compile`/`os build`
       //     run. Without it here, `os validate` passed a stack (e.g. a custom
       //     object with no explicit sharingModel) that the build then rejected,
@@ -652,7 +723,7 @@ export default class Validate extends Command {
           valid: true,
           manifest: config.manifest,
           stats,
-          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...flowTemplateWarnings, ...readonlyWriteWarnings, ...securityAdvisories, ...capProviderWarnings],
+          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...flowTemplateWarnings, ...readonlyWriteWarnings, ...authoringLintWarnings, ...securityAdvisories, ...capProviderWarnings],
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),
