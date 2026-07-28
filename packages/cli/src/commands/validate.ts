@@ -613,11 +613,11 @@ export default class Validate extends Command {
       ];
       if (authoringLintErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             valid: false,
             errors: authoringLintErrors,
             duration: timer.elapsed(),
-          }, null, 2));
+          });
           this.exit(1);
         }
         console.log('');

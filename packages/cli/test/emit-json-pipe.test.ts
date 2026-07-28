@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -112,16 +112,45 @@ describe('emitJson over a pipe', () => {
   }, 60_000);
 
   it('CONTROL: the console.log pattern it replaced really does truncate', async () => {
-    // Pins that the three assertions above are testing something real. If a
-    // future Node makes pipe writes synchronous this goes green-to-red — which
-    // is the correct signal that the hazard is gone, not a flake to silence.
-    const file = harness(
-      'console.log(JSON.stringify(payload, null, 2));\nprocess.exit(1);',
+    // Pins that the assertions above are testing something real.
+    //
+    // Whether a given run truncates is a RACE between the writer's exit and the
+    // reader's drain, so this must not be written the obvious way. A first
+    // version used the same 300 KB payload and `execFileP` (which reads
+    // continuously): it truncated at 65536 locally and delivered all 300017
+    // bytes on a CI runner whose reader kept up — a gate that goes red by
+    // machine speed, which is no better than one that cannot go red at all.
+    //
+    // Removing the race: never read the pipe until the child has exited. The
+    // kernel buffer then caps at its capacity (64 KiB by default) and
+    // everything still queued in userspace dies with `process.exit`. The
+    // payload is 4 MB so the margin over any plausible capacity — even a
+    // 1 MiB `pipe-max-size` — is ~50x, and the exact byte count is allowed to
+    // vary because only the shortfall is the claim.
+    //
+    // This technique is valid ONLY for the broken pattern. Pointing it at
+    // `emitJson` would hang forever, because awaiting the write callback is
+    // precisely what the fix does: with no reader, the write never completes.
+    // That deadlock IS the fix working.
+    const CONTROL_BYTES = 4_000_000;
+    const file = join(dir, 'control.mts');
+    writeFileSync(
+      file,
+      `const payload = { blob: 'x'.repeat(${CONTROL_BYTES}) };\n` +
+        'console.log(JSON.stringify(payload, null, 2));\n' +
+        'process.exit(1);\n',
     );
-    const { stdout } = await runPiped(file);
 
-    expect(stdout.length).toBeLessThan(expectedLength);
-    expect(() => JSON.parse(stdout)).toThrow();
+    const child = spawn(TSX, [file], { stdio: ['ignore', 'pipe', 'ignore'] });
+    child.stdout.pause();
+    await new Promise<void>((resolve) => child.on('exit', () => resolve()));
+    const chunks: Buffer[] = [];
+    for await (const c of child.stdout) chunks.push(c as Buffer);
+    const delivered = Buffer.concat(chunks).toString('utf8');
+
+    const whole = JSON.stringify({ blob: 'x'.repeat(CONTROL_BYTES) }, null, 2).length + 1;
+    expect(delivered.length).toBeLessThan(whole);
+    expect(() => JSON.parse(delivered)).toThrow();
   }, 60_000);
 });
 
