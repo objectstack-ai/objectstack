@@ -292,7 +292,9 @@ schema, and the **database column wins at write time** (#2186):
 |--------|------------------------|
 | add object / field / index | ✅ applied automatically (additive) |
 | `required: true → false` (relax `NOT NULL`) | dev auto-heals (`autoMigrate:'safe'`); otherwise `os migrate apply` |
+| `unique` re-scoped global → per-tenant (#3696) | dev auto-heals; otherwise `os migrate apply` (`replace_unique_index`) |
 | type / length change, drop field, rename | `os migrate apply` (`--allow-destructive` for drops / tightenings) |
+| declared index removed, or its columns changed | `os migrate apply` (`--allow-destructive` when it drops, or rebuilds as `UNIQUE`) |
 
 Tell-tale: `/meta` reports a field optional but a write still 400s
 `"<field> is required"` — that is a stale `NOT NULL` column (physical drift),

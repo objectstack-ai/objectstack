@@ -136,6 +136,17 @@ export function groupByCategory(drift: ManagedDriftEntry[]): Record<DriftCategor
   return out;
 }
 
+/**
+ * What a drift entry acts on. Column ops read `table.column`; index ops (#3728)
+ * name the index instead — a composite unique spans several columns, so the
+ * leading column alone would misrepresent what is about to change.
+ */
+export function driftTarget(d: ManagedDriftEntry): string {
+  const op = d.op as { indexName?: string; createIndexName?: string };
+  const indexName = op.indexName ?? op.createIndexName;
+  return indexName ? `${d.table} [${indexName}]` : `${d.table}.${d.column ?? ''}`;
+}
+
 export function renderPlan(drift: ManagedDriftEntry[]): void {
   const grouped = groupByCategory(drift);
   for (const cat of CATEGORY_ORDER) {
@@ -144,7 +155,7 @@ export function renderPlan(drift: ManagedDriftEntry[]): void {
     const meta = CATEGORY_META[cat];
     console.log(`  ${chalk.bold(meta.label)}`);
     for (const d of items) {
-      console.log(`    ${meta.color(meta.icon)} ${meta.color(`${d.table}.${d.column ?? ''}`)} ${chalk.dim(`[${d.op.type}]`)}`);
+      console.log(`    ${meta.color(meta.icon)} ${meta.color(driftTarget(d))} ${chalk.dim(`[${d.op.type}]`)}`);
       console.log(`        ${chalk.dim(d.message)}`);
     }
     console.log('');

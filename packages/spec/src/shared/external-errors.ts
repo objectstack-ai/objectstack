@@ -37,7 +37,12 @@ export type SchemaDiffEntryKind =
   | 'type_mismatch'
   | 'nullability_mismatch'
   | 'unmapped_column'
-  | 'pk_mismatch';
+  | 'pk_mismatch'
+  /** A declared index is absent, or the index under that name has a different
+   *  definition than metadata declares (#3728). */
+  | 'index_mismatch'
+  /** A physical index ObjectStack generated that metadata no longer declares. */
+  | 'unmapped_index';
 
 /**
  * A single divergence entry. Produced by the validation gate (ADR §5.2)

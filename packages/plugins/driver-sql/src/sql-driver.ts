@@ -15,10 +15,17 @@ import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import { resolveMultiOrgEnabled } from '@objectstack/types';
 import {
+  buildIndexName,
+  diffManagedIndexes,
   diffManagedTable,
   driftKey,
+  expectedIndexes,
+  isIndexDriftOp,
+  legacyUniqueReplacements,
+  uniqueIndexesFromFields,
   type ManagedDriftEntry,
   type DriftOp,
+  type PhysicalIndex,
   type SqlDialectName,
   type PhysicalColumn,
 } from './schema-drift.js';
@@ -2138,8 +2145,13 @@ export class SqlDriver implements IDataDriver {
       // #2186: remember the authoritative metadata field set for this table so
       // drift detection / `os migrate` can diff the physical schema against it.
       this.managedObjectFields.set(tableName, obj.fields ?? {});
+      // Always overwrite — a metadata change that REMOVES `indexes` must clear
+      // the previous entry, or drift detection keeps expecting an index nobody
+      // declares any more (and never reports it as orphaned).
       if (Array.isArray((obj as any).indexes)) {
         this.managedObjectIndexes.set(tableName, (obj as any).indexes);
+      } else {
+        this.managedObjectIndexes.delete(tableName);
       }
 
       const jsonCols: string[] = [];
@@ -2282,12 +2294,14 @@ export class SqlDriver implements IDataDriver {
         );
       }
 
-      // #2186: the additive sync above only ever ADDs tables/columns. For a
-      // table that already existed, detect (and in dev, auto-reconcile) any
-      // non-additive divergence (relaxed NOT NULL, widened varchar, orphaned
-      // column) between metadata and the physical schema.
+      // #2186: the additive sync above only ever ADDs tables/columns/indexes.
+      // For a table that already existed, detect (and in dev, auto-reconcile)
+      // any non-additive divergence between metadata and the physical schema —
+      // relaxed NOT NULL, widened varchar, orphaned column, and since #3728 the
+      // index dimension too (a legacy global unique that is now tenant-scoped,
+      // a redefined or orphaned index).
       if (exists) {
-        await this.reconcileAndWarnDrift(tableName, obj.fields ?? {});
+        await this.reconcileAndWarnDrift(tableName, obj.fields ?? {}, declaredIndexes);
       }
     }
 
@@ -2326,10 +2340,18 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
-  /** Diff one table's metadata fields against its physical columns. */
+  /**
+   * Diff one table's metadata (fields + indexes) against its physical schema.
+   *
+   * `declaredIndexes` is authoritative and complete: `undefined` means the
+   * object declares none, NOT "look it up". Every caller already holds the
+   * object it is diffing, and falling back to the last-synced set would make a
+   * removed `indexes[]` undetectable as an orphan.
+   */
   protected async detectTableDrift(
     tableName: string,
     fields: Record<string, any>,
+    declaredIndexes?: any[],
   ): Promise<ManagedDriftEntry[]> {
     const cols = await this.introspectColumns(tableName);
     const physical: PhysicalColumn[] = cols.map((c) => ({
@@ -2338,7 +2360,32 @@ export class SqlDriver implements IDataDriver {
       nullable: c.nullable,
       maxLength: c.maxLength,
     }));
-    return diffManagedTable({ table: tableName, fields, columns: physical, dialect: this.dialectName });
+    const out = diffManagedTable({ table: tableName, fields, columns: physical, dialect: this.dialectName });
+    out.push(...(await this.detectTableIndexDrift(tableName, fields, declaredIndexes, new Set(cols.map((c) => c.name)))));
+    return out;
+  }
+
+  /**
+   * Diff one table's expected index set against the physical one (#3728).
+   *
+   * Kept separate from {@link diffManagedTable} because it needs a second
+   * introspection round-trip (indexes, not columns) and two inputs the column
+   * differ has no use for: the object's declared `indexes[]` and its tenant
+   * column.
+   */
+  protected async detectTableIndexDrift(
+    tableName: string,
+    fields: Record<string, any>,
+    declaredIndexes: any[] | undefined,
+    physicalColumns: Set<string>,
+  ): Promise<ManagedDriftEntry[]> {
+    const tenantField = this.resolveTenantField(tableName);
+    return diffManagedIndexes({
+      table: tableName,
+      expected: expectedIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }),
+      legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns }),
+      physical: await this.introspectIndexes(tableName),
+    });
   }
 
   /**
@@ -2346,23 +2393,35 @@ export class SqlDriver implements IDataDriver {
    * database. Metadata is the source of truth. Returns one entry per drift,
    * sorted by table then column. Used by `os migrate` (P3) and tests.
    *
-   * @param objects optional explicit object list; defaults to whatever
-   *   `initObjects` last synced (captured in {@link managedObjectFields}).
+   * Covers both the column dimension ({@link diffManagedTable}) and, since
+   * #3728, the index dimension ({@link detectTableIndexDrift}).
+   *
+   * @param objects optional explicit object list — `fields` and `indexes` are
+   *   then authoritative for those tables. Defaults to whatever `initObjects`
+   *   last synced (captured in {@link managedObjectFields} /
+   *   {@link managedObjectIndexes}).
    */
   async detectManagedDrift(
-    objects?: Array<{ name: string; fields?: Record<string, any> }>,
+    objects?: Array<{ name: string; fields?: Record<string, any>; indexes?: any[] }>,
   ): Promise<ManagedDriftEntry[]> {
-    const tables = new Map<string, Record<string, any>>();
+    const tables = new Map<string, { fields: Record<string, any>; indexes?: any[] }>();
     if (objects) {
-      for (const o of objects) tables.set(StorageNameMapping.resolveTableName(o), o.fields ?? {});
+      for (const o of objects) {
+        tables.set(StorageNameMapping.resolveTableName(o), {
+          fields: o.fields ?? {},
+          indexes: (o as any).indexes,
+        });
+      }
     } else {
-      for (const [t, f] of this.managedObjectFields) tables.set(t, f);
+      for (const [t, f] of this.managedObjectFields) {
+        tables.set(t, { fields: f, indexes: this.managedObjectIndexes.get(t) });
+      }
     }
 
     const out: ManagedDriftEntry[] = [];
-    for (const [tableName, fields] of tables) {
+    for (const [tableName, meta] of tables) {
       if (!(await this.knex.schema.hasTable(tableName))) continue;
-      out.push(...(await this.detectTableDrift(tableName, fields)));
+      out.push(...(await this.detectTableDrift(tableName, meta.fields, meta.indexes)));
     }
     out.sort((a, b) => (a.table === b.table ? (a.column ?? '').localeCompare(b.column ?? '') : a.table.localeCompare(b.table)));
     return out;
@@ -2373,10 +2432,14 @@ export class SqlDriver implements IDataDriver {
    * auto-reconcile the *safe* (loosening) subset when `autoMigrate==='safe'`,
    * then WARN once per remaining divergence with an actionable hint.
    */
-  protected async reconcileAndWarnDrift(tableName: string, fields: Record<string, any>): Promise<void> {
+  protected async reconcileAndWarnDrift(
+    tableName: string,
+    fields: Record<string, any>,
+    declaredIndexes?: any[],
+  ): Promise<void> {
     let drift: ManagedDriftEntry[];
     try {
-      drift = await this.detectTableDrift(tableName, fields);
+      drift = await this.detectTableDrift(tableName, fields, declaredIndexes);
     } catch (e: any) {
       this.logger.warn(`[schema-drift] could not introspect '${tableName}' for drift detection`, e?.message ?? e);
       return;
@@ -2394,10 +2457,10 @@ export class SqlDriver implements IDataDriver {
         try {
           const { applied } = await this.applyMigrationEntries(safe, { allowDestructive: false });
           for (const d of applied) {
-            (this.logger.info ?? this.logger.warn)(`[schema-drift] auto-reconciled ${d.op.type} on ${d.table}.${d.column}`);
+            (this.logger.info ?? this.logger.warn)(`[schema-drift] auto-reconciled ${d.op.type} on ${d.table}.${d.column ?? ''}`);
           }
           // Re-detect so the warnings below reflect the post-reconcile state.
-          drift = await this.detectTableDrift(tableName, fields);
+          drift = await this.detectTableDrift(tableName, fields, declaredIndexes);
         } catch (e: any) {
           this.logger.warn(`[schema-drift] dev auto-reconcile failed for '${tableName}' — falling back to warning`, e?.message ?? e);
         }
@@ -2440,9 +2503,17 @@ export class SqlDriver implements IDataDriver {
     });
     if (candidates.length === 0) return { applied, skipped };
 
+    // Index ops (#3728) are portable DDL on every dialect — no ALTER COLUMN, no
+    // SQLite table rebuild — so they take their own path. Column ops run FIRST:
+    // a `drop_column` takes its indexes with it, and on SQLite the rebuild
+    // re-materializes the whole index set from metadata, which may already
+    // satisfy the index entries below (they are idempotent, so that is fine).
+    const columnEntries = candidates.filter((d) => !isIndexDriftOp(d.op));
+    const indexEntries = candidates.filter((d) => isIndexDriftOp(d.op));
+
     // Group by table — SQLite reconciles a whole table in one rebuild.
     const byTable = new Map<string, ManagedDriftEntry[]>();
-    for (const d of candidates) {
+    for (const d of columnEntries) {
       (byTable.get(d.table) ?? byTable.set(d.table, []).get(d.table)!).push(d);
     }
 
@@ -2462,11 +2533,71 @@ export class SqlDriver implements IDataDriver {
         for (const d of ents) if (!applied.includes(d)) skipped.push(d);
       }
     }
+
+    for (const d of indexEntries) {
+      try {
+        const ok = await this.applyIndexDriftOp(d.op);
+        (ok ? applied : skipped).push(d);
+      } catch (e: any) {
+        this.logger.warn(`[schema-drift] failed to reconcile index on '${d.table}'`, e?.message ?? e);
+        skipped.push(d);
+      }
+    }
     return { applied, skipped };
+  }
+
+  /**
+   * Apply one index drift op (#3728). Portable across dialects: index DDL needs
+   * neither `ALTER COLUMN` nor the SQLite table rebuild that column ops do.
+   */
+  protected async applyIndexDriftOp(op: DriftOp): Promise<boolean> {
+    const physicalColumns = new Set(Object.keys(await this.knex(op.table).columnInfo()));
+    const ensure = (name: string, columns: string[], unique: boolean) =>
+      this.syncDeclaredIndexes(op.table, [{ name, fields: columns, unique }], physicalColumns);
+
+    switch (op.type) {
+      case 'replace_unique_index': {
+        // CREATE before DROP: the composite and the legacy index have different
+        // names, so uniqueness is never unenforced in between. If the create
+        // fails we have not dropped anything yet and the schema is untouched.
+        await ensure(op.createIndexName, op.createColumns, true);
+        // …and only drop once the replacement is confirmed present. This is a
+        // relaxation, not a removal: if `syncDeclaredIndexes` skipped the create
+        // (a column it references is not materialized), dropping the legacy
+        // index would leave the field with NO uniqueness at all.
+        if (!(await this.getExistingIndexNames(op.table)).has(op.createIndexName)) {
+          this.logger.warn(
+            `[schema-drift] keeping legacy unique index(es) ${op.dropIndexNames.join(', ')} on '${op.table}' — ` +
+              `the replacement '${op.createIndexName}' could not be created.`,
+          );
+          return false;
+        }
+        for (const name of op.dropIndexNames) {
+          await this.dropIndexIfExists(op.table, name);
+        }
+        return true;
+      }
+      case 'create_index':
+        await ensure(op.indexName, op.columns, op.unique);
+        return true;
+      case 'drop_index':
+        return await this.dropIndexIfExists(op.table, op.indexName);
+      case 'recreate_index':
+        // Same name on both sides — the drop has to come first, and a UNIQUE
+        // target can fail on existing duplicates. That is why this op is
+        // categorised destructive when unique (see `diffManagedIndexes`).
+        await this.dropIndexIfExists(op.table, op.indexName);
+        await ensure(op.indexName, op.columns, op.unique);
+        return true;
+      default:
+        return false;
+    }
   }
 
   /** Apply a single drift op in place (Postgres / MySQL). Returns false if unsupported. */
   protected async applyDriftOpInPlace(op: DriftOp): Promise<boolean> {
+    // Index ops need no dialect-specific ALTER — route them to the portable path.
+    if (isIndexDriftOp(op)) return this.applyIndexDriftOp(op);
     const { table, column } = op;
     if (this.isPostgres) {
       switch (op.type) {
@@ -2609,122 +2740,123 @@ export class SqlDriver implements IDataDriver {
   /**
    * Build a deterministic index name for a declared index so repeated
    * `initObjects` runs converge on the same identifier (and can detect an
-   * already-materialized index by name). Long names are hash-suffixed to
-   * stay within the 63/64-char identifier limits of Postgres/MySQL.
+   * already-materialized index by name).
+   *
+   * Delegates to the shared {@link buildIndexName} so the names the driver
+   * *creates* and the names the drift differ *looks for* can never diverge.
    */
   protected buildIndexName(tableName: string, fields: string[], unique: boolean): string {
-    const prefix = unique ? 'uniq' : 'idx';
-    const base = `${prefix}_${tableName}_${fields.join('_')}`;
-    const MAX = 60;
-    if (base.length <= MAX) return base;
-    const hash = createHash('sha1').update(base).digest('hex').slice(0, 8);
-    return `${`${prefix}_${tableName}`.slice(0, MAX - 9)}_${hash}`;
+    return buildIndexName(tableName, fields, unique);
   }
 
   /**
-   * Read the names of indexes that already exist on a table, per dialect.
-   * Used to make declared-index sync idempotent across repeated runs.
-   * Failures are swallowed — at worst we attempt a create and absorb the
-   * "already exists" error in `syncDeclaredIndexes`.
+   * Read the indexes that physically exist on a table — name, ordered columns,
+   * uniqueness, and whether it backs the PRIMARY KEY — per dialect.
+   *
+   * Used both for sync idempotency ({@link getExistingIndexNames}) and for index
+   * drift detection (#3728), which needs the full definition rather than just
+   * the name. Failures are swallowed: at worst we attempt a create and absorb
+   * the "already exists" error in {@link syncDeclaredIndexes}.
+   *
+   * Postgres reads `pg_index` rather than `pg_indexes` so indexes backing a
+   * UNIQUE CONSTRAINT (which is exactly what knex's old `col.unique()` produced)
+   * are returned too — the drift detector cannot see the #3696 legacy shape
+   * otherwise.
    */
-  protected async getExistingIndexNames(tableName: string): Promise<Set<string>> {
-    const names = new Set<string>();
+  protected async introspectIndexes(tableName: string): Promise<PhysicalIndex[]> {
+    const byName = new Map<string, PhysicalIndex>();
+    const upsert = (name: string, unique: boolean, primary: boolean): PhysicalIndex => {
+      let e = byName.get(name);
+      if (!e) byName.set(name, (e = { name, columns: [], unique, primary }));
+      return e;
+    };
     try {
       if (this.isSqlite) {
         const safe = tableName.replace(/[^a-zA-Z0-9_]/g, '');
-        const rows: any = await this.knex.raw(`PRAGMA index_list(${safe})`);
-        for (const r of rows) names.add(r.name);
+        const list: any = await this.knex.raw(`PRAGMA index_list(${safe})`);
+        for (const r of list) {
+          const entry = upsert(r.name, r.unique === 1 || r.unique === true, r.origin === 'pk');
+          const info: any = await this.knex.raw(`PRAGMA index_info(${JSON.stringify(r.name)})`);
+          // An expression index reports a null column name — skip those parts;
+          // a partial column list only ever makes the differ *less* eager.
+          for (const c of info) if (c.name != null) entry.columns.push(c.name);
+        }
       } else if (this.isPostgres) {
         const res: any = await this.knex.raw(
-          `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = ?`,
+          `SELECT i.relname AS index_name, ix.indisunique AS is_unique, ix.indisprimary AS is_primary,
+                  a.attname AS column_name
+             FROM pg_class t
+             JOIN pg_namespace n ON n.oid = t.relnamespace
+             JOIN pg_index ix ON t.oid = ix.indrelid
+             JOIN pg_class i ON i.oid = ix.indexrelid
+             JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+             JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+            WHERE t.relname = ? AND n.nspname = 'public'
+            ORDER BY i.relname, k.ord`,
           [tableName],
         );
-        for (const r of res.rows) names.add(r.indexname);
+        for (const r of res.rows) {
+          upsert(r.index_name, r.is_unique === true, r.is_primary === true).columns.push(r.column_name);
+        }
       } else if (this.isMysql) {
         const res: any = await this.knex.raw(
-          `SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+          `SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME
+             FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
           [tableName],
         );
-        for (const r of res[0]) names.add(r.INDEX_NAME);
+        for (const r of res[0]) {
+          upsert(
+            r.INDEX_NAME,
+            Number(r.NON_UNIQUE) === 0,
+            r.INDEX_NAME === 'PRIMARY',
+          ).columns.push(r.COLUMN_NAME);
+        }
       }
     } catch {
       // Best-effort — fall through and let creation handle conflicts.
     }
-    return names;
+    return [...byName.values()];
+  }
+
+  /**
+   * Names of the indexes that already exist on a table. Used to make
+   * declared-index sync idempotent across repeated runs.
+   */
+  protected async getExistingIndexNames(tableName: string): Promise<Set<string>> {
+    return new Set((await this.introspectIndexes(tableName)).map((i) => i.name));
   }
 
   /**
    * Translate field-level `unique` declarations into concrete index
-   * descriptors, applying tenant scoping (#3696).
-   *
-   * This is the ONLY place field-level uniqueness becomes physical, so the
-   * create-table, alter-table and SQLite-rebuild paths cannot drift apart the
-   * way they had (each used to inline its own single-column DDL).
-   *
-   * Scoping rule:
-   *   - `unique: 'global'` → single-column `(field)`, platform-wide.
-   *   - `unique: true` on a tenant-scoped table → composite `(tenantField,
-   *     field)`: unique *within* the tenant, matching the per-tenant autonumber
-   *     sequence, the RLS read predicate and the write-path tenant stamp.
-   *   - `unique: true` with no tenant column → single-column `(field)`. Single-
-   *     tenant deployments therefore see byte-identical DDL to before.
-   *
-   * The tenant column comes FIRST in the composite so the index also serves the
-   * `WHERE tenant = ?` prefix scans every tenant-scoped read issues.
+   * descriptors, applying tenant scoping (#3696). Delegates to the shared
+   * {@link uniqueIndexesFromFields} — see there for the scoping rule.
    */
   protected uniqueIndexesFromFields(
     tableName: string,
     fields: Record<string, any>,
     tenantField: string | null,
   ): Array<{ name: string; fields: string[]; unique: true }> {
-    const out: Array<{ name: string; fields: string[]; unique: true }> = [];
-    for (const [name, field] of Object.entries<any>(fields ?? {})) {
-      if (!isUniqueDeclared(field?.unique)) continue;
-      // A unique declaration ON the tenant column itself ("one row per tenant")
-      // cannot be tenant-scoped — `(organization_id, organization_id)` is not a
-      // constraint. Keep it single-column.
-      const scoped =
-        !isGlobalUnique(field.unique) && tenantField != null && tenantField !== name;
-      const cols = scoped ? [tenantField, name] : [name];
-      out.push({ name: this.buildIndexName(tableName, cols, true), fields: cols, unique: true });
-    }
-    return out;
+    return uniqueIndexesFromFields(tableName, fields, tenantField).map((i) => ({
+      name: i.name,
+      fields: i.columns,
+      unique: true as const,
+    }));
   }
 
   /**
-   * Legacy single-column unique indexes that a tenant-scoped field's constraint
-   * used to be materialized as, and which must be dropped once the composite
-   * replaces them (#3696). Two spellings ever existed:
-   *
-   *   - `<table>_<column>_unique` — knex's default name for `col.unique()`,
-   *     emitted by the old `createColumn`. A real CONSTRAINT on Postgres, a
-   *     plain index on SQLite/MySQL.
-   *   - `uniq_<table>_<column>` — {@link buildIndexName}, emitted by the old
-   *     SQLite rebuild path.
-   *
-   * Dropping them is a pure RELAXATION: the old global constraint is strictly
-   * stronger than the new per-tenant one, so existing data satisfies the
-   * replacement by construction. No dedup, no cleanup, no possible failure —
-   * which is why this converges inline at sync time instead of waiting for a
-   * deliberate `os migrate` run (a deployment that never ran migrate would
-   * otherwise stay broken, and the failure mode is cross-tenant data loss on
-   * insert).
-   */
-  protected legacySingleColumnUniqueNames(tableName: string, column: string): string[] {
-    return [`${tableName}_${column}_unique`, this.buildIndexName(tableName, [column], true)];
-  }
-
-  /**
-   * Drop a unique index/constraint by name if present, across dialects.
+   * Drop an index (or the constraint backing it) by name if present, across
+   * dialects.
    *
    * Postgres materializes knex's `col.unique()` as a table CONSTRAINT (not a
    * bare index), so `DROP INDEX` alone silently leaves it in place — the exact
-   * failure that would have made this migration a no-op on the deployments that
-   * matter most. Try the constraint form first, then the index form.
+   * failure that would have made the #3696 migration a no-op on the deployments
+   * that matter most. Try the constraint form first, then the index form.
    *
    * Returns true when something was actually dropped.
    */
-  protected async dropUniqueIndexIfExists(tableName: string, indexName: string): Promise<boolean> {
+  protected async dropIndexIfExists(tableName: string, indexName: string): Promise<boolean> {
     const attempts: string[] = this.isPostgres
       ? [
           `ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??`,
@@ -2751,54 +2883,21 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Retire the legacy global unique indexes for every field whose constraint is
-   * now tenant-scoped (#3696). Runs before the composites are created so a
-   * Postgres constraint and its replacement never contend for a name.
-   */
-  protected async dropLegacyGlobalUniques(
-    tableName: string,
-    fields: Record<string, any>,
-    tenantField: string | null,
-    physicalColumns: Set<string>,
-  ): Promise<void> {
-    if (!tenantField) return; // Nothing was ever mis-scoped on a tenant-less table.
-    const existing = await this.getExistingIndexNames(tableName);
-    for (const [name, field] of Object.entries<any>(fields ?? {})) {
-      if (!isUniqueDeclared(field?.unique)) continue;
-      // `'global'` keeps its single-column index — that is now the declared
-      // intent, not legacy debt.
-      if (isGlobalUnique(field.unique)) continue;
-      if (name === tenantField || !physicalColumns.has(name)) continue;
-
-      for (const legacy of this.legacySingleColumnUniqueNames(tableName, name)) {
-        // On Postgres a unique CONSTRAINT may not surface in `pg_indexes` under
-        // a name we can match, so attempt the drop when either the name is
-        // known to exist or the dialect hides constraints from us.
-        if (!existing.has(legacy) && !this.isPostgres) continue;
-        try {
-          const dropped = await this.dropUniqueIndexIfExists(tableName, legacy);
-          if (dropped) {
-            (this.logger.info ?? this.logger.warn)(
-              `[sql-driver] dropped legacy global unique index '${legacy}' on '${tableName}' — ` +
-                `${tableName}.${name} is now unique per '${tenantField}' (#3696). ` +
-                `Declare \`unique: 'global'\` if platform-wide uniqueness was intended.`,
-            );
-          }
-        } catch (e: any) {
-          this.logger.warn(
-            `[sql-driver] could not drop legacy unique index '${legacy}' on '${tableName}'`,
-            e?.message ?? e,
-          );
-        }
-      }
-    }
-  }
-
-  /**
    * Materialize a table's full index set: field-level `unique` (tenancy-aware,
    * see {@link uniqueIndexesFromFields}) plus the object's declared `indexes`.
    * Single entry point so every caller — create, alter, SQLite rebuild — lands
    * on identical DDL.
+   *
+   * ADDITIVE ONLY (#3728). This creates indexes; it never drops or rewrites
+   * one. Retiring the legacy platform-wide unique index a tenant-scoped field
+   * used to carry (#3696) used to happen right here, unconditionally, at every
+   * boot — a DROP that `os migrate plan` could not show and an operator could
+   * not pre-inspect, and which altered a managed schema in production in
+   * violation of the #2186 contract. That DROP is now a
+   * `replace_unique_index` drift entry: detected by
+   * {@link detectManagedDrift}, rendered by `os migrate plan`, applied by
+   * `os migrate apply` — and still auto-reconciled at boot in dev, via the same
+   * `autoMigrate: 'safe'` policy that governs every other safe drift.
    */
   protected async syncTableIndexes(
     tableName: string,
@@ -2807,7 +2906,6 @@ export class SqlDriver implements IDataDriver {
     tenantField: string | null,
     physicalColumns: Set<string>,
   ): Promise<void> {
-    await this.dropLegacyGlobalUniques(tableName, fields, tenantField, physicalColumns);
     const fromFields = this.uniqueIndexesFromFields(tableName, fields, tenantField);
     const declared = Array.isArray(declaredIndexes) ? declaredIndexes : [];
     if (fromFields.length === 0 && declared.length === 0) return;

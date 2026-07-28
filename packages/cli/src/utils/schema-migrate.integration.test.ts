@@ -8,10 +8,16 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { bootSchemaStack } from './schema-migrate.js';
 
 /**
- * End-to-end (#2186): boot the real standalone stack via `bootSchemaStack`
- * against a pre-seeded "legacy" SQLite DB (organization_id created NOT NULL),
- * then verify `os migrate`'s engine detects the drift and reconciles it —
- * exercising the full createStandaloneStack → AppPlugin → ObjectQL → driver path.
+ * End-to-end (#2186, #3728): boot the real standalone stack via
+ * `bootSchemaStack` against a pre-seeded "legacy" SQLite DB — `organization_id`
+ * created NOT NULL, and a platform-wide UNIQUE index on a field metadata now
+ * scopes per tenant — then verify `os migrate`'s engine detects BOTH drifts and
+ * reconciles them, exercising the full createStandaloneStack → AppPlugin →
+ * ObjectQL → driver path.
+ *
+ * The index half is the #3728 acceptance: under `NODE_ENV=production` nothing
+ * self-heals at boot, so whatever `plan` reports here is exactly what an
+ * operator would see before any DDL touches their database.
  */
 describe('bootSchemaStack + migrate engine (integration)', () => {
   let dir: string;
@@ -36,13 +42,15 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
             fields: {
               name: { type: 'text', required: true },
               organization_id: { type: 'text', required: false }, // optional now
+              code: { type: 'text', unique: true }, // tenant-scoped since #3696
             },
           },
         ],
       }),
     );
 
-    // Seed a "legacy" DB where organization_id is NOT NULL (the #2178 shape).
+    // Seed a "legacy" DB: organization_id NOT NULL (the #2178 shape) plus the
+    // platform-wide unique index on `code` the pre-#3696 driver emitted.
     const seed = new SqlDriver({ client: 'better-sqlite3', connection: { filename: dbFile }, useNullAsDefault: true });
     const k = (seed as any).knex;
     await k.schema.createTable('mig_biz_unit', (t: any) => {
@@ -51,8 +59,10 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
       t.timestamp('updated_at');
       t.string('name').notNullable();
       t.string('organization_id').notNullable();
+      t.string('code');
     });
-    await k('mig_biz_unit').insert({ id: '1', name: 'Acme', organization_id: 'org1' });
+    await k.raw('CREATE UNIQUE INDEX mig_biz_unit_code_unique ON mig_biz_unit (code)');
+    await k('mig_biz_unit').insert({ id: '1', name: 'Acme', organization_id: 'org1', code: 'BU-00001' });
     await k.destroy();
 
     savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
@@ -67,24 +77,41 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  it('detects the NOT NULL drift, applies it, and self-verifies in-sync', async () => {
+  it('detects the NOT NULL + legacy-unique drift, applies both, and self-verifies in-sync', async () => {
     const stack = await bootSchemaStack({ databaseUrl: `file:${dbFile}` });
     try {
       expect(stack.driver).toBeTruthy();
       expect(stack.managedTableCount).toBeGreaterThan(0);
 
+      // Boot changed nothing — this is exactly what `os migrate plan` renders.
       const drift = await stack.driver!.detectManagedDrift();
+
       const org = drift.find((d) => d.table === 'mig_biz_unit' && d.column === 'organization_id');
       expect(org, 'expected drift on mig_biz_unit.organization_id').toBeDefined();
       expect(org!.category).toBe('safe');
       expect(org!.op.type).toBe('relax_not_null');
 
+      // #3728: the legacy platform-wide unique is PLANNED, not silently rewritten.
+      const idx = drift.find((d) => d.op.type === 'replace_unique_index');
+      expect(idx, 'expected replace_unique_index drift on mig_biz_unit.code').toBeDefined();
+      expect(idx!.category).toBe('safe');
+      expect(idx!.op).toMatchObject({
+        table: 'mig_biz_unit',
+        dropIndexNames: ['mig_biz_unit_code_unique'],
+        createColumns: ['organization_id', 'code'],
+      });
+
       const { applied, skipped } = await stack.driver!.applyMigrationEntries(drift, { allowDestructive: false });
       expect(applied.some((d) => d.op.type === 'relax_not_null')).toBe(true);
+      expect(applied.some((d) => d.op.type === 'replace_unique_index')).toBe(true);
       expect(skipped).toHaveLength(0);
 
       const after = await stack.driver!.detectManagedDrift();
       expect(after.find((d) => d.table === 'mig_biz_unit' && d.column === 'organization_id')).toBeUndefined();
+      expect(after.find((d) => d.op.type === 'replace_unique_index')).toBeUndefined();
+
+      // The seeded row survived the reconcile.
+      expect(await (stack.driver as any).count('mig_biz_unit', {})).toBe(1);
     } finally {
       await stack.shutdown();
     }

@@ -477,12 +477,12 @@ os info --json         # JSON output for tooling
 ### Schema migrations
 
 The metadata→database sync is **additive-only**: on boot it creates missing
-tables and adds new columns, but never alters or drops existing ones. So a
-*non-additive* change to an object already backed by a database — relaxing
-`required` (drop `NOT NULL`), changing a field's type/length, or removing a
-field — silently diverges from the live schema, and the physical column wins at
-write time. `os migrate` reconciles the database to the metadata (the source of
-truth).
+tables, adds new columns and creates missing indexes, but never alters or drops
+existing ones. So a *non-additive* change to an object already backed by a
+database — relaxing `required` (drop `NOT NULL`), changing a field's
+type/length, removing a field, or re-scoping a `unique` constraint — silently
+diverges from the live schema, and the physical column wins at write time.
+`os migrate` reconciles the database to the metadata (the source of truth).
 
 | Command | Description |
 |---------|-------------|
@@ -499,16 +499,32 @@ os migrate plan --json                       # Machine-readable output
 
 | Category | Examples | Applied by |
 |----------|----------|------------|
-| `safe` | relax `NOT NULL` → nullable, widen a `varchar` | `os migrate apply` (and dev auto-reconcile) |
-| `needs_confirm` | non-narrowing type change | `os migrate apply` |
-| `destructive` | drop an orphaned column, tighten `NOT NULL`, narrow a type | `os migrate apply --allow-destructive` |
+| `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index, replace a legacy global unique with its tenant-scoped composite | `os migrate apply` (and dev auto-reconcile) |
+| `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` |
+| `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE` | `os migrate apply --allow-destructive` |
+
+#### Index drift
+
+`plan` covers indexes as well as columns:
+
+| Op | What it means |
+|----|---------------|
+| `create_index` | Metadata declares an index the database does not have |
+| `replace_unique_index` | A field's `unique` used to be enforced platform-wide, but metadata now scopes it per tenant — the legacy single-column index is swapped for the `(tenantField, field)` composite. A pure relaxation: it creates before it drops, and cannot fail |
+| `recreate_index` | An index exists under the declared name but with different columns/uniqueness. The additive sync skips it by name, so it must be dropped and rebuilt |
+| `drop_index` | An index carrying ObjectStack's generated naming (`uniq_…` / `idx_…`) that metadata no longer declares |
+
+Orphan detection is deliberately limited to indexes ObjectStack itself
+generated. A hand-rolled covering index you added in `psql` is never reported as
+drift, and `--allow-destructive` will not delete it.
 
 <Callout type="tip">
 **Dev self-heal.** `os dev` runs the SQL driver with `autoMigrate: 'safe'`, so
-loosening changes (e.g. you just made a field optional) are applied to your
-existing dev database automatically on restart — no `os migrate` needed, no data
-loss. Auto-reconcile is **dev-only and never destructive**; it is force-disabled
-under `NODE_ENV=production`, where you run `os migrate` deliberately.
+safe changes (you just made a field optional; a `unique` field became
+tenant-scoped) are applied to your existing dev database automatically on
+restart — no `os migrate` needed, no data loss. Auto-reconcile is **dev-only and
+never destructive**; it is force-disabled under `NODE_ENV=production`, where
+every change is shown by `os migrate plan` before you apply it deliberately.
 </Callout>
 
 <Callout type="warn">

@@ -11,12 +11,22 @@ export type {
   IntrospectedForeignKey,
 } from './sql-driver.js';
 
-// Managed-schema drift / reconcile (#2186)
+// Managed-schema drift / reconcile (#2186), incl. the index dimension (#3728)
 export {
   diffManagedTable,
   driftKey,
   fieldHasColumn,
   BUILTIN_COLUMNS,
+  buildIndexName,
+  diffManagedIndexes,
+  expectedIndexes,
+  isIndexDriftOp,
+  isManagedIndexName,
+  legacyUniqueIndexNames,
+  legacyUniqueReplacements,
+  normalizeDeclaredIndex,
+  uniqueIndexesFromFields,
+  INDEX_DRIFT_OPS,
 } from './schema-drift.js';
 export type {
   ManagedDriftEntry,
@@ -24,6 +34,9 @@ export type {
   DriftCategory,
   SqlDialectName,
   PhysicalColumn,
+  PhysicalIndex,
+  ExpectedIndex,
+  LegacyUniqueReplacement,
   FieldDef as DriftFieldDef,
 } from './schema-drift.js';
 
