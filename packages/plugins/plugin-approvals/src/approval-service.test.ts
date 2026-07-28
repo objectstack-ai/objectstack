@@ -183,6 +183,38 @@ describe('ApprovalService (node era)', () => {
     expect(JSON.parse(raw.node_config_json)).toMatchObject({ behavior: 'first_response', lockRecord: true });
   });
 
+  // #3794 — the row tells a client whether THIS node locks the record, so
+  // "pending" and "locked" stop being the same signal. Read from the same
+  // snapshot key the `beforeUpdate` lock hook reads, with the same default.
+  it('rows surface locks_record from the node config (default true)', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    expect(req.locks_record).toBe(true);
+    const [listed] = await svc.listRequests({ status: 'pending' }, SYS);
+    expect(listed.locks_record).toBe(true);
+  });
+
+  it('rows surface locks_record=false for a lockRecord:false node', async () => {
+    const req = await svc.openNodeRequest(
+      openInput(['u9'], {}, { lockRecord: false }),
+      CTX,
+    );
+    expect(req.locks_record).toBe(false);
+    const [listed] = await svc.listRequests({ status: 'pending' }, SYS);
+    expect(listed.locks_record).toBe(false);
+    const fetched = await svc.getRequest(req.id, SYS);
+    expect(fetched?.locks_record).toBe(false);
+  });
+
+  it('locks_record defaults to true when the node config omits lockRecord', async () => {
+    // A node that says nothing about locking locks — matching the hook, which
+    // only returns early on an explicit `lockRecord === false`.
+    const req = await svc.openNodeRequest(
+      openInput(['u9'], {}, { lockRecord: undefined }),
+      CTX,
+    );
+    expect(req.locks_record).toBe(true);
+  });
+
   it('openNodeRequest: deduplicates a pending request per (object, record)', async () => {
     await svc.openNodeRequest(openInput(['u9']), CTX);
     await expect(svc.openNodeRequest(openInput(['u9'], { runId: 'run_2' }), CTX))

@@ -280,6 +280,11 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     payload: parseJson(row.payload_json, undefined),
     flow_run_id: row.flow_run_id ?? undefined,
     flow_node_id: row.flow_node_id ?? undefined,
+    // #3794: the node's record-lock policy, read from the SAME config snapshot
+    // the `beforeUpdate` lock hook reads (`lockRecord === false` ⇒ allow), so a
+    // client can tell "pending" from "locked" instead of assuming every pending
+    // request locks. Default-true mirrors the hook's default.
+    locks_record: cfg?.lockRecord !== false,
     completed_at: row.completed_at ?? undefined,
     created_at: row.created_at ?? undefined,
     updated_at: row.updated_at ?? undefined,

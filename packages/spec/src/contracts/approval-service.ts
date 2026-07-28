@@ -70,6 +70,27 @@ export interface ApprovalRequestRow {
     type?: 'text' | 'user' | 'department' | 'position' | 'team';
     multiple?: boolean;
   }>;
+  /**
+   * Whether THIS request's node locks the target record for writes (#3794).
+   * Mirrors the one policy the `beforeUpdate` lock hook actually enforces:
+   * the node config snapshot's `lockRecord`, defaulting to `true` when the
+   * node says nothing (`lockRecord === false` ⇒ the hook returns early and
+   * the record stays editable while the request is pending).
+   *
+   * Surfaced because "a pending request exists" and "the record is locked"
+   * are NOT the same statement, and a client that conflates them tells the
+   * user the opposite of the truth in one direction or the other: a console
+   * that renders "Locked for approval" on every pending request hides a
+   * `lockRecord: false` node's whole point (the approver is meant to edit
+   * while deciding), and one that renders nothing lets a user fill a form
+   * that the hook will reject with `RECORD_LOCKED`. Read it instead of
+   * re-deriving from the record's `approval_status` mirror — that field says
+   * "in approval", never "locked", and some flows never materialize it.
+   *
+   * Optional only for version skew (a row from an older server has no
+   * opinion); the service always emits it. Absent ⇒ assume locked.
+   */
+  locks_record?: boolean;
   completed_at?: string;
   created_at?: string;
   updated_at?: string;

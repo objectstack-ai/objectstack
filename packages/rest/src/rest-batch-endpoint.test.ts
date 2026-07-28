@@ -219,6 +219,45 @@ describe('POST {basePath}/batch — cross-object transactional batch', () => {
     expect(ql.transaction).not.toHaveBeenCalled();
   });
 
+  // ── write observability (#3794) ───────────────────────────────────────────
+  //
+  // The console's record form saves a master-detail record through THIS route,
+  // so a `readonlyWhen`-locked field edited in that form was stripped by the
+  // engine and the response said nothing — the user saw "updated successfully"
+  // over a value that never changed. Every other write path already reports its
+  // strips (#3431/#3455); this one now does too.
+
+  it('surfaces engine-stripped fields as droppedFields tagged with the op index', async () => {
+    const ql = makeQl({
+      update: vi.fn(async (_object: string, data: any, opts: any) => {
+        opts?.onFieldsDropped?.({ object: 'invoice', fields: ['tax_rate'], reason: 'readonly_when' });
+        const { tax_rate: _stripped, ...kept } = data;
+        return kept;
+      }),
+    });
+    const { route } = buildServer({ ql });
+    const res = await post(route, {
+      operations: [
+        { object: 'account', action: 'create', data: { name: 'Acme' } },
+        { object: 'invoice', action: 'update', id: 'inv_1', data: { status: 'paid', tax_rate: 9 } },
+      ],
+    });
+    expect(res.statusCode).toBe(200);
+    // The batch still committed — a strip is legal semantics, not an error.
+    expect(res.body.results).toHaveLength(2);
+    expect(res.body.droppedFields).toEqual([
+      { object: 'invoice', fields: ['tax_rate'], reason: 'readonly_when', index: 1 },
+    ]);
+  });
+
+  it('omits droppedFields entirely when nothing was stripped', async () => {
+    const ql = makeQl();
+    const { route } = buildServer({ ql });
+    const res = await post(route, { operations: [{ object: 'account', data: { name: 'Acme' } }] });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toHaveProperty('droppedFields');
+  });
+
   // ── request validation ────────────────────────────────────────────────────
 
   it('rejects a non-atomic request (this endpoint is always atomic)', async () => {

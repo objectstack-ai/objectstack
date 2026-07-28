@@ -299,12 +299,36 @@ export const CrossObjectBatchRequestSchema = lazySchema(() => z.object({
 export type CrossObjectBatchRequest = z.input<typeof CrossObjectBatchRequestSchema>;
 
 /**
+ * One strip event on a cross-object batch, tagged with the operation it
+ * belongs to (#3794). The per-object bulk paths hang `droppedFields` on their
+ * per-row result object; this batch's `results` entries are the raw record
+ * echoes (`z.unknown()`), with no envelope to hang anything on — so the events
+ * ride a parallel top-level list and carry `index` to point back at the
+ * operation that produced them.
+ */
+export const CrossObjectBatchDroppedFieldsSchema = lazySchema(() => DroppedFieldsEventSchema.extend({
+  index: z.number().int().min(0).describe('Index of the operation in the request `operations` array'),
+}).describe('A cross-object batch strip event: dropped fields plus the operation index'));
+
+export type CrossObjectBatchDroppedFields = z.infer<typeof CrossObjectBatchDroppedFieldsSchema>;
+
+/**
  * Response for the cross-object transactional batch — one result per operation,
  * index-aligned with the request `operations` (create/update echo the record,
  * delete echoes the driver's delete result).
  */
 export const CrossObjectBatchResponseSchema = lazySchema(() => z.object({
   results: z.array(z.unknown()).describe('Per-operation result, index-aligned with the request operations'),
+  droppedFields: z.array(CrossObjectBatchDroppedFieldsSchema).optional().describe(
+    'Write-observability (#3407/#3431/#3455/#3794): caller-supplied fields the engine LEGALLY ' +
+    'stripped from an operation before it was written — static `readonly` (#2948) or a TRUE ' +
+    '`readonlyWhen` predicate (#3042). This endpoint is the console record form\'s save path ' +
+    '(master-detail writes parent + children in one transaction), so without it the ONE surface ' +
+    'where a user edits a `readonlyWhen` field reported plain success while the value never ' +
+    'landed. Each event carries the `index` of its operation. Present ONLY when ≥1 field was ' +
+    'dropped; the batch still committed without them (results/success semantics unchanged). ' +
+    'Optional — omit-when-empty keeps the shape backward-compatible.'
+  ),
 }));
 
 export type CrossObjectBatchResponse = z.infer<typeof CrossObjectBatchResponseSchema>;

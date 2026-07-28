@@ -152,6 +152,7 @@
     "api/CreateRequest",
     "api/CreateViewRequest",
     "api/CreateViewResponse",
+    "api/CrossObjectBatchDroppedFields",
     "api/CrossObjectBatchOperation",
     "api/CrossObjectBatchRequest",
     "api/CrossObjectBatchResponse",

@@ -6594,15 +6594,27 @@ export class RestServer {
                         return result;
                     };
 
+                    // [#3794] Write-observability on THIS surface too. The engine
+                    // strips `readonly` / `readonlyWhen` writes silently, and every
+                    // other write path already reports what it dropped (#3431/#3455)
+                    // — but this one did not, and it is precisely the path the
+                    // console's record form takes for a master-detail save. Result:
+                    // a user edited a `readonlyWhen`-locked field, got "updated
+                    // successfully", and the value never changed with nothing said
+                    // (#3794 problem 2). Each event is tagged with its operation
+                    // index, since `results` entries are bare record echoes with no
+                    // envelope to hang a per-row list on.
+                    const dropped: Array<DroppedFieldsEvent & { index: number }> = [];
                     const results = await ql.transaction(async (trxCtx: any) => {
                         const out: any[] = [];
-                        for (const op of ops) {
+                        for (const [index, op] of ops.entries()) {
                             const data = resolveRefs(op.data, out);
+                            const onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push({ ...e, index }); };
                             if (op.action === 'create') {
-                                out.push(await ql.insert(op.object, data, { context: trxCtx }));
+                                out.push(await ql.insert(op.object, data, { context: trxCtx, onFieldsDropped }));
                             } else if (op.action === 'update') {
                                 const id = op.id ?? data?.id;
-                                out.push(await ql.update(op.object, { ...data, id }, { context: trxCtx }));
+                                out.push(await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped }));
                             } else { // 'delete'
                                 out.push(await ql.delete(op.object, { where: { id: op.id }, context: trxCtx }));
                             }
@@ -6610,7 +6622,7 @@ export class RestServer {
                         return out;
                     }, context);
 
-                    res.json({ results });
+                    res.json({ results, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 } catch (error: any) {
                     // Log only genuine server faults; client 4xx (validation,
                     // unresolved ref, atomic rollback of a bad op) are expected.
