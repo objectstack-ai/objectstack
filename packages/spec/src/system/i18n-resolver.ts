@@ -724,6 +724,44 @@ function lookupObjectFieldAttr(
   return undefined;
 }
 
+/**
+ * Enumerate an object's translated field labels out of ONE locale's
+ * `TranslationData` — the `GET /i18n/labels/:object/:locale` body.
+ *
+ * Distinct from `lookupObjectFieldAttr` above, which answers "what is this
+ * one field called" against a whole bundle and a locale chain. This answers
+ * "which fields does this locale translate at all", which is what the
+ * endpoint returns and what no per-field lookup can produce.
+ *
+ * Shared deliberately. Both serving surfaces derive this map — the dispatcher
+ * domain body and service-i18n's autonomous route — and they are the only
+ * path there is: `getFieldLabels` is optional on `II18nService` and NOTHING
+ * implements it (neither `memory-i18n` nor `file-i18n-adapter`), so the
+ * "dedicated method" branch both surfaces check first is dead and this
+ * derivation always runs. Keeping one copy each is how the dispatcher was
+ * left scanning the retired flat `o.<object>.fields.<field>` dialect after
+ * #3778 converged the tree on nested `objects.<object>.fields.<field>.label`
+ * and fixed only service-i18n's copy — a scan that cannot match a real bundle,
+ * so that route returned `{}` for every provider (#3833).
+ *
+ * Fields with no non-empty `label` are omitted rather than emitted blank:
+ * partial translation is the normal state (see `ObjectTranslationDataSchema`),
+ * and a caller merges what comes back over its source labels.
+ */
+export function resolveObjectFieldLabels(
+  data: TranslationData | undefined,
+  objectName: string,
+): Record<string, string> {
+  const fields = data?.objects?.[objectName]?.fields;
+  const labels: Record<string, string> = {};
+  if (!fields) return labels;
+  for (const [fieldName, field] of Object.entries(fields)) {
+    const label = field?.label;
+    if (typeof label === 'string' && label.length > 0) labels[fieldName] = label;
+  }
+  return labels;
+}
+
 function lookupObjectFieldOption(
   bundle: TranslationBundle | undefined,
   objectName: string,

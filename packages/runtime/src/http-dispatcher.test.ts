@@ -1801,7 +1801,16 @@ describe('HttpDispatcher', () => {
         beforeEach(() => {
             mockI18nService = {
                 getLocales: vi.fn().mockReturnValue(['en', 'zh-CN', 'ja']),
-                getTranslations: vi.fn().mockReturnValue({ 'o.account.label': '客户', 'o.account.fields.name': '名称' }),
+                // The nested shape every producer writes and #3778 converged
+                // on. This used to be flat `o.account.label` keys — a dialect
+                // no bundle has ever carried.
+                getTranslations: vi.fn().mockReturnValue({
+                    objects: { account: { label: '客户', fields: { name: { label: '名称' } } } },
+                }),
+                // Declared optional on `II18nService` and implemented by NO
+                // shipped provider — the tests below that assert it is called
+                // cover the dispatcher's handling of a provider that supplies
+                // it, not a path any current stack takes. See #3833.
                 getFieldLabels: vi.fn().mockReturnValue({ name: '名称', industry: '行业' }),
             };
 
@@ -1824,7 +1833,9 @@ describe('HttpDispatcher', () => {
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data?.locale).toBe('zh-CN');
-            expect(result.response?.body?.data?.translations).toEqual({ 'o.account.label': '客户', 'o.account.fields.name': '名称' });
+            expect(result.response?.body?.data?.translations).toEqual({
+                objects: { account: { label: '客户', fields: { name: { label: '名称' } } } },
+            });
             expect(mockI18nService.getTranslations).toHaveBeenCalledWith('zh-CN');
         });
 
@@ -1897,12 +1908,38 @@ describe('HttpDispatcher', () => {
             expect((body.error as { code: unknown }).code).toBe(400);
         });
 
-        it('should fallback to deriving labels from translations when getFieldLabels is missing', async () => {
+        /**
+         * This is the path EVERY provider takes, not an edge case:
+         * `getFieldLabels` is optional on `II18nService` and nothing implements
+         * it — not `memory-i18n`, not `file-i18n-adapter` — so the dedicated-
+         * method branch above is dead in production and this derivation always
+         * runs.
+         *
+         * Its predecessor fed flat `o.contact.fields.first_name` keys and
+         * asserted labels came back. That dialect was retired by #3778 (no
+         * producer ever wrote it), so the test passed on data that cannot
+         * occur while the real path — scanning for an `o.` prefix in a bundle
+         * whose top-level keys are `objects`/`apps`/`messages` — returned `{}`
+         * for every caller. Feeding the shape real bundles actually have is
+         * the whole point of the test (#3833).
+         */
+        it('derives labels from the NESTED bundle shape every producer writes (#3833)', async () => {
             delete mockI18nService.getFieldLabels;
             mockI18nService.getTranslations.mockReturnValue({
-                'o.contact.fields.first_name': 'First Name',
-                'o.contact.fields.email': 'Email',
-                'o.contact.label': 'Contact',
+                objects: {
+                    contact: {
+                        label: 'Contact',
+                        fields: {
+                            first_name: { label: 'First Name' },
+                            email: { label: 'Email', help: 'Primary address' },
+                            // No label — partial translation is the normal
+                            // state, and a blank entry would overwrite the
+                            // caller's source label with an empty string.
+                            phone: { help: 'Mobile preferred' },
+                        },
+                    },
+                },
+                messages: { save: 'Save' },
             });
 
             const result = await dispatcher.handleI18n('/labels/contact/en', 'GET', {}, { request: {} });
@@ -1912,6 +1949,18 @@ describe('HttpDispatcher', () => {
                 first_name: 'First Name',
                 email: 'Email',
             });
+        });
+
+        it('returns {} for an object the locale does not translate, without throwing', async () => {
+            delete mockI18nService.getFieldLabels;
+            mockI18nService.getTranslations.mockReturnValue({
+                objects: { contact: { fields: { email: { label: 'Email' } } } },
+            });
+
+            const result = await dispatcher.handleI18n('/labels/account/en', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(200);
+            expect(result.response?.body?.data?.labels).toEqual({});
         });
 
         it('should return 501 when i18n service is not available', async () => {

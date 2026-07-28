@@ -17,7 +17,8 @@
  */
 
 import { resolveLocale } from '@objectstack/core';
-import { CoreServiceName } from '@objectstack/spec/system';
+import { CoreServiceName, resolveObjectFieldLabels } from '@objectstack/spec/system';
+import type { TranslationData } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -89,15 +90,16 @@ export async function handleI18nRequest(
             const labels = i18nService.getFieldLabels(objectName, locale);
             return { handled: true, response: deps.success({ object: objectName, locale, labels }) };
         }
-        // Fallback: derive field labels from full translation bundle
-        const translations = i18nService.getTranslations(locale);
-        const prefix = `o.${objectName}.fields.`;
-        const labels: Record<string, string> = {};
-        for (const [key, value] of Object.entries(translations)) {
-            if (key.startsWith(prefix)) {
-                labels[key.substring(prefix.length)] = value as string;
-            }
-        }
+        // Fallback: derive field labels from the locale's translation bundle.
+        // This is not really a fallback — `getFieldLabels` is optional on
+        // `II18nService` and nothing implements it, so this is the path every
+        // provider takes. Shared with service-i18n's identical derivation so
+        // the next bundle-shape change cannot fix one copy and miss the other,
+        // which is how this one went on scanning the retired flat
+        // `o.<object>.fields.<field>` dialect after #3778 and returned `{}`
+        // for every provider (#3833).
+        const translations = i18nService.getTranslations(locale) as TranslationData | undefined;
+        const labels = resolveObjectFieldLabels(translations, objectName);
         return { handled: true, response: deps.success({ object: objectName, locale, labels }) };
     }
 

@@ -11,6 +11,7 @@ import {
   resolveActionResultDialog,
   translateAction,
   translateMetadataDocument,
+  resolveObjectFieldLabels,
 } from './i18n-resolver';
 
 describe('ObjectTranslationDataSchema (_views/_actions extensions)', () => {
@@ -1036,5 +1037,55 @@ describe('translateObject inline actions (objectstack#3370)', () => {
     });
     expect(out.label).toBe('审批请求');
     expect(Object.hasOwn(out, 'actions')).toBe(false);
+  });
+});
+
+// ==========================================
+// resolveObjectFieldLabels — the `/i18n/labels/:object/:locale` body
+// ==========================================
+
+describe('resolveObjectFieldLabels (objectstack#3833)', () => {
+  const data = TranslationDataSchema.parse({
+    objects: {
+      contact: {
+        label: 'Contact',
+        fields: {
+          first_name: { label: 'First Name' },
+          email: { label: 'Email', help: 'Primary address' },
+          phone: { help: 'Mobile preferred' },
+        },
+      },
+    },
+    messages: { save: 'Save' },
+  });
+
+  it('enumerates the labels a locale actually translates', () => {
+    expect(resolveObjectFieldLabels(data, 'contact')).toEqual({
+      first_name: 'First Name',
+      email: 'Email',
+    });
+  });
+
+  it('omits fields carrying no label rather than emitting a blank one', () => {
+    // Partial translation is the normal state (see ObjectTranslationDataSchema),
+    // and callers merge this over their source labels — a '' would erase them.
+    expect(resolveObjectFieldLabels(data, 'contact')).not.toHaveProperty('phone');
+  });
+
+  it('returns {} for an untranslated object, a bundle with no objects, and no bundle', () => {
+    expect(resolveObjectFieldLabels(data, 'account')).toEqual({});
+    expect(resolveObjectFieldLabels({ messages: { save: 'Save' } }, 'contact')).toEqual({});
+    expect(resolveObjectFieldLabels(undefined, 'contact')).toEqual({});
+  });
+
+  it('never matches the retired flat `o.<object>.fields.<field>` dialect', () => {
+    // The shape the dispatcher scanned for until #3833. It is not a bundle
+    // any producer writes, and reading it as one is what returned {} in
+    // production while a test built on the same fiction stayed green.
+    const flat = {
+      'o.contact.fields.first_name': 'First Name',
+      'o.contact.label': 'Contact',
+    } as unknown as Parameters<typeof resolveObjectFieldLabels>[0];
+    expect(resolveObjectFieldLabels(flat, 'contact')).toEqual({});
   });
 });

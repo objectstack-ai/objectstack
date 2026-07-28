@@ -1300,6 +1300,7 @@
     "resolveMetadataFormLabels (function)",
     "resolveMetadataTypeDescription (function)",
     "resolveMetadataTypeLabel (function)",
+    "resolveObjectFieldLabels (function)",
     "resolveSettingsActionConfirm (function)",
     "resolveSettingsActionLabel (function)",
     "resolveSettingsActionSuccess (function)",

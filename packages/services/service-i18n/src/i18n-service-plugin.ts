@@ -5,6 +5,7 @@ import { wireAuthoredTranslationSync } from '@objectstack/core';
 import type { IHttpServer, IHttpRequest, IHttpResponse } from '@objectstack/spec/contracts';
 import type { II18nService } from '@objectstack/spec/contracts';
 import type { TranslationData } from '@objectstack/spec/system';
+import { resolveObjectFieldLabels } from '@objectstack/spec/system';
 import { FileI18nAdapter } from './file-i18n-adapter.js';
 import type { FileI18nAdapterOptions } from './file-i18n-adapter.js';
 
@@ -234,14 +235,11 @@ export class I18nServicePlugin implements Plugin {
           // That data is NESTED (`objects.<obj>.fields.<field>.label`) — the
           // flat dotted `o.<obj>.fields.<field>` keys this used to scan were a
           // third translation dialect that no producer ever wrote, so the
-          // fallback always returned `{}` (#3778).
+          // fallback always returned `{}` (#3778). The derivation now lives in
+          // `resolveObjectFieldLabels` so the dispatcher's copy of it cannot
+          // drift out of shape again the way it did after that fix (#3833).
           const data = i18n.getTranslations(locale) as TranslationData | undefined;
-          const fields = data?.objects?.[objectName]?.fields ?? {};
-          const labels: Record<string, string> = {};
-          for (const [fieldName, field] of Object.entries(fields)) {
-            const label = field?.label;
-            if (typeof label === 'string' && label.length > 0) labels[fieldName] = label;
-          }
+          const labels = resolveObjectFieldLabels(data, objectName);
           res.json({ success: true, data: { object: objectName, locale, labels } });
         }
       } catch (error: any) {
