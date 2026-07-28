@@ -19,7 +19,16 @@ import {
   isDataMigrationFlagVerified,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
-import { IDataDriver, IDataEngine, Logger, createLogger, withTransientRetry, type RetryOptions } from '@objectstack/core';
+import {
+  IDataDriver,
+  IDataEngine,
+  Logger,
+  createLogger,
+  withTransientRetry,
+  type RetryOptions,
+  filterTokenContextFrom,
+  resolveFilterTokens,
+} from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
 import { DriverConnectError, emitDegradedBootBanner, type DriverConnectFailure, type DriverHealth } from './driver-connect-errors.js';
 import { resolveAllowDriverConnectFailure } from '@objectstack/types';
@@ -2519,6 +2528,34 @@ export class ObjectQL implements IDataEngine {
   // Data Access Methods (IDataEngine Interface)
   // ============================================
 
+  /**
+   * Expand `{filter-placeholder}` values in a read AST's `where` against the
+   * request (framework#3582).
+   *
+   * Filters travel as JSON, so a time- or user-scoped slice authored in a view,
+   * dashboard, related list or REST query writes `'{current_year_start}'` /
+   * `'{current_user_id}'` rather than a literal. Until now nothing on the server
+   * substituted them: the placeholder reached the driver as a string, compared
+   * as text, and matched nothing — an empty grid with no error anywhere.
+   *
+   * The engine is the right seam because it is the ONE gate every server-side
+   * read passes through (REST, SDK, related lists, flow `find_records`, sharing
+   * graph reads), so a surface that follows the filter contract works the day it
+   * ships instead of waiting for its own resolver. It runs BEFORE the middleware
+   * chain so only author-supplied filters are inspected; the RLS/sharing filters
+   * injected downstream are built from concrete context values and carry no
+   * placeholders.
+   *
+   * Cheap by construction: {@link resolveFilterTokens} returns the input by
+   * reference when the tree holds no placeholder, which is every internal query.
+   * An unresolvable placeholder throws (see the resolver's module doc) — the one
+   * outcome an author can act on.
+   */
+  private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContextInput): void {
+    if (!ast || ast.where == null) return;
+    ast.where = resolveFilterTokens(ast.where, filterTokenContextFrom(execCtx));
+  }
+
   async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     this.logger.debug('Find operation starting', { object, query });
@@ -2610,6 +2647,7 @@ export class ObjectQL implements IDataEngine {
       options: query,
       context: mergeReadContext(query?.context, options?.context),
     };
+    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
 
     await this.executeWithMiddleware(opCtx, async () => {
       const hookContext: HookContext = {
@@ -2697,6 +2735,7 @@ export class ObjectQL implements IDataEngine {
       options: query,
       context: mergeReadContext(query?.context, options?.context),
     };
+    this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
 
     await this.executeWithMiddleware(opCtx, async () => {
       // [#3195] `findOne` fires the SAME `beforeFind`/`afterFind` hooks as
@@ -3546,6 +3585,11 @@ export class ObjectQL implements IDataEngine {
        options: query,
        context: mergeReadContext(query?.context, options?.context),
      };
+     this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
+     // The caller's own `where`, placeholders expanded — captured BEFORE the
+     // middleware chain scopes `opCtx.ast.where`, so the find() fallback below
+     // still passes the unscoped filter (find() applies the read filters itself).
+     const callerWhere = (opCtx.ast as QueryAST).where;
 
      await this.executeWithMiddleware(opCtx, async () => {
        const countOpts = this.buildDriverOptions(object, opCtx.context);
@@ -3554,7 +3598,7 @@ export class ObjectQL implements IDataEngine {
        }
        // Fallback to find().length — find() applies the read filters itself,
        // so pass the caller's original where, not the already-scoped ast.
-       const res = await this.find(object, { where: query?.where, fields: ['id'], context: opCtx.context });
+       const res = await this.find(object, { where: callerWhere, fields: ['id'], context: opCtx.context });
        return res.length;
      });
 
@@ -3622,6 +3666,7 @@ export class ObjectQL implements IDataEngine {
         options: query,
         context: mergeReadContext(query?.context, options?.context),
       };
+      this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
 
       await this.executeWithMiddleware(opCtx, async () => {
         const ast = opCtx.ast as QueryAST;

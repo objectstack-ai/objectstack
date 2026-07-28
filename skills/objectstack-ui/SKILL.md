@@ -1479,11 +1479,19 @@ Dashboard and report drill are unified.
 ## Date Macros — Filter Placeholders
 
 Dashboards, reports, list-view filters, and other UI metadata can embed
-relative-date placeholders that are resolved on the client just before
-the request leaves the browser. The canonical contract is published as
+relative-date placeholders. The canonical contract is published as
 `DATE_MACRO_TOKENS` in `@objectstack/spec/data` (source:
-`node_modules/@objectstack/spec/src/data/date-macros.zod.ts`); the resolver
-lives in `@object-ui/core` (`resolveDateMacros`). Keep the two in lockstep.
+`node_modules/@objectstack/spec/src/data/date-macros.zod.ts`); two resolvers
+consume it and must stay in lockstep with it — `resolveDateMacros` in
+`@object-ui/core` (before the request leaves the browser) and
+`resolveFilterTokens` in `@objectstack/core` (framework#3582: the ObjectQL
+read path and the analytics dataset executor, which is what a dashboard
+widget's `filter` actually travels through — it never passes a renderer).
+
+An unrecognised placeholder is a build error (`validate-filter-tokens`) and a
+runtime throw, never a silent literal. Note `*_end` is the period's last
+calendar DAY, so a `datetime` column wants `< {next_*_start}` rather than
+`<= {current_*_end}`.
 
 Both `{token}` and `${token}` forms are accepted.
 

@@ -15,10 +15,27 @@ import { z } from 'zod';
  *     { published_at: { $gte: '{last_quarter_start}' } }
  *     { signal_at:    { $gte: '{30_days_ago}' } }
  *
- * The placeholders are expanded **client-side** by
- * `resolveDateMacros()` in `@object-ui/core` immediately before the
- * filter is handed to the data source. The data engine itself only
- * sees ISO date / timestamp strings, never `{tokens}`.
+ * The placeholders are expanded on **both** sides of the wire, so a
+ * filter behaves the same wherever it is executed (framework#3582):
+ *
+ * - **Client** — `resolveDateMacros()` in `@object-ui/core`, just
+ *   before the filter is handed to the data source.
+ * - **Server** — `resolveFilterTokens()` in `@objectstack/core`, wired
+ *   into the ObjectQL read path (`find`/`findOne`/`count`/`aggregate`)
+ *   and the analytics dataset executor. Filters that reach the database
+ *   WITHOUT passing through a renderer — dashboard widgets, dataset
+ *   definitions, REST query params — need this: before it, the token
+ *   compared as a literal string and matched nothing.
+ *
+ * Either way the DRIVER only ever sees ISO date / timestamp strings,
+ * never `{tokens}`. Translating an ISO comparand into a column's on-disk
+ * form (SQLite epoch-ms, `YYYY-MM-DD` text, native timestamp) is the
+ * driver's job — see `SqlDriver.temporalFilterValue`.
+ *
+ * A token OUTSIDE this vocabulary is rejected rather than passed
+ * through: `@objectstack/lint`'s `validate-filter-tokens` fails the
+ * build, and the runtime resolver throws. Silently matching nothing is
+ * the failure mode the vocabulary exists to prevent.
  *
  * AI agents and template authors author these placeholders directly,
  * so the **set of recognised tokens is part of the platform contract**
@@ -43,7 +60,11 @@ import { z } from 'zod';
  *   `@objectstack/formula`.
  * - Token resolution semantics (week-start day, timezone, fiscal
  *   calendars) are defined by the resolver implementation; spec only
- *   freezes the **vocabulary**.
+ *   freezes the **vocabulary**. One property is worth stating here
+ *   because it is authored against: a `*_end` token is the period's
+ *   last calendar DAY (`{current_year_end}` → `2026-12-31`), so on a
+ *   `datetime` column `<= {current_year_end}` stops at midnight on the
+ *   31st. Filter a timestamp with the half-open `< {next_year_start}`.
  */
 
 /** Single-point tokens — moments in time. */

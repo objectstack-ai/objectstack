@@ -241,8 +241,33 @@ where: {
   units `minute|hour|day|week|month|year` — e.g. `{30_days_ago}`,
   `{2_weeks_from_now}`.
 
-**Scope:** the tokens are expanded **client-side** (by `resolveDateMacros()`
-in `@object-ui/core`) immediately before the filter reaches the data
-engine — the engine only ever sees ISO date/timestamp strings. Use macros in
-UI-rendered filter metadata; for queries you issue directly against the
-engine, keep computing dates in application code as above.
+**Session tokens:** the same value positions accept `{current_user_id}` and
+`{current_org_id}` (defined in `data/context-tokens.zod.ts`) — the signed-in
+user's id and the active organization id.
+
+```typescript
+where: { owner: '{current_user_id}', close_date: { $gte: '{current_year_start}' } }
+```
+
+**Scope:** tokens are expanded on **both** sides of the wire, so the same
+filter behaves the same wherever it runs — client-side by `resolveDateMacros()`
+/ `resolveContextTokens()` in `@object-ui/core`, and server-side by
+`resolveFilterTokens()` in `@objectstack/core` (wired into the ObjectQL read
+path and the analytics dataset executor). The driver only ever sees ISO
+date/timestamp strings and concrete ids, never `{tokens}`. You may therefore
+use tokens in a query issued directly against the engine — and you should:
+computing "today" at module load freezes the date into the built artifact.
+
+One exception: a **flow node's** `config.filter` is interpolated by the flow
+template engine first, which owns `{…}` in that position and blanks anything
+that is not a flow variable. Compute the bound in an earlier node instead.
+
+**Unknown tokens are rejected, not ignored.** `{current_user}` (the RLS
+expression root) and `{this_quarter_start}` are near-misses, not tokens:
+`objectstack build` fails on them and the runtime resolver throws. A filter
+value that is entirely `{...}` is always read as a placeholder, so a literal
+value of that shape is not expressible.
+
+**`*_end` is a calendar DAY.** `{current_year_end}` is `2026-12-31`, so on a
+`datetime` column `<= {current_year_end}` stops at midnight on the 31st. Use
+the half-open `< {next_year_start}` for timestamps.

@@ -16,10 +16,19 @@ import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod.js';
  *     { owner_id: '{current_user_id}' }
  *     [{ field: 'owner', operator: 'equals', value: '{current_user_id}' }]
  *
- * Like date macros, the placeholders are expanded **client-side** by
- * `resolveContextTokens()` in `@object-ui/core` immediately before the
- * filter is handed to the data source. The data engine only ever sees
- * concrete ids, never `{tokens}`.
+ * Like date macros, the placeholders are expanded on **both** sides of
+ * the wire (framework#3582): `resolveContextTokens()` in
+ * `@object-ui/core` before the filter leaves the browser, and
+ * `resolveFilterTokens()` in `@objectstack/core` on the ObjectQL read
+ * path and the analytics dataset executor for filters that reach the
+ * database without passing through a renderer. The DRIVER only ever
+ * sees concrete ids, never `{tokens}`.
+ *
+ * The server resolver reads `ExecutionContext` — `{current_user_id}` is
+ * `userId`, `{current_org_id}` is `tenantId`. A request that carries
+ * neither is an ERROR, not a null comparand: resolving to `null`
+ * degrades to `IS NULL` on most drivers and would hand back the rows
+ * the filter was written to exclude.
  *
  * # Presentation scope, NOT a security boundary
  *

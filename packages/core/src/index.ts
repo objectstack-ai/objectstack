@@ -29,6 +29,9 @@ export * from './utils/datetime.js';
 // Export the shared batched-write helper (framework#2678)
 export * from './utils/bulk-write.js';
 
+// Export the runtime filter-placeholder resolver (framework#3582)
+export * from './utils/filter-tokens.js';
+
 // Export in-memory fallbacks for core-criticality services
 export * from './fallbacks/index.js';
 

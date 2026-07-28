@@ -9,6 +9,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { filterTokenContextFrom, resolveFilterTokens } from '@objectstack/core';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
 import type { OrderLabelResolver } from './dimension-labels.js';
 
@@ -70,6 +71,56 @@ export type CompareTo = DatasetCompareTo;
  * shaping + arithmetic; the order-label hook is an injected interface, not an
  * engine dependency.
  */
+
+/**
+ * Expand `{filter-placeholder}` values across everything a dataset query
+ * compares on (framework#3582): the dataset's intrinsic `filter`, the
+ * presentation's `runtimeFilter` (a dashboard widget's own scope), every
+ * measure-scoped filter, and the `dateRange` bounds of the selection's time
+ * dimensions.
+ *
+ * The dashboard path needs its own call rather than inheriting the ObjectQL
+ * engine's: `NativeSQLStrategy` compiles a raw `SELECT … WHERE` and binds
+ * comparands directly, so a widget filtered on `{current_year_start}` never
+ * passes through `engine.find()` at all — which is exactly why the token
+ * reached SQLite as the literal text and every such widget rendered zero.
+ *
+ * Inputs are treated as immutable: a `CompiledDataset` lives in the service's
+ * registry across requests, so resolving in place would bake one request's
+ * user id (and one day's dates) into every later render. New objects are
+ * allocated only when the tree actually held a placeholder.
+ */
+function resolveSelectionTokens(
+  compiled: CompiledDataset,
+  selection: DatasetSelection,
+  context?: ExecutionContext,
+): { compiled: CompiledDataset; selection: DatasetSelection } {
+  // One instant for the whole call: the intrinsic filter, the runtime filter
+  // and each measure filter are resolved in separate passes, and a query whose
+  // pieces disagreed about "now" could straddle a period boundary — the primary
+  // grid scoped to this month while a measure-scoped sub-query saw the next.
+  const tokenCtx = filterTokenContextFrom(context, new Date());
+  const resolve = <T>(v: T): T => resolveFilterTokens(v, tokenCtx);
+
+  const filter = resolve(compiled.filter);
+  const measureFilters = resolve(compiled.measureFilters);
+  const runtimeFilter = resolve(selection.runtimeFilter);
+  const timeDimensions = selection.timeDimensions?.map((td) =>
+    td.dateRange == null ? td : { ...td, dateRange: resolve(td.dateRange) },
+  );
+
+  const compiledChanged =
+    filter !== compiled.filter || measureFilters !== compiled.measureFilters;
+  const selectionChanged =
+    runtimeFilter !== selection.runtimeFilter ||
+    (timeDimensions !== undefined &&
+      timeDimensions.some((td, i) => td !== selection.timeDimensions![i]));
+
+  return {
+    compiled: compiledChanged ? { ...compiled, filter, measureFilters } : compiled,
+    selection: selectionChanged ? { ...selection, runtimeFilter, timeDimensions } : selection,
+  };
+}
 
 /** AND two optional FilterConditions into one (MongoDB-style). */
 export function combineFilters(
@@ -350,10 +401,15 @@ export class DatasetExecutor {
    *   applied per request (ADR-0021 D-C).
    */
   async execute(
-    compiled: CompiledDataset,
-    selection: DatasetSelection,
+    compiledInput: CompiledDataset,
+    selectionInput: DatasetSelection,
     context?: ExecutionContext,
   ): Promise<AnalyticsResult> {
+    // framework#3582 — expand `{current_quarter_start}` / `{current_user_id}`
+    // placeholders BEFORE any query is shaped, once for the whole call so every
+    // sub-query (measure-scoped, totals, compareTo) shares one instant.
+    const { compiled, selection } = resolveSelectionTokens(compiledInput, selectionInput, context);
+
     const result = await this.executeSelection(compiled, selection, context);
 
     // Server-side totals (#1753) — re-run the selection grouped by each

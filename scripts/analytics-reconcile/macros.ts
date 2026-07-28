@@ -2,14 +2,18 @@
 //
 // ADR-0021 Phase 2 — date-macro resolver for the reconciliation harness.
 //
-// In production the renderer (@object-ui/core `resolveDateMacros()`) resolves
-// `{today}` / `{current_quarter_start}` / `{30_days_ago}` to concrete dates
-// BEFORE issuing the query — identically for the legacy and dataset forms. This
-// repo has no runtime resolver, so the harness must resolve them itself, or the
-// two paths diverge on the unparseable placeholder (the dataset filter-normalizer
-// drops an unparseable date filter; engine.aggregate keeps it). The resolved
-// VALUE is arbitrary — what matters is that BOTH paths receive the identical
-// concrete filter, so equality holds iff the two query paths agree semantically.
+// In production `{today}` / `{current_quarter_start}` / `{30_days_ago}` resolve
+// to concrete dates BEFORE the query runs — in the renderer (@object-ui/core
+// `resolveDateMacros()`) or, since framework#3582, server-side in
+// `resolveFilterTokens()` (@objectstack/core). The harness pre-resolves them
+// itself for a different reason: it must hand BOTH compared paths the byte-identical
+// concrete filter, so any difference in the result is a semantic disagreement
+// between the paths rather than a difference in when each resolved the clock.
+//
+// This is also why it does NOT call `resolveFilterTokens()`: that emits ISO
+// strings (the driver then coerces per column), while the harness compares raw
+// stored values and wants epoch-millis directly. The resolved VALUE is arbitrary
+// here — only its identity across the two paths matters.
 //
 // Token grammar mirrors packages/spec/src/data/date-macros.zod.ts.
 
