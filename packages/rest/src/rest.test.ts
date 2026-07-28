@@ -2365,6 +2365,44 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.error).toBe('线索信息不完整');
     expect(r.body.object).toBeUndefined();
   });
+
+  // [#3770] The protocol's registry gate is now the PRIMARY producer of the
+  // unknown-object 404 — it answers from the schema registry before the name
+  // ever becomes a table name, instead of the REST layer inferring it from a
+  // driver's error string. Both producers must land on ONE wire envelope, or
+  // a client keying on `code` sees which layer noticed rather than what
+  // happened.
+  const objectNotFound = (object: string) =>
+    Object.assign(new Error(`Object '${object}' not found`), {
+      code: 'OBJECT_NOT_FOUND',
+      status: 404,
+      object,
+    });
+
+  it('maps the protocol registry gate OBJECT_NOT_FOUND → 404 object_not_found', () => {
+    const r = mapDataError(objectNotFound('ghost'), 'ghost');
+    expect(r.status).toBe(404);
+    expect(r.body.code).toBe('object_not_found');
+    expect(r.body.object).toBe('ghost');
+  });
+
+  it('emits the identical envelope whether the gate or the driver detected it', () => {
+    const fromGate = mapDataError(objectNotFound('ghost'), 'ghost');
+    const fromDriver = mapDataError(sqliteError('no such table: ghost'), 'ghost');
+    expect(fromGate).toEqual(fromDriver);
+  });
+
+  it('names the object from the error itself when the caller passes none', () => {
+    const r = mapDataError(objectNotFound('ghost'));
+    expect(r.status).toBe(404);
+    expect(r.body.code).toBe('object_not_found');
+    expect(r.body.object).toBe('ghost');
+  });
+
+  it('does not let the generic 4xx passthrough ship the internal SCREAMING_CASE code', () => {
+    const r = mapDataError(objectNotFound('ghost'), 'ghost');
+    expect(r.body.code).not.toBe('OBJECT_NOT_FOUND');
+  });
 });
 
 // ---------------------------------------------------------------------------

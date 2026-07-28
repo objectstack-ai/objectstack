@@ -53,12 +53,22 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
 
 
 /**
- * Map a data-layer error to a clean HTTP response. Unknown-object errors
- * (SQLite "no such table", PG "relation does not exist", protocol
- * "object not found", etc.) are surfaced as a 404 with `code: 'object_not_found'`
- * so clients can distinguish "object isn't registered" from real server
- * faults. Anything else becomes a 400 (bad request) preserving prior
- * behavior. Genuine 500s are still logged.
+ * Map a data-layer error to a clean HTTP response. Unknown-object errors are
+ * surfaced as a 404 with `code: 'object_not_found'` so clients can distinguish
+ * "object isn't registered" from real server faults. Anything else becomes a
+ * 400 (bad request) preserving prior behavior. Genuine 500s are still logged.
+ *
+ * Two sources produce that 404, and since #3770 the FIRST one is the primary:
+ *  - `code: 'OBJECT_NOT_FOUND'` from the protocol's registry gate
+ *    (`assertObjectRegistered`) — an authoritative, driver-independent answer
+ *    raised before the object name is ever turned into a table name.
+ *  - Driver error strings (SQLite "no such table", PG "relation does not
+ *    exist", …) — retained as the safety net for the *other* failure, an
+ *    object that IS registered but whose physical table is missing (metadata /
+ *    schema drift), plus engine-direct callers that bypass the protocol.
+ *    Before #3770 this string match was the ONLY thing producing the 404,
+ *    which is why an unregistered object whose table happened to exist was
+ *    served instead of rejected.
  *
  * `PermissionDeniedError` (thrown by `SecurityPlugin`) MUST be caught
  * before the unknown-object heuristic, otherwise its message —
@@ -197,6 +207,25 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             body: {
                 error: error.innerMessage,
                 ...(object ? { object } : {}),
+            },
+        };
+    }
+    // [#3770] Object does not exist — thrown by the protocol's registry gate
+    // (`assertObjectRegistered`, which covers every data entry point) and by
+    // `cloneData`. Mapped to the SAME envelope the driver-string branch below
+    // produces, so one condition has exactly one wire code (`object_not_found`,
+    // the canonical `ApiErrorCode`) no matter which layer detected it — the
+    // point of #3770 is that this 404 no longer depends on a driver erroring
+    // on a missing table. Must precede the generic 4xx passthrough, which
+    // would otherwise ship the internal SCREAMING_CASE code verbatim.
+    if (error?.code === 'OBJECT_NOT_FOUND') {
+        const name = error?.object ?? object;
+        return {
+            status: 404,
+            body: {
+                error: name ? `Object '${name}' is not registered` : 'Object not found',
+                code: 'object_not_found',
+                ...(name ? { object: name } : {}),
             },
         };
     }
@@ -414,7 +443,13 @@ export function mapDataError(error: any, object?: string): { status: number; bod
  * uniformly across CRUD, batch, metadata, UI and discovery routes.
  */
 function sendError(res: any, error: any, object?: string): void {
-    if (typeof error?.status === 'number' && error.status >= 400 && error.status < 600) {
+    // [#3770] `OBJECT_NOT_FOUND` is deliberately excluded from this
+    // status-passthrough: `mapDataError` owns its canonical envelope
+    // (`object_not_found`), and short-circuiting here would ship a second wire
+    // code for the same condition depending on which route caught it.
+    const passThroughStatus = error?.code !== 'OBJECT_NOT_FOUND'
+        && typeof error?.status === 'number' && error.status >= 400 && error.status < 600;
+    if (passThroughStatus) {
         const safeMsg = typeof error.message === 'string' && error.message.length < 500
             ? error.message
             : 'Request failed';
@@ -1139,10 +1174,32 @@ export class RestServer {
      * - `enable.apiMethods` (non-empty whitelist) → unlisted operations rejected (405).
      *
      * Default-allow: objects with no `enable` block (or `apiEnabled` unset/true and
-     * no `apiMethods` whitelist) behave exactly as before — no regression. Unknown
-     * objects fall through to the normal 404 path. A metadata-read failure does not
-     * block (the data call itself needs the same metadata and will surface the
-     * error). Returns `true` when the request was blocked (response already sent).
+     * no `apiMethods` whitelist) behave exactly as before — no regression. A
+     * metadata-read failure does not block (the data call itself needs the same
+     * metadata and will surface the error). Returns `true` when the request was
+     * blocked (response already sent).
+     *
+     * ## Unknown objects (#3770)
+     *
+     * An object this gate cannot find in metadata is passed through — there is no
+     * declared exposure policy to enforce on it, so there is nothing for this gate
+     * to decide. What CLOSES it is downstream, and it is worth naming precisely
+     * because the previous note here named the wrong thing ("let the data path
+     * 404" — a fallback that did not exist):
+     *
+     *  1. `protocol.assertObjectRegistered` (#3770) rejects every data entry point
+     *     for an object absent from the schema registry with 404
+     *     `OBJECT_NOT_FOUND`, BEFORE the engine turns the name into a table name.
+     *     That is the real 404, and unlike the old assumption it does not depend
+     *     on a driver happening to error on a missing table — which is why an
+     *     unregistered object whose physical table DID exist used to be served.
+     *  2. plugin-security's `getObjectSecurityMeta` (#3545) reports an
+     *     `unresolved` posture for the same object, and the engine middleware,
+     *     `canExport` and `getReadableFields` fail CLOSED on it.
+     *
+     * Neither is a reason to widen this gate: (1) is the existence answer and (2)
+     * is the authorization answer. Do not relax the pass-through on the assumption
+     * that some other layer 404s — verify which one, as #3770 did.
      *
      * See ADR-0049 (#1889): shipping a non-enforcing `apiEnabled` is false security.
      */
@@ -1158,7 +1215,9 @@ export class RestServer {
         if (!objectName) return false;
         const items = await this.loadObjectItems(p, environmentId);
         const obj = items.find((o: any) => o?.name === objectName);
-        if (!obj) return false; // unknown object → let the data path 404
+        // [#3770] Unknown object → no declared exposure policy to enforce here;
+        // the data path's registry gate 404s it. See the doc comment above.
+        if (!obj) return false;
         const denial = apiAccessDenialFromEnable(obj.enable, objectName, operation, opts);
         if (denial) {
             res.status(denial.status).json(denial.body);
