@@ -557,11 +557,14 @@ export const FieldSchema = lazySchema(() => z.object({
    */
   visibleWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
   readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`"),
-  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. Canonical name for `conditionalRequired`."),
+  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. Canonical slot; the deprecated `conditionalRequired` alias is lowered into this one at parse time."),
 
   /** Conditional Requirements
-   *  @deprecated Alias of `requiredWhen` — kept for back-compat. */
-  conditionalRequired: ExpressionInputSchema.optional().describe('Predicate (CEL) — field is required when TRUE. Alias of `requiredWhen`.'),
+   *  @deprecated Alias of `requiredWhen`. Accepted on input, lowered into
+   *  `requiredWhen` at parse time, then **removed from the parsed output**
+   *  (#3754) — so every consumer reads one canonical slot. When both are set,
+   *  `requiredWhen` wins and this value is discarded. */
+  conditionalRequired: ExpressionInputSchema.optional().describe('@deprecated — Use requiredWhen instead. Lowered into requiredWhen during parsing and dropped from the parsed output; when both are set, requiredWhen wins.'),
 
   /**
    * Form widget override. Names a registered field/UI component to render this
@@ -633,9 +636,37 @@ export const FieldSchema = lazySchema(() => z.object({
   // driver builds indexes from the object's `indexes[]` array; a field-level
   // `index: true` created no index. Declare the index in object `indexes[]`.
   externalId: z.boolean().default(false).describe('Is external ID for upsert operations'),
+}).transform((data) => {
+  // #3754: lower the deprecated `conditionalRequired` alias into the canonical
+  // `requiredWhen` and DROP it from the output — the shape #3713/#3742 settled on
+  // for `action.execute` → `target`, and #1891 for `agent.knowledge.topics` →
+  // `sources`. Canonical wins when both are set.
+  //
+  // Why this is worth doing even though today's readers all agree: leaving both
+  // keys live in the parsed output means every consumer has to re-implement the
+  // precedence, and that is exactly the condition that produced #3713 — there the
+  // server kept `target` while objectui's ActionRunner preferred the alias, so one
+  // button ran two different scripts. The server side here happens to get it right
+  // (`rule-validator.ts` reads `requiredWhen ?? conditionalRequired`), but nothing
+  // in the contract *made* it right. Folding once, here, removes the chance.
+  //
+  // Authors may still write `conditionalRequired` — it stays on the parse-input
+  // type (`FieldParseInput`) and in the reference docs; only the output is canonical.
+  const { conditionalRequired, ...rest } = data;
+  if (conditionalRequired && !rest.requiredWhen) {
+    return { ...rest, requiredWhen: conditionalRequired };
+  }
+  return rest;
 }));
 
 export type Field = z.infer<typeof FieldSchema>;
+/**
+ * Author-facing parse INPUT for a field. Unlike {@link Field} (the parsed output)
+ * this still carries the deprecated `conditionalRequired` alias, which the schema
+ * lowers into `requiredWhen` at parse time (#3754). Distinct from the
+ * `FieldInput` factory-helper type further down, which is `Partial<Field>`.
+ */
+export type FieldParseInput = z.input<typeof FieldSchema>;
 export type SelectOption = z.infer<typeof SelectOptionSchema>;
 export type LocationCoordinates = z.infer<typeof LocationCoordinatesSchema>;
 export type Address = z.infer<typeof AddressSchema>;

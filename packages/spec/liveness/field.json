@@ -83,7 +83,8 @@
     },
     "conditionalRequired": {
       "status": "live",
-      "note": "deprecated alias of requiredWhen — plan removal."
+      "evidence": "packages/spec/src/data/field.zod.ts:639 — the FieldSchema .transform lowers conditionalRequired -> requiredWhen and DROPS the alias, so authoring it changes what the validator enforces",
+      "note": "#3754: folded at parse time and removed from the parsed output (same shape as action.execute -> target in #3742, agent.knowledge.topics -> sources in #1891). Previously BOTH keys stayed live in the output with no canonicalization, so each consumer re-derived the precedence — the condition that produced the #3713 divergence. objectql rule-validator.ts keeps its `requiredWhen ?? conditionalRequired` fallback on purpose: raw (unparsed) metadata still reaches evaluateValidationRules. Removal of the input key is still the endgame."
     },
     "readonly": {
       "status": "live",

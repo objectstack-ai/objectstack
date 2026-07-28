@@ -421,7 +421,13 @@ interface ConditionalFieldOption {
 
 interface ConditionalFieldDef {
   requiredWhen?: string | Expression;
-  conditionalRequired?: string | Expression; // back-compat alias of requiredWhen
+  // Back-compat alias of `requiredWhen`. Since #3754 `FieldSchema`'s transform
+  // lowers this into `requiredWhen` and drops it, so PARSED metadata never carries
+  // it — but the alias-reading fallback below stays deliberately: this validator is
+  // also handed RAW, unparsed field definitions (see the `conditionalRequired`
+  // case in rule-validator.test.ts), and those still need honouring. Canonical
+  // first, always — never `conditionalRequired ?? requiredWhen`.
+  conditionalRequired?: string | Expression;
   readonlyWhen?: string | Expression;
   /** Static, unconditional read-only flag (`field.readonly`). #2948. */
   readonly?: boolean;

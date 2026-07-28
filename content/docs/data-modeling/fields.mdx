@@ -314,7 +314,7 @@ For values that must be encrypted at rest (API keys, tokens, DB passwords), use 
 | `visibleWhen` | `string \| Expression` | CEL predicate; field is shown only when `TRUE` |
 | `readonlyWhen` | `string \| Expression` | CEL predicate; field is read-only when `TRUE` |
 | `requiredWhen` | `string \| Expression` | CEL predicate; field is required when `TRUE` |
-| `conditionalRequired` | `string \| Expression` | Deprecated alias of `requiredWhen` |
+| `conditionalRequired` | `string \| Expression` | Deprecated alias of `requiredWhen` — lowered into it at parse time, then dropped |
 | `multiple` | `boolean` | Allow multiple values (for select, lookup, file) |
 
 ```typescript
@@ -344,7 +344,10 @@ changes, including row-scoped rules inside inline master-detail grids. The
 server enforces `requiredWhen` on submit and ignores writes to fields whose
 `readonlyWhen` predicate is `TRUE`, so client-side affordances are not the
 only guard. Use `requiredWhen` for new metadata; keep `conditionalRequired`
-only for older packages that already emitted it.
+only for older packages that already emitted it. The alias is still accepted on
+input, but it is lowered into `requiredWhen` at parse time and then removed from
+the parsed metadata, so every consumer reads one canonical slot — if a field
+declares both, `requiredWhen` wins and the alias is discarded.
 
 ## Naming Conventions
 

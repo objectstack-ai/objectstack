@@ -34,7 +34,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 | `visibleWhen` | `string \| Expression` | — | CEL predicate; field is shown only when `TRUE` |
 | `readonlyWhen` | `string \| Expression` | — | CEL predicate; field is read-only when `TRUE` |
 | `requiredWhen` | `string \| Expression` | — | CEL predicate; field is required when `TRUE` |
-| `conditionalRequired` | `string \| Expression` | — | Deprecated alias of `requiredWhen` |
+| `conditionalRequired` | `string \| Expression` | — | Deprecated alias of `requiredWhen` — lowered into it at parse time, then dropped from the parsed metadata |
 
 ---
 

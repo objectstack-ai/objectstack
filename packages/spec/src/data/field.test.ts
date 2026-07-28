@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { 
-  FieldSchema, 
-  FieldType, 
+import {
+  FieldSchema,
+  FieldType,
   SelectOptionSchema,
   CurrencyConfigSchema,
   CurrencyValueSchema,
@@ -10,6 +10,7 @@ import {
   type CurrencyConfig,
   type CurrencyValue,
 } from './field.zod';
+import { ObjectSchema } from './object.zod';
 
 describe('FieldType', () => {
   it('should accept valid field types', () => {
@@ -940,20 +941,26 @@ describe('FieldSchema - group property', () => {
   });
 });
 
-describe('FieldSchema - conditionalRequired property', () => {
-  it('should accept a field with conditionalRequired formula', () => {
+describe('FieldSchema - conditionalRequired → requiredWhen migration (#3754)', () => {
+  // These three cases used to assert that `conditionalRequired` SURVIVED parse,
+  // which pinned the alias into the output and left every consumer to invent its
+  // own precedence — the condition that produced #3713 for `action.execute`. The
+  // alias is now lowered into the canonical `requiredWhen` and dropped.
+  it('lowers a conditionalRequired formula into requiredWhen', () => {
     const result = FieldSchema.parse({
       type: 'text',
       conditionalRequired: "status = 'closed_won'",
     });
-    expect(result.conditionalRequired).toEqual({ dialect: 'cel', source: "status = 'closed_won'" });
+    expect(result.requiredWhen).toEqual({ dialect: 'cel', source: "status = 'closed_won'" });
+    expect('conditionalRequired' in result).toBe(false);
   });
 
   it('should accept a field without conditionalRequired (optional)', () => {
     const result = FieldSchema.parse({
       type: 'text',
     });
-    expect(result.conditionalRequired).toBeUndefined();
+    expect(result.requiredWhen).toBeUndefined();
+    expect('conditionalRequired' in result).toBe(false);
   });
 
   it('should allow combining required and conditionalRequired', () => {
@@ -963,7 +970,35 @@ describe('FieldSchema - conditionalRequired property', () => {
       conditionalRequired: 'amount > 1000',
     });
     expect(result.required).toBe(false);
-    expect(result.conditionalRequired).toEqual({ dialect: 'cel', source: 'amount > 1000' });
+    expect(result.requiredWhen).toEqual({ dialect: 'cel', source: 'amount > 1000' });
+    expect('conditionalRequired' in result).toBe(false);
+  });
+
+  it('keeps requiredWhen when BOTH are declared, and drops the alias', () => {
+    const result = FieldSchema.parse({
+      type: 'text',
+      requiredWhen: "record.status == 'sent'",
+      conditionalRequired: 'record.amount > 1000',
+    });
+    expect(result.requiredWhen).toEqual({ dialect: 'cel', source: "record.status == 'sent'" });
+    expect('conditionalRequired' in result).toBe(false);
+    expect(Object.keys(result)).not.toContain('conditionalRequired');
+    expect(JSON.parse(JSON.stringify(result)).conditionalRequired).toBeUndefined();
+  });
+
+  it('survives a field nested in an object (the real authoring path)', () => {
+    // The alias has to be gone from the metadata a renderer actually receives,
+    // not just from a bare FieldSchema.parse() in a unit test.
+    const parsed = ObjectSchema.parse({
+      name: 'crm_deal',
+      label: 'Deal',
+      fields: {
+        amount: { type: 'currency', conditionalRequired: "record.stage == 'closing'" },
+      },
+    });
+    const amount = parsed.fields.amount as Record<string, unknown>;
+    expect(amount.requiredWhen).toEqual({ dialect: 'cel', source: "record.stage == 'closing'" });
+    expect('conditionalRequired' in amount).toBe(false);
   });
 });
 
@@ -987,14 +1022,18 @@ describe('FieldSchema - conditional field rules (visibleWhen / readonlyWhen / re
     expect(result.requiredWhen).toBeUndefined();
   });
 
-  it('requiredWhen and its alias conditionalRequired can coexist', () => {
+  it('requiredWhen and its alias conditionalRequired can NOT coexist — canonical wins, alias dropped (#3754)', () => {
+    // Inverted from the original assertion, which pinned the two keys as
+    // coexisting in the parsed output. Coexistence is the whole problem: it makes
+    // every consumer re-derive the precedence, which is how #3713 produced a
+    // button that ran one script on the server and a different one in the browser.
     const result = FieldSchema.parse({
       type: 'text',
       requiredWhen: "record.status == 'sent'",
       conditionalRequired: "record.status == 'closed_won'",
     });
     expect(result.requiredWhen).toEqual({ dialect: 'cel', source: "record.status == 'sent'" });
-    expect(result.conditionalRequired).toEqual({ dialect: 'cel', source: "record.status == 'closed_won'" });
+    expect('conditionalRequired' in result).toBe(false);
   });
 });
 
