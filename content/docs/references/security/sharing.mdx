@@ -36,7 +36,7 @@ const result = CriteriaSharingRule.parse(data);
 | **description** | `string` | optional | Administrative notes |
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | optional |  |
-| **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
+| **accessLevel** | `Enum<'read' \| 'edit'>` | optional |  |
 | **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>; value: string }` | ✅ | The recipient of the shared access |
 | **type** | `'criteria'` | ✅ |  |
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
@@ -75,7 +75,6 @@ const result = CriteriaSharingRule.parse(data);
 
 * `read`
 * `edit`
-* `full`
 
 
 ---
@@ -91,7 +90,7 @@ const result = CriteriaSharingRule.parse(data);
 | **description** | `string` | optional | Administrative notes |
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | optional |  |
-| **accessLevel** | `Enum<'read' \| 'edit' \| 'full'>` | optional |  |
+| **accessLevel** | `Enum<'read' \| 'edit'>` | optional |  |
 | **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>; value: string }` | ✅ | The recipient of the shared access |
 | **type** | `'criteria'` | ✅ |  |
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |

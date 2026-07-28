@@ -153,7 +153,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | :--- | :--- | :--- | :--- |
 | **kind** | `Enum<'tenant_filter' \| 'owd_baseline' \| 'ownership' \| 'record_share' \| 'sharing_rule' \| 'team' \| 'territory' \| 'rls_policy'>` | ✅ | The row-visibility source kind evaluated for this record at this layer. |
 | **name** | `string` | ✅ | Stable identifier of the concrete rule, share, or policy that was evaluated. |
-| **grants** | `Enum<'read' \| 'edit' \| 'full'>` | optional | Access level a sharing source grants on the record (mirrors SharingLevel). |
+| **grants** | `Enum<'read' \| 'edit' \| 'full'>` | optional | Access level a sharing source grants on the record (authorable: read/edit; `full` appears only for legacy rows pending normalisation). |
 | **via** | `string` | optional | How the rule reached the principal — recipient group/position, ownership, or the matching criteria. |
 | **predicate** | `any` | optional | The row predicate this rule contributed, when it is filter-shaped (null = unrestricted). |
 | **effect** | `Enum<'admits' \| 'excludes' \| 'neutral'>` | ✅ | The rule's effect on THIS record: admits, excludes, or neutral. |
