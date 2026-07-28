@@ -616,6 +616,69 @@ describe('ApprovalService (node era)', () => {
     expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
   });
 
+  // #3807 — an app's org tree is normally SEEDED, and a seed cannot know the
+  // organization id the runtime mints at boot, so those rows carry
+  // `organization_id = null` while every approval request carries an org. The
+  // old strict equality made each of them invisible and every `department`
+  // approver resolved to the dead `department:<id>` literal.
+  const departmentInput = (value: string) => positionInput({
+    config: {
+      approvers: [{ type: 'department' as const, value }],
+      behavior: 'first_response' as const,
+      lockRecord: true,
+    },
+  });
+
+  it('department approver: an env-wide (null-org) business unit still resolves (#3807)', async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'bu_seeded', organization_id: null, active: true },
+      { id: 'bu_seeded_child', parent_business_unit_id: 'bu_seeded', organization_id: null, active: true },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'bm1', business_unit_id: 'bu_seeded', user_id: 'u5' },
+      { id: 'bm2', business_unit_id: 'bu_seeded_child', user_id: 'u6' },
+    ];
+    const req = await svc.openNodeRequest(departmentInput('bu_seeded'), CTX);
+    // Both the seed check AND the subtree descent must see the null-org rows.
+    expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+  });
+
+  it('department approver: another organization’s unit stays invisible (#3807 keeps the wall)', async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'bu_other', organization_id: 't2', active: true },
+      { id: 'bu_other_child', parent_business_unit_id: 'bu_other', organization_id: 't2', active: true },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'bm1', business_unit_id: 'bu_other', user_id: 'intruder' },
+      { id: 'bm2', business_unit_id: 'bu_other_child', user_id: 'intruder2' },
+    ];
+    const req = await svc.openNodeRequest(departmentInput('bu_other'), CTX);
+    expect(req.pending_approvers).toEqual(['department:bu_other']);
+  });
+
+  it('department approver: a null-org subtree does not drag in another org’s child unit (#3807)', async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'bu_seeded', organization_id: null, active: true },
+      { id: 'bu_mine', parent_business_unit_id: 'bu_seeded', organization_id: 't1', active: true },
+      { id: 'bu_theirs', parent_business_unit_id: 'bu_seeded', organization_id: 't2', active: true },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'bm1', business_unit_id: 'bu_mine', user_id: 'u5' },
+      { id: 'bm2', business_unit_id: 'bu_theirs', user_id: 'intruder' },
+    ];
+    const req = await svc.openNodeRequest(departmentInput('bu_seeded'), CTX);
+    expect(req.pending_approvers).toEqual(['u5']);
+  });
+
+  it('department approver: an inactive env-wide unit still contributes nobody (#3807)', async () => {
+    engine._tables['sys_business_unit'] = [{ id: 'bu_seeded', organization_id: null, active: false }];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'bm1', business_unit_id: 'bu_seeded', user_id: 'u5' },
+    ];
+    const req = await svc.openNodeRequest(departmentInput('bu_seeded'), CTX);
+    expect(req.pending_approvers).toEqual(['department:bu_seeded']);
+  });
+
   // ── decideNode ──────────────────────────────────────────────────
 
   it('decideNode: first_response approve finalizes immediately', async () => {

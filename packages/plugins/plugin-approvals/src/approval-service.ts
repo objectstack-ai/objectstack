@@ -802,15 +802,41 @@ export class ApprovalService implements IApprovalService {
     return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
   }
 
+  /**
+   * Tenant scope for a `sys_business_unit` read that may legitimately be
+   * env-wide (#3807).
+   *
+   * `organization_id = null` on a platform object means "owned by no
+   * organization" — a row written by a seed, the file layer, or bootstrap,
+   * i.e. before (or outside) any org exists. A strict
+   * `organization_id = <request org>` equality made every such row invisible:
+   * the seed check below found nothing, the whole expansion returned `[]`, and
+   * the approver fell back to the dead `department:<id>` literal that routes to
+   * nobody. That is not an edge case — an app's org tree is normally seeded
+   * (a seed cannot know the org id the runtime mints at boot) while the
+   * approval request always carries one, so EVERY department approver a
+   * designer could pick resolved to nobody.
+   *
+   * Widen to "this org ∪ env-wide", the same predicate `sys_metadata`'s
+   * pending-draft listing settled on for the identical reason. Another org's
+   * unit still fails the match, so the wall between two organizations is
+   * unchanged — only rows belonging to no org at all become visible.
+   */
+  private businessUnitOrgScope(
+    filter: Record<string, unknown>,
+    organizationId?: string | null,
+  ): Record<string, unknown> {
+    if (!organizationId) return filter;
+    return { ...filter, $or: [{ organization_id: organizationId }, { organization_id: null }] };
+  }
+
   /** Recursive department — walks `sys_business_unit.parent_business_unit_id`. */
   private async expandBusinessUnitUsers(businessUnitId: string, organizationId?: string | null): Promise<string[]> {
     if (!businessUnitId) return [];
     // Seed sanity check: skip if dept doesn't exist or is inactive within tenant.
     try {
       const seed = await this.engine.find('sys_business_unit', {
-        filter: organizationId
-          ? { id: businessUnitId, organization_id: organizationId }
-          : { id: businessUnitId },
+        filter: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
         fields: ['id', 'active'],
         limit: 1,
         context: SYSTEM_CTX,
@@ -825,8 +851,10 @@ export class ApprovalService implements IApprovalService {
       const parent = queue.shift()!;
       let kids: any[] = [];
       try {
-        const filter: any = { parent_business_unit_id: parent, active: { $ne: false } };
-        if (organizationId) filter.organization_id = organizationId;
+        const filter = this.businessUnitOrgScope(
+          { parent_business_unit_id: parent, active: { $ne: false } },
+          organizationId,
+        );
         kids = await this.engine.find('sys_business_unit', { filter, fields: ['id'], limit: 1000, context: SYSTEM_CTX } as any);
       } catch { kids = []; }
       for (const k of kids ?? []) {
