@@ -175,6 +175,20 @@ function toNumber(v: any): number {
  * Bucket a date-like value into an ISO-formatted period label. Weeks start
  * Monday and use ISO week numbering.
  *
+ * ⚠️ **This is one of two implementations of the same contract.** A driver that
+ * advertises `supports.queryDateGranularity[g]` buckets that granularity in SQL
+ * instead, and `engine.aggregate` picks between them per query — so a label
+ * produced here must equal the label that driver's SQL produces for the same
+ * instant, or a drill-down breaks when it crosses the seam. Editing the labels
+ * below means editing every driver's bucket expression too.
+ *
+ * The seam is enforced by `checkDateBucketParity` (@objectstack/verify), run
+ * against the real drivers in
+ * `packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts`. Three
+ * driver test files also hand-copy this function for self-containment; those
+ * copies cannot detect their own drift, which is why the executable check
+ * exists.
+ *
  * `timezone` (ADR-0053 Phase 2) resolves the calendar day in a reference zone
  * so an instant near a tz day-boundary buckets where a user in that zone would
  * expect. An unset / `'UTC'` / invalid zone keeps the historical UTC bucketing.

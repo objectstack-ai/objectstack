@@ -1638,6 +1638,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../plugins/driver-sql
+      '@objectstack/driver-sqlite-wasm':
+        specifier: workspace:*
+        version: link:../../plugins/driver-sqlite-wasm
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1

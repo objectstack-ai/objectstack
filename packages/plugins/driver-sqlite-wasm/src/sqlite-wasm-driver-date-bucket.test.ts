@@ -17,7 +17,16 @@ import { SqliteWasmDriver } from '../src/index.js';
 
 type Granularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
-/** ⚠️ Keep in sync with `packages/objectql/src/in-memory-aggregation.ts#bucketDateValue` */
+/**
+ * ⚠️ Keep in sync with `packages/objectql/src/in-memory-aggregation.ts#bucketDateValue`.
+ *
+ * This copy exists because driver-sql cannot depend on objectql. Nothing here
+ * can detect it drifting from its original — a stale copy and the SQL agree
+ * with each other while both are wrong. The executable check is
+ * `checkDateBucketParity` (@objectstack/verify), run against the real drivers
+ * in `packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts`, where
+ * the reference side is the REAL `applyInMemoryAggregation`.
+ */
 function bucketDateValue(value: unknown, g: Granularity): string {
   if (value == null) return '(null)';
   // A finite number is epoch milliseconds — SQLite's `Field.datetime` storage.
