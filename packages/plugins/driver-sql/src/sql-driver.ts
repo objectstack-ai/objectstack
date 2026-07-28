@@ -496,10 +496,16 @@ export class SqlDriver implements IDataDriver {
    * Exposed as `{sql, bindings}` (not `Knex.Raw`) so callers can both
    * `groupByRaw()` and embed the same expression inside a `select() as alias`
    * with correctly forwarded identifier bindings.
+   *
+   * `table` is the coercion key of the object being aggregated (what
+   * {@link coercionKey} returns for the builder). It is what makes the SQLite
+   * expression storage-aware — see {@link sqliteTemporalArg}. Omitting it yields
+   * the plain column form, which is correct for any TEXT-stored column.
    */
   protected buildDateBucketExpr(
     field: string,
     granularity: 'day' | 'week' | 'month' | 'quarter' | 'year',
+    table?: string | null,
   ): { sql: string; bindings: any[] } | null {
     if (!this.dateGranularityCapabilities[granularity]) return null;
 
@@ -524,11 +530,15 @@ export class SqlDriver implements IDataDriver {
     }
 
     if (this.isSqlite) {
+      // `arg` is a bare `??` for a TEXT-stored column and an epoch→julian-day
+      // normalization for a `Field.datetime` one (#3773).
+      const { sql: arg, bindings: argBindings } = this.sqliteTemporalArg(field, table);
+      const fmt = (f: string) => ({ sql: `strftime('${f}', ${arg})`, bindings: [...argBindings] });
       switch (granularity) {
-        case 'year':    return { sql: `strftime('%Y', ??)`, bindings: [field] };
-        case 'month':   return { sql: `strftime('%Y-%m', ??)`, bindings: [field] };
-        case 'day':     return { sql: `strftime('%Y-%m-%d', ??)`, bindings: [field] };
-        case 'quarter': return { sql: `(strftime('%Y', ??) || '-Q' || ((cast(strftime('%m', ??) as integer) - 1) / 3 + 1))`, bindings: [field, field] };
+        case 'year':    return fmt('%Y');
+        case 'month':   return fmt('%Y-%m');
+        case 'day':     return fmt('%Y-%m-%d');
+        case 'quarter': return { sql: `(strftime('%Y', ${arg}) || '-Q' || ((cast(strftime('%m', ${arg}) as integer) - 1) / 3 + 1))`, bindings: [...argBindings, ...argBindings] };
         case 'week':    return null; // see capabilities note
       }
     }
@@ -1579,13 +1589,19 @@ export class SqlDriver implements IDataDriver {
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
       // items we emit a dialect-specific bucket expression aliased as the
       // field name so the resulting row keys match in-memory bucketDateValue.
+      //
+      // The bucket expression needs the same coercion key `applyFilters` just
+      // used above, so the WHERE window and the GROUP BY buckets agree on how
+      // the column is stored — disagreeing is exactly how #3773 produced an
+      // in-window total spread over a single `(null)` bucket.
+      const bucketTable = this.coercionKey(builder);
       for (const g of query.groupBy as Array<string | { field: string; dateGranularity?: string }>) {
         if (typeof g === 'string') {
           builder.groupBy(g);
           builder.select(g);
         } else if (g && typeof g === 'object' && g.field) {
           if (g.dateGranularity) {
-            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity as any);
+            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity as any, bucketTable);
             if (!bucket) {
               throw new Error(
                 `SqlDriver: dateGranularity '${g.dateGranularity}' not supported on dialect ` +
@@ -3332,14 +3348,72 @@ export class SqlDriver implements IDataDriver {
       // that never matches. Postgres/MySQL map datetime to a native TIMESTAMP
       // (see `defineColumn` → `table.timestamp`), where Knex binds an ISO string
       // or `Date` correctly — coercing to an epoch integer there would compare an
-      // INTEGER against a TIMESTAMP and break the query. So gate on dialect.
-      if (!this.isSqlite) return value;
+      // INTEGER against a TIMESTAMP and break the query. So gate on the storage
+      // form, via the predicate the bucket expression reads too.
+      if (!this.isEpochStoredDatetime(table, field)) return value;
       const ms = toMs(value);
       return ms == null ? value : ms;
     }
 
     // Field.date — normalise the comparand to YYYY-MM-DD (ADR-0053 Phase 1).
     return this.toDateOnly(value);
+  }
+
+  /**
+   * Does this column store instants as epoch **milliseconds** rather than as a
+   * temporal type SQL understands natively?
+   *
+   * True for a SQLite `Field.datetime` and nothing else: better-sqlite3 binds a
+   * JS `Date` as `.getTime()`, while Postgres/MySQL get a real TIMESTAMP column
+   * (`defineColumn` → `table.timestamp`) and `Field.date` is ISO TEXT on every
+   * dialect.
+   *
+   * This is the ONE predicate for that storage convention. Both consumers of it
+   * have already been bitten by disagreeing about storage — the filter comparand
+   * (#2034: an ISO string compared against an INTEGER column matched nothing)
+   * and the aggregate bucket expression (#3773: `strftime` read the same INTEGER
+   * as a Julian day and bucketed everything as NULL) — so they share it rather
+   * than each carrying their own copy of the rule.
+   */
+  protected isEpochStoredDatetime(table: string | null | undefined, field: string): boolean {
+    if (!table || !this.isSqlite) return false;
+    return this.datetimeFields[table]?.has(field) === true;
+  }
+
+  /**
+   * The value expression to hand SQLite's `strftime()` for a bucketed column.
+   *
+   * A TEXT-stored column is passed straight through — `strftime` already parses
+   * `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SSZ` and the zone-naive `CURRENT_TIMESTAMP`
+   * form. An epoch-stored `Field.datetime` (see {@link isEpochStoredDatetime})
+   * must first be converted, or `strftime` reads the bare integer as a Julian
+   * day number — epoch ms is far outside the legal range, so every row buckets
+   * as NULL and a trend chart collapses into a single `(null)` bar.
+   *
+   * The conversion dispatches on the STORED value's type, not just the declared
+   * one, because a SQLite `Field.datetime` column is genuinely mixed-form: an
+   * explicit value bound as a JS `Date` lands as INTEGER/REAL epoch ms, while a
+   * `defaultValue: 'NOW()'` slot lands as TEXT (the same mix `formatOutput` →
+   * `normalizeSqliteDatetimeOutput` already repairs on read). Dividing a TEXT
+   * timestamp by 1000 would coerce it to its leading year — `'2026-01-10T…'/1000.0`
+   * is `2.026` seconds past the epoch, bucketing real rows into 1970 — which is
+   * strictly worse than the NULL it replaces, so the CASE is load-bearing.
+   *
+   * Normalising to a julian day (rather than emitting `strftime(fmt, x/1000.0,
+   * 'unixepoch')`) keeps ONE reusable scalar the caller can drop into any format
+   * string, including the two-reference quarter expression. `/1000.0` is real
+   * division on purpose: integer `/1000` truncates toward zero, which pushes a
+   * pre-1970 instant forward a day (`-1` → 1970-01-01 instead of 1969-12-31).
+   */
+  protected sqliteTemporalArg(
+    field: string,
+    table: string | null | undefined,
+  ): { sql: string; bindings: any[] } {
+    if (!this.isEpochStoredDatetime(table, field)) return { sql: '??', bindings: [field] };
+    return {
+      sql: `(case when typeof(??) in ('integer','real') then julianday(??/1000.0, 'unixepoch') else julianday(??) end)`,
+      bindings: [field, field, field],
+    };
   }
 
   /**

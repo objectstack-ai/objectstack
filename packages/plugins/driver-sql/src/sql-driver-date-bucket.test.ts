@@ -20,7 +20,9 @@ type Granularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 /** ⚠️ Keep in sync with `packages/objectql/src/in-memory-aggregation.ts#bucketDateValue` */
 function bucketDateValue(value: unknown, g: Granularity): string {
   if (value == null) return '(null)';
-  const d = value instanceof Date ? value : new Date(String(value));
+  // A finite number is epoch milliseconds — SQLite's `Field.datetime` storage.
+  const d =
+    value instanceof Date ? value : typeof value === 'number' ? new Date(value) : new Date(String(value));
   if (Number.isNaN(d.getTime())) return '(null)';
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth() + 1;

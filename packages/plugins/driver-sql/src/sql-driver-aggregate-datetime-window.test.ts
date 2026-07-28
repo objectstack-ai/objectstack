@@ -100,29 +100,26 @@ describe('SqlDriver.aggregate — ISO window over epoch-stored datetime (#3650)'
     expect(byMonth).toEqual({ '2026-01': 300, '2026-02': 30 });
   });
 
-  it('KNOWN GAP — bucketing an EPOCH-stored datetime collapses into one null bucket', async () => {
-    // Pre-existing, unrelated to #3650, and deliberately NOT fixed here — but
-    // it lands on the exact same query shape, so it is pinned rather than left
-    // to be rediscovered as "the dateRange fix did nothing".
-    //
-    // SQLite advertises `queryDateGranularity.month`, so `engine.aggregate`
-    // pushes the bucketing down to the driver — `engine.ts` only falls back to
-    // in-memory bucketing when a granularity is UNSUPPORTED or a non-UTC
-    // timezone is in play, neither of which applies here. The dialect
-    // expression is `strftime('%Y-%m', col)`, and SQLite reads a bare INTEGER
-    // as a Julian day number; an epoch-ms value is far outside the legal range,
-    // so every row buckets as NULL.
+  it('buckets an EPOCH-stored datetime inside the window (was one null bucket)', async () => {
+    // This assertion was pinned as a KNOWN GAP by #3650 and is the acceptance
+    // gate of the follow-up fix (#3773): SQLite advertises
+    // `queryDateGranularity.month`, so `engine.aggregate` pushes the bucketing
+    // down to the driver — `engine.ts` only falls back to in-memory bucketing
+    // when a granularity is UNSUPPORTED or a non-UTC timezone is in play,
+    // neither of which applies here. The dialect expression used to be a flat
+    // `strftime('%Y-%m', col)`, and SQLite reads a bare INTEGER as a Julian day
+    // number; an epoch-ms value is far outside the legal range, so every row
+    // bucketed as NULL and the whole trend chart collapsed to one bar.
     const rows = await driver.aggregate(TABLE, {
       groupBy: [{ field: 'closed_at', dateGranularity: 'month' }],
       aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
       where: window('closed_at'),
     } as any);
 
-    // The WINDOW works — the total is the in-window 330, not the full 1930 —
-    // which is what #3650 is responsible for. The BUCKETS are what is broken.
-    // When that is fixed, this becomes `{ '2026-01': 300, '2026-02': 30 }`.
+    // Two things have to hold at once: the WINDOW (#3650 — the total is the
+    // in-window 330, not the full 1930) and the BUCKETS (#3773).
     const byMonth = Object.fromEntries(rows.map((r: any) => [String(r.closed_at), Number(r.total)]));
-    expect(byMonth).toEqual({ null: 330 });
+    expect(byMonth).toEqual({ '2026-01': 300, '2026-02': 30 });
   });
 
   it('confines a date (TEXT-stored) aggregate to the same window', async () => {

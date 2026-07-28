@@ -1,0 +1,217 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * Date bucketing across the two SQLite storage forms (#3773).
+ *
+ * `sql-driver-date-bucket.test.ts` builds its fixture with
+ * `knex.schema.createTable` + `t.string('ts')`, so every value it buckets is ISO
+ * TEXT. That is only half of what SQLite actually holds: a `Field.datetime`
+ * declared through `initObjects` becomes INTEGER epoch **milliseconds** (knex
+ * binds a JS `Date` as `.getTime()`), and `strftime` reads a bare integer as a
+ * Julian day number — epoch ms is orders of magnitude outside the legal range,
+ * so every row bucketed as NULL and any datetime trend chart rendered as one
+ * `(null)` bar carrying the whole total.
+ *
+ * So this suite goes through `driver.initObjects([...])` — the path a real
+ * object takes — and sweeps every supported granularity against BOTH storage
+ * forms, asserting against the same `bucketDateValue` labels the in-memory
+ * fallback produces. Anything that buckets differently depending on how the
+ * column happens to be stored is the bug this file exists to catch.
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { SqlDriver } from '../src/index.js';
+
+type Granularity = 'day' | 'month' | 'quarter' | 'year';
+
+/** Every granularity SQLite advertises natively (week is bucketed in-memory). */
+const GRANULARITIES: Granularity[] = ['day', 'month', 'quarter', 'year'];
+
+/** ⚠️ Keep in sync with `packages/objectql/src/in-memory-aggregation.ts#bucketDateValue` */
+function bucketDateValue(value: unknown, g: Granularity): string {
+  if (value == null) return '(null)';
+  // A finite number is epoch milliseconds — SQLite's `Field.datetime` storage.
+  const d =
+    value instanceof Date ? value : typeof value === 'number' ? new Date(value) : new Date(String(value));
+  if (Number.isNaN(d.getTime())) return '(null)';
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth() + 1;
+  switch (g) {
+    case 'year': return String(y);
+    case 'quarter': return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+    case 'month': return `${y}-${String(m).padStart(2, '0')}`;
+    case 'day': return `${y}-${String(m).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  }
+}
+
+const TABLE = 'deal';
+
+/**
+ * One UTC instant per row, with its `Field.date` twin on the same calendar day
+ * so the two columns MUST produce identical labels at every granularity — the
+ * whole point being that storage form may not change the answer.
+ *
+ * Amounts are distinct powers of two: a bucket's sum names exactly which rows
+ * landed in it, so a mis-bucketing can't hide behind a coincidental total.
+ */
+const FIXTURE: Array<{ id: string; iso: string; amount: number }> = [
+  { id: 'r1', iso: '1969-12-31T23:59:59.999Z', amount: 1 },  // pre-epoch, 1ms before 1970
+  { id: 'r2', iso: '2025-11-15T09:00:00.000Z', amount: 2 },
+  { id: 'r3', iso: '2026-01-10T09:00:00.000Z', amount: 4 },
+  { id: 'r4', iso: '2026-01-20T23:59:59.000Z', amount: 8 },  // same month as r3
+  { id: 'r5', iso: '2026-02-14T00:00:00.000Z', amount: 16 }, // exact midnight
+  { id: 'r6', iso: '2026-06-30T23:59:59.000Z', amount: 32 }, // last instant of Q2
+  { id: 'r7', iso: '2026-07-01T00:00:00.000Z', amount: 64 }, // first instant of Q3
+];
+
+/** The labels the in-memory path would produce, folded into bucket → sum. */
+function expectedBuckets(g: Granularity): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const row of FIXTURE) {
+    const key = bucketDateValue(row.iso, g);
+    out[key] = (out[key] ?? 0) + row.amount;
+  }
+  return out;
+}
+
+async function bucketSums(driver: SqlDriver, field: string, g: Granularity) {
+  const rows = await driver.aggregate(TABLE, {
+    groupBy: [{ field, dateGranularity: g }],
+    aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+  } as any);
+  return Object.fromEntries(rows.map((r: any) => [String(r[field]), Number(r.total)]));
+}
+
+describe('SqlDriver date bucketing is storage-form independent (#3773)', () => {
+  let driver: SqlDriver;
+
+  beforeEach(async () => {
+    driver = new SqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    });
+
+    await driver.initObjects([
+      {
+        name: TABLE,
+        fields: {
+          closed_at: { type: 'datetime' }, // INTEGER epoch ms under better-sqlite3
+          closed_on: { type: 'date' },     // YYYY-MM-DD TEXT
+          amount: { type: 'number' },
+        },
+      },
+    ]);
+
+    for (const { id, iso, amount } of FIXTURE) {
+      await driver.create(
+        TABLE,
+        // A real `Date` for the datetime column — the path the seed loader and
+        // every normal write take, and the one that produces epoch storage.
+        { id, closed_at: new Date(iso), closed_on: iso.slice(0, 10), amount },
+        { bypassTenantAudit: true },
+      );
+    }
+  });
+
+  afterEach(async () => {
+    await driver.disconnect();
+  });
+
+  it('really does store the two columns in the two different forms', async () => {
+    // The premise of this whole file. If better-sqlite3 ever stops binding a
+    // `Date` as an integer, this fails first and explains the rest.
+    const res: any = await driver.execute(
+      `SELECT typeof("closed_at") AS at_t, typeof("closed_on") AS on_t FROM "${TABLE}" WHERE id = 'r3'`,
+    );
+    const row = Array.isArray(res) ? res[0] : (res?.rows?.[0] ?? res);
+    expect(['integer', 'real']).toContain(row.at_t);
+    expect(row.on_t).toBe('text');
+  });
+
+  for (const g of GRANULARITIES) {
+    describe(`granularity '${g}'`, () => {
+      it('buckets the epoch-stored datetime column', async () => {
+        expect(await bucketSums(driver, 'closed_at', g)).toEqual(expectedBuckets(g));
+      });
+
+      it('buckets the TEXT-stored date column', async () => {
+        expect(await bucketSums(driver, 'closed_on', g)).toEqual(expectedBuckets(g));
+      });
+
+      it('gives both columns the same labels', async () => {
+        const [byAt, byOn] = await Promise.all([
+          bucketSums(driver, 'closed_at', g),
+          bucketSums(driver, 'closed_on', g),
+        ]);
+        expect(Object.keys(byAt).sort()).toEqual(Object.keys(byOn).sort());
+      });
+    });
+  }
+
+  it('keeps a pre-1970 instant on its own calendar day', async () => {
+    // Guards the `/1000.0` in the bucket expression. Integer division truncates
+    // toward zero, so `-1 / 1000` is 0 and this row would surface as 1970-01-01
+    // — a full day, year and quarter wrong, and only for negative epochs.
+    const byDay = await bucketSums(driver, 'closed_at', 'day');
+    expect(byDay['1969-12-31']).toBe(1);
+    expect(byDay['1970-01-01']).toBeUndefined();
+  });
+});
+
+describe('SqlDriver date bucketing over a MIXED-form datetime column (#3773)', () => {
+  // One SQLite `Field.datetime` column legitimately holds both forms at once:
+  // `formatInput` leaves datetime values alone, so a `Date` lands as INTEGER
+  // epoch ms while an ISO string (what an unresolved `defaultValue: 'NOW()'`
+  // slot and any string-valued write produce) lands as TEXT. A bucket
+  // expression that assumed epoch for the whole column would divide the TEXT by
+  // 1000 — `'2026-01-10T…' / 1000.0` is 2.026 seconds past the epoch — and file
+  // live rows under 1970, which is worse than the NULL it replaced.
+  let driver: SqlDriver;
+
+  beforeEach(async () => {
+    driver = new SqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    });
+    await driver.initObjects([
+      { name: TABLE, fields: { closed_at: { type: 'datetime' }, amount: { type: 'number' } } },
+    ]);
+    await driver.create(TABLE, { id: 'int', closed_at: new Date('2026-01-10T09:00:00Z'), amount: 1 }, { bypassTenantAudit: true });
+    await driver.create(TABLE, { id: 'txt', closed_at: '2026-02-14T09:00:00Z', amount: 2 }, { bypassTenantAudit: true });
+    await driver.create(TABLE, { id: 'naive', closed_at: '2026-02-20 09:00:00', amount: 4 }, { bypassTenantAudit: true });
+    await driver.create(TABLE, { id: 'nil', closed_at: null, amount: 8 }, { bypassTenantAudit: true });
+  });
+
+  afterEach(async () => {
+    await driver.disconnect();
+  });
+
+  it('stores the fixture in both forms', async () => {
+    const res: any = await driver.execute(
+      `SELECT id, typeof("closed_at") AS t FROM "${TABLE}" ORDER BY id`,
+    );
+    const rows = Array.isArray(res) ? res : (res?.rows ?? []);
+    const byId = Object.fromEntries(rows.map((r: any) => [r.id, r.t]));
+    expect(['integer', 'real']).toContain(byId.int);
+    expect(byId.txt).toBe('text');
+    expect(byId.naive).toBe('text');
+    expect(byId.nil).toBe('null');
+  });
+
+  it('buckets each row by its own stored form', async () => {
+    const byMonth = await bucketSums(driver, 'closed_at', 'month');
+    expect(byMonth['2026-01']).toBe(1);  // INTEGER epoch ms
+    expect(byMonth['2026-02']).toBe(6);  // ISO TEXT (2) + zone-naive TEXT (4)
+    expect(byMonth['1970-01']).toBeUndefined(); // TEXT never divided by 1000
+  });
+
+  it('leaves a NULL instant in its own bucket', async () => {
+    const byMonth = await bucketSums(driver, 'closed_at', 'month');
+    // SQL NULL aliases to the string 'null' through `String(r[field])` — a
+    // pre-existing divergence from the in-memory label `'(null)'`, unchanged
+    // here and equally true of a TEXT-stored column.
+    expect(byMonth.null).toBe(8);
+  });
+});

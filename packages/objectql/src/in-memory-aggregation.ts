@@ -181,6 +181,13 @@ function toNumber(v: any): number {
  * The y/m/d are taken in the reference zone and the ISO-week math then runs on
  * a UTC date built from those parts — the parts already carry the zone shift,
  * so the week boundary lands correctly without re-applying any offset.
+ *
+ * A finite NUMBER is read as epoch milliseconds — the form SQLite stores a
+ * `Field.datetime` in, and what any driver that hands back raw storage values
+ * yields. `new Date(String(1767225600000))` is an Invalid Date, so without this
+ * branch such a row bucketed as `'(null)'` while the pushed-down SQL bucketed it
+ * correctly (#3773) — the two paths must label the same instant identically or a
+ * drill-down built on one breaks against the other.
  */
 export function bucketDateValue(
   value: unknown,
@@ -188,7 +195,12 @@ export function bucketDateValue(
   timezone?: string,
 ): string {
   if (value == null) return '(null)';
-  const d = value instanceof Date ? value : new Date(String(value));
+  const d =
+    value instanceof Date
+      ? value
+      : typeof value === 'number'
+        ? new Date(value)
+        : new Date(String(value));
   if (Number.isNaN(d.getTime())) return '(null)';
   const { year: y, month: m, day } = calendarPartsInTzOrUtc(d, timezone);
   switch (granularity) {

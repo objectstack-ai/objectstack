@@ -106,6 +106,29 @@ describe('bucketDateValue', () => {
     expect(bucketDateValue('not-a-date', 'month')).toBe('(null)');
   });
 
+  // #3773 — parity with the pushed-down SQL. SQLite stores a `Field.datetime`
+  // as epoch milliseconds, so a driver that hands back raw storage values feeds
+  // this a NUMBER. `new Date(String(1767225600000))` is an Invalid Date, so
+  // these all bucketed as '(null)' while the native SQL bucketed them correctly
+  // — the two paths have to label the same instant identically.
+  it('reads a finite number as epoch milliseconds', () => {
+    const ms = Date.parse('2026-01-10T09:00:00Z');
+    expect(bucketDateValue(ms, 'year')).toBe('2026');
+    expect(bucketDateValue(ms, 'quarter')).toBe('2026-Q1');
+    expect(bucketDateValue(ms, 'month')).toBe('2026-01');
+    expect(bucketDateValue(ms, 'day')).toBe('2026-01-10');
+    // Same instant, all three shapes a driver might return.
+    for (const g of ['year', 'quarter', 'month', 'day'] as const) {
+      expect(bucketDateValue(ms, g)).toBe(bucketDateValue(new Date(ms), g));
+      expect(bucketDateValue(ms, g)).toBe(bucketDateValue(new Date(ms).toISOString(), g));
+    }
+  });
+
+  it('reads a negative epoch as a pre-1970 instant', () => {
+    expect(bucketDateValue(-1, 'day')).toBe('1969-12-31');
+    expect(bucketDateValue(0, 'day')).toBe('1970-01-01');
+  });
+
   // ADR-0053 Phase 2 (D2): a non-UTC reference timezone shifts the calendar day.
   describe('timezone-aware bucketing', () => {
     // 2024-03-01T03:00Z is still 2024-02-29 (22:00) in America/New_York.

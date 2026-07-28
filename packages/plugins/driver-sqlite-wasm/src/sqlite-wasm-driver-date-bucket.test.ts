@@ -20,7 +20,9 @@ type Granularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 /** ⚠️ Keep in sync with `packages/objectql/src/in-memory-aggregation.ts#bucketDateValue` */
 function bucketDateValue(value: unknown, g: Granularity): string {
   if (value == null) return '(null)';
-  const d = value instanceof Date ? value : new Date(String(value));
+  // A finite number is epoch milliseconds — SQLite's `Field.datetime` storage.
+  const d =
+    value instanceof Date ? value : typeof value === 'number' ? new Date(value) : new Date(String(value));
   if (Number.isNaN(d.getTime())) return '(null)';
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth() + 1;
@@ -113,6 +115,42 @@ describe('SqliteWasmDriver date bucket (dateGranularity)', () => {
       });
     },
   );
+
+  // #3773 — the fixture above is TEXT (`t.string('ts')`). A `Field.datetime`
+  // declared through `initObjects` is stored as epoch ms instead, and `strftime`
+  // reads a bare integer as a Julian day number → every row bucketed as NULL.
+  // SqliteWasmDriver inherits `buildDateBucketExpr` from SqlDriver, so it
+  // inherited the bug and now inherits the fix; pinned here so a wasm-side
+  // divergence can't reintroduce it.
+  describe('epoch-stored Field.datetime', () => {
+    it('buckets by the stored instant, not into one null bucket', async () => {
+      const d2 = new SqliteWasmDriver({ filename: ':memory:' });
+      try {
+        await d2.initObjects([
+          { name: 'deal', fields: { closed_at: { type: 'datetime' }, amount: { type: 'number' } } },
+        ]);
+        for (const [id, iso, amount] of [
+          ['d1', '2026-01-10T09:00:00Z', 1],
+          ['d2', '2026-01-20T09:00:00Z', 2],
+          ['d3', '2026-02-14T09:00:00Z', 4],
+        ] as const) {
+          await d2.create('deal', { id, closed_at: new Date(iso), amount }, { bypassTenantAudit: true });
+        }
+
+        const rows = await d2.aggregate('deal', {
+          groupBy: [{ field: 'closed_at', dateGranularity: 'month' }],
+          aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+        } as any);
+
+        const byMonth = Object.fromEntries(
+          rows.map((r: any) => [String(r.closed_at), Number(r.total)]),
+        );
+        expect(byMonth).toEqual({ '2026-01': 3, '2026-02': 4 });
+      } finally {
+        await d2.disconnect();
+      }
+    });
+  });
 
   describe('unsupported granularity', () => {
     it('throws a loud error for week on SQLite (so engine routes to in-memory)', async () => {
