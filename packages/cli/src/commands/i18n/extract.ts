@@ -81,6 +81,12 @@ export default class I18nExtract extends Command {
       default: true,
       allowNo: true,
     }),
+    'metadata-forms': Flags.boolean({
+      description:
+        'Also write <locale>.metadata-forms.generated.ts for the Studio metadata-form baseline (default). Pass --no-metadata-forms in a package that owns only its own objects — that baseline belongs to one package, not every plugin.',
+      default: true,
+      allowNo: true,
+    }),
     'dry-run': Flags.boolean({
       description: 'Print to stdout instead of writing to --out',
       default: false,
@@ -141,12 +147,16 @@ export default class I18nExtract extends Command {
         metadataFormsCounts[locale] = countLeaves(result.bundles[locale]?.metadataForms);
       }
       const anyMetadataForms = Object.values(metadataFormsCounts).some((n) => n > 0);
-      // …but under --objects-only they are only ever *reported*, never written.
-      // Counting them as emitted files made `--check` demand
-      // `<locale>.metadata-forms.generated.ts` next to bundles a plain run does
-      // not produce, so the drift gate failed on a tree that was in fact in sync.
+      // Whether the companion `<locale>.metadata-forms.generated.ts` file is
+      // written is its own question, orthogonal to `--objects-only` (which only
+      // picks the sub-tree of the *objects* module). The Studio metadata-form
+      // baseline is registry-driven and identical for every stack, so exactly
+      // one package should own it — `platform-objects` does. A plugin that owns
+      // only its own objects passes `--no-metadata-forms`; without it, `--check`
+      // demands a baseline copy the package deliberately does not commit and
+      // fails on a tree that is in fact in sync.
       const emitsMetadataForms = (locale: string): boolean =>
-        !objectsOnly && (metadataFormsCounts[locale] ?? 0) > 0;
+        flags['metadata-forms'] && (metadataFormsCounts[locale] ?? 0) > 0;
 
       if (flags.json) {
         console.log(JSON.stringify({

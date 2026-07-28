@@ -44,7 +44,11 @@ fetched bundle; every other consumer — mobile, plain HTTP, SDUI — rendered t
 source language. It now runs inline actions through `translateAction`, without
 stamping a synthetic `objectName` onto the response.
 
-Also fixes `os i18n extract --check` demanding `<locale>.metadata-forms.generated.ts`
-files under `--objects-only` (the default), where a plain run writes none — the
-drift gate failed on a tree that was in sync, which made it unusable as the CI
-check the gate is meant to be.
+Adds `os i18n extract --no-metadata-forms`. Whether the companion
+`<locale>.metadata-forms.generated.ts` file is written was previously implicit:
+every run emitted it, so `--check` demanded that file in packages that
+deliberately do not commit one. The Studio metadata-form baseline is
+registry-driven and identical for every stack, so exactly one package owns it
+(`platform-objects`); a plugin translating only its own objects now opts out,
+and its `--check` stops failing on a tree that is in sync. Defaults to emitting,
+so `pnpm check:i18n` keeps covering all 8 platform bundles.

@@ -8,8 +8,13 @@
  * strings were seeded from @objectstack/platform-objects.)
  *
  *   os i18n extract packages/plugins/plugin-approvals/scripts/i18n-extract.config.ts \
- *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only \
+ *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only --no-metadata-forms \
  *     --out=packages/plugins/plugin-approvals/src/translations
+ *
+ * `--no-metadata-forms` because the Studio metadata-form baseline is owned by
+ * `@objectstack/platform-objects` — this plugin translates only the objects it
+ * owns, so it must not commit a second copy. Add `--check` to run the same
+ * command as a drift gate.
  */
 
 import { defineStack } from '@objectstack/spec';
