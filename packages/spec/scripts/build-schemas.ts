@@ -8,6 +8,8 @@ process.env.OS_EAGER_SCHEMAS = '1';
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
+import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
+import { MIGRATIONS_BY_MAJOR } from '../src/migrations/registry';
 import * as AI from '../src/ai';
 import * as API from '../src/api';
 import * as Automation from '../src/automation';
@@ -37,6 +39,10 @@ const OUT_DIR = path.resolve(__dirname, '../json-schema');
 // ever emitted. json-schema/ itself is a gitignored build artifact, so this
 // file is the durable "last time" — see the disappearance check below (#2978).
 const MANIFEST_PATH = path.resolve(__dirname, '../json-schema.manifest.json');
+// `--check` verifies the committed authorable-surface snapshot without rewriting
+// it, so CI fails on an uncommitted ADDITION too (the write and check paths share
+// the same code — same discipline as build-docs.ts).
+const CHECK = process.argv.includes('--check');
 const SPEC_VERSION = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8')).version;
 const SCHEMA_BASE_URL = `https://schema.objectstack.io/v${SPEC_VERSION}`;
 
@@ -322,6 +328,163 @@ if (!manifest || added.length > 0) {
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(updated, null, 2) + '\n');
   console.log(
     `\n📒 json-schema.manifest.json ${manifest ? `updated (+${added.length} schema(s))` : `created (${generatedKeys.size} schemas)`} — commit it.`,
+  );
+}
+
+// ─── Authorable-surface ratchet (#3855 follow-up) ────────────────────
+//
+// The sibling manifest above ratchets whole SCHEMAS. Nothing ratchets the KEYS
+// inside them — and for a metadata-driven platform those keys ARE the
+// third-party API: what an author (very often an AI, ADR-0033) may write.
+//
+// Both existing witnesses look elsewhere. `api-surface.json` records exported
+// `name (kind)`, and `api-surface-signatures.json` hashes each `defineX`
+// factory's type as TypeScript PRINTS it — a reference (`z.input<typeof
+// ActionSchema>`), never structurally expanded, so member-level narrowing does
+// not reach the hash. `spec-changes.json` inherits the same blind spot: its
+// added/removed arrays are a diff of `api-surface.json`. So #3883 removed three
+// authorable keys with all three witnesses green, and #3733 did the same by
+// ACCIDENT — `dataQuality` / `cached` outlived their keys and were silently
+// stripped. ADR-0059 §5 deferred this gate "until a narrowing actually slips
+// both"; it has, twice.
+//
+// Three states, distinguishable because a tombstoned key (`retiredKey()`,
+// `shared/retired-key.ts`) is `z.never()`, which Zod emits as `{ not: {} }`:
+//
+//   live     — a normal property. The author may write it.
+//   retired  — present but unwritable, carrying its own upgrade prescription.
+//   absent   — gone from the contract with nothing left to say. This is the
+//              state that must never be reached silently, because none of these
+//              schemas is `.strict()`: Zod STRIPS an unknown key, so the setting
+//              vanishes and the metadata still parses clean.
+const AUTHORABLE_SURFACE_PATH = path.resolve(__dirname, '../authorable-surface.json');
+const RETIRED_MARK = ' [RETIRED]';
+
+interface AuthorableSurface { description: string; keys: string[] }
+
+/** `retiredKey()` is `z.never()`, which Zod renders as `{ "not": {} }`. */
+function isRetired(prop: unknown): boolean {
+  if (!prop || typeof prop !== 'object') return false;
+  const not = (prop as Record<string, unknown>).not;
+  return !!not && typeof not === 'object' && Object.keys(not).length === 0;
+}
+
+/** Every conversion/migration surface registered across the ADR-0087 registries. */
+function registeredRetirementSurfaces(): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(CONVERSIONS_BY_MAJOR)) {
+    for (const c of list) out.push(c.surface);
+  }
+  for (const step of Object.values(MIGRATIONS_BY_MAJOR)) {
+    for (const sem of step.semantic ?? []) out.push(sem.surface);
+  }
+  return out;
+}
+
+const currentKeys = new Map<string, boolean>(); // key -> isRetired
+for (const [defKey, schema] of generatedSchemas) {
+  const props = (schema as { properties?: Record<string, unknown> }).properties;
+  if (!props || typeof props !== 'object') continue;
+  for (const [name, prop] of Object.entries(props)) {
+    currentKeys.set(`${defKey}:${name}`, isRetired(prop));
+  }
+}
+const currentEntries = [...currentKeys.entries()]
+  .map(([k, retired]) => (retired ? k + RETIRED_MARK : k))
+  .sort();
+
+let surfaceDoc: AuthorableSurface | null = null;
+if (fs.existsSync(AUTHORABLE_SURFACE_PATH)) {
+  surfaceDoc = JSON.parse(fs.readFileSync(AUTHORABLE_SURFACE_PATH, 'utf-8')) as AuthorableSurface;
+}
+
+if (surfaceDoc) {
+  const prev = new Map<string, boolean>(
+    surfaceDoc.keys.map((e) => [e.replace(RETIRED_MARK, ''), e.endsWith(RETIRED_MARK)]),
+  );
+
+  // (a) A key that vanished outright. The silent-strip class — always fatal.
+  const vanished = [...prev.keys()].filter((k) => !currentKeys.has(k));
+  if (vanished.length > 0) {
+    console.error(`\n❌ ${vanished.length} authorable key(s) disappeared from the contract:`);
+    for (const k of vanished) console.error(`     - ${k}`);
+    console.error(
+      `\n   These schemas are NOT .strict(), so Zod silently STRIPS an unknown key: an author\n` +
+      `   who keeps writing one gets a clean parse and a setting that never takes effect —\n` +
+      `   no error, nothing to grep, nothing pointing at the changelog (#3733, ADR-0104).\n\n` +
+      `   To retire a key, tombstone it instead of deleting it:\n` +
+      `     1. \`retiredKey('<key> was removed in ... — use <replacement>. ...')\` in the schema\n` +
+      `        (or an UNKNOWN_KEY_GUIDANCE entry for an object top-level key), so the\n` +
+      `        rejection carries the fix;\n` +
+      `     2. a D2 conversion (and D3 chain step) so the rename reaches spec-changes.json\n` +
+      `        and \`os migrate meta\` can rewrite consumer sources;\n` +
+      `     3. a \`major\` changeset carrying the FROM → TO mapping.\n\n` +
+      `   A tombstone that has aged out (~two majors) is the ONE legitimate reason to delete\n` +
+      `   a line here — do it in the same PR, deliberately.`,
+    );
+    process.exit(1);
+  }
+
+  // (b) live → retired: a removal. It must be registered, or the change never
+  //     reaches the upgrade guide / `spec_changes` / `migrate meta`.
+  const newlyRetired = [...currentKeys.entries()]
+    .filter(([k, retired]) => retired && prev.get(k) === false)
+    .map(([k]) => k);
+  if (newlyRetired.length > 0) {
+    const surfaces = registeredRetirementSurfaces();
+    const unregistered = newlyRetired.filter(
+      (k) => !surfaces.some((s) => s.endsWith('.' + k.split(':')[1])),
+    );
+    if (unregistered.length > 0) {
+      console.error(`\n❌ ${unregistered.length} key(s) were tombstoned with no registered migration:`);
+      for (const k of unregistered) console.error(`     - ${k}`);
+      console.error(
+        `\n   The tombstone makes the removal audible to whoever hits it, but the change\n` +
+        `   documentation is the primary channel and it is still empty: spec-changes.json\n` +
+        `   (ADR-0087 D4) is a projection of the conversion + migration registries, and the\n` +
+        `   generated upgrade guide and the \`spec_changes\` MCP tool are projections of that.\n` +
+        `   Without an entry a consumer only learns of this by failing.\n\n` +
+        `   Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
+        `   chain step referencing it) so \`os migrate meta\` rewrites their source.`,
+      );
+      process.exit(1);
+    }
+  }
+}
+
+const surfaceChanged =
+  !surfaceDoc || JSON.stringify(surfaceDoc.keys) !== JSON.stringify(currentEntries);
+if (surfaceChanged && CHECK) {
+  // Removals already exited above; reaching here in check mode means the snapshot
+  // is behind on ADDITIONS. Left unnoticed that is not cosmetic: an unrecorded key
+  // is one this ratchet can never miss later, because it was never in the baseline.
+  const before = new Set(surfaceDoc?.keys ?? []);
+  const addedKeys = currentEntries.filter((k) => !before.has(k));
+  console.error(
+    `\n❌ authorable-surface.json is out of date (${addedKeys.length} key(s) not recorded).`,
+  );
+  for (const k of addedKeys.slice(0, 20)) console.error(`     + ${k}`);
+  if (addedKeys.length > 20) console.error(`     … and ${addedKeys.length - 20} more`);
+  console.error(
+    `\n   Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result. An\n` +
+    `   unrecorded key is invisible to this ratchet forever after — it can only detect\n` +
+    `   the disappearance of something it once saw.`,
+  );
+  process.exit(1);
+}
+if (surfaceChanged && !CHECK) {
+  const updated: AuthorableSurface = {
+    description:
+      'Ratchet of every AUTHORABLE key in the spec — what a metadata author may write, which ' +
+      'for this platform IS the third-party API. Auto-updated on additions (commit the change). ' +
+      'A key that disappears without a tombstone fails gen:schema, because these schemas are ' +
+      'not .strict() and Zod would silently strip it. "[RETIRED]" marks a tombstoned key that ' +
+      'still rejects with an upgrade prescription. See #3855, ADR-0059 §5.',
+    keys: currentEntries,
+  };
+  fs.writeFileSync(AUTHORABLE_SURFACE_PATH, JSON.stringify(updated, null, 2) + '\n');
+  console.log(
+    `\n🔑 authorable-surface.json ${surfaceDoc ? 'updated' : 'created'} (${currentEntries.length} keys) — commit it.`,
   );
 }
 

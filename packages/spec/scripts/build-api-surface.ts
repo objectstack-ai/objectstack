@@ -13,11 +13,19 @@
  *   - api-surface.json            — every exported `name (kind)` per public entry
  *                                    point (breadth: did an export disappear?).
  *   - api-surface-signatures.json — a stable hash of each `defineX` factory's
- *                                    resolved signature (depth: did the accepted
- *                                    authoring shape narrow?). Scoped to the
- *                                    factories — the authoring contract — to stay
- *                                    low-noise; full per-export signatures would
- *                                    churn on every internal type tweak.
+ *                                    resolved signature. Scoped to the factories to
+ *                                    stay low-noise; full per-export signatures
+ *                                    would churn on every internal type tweak.
+ *
+ * SCOPE — read before trusting these as a narrowing gate. Both artifacts describe
+ * the TYPESCRIPT surface. The hash is of `checker.typeToString()`, which prints a
+ * type REFERENCE (`z.input<typeof ActionSchema>`) and does not expand it, so
+ * adding or removing a key inside a schema does not move it: #3883 narrowed
+ * `defineAction`'s input by three keys and this snapshot did not change. The
+ * authorable KEY surface — which for a metadata-driven platform is the real
+ * third-party API — is ratcheted separately by `authorable-surface.json`
+ * (scripts/build-schemas.ts, #3855). Value-level narrowing (an enum losing a
+ * member) is still ungated, per ADR-0059 §5's evidence gate.
  *
  *   pnpm --filter @objectstack/spec gen:api-surface     # regenerate + write
  *   pnpm --filter @objectstack/spec check:api-surface   # CI: fail on any drift

@@ -197,6 +197,7 @@
     "gen:sbom": "tsx scripts/generate-sbom.ts",
     "gen:api-surface": "tsx scripts/build-api-surface.ts",
     "check:api-surface": "tsx scripts/build-api-surface.ts --check",
+    "check:authorable-surface": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --check",
     "gen:spec-changes": "tsx scripts/build-spec-changes.ts",
     "check:spec-changes": "tsx scripts/build-spec-changes.ts --check",
     "gen:upgrade-guide": "tsx scripts/build-upgrade-guide.ts",

@@ -62,6 +62,12 @@ jobs:
               - 'packages/spec/api-surface.json'
               - 'packages/spec/spec-changes.json'
               - 'docs/protocol-upgrade-guide.md'
+              # check:authorable-surface — the ratchet's input is every Zod schema
+              # in the spec, so the filter has to be that broad or the gate goes
+              # dormant on exactly the PRs that remove an authorable key (#3855).
+              - 'packages/spec/src/**'
+              - 'packages/spec/scripts/build-schemas.ts'
+              - 'packages/spec/authorable-surface.json'
               - '.github/workflows/ci.yml'
             core:
               - 'packages/**'
@@ -558,3 +564,13 @@ jobs:
 
       - name: Check the protocol upgrade guide is regenerated with the ADR-0087 registries
         run: pnpm --filter @objectstack/spec check:upgrade-guide
+
+      # The authorable KEY surface — what a metadata author may write, which for
+      # this platform is the third-party API. `api-surface.json` records exported
+      # names and `api-surface-signatures.json` hashes factory types as TypeScript
+      # PRINTS them (a reference, never structurally expanded), so neither sees a
+      # key added to or removed from a schema. #3883 removed three authorable keys
+      # with every witness green; #3733 did it by accident. ADR-0059 §5 deferred
+      # this gate until a narrowing actually slipped both — it has.
+      - name: Check the authorable key surface is recorded and nothing vanished
+        run: pnpm --filter @objectstack/spec check:authorable-surface
