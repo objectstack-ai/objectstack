@@ -93,14 +93,13 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   },
   {
     id: 'cel-field-rule',
-    summary: 'field UI rules (requiredWhen / readonlyWhen / visibleWhen / conditionalRequired)',
+    summary: 'field UI rules (requiredWhen / readonlyWhen / visibleWhen)',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: '@objectstack/formula celEngine (interpret) — console (objectui) + server',
     covers: [
       'data/field.zod.ts:requiredWhen',
       'data/field.zod.ts:readonlyWhen',
       'data/field.zod.ts:visibleWhen',
-      'data/field.zod.ts:conditionalRequired',
     ],
   },
   {

@@ -359,15 +359,34 @@ Yes. All schemas work with plain JavaScript. You lose compile-time type checking
 
 ### How do I extend a built-in schema?
 
-Use Zod's `.extend()` or `.merge()`:
+**Not with `.extend()` on the schema itself.** Several built-in schemas —
+`FieldSchema`, `ObjectSchema`, `ActionSchema` — carry a `.transform()` that lowers
+author-facing sugar at parse time, which makes the exported value a **`ZodPipe`,
+not a `ZodObject`**. `FieldSchema.extend` is `undefined`, so calling it throws
+`is not a function`.
 
+Compose instead: parse with the built-in schema, and validate your additions
+alongside it. This keeps the transform running, which `.extend()` would discard.
+
+{/* os:check */}
 ```typescript
+import { z } from 'zod';
 import { FieldSchema } from '@objectstack/spec/data';
 
-const CustomFieldSchema = FieldSchema.extend({
-  customProperty: z.string().optional()
-});
+const CustomProps = z.object({ customProperty: z.string().optional() });
+
+function parseCustomField(input: unknown) {
+  return { ...FieldSchema.parse(input), ...CustomProps.parse(input) };
+}
+
+parseCustomField({ name: 'code', type: 'text', customProperty: 'x' });
 ```
+
+If you genuinely need one merged schema object, `FieldSchema.in` is the
+`ZodObject` the pipe wraps, so `FieldSchema.in.extend({ … })` builds one — but
+the result **skips the transform**, so author-facing sugar the pipe would have
+lowered stays raw. Prefer the composition above unless you specifically want the
+untransformed shape.
 
 ### Where are the JSON Schemas for IDE autocomplete?
 

@@ -216,37 +216,32 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // `ApprovalService`, which records the decision and enforces the slate —
         // on a SYMBOL-keyed marker. Assembling the signal field-wise (never
         // spreading the body) keeps that unforgeable even if a caller invents
-        // extra keys; a refused resume comes back `code: 'forbidden'` and is
-        // answered 403 rather than a 200 carrying `success: false`.
+        // extra keys.
+        //
+        // Two REFUSAL codes come back from the engine and are answered as such
+        // rather than a 200 carrying `success: false` (which reads as "your
+        // resume ran and the flow failed"):
+        //   forbidden      → 403, the suspension is service-owned (#3801)
+        //   invalid_signal → 400, the signal wrote the engine's `$` variable
+        //                    namespace (#3853 follow-up)
+        // Both are enforced in the ENGINE, at the one place a signal reaches the
+        // variable map — deliberately not re-implemented here. Guarding a field
+        // at a time in the transport is what let `output` reopen the hole
+        // `inputs` had just closed; every transport now inherits one rule.
         if (parts[1] === 'runs' && parts[2] && parts[3] === 'resume' && m === 'POST') {
             if (typeof automationService.resume === 'function') {
                 const b = (body && typeof body === 'object') ? body : {};
                 const inputs = (b.inputs ?? b.variables);
                 const signal: any = {};
-                if (inputs && typeof inputs === 'object') {
-                    // #3853: `inputs` land as BARE flow variables, and `$` is the
-                    // engine's own variable namespace (`$runId`, `$record`,
-                    // `$flowName`, `<nodeId>.$mapItemDone`/`$mapItemOutput`/
-                    // `$mapState`, …). A caller who could write those could forge
-                    // the map node's item handoff — recording a per-item result
-                    // for an approval nobody made — or re-point `$runId`, which is
-                    // how approval/wait nodes correlate external state back to a
-                    // run. Author-declared variables never live in that namespace,
-                    // so refuse rather than silently drop: a screen whose input is
-                    // quietly discarded fails much further downstream.
-                    const reserved = Object.keys(inputs).filter(k => k.startsWith('$') || k.includes('.$'));
-                    if (reserved.length) {
-                        return { handled: true, response: deps.error(
-                            `Resume inputs may not set engine-internal variables (${reserved.join(', ')}) — ` +
-                            `names starting with '$' (or containing '.$') are reserved by the flow engine`, 400) };
-                    }
-                    signal.variables = inputs;
-                }
+                if (inputs && typeof inputs === 'object') signal.variables = inputs;
                 if (b.output && typeof b.output === 'object') signal.output = b.output;
                 if (typeof b.branchLabel === 'string') signal.branchLabel = b.branchLabel;
                 const result = await automationService.resume(parts[2], signal);
                 if (result?.success === false && result.code === 'forbidden') {
                     return { handled: true, response: deps.error(result.error ?? 'Resume forbidden', 403) };
+                }
+                if (result?.success === false && result.code === 'invalid_signal') {
+                    return { handled: true, response: deps.error(result.error ?? 'Invalid resume signal', 400) };
                 }
                 return { handled: true, response: deps.success(result) };
             }

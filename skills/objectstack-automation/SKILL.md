@@ -139,18 +139,29 @@ variables: [
 > `label` is **required** on the flow and on every node.
 
 > **Handling a failed node: a `fault` edge.** `{ source, target, type: 'fault' }`
-> routes a failed node to a handler instead of ending the run; the handler reads
-> `{<nodeId>.error}` (or run-wide `{$error}`). The run then reports success, and
-> the failed step stays in the trace.
+> routes a failed node to a handler instead of ending the run. **`type: 'fault'`
+> is what routes — a `label: 'error'` alone does nothing:** the edge stays
+> ordinary, and every unconditional out-edge traverses on SUCCESS, so the
+> handler would run when the node succeeds and never when it fails
+> (`objectstack validate` reports `flow-error-label-not-fault`).
+> A handled failure does NOT consume a flow-level `errorHandling.retry`, which
+> replays the flow from the start — prefer a fault edge when the failure is
+> local. The handler reads `{<nodeId>.error}` (or run-wide `{$error}`). The run
+> then reports success, and the failed step stays in the trace.
 >
 > **It is not a way past a guardrail.** Only *runtime* failures route — a 404, a
-> rate-limit, a rejected write. A *guard* refusal means the metadata is wrong (a
-> filter token resolved to nothing so the condition was dropped; a data node
-> names no object; the run would execute unscoped) and stays fatal with or
-> without a fault edge. Never add one to silence such an error: a dropped filter
-> condition **widens** the query, so routing it would let a `delete_record`
-> empty the object while the run reported success. Fix the metadata —
-> `objectstack validate` names the offending template.
+> rate-limit, a rejected write, a subflow that failed on its own. A *guard*
+> refusal stays fatal with or without a fault edge. A failure is a guard when
+> re-running unchanged could never succeed **and** the fix is to edit metadata:
+> a missing required config key (`objectName`, `url`, `flowName`,
+> `connectorId`/`actionId`), a filter token that resolved to nothing so the
+> condition was dropped, a graph that recurses past the nesting ceiling, or a run
+> that would execute unscoped.
+>
+> Never add a fault edge to silence such an error: a dropped filter condition
+> **widens** the query, so routing it would let a `delete_record` empty the
+> object while the run reported success. Fix the metadata — `objectstack
+> validate` names the offending template.
 
 > **Writing a `readonly` field? Set `runAs: 'system'`.** `readonly: true`
 > governs the end-user surface: under the default `runAs: 'user'`, the engine

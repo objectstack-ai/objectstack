@@ -1,11 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { InMemoryDriver } from '@objectstack/driver-memory';
 import {
   inferDriverTypeFromUrl,
   resolveDriverType,
-  createStorageDriver,
+  resolveStorageDefinition,
   UnsupportedDriverError,
 } from './storage-driver.js';
 
@@ -60,114 +59,119 @@ describe('resolveDriverType', () => {
   });
 });
 
-describe('createStorageDriver', () => {
-  // ── #3276: the regression this whole change exists to fix ──────────────────
-  // `memory` must construct the mingo InMemoryDriver — NOT fall through to the
-  // dev SQLite `:memory:` default (SQLite-in-memory, a different engine). Remove
-  // the `memory` branch in storage-driver.ts and this assertion goes red: in dev
-  // it resolves to a SqlDriver/SQLite engine, in prod it resolves to null.
-  it('constructs the mingo InMemoryDriver for `memory` in DEV', async () => {
-    const r = await createStorageDriver('memory', { isDev: true });
-    expect(r).not.toBeNull();
-    expect(r!.driver).toBeInstanceOf(InMemoryDriver);
-    expect(r!.engine).toBe('memory');
-    expect(r!.label).toBe('InMemoryDriver');
-    expect(r!.trackName).toBe('MemoryDriver');
-    expect(r!.displayUrl).toBe('(in-memory)');
-    // Never provisions a telemetry sibling.
-    expect(r!.sqliteFilePath).toBeUndefined();
+describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () => {
+  // ── #3276: the regression the memory branch exists to fix ──────────────────
+  // `memory` must declare the mingo InMemoryDriver — NOT fall through to the
+  // dev SQLite `:memory:` default. Remove the `memory` branch and this goes
+  // red: in dev it resolves to the sqlite dev-default, in prod to null.
+  it('declares the mingo memory driver for `memory` in DEV and PROD', () => {
+    for (const isDev of [true, false]) {
+      const r = resolveStorageDefinition('memory', { isDev });
+      expect(r).not.toBeNull();
+      expect(r!.driverId).toBe('memory');
+      expect(r!.label).toBe('InMemoryDriver');
+      expect(r!.trackName).toBe('MemoryDriver');
+      expect(r!.displayUrl).toBe('(in-memory)');
+      // Never provisions a telemetry sibling.
+      expect(r!.sqliteFilePath).toBeUndefined();
+    }
   });
 
-  // The explicit choice is honored in PRODUCTION too — declared === enforced.
-  it('constructs the mingo InMemoryDriver for `memory` in PROD', async () => {
-    const r = await createStorageDriver('memory', { isDev: false });
-    expect(r!.driver).toBeInstanceOf(InMemoryDriver);
-    expect(r!.engine).toBe('memory');
+  it('accepts the `mingo` and `in-memory` aliases', () => {
+    expect(resolveStorageDefinition('mingo', { isDev: false })!.driverId).toBe('memory');
+    expect(resolveStorageDefinition('in-memory', { isDev: false })!.driverId).toBe('memory');
   });
 
-  it('accepts the `mingo` and `in-memory` aliases', async () => {
-    expect((await createStorageDriver('mingo', { isDev: false }))!.driver).toBeInstanceOf(InMemoryDriver);
-    expect((await createStorageDriver('in-memory', { isDev: false }))!.driver).toBeInstanceOf(InMemoryDriver);
-  });
-
-  // ── Regression guards for the other branches (no connection is opened) ─────
-  it('constructs mongodb with the default URL when none is supplied', async () => {
-    const r = await createStorageDriver('mongodb', { isDev: false });
-    expect(r!.label).toBe('MongoDBDriver');
+  it('declares mongodb with the default URL when none is supplied', () => {
+    const r = resolveStorageDefinition('mongodb', { isDev: false });
+    expect(r!.driverId).toBe('mongodb');
+    expect(r!.config).toEqual({ url: 'mongodb://localhost:27017/objectstack' });
     expect(r!.trackName).toBe('MongoDBDriver');
-    expect(r!.displayUrl).toBe('mongodb://localhost:27017/objectstack');
   });
 
-  it('constructs postgres / mysql with their SqlDriver labels', async () => {
-    const pg = await createStorageDriver('postgres', { databaseUrl: 'postgres://u:p@h/db', isDev: false });
+  it('declares postgres / mysql with the DSN in config and their SqlDriver labels', () => {
+    const pg = resolveStorageDefinition('postgres', { databaseUrl: 'postgres://u:p@h/db', isDev: false });
+    expect(pg!.driverId).toBe('postgres');
+    expect(pg!.config.url).toBe('postgres://u:p@h/db');
     expect(pg!.label).toBe('SqlDriver(pg)');
-    expect(pg!.trackName).toBe('PostgresDriver');
-    const my = await createStorageDriver('mysql', { databaseUrl: 'mysql://u:p@h/db', isDev: false });
+    const my = resolveStorageDefinition('mysql', { databaseUrl: 'mysql://u:p@h/db', isDev: false });
+    expect(my!.driverId).toBe('mysql');
+    expect(my!.config.url).toBe('mysql://u:p@h/db');
     expect(my!.label).toBe('SqlDriver(mysql2)');
-    expect(my!.trackName).toBe('MySQLDriver');
   });
 
-  it('constructs sqlite-wasm without connecting', async () => {
-    const r = await createStorageDriver('sqlite-wasm', { databaseUrl: 'file:./x.db', isDev: false });
-    expect(r!.label).toBe('SqliteWasmDriver');
-    expect(r!.trackName).toBe('SqliteWasmDriver');
+  // #2186: the dev loosen-only self-heal rides in config so the shared factory
+  // applies it at construction. Never present in production configs.
+  it('carries autoMigrate:safe in DEV configs for the SQL kinds, never in PROD', () => {
+    expect(resolveStorageDefinition('sqlite', { databaseUrl: 'file:./x.db', isDev: true })!.config.autoMigrate).toBe('safe');
+    expect(resolveStorageDefinition('postgres', { databaseUrl: 'postgres://h/db', isDev: true })!.config.autoMigrate).toBe('safe');
+    expect(resolveStorageDefinition('mysql', { databaseUrl: 'mysql://h/db', isDev: true })!.config.autoMigrate).toBe('safe');
+    expect(resolveStorageDefinition('sqlite', { databaseUrl: 'file:./x.db', isDev: false })!.config.autoMigrate).toBeUndefined();
   });
 
-  // In PROD, `resolveSqliteDriver` returns the native driver UNPROBED (no
-  // connect), so this is fast and native-addon-free. It also documents that an
-  // explicit sqlite primary DOES surface `sqliteFilePath` for the telemetry
-  // sibling — the field the `memory` driver deliberately leaves unset.
-  it('constructs explicit sqlite and surfaces sqliteFilePath for telemetry', async () => {
-    const r = await createStorageDriver('sqlite', { databaseUrl: ':memory:', isDev: false });
-    expect(r!.engine).toBe('better-sqlite3');
-    expect(r!.label).toBe('SqlDriver(sqlite)');
-    expect(r!.trackName).toBe('SqlDriver');
-    expect(r!.sqliteFilePath).toBe(':memory:');
+  it('declares sqlite-wasm with the CLI on-disconnect persistence', () => {
+    const r = resolveStorageDefinition('sqlite-wasm', { databaseUrl: 'file:./x.db', isDev: false });
+    expect(r!.driverId).toBe('sqlite-wasm');
+    expect(r!.config).toEqual({ filename: './x.db', persist: 'on-disconnect' });
+  });
+
+  // An explicit sqlite primary surfaces `sqliteFilePath` for the telemetry
+  // sibling — the field the memory/dev-default branches deliberately leave unset.
+  it('declares explicit sqlite and surfaces sqliteFilePath for telemetry', () => {
+    const r = resolveStorageDefinition('sqlite', { databaseUrl: 'file:./app.db', isDev: false });
+    expect(r!.driverId).toBe('sqlite');
+    expect(r!.config.filename).toBe('./app.db');
+    expect(r!.sqliteFilePath).toBe('./app.db');
+  });
+
+  it('dev default (no driver) declares sqlite :memory: with NO telemetry sibling', () => {
+    const r = resolveStorageDefinition('', { isDev: true });
+    expect(r!.driverId).toBe('sqlite');
+    expect(r!.config.filename).toBe(':memory:');
+    expect(r!.sqliteFilePath).toBeUndefined();
   });
 
   // Production with no driver configured registers nothing (loud downstream
   // failure), rather than silently inventing an engine.
-  it('returns null for an unknown/absent driver in PROD', async () => {
-    expect(await createStorageDriver('', { isDev: false })).toBeNull();
-    expect(await createStorageDriver('nonsense', { isDev: false })).toBeNull();
+  it('returns null for an unknown/absent driver in PROD', () => {
+    expect(resolveStorageDefinition('', { isDev: false })).toBeNull();
+    expect(resolveStorageDefinition('nonsense', { isDev: false })).toBeNull();
   });
 });
 
-describe('createStorageDriver: turso / libSQL is recognized but fails loud', () => {
+describe('resolveStorageDefinition: turso / libSQL is recognized but fails loud', () => {
   // turso is a cloud/EE driver (@objectstack/driver-turso) the open-core CLI
-  // cannot construct. Selecting it must THROW a typed error — NOT fall through
-  // to the SQLite default. Remove the `turso` branch in storage-driver.ts and
-  // these go red: in dev it resolves to a SqlDriver, in prod it returns null —
-  // both silently ignoring the requested turso engine (the reported bug).
-  it('throws UnsupportedDriverError for `turso` in DEV and PROD', async () => {
-    await expect(createStorageDriver('turso', { isDev: true })).rejects.toBeInstanceOf(UnsupportedDriverError);
-    await expect(createStorageDriver('turso', { isDev: false })).rejects.toBeInstanceOf(UnsupportedDriverError);
+  // cannot build. Selecting it must THROW a typed error — NOT fall through to
+  // the SQLite default. Remove the `turso` branch and these go red: in dev it
+  // resolves to the sqlite dev-default, in prod it returns null — both silently
+  // ignoring the requested turso engine (the reported bug).
+  it('throws UnsupportedDriverError for `turso` in DEV and PROD', () => {
+    expect(() => resolveStorageDefinition('turso', { isDev: true })).toThrow(UnsupportedDriverError);
+    expect(() => resolveStorageDefinition('turso', { isDev: false })).toThrow(UnsupportedDriverError);
   });
 
-  it('throws for the `libsql` alias too', async () => {
-    await expect(createStorageDriver('libsql', { isDev: true })).rejects.toBeInstanceOf(UnsupportedDriverError);
+  it('throws for the `libsql` alias too', () => {
+    expect(() => resolveStorageDefinition('libsql', { isDev: true })).toThrow(UnsupportedDriverError);
   });
 
   // The message must be actionable: name the cloud/EE package and the open-core
   // alternatives, so an operator knows exactly how to proceed.
-  it('carries an actionable message (cloud/EE package + open-core alternatives)', async () => {
-    await expect(createStorageDriver('turso', { isDev: false })).rejects.toThrow(/@objectstack\/driver-turso/);
-    await expect(createStorageDriver('turso', { isDev: false })).rejects.toThrow(/cloud|enterprise/i);
-    const err = await createStorageDriver('turso', { isDev: false }).catch((e) => e);
+  it('carries an actionable message (cloud/EE package + open-core alternatives)', () => {
+    expect(() => resolveStorageDefinition('turso', { isDev: false })).toThrow(/@objectstack\/driver-turso/);
+    let err: unknown;
+    try { resolveStorageDefinition('turso', { isDev: false }); } catch (e) { err = e; }
     expect(err).toBeInstanceOf(UnsupportedDriverError);
     expect((err as UnsupportedDriverError).driverType).toBe('turso');
+    expect((err as Error).message).toMatch(/cloud|enterprise/i);
   });
 
   // A `libsql://` / Turso URL routes to the same loud failure — it is NOT left
   // unrecognized (which would silently fall through to SQLite).
-  it('routes libsql:// and *.turso.* URLs to the turso failure, never SQLite', async () => {
+  it('routes libsql:// and *.turso.* URLs to the turso failure, never SQLite', () => {
     expect(resolveDriverType(undefined, 'libsql://my-db.turso.io')).toBe('turso');
     expect(resolveDriverType(undefined, 'https://my-db.turso.io')).toBe('turso');
-    await expect(
-      createStorageDriver(resolveDriverType(undefined, 'libsql://my-db.turso.io'), {
-        databaseUrl: 'libsql://my-db.turso.io',
-        isDev: true,
-      }),
-    ).rejects.toBeInstanceOf(UnsupportedDriverError);
+    expect(() =>
+      resolveStorageDefinition(resolveDriverType(undefined, 'libsql://my-db.turso.io'), { isDev: true }),
+    ).toThrow(UnsupportedDriverError);
   });
 });

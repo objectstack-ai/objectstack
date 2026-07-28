@@ -217,6 +217,7 @@ to the agent. ObjectStack turns those into loud, located build errors.
 Suppose the agent wrote the Resolve action's predicate as a **bare field
 reference** — `status` instead of `record.status`:
 
+{/* os:check */}
 ```typescript
 // ✗ Wrong — bare `status`. Type-checks (it's just a string), but at runtime
 //   it resolves to null, so the action is hidden on EVERY ticket.

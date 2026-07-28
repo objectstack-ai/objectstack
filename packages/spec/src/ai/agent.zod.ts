@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { retiredKey } from '../shared/retired-key';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { StateMachineSchema } from '../automation/state-machine.zod';
@@ -33,18 +34,18 @@ export const AIToolSchema = lazySchema(() => z.object({
  */
 export const AIKnowledgeSchema = lazySchema(() => z.object({
   sources: z.array(z.string()).optional().describe('Knowledge sources/tags to recruit RAG context from. Canonical key consumed by the agent renderer (objectui AgentPreview KnowledgeSummary).'),
-  topics: z.array(z.string()).optional().describe('Deprecated alias for `sources` (spec key ≠ consumed key drift, liveness audit #1878/#1891). Folded into `sources` at parse time; prefer `sources`.'),
+  /**
+   * [REMOVED in protocol 17 — #3855] The deprecated alias of `sources`.
+   * Tombstoned rather than deleted: `AIKnowledgeSchema` is not `.strict()`, so a
+   * plain deletion would silently strip the key and the agent would quietly
+   * recruit no RAG context (#1878's original failure, restored).
+   */
+  topics: retiredKey(
+    "`knowledge.topics` was removed in @objectstack/spec 17 (#3855) — use `knowledge.sources`. " +
+    'Rename the key; the value (a list of source tags) is unchanged. ' +
+    "Run `os migrate meta --from 16` to rewrite it automatically.",
+  ),
   indexes: z.array(z.string()).describe('Vector Store Indexes'),
-}).transform((input) => {
-  // #1891: fold the deprecated `topics` alias into the canonical `sources` and
-  // drop it from the output (mirrors `normalizeVisibleWhen`, ADR-0089 D2) so
-  // authoring `topics` is no longer a silent no-op — the renderer reads
-  // `sources`. The canonical key wins when both are present.
-  const { topics, ...rest } = input;
-  if (rest.sources === undefined && topics !== undefined) {
-    return { ...rest, sources: topics };
-  }
-  return rest;
 }));
 
 /**

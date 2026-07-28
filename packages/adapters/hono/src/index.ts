@@ -7,7 +7,11 @@ import {
   HttpDispatcher,
   HttpDispatcherResult,
 } from '@objectstack/runtime';
-import { readEnvWithDeprecation } from '@objectstack/types';
+import {
+  readEnvWithDeprecation,
+  looksLikeInternalErrorLeak,
+  INTERNAL_ERROR_MESSAGE,
+} from '@objectstack/types';
 
 /**
  * Re-export the `Hono` type from the copy of `hono` this adapter owns.
@@ -308,11 +312,17 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
           }
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
+          // [#3867 follow-up] Same guard the two dispatcher error exits apply.
+          // This is a 500 built from a caught error, and the auth service reads
+          // from the database, so its message can carry a driver dump. Only the
+          // leak case is replaced — an ordinary config error still names itself.
           return c.json({
             success: false,
             error: {
               code: 'auth_config_error',
-              message: err.message,
+              message: looksLikeInternalErrorLeak(err.message)
+                ? INTERNAL_ERROR_MESSAGE
+                : err.message,
             },
           }, 500);
         }

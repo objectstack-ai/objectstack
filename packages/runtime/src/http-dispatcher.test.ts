@@ -358,33 +358,34 @@ describe('HttpDispatcher', () => {
             expect(result.response?.body?.data?.success).toBe(false);
         });
 
-        // #3853: `inputs` land as BARE flow variables, so a caller who could
-        // write the engine's `$` namespace could forge the `map` node's item
-        // handoff (recording a per-item result for an approval nobody made) or
-        // re-point `$runId`, which is how approval/wait nodes correlate.
-        it('should refuse resume inputs that write engine-internal variables', async () => {
-            for (const inputs of [
-                { 'signoffs.$mapItemDone': true, 'signoffs.$mapItemOutput': { forged: true } },
-                { $runId: 'someone_elses_run' },
-                { $record: { id: 'other' } },
-            ]) {
-                const result = await dispatcher.handleAutomation(
-                    'flow_a/runs/run_1/resume', 'POST', { inputs }, { request: {} },
-                );
-                expect(result.response?.status).toBe(400);
-                expect(result.response?.body?.error?.message).toMatch(/reserved by the flow engine/);
-            }
-            // Refused at the door — the engine is never asked.
-            expect(mockAutomationService.resume).not.toHaveBeenCalled();
+        // #3853 follow-up: the reserved-name rule lives in the ENGINE, at the one
+        // place a signal reaches the variable map — the route only maps its
+        // verdict onto a status. (Guarding one body field at a time here is what
+        // let `output` reopen the hole `inputs` had just closed.)
+        it('should answer 400 when the engine rejects the signal as engine-internal', async () => {
+            mockAutomationService.resume.mockResolvedValue({
+                success: false, code: 'invalid_signal',
+                error: "Resume signal may not set engine-internal variables (signoffs.$mapItemDone) — " +
+                    "names starting with '$' (or containing '.$') are reserved by the flow engine",
+            });
+            const result = await dispatcher.handleAutomation(
+                'flow_a/runs/run_1/resume', 'POST',
+                { output: { $mapItemDone: true } }, { request: {} },
+            );
+            expect(result.response?.status).toBe(400);
+            expect(result.response?.body?.error?.message).toMatch(/reserved by the flow engine/);
         });
 
-        it('should still accept ordinary screen inputs alongside the reserved-name guard', async () => {
+        // Both body fields reach the engine verbatim — it, not the route, decides.
+        it('should forward `output` and `inputs` unfiltered for the engine to judge', async () => {
             await dispatcher.handleAutomation(
                 'flow_a/runs/run_1/resume', 'POST',
-                { inputs: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 } }, { request: {} },
+                { inputs: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 }, output: { decision: 'ok' } },
+                { request: {} },
             );
             expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
                 variables: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 },
+                output: { decision: 'ok' },
             });
         });
 

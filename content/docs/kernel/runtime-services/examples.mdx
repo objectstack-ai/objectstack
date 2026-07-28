@@ -7,6 +7,7 @@ description: Practical examples for flow nodes, hooks, and plugin event subscrip
 
 ## 1) Flow custom node: read related records
 
+{/* os:check */}
 ```ts
 export async function run(ctx: any) {
   const { record: order } = await ctx.services.data.get('sales_order', ctx.input.orderId);
@@ -25,6 +26,7 @@ export async function run(ctx: any) {
 
 ## 2) Hook: check sharing permission before mutation
 
+{/* os:check */}
 ```ts
 export async function beforeUpdate(ctx: any) {
   const ok = await ctx.services?.sharing?.canEdit('contract', ctx.input.id, {

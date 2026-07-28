@@ -46,6 +46,7 @@ label: Customer
 ```
 
 **TypeScript (Recommended for strict validation):**
+{/* os:check */}
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
@@ -128,6 +129,7 @@ validations:
 
 **TypeScript Complete Example:**
 
+{/* os:check */}
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
@@ -621,6 +623,7 @@ Record-triggered logic is **not** an object-schema field — `triggers` (and `ho
 `src/objects/<name>.hook.ts` module as a typed `Hook` and export it (or model the
 automation as a top-level `record_change` flow).
 
+{/* os:check */}
 ```typescript
 // src/objects/customer.hook.ts
 import { Hook, HookContext } from '@objectstack/spec/data';

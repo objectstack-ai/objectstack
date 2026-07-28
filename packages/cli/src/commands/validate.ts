@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
-import { ObjectStackDefinitionSchema, normalizeStackInput, lintDeprecatedAliases, type ConversionNotice } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, normalizeStackInput, type ConversionNotice } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { validateStackExpressions } from '@objectstack/lint';
 import { validateListViewMode } from '@objectstack/lint';
@@ -592,25 +592,12 @@ export default class Validate extends Command {
       const viewRefErrors = viewRefLint.filter((f) => f.severity === 'error');
       const viewRefWarnings = viewRefLint.filter((f) => f.severity !== 'error');
 
-      // Deprecated aliases (#3743). The ONE lint here that reads `normalized`
-      // rather than `result.data`, and it has to: the parse consumes the alias
-      // it reports (`ActionSchema` folds `execute` into `target` and drops it),
-      // so a post-parse read is structurally blind to the conflict. `os build`
-      // lints the same pre-parse input, so both surfaces see the same findings.
-      // A stack authored with strict `defineStack` was already parsed — and
-      // warned about — inside its own config module; this covers the paths that
-      // reach the CLI with the alias intact.
-      const aliasLint = lintDeprecatedAliases(normalized as Record<string, unknown>);
-      const aliasLintErrors = aliasLint.filter((f) => f.severity === 'error');
-      const aliasLintWarnings = aliasLint.filter((f) => f.severity !== 'error');
-
-      const authoringLintErrors = [...flowLintErrors, ...autonumberErrors, ...viewRefErrors, ...aliasLintErrors];
+      const authoringLintErrors = [...flowLintErrors, ...autonumberErrors, ...viewRefErrors];
       const authoringLintWarnings = [
         ...flowLintWarnings,
         ...livenessLint,
         ...autonumberWarnings,
         ...viewRefWarnings,
-        ...aliasLintWarnings,
       ];
       if (authoringLintErrors.length > 0) {
         if (flags.json) {

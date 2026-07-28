@@ -9,6 +9,7 @@ An **Object** is the foundational metadata type in ObjectStack. It defines a bus
 
 ## Basic Structure
 
+{/* os:check */}
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
@@ -192,6 +193,7 @@ entirely.
 
 Optimize query performance:
 
+{/* os:check */}
 ```typescript
 indexes: [
   { fields: ['name'], type: 'btree', unique: false },
@@ -281,6 +283,7 @@ listing the verb in `apiMethods`.
 
 ## Complete Example
 
+{/* os:check */}
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 

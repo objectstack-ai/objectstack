@@ -11,6 +11,7 @@ A **View** defines how records of an Object are displayed to users. ObjectStack 
 
 Views are authored **per object** inside a `defineView({ ... })` container — the default `list`, named `listViews`, and named `formViews` all live in one document. The loader expands the container into independently addressable `<object>.<key>` view items that power the view switcher.
 
+{/* os:check */}
 ```typescript
 // src/ui/views/task.view.ts
 import { defineView } from '@objectstack/spec';
@@ -118,6 +119,7 @@ List and form views share that one namespace — don't reuse a key.
 
 ### Column Configuration
 
+{/* os:check */}
 ```typescript
 columns: [
   {
@@ -287,6 +289,7 @@ formViews: {
 
 Each field in a form section can be customized:
 
+{/* os:check */}
 ```typescript
 fields: [
   {
@@ -320,6 +323,7 @@ fields: [
 
 One container covering a default grid, a kanban saved view, and a tabbed edit form — mirroring `examples/app-showcase/src/ui/views/task.view.ts`:
 
+{/* os:check */}
 ```typescript
 import { defineView } from '@objectstack/spec';
 

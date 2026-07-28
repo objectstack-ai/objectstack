@@ -169,7 +169,7 @@ To grant data exploration to your own (platform-internal) agent, add
 | `tools` | Direct tool references — legacy fallback |
 | `surface` | `'ask' \| 'build'` — the product surface this agent is (default `'ask'`) |
 | `model` | LLM model configuration — `provider`, `model`, `temperature`, `maxTokens`, `topP` |
-| `knowledge` | RAG access — `sources` (canonical; `topics` is a deprecated alias) + `indexes` |
+| `knowledge` | RAG access — `sources` + `indexes`. The `topics` alias was REMOVED in protocol 17; emitting it is a parse error |
 | `guardrails` | `maxTokensPerInvocation`, `maxExecutionTimeSec`, `blockedTopics` |
 | `structuredOutput` | Output format (JSON schema, regex, etc.) |
 | `planning` | Autonomous reasoning — `maxIterations` (default 10) |

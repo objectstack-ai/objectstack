@@ -30,7 +30,7 @@ const result = AIKnowledge.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **sources** | `string[]` | optional | Knowledge sources/tags to recruit RAG context from. Canonical key consumed by the agent renderer (objectui AgentPreview KnowledgeSummary). |
-| **topics** | `string[]` | optional | Deprecated alias for `sources` (spec key ≠ consumed key drift, liveness audit #1878/#1891). Folded into `sources` at parse time; prefer `sources`. |
+| **topics** | `any` | optional | [REMOVED] `knowledge.topics` was removed in @objectstack/spec 17 (#3855) — use `knowledge.sources`. Rename the key; the value (a list of source tags) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
 | **indexes** | `string[]` | ✅ | Vector Store Indexes |
 
 
@@ -75,19 +75,19 @@ const result = AIKnowledge.parse(data);
 | **avatar** | `string` | optional |  |
 | **role** | `string` | ✅ | The persona/role (e.g. "Senior Support Engineer") |
 | **instructions** | `string` | ✅ | System Prompt / Prime Directives |
-| **model** | `{ provider?: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature?: number; maxTokens?: number; … }` | optional |  |
+| **model** | `{ provider: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature: number; maxTokens?: number; … }` | optional |  |
 | **lifecycle** | `{ id: string; description?: string; contextSchema?: Record<string, any>; initial: string; … }` | optional | [EXPERIMENTAL — not enforced] State machine defining the agent conversation flow and constraints. Parsed but no runtime consumer yet (liveness #1878/#1893). |
-| **surface** | `Enum<'ask' \| 'build'>` | optional | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
+| **surface** | `Enum<'ask' \| 'build'>` | ✅ | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
 | **skills** | `string[]` | optional | Skill names to attach (Agent→Skill→Tool architecture) |
 | **tools** | `{ type: Enum<'action' \| 'flow' \| 'query' \| 'vector_search'>; name: string; description?: string }[]` | optional | Direct tool references (legacy fallback) |
-| **knowledge** | `{ sources?: string[]; topics?: string[]; indexes: string[] }` | optional | RAG access |
-| **active** | `boolean` | optional |  |
+| **knowledge** | `{ sources?: string[]; topics?: any; indexes: string[] }` | optional | RAG access |
+| **active** | `boolean` | ✅ |  |
 | **access** | `string[]` | optional | Who can chat with this agent |
 | **permissions** | `string[]` | optional | Required permission-set capabilities |
-| **planning** | `{ maxIterations?: integer }` | optional | Autonomous reasoning and planning configuration |
+| **planning** | `{ maxIterations: integer }` | optional | Autonomous reasoning and planning configuration |
 | **memory** | `{ longTerm?: object; reflectionInterval?: integer }` | optional | [EXPERIMENTAL — not enforced] Agent memory management. Parsed but no runtime consumer yet (liveness #1878/#1893). |
 | **guardrails** | `{ maxTokensPerInvocation?: integer; maxExecutionTimeSec?: integer; blockedTopics?: string[] }` | optional | [EXPERIMENTAL — not enforced] Safety guardrails for the agent. Parsed but not enforced — real limits come from the quota service (liveness #1878/#1893). |
-| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>; schema?: Record<string, any>; strict?: boolean; retryOnValidationFailure?: boolean; … }` | optional | [EXPERIMENTAL — not enforced] Structured output format and validation configuration. Parsed but no runtime consumer yet (liveness #1878/#1893). |
+| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>; schema?: Record<string, any>; strict: boolean; retryOnValidationFailure: boolean; … }` | optional | [EXPERIMENTAL — not enforced] Structured output format and validation configuration. Parsed but no runtime consumer yet (liveness #1878/#1893). |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this agent. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

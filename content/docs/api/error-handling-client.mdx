@@ -17,6 +17,7 @@ This guide covers best practices for handling ObjectStack API errors in client a
 
 Every error response from ObjectStack follows this shape:
 
+{/* os:check */}
 ```typescript
 interface ErrorResponse {
   success: false;        // Always false for error responses
@@ -56,6 +57,7 @@ Error `code` values are lowercase snake_case (`validation_error`, `permission_de
 
 Create a typed error parser to extract structured information from API responses:
 
+{/* os:check */}
 ```typescript
 import type { ErrorResponse } from '@objectstack/spec/api';
 

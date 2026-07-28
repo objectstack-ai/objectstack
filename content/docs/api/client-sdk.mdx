@@ -337,6 +337,28 @@ await client.ai.conversations.addMessage(conv.id, { role: 'user', content: 'hi' 
 await client.ai.conversations.update(conv.id, { title: 'Renamed' });
 await client.ai.conversations.delete(conv.id);
 
+// Named agents — `ai.chat` talks to the environment default; these talk to one
+// you name. The catalog is access-filtered server-side (ADR-0049), so an empty
+// list is a legitimate answer for a seat-less user, not an error to retry.
+const agents = await client.ai.agents.list();
+await client.ai.agents.chat('build', { messages, context: { appId: 'crm' } });
+for await (const frame of await client.ai.agents.chatStream('build', { messages })) {
+  if (frame.type === 'text-delta') process.stdout.write(frame.delta as string);
+}
+
+// Pending actions — the human-in-the-loop queue. A tool call needing a human
+// decision parks here instead of executing.
+await client.ai.pendingActions.list({ status: 'pending', limit: 20 });
+await client.ai.pendingActions.get('pa_1');
+const outcome = await client.ai.pendingActions.approve('pa_1');
+// CHECK `outcome.status`: approve runs the tool, and a tool that fails comes
+// back { status: 'failed', error } on HTTP 200 — the approval succeeded, the
+// execution did not. Code that reads only `res.ok` calls that a success.
+if (outcome.status === 'failed') console.error(outcome.error);
+await client.ai.pendingActions.reject('pa_1', 'wrong account');
+// Listing takes `ai:read`, deciding takes `ai:approve` — a caller that can see
+// the queue may still be refused on approve. Handle the 403.
+
 // In a React chat UI prefer `useChat()` (`@ai-sdk/react`) over `ai.chatStream`:
 // it speaks the same protocol and owns message state. These methods are for
 // everything that is not a component — server code, jobs, CLIs, tests.

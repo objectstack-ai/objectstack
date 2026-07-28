@@ -9,6 +9,7 @@ A **Flow** is a visual automation that orchestrates business logic through conne
 
 ## Basic Structure
 
+{/* os:check */}
 ```typescript
 const approvalFlow = {
   name: 'order_approval',
@@ -424,11 +425,16 @@ the item rather than the loop:
   decision is still open. Refused while that item is service-gated; the map
   moves on when the item completes through its owning service.
 
-Two related rules on the same route: **resume `inputs` may not write the
-engine's `$` namespace** (`$runId`, `$record`, `$flowName`,
-`<nodeId>.$mapItemDone`, …) — those are the engine's own handoff variables, and
-a caller who could set them could forge a map item's recorded result. Ordinary
-author-declared variables are unaffected; a reserved name answers **400**.
+A second rule on the same seam: **a resume signal may not write the engine's
+`$` namespace** (`$runId`, `$record`, `$flowName`, `<nodeId>.$mapItemDone`, …) —
+those are the engine's own handoff variables, and a caller who could set them
+could forge a map item's recorded result or re-point the run id an `approval` /
+`wait` node correlates on. It covers **both** signal fields: `inputs` land under
+their plain names, and `output` keys land under the *suspended node's* id —
+which for a map-parked run is the map node itself, i.e. the very same reserved
+key. A reserved name answers **400**, nothing is applied (not even legitimate
+keys sent alongside it), and the run stays parked. Ordinary author variables are
+unaffected, `$` mid-name (`price$`) included.
 
 Registering a pausing node of your own? Declare `resumeAuthority: 'service'` on
 its descriptor when the decision to continue belongs to your service rather
@@ -558,7 +564,7 @@ Edges connect nodes and define the execution path:
 | `target` | `string` | ✅ | Target node ID |
 | `type` | `enum` | optional | `'default'` (success), `'fault'` (error), `'conditional'` (expression-guarded), or `'back'` (declared back-edge, ADR-0044); defaults to `'default'` |
 | `condition` | `string` | optional | Boolean expression for branching |
-| `label` | `string` | optional | Label displayed on the connector |
+| `label` | `string` | optional | Label displayed on the connector — cosmetic only. It does **not** select a path except on a branching node (`decision` / `approval`), which picks its out-edge by label. |
 
 ### Fault edges — handling a failed node
 
@@ -571,6 +577,16 @@ edges: [
   { id: 'e_fault', source: 'charge_card', target: 'flag_for_review', type: 'fault' },
 ]
 ```
+
+<Callout type="warn">
+**`type: 'fault'` is what routes — a label is not.** Writing
+`{ source: 'charge_card', target: 'flag_for_review', label: 'error' }` without
+the type leaves an ordinary edge, and every unconditional out-edge is traversed
+(in parallel) on **success**. The handler then runs whenever the node
+*succeeds*, never when it fails, and the run still aborts on failure. Both
+halves are silent, so `objectstack validate` reports this as
+`flow-error-label-not-fault`.
+</Callout>
 
 The handler reads what went wrong from two variables:
 
@@ -587,14 +603,21 @@ recovery never erases the record of what failed.
 **A fault edge does not disable a guardrail.** Failures come in two classes, and
 only one is routable.
 
-- **Runtime** — the world did not cooperate: an `http` node got a 404, a
-  connector rate-limited, the data engine rejected a write. Routed to the fault
-  edge.
-- **Guard** — the *metadata* is wrong, and a refuse-to-execute check said so: a
-  filter token resolved to nothing so the condition was dropped from the query,
-  a data node names no object, or the run would execute unscoped. **Never
-  routed.** These stay fatal whether or not a `fault` edge exists, and the run
+- **Runtime** — the world did not cooperate, and a later run could succeed: an
+  `http` node got a 404, a connector rate-limited or is degraded, the data engine
+  rejected a write, a collection arrived the wrong shape, a subflow failed on its
+  own. Routed to the fault edge.
+- **Guard** — a refuse-to-execute check found the *metadata* wrong. **Never
+  routed:** these stay fatal whether or not a `fault` edge exists, and the run
   fails with the guard's own message.
+
+A failure is a guard when both hold: re-running the flow unchanged could never
+succeed, **and** the fix is to edit metadata. In practice that is a missing
+required config key (a data node with no `objectName`, an `http` node with no
+`url`, a `subflow` or `map` with no `flowName`, a `connector_action` with no
+`connectorId`/`actionId`), a filter token that resolved to nothing so the
+condition was dropped from the query, a graph that recurses past the nesting
+ceiling, or a run that would execute unscoped.
 
 The split is deliberate. A dropped filter condition does not narrow a query, it
 widens it — so if guards were routable, one `fault` edge on a `delete_record`
@@ -603,10 +626,26 @@ reported success. Re-running changes nothing either: the fix is to correct the
 metadata, which `objectstack validate` will point at.
 </Callout>
 
+#### Fault edges vs. `errorHandling.retry`
+
+The two recovery mechanisms operate at different scopes and do not compound:
+
+| | Scope | On failure |
+| :--- | :--- | :--- |
+| `fault` edge | one node | traversal continues from the handler; the run completes |
+| `errorHandling: { strategy: 'retry' }` | the whole flow | the flow re-runs **from the start** |
+
+A failure a fault edge handled is not a flow failure, so it does **not** consume
+a retry. That matters because flow-level retry replays every node that already
+succeeded — a second notification, a second created record. Prefer a fault edge
+where the failure is local; reach for `retry` only when replaying the whole flow
+is genuinely safe.
+
 ## Variables
 
 Flows use variables to pass data between nodes and to/from callers:
 
+{/* os:check */}
 ```typescript
 variables: [
   { name: 'input_id', type: 'text', isInput: true, isOutput: false },
@@ -781,6 +820,7 @@ is retired; model the same logic as a Flow.
 
 ### Record-change flow
 
+{/* os:check */}
 ```typescript
 import type { Flow } from '@objectstack/spec/automation';
 

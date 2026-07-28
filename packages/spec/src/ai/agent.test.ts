@@ -102,21 +102,38 @@ describe('AIKnowledgeSchema', () => {
     expect(() => AIKnowledgeSchema.parse(knowledge)).not.toThrow();
   });
 
-  it('folds the deprecated topics alias into sources at parse time (#1891)', () => {
-    const parsed = AIKnowledgeSchema.parse({
+  it('rejects the removed `topics` alias instead of silently stripping it (#3855)', () => {
+    // #1891 folded `topics` into `sources` and dropped it; protocol 17 removes
+    // it from the spec. Tombstoned rather than deleted because
+    // `AIKnowledgeSchema` is not `.strict()` — a silent strip would leave the
+    // agent recruiting no RAG context at all, which is #1878's original bug.
+    expect(() => AIKnowledgeSchema.parse({
       topics: ['product_docs', 'faq'],
       indexes: ['vector_store_main'],
-    });
-    expect(parsed.sources).toEqual(['product_docs', 'faq']);
-    expect('topics' in parsed).toBe(false);
+    })).toThrow(/`knowledge.topics` was removed/);
   });
 
-  it('lets canonical sources win when both keys are present', () => {
-    const parsed = AIKnowledgeSchema.parse({
+  it('carries the upgrade prescription in the rejection itself', () => {
+    let message = '';
+    try {
+      AIKnowledgeSchema.parse({ topics: ['legacy'], indexes: [] });
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toContain('use `knowledge.sources`');
+    expect(message).toContain('os migrate meta');
+  });
+
+  it('rejects `topics` even when the canonical `sources` is also present', () => {
+    expect(() => AIKnowledgeSchema.parse({
       sources: ['canonical'],
       topics: ['legacy'],
       indexes: [],
-    });
+    })).toThrow(/`knowledge.topics` was removed/);
+  });
+
+  it('accepts the canonical `sources` on its own', () => {
+    const parsed = AIKnowledgeSchema.parse({ sources: ['canonical'], indexes: [] });
     expect(parsed.sources).toEqual(['canonical']);
     expect('topics' in parsed).toBe(false);
   });

@@ -233,8 +233,8 @@ P`!isBlank(record.po_number)`
 ```
 
 For field-level conditional rules, emit the canonical field properties:
-`visibleWhen`, `readonlyWhen`, and `requiredWhen`. Treat
-`conditionalRequired` as a read/compatibility alias only.
+`visibleWhen`, `readonlyWhen`, and `requiredWhen`. Never emit
+`conditionalRequired` — it was REMOVED in protocol 17 and is a parse error.
 
 ❌ Salesforce-flavor — **fails CEL compile**: `objectstack build` errors with a
 located message, and the flow engine throws if it ever reaches runtime (see the
@@ -312,7 +312,6 @@ to the envelope.
 |:---|:---|:---|
 | `Field` | `expression` (when `type: 'formula'`) | cel |
 | `Field` | `visibleWhen` / `readonlyWhen` / `requiredWhen` | cel |
-| `Field` | `conditionalRequired` (deprecated alias of `requiredWhen`) | cel |
 | `View` / `Page` | `visibleWhen` (form section/field, page component) | cel |
 | `Field` | `defaultValue` (M9.9b) | cel |
 | `ConditionalValidation` | `when` | cel |

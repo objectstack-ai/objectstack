@@ -1036,6 +1036,122 @@ export const UpdateAiConversationRequestSchema = lazySchema(() => z.object({
   message: 'at least one of title or metadata is required',
 }));
 
+// ── Named agents ──────────────────────────────────────────────────────────
+//
+// `/ai/agents` and `/ai/agents/:agentName/chat` were mounted long before the
+// SDK could express them: `objectui` hand-built both URLs in five places
+// because there was nothing to call. Typed from what the routes RETURN, not
+// from what a client might like them to (#3718).
+
+/** What an agent can do, derived server-side from its surface. */
+export const AiAgentCapabilitiesSchema = lazySchema(() => z.object({
+  authoring: z.boolean().describe('Authors app metadata (objects/views/flows)'),
+  canvas: z.boolean().describe('Drives the Live Canvas split view (ADR-0037)'),
+  debug: z.boolean().describe('Exposes the build-doctor debug drawer'),
+  resume: z.boolean().describe('Turns resume durable multi-step runs (ADR-0013)'),
+}));
+
+/** One row of the `GET /api/v1/ai/agents` catalog. */
+export const AiAgentSummarySchema = lazySchema(() => z.object({
+  name: z.string().describe('Agent name — the `:agentName` path segment'),
+  label: z.string().describe('Display label'),
+  role: z.string().describe('Agent role'),
+  capabilities: AiAgentCapabilitiesSchema.describe('Capability set implied by the agent surface'),
+}));
+
+/**
+ * `GET /api/v1/ai/agents`.
+ *
+ * ACCESS-AWARE: the route returns only agents the CALLER may chat with
+ * (ADR-0049), so an empty list is a legitimate answer for a seat-less user —
+ * not an error, and not something to retry.
+ */
+export const AiAgentsResponseSchema = lazySchema(() => z.object({
+  agents: z.array(AiAgentSummarySchema).describe('Agents this caller may chat with'),
+}));
+
+/**
+ * `POST /api/v1/ai/agents/:agentName/chat`.
+ *
+ * Same dual-mode `stream` flag as `/ai/chat`: absent or `true` streams Vercel
+ * Data Stream frames, `false` returns the JSON reply. The client sets it per
+ * method rather than leaving it to the caller, so `agents.chat` cannot
+ * accidentally return a stream body.
+ */
+export const AiAgentChatRequestSchema = lazySchema(() => z.object({
+  messages: z.array(AiMessageSchema).min(1).describe('Conversation messages (at least one)'),
+  context: z.record(z.string(), z.unknown()).optional().describe('Agent context (app, object, record, …)'),
+  options: z.record(z.string(), z.unknown()).optional().describe('Request options (model, temperature, …)'),
+}));
+
+// ── HITL pending actions ──────────────────────────────────────────────────
+//
+// The approval queue an embedding app has to render. `objectui` ships a whole
+// approval UI on these four routes over hand-built URLs.
+
+/** Lifecycle of a proposed action. Mirrors `PendingActionStatus` in contracts. */
+export const AiPendingActionStatusSchema = lazySchema(() =>
+  z.enum(['pending', 'approved', 'executed', 'failed', 'rejected']));
+
+/**
+ * One queued action, as the routes return it — the persisted row, snake_case
+ * because that is the wire shape, not a style choice.
+ */
+export const AiPendingActionSchema = lazySchema(() => z.object({
+  id: z.string().describe('Pending action id'),
+  object_name: z.string().describe('Object the action targets'),
+  action_name: z.string().describe('Action name'),
+  tool_name: z.string().describe('Tool that would execute it'),
+  tool_input: z.string().describe('Serialized tool input'),
+  status: AiPendingActionStatusSchema.describe('Lifecycle status'),
+  result: z.string().optional().describe('Serialized result, once executed'),
+  error: z.string().optional().describe('Failure message, when status is failed'),
+  rejection_reason: z.string().optional().describe('Reason given at rejection'),
+  conversation_id: z.string().optional().describe('Conversation that proposed it'),
+  message_id: z.string().optional().describe('Message that proposed it'),
+  proposed_by: z.string().optional().describe('Actor that proposed it'),
+  decided_by: z.string().optional().describe('Actor that approved or rejected it'),
+  proposed_at: z.string().describe('Proposal timestamp (ISO 8601)'),
+  decided_at: z.string().optional().describe('Decision timestamp (ISO 8601)'),
+}));
+
+/**
+ * `GET /api/v1/ai/pending-actions` query.
+ *
+ * Only the three the ROUTE reads. `AIService.listPendingActions` also accepts
+ * `objectName`, but the route never forwards it, so declaring it here would
+ * type a filter that silently does nothing.
+ */
+export const ListAiPendingActionsRequestSchema = lazySchema(() => z.object({
+  status: AiPendingActionStatusSchema.optional().describe('Filter by status'),
+  conversationId: z.string().optional().describe('Filter by proposing conversation'),
+  limit: z.number().int().positive().optional().describe('Max rows (server default 100)'),
+}));
+
+export const ListAiPendingActionsResponseSchema = lazySchema(() => z.object({
+  items: z.array(AiPendingActionSchema).describe('Queued actions, newest first'),
+  total: z.number().describe('Number of rows returned (not a total across pages)'),
+}));
+
+/**
+ * `POST /api/v1/ai/pending-actions/:id/approve` — approve AND execute.
+ *
+ * `status: 'failed'` is a 200 with a reason, not an HTTP error: the approval
+ * succeeded, the execution did not. A caller that only checks `res.ok` will
+ * report a failed write as a success.
+ */
+export const ApproveAiPendingActionResponseSchema = lazySchema(() => z.object({
+  status: z.enum(['executed', 'failed']).describe('Outcome of executing the approved action'),
+  result: z.unknown().optional().describe('Tool result, when executed'),
+  error: z.string().optional().describe('Failure reason, when failed'),
+}));
+
+/** `POST /api/v1/ai/pending-actions/:id/reject` — never executes anything. */
+export const RejectAiPendingActionResponseSchema = lazySchema(() => z.object({
+  status: z.literal('rejected').describe('Always "rejected"'),
+  id: z.string().describe('The rejected action id'),
+}));
+
 // ==========================================
 // i18n Operations
 // ==========================================
@@ -1224,6 +1340,16 @@ export type CreateAiConversationRequest = z.input<typeof CreateAiConversationReq
 export type ListAiConversationsRequest = z.input<typeof ListAiConversationsRequestSchema>;
 export type ListAiConversationsResponse = z.infer<typeof ListAiConversationsResponseSchema>;
 export type UpdateAiConversationRequest = z.input<typeof UpdateAiConversationRequestSchema>;
+export type AiAgentCapabilities = z.infer<typeof AiAgentCapabilitiesSchema>;
+export type AiAgentSummary = z.infer<typeof AiAgentSummarySchema>;
+export type AiAgentsResponse = z.infer<typeof AiAgentsResponseSchema>;
+export type AiAgentChatRequest = z.input<typeof AiAgentChatRequestSchema>;
+export type AiPendingActionStatus = z.infer<typeof AiPendingActionStatusSchema>;
+export type AiPendingAction = z.infer<typeof AiPendingActionSchema>;
+export type ListAiPendingActionsRequest = z.input<typeof ListAiPendingActionsRequestSchema>;
+export type ListAiPendingActionsResponse = z.infer<typeof ListAiPendingActionsResponseSchema>;
+export type ApproveAiPendingActionResponse = z.infer<typeof ApproveAiPendingActionResponseSchema>;
+export type RejectAiPendingActionResponse = z.infer<typeof RejectAiPendingActionResponseSchema>;
 
 // i18n Types
 export type GetLocalesRequest = z.input<typeof GetLocalesRequestSchema>;

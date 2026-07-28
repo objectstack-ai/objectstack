@@ -24,6 +24,7 @@ LIMIT 10;
 ```
 
 **ObjectQL (Canonical Spec Format):**
+{/* os:check */}
 ```typescript
 import type { QueryAST } from '@objectstack/spec/data';
 
@@ -292,6 +293,7 @@ const query: QueryAST = {
 
 ### Date Filters
 
+{/* os:check */}
 ```typescript
 // Specific date
 where: { created_at: '2024-01-15' }
@@ -306,6 +308,7 @@ where: { created_at: { $gte: '2024-01-01' } }
 
 ### Null Checks
 
+{/* os:check */}
 ```typescript
 // Field IS NULL
 where: { manager_id: { $null: true } }
@@ -796,6 +799,7 @@ The tuple/array format (e.g. `['status', '=', 'active']`) and the `filters` key 
 
 Before entering the ObjectQL protocol or `IDataEngine`, tuple filters **must** be converted to the canonical `where` + `$op` object format using the `parseFilterAST()` utility from `@objectstack/spec/data`:
 
+{/* os:check */}
 ```typescript
 import { parseFilterAST } from '@objectstack/spec/data';
 

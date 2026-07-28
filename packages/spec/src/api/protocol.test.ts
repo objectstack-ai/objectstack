@@ -51,6 +51,12 @@ import {
   MarkNotificationsReadRequestSchema,
   // AI
   AiChatRequestSchema,
+  AiAgentsResponseSchema,
+  AiAgentChatRequestSchema,
+  ListAiPendingActionsRequestSchema,
+  ListAiPendingActionsResponseSchema,
+  ApproveAiPendingActionResponseSchema,
+  RejectAiPendingActionResponseSchema,
   AiChatResponseSchema,
   AiCompleteRequestSchema,
   AiModelsResponseSchema,
@@ -325,6 +331,54 @@ describe('ObjectStack Protocol', () => {
       UpdateAiConversationRequestSchema.safeParse({}).success,
       'PATCH with neither title nor metadata is a 400 on the wire',
     ).toBe(false);
+
+    // agents — the named-agent surface `objectui` hand-built URLs for (#3718)
+    expect(AiAgentsResponseSchema.safeParse({
+      agents: [{
+        name: 'build', label: 'Builder', role: 'authoring',
+        capabilities: { authoring: true, canvas: true, debug: true, resume: true },
+      }],
+    }).success).toBe(true);
+    expect(
+      AiAgentsResponseSchema.safeParse({ agents: [] }).success,
+      'an access-filtered catalog is legitimately empty for a seat-less caller',
+    ).toBe(true);
+    expect(
+      AiAgentsResponseSchema.safeParse({ agents: [{ name: 'build', label: 'Builder', role: 'authoring' }] }).success,
+      'capabilities drive UI affordances — a row without them is not a row this route returns',
+    ).toBe(false);
+    expect(AiAgentChatRequestSchema.safeParse({
+      messages: [{ role: 'user', content: 'add a status field' }],
+      context: { appId: 'crm', objectName: 'account' },
+    }).success).toBe(true);
+    expect(
+      AiAgentChatRequestSchema.safeParse({ messages: [] }).success,
+      'the agent chat route 400s an empty message list, same as /ai/chat',
+    ).toBe(false);
+
+    // pending actions — the HITL queue
+    expect(ListAiPendingActionsResponseSchema.safeParse({
+      items: [{
+        id: 'pa_1', object_name: 'account', action_name: 'update', tool_name: 'record_update',
+        tool_input: '{"id":"a_1"}', status: 'pending', proposed_at: '2026-07-27T10:00:00Z',
+      }],
+      total: 1,
+    }).success).toBe(true);
+    expect(
+      ListAiPendingActionsRequestSchema.safeParse({ status: 'archived' }).success,
+      'status is the persisted lifecycle enum, not free text',
+    ).toBe(false);
+    expect(ListAiPendingActionsRequestSchema.safeParse({ status: 'pending', limit: 20 }).success).toBe(true);
+    // Approval and execution are separate outcomes on one 200 response: a tool
+    // that fails after approval is `status: 'failed'`, NOT an HTTP error. A
+    // caller reading only `res.ok` reports a failed write as a success.
+    expect(ApproveAiPendingActionResponseSchema.safeParse({ status: 'executed', result: { id: 'a_1' } }).success).toBe(true);
+    expect(ApproveAiPendingActionResponseSchema.safeParse({ status: 'failed', error: 'row locked' }).success).toBe(true);
+    expect(
+      ApproveAiPendingActionResponseSchema.safeParse({ status: 'rejected' }).success,
+      'approve never yields "rejected" — that is the other route',
+    ).toBe(false);
+    expect(RejectAiPendingActionResponseSchema.safeParse({ status: 'rejected', id: 'pa_1' }).success).toBe(true);
   });
 
   it('validates i18n operations', () => {

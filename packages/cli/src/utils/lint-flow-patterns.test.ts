@@ -12,6 +12,7 @@ import {
   FLOW_APPROVAL_REVISE_UNMARKED_BACKEDGE,
   FLOW_APPROVAL_REVISE_DISABLED,
   FLOW_RUNAS_UNSCOPED,
+  FLOW_ERROR_LABEL_NOT_FAULT,
 } from './lint-flow-patterns.js';
 
 const CEL = (source: string) => ({ dialect: 'cel', source });
@@ -376,4 +377,74 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
       expect(lintFlowPatterns(scheduledDataFlow({ flowType: 'screen', startConfig: {} }))).toHaveLength(0);
     });
   });
+});
+
+/**
+ * #3863 — `label: 'error'` without `type: 'fault'`.
+ *
+ * The label is cosmetic on an ordinary edge, so the handler runs on every
+ * SUCCESS (unconditional out-edges all traverse, in parallel) and never on a
+ * failure. Both halves are silent, which is why this is worth a build-time
+ * diagnostic rather than a runtime one.
+ */
+function edgeFlow(edge: Record<string, unknown>, sourceType = 'http') {
+  return {
+    flows: [{
+      name: 'edge_flow',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', config: {} },
+        { id: 'op', type: sourceType, config: { url: 'https://x.test' } },
+        { id: 'handler', type: 'notify', config: { topic: 'x' } },
+        { id: 'end', type: 'end' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'op' },
+        { id: 'e2', source: 'op', target: 'end' },
+        { id: 'e_h', source: 'op', target: 'handler', ...edge },
+      ],
+    }],
+  };
+}
+
+describe('flow-error-label-not-fault (#3863)', () => {
+  it("flags label:'error' left at the default type", () => {
+    const fnds = lintFlowPatterns(edgeFlow({ label: 'error' }));
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].rule).toBe(FLOW_ERROR_LABEL_NOT_FAULT);
+    // The message must name the actual consequence, not just the mismatch.
+    expect(fnds[0].message).toContain('SUCCESSFUL');
+    expect(fnds[0].hint).toContain("type: 'fault'");
+  });
+
+  it.each(['Error', 'FAILURE', 'catch', 'on_error', 'fault'])(
+    "flags the equivalent label %s",
+    (label) => {
+      const fnds = lintFlowPatterns(edgeFlow({ label }));
+      expect(fnds.map((f) => f.rule)).toContain(FLOW_ERROR_LABEL_NOT_FAULT);
+    },
+  );
+
+  it("does NOT flag the correct shape (type: 'fault')", () => {
+    expect(lintFlowPatterns(edgeFlow({ label: 'error', type: 'fault' }))).toHaveLength(0);
+  });
+
+  it('does NOT flag an unlabelled fault edge', () => {
+    expect(lintFlowPatterns(edgeFlow({ type: 'fault' }))).toHaveLength(0);
+  });
+
+  it('does NOT flag an ordinary labelled edge', () => {
+    expect(lintFlowPatterns(edgeFlow({ label: 'approved' }))).toHaveLength(0);
+  });
+
+  it('does NOT flag a CONDITIONAL edge — a guarded path is not the footgun', () => {
+    expect(lintFlowPatterns(edgeFlow({ label: 'error', condition: "status == 'bad'" }))).toHaveLength(0);
+  });
+
+  it.each(['decision', 'approval'])(
+    "does NOT flag label:'error' out of a %s node — the label IS the branch selector",
+    (sourceType) => {
+      expect(lintFlowPatterns(edgeFlow({ label: 'error' }, sourceType))).toHaveLength(0);
+    },
+  );
 });

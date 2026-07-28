@@ -299,14 +299,8 @@ const step16: MigrationStep = {
     '(`object`+`categoryField`+`valueField`+`aggregate`, pivot ' +
     '`rowField`/`columnField`) was already removed at protocol 9, so no mechanical ' +
     'rewrite applies; the residue is the strictness itself, delegated to the author ' +
-    'because an arbitrary unknown key has no lossless canonical target.\n\n' +
-    'It also removed the sharing-rule access level `full` (#3865): declared as ' +
-    '"Full Access (Transfer, Share, Delete)" but never enforced as anything but ' +
-    '`edit`. Unlike the OWD `sharingModel: \'full\'` alias retired at step 13, this ' +
-    'one HAS a lossless target precisely because it was inert — old and new shapes ' +
-    'are behaviourally identical — so it converts mechanically and leaves no ' +
-    'semantic residue.',
-  conversionIds: ['sharing-rule-access-level-full-to-edit'],
+    'because an arbitrary unknown key has no lossless canonical target.',
+  conversionIds: [],
   semantic: [
     {
       id: 'dashboard-widget-strict-unknown-keys',
@@ -328,6 +322,51 @@ const step16: MigrationStep = {
   ],
 };
 
+/**
+ * Protocol 17 step.
+ *
+ * Mechanical, and mechanical only: the three deprecated aliases that a schema
+ * transform used to fold into a canonical key and drop from the parsed output
+ * (`action.execute`, `field.conditionalRequired`, `agent.knowledge.topics`) are
+ * removed from the spec. Each is a pure key rename with an unchanged value, so
+ * the whole break replays losslessly — there is no semantic residue and the
+ * `semantic` list is deliberately empty.
+ *
+ * The three conversions are `retiredFromLoadPath` from the day they land: 17
+ * gives the aliases no acceptance window at all, and each schema tombstones its
+ * key with a fix-it error instead. This step is what makes that affordable —
+ * `os migrate meta --from <N>` rewrites the consumer's source rather than
+ * leaving them to hand-edit against a changelog.
+ */
+const step17: MigrationStep = {
+  toMajor: 17,
+  rationale:
+    'Protocol 17 removes the last three deprecated authorable aliases: action ' +
+    '`execute` (use `target`), field `conditionalRequired` (use `requiredWhen`), and ' +
+    'agent `knowledge.topics` (use `knowledge.sources`). Each was already lowered into ' +
+    'its canonical key at parse time and dropped from the parsed output, so no runtime ' +
+    'behaviour changes — only the authorable surface shrinks to one spelling per slot. ' +
+    'All three are pure key renames with unchanged values and replay losslessly; the ' +
+    'schemas reject the removed spellings with a fix-it error naming the replacement.\n\n' +
+    'It also removes the sharing-rule access level `full` (#3865): declared as ' +
+    '"Full Access (Transfer, Share, Delete)" but never enforced as anything but ' +
+    '`edit` — both gates matched `edit`/`full` alike, so Setup promised admins a ' +
+    'delete grant it never issued (ADR-0078). Unlike the OWD `sharingModel: \'full\'` ' +
+    'alias retired at step 13, this one HAS a lossless target precisely because it ' +
+    'was inert — old and new shapes are behaviourally identical — so it converts ' +
+    'mechanically and leaves no semantic residue. It is the one protocol-17 ' +
+    'conversion that keeps a load-path acceptance window: it had no prior ' +
+    'deprecation, and a removed enum value cannot carry the fix-it error the three ' +
+    'key renames tombstone theirs with.',
+  conversionIds: [
+    'action-execute-to-target',
+    'field-conditionalRequired-to-requiredWhen',
+    'agent-knowledge-topics-to-sources',
+    'sharing-rule-access-level-full-to-edit',
+  ],
+  semantic: [],
+};
+
 /** All migration steps, keyed by the major they migrate into. */
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   11: step11,
@@ -336,6 +375,7 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   14: step14,
   15: step15,
   16: step16,
+  17: step17,
 };
 
 /** The majors that have a step, ascending. */

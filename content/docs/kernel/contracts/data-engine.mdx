@@ -237,6 +237,7 @@ the listener exists so callers that report per-field success (e.g. the flow
 engine's `update_record` step) can surface a warning instead of a silent
 success.
 
+{/* os:check */}
 ```typescript
 interface WriteObservabilityOptions {
   onFieldsDropped?: (event: DroppedFieldsEvent) => void;

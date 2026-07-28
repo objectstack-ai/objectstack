@@ -166,15 +166,21 @@ export interface AutomationResult {
     durationMs?: number;
     /**
      * Machine-readable failure classification, set alongside `error` when the
-     * caller must distinguish *why* it failed rather than just report it.
+     * caller must distinguish *why* it failed rather than just report it —
+     * without it a refusal is indistinguishable from "no such run".
      *
-     * Today the one value is `'forbidden'` — {@link IAutomationService.resume}
-     * refused because the run is parked on a node whose descriptor declares
-     * `resumeAuthority: 'service'` (#3801). A transport maps it to 403; without
-     * it a resume denied on authorization grounds is indistinguishable from
-     * "no such run".
+     *  - `'forbidden'` — {@link IAutomationService.resume} refused because the
+     *    run is parked on a node whose descriptor declares
+     *    `resumeAuthority: 'service'` (#3801). A transport maps it to **403**.
+     *  - `'invalid_signal'` — the resume signal tried to write variables the
+     *    flow engine reserves for itself (a `$…` name, or one carrying a `.$`
+     *    segment: `$runId`, `<nodeId>.$mapItemDone`, …). A transport maps it to
+     *    **400**.
+     *
+     * Both refuse before consuming the suspension: the run stays parked and the
+     * legitimate continuation still lands.
      */
-    code?: 'forbidden';
+    code?: 'forbidden' | 'invalid_signal';
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be

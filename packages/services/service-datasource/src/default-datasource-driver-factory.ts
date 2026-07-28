@@ -14,6 +14,7 @@
  *   - `postgres` / `pg` / `postgresql` → `@objectstack/driver-sql` (client `pg`)
  *   - `sqlite` / `sqlite3`             → `@objectstack/driver-sql` (better-sqlite3)
  *   - `sqlite-wasm` / `wasm-sqlite`    → `@objectstack/driver-sqlite-wasm` (pure-JS)
+ *   - `mysql` / `mysql2`               → `@objectstack/driver-sql` (client `mysql2`)
  *   - `mongodb` / `mongo`             → `@objectstack/driver-mongodb` (peer dep)
  *   - `memory` / `inmemory`           → `@objectstack/driver-memory`
  *
@@ -35,7 +36,7 @@ import type {
   DatasourceDriverHandle,
 } from './contracts/index.js';
 
-type ResolvedKind = 'postgres' | 'sqlite' | 'sqlite-wasm' | 'mongodb' | 'memory';
+type ResolvedKind = 'postgres' | 'sqlite' | 'sqlite-wasm' | 'mysql' | 'mongodb' | 'memory';
 
 const DRIVER_ID_ALIASES: Record<string, ResolvedKind> = {
   postgres: 'postgres',
@@ -46,6 +47,8 @@ const DRIVER_ID_ALIASES: Record<string, ResolvedKind> = {
   'better-sqlite3': 'sqlite',
   'sqlite-wasm': 'sqlite-wasm',
   'wasm-sqlite': 'sqlite-wasm',
+  mysql: 'mysql',
+  mysql2: 'mysql',
   mongodb: 'mongodb',
   mongo: 'mongodb',
   memory: 'memory',
@@ -103,6 +106,26 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
   };
 }
 
+/**
+ * Build the Knex `connection` for mysql2 from a spec's config + secret. A DSN
+ * (`url`/`connectionString`) passes through as-is — knex's mysql2 dialect
+ * accepts a connection string; otherwise discrete fields, with the secret as
+ * the password (never part of `config`).
+ */
+function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
+  const cfg = (spec.config ?? {}) as Record<string, unknown>;
+  const url = (cfg.url as string | undefined) ?? (cfg.connectionString as string | undefined);
+  if (url) return url;
+  return {
+    host: cfg.host,
+    port: cfg.port,
+    database: cfg.database,
+    user: cfg.user ?? cfg.username,
+    ...(spec.secret ? { password: spec.secret } : cfg.password ? { password: cfg.password } : {}),
+    ...(cfg.ssl != null ? { ssl: cfg.ssl } : {}),
+  };
+}
+
 /** Build a mongodb connection URL from a spec's config + secret. */
 function buildMongoUrl(spec: DatasourceConnectionSpec): string {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
@@ -147,6 +170,13 @@ export function createDefaultDatasourceDriverFactory(
 
       const schemaMode = (spec.external as { schemaMode?: string } | undefined)?.schemaMode
         ?? ((spec.config as Record<string, unknown> | undefined)?.schemaMode as string | undefined);
+      // Host-composition passthroughs (#3826): the CLI's declared `default`
+      // definition carries the dev loosen-only self-heal (#2186) and the wasm
+      // persistence mode in `config`. Connection builders ignore both keys, so
+      // they never leak into a DSN.
+      const cfg = (spec.config ?? {}) as Record<string, unknown>;
+      const autoMigrate = cfg.autoMigrate as 'safe' | undefined;
+      const persistOverride = cfg.persist as string | undefined;
 
       if (kind === 'postgres') {
         const { SqlDriver } = await import('@objectstack/driver-sql');
@@ -155,6 +185,7 @@ export function createDefaultDatasourceDriverFactory(
           connection: buildSqlConnection(spec, 'pg') as any,
           pool: { min: 0, max: 5 },
           ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
+          ...(autoMigrate ? { autoMigrate } : {}),
         } as any);
         return toHandle(driver, () => sqlServerVersion(driver, 'pg'));
       }
@@ -171,6 +202,7 @@ export function createDefaultDatasourceDriverFactory(
           filename: conn.filename ?? ':memory:',
           dev: options.dev,
           ...(schemaMode ? { schemaMode } : {}),
+          ...(autoMigrate ? { autoMigrate } : {}),
         });
         return toHandle(resolved.driver, () => sqlServerVersion(resolved.driver, 'sqlite'));
       }
@@ -193,10 +225,22 @@ export function createDefaultDatasourceDriverFactory(
         const filename = conn.filename ?? ':memory:';
         const driver = new SqliteWasmDriver({
           filename,
-          persist: filename !== ':memory:' ? 'on-write' : undefined,
+          persist: persistOverride ?? (filename !== ':memory:' ? 'on-write' : undefined),
           ...(schemaMode ? { schemaMode } : {}),
         });
         return toHandle(driver, () => sqlServerVersion(driver, 'sqlite'));
+      }
+
+      if (kind === 'mysql') {
+        const { SqlDriver } = await import('@objectstack/driver-sql');
+        const driver = new SqlDriver({
+          client: 'mysql2',
+          connection: buildMysqlConnection(spec) as any,
+          pool: { min: 0, max: 5 },
+          ...(schemaMode ? { schemaMode: schemaMode as any } : {}),
+          ...(autoMigrate ? { autoMigrate } : {}),
+        } as any);
+        return toHandle(driver);
       }
 
       if (kind === 'mongodb') {

@@ -14,6 +14,7 @@ the dataset's `dimensions` and `values` by name. The dataset owns the base
 object, joins, and measures, so the same numbers stay consistent
 across every dashboard and report.
 
+{/* os:check */}
 ```typescript
 const salesDashboard = {
   name: 'sales_overview',
@@ -165,6 +166,7 @@ stay consistent across surfaces.
 > `aggregate` directly on the widget) was removed in the ADR-0021 single-form
 > cutover. Define a dataset and bind widgets to it instead.
 
+{/* os:check */}
 ```typescript
 import { defineDataset } from '@objectstack/spec/ui';
 
@@ -346,6 +348,7 @@ dateRange: {
 
 Add interactive filter controls that apply to all widgets:
 
+{/* os:check */}
 ```typescript
 globalFilters: [
   { name: 'region', field: 'region', label: 'Region', type: 'select' },
@@ -365,6 +368,7 @@ range defaults to `dateRange.field ?? 'created_at'`). When a widget stores
 the concept under a different field — or should ignore a filter — declare
 `filterBindings` on the widget:
 
+{/* os:check */}
 ```typescript
 widgets: [
   // Default binding: dateRange → created_at, region → region.
@@ -388,6 +392,7 @@ filter's own `field`.
 
 First define the dataset the widgets bind to:
 
+{/* os:check */}
 ```typescript
 import { defineDataset } from '@objectstack/spec/ui';
 
@@ -410,6 +415,7 @@ export const projectTasksDataset = defineDataset({
 
 Then bind the dashboard widgets to it:
 
+{/* os:check */}
 ```typescript
 const projectDashboard = {
   name: 'project_overview',

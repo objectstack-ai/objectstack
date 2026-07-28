@@ -5,6 +5,7 @@ import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
+import { refuseNode } from '../guard-refusal.js';
 
 /** Hard cap on subflow nesting — turns an accidental cycle into a clean error. */
 const MAX_SUBFLOW_DEPTH = 16;
@@ -55,16 +56,17 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       const flowName =
         typeof cfg.flowName === 'string' ? cfg.flowName : typeof cfg.flow === 'string' ? cfg.flow : undefined;
       if (!flowName) {
-        return { success: false, error: `subflow '${node.id}': config.flowName is required` };
+        return refuseNode(`subflow '${node.id}': config.flowName is required`);
       }
 
       // Cycle guard: depth rides on the context so it accumulates across nesting.
       const depth = Number((context as { $subflowDepth?: number } | undefined)?.$subflowDepth ?? 0);
       if (depth >= MAX_SUBFLOW_DEPTH) {
-        return {
-          success: false,
-          error: `subflow '${flowName}': max nesting depth (${MAX_SUBFLOW_DEPTH}) exceeded — recursive subflow?`,
-        };
+        // A graph that recurses past the ceiling is a metadata defect, not a
+        // transient condition — the next run nests exactly as deep (#3863).
+        return refuseNode(
+          `subflow '${flowName}': max nesting depth (${MAX_SUBFLOW_DEPTH}) exceeded — recursive subflow?`,
+        );
       }
 
       // Map inputs (resolve `{var}` against the parent's variables/context).

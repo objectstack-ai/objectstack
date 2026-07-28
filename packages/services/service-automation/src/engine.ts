@@ -573,6 +573,83 @@ function isSuspendSignal(err: unknown): err is FlowSuspendSignal {
 }
 
 /**
+ * Marks a {@link ResumeSignal} the ENGINE built for its own continuations —
+ * the subflow output mapping and the `map` item handoff. Module-private and
+ * symbol-keyed, so it cannot arrive from a transport (no JSON body produces a
+ * symbol key) and no other package can mint one.
+ *
+ * Distinct from `RESUME_AUTHORITY_SERVICE`, which answers a different question:
+ * that marker says "the owning service authorized this decision" (#3801) and
+ * still may not write engine internals; this one says "the engine wrote this
+ * signal itself", which is the only case that may.
+ */
+const ENGINE_BUILT_SIGNAL = Symbol('objectstack.automation.resume.engineBuilt');
+
+/** Tag a signal the engine constructed for its own continuation. */
+function engineBuilt(signal: ResumeSignal): ResumeSignal {
+    return Object.assign(signal, { [ENGINE_BUILT_SIGNAL]: true });
+}
+
+/**
+ * Variable names the flow engine owns: `$runId`, `$flowName`, `$flowLabel`,
+ * `$record`, `$error`, `$parentRunId`, `$parentMapNode`, `$parentOutputVariable`,
+ * and the node-scoped `<nodeId>.$mapState` / `$mapItemDone` / `$mapItemOutput`.
+ * Authors never write here.
+ */
+function isEngineVariable(name: string): boolean {
+    return name.startsWith('$') || name.includes('.$');
+}
+
+/**
+ * Fold a resume signal into a run's variable map — **the one place a signal
+ * reaches those variables** (#3853 follow-up).
+ *
+ * It exists as a chokepoint rather than three open-coded loops because the
+ * shape of this seam is what produced two separate escapes: the map item
+ * handoff was forgeable through `variables`, and — once that was guarded at the
+ * route — through `output`, which lands under `${nodeId}.${key}` and so reaches
+ * the very same `<mapNodeId>.$mapItemDone`. Guarding one field at a time
+ * invites the next field. Every caller-supplied write now passes here, and a
+ * new signal field is checked by construction.
+ *
+ * @returns the rejected key names (already in their final, prefixed form).
+ *   Empty ⇒ every write was applied. An engine-built signal
+ *   ({@link ENGINE_BUILT_SIGNAL}) is exempt: `bubbleToParent` legitimately
+ *   writes the handoff keys, and it is not reachable from a transport.
+ */
+function applyResumeSignal(
+    variables: Map<string, unknown>,
+    signal: ResumeSignal | undefined,
+    nodeId: string,
+): string[] {
+    if (!signal) return [];
+    const trusted = (signal as Record<symbol, unknown>)[ENGINE_BUILT_SIGNAL] === true;
+    const rejected: string[] = [];
+    const writes: Array<[string, unknown]> = [];
+
+    // `output` is merged under the suspended node's id, so downstream edges
+    // branch on it exactly as for a normally-executed node.
+    for (const [key, value] of Object.entries(signal.output ?? {})) {
+        writes.push([`${nodeId}.${key}`, value]);
+    }
+    // Bare flow variables — a `screen` node's collected inputs land under their
+    // plain names so downstream `{var}` interpolation / conditions read them
+    // directly (e.g. `new_assignee` → update_record fields).
+    for (const [key, value] of Object.entries(signal.variables ?? {})) {
+        writes.push([key, value]);
+    }
+
+    for (const [name] of writes) {
+        if (!trusted && isEngineVariable(name)) rejected.push(name);
+    }
+    // Reject as a whole — never a partial application.
+    if (rejected.length) return rejected;
+
+    for (const [name, value] of writes) variables.set(name, value);
+    return [];
+}
+
+/**
  * A run paused at a node, awaiting {@link AutomationEngine.resume} (ADR-0019).
  *
  * Held in an in-memory hot cache and — when a {@link SuspendedRunStore} is
@@ -2231,27 +2308,31 @@ export class AutomationEngine implements IAutomationService {
                 }
             }
 
+            // Restore the variable context and fold the signal in — the ONE
+            // place a resume signal reaches the variable map. Runs BEFORE the
+            // suspension is consumed, so a rejected signal changes nothing:
+            // the pause stays live and the legitimate continuation still lands.
+            const variables = new Map<string, unknown>(Object.entries(run.variables));
+            const rejected = applyResumeSignal(variables, signal, run.nodeId);
+            if (rejected.length) {
+                this.logger.warn(
+                    `[automation] refused resume of run '${runId}': signal writes engine-internal ` +
+                        `variable(s) ${rejected.join(', ')}`,
+                );
+                return {
+                    success: false,
+                    code: 'invalid_signal',
+                    error:
+                        `Resume signal may not set engine-internal variables (${rejected.join(', ')}) — ` +
+                        `names starting with '$' (or containing '.$') are reserved by the flow engine`,
+                };
+            }
+
             // Consume the suspension *before* running downstream work — a run
             // resumes exactly once per pause, and a duplicate resume after a
-            // partial restart must not double-run side effects.
+            // partial restart must not double-run side effects. (Folding the
+            // signal above is pure in-memory work, not downstream work.)
             await this.forgetSuspendedRun(runId);
-
-            // Restore variable context and apply the resume signal's output as if it
-            // were the node's output, so downstream edges branch on it.
-            const variables = new Map<string, unknown>(Object.entries(run.variables));
-            if (signal?.output) {
-                for (const [key, value] of Object.entries(signal.output)) {
-                    variables.set(`${run.nodeId}.${key}`, value);
-                }
-            }
-            // Bare flow variables — a `screen` node's collected inputs land under
-            // their plain names so downstream `{var}` interpolation / conditions
-            // read them directly (e.g. `new_assignee` → update_record fields).
-            if (signal?.variables) {
-                for (const [key, value] of Object.entries(signal.variables)) {
-                    variables.set(key, value);
-                }
-            }
 
             const steps = run.steps;
             const context = run.context;
@@ -2378,12 +2459,14 @@ export class AutomationEngine implements IAutomationService {
      */
     private buildSubflowResumeSignal(childContext: AutomationContext | undefined, childOutput: unknown): ResumeSignal {
         const outVar = (childContext as Record<string, unknown> | undefined)?.$parentOutputVariable;
-        return {
+        // Engine-built: `outVar` is the author's `config.outputVariable`, so the
+        // reserved-name check would be a false positive on an oddly-named one.
+        return engineBuilt({
             output: { output: childOutput ?? null },
             ...(typeof outVar === 'string' && outVar
                 ? { variables: { [outVar]: childOutput ?? null } }
                 : {}),
-        };
+        });
     }
 
     /**
@@ -2403,7 +2486,9 @@ export class AutomationEngine implements IAutomationService {
             // and starts the next. A plain subflow child uses the 1:1 mapping.
             const mapNode = ctx?.$parentMapNode;
             const sig = typeof mapNode === 'string' && mapNode
-                ? { variables: { [`${mapNode}.$mapItemOutput`]: output ?? null, [`${mapNode}.$mapItemDone`]: true } }
+                // Engine-built: these ARE the reserved handoff keys, and this is
+                // the one writer allowed to set them (#3853 follow-up).
+                ? engineBuilt({ variables: { [`${mapNode}.$mapItemOutput`]: output ?? null, [`${mapNode}.$mapItemDone`]: true } })
                 : this.buildSubflowResumeSignal(run.context, output);
             const parentRes = await this.resumeInternal(parentRunId, sig, false);
             if (!parentRes.success) {

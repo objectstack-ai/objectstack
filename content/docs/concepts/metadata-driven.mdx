@@ -72,6 +72,7 @@ ObjectStack centralizes the "Intent" into a **single TypeScript-authored, Zod-va
 
 ### Example: The ObjectStack Way
 
+{/* os:check */}
 ```typescript
 // ONE definition (in objectstack.config.ts)
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -112,6 +113,7 @@ In metadata-driven development, we embrace three core truths:
 
 The UI doesn't "build" a form; it **projects** the Object schema into visual components.
 
+{/* os:check */}
 ```typescript
 // Conceptual: the schema IS the form. The runtime renders a view
 // definition (a FormView metadata object) — there is no FormView
@@ -234,6 +236,7 @@ data, API, UI, and permissions in a single change — it can answer *"what break
 if I change this?"* instead of grepping and hoping. That turns AI from an
 autocomplete tool into a real co-maintainer.
 
+{/* os:check */}
 ```typescript
 // All you need:
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -332,6 +335,7 @@ When defining objects and metadata in ObjectStack, follow these strict rules and
 ### 1. Always Use `ObjectSchema.create()` with `Field.*` Helpers
 
 **✅ Correct:**
+{/* os:check */}
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
@@ -476,6 +480,7 @@ export const Account = ObjectSchema.create({
 
 ### Quick Reference
 
+{/* os:check */}
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 

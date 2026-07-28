@@ -105,8 +105,8 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
   }
 
   // 1b. Lower inline action handlers found inside `objects[*].actions[*]`
-  //     and `actions[*]`. We accept either `target: fn` or the deprecated
-  //     `execute: fn`; `target` wins when both are present (#3713).
+  //     and `actions[*]`. Only `target: fn` — the `execute` alias was removed
+  //     in protocol 17 (#3855) and is left for the parse to reject by name.
   if (Array.isArray(lowered.objects)) {
     lowered.objects = (lowered.objects as unknown[]).map((rawObj) => {
       if (!isPlainObject(rawObj)) return rawObj;
@@ -174,11 +174,17 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
 }
 
 /**
- * Lower a single action definition: detect a callable on `target` or on the
- * deprecated `execute` alias, register it, optionally extract a metadata body,
- * and drop the alias. A declared `target` — string or function — always wins
- * over `execute` (#3713 / #3743), matching the `ActionSchema` transform. Mutates
- * a shallow clone, never the input.
+ * Lower a single action definition: detect a callable on `target`, register it,
+ * and optionally extract a metadata body. Mutates a shallow clone, never the
+ * input.
+ *
+ * `target` is the ONLY handler slot. The deprecated `execute` alias was removed
+ * in protocol 17 (#3855) and this step must not keep it alive behind the
+ * schema's back: lowering runs BEFORE the parse, so quietly binding a
+ * function-valued `execute` here would consume the key and the tombstone would
+ * never fire — the author would get the alias silently working in one authoring
+ * style and rejected in every other. Leaving it untouched hands it to
+ * `ActionSchema`, which rejects it with the rename prescription.
  */
 function lowerActionCallable(
   raw: unknown,
@@ -192,39 +198,10 @@ function lowerActionCallable(
   const baseName = typeof action.name === 'string' && action.name.length > 0
     ? `${ownerLabel}_${action.name}`
     : `${ownerLabel}_anon_action`;
-  // #3713: `target` is the canonical slot and `execute` its deprecated alias, so
-  // probe `target` FIRST. This used to prefer `execute`, which made the compile
-  // step the third reader of this pair — and it disagreed with the spec transform
-  // (which keeps `target` when both are set). An author who inlined a function in
-  // both slots got the `execute` one bundled while `action.target = ref` below
-  // silently overwrote the `target` function they had actually declared.
-  //
-  // #3743: "`target` first" means the DECLARED target, not merely a callable one.
-  // Probing `typeof action.target === 'function'` left one combination still
-  // resolving the alias's way: a STRING `target` beside a function `execute` fell
-  // through to the alias, bundled it, and then overwrote the canonical ref the
-  // author wrote — the same inversion #3713 fixed for the function/function pair,
-  // one slot type over. `target` now wins in every combination, so the
-  // `action-target-execute-conflict` warning can state one precedence rule and
-  // have it be true everywhere.
-  const targetDeclared =
-    typeof action.target === 'function' || (typeof action.target === 'string' && action.target.length > 0);
-  const handlerSlot: 'execute' | 'target' | null =
-    typeof action.target === 'function'
-      ? 'target'
-      : !targetDeclared && typeof action.execute === 'function'
-        ? 'execute'
-        : null;
-  if (!handlerSlot) {
-    // A function-valued alias that lost to a string `target` still has to go: it
-    // is not JSON-safe (`JSON.stringify` drops it from the artifact without a
-    // word) and `ActionSchema` expects a string, so leaving it would trade a
-    // silent discard for a confusing parse error. The lint above has already
-    // told the author which handler they lost.
-    if (typeof action.execute === 'function') delete action.execute;
-    return action;
-  }
-  const fn = action[handlerSlot] as AnyFn;
+  // Only a callable `target` is lowered. A function on the removed `execute`
+  // alias is deliberately left in place so the parse rejects it by name.
+  if (typeof action.target !== 'function') return action;
+  const fn = action.target as AnyFn;
   const ref = uniqueName(baseName, taken);
   taken.add(ref);
   functions[ref] = fn;
@@ -234,10 +211,5 @@ function lowerActionCallable(
   }
   // Keep a string-named target so the legacy executor can still resolve it.
   action.target = ref;
-  // Drop the alias unconditionally, matching the spec transform's "canonical wins,
-  // alias disappears" rule (#3713). Once `target` carries the bundled ref, any
-  // leftover `execute` is stale by construction — and a function-valued one would
-  // fail `ActionSchema` (it expects a string) further down the pipeline.
-  if ('execute' in action) delete action.execute;
   return action;
 }

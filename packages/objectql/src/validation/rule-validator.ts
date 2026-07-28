@@ -421,12 +421,17 @@ interface ConditionalFieldOption {
 
 interface ConditionalFieldDef {
   requiredWhen?: string | Expression;
-  // Back-compat alias of `requiredWhen`. Since #3754 `FieldSchema`'s transform
-  // lowers this into `requiredWhen` and drops it, so PARSED metadata never carries
-  // it — but the alias-reading fallback below stays deliberately: this validator is
-  // also handed RAW, unparsed field definitions (see the `conditionalRequired`
-  // case in rule-validator.test.ts), and those still need honouring. Canonical
-  // first, always — never `conditionalRequired ?? requiredWhen`.
+  // Retired authorable key. #3754 lowered it into `requiredWhen` and dropped it,
+  // so PARSED metadata never carried it; #3855 removed it from the spec outright,
+  // so it can no longer be AUTHORED at all — `FieldSchema` rejects it.
+  //
+  // The alias-reading fallback below stays deliberately, and its job has changed:
+  // this validator is also handed RAW, unparsed field definitions, which includes
+  // metadata STORED under protocol <= 16. Dropping the read here would silently
+  // stop enforcing those rules on existing deployments — a runtime regression the
+  // spec change does not otherwise cause. It retires when that stored metadata is
+  // migrated (`os migrate meta`), not when the spec key went away.
+  // Canonical first, always — never `conditionalRequired ?? requiredWhen`.
   conditionalRequired?: string | Expression;
   readonlyWhen?: string | Expression;
   /** Static, unconditional read-only flag (`field.readonly`). #2948. */

@@ -34,6 +34,7 @@ plus the ObjectStack standard library.
 
 Every expression in metadata is persisted as the same envelope:
 
+{/* os:check */}
 ```ts
 type Expression = {
   dialect: 'cel' | 'cron' | 'template';
@@ -85,6 +86,7 @@ At **input** time you may write a bare string for shorthand — the spec
 transforms it into the right envelope based on the field type. The compiled
 artifact always contains the full envelope (and, after M9.2, the AST).
 
+{/* os:check */}
 ```ts
 import { F, P, cel, cron, tmpl } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';

@@ -55,3 +55,24 @@ describe('createDefaultDatasourceDriverFactory — sqlite-wasm construction (#38
     expect(await roundTrip({})).toContain('wasm-hello');
   }, 30_000);
 });
+
+// #3826 (config-load convergence): mysql joined the factory so the CLI's
+// serve fallback can DECLARE a mysql default instead of constructing one.
+describe('createDefaultDatasourceDriverFactory — mysql construction', () => {
+  it('supports the mysql id and its mysql2 alias', () => {
+    expect(factory().supports('mysql')).toBe(true);
+    expect(factory().supports('mysql2')).toBe(true);
+  });
+
+  it('builds a SqlDriver(mysql2) from a DSN without connecting', async () => {
+    const handle: any = await factory().create({
+      driver: 'mysql',
+      config: { url: 'mysql://user:pw@localhost:3306/db' },
+    });
+    const driver = handle.driver ?? handle;
+    expect(driver?.constructor?.name).toMatch(/SqlDriver$/);
+    // Construction must not open a socket — no connect() was called.
+    expect(typeof handle.connect).toBe('function');
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+});

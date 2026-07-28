@@ -58,6 +58,7 @@ Create `tsconfig.json`:
 
 A plugin package describes itself with a manifest validated by `ManifestSchema`. Create `src/manifest.ts`:
 
+{/* os:check */}
 ```typescript
 import { ManifestSchema } from '@objectstack/spec/kernel';
 
@@ -127,6 +128,7 @@ export function createHelloPlugin(): Plugin {
 
 Plugins can register new objects:
 
+{/* os:check */}
 ```typescript
 import { ObjectSchema } from '@objectstack/spec/data';
 
@@ -265,6 +267,7 @@ Declare the capabilities your plugin needs in its manifest's `permissions` block
 
 Always use structured errors:
 
+{/* os:check */}
 ```typescript
 import type { EnhancedApiError } from '@objectstack/spec/api';
 
@@ -318,6 +321,7 @@ For plugins that extend the **ObjectStack Studio IDE**, use `defineStudioPlugin`
 
 ### Basic Studio Plugin
 
+{/* os:check */}
 ```typescript
 import { defineStudioPlugin } from '@objectstack/spec/studio';
 
@@ -343,6 +347,7 @@ export const manifest = defineStudioPlugin({
 
 Plugin IDs use reverse-domain notation and must match the pattern `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$`:
 
+{/* os:check */}
 ```typescript
 // ✅ Valid IDs
 'objectstack.flow-designer'
@@ -370,6 +375,7 @@ Studio plugins can declare six types of contributions:
 
 ### Full Example with All Contributions
 
+{/* os:check */}
 ```typescript
 import { defineStudioPlugin } from '@objectstack/spec/studio';
 
