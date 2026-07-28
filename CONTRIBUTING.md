@@ -22,7 +22,7 @@ We are committed to providing a welcoming and inclusive environment. Please be r
 
 ### Prerequisites
 
-- **Node.js** >= 18.0.0
+- **Node.js** >= 22.0.0
 - **PNPM** >= 8.0.0
 - **Git** >= 2.0.0
 
