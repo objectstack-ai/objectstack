@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// check-node-version -- every workflow must run the Node version in .nvmrc.
+// check-node-version -- every workflow must run the Node version in .nvmrc,
+// and that version must still be supported by Node.
 //
 // Before #3825 the repo ran two Node versions at once, and nobody had decided
 // that: all 12 PR gates were on Node 20 while release.yml, publish-smoke.yml,
@@ -49,6 +50,77 @@ const pin = readFileSync(join(root, PIN_FILE), 'utf8').trim();
 if (!pin) {
   console.error(`check-node-version: ${PIN_FILE} is empty -- it must pin a Node major, e.g. 22.`);
   process.exit(1);
+}
+
+// --- Lifecycle: the pin must not be a runtime Node has stopped patching. ------
+//
+// Consistency alone does not make the pin correct. The guard below proves all
+// 18 workflows agree; it would have said OK just as cheerfully when all 18
+// agreed on Node 20, three months after that line went EOL. That is the exact
+// state #3825 found the repo in, so "they match" is only half the invariant --
+// the other half is "and the thing they match is still supported".
+//
+// Dates are from nodejs/Release schedule.json, hardcoded on purpose: a required
+// gate must not depend on the network, and these move once a year. An
+// unrecognised major is an ERROR rather than a pass, so adopting Node 26 forces
+// you to record its dates here instead of silently validating on a runtime this
+// guard knows nothing about.
+const NODE_LIFECYCLE = {
+  18: { maintenance: '2023-10-18', end: '2025-04-30' },
+  20: { maintenance: '2024-10-22', end: '2026-04-30' },
+  22: { maintenance: '2025-10-21', end: '2027-04-30' },
+  24: { maintenance: '2026-10-20', end: '2028-04-30' },
+  26: { maintenance: '2027-10-20', end: '2029-04-30' },
+};
+
+// Warn this far ahead of EOL. Long enough that the bump is scheduled work
+// rather than an emergency, and it stays a warning until the day support
+// actually ends -- a hard failure months early would block unrelated PRs.
+const WARN_WITHIN_DAYS = 180;
+const DAY = 24 * 60 * 60 * 1000;
+
+const major = Number.parseInt(String(pin).replace(/^v/, ''), 10);
+const lifecycle = NODE_LIFECYCLE[major];
+
+if (!Number.isInteger(major) || !lifecycle) {
+  console.error(
+    `check-node-version: ${PIN_FILE} pins Node "${pin}", which this guard has no support dates for.\n\n` +
+      `Add it to NODE_LIFECYCLE in ${'scripts/check-node-version.mjs'} using the dates from\n` +
+      `https://github.com/nodejs/Release/blob/main/schedule.json, then re-run.\n` +
+      `Known: ${Object.keys(NODE_LIFECYCLE).join(', ')}.`,
+  );
+  process.exit(1);
+}
+
+const today = new Date();
+const eol = new Date(`${lifecycle.end}T00:00:00Z`);
+const daysLeft = Math.round((eol - today) / DAY);
+const inMaintenance = today >= new Date(`${lifecycle.maintenance}T00:00:00Z`);
+
+if (daysLeft <= 0) {
+  console.error(
+    `check-node-version: ${PIN_FILE} pins Node ${major}, which reached end-of-life on ${lifecycle.end} ` +
+      `(${Math.abs(daysLeft)} days ago).\n\n` +
+      `An EOL runtime receives no security patches, and every PR gate in this repo runs on it --\n` +
+      `so the runtime guarding each merge is the one nobody is fixing. That is #3825 verbatim.\n\n` +
+      `Bump ${PIN_FILE} to a supported major and update the workflows this guard then lists.\n` +
+      `Supported today: ${Object.entries(NODE_LIFECYCLE)
+        .filter(([, l]) => new Date(`${l.end}T00:00:00Z`) > today)
+        .map(([m, l]) => `${m} (until ${l.end})`)
+        .join(', ')}.`,
+  );
+  process.exit(1);
+}
+
+// GitHub renders ::warning:: in the job summary and on the PR, so this is
+// visible without opening logs -- unlike a plain console.warn.
+if (daysLeft <= WARN_WITHIN_DAYS) {
+  console.log(
+    `::warning file=${PIN_FILE}::Node ${major} reaches end-of-life on ${lifecycle.end} ` +
+      `(${daysLeft} days). Plan the bump before then -- when it lands, every PR gate will be ` +
+      `validating on an unpatched runtime. Bumping is a one-line ${PIN_FILE} edit plus the ` +
+      `workflows check-node-version lists.`,
+  );
 }
 
 const files = readdirSync(join(root, WORKFLOW_DIR))
@@ -140,8 +212,10 @@ for (const file of files) {
 }
 
 if (offenders.length === 0) {
+  const phase = inMaintenance ? 'maintenance' : 'active LTS';
   console.log(
-    `check-node-version: OK (${steps} setup-node step(s) across ${files.length} workflow(s), all on Node ${pin}).`,
+    `check-node-version: OK (${steps} setup-node step(s) across ${files.length} workflow(s), all on Node ${pin}).\n` +
+      `  Node ${major} is in ${phase}; supported until ${lifecycle.end} (${daysLeft} days).`,
   );
   process.exit(0);
 }
