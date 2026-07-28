@@ -1833,9 +1833,12 @@ importers:
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
-      better-sqlite3:
-        specifier: ^13.0.1
-        version: 13.0.1
+      '@types/sql.js':
+        specifier: ^1.4.11
+        version: 1.4.11
+      sql.js:
+        specifier: ^1.14.1
+        version: 1.14.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -11645,6 +11648,7 @@ snapshots:
   better-sqlite3@13.0.1:
     dependencies:
       node-addon-api: 8.9.0
+    optional: true
 
   big-integer@1.6.52: {}
 
@@ -14350,7 +14354,8 @@ snapshots:
   node-addon-api@4.3.0:
     optional: true
 
-  node-addon-api@8.9.0: {}
+  node-addon-api@8.9.0:
+    optional: true
 
   node-rsa@1.1.1:
     dependencies:

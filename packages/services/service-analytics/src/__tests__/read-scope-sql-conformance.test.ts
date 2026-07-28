@@ -2,7 +2,7 @@
 
 /**
  * Filter logical-combinator conformance for the read-scope SQL lowering,
- * executed against a real SQL engine (in-memory better-sqlite3).
+ * executed against a real SQLite engine (`sql.js`, pure WASM).
  *
  * The cases come from `@objectstack/spec/data` so this backend, `driver-sql`,
  * `driver-memory` and `formula`'s `matchesFilterCondition` are all held to one
@@ -33,24 +33,53 @@
  * The other half of the value is cheap coverage: a case added to the shared
  * table lands on all four backends at once, with no SQL to hand-write here.
  *
- * This is the compiler that lowers RLS read scopes for the analytics path, so
- * a widening bug here is an unauthorized read, not a wrong chart.
+ * ## Why `sql.js` and not `better-sqlite3`
+ *
+ * An earlier revision imported `better-sqlite3` here and killed the vitest
+ * worker outright on CI — a process-level abort with no JS error to catch, so
+ * the 17 cases silently did not run. The same symptom reproduces locally under
+ * Node 20 (CI's version); `better-sqlite3@13` declares `engines: >=22`, and a
+ * native binding is only loadable by the exact Node ABI it was built for.
+ *
+ * `driver-sql` can afford the native dependency because it *falls back* to WASM
+ * SQLite when the binding fails to load (see the step-down warning in
+ * `sql-driver.ts`). A test has no such fallback, so it uses the pure-WASM engine
+ * directly — no ABI to match, no build step, identical behaviour on every Node
+ * version. `sql.js` is the same engine that fallback lands on.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import Database from 'better-sqlite3';
 import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS } from '@objectstack/spec/data';
 
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 
 const ALIAS = 't';
 
-describe('compileScopedFilterToSql — filter logic conformance', () => {
-  let db: InstanceType<typeof Database>;
+/** Point sql.js at the `.wasm` shipped inside its own package (Node-safe). */
+async function locateWasm(): Promise<((file: string) => string) | undefined> {
+  try {
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    const pkgJsonPath = require.resolve('sql.js/package.json');
+    const { dirname, join } = await import('node:path');
+    const dir = dirname(pkgJsonPath);
+    return (file: string) => join(dir, 'dist', file);
+  } catch {
+    return undefined;
+  }
+}
 
-  beforeAll(() => {
-    db = new Database(':memory:');
-    db.exec(`
+describe('compileScopedFilterToSql — filter logic conformance', () => {
+  let db: any;
+
+  beforeAll(async () => {
+    const mod: any = await import('sql.js');
+    const initSqlJs = mod.default ?? mod;
+    const locateFile = await locateWasm();
+    const SQL = await initSqlJs(locateFile ? { locateFile } : undefined);
+
+    db = new SQL.Database();
+    db.run(`
       CREATE TABLE "t" (
         "id" TEXT PRIMARY KEY,
         "a" TEXT, "b" TEXT, "c" TEXT,
@@ -60,9 +89,12 @@ describe('compileScopedFilterToSql — filter logic conformance', () => {
     `);
     const insert = db.prepare(
       `INSERT INTO "t" ("id","a","b","c","owner","status","parent_object","parent_id")
-       VALUES (@id,@a,@b,@c,@owner,@status,@parent_object,@parent_id)`,
+       VALUES (?,?,?,?,?,?,?,?)`,
     );
-    for (const row of FILTER_LOGIC_ROWS) insert.run(row);
+    for (const r of FILTER_LOGIC_ROWS) {
+      insert.run([r.id, r.a, r.b, r.c, r.owner, r.status, r.parent_object, r.parent_id]);
+    }
+    insert.free();
   });
 
   afterAll(() => {
@@ -74,10 +106,12 @@ describe('compileScopedFilterToSql — filter logic conformance', () => {
       const { sql, params } = compileScopedFilterToSql(c.filter, ALIAS);
       // The compiler returns a boolean expression, exactly as the analytics
       // query builder splices it — including the unparenthesized top level.
-      const rows = db
-        .prepare(`SELECT "id" FROM "t" AS "${ALIAS}" WHERE ${sql} ORDER BY "id"`)
-        .all(...(params as any[])) as Array<{ id: string }>;
-      expect(rows.map((r) => r.id), c.note).toEqual(c.expected);
+      const stmt = db.prepare(`SELECT "id" FROM "t" AS "${ALIAS}" WHERE ${sql} ORDER BY "id"`);
+      stmt.bind(params as any[]);
+      const got: string[] = [];
+      while (stmt.step()) got.push(String(stmt.get()[0]));
+      stmt.free();
+      expect(got, c.note).toEqual(c.expected);
     });
   }
 });
