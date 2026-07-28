@@ -34,13 +34,17 @@ export const toolForm = defineForm({
       ],
     },
     {
-      label: 'Access & safety',
-      description: 'Permissions and confirmation requirements.',
+      // NOT an enforcement section — both fields are declared-but-dead (#3715,
+      // liveness/tool.json). The label used to read "Access & safety" with
+      // copy that told authors to rely on them for destructive operations,
+      // which is exactly the false promise this section must not make.
+      label: 'Declarative metadata (not enforced)',
+      description: 'Recorded on the tool definition but read by no execution path — see the per-field notes for where the real gates live.',
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'requiresConfirmation', helpText: 'Ask user to approve before executing (for destructive actions)' },
-        { field: 'permissions', widget: 'string-tags', helpText: 'Required permissions to use this tool' },
+        { field: 'requiresConfirmation', helpText: 'NOT ENFORCED (#3715) — nothing pauses for confirmation on this flag. For a real gate use the action-level `ai.requiresConfirmation` + approval queue; AI metadata edits are already gated by draft/publish.' },
+        { field: 'permissions', widget: 'string-tags', helpText: 'NOT ENFORCED — tool invocation is not permission-gated by this list. Gate the underlying action via permission sets (ADR-0066), or restrict the agent that exposes the tool.' },
       ],
     },
   ],
