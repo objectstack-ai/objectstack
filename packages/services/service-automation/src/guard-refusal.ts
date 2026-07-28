@@ -29,6 +29,35 @@ export const GUARD_REFUSAL: unique symbol = Symbol.for(
     'objectstack.automation.guardRefusal',
 ) as never;
 
+/**
+ * Refuse a node because its METADATA is wrong — the one call an executor should
+ * make instead of hand-writing `{ success: false, … }` for that case.
+ *
+ * `errorClass` defaults to `'runtime'` so executors written before #3863 keep
+ * their routing, which leaves a footgun pointing the other way: a NEW
+ * refuse-to-execute guard is routable unless its author remembers to classify
+ * it, and forgetting is silent. This helper closes that by making "write a
+ * guard" and "mark it un-routable" the same act — there is nothing to remember
+ * and nothing extra to type.
+ *
+ * Use it when BOTH hold:
+ *   1. re-running the flow unchanged can never succeed, and
+ *   2. the fix is to edit metadata (a missing required config key, a graph that
+ *      recurses, a filter whose condition interpolation erased).
+ *
+ * If either is false the failure is a `runtime` one — the world did not
+ * cooperate — and it must stay routable so authors can handle it. A connector
+ * that is degraded, a collection that arrived the wrong shape, a subflow that
+ * failed on its own: return those as plain `{ success: false }`. Over-marking
+ * is not the safe direction; it turns a handleable condition into a dead run.
+ *
+ * @example
+ *   if (!url) return refuseNode('http: url is required');
+ */
+export function refuseNode(reason: string): { success: false; error: string; errorClass: 'guard' } {
+    return { success: false, error: reason, errorClass: 'guard' };
+}
+
 /** Brand `err` as a guard refusal, so a `fault` edge will not route it. */
 export function markGuardRefusal<E extends object>(err: E): E {
     Object.defineProperty(err, GUARD_REFUSAL, {

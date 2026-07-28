@@ -3,6 +3,7 @@
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationEngine, ConnectorActionContext } from '../engine.js';
+import { refuseNode } from '../guard-refusal.js';
 
 /**
  * Connector built-in node — `connector_action` (generic integration dispatch).
@@ -49,10 +50,9 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
         async execute(node, variables, context) {
             const cfg = node.connectorConfig;
             if (!cfg?.connectorId || !cfg?.actionId) {
-                return {
-                    success: false,
-                    error: `connector_action '${node.id}': connectorConfig.connectorId and .actionId are required`,
-                };
+                return refuseNode(
+                    `connector_action '${node.id}': connectorConfig.connectorId and .actionId are required`,
+                );
             }
 
             const handler = engine.resolveConnectorAction(cfg.connectorId, cfg.actionId);

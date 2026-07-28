@@ -4,6 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
+import { refuseNode } from '../guard-refusal.js';
 import { interpolate } from './template.js';
 
 /** Hard cap on map fan-out — turns a runaway collection into a clean error. */
@@ -74,7 +75,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       const flowName =
         typeof cfg.flowName === 'string' ? cfg.flowName : typeof cfg.flow === 'string' ? cfg.flow : undefined;
       if (!flowName) {
-        return { success: false, error: `map '${node.id}': config.flowName (the per-item subflow) is required` };
+        return refuseNode(`map '${node.id}': config.flowName (the per-item subflow) is required`);
       }
 
       const iteratorVariable =

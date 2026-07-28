@@ -4,6 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import { randomUUID } from 'node:crypto';
 import type { AutomationEngine } from '../engine.js';
+import { refuseNode } from '../guard-refusal.js';
 import { interpolate } from './template.js';
 
 /**
@@ -95,7 +96,7 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             const cfg = interpolate(raw, variables, context) as Record<string, unknown>;
 
             const url = cfg.url as string | undefined;
-            if (!url) return { success: false, error: 'http: url is required' };
+            if (!url) return refuseNode('http: url is required');
 
             const durable = cfg.durable === true;
             const headers = cfg.headers as Record<string, string> | undefined;
