@@ -14,10 +14,7 @@ import { validateViewContainers } from '@objectstack/lint';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateFilterTokens } from '@objectstack/lint';
-import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
-import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
-import { validateNavAccess } from '@objectstack/lint';
-import { validateTranslationReferences } from '@objectstack/lint';
+import { validateReferenceIntegrity } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
 import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
@@ -310,14 +307,7 @@ export default class Validate extends Command {
       //     to nothing and renders the source string (advisory: inert, not
       //     broken).
       if (!flags.json) printStep('Checking object & action references (#3583)...');
-      const refFindings = [
-        ...validateObjectReferences(result.data as Record<string, unknown>),
-        ...validateActionNameRefs(result.data as Record<string, unknown>),
-        ...validatePageFieldBindings(result.data as Record<string, unknown>),
-        ...validateChartBindings(result.data as Record<string, unknown>),
-        ...validateNavAccess(result.data as Record<string, unknown>),
-        ...validateTranslationReferences(result.data as Record<string, unknown>),
-      ];
+      const refFindings = validateReferenceIntegrity(result.data as Record<string, unknown>);
       const refErrors = refFindings.filter((f) => f.severity === 'error');
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');
       if (refErrors.length > 0) {

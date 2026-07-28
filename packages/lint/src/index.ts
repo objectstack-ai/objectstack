@@ -221,4 +221,17 @@ export type {
   TranslationRefSeverity,
 } from './validate-translation-references.js';
 
+// One entry point for the reference-resolution rules above (#3583 §5 D5).
+// Adding a rule to `REFERENCE_INTEGRITY_RULES` runs it on `validate`, `lint`
+// and `compile` at once — the CLI call sites do not change.
+export {
+  validateReferenceIntegrity,
+  REFERENCE_INTEGRITY_RULES,
+} from './reference-integrity-suite.js';
+export type {
+  ReferenceIntegrityFinding,
+  ReferenceIntegrityRule,
+  ReferenceIntegritySeverity,
+} from './reference-integrity-suite.js';
+
 export { buildAccessMatrix, diffAccessMatrix } from './build-access-matrix.js';

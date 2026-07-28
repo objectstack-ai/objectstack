@@ -10,10 +10,7 @@ import { computeI18nCoverage, type CoverageIssue } from '../utils/i18n-coverage.
 import { lintDataModel } from '../lint/data-model-rules.js';
 import { validateWidgetBindings } from '@objectstack/lint';
 import { validateRecordTitle, validateSemanticRoles, validateCapabilityReferences, validateSecurityPosture, validateOrgAxisRedLines, validateApprovalApprovers, validateSeedReplaySafety, validateSeedStateMachine } from '@objectstack/lint';
-import { validateObjectReferences, validateActionNameRefs } from '@objectstack/lint';
-import { validatePageFieldBindings, validateChartBindings } from '@objectstack/lint';
-import { validateNavAccess } from '@objectstack/lint';
-import { validateTranslationReferences } from '@objectstack/lint';
+import { validateReferenceIntegrity } from '@objectstack/lint';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
@@ -493,90 +490,16 @@ export function lintConfig(config: any): LintIssue[] {
     });
   }
 
-  // ── Object-name references (issue #3583) ──
-  // The reference sites `defineStack` does not cover: action-param
-  // `reference`/`objectOverride`, dashboard filter `optionsFrom.object`, and
-  // navigation `requiresObject` gates. An unprefixed miss (`user` for
-  // `sys_user`) is a typo → error; a platform-prefixed name no known package
-  // registers (`sys_approval_process`) is advisory, since a third-party
-  // package may still provide it.
-  for (const t of validateObjectReferences(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Action-name references (issue #3583) ──
-  // `bulkActions`/`rowActions`, page `quick_actions`, and nav action items bind
-  // an action BY NAME. A name matching no defined action ships a button that
-  // renders and does nothing — same failure `validate-dashboard-action-refs`
-  // catches for dashboards, so the same severity.
-  for (const t of validateActionNameRefs(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Page component field bindings (issue #3583) ──
-  // `PageComponent.properties` is an untyped bag, so a highlights strip, KPI
-  // card, or details section can name a field the object does not have; the
-  // component silently skips it. Advisory, matching `FORM_FIELD_UNKNOWN` —
-  // every page consumer degrades rather than failing.
-  for (const t of validatePageFieldBindings(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Chart bindings outside dashboards (issue #3583) ──
-  // `validate-widget-bindings` covers dashboard widgets only. Report charts,
-  // list-view charts, and dataset-bound page chart components bind the same
-  // semantic layer, where an axis naming a raw field instead of a dataset
-  // measure renders an empty series (ADR-0021).
-  for (const t of validateChartBindings(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Navigation reachability vs. granted access (ADR-0090 D6, issue #3583) ──
-  // Navigation and permissions are separate metadata, so an app can expose an
-  // object no permission set grants read on: the entry renders and the click
-  // fails permission-denied for every user, including admins. Advisory — the
-  // grant may come from a set another installed package ships.
-  for (const t of validateNavAccess(config)) {
-    issues.push({
-      severity: t.severity,
-      rule: t.rule,
-      message: `${t.where}: ${t.message}`,
-      path: t.path,
-      fix: t.hint,
-    });
-  }
-
-  // ── Translation-bundle references & option keys (issue #3583) ──
-  // The i18n gate only ever asked "which expected keys are missing?". This is
-  // the reverse the spec already names (`TranslationDiffStatus 'redundant'`):
-  // keys pointing at metadata that no longer exists, and select-option keys
-  // written as the display label instead of the stored value. Advisory — an
-  // orphan key is inert, it just leaves one string untranslated.
-  for (const t of validateTranslationReferences(config)) {
+  // ── Reference integrity (issue #3583) ──
+  // One suite, one call site: object-name references `defineStack` does not
+  // cover, name-bound action surfaces, page-component field bindings, chart
+  // axes outside dashboards, navigation vs. granted access, and translation
+  // keys pointing at metadata that no longer exists. Every member resolves a
+  // NAME against what the stack declares — the class the HotCRM audit found
+  // shipping, where each instance parses, validates, and fails silently.
+  // Adding a rule to `REFERENCE_INTEGRITY_RULES` reaches this path with no
+  // edit here (assessment §5 D5 — the wiring drift this ends).
+  for (const t of validateReferenceIntegrity(config)) {
     issues.push({
       severity: t.severity,
       rule: t.rule,
