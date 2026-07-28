@@ -20,12 +20,64 @@ validation. Each entry is a canonical `ActionDescriptorSchema`.
 ## TypeScript Usage
 
 ```typescript
-import { AiChatRequest, AiChatResponse, AiCompleteRequest, AiConversation, AiMessage, AiModelsResponse, AiStreamChunk, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CreateAiConversationRequest, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, CreateViewRequest, CreateViewResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DeleteViewRequest, DeleteViewResponse, FindDataRequest, FindDataResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPresenceRequest, GetPresenceResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetUiViewResponse, GetViewRequest, GetViewResponse, GetWorkflowConfigRequest, GetWorkflowConfigResponse, GetWorkflowStateRequest, GetWorkflowStateResponse, HttpFindQueryParams, ListAiConversationsRequest, ListAiConversationsResponse, ListNotificationsRequest, ListNotificationsResponse, ListViewsRequest, ListViewsResponse, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, NotificationPreferences, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, SaveMetaItemRequest, SaveMetaItemResponse, SetPresenceRequest, SetPresenceResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateAiConversationRequest, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, UpdateViewRequest, UpdateViewResponse, WorkflowState, WorkflowTransitionRequest, WorkflowTransitionResponse } from '@objectstack/spec/api';
-import type { AiChatRequest, AiChatResponse, AiCompleteRequest, AiConversation, AiMessage, AiModelsResponse, AiStreamChunk, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CreateAiConversationRequest, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, CreateViewRequest, CreateViewResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DeleteViewRequest, DeleteViewResponse, FindDataRequest, FindDataResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPresenceRequest, GetPresenceResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetUiViewResponse, GetViewRequest, GetViewResponse, GetWorkflowConfigRequest, GetWorkflowConfigResponse, GetWorkflowStateRequest, GetWorkflowStateResponse, HttpFindQueryParams, ListAiConversationsRequest, ListAiConversationsResponse, ListNotificationsRequest, ListNotificationsResponse, ListViewsRequest, ListViewsResponse, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, NotificationPreferences, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, SaveMetaItemRequest, SaveMetaItemResponse, SetPresenceRequest, SetPresenceResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateAiConversationRequest, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, UpdateViewRequest, UpdateViewResponse, WorkflowState, WorkflowTransitionRequest, WorkflowTransitionResponse } from '@objectstack/spec/api';
+import { AiAgentCapabilities, AiAgentChatRequest, AiAgentSummary, AiAgentsResponse, AiChatRequest, AiChatResponse, AiCompleteRequest, AiConversation, AiMessage, AiModelsResponse, AiPendingAction, AiPendingActionStatus, AiStreamChunk, ApproveAiPendingActionResponse, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CreateAiConversationRequest, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, CreateViewRequest, CreateViewResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DeleteViewRequest, DeleteViewResponse, FindDataRequest, FindDataResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPresenceRequest, GetPresenceResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetUiViewResponse, GetViewRequest, GetViewResponse, GetWorkflowConfigRequest, GetWorkflowConfigResponse, GetWorkflowStateRequest, GetWorkflowStateResponse, HttpFindQueryParams, ListAiConversationsRequest, ListAiConversationsResponse, ListAiPendingActionsRequest, ListAiPendingActionsResponse, ListNotificationsRequest, ListNotificationsResponse, ListViewsRequest, ListViewsResponse, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, NotificationPreferences, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, RejectAiPendingActionResponse, SaveMetaItemRequest, SaveMetaItemResponse, SetPresenceRequest, SetPresenceResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateAiConversationRequest, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, UpdateViewRequest, UpdateViewResponse, WorkflowState, WorkflowTransitionRequest, WorkflowTransitionResponse } from '@objectstack/spec/api';
+import type { AiAgentCapabilities, AiAgentChatRequest, AiAgentSummary, AiAgentsResponse, AiChatRequest, AiChatResponse, AiCompleteRequest, AiConversation, AiMessage, AiModelsResponse, AiPendingAction, AiPendingActionStatus, AiStreamChunk, ApproveAiPendingActionResponse, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CreateAiConversationRequest, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, CreateViewRequest, CreateViewResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DeleteViewRequest, DeleteViewResponse, FindDataRequest, FindDataResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPresenceRequest, GetPresenceResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetUiViewResponse, GetViewRequest, GetViewResponse, GetWorkflowConfigRequest, GetWorkflowConfigResponse, GetWorkflowStateRequest, GetWorkflowStateResponse, HttpFindQueryParams, ListAiConversationsRequest, ListAiConversationsResponse, ListAiPendingActionsRequest, ListAiPendingActionsResponse, ListNotificationsRequest, ListNotificationsResponse, ListViewsRequest, ListViewsResponse, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, NotificationPreferences, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, RejectAiPendingActionResponse, SaveMetaItemRequest, SaveMetaItemResponse, SetPresenceRequest, SetPresenceResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateAiConversationRequest, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, UpdateViewRequest, UpdateViewResponse, WorkflowState, WorkflowTransitionRequest, WorkflowTransitionResponse } from '@objectstack/spec/api';
 
 // Validate data
-const result = AiChatRequest.parse(data);
+const result = AiAgentCapabilities.parse(data);
 ```
+
+---
+
+## AiAgentCapabilities
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **authoring** | `boolean` | ✅ | Authors app metadata (objects/views/flows) |
+| **canvas** | `boolean` | ✅ | Drives the Live Canvas split view (ADR-0037) |
+| **debug** | `boolean` | ✅ | Exposes the build-doctor debug drawer |
+| **resume** | `boolean` | ✅ | Turns resume durable multi-step runs (ADR-0013) |
+
+
+---
+
+## AiAgentChatRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **messages** | `Record<string, any>[]` | ✅ | Conversation messages (at least one) |
+| **context** | `Record<string, any>` | optional | Agent context (app, object, record, …) |
+| **options** | `Record<string, any>` | optional | Request options (model, temperature, …) |
+
+
+---
+
+## AiAgentSummary
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Agent name — the `:agentName` path segment |
+| **label** | `string` | ✅ | Display label |
+| **role** | `string` | ✅ | Agent role |
+| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean }` | ✅ | Capability set implied by the agent surface |
+
+
+---
+
+## AiAgentsResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **agents** | `{ name: string; label: string; role: string; capabilities: object }[]` | ✅ | Agents this caller may chat with |
+
 
 ---
 
@@ -118,6 +170,44 @@ const result = AiChatRequest.parse(data);
 
 ---
 
+## AiPendingAction
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Pending action id |
+| **object_name** | `string` | ✅ | Object the action targets |
+| **action_name** | `string` | ✅ | Action name |
+| **tool_name** | `string` | ✅ | Tool that would execute it |
+| **tool_input** | `string` | ✅ | Serialized tool input |
+| **status** | `Enum<'pending' \| 'approved' \| 'executed' \| 'failed' \| 'rejected'>` | ✅ | Lifecycle status |
+| **result** | `string` | optional | Serialized result, once executed |
+| **error** | `string` | optional | Failure message, when status is failed |
+| **rejection_reason** | `string` | optional | Reason given at rejection |
+| **conversation_id** | `string` | optional | Conversation that proposed it |
+| **message_id** | `string` | optional | Message that proposed it |
+| **proposed_by** | `string` | optional | Actor that proposed it |
+| **decided_by** | `string` | optional | Actor that approved or rejected it |
+| **proposed_at** | `string` | ✅ | Proposal timestamp (ISO 8601) |
+| **decided_at** | `string` | optional | Decision timestamp (ISO 8601) |
+
+
+---
+
+## AiPendingActionStatus
+
+### Allowed Values
+
+* `pending`
+* `approved`
+* `executed`
+* `failed`
+* `rejected`
+
+
+---
+
 ## AiStreamChunk
 
 ### Properties
@@ -125,6 +215,19 @@ const result = AiChatRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Frame type (text-delta, tool-input-available, finish, error, …) |
+
+
+---
+
+## ApproveAiPendingActionResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **status** | `Enum<'executed' \| 'failed'>` | ✅ | Outcome of executing the approved action |
+| **result** | `any` | optional | Tool result, when executed |
+| **error** | `string` | optional | Failure reason, when failed |
 
 
 ---
@@ -915,6 +1018,31 @@ const result = AiChatRequest.parse(data);
 
 ---
 
+## ListAiPendingActionsRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **status** | `Enum<'pending' \| 'approved' \| 'executed' \| 'failed' \| 'rejected'>` | optional | Filter by status |
+| **conversationId** | `string` | optional | Filter by proposing conversation |
+| **limit** | `integer` | optional | Max rows (server default 100) |
+
+
+---
+
+## ListAiPendingActionsResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **items** | `{ id: string; object_name: string; action_name: string; tool_name: string; … }[]` | ✅ | Queued actions, newest first |
+| **total** | `number` | ✅ | Number of rows returned (not a total across pages) |
+
+
+---
+
 ## ListNotificationsRequest
 
 ### Properties
@@ -1143,6 +1271,18 @@ const result = AiChatRequest.parse(data);
 | :--- | :--- | :--- | :--- |
 | **deviceId** | `string` | ✅ | Registered device ID |
 | **success** | `boolean` | ✅ | Whether registration succeeded |
+
+
+---
+
+## RejectAiPendingActionResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **status** | `'rejected'` | ✅ | Always "rejected" |
+| **id** | `string` | ✅ | The rejected action id |
 
 
 ---
