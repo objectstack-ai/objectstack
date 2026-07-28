@@ -3,14 +3,25 @@
 /**
  * I18n Extractor
  *
- * Companion to `i18n-coverage.ts`. Where coverage *detects* missing keys,
- * extract *scaffolds* the bundle: it walks a normalized stack config and
- * produces ready-to-edit `TranslationData` skeletons for every requested
- * locale, pre-populated with the source labels from the schema for the
- * default locale.
+ * Walks a normalized stack config and produces ready-to-edit `TranslationData`
+ * skeletons for every requested locale, pre-populated with the source labels
+ * from the schema for the default locale.
  *
- * Walk surface (kept superset-aligned with the coverage detector plus the
- * known coverage gap of object-nested `listViews` / inline `actions`):
+ * {@link collectExpectedEntries} is also the **single** definition of what is
+ * translatable at all: `i18n-coverage.ts` consumes it to decide what `os lint`
+ * gates, instead of keeping the parallel walk the two used to maintain. They
+ * had drifted — inline object `actions` and object-nested `listViews` were
+ * scaffoldable but ungated, which is how English approval buttons shipped into
+ * a zh-CN workspace unnoticed (#3370). Add a surface here and both sides get it.
+ *
+ * Two axes per entry, and they are not the same question:
+ *   `sourceValue` — what extract seeds the skeleton with; may be a derived
+ *                   fallback (an object's own name, a humanized field path).
+ *   `inline`      — what the reader actually sees in the source locale; drives
+ *                   the coverage gate, so a string nobody authored is never
+ *                   reported as an untranslated one.
+ *
+ * Walk surface:
  *
  *   objects.<name>.label
  *   objects.<name>.pluralLabel
@@ -60,8 +71,25 @@ import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 export interface ExpectedEntry {
   /** Lookup path expressed as an array of segments. */
   path: string[];
-  /** Source-of-truth string (typically the English literal on the schema). */
-  sourceValue: string;
+  /**
+   * Value `os i18n extract` seeds the default-locale skeleton with — the
+   * English literal on the schema, or the fallback the renderer displays when
+   * the author omitted one (an object's own name, a humanized field path).
+   *
+   * `undefined` means there is nothing to scaffold: the key is recorded only so
+   * the coverage gate can notice a bundle that authors it anyway.
+   */
+  sourceValue?: string;
+  /**
+   * The text a reader actually sees in the source locale. Drives the coverage
+   * gate: a key with no `inline` and no bundle entry has no text to translate
+   * at all, so demanding a translation for it would be noise (a *missing* label
+   * is `required/label`'s finding, not an i18n gap).
+   *
+   * Narrower than {@link sourceValue} wherever the seed is a derived fallback
+   * the author never wrote.
+   */
+  inline?: string;
   /** What kind of metadata this entry was harvested from. */
   source:
     | 'object'
@@ -144,15 +172,60 @@ function pushViewEmptyState(out: ExpectedEntry[], viewPath: string[], view: any,
   }
 }
 
+type EntryScope = Pick<ExpectedEntry, 'objectName' | 'appName' | 'metadataType'>;
+
+/** Narrow to a usable source string; an empty string is not authored text. */
+function inlineText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Record a key whose displayed text *is* its seed — the common case, where the
+ * author wrote the literal we scaffold from.
+ */
 function pushEntry(
   out: ExpectedEntry[],
   path: string[],
   sourceValue: string | undefined,
   source: ExpectedEntry['source'],
-  extra?: Pick<ExpectedEntry, 'objectName' | 'appName' | 'metadataType'>,
+  extra?: EntryScope,
 ): void {
   if (typeof sourceValue !== 'string') return;
-  out.push({ path, sourceValue, source, ...extra });
+  out.push({ path, sourceValue, inline: sourceValue, source, ...extra });
+}
+
+/**
+ * Record a key whose seed is *derived* — an object's own name standing in for a
+ * missing label, a param's machine name rendered as its caption. The seed keeps
+ * the extracted skeleton usable, but `inline` stays unset so the coverage gate
+ * does not demand translations of a string nobody authored.
+ */
+function pushDerived(
+  out: ExpectedEntry[],
+  path: string[],
+  seed: string,
+  authored: string | undefined,
+  source: ExpectedEntry['source'],
+  extra?: EntryScope,
+): void {
+  out.push({ path, sourceValue: seed, inline: authored, source, ...extra });
+}
+
+/**
+ * Record an optional authored string: seeds the skeleton when present, and
+ * still records the key when absent so the coverage gate notices a bundle that
+ * authors it without an inline counterpart.
+ */
+function pushOptional(
+  out: ExpectedEntry[],
+  path: string[],
+  value: unknown,
+  source: ExpectedEntry['source'],
+  extra?: EntryScope,
+): void {
+  const text = inlineText(value);
+  if (text === undefined) out.push({ path, source, ...extra });
+  else pushEntry(out, path, text, source, extra);
 }
 
 /**
@@ -182,18 +255,14 @@ function pushActionParams(
     const pname = param.name ?? param.field;
     if (typeof pname !== 'string' || pname.length === 0) continue;
     const base = [...actionRoot, 'params', pname];
-    const literalLabel = typeof param.label === 'string' ? param.label : undefined;
+    const literalLabel = inlineText(param.label);
     if (param.field) {
-      if (literalLabel) pushEntry(out, [...base, 'label'], literalLabel, kind, { objectName });
+      pushOptional(out, [...base, 'label'], literalLabel, kind, { objectName });
     } else {
-      pushEntry(out, [...base, 'label'], literalLabel ?? pname, kind, { objectName });
+      pushDerived(out, [...base, 'label'], literalLabel ?? pname, literalLabel, kind, { objectName });
     }
-    if (typeof param.helpText === 'string' && param.helpText.length > 0) {
-      pushEntry(out, [...base, 'helpText'], param.helpText, kind, { objectName });
-    }
-    if (typeof param.placeholder === 'string' && param.placeholder.length > 0) {
-      pushEntry(out, [...base, 'placeholder'], param.placeholder, kind, { objectName });
-    }
+    pushOptional(out, [...base, 'helpText'], param.helpText, kind, { objectName });
+    pushOptional(out, [...base, 'placeholder'], param.placeholder, kind, { objectName });
     if (Array.isArray(param.options)) {
       for (const opt of param.options) {
         if (opt && typeof opt === 'object' && 'value' in opt && typeof opt.label === 'string') {
@@ -222,15 +291,9 @@ function pushActionResultDialog(
   const dialog = action?.resultDialog;
   if (!dialog || typeof dialog !== 'object') return;
   const base = [...actionRoot, 'resultDialog'];
-  if (typeof dialog.title === 'string' && dialog.title.length > 0) {
-    pushEntry(out, [...base, 'title'], dialog.title, kind, { objectName });
-  }
-  if (typeof dialog.description === 'string' && dialog.description.length > 0) {
-    pushEntry(out, [...base, 'description'], dialog.description, kind, { objectName });
-  }
-  if (typeof dialog.acknowledge === 'string' && dialog.acknowledge.length > 0) {
-    pushEntry(out, [...base, 'acknowledge'], dialog.acknowledge, kind, { objectName });
-  }
+  pushOptional(out, [...base, 'title'], dialog.title, kind, { objectName });
+  pushOptional(out, [...base, 'description'], dialog.description, kind, { objectName });
+  pushOptional(out, [...base, 'acknowledge'], dialog.acknowledge, kind, { objectName });
   if (Array.isArray(dialog.fields)) {
     for (const field of dialog.fields) {
       if (!field || typeof field !== 'object') continue;
@@ -251,27 +314,25 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
     if (!obj?.name) continue;
     const objectName = obj.name as string;
 
-    pushEntry(out, ['objects', objectName, 'label'], obj.label ?? objectName, 'object', { objectName });
-    if (obj.pluralLabel) {
-      pushEntry(out, ['objects', objectName, 'pluralLabel'], obj.pluralLabel, 'object', { objectName });
-    }
-    if (obj.description) {
-      pushEntry(out, ['objects', objectName, 'description'], obj.description, 'object', { objectName });
-    }
+    pushDerived(out, ['objects', objectName, 'label'], obj.label ?? objectName, inlineText(obj.label), 'object', { objectName });
+    pushOptional(out, ['objects', objectName, 'pluralLabel'], obj.pluralLabel, 'object', { objectName });
+    pushOptional(out, ['objects', objectName, 'description'], obj.description, 'object', { objectName });
 
     // Fields (always a record on normalized schemas)
     if (obj.fields && typeof obj.fields === 'object') {
       for (const [fieldName, raw] of Object.entries<any>(obj.fields)) {
         const field = raw ?? {};
-        pushEntry(out, ['objects', objectName, 'fields', fieldName, 'label'], field.label ?? fieldName, 'field', { objectName });
+        pushDerived(
+          out,
+          ['objects', objectName, 'fields', fieldName, 'label'],
+          field.label ?? fieldName,
+          inlineText(field.label),
+          'field',
+          { objectName },
+        );
 
-        const help = field.help ?? field.description;
-        if (help) {
-          pushEntry(out, ['objects', objectName, 'fields', fieldName, 'help'], help, 'field', { objectName });
-        }
-        if (field.placeholder) {
-          pushEntry(out, ['objects', objectName, 'fields', fieldName, 'placeholder'], field.placeholder, 'field', { objectName });
-        }
+        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'help'], field.help ?? field.description, 'field', { objectName });
+        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'placeholder'], field.placeholder, 'field', { objectName });
 
         // Options — accept either `{value, label}[]` arrays or a record map.
         const opts = field.options;
@@ -307,10 +368,8 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
     if (obj.listViews && typeof obj.listViews === 'object') {
       for (const [viewName, raw] of Object.entries<any>(obj.listViews)) {
         const view = raw ?? {};
-        pushEntry(out, ['objects', objectName, '_views', viewName, 'label'], view.label ?? viewName, 'view', { objectName });
-        if (view.description) {
-          pushEntry(out, ['objects', objectName, '_views', viewName, 'description'], view.description, 'view', { objectName });
-        }
+        pushDerived(out, ['objects', objectName, '_views', viewName, 'label'], view.label ?? viewName, inlineText(view.label), 'view', { objectName });
+        pushOptional(out, ['objects', objectName, '_views', viewName, 'description'], view.description, 'view', { objectName });
         pushViewEmptyState(out, ['objects', objectName, '_views', viewName], view, objectName);
       }
     }
@@ -320,13 +379,10 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
       for (const action of obj.actions) {
         if (!action?.name) continue;
         const aname = action.name as string;
-        pushEntry(out, ['objects', objectName, '_actions', aname, 'label'], action.label ?? aname, 'action', { objectName });
-        if (action.confirmText) {
-          pushEntry(out, ['objects', objectName, '_actions', aname, 'confirmText'], action.confirmText, 'action', { objectName });
-        }
-        if (action.successMessage) {
-          pushEntry(out, ['objects', objectName, '_actions', aname, 'successMessage'], action.successMessage, 'action', { objectName });
-        }
+        const aroot = ['objects', objectName, '_actions', aname];
+        pushDerived(out, [...aroot, 'label'], action.label ?? aname, inlineText(action.label), 'action', { objectName });
+        pushOptional(out, [...aroot, 'confirmText'], action.confirmText, 'action', { objectName });
+        pushOptional(out, [...aroot, 'successMessage'], action.successMessage, 'action', { objectName });
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
@@ -339,10 +395,8 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
     if (!view?.name) continue;
     const objectName = viewObjectName(view);
     if (!objectName) continue;
-    pushEntry(out, ['objects', objectName, '_views', view.name, 'label'], view.label ?? view.name, 'view', { objectName });
-    if (view.description) {
-      pushEntry(out, ['objects', objectName, '_views', view.name, 'description'], view.description, 'view', { objectName });
-    }
+    pushDerived(out, ['objects', objectName, '_views', view.name, 'label'], view.label ?? view.name, inlineText(view.label), 'view', { objectName });
+    pushOptional(out, ['objects', objectName, '_views', view.name, 'description'], view.description, 'view', { objectName });
     pushViewEmptyState(out, ['objects', objectName, '_views', view.name], view, objectName);
   }
 
@@ -355,13 +409,9 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
       ? ['objects', objectName as string, '_actions', action.name]
       : ['globalActions', action.name];
     const kind: ExpectedEntry['source'] = objectName ? 'action' : 'globalAction';
-    pushEntry(out, [...root, 'label'], action.label ?? action.name, kind, { objectName });
-    if (action.confirmText) {
-      pushEntry(out, [...root, 'confirmText'], action.confirmText, kind, { objectName });
-    }
-    if (action.successMessage) {
-      pushEntry(out, [...root, 'successMessage'], action.successMessage, kind, { objectName });
-    }
+    pushDerived(out, [...root, 'label'], action.label ?? action.name, inlineText(action.label), kind, { objectName });
+    pushOptional(out, [...root, 'confirmText'], action.confirmText, kind, { objectName });
+    pushOptional(out, [...root, 'successMessage'], action.successMessage, kind, { objectName });
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);
   }
@@ -469,10 +519,7 @@ function walkMetadataForms(out: ExpectedEntry[]): void {
   for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
     const type = entry.type;
     pushEntry(out, ['metadataForms', type, 'label'], entry.label ?? type, 'metadataType', { metadataType: type });
-    const desc = (entry as any).description;
-    if (typeof desc === 'string' && desc.length > 0) {
-      pushEntry(out, ['metadataForms', type, 'description'], desc, 'metadataType', { metadataType: type });
-    }
+    pushOptional(out, ['metadataForms', type, 'description'], (entry as any).description, 'metadataType', { metadataType: type });
   }
 
   // 2) Section + field labels for every registered form.
@@ -484,11 +531,9 @@ function walkMetadataForms(out: ExpectedEntry[]): void {
     for (const section of sections) {
       if (!section || typeof section !== 'object') continue;
       const sectionName = normalizeSectionName(section);
-      if (sectionName && typeof section.label === 'string') {
-        pushEntry(out, ['metadataForms', type, 'sections', sectionName, 'label'], section.label, 'metadataFormSection', { metadataType: type });
-      }
-      if (sectionName && typeof section.description === 'string' && section.description.length > 0) {
-        pushEntry(out, ['metadataForms', type, 'sections', sectionName, 'description'], section.description, 'metadataFormSection', { metadataType: type });
+      if (sectionName) {
+        pushOptional(out, ['metadataForms', type, 'sections', sectionName, 'label'], section.label, 'metadataFormSection', { metadataType: type });
+        pushOptional(out, ['metadataForms', type, 'sections', sectionName, 'description'], section.description, 'metadataFormSection', { metadataType: type });
       }
       if (Array.isArray(section.fields)) {
         for (const child of section.fields) walkFormField(child, type, '', out);
@@ -503,16 +548,12 @@ function walkFormField(field: any, type: string, parentPath: string, out: Expect
   const name = typeof field.field === 'string' ? field.field : undefined;
   const path = name ? (parentPath ? `${parentPath}.${name}` : name) : parentPath;
   if (path) {
-    const label = typeof field.label === 'string' && field.label.length > 0
-      ? field.label
-      : humanizeFieldPath(path);
-    pushEntry(out, ['metadataForms', type, 'fields', path, 'label'], label, 'metadataFormField', { metadataType: type });
-    if (typeof field.helpText === 'string' && field.helpText.length > 0) {
-      pushEntry(out, ['metadataForms', type, 'fields', path, 'helpText'], field.helpText, 'metadataFormField', { metadataType: type });
-    }
-    if (typeof field.placeholder === 'string' && field.placeholder.length > 0) {
-      pushEntry(out, ['metadataForms', type, 'fields', path, 'placeholder'], field.placeholder, 'metadataFormField', { metadataType: type });
-    }
+    // A form field that omits `label` is still labelled on screen — the
+    // renderer humanizes its path ("name" → "Name"). That derived text IS the
+    // source string, so other locales genuinely owe it a translation.
+    pushEntry(out, ['metadataForms', type, 'fields', path, 'label'], inlineText(field.label) ?? humanizeFieldPath(path), 'metadataFormField', { metadataType: type });
+    pushOptional(out, ['metadataForms', type, 'fields', path, 'helpText'], field.helpText, 'metadataFormField', { metadataType: type });
+    pushOptional(out, ['metadataForms', type, 'fields', path, 'placeholder'], field.placeholder, 'metadataFormField', { metadataType: type });
   }
   if (Array.isArray(field.fields)) {
     for (const child of field.fields) walkFormField(child, type, path, out);
@@ -617,7 +658,10 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
     : [defaultLocale];
   const fill: FillStrategy = opts.fill ?? 'empty';
 
-  const allEntries = collectExpectedEntries(config);
+  // Seed-less entries exist only so the coverage gate can spot a bundle that
+  // authors a key the metadata never writes inline — there is nothing to
+  // scaffold from, so they never reach a generated skeleton.
+  const allEntries = collectExpectedEntries(config).filter((e) => e.sourceValue !== undefined);
   const entries = allEntries.filter((e) => passesFilter(e, opts.filter));
 
   const existingBundles: TranslationBundle[] = Array.isArray(config?.translations) ? config.translations : [];
@@ -630,6 +674,8 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
     const data: TranslationData = {};
     let count = 0;
     for (const entry of entries) {
+      // Guaranteed by the seed-less filter above; narrows for the branches below.
+      const seed = entry.sourceValue ?? '';
       let value: string | undefined;
       // If a translation already exists for this locale, carry it through
       // verbatim so the generated file remains a complete, self-contained
@@ -643,11 +689,11 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
       }
       if (value === undefined) {
         if (locale === defaultLocale) {
-          value = entry.sourceValue;
+          value = seed;
         } else if (fill === 'default') {
-          value = entry.sourceValue;
+          value = seed;
         } else if (fill === 'todo') {
-          value = `[TODO] ${entry.sourceValue}`;
+          value = `[TODO] ${seed}`;
         } else {
           value = '';
         }

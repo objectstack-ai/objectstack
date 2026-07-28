@@ -34,11 +34,12 @@ export default class I18nCheck extends Command {
   static override flags = {
     json: Flags.boolean({ description: 'Output as JSON' }),
     'default-locale': Flags.string({
-      description: 'Locale that must be 100% translated (errors raised against it)',
-      default: 'en',
+      description:
+        "Locale that must be 100% translated (errors raised against it). Defaults to the config's i18n.defaultLocale, else 'en'.",
     }),
     locales: Flags.string({
-      description: 'Comma-separated list of locales to check (default: every locale found)',
+      description:
+        'Comma-separated list of locales to check (default: the config\'s i18n.supportedLocales, else every locale found)',
     }),
     strict: Flags.boolean({
       description: 'Treat missing keys in non-default locales as errors (CI parity gate)',

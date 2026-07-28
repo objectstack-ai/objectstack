@@ -55,11 +55,11 @@ export default class I18nExtract extends Command {
   static override flags = {
     json: Flags.boolean({ description: 'Output JSON instead of writing files' }),
     'default-locale': Flags.string({
-      description: 'Locale filled from schema labels',
-      default: 'en',
+      description: "Locale filled from schema labels. Defaults to the config's i18n.defaultLocale, else 'en'.",
     }),
     locales: Flags.string({
-      description: 'Comma-separated list of locales to emit (always includes default-locale)',
+      description:
+        "Comma-separated list of locales to emit (always includes default-locale). Defaults to the config's i18n.supportedLocales.",
     }),
     fill: Flags.string({
       description: 'How non-default locales are filled: empty | default | todo',
@@ -106,12 +106,25 @@ export default class I18nExtract extends Command {
 
       const normalized = normalizeStackInput(config as Record<string, unknown>);
       const filter = flags.filter ? new RegExp(flags.filter) : undefined;
+      // The stack's own `i18n` block already names the languages it ships, so
+      // scaffolding those by default saves repeating them on every invocation.
+      const declared = (normalized as { i18n?: { defaultLocale?: unknown; supportedLocales?: unknown } }).i18n;
+      const declaredLocales = Array.isArray(declared?.supportedLocales)
+        ? declared.supportedLocales.filter((l): l is string => typeof l === 'string' && l.length > 0)
+        : [];
       const locales = flags.locales
         ? flags.locales.split(',').map((s) => s.trim()).filter(Boolean)
-        : undefined;
+        : declaredLocales.length > 0
+          ? declaredLocales
+          : undefined;
+      const defaultLocale =
+        flags['default-locale'] ??
+        (typeof declared?.defaultLocale === 'string' && declared.defaultLocale.length > 0
+          ? declared.defaultLocale
+          : 'en');
 
       const result = extractTranslations(normalized, {
-        defaultLocale: flags['default-locale'],
+        defaultLocale,
         locales,
         fill: flags.fill as FillStrategy,
         filter,
@@ -128,6 +141,12 @@ export default class I18nExtract extends Command {
         metadataFormsCounts[locale] = countLeaves(result.bundles[locale]?.metadataForms);
       }
       const anyMetadataForms = Object.values(metadataFormsCounts).some((n) => n > 0);
+      // …but under --objects-only they are only ever *reported*, never written.
+      // Counting them as emitted files made `--check` demand
+      // `<locale>.metadata-forms.generated.ts` next to bundles a plain run does
+      // not produce, so the drift gate failed on a tree that was in fact in sync.
+      const emitsMetadataForms = (locale: string): boolean =>
+        !objectsOnly && (metadataFormsCounts[locale] ?? 0) > 0;
 
       if (flags.json) {
         console.log(JSON.stringify({
@@ -169,7 +188,7 @@ export default class I18nExtract extends Command {
             locale,
             objectsOnly,
           }));
-          if (metadataFormsCounts[locale] > 0) {
+          if (emitsMetadataForms(locale)) {
             console.log(chalk.dim(`── ${locale} (metadataForms) ──`));
             console.log(renderTranslationModule(result.bundles[locale], {
               locale,
@@ -195,7 +214,7 @@ export default class I18nExtract extends Command {
             keys: result.counts[locale],
           });
         }
-        if (metadataFormsCounts[locale] > 0) {
+        if (emitsMetadataForms(locale)) {
           emitted.push({
             file: path.join(outDir, `${locale}.metadata-forms.generated.ts`),
             content: renderTranslationModule(result.bundles[locale], { locale, kind: 'metadataForms' }),
@@ -222,7 +241,7 @@ export default class I18nExtract extends Command {
         console.log('');
         printError(
           'Translation bundles have drifted from the schema. Regenerate and commit:\n' +
-          `  os i18n extract ${args.config ?? ''} --locales=${localesEmitted.filter((l) => l !== flags['default-locale']).join(',')} ` +
+          `  os i18n extract ${args.config ?? ''} --locales=${localesEmitted.filter((l) => l !== defaultLocale).join(',')} ` +
           `--fill=${flags.fill} --out=${flags.out}`.replace(/\s+/g, ' '),
         );
         process.exit(1);

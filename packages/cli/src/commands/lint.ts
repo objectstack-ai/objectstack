@@ -604,8 +604,8 @@ export default class Lint extends Command {
       description: 'Treat missing translations in non-default locales as errors',
     }),
     'default-locale': Flags.string({
-      description: 'Default locale for i18n coverage (must be 100% translated)',
-      default: 'en',
+      description:
+        "Default locale for i18n coverage (must be 100% translated). Defaults to the config's i18n.defaultLocale, else 'en'.",
     }),
   };
 
@@ -645,6 +645,11 @@ export default class Lint extends Command {
       }
 
       // ── Translation coverage ──
+      // No locale is forced here: `computeI18nCoverage` falls back to the
+      // stack's own `i18n` block and, failing that, to the locales its bundles
+      // already cover. A project that ships neither is checked against its
+      // default locale alone, which its inline labels already satisfy — so this
+      // stays silent for projects that do not translate.
       let hiddenPlatform = 0;
       if (!flags['skip-i18n']) {
         const coverage = computeI18nCoverage(normalized, {

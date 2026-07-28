@@ -680,6 +680,8 @@ export interface ObjectLike {
   pluralLabel?: string;
   description?: string;
   fields?: Record<string, ObjectFieldLike> | ObjectFieldLike[];
+  /** Actions declared inline on the object (`Object.actions`). */
+  actions?: ActionLike[];
 }
 
 export interface ObjectFieldLike {
@@ -784,14 +786,22 @@ function builtinSystemFieldLabel(
 
 /**
  * Apply the active locale to an object metadata document. Translates the
- * object's `label` / `pluralLabel` / `description` and walks each field to
- * translate its `label`, `help`, and per-option `label`s. The input document
+ * object's `label` / `pluralLabel` / `description`, walks each field to
+ * translate its `label`, `help`, and per-option `label`s, and walks any
+ * inline-declared `actions` through {@link translateAction}. The input document
  * is not mutated; a structural clone of the touched branches is returned.
  *
  * Field maps come in two shapes across the codebase: a `Record<string, Field>`
  * (preferred — the canonical authored shape) and an `Array<Field>` (some REST
  * responses flatten the record). Both are supported; the function returns the
  * same shape it was given.
+ *
+ * Actions were the long-standing hole here: `sys_approval_request` declares its
+ * decision actions inline, so an object document went out with English
+ * Approve / Reject buttons even though the plugin ships `_actions` translations
+ * for them. The Console papered over it by re-resolving labels client-side
+ * against a separately fetched bundle, which left every other consumer — mobile,
+ * plain HTTP, SDUI — rendering the source language (#3370).
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -839,12 +849,30 @@ export function translateObject<T extends ObjectLike>(
     fields = next;
   }
 
+  const actions = Array.isArray(doc.actions)
+    ? doc.actions.map((action) => {
+        if (!action || typeof action !== 'object' || !action.name) return action;
+        if (action.objectName) return translateAction(action, bundle, opts);
+        // An inline action carries no `objectName` of its own — it is addressed
+        // by the object that declares it, which is what `_actions` keys on. Scope
+        // it for the lookup, then hand back the shape the document came in with
+        // rather than stamping a synthetic field onto the response.
+        const { objectName: _scoped, ...translated } = translateAction(
+          { ...action, objectName },
+          bundle,
+          opts,
+        );
+        return translated as typeof action;
+      })
+    : undefined;
+
   return {
     ...doc,
     ...(label !== undefined ? { label } : {}),
     ...(pluralLabel !== undefined ? { pluralLabel } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(fields !== undefined ? { fields } : {}),
+    ...(actions !== undefined ? { actions } : {}),
   };
 }
 

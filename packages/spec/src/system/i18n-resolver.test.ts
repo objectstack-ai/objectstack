@@ -960,3 +960,81 @@ describe('translateObject system-field label fallback', () => {
     expect((out.fields as any)[0].label).toBe('所有者');
   });
 });
+
+describe('translateObject inline actions (objectstack#3370)', () => {
+  // The `sys_approval_request` shape: decision actions declared inline on the
+  // object. The plugin ships `_actions` translations for them, but the object
+  // document used to go out with the English literals regardless of locale —
+  // so anything that was not the Console (which re-resolves labels client-side
+  // against its own bundle) rendered Approve / Reject in a zh-CN workspace.
+  const approvalRequest = {
+    name: 'sys_approval_request',
+    label: 'Approval Request',
+    actions: [
+      { name: 'approval_approve', label: 'Approve', successMessage: 'Approved.' },
+      { name: 'approval_reject', label: 'Reject', confirmText: 'Reject this request?' },
+      { name: 'approval_remind', label: 'Send reminder' },
+    ],
+  };
+
+  const bundle = {
+    'zh-CN': {
+      objects: {
+        sys_approval_request: {
+          label: '审批请求',
+          _actions: {
+            approval_approve: { label: '通过', successMessage: '已通过。' },
+            approval_reject: { label: '拒绝', confirmText: '拒绝该请求？' },
+          },
+        },
+      },
+    },
+  };
+
+  it('translates inline action labels and copy', () => {
+    const out = translateObject(approvalRequest, bundle, { locale: 'zh-CN' });
+    const actions = out.actions as any[];
+
+    expect(actions[0].label).toBe('通过');
+    expect(actions[0].successMessage).toBe('已通过。');
+    expect(actions[1].label).toBe('拒绝');
+    expect(actions[1].confirmText).toBe('拒绝该请求？');
+  });
+
+  it('falls back to the authored literal for an untranslated action', () => {
+    const out = translateObject(approvalRequest, bundle, { locale: 'zh-CN' });
+    expect((out.actions as any[])[2].label).toBe('Send reminder');
+  });
+
+  it('does not stamp a synthetic objectName onto inline actions', () => {
+    // The lookup needs the declaring object's name; the response should not
+    // grow a field the document never carried.
+    const out = translateObject(approvalRequest, bundle, { locale: 'zh-CN' });
+    for (const action of out.actions as any[]) {
+      expect(Object.hasOwn(action, 'objectName')).toBe(false);
+    }
+  });
+
+  it('leaves the input document unmutated', () => {
+    translateObject(approvalRequest, bundle, { locale: 'zh-CN' });
+    expect(approvalRequest.actions[0].label).toBe('Approve');
+  });
+
+  it('honours an action that names its own object', () => {
+    const doc = {
+      name: 'sys_approval_request',
+      actions: [{ name: 'approval_approve', label: 'Approve', objectName: 'sys_approval_request' }],
+    };
+    const out = translateObject(doc, bundle, { locale: 'zh-CN' });
+    expect((out.actions as any[])[0].label).toBe('通过');
+    expect((out.actions as any[])[0].objectName).toBe('sys_approval_request');
+  });
+
+  it('passes objects through untouched when they declare no actions', () => {
+    const out = translateObject({ name: 'sys_approval_request', label: 'Approval Request' }, bundle, {
+      locale: 'zh-CN',
+    });
+    expect(out.label).toBe('审批请求');
+    expect(Object.hasOwn(out, 'actions')).toBe(false);
+  });
+});
