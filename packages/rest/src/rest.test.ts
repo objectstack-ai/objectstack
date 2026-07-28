@@ -2080,6 +2080,41 @@ describe('mapDataError — schema/constraint envelopes', () => {
   // errors through mapDataError (not sendError's `.status` passthrough), so
   // the code needs its own branch — without it the 403 degraded to the
   // catch-all 400 (caught live in the runtime smoke test).
+  // #3828: an object whose declared datasource is refused by the host policy,
+  // or failed to connect under OS_ALLOW_DRIVER_CONNECT_FAILURE. Nothing about
+  // the REQUEST is wrong, so 4xx lies; and it is a dependency/policy state that
+  // may clear, so 503 is more honest (and more actionable to a proxy) than 500.
+  it('maps ERR_DATASOURCE_UNAVAILABLE → 503 with the datasource and reason class', () => {
+    const r = mapDataError(
+      Object.assign(
+        new Error(
+          "[ObjectQL] Datasource 'analytics' configured for object 'visit' is declared but not connected: " +
+          "the host's datasource connect policy refused it. External datasources require the Scale plan. " +
+          'See the startup logs or Setup → Datasources for the cause.',
+        ),
+        { code: 'ERR_DATASOURCE_UNAVAILABLE', datasource: 'analytics', kind: 'blocked' },
+      ),
+      'visit',
+    );
+    expect(r.status).toBe(503);
+    expect(r.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
+    expect(r.body.datasource).toBe('analytics');
+    expect(r.body.reason).toBe('blocked');
+    expect(r.body.object).toBe('visit');
+    // The message is sanitised at the throw site, so it passes through as-is.
+    expect(String(r.body.error)).toContain('require the Scale plan');
+  });
+
+  it('does not downgrade ERR_DATASOURCE_UNAVAILABLE to the generic 400 catch-all', () => {
+    const r = mapDataError(
+      Object.assign(new Error("Datasource 'x' ... is declared but not connected"), {
+        code: 'ERR_DATASOURCE_UNAVAILABLE',
+        kind: 'failed',
+      }),
+    );
+    expect(r.status).toBe(503);
+  });
+
   it('maps FEEDS_DISABLED → 403 with the gated target object', () => {
     const r = mapDataError(
       Object.assign(new Error("Comments are disabled for object 'gate_probe' (enable.feeds: false)"), {

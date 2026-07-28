@@ -30,7 +30,15 @@ import {
   resolveFilterTokens,
 } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
-import { DriverConnectError, emitDegradedBootBanner, type DriverConnectFailure, type DriverHealth } from './driver-connect-errors.js';
+import {
+  DriverConnectError,
+  DatasourceUnavailableError,
+  emitDegradedBootBanner,
+  type DriverConnectFailure,
+  type DriverHealth,
+  type DatasourceUnavailableInfo,
+  type DatasourceUnavailableKind,
+} from './driver-connect-errors.js';
 import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 
 /**
@@ -354,6 +362,12 @@ export class ObjectQL implements IDataEngine {
   // ownership. Populated from manifests in registerApp and via
   // registerDatasourceDef. Absent entry ⇒ treated as managed (default DB).
   private datasourceDefs = new Map<string, { schemaMode?: string; external?: { allowWrites?: boolean } }>();
+
+  // Declared-but-unusable datasources, keyed by name (framework#3828). Written
+  // by the datasource connection layer via markDatasourceUnavailable; read only
+  // by getDriver, to explain a missing driver instead of blaming a typo. Empty
+  // is the normal state — an entry here means a connect was refused or failed.
+  private unavailableDatasources = new Map<string, DatasourceUnavailableInfo>();
 
   // Per-object hooks with priority support
   private hooks: Map<string, HookEntry[]> = new Map([
@@ -1482,6 +1496,41 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
+   * Record that a **declared** datasource has no live driver, and why
+   * (framework#3828). Called by `DatasourceConnectionService` when a connect is
+   * refused by the host policy or fails while the operator has opted into a
+   * degraded boot.
+   *
+   * The engine only needs this to answer a query well: without it
+   * {@link getDriver} cannot tell a refused datasource from a misspelled one and
+   * says `is not registered` to both. Deliberately carries no operator-facing
+   * cause — see {@link DatasourceUnavailableError}.
+   */
+  markDatasourceUnavailable(info: { name: string; kind: DatasourceUnavailableKind; publicDetail?: string }): void {
+    if (!info?.name) return;
+    this.unavailableDatasources.set(info.name, {
+      kind: info.kind,
+      ...(info.publicDetail ? { publicDetail: info.publicDetail } : {}),
+    });
+  }
+
+  /** Drop a {@link markDatasourceUnavailable} record (successful (re)connect / pool removal). */
+  clearDatasourceUnavailable(name: string): void {
+    this.unavailableDatasources.delete(name);
+  }
+
+  /**
+   * Datasources that were declared but are NOT usable, with the reason class.
+   *
+   * Distinct from {@link checkDriversHealth}, which answers "can a REGISTERED
+   * driver serve a query right now" and therefore cannot see these at all — a
+   * datasource that never connected was never registered (framework#3827).
+   */
+  listUnavailableDatasources(): Array<{ name: string } & DatasourceUnavailableInfo> {
+    return Array.from(this.unavailableDatasources, ([name, info]) => ({ name, ...info }));
+  }
+
+  /**
    * Write gate — Gate 3 of ADR-0015 §5.3.
    *
    * Blocks insert/update/delete against a federated datasource
@@ -1761,6 +1810,21 @@ export class ObjectQL implements IDataEngine {
       if (this.drivers.has(object.datasource)) {
         return this.drivers.get(object.datasource)!;
       }
+      // The datasource layer may have recorded WHY this one has no driver —
+      // refused by the host policy, or failed to connect under
+      // OS_ALLOW_DRIVER_CONNECT_FAILURE (framework#3828). Saying so beats
+      // sending the reader hunting for a typo that isn't there.
+      const unavailable = this.unavailableDatasources.get(object.datasource);
+      if (unavailable) {
+        throw new DatasourceUnavailableError(
+          object.datasource,
+          objectName,
+          unavailable.kind,
+          unavailable.publicDetail,
+        );
+      }
+      // No record: nothing ever tried to connect this name, so it is genuinely
+      // undeclared (or misspelled). Unchanged message — there is nothing to add.
       throw new Error(`[ObjectQL] Datasource '${object.datasource}' configured for object '${objectName}' is not registered.`);
     }
 
