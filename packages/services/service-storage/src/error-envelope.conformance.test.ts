@@ -223,6 +223,32 @@ describe('storage error envelope (#3675)', () => {
       },
     },
     {
+      // #3641: these two used to answer 200/302 with
+      // `${basePath}/_local/file/<key>` — a URL no registrar mounts — so a
+      // caller followed a link straight into a 404. An adapter that can
+      // produce no download URL now says so.
+      name: 'download URL from an adapter with neither presigned nor signed URLs',
+      status: 501,
+      code: 'NOT_IMPLEMENTED',
+      run: async () => {
+        const store = new StorageMetadataStore(null);
+        await committedAttachment(store, 'nocap', { scope: 'user', key: 'user/nocap.bin' });
+        const routes = mount({} as any, store);
+        return drive(routes, 'GET', `${BASE}/files/:fileId/url`, { params: { fileId: 'nocap' } });
+      },
+    },
+    {
+      name: 'the redirect twin of the same adapter limitation',
+      status: 501,
+      code: 'NOT_IMPLEMENTED',
+      run: async () => {
+        const store = new StorageMetadataStore(null);
+        await committedAttachment(store, 'nocap2', { scope: 'user', key: 'user/nocap2.bin' });
+        const routes = mount({} as any, store);
+        return drive(routes, 'GET', `${BASE}/files/:fileId`, { params: { fileId: 'nocap2' } });
+      },
+    },
+    {
       name: 'raw download with a forged token signature',
       status: 403,
       code: 'INVALID_TOKEN',

@@ -19,16 +19,25 @@ import { SqlDriver } from '../src/index.js';
  *   - `unique: true`, no tenant column → single-column (single-tenant: unchanged)
  *   - `unique: 'global'`               → single-column, always
  *   - declared `indexes[]`             → verbatim columns, never rewritten
+ *
+ * Retiring the legacy global index is no longer inline DDL at boot: since
+ * #3728 it is a `replace_unique_index` drift entry, auto-applied on restart
+ * only under the dev `autoMigrate: 'safe'` policy and otherwise left to
+ * `os migrate`. The migration tests below therefore opt into that policy.
  */
 describe('SqlDriver unique × tenancy (#3696)', () => {
   let driver: SqlDriver;
 
-  beforeEach(async () => {
-    driver = new SqlDriver({
+  const makeDriver = (opts: any = {}) =>
+    new SqlDriver({
       client: 'better-sqlite3',
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
+      ...opts,
     });
+
+  beforeEach(async () => {
+    driver = makeDriver();
   });
 
   afterEach(async () => {
@@ -254,6 +263,7 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
   // ── Legacy migration: drop the global index, create the composite ─────────
 
   it('retires a legacy global unique index and replaces it with the composite', async () => {
+    driver = makeDriver({ autoMigrate: 'safe' });
     const k = (driver as any).knex;
 
     // Reproduce exactly what the OLD code left behind: knex's `col.unique()`
@@ -295,6 +305,7 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
   });
 
   it('retires the legacy `uniq_<table>_<col>` index left by the drift rebuild path', async () => {
+    driver = makeDriver({ autoMigrate: 'safe' });
     const k = (driver as any).knex;
     await k.schema.createTable('product', (t: any) => {
       t.string('id').primary();
@@ -319,6 +330,7 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
   });
 
   it("does NOT retire the single-column index of a unique: 'global' field", async () => {
+    driver = makeDriver({ autoMigrate: 'safe' });
     const k = (driver as any).knex;
     await k.schema.createTable('runtime', (t: any) => {
       t.string('id').primary();

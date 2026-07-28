@@ -66,7 +66,7 @@ as `live`, 10 were wrong** — a 77% error rate for the preview-renderer standar
 
 | Verdict | Properties |
 |---|---|
-| `live`, evidence corrected to the real reader | `action.execute` (ActionRunner + the spec transform), `action.disabled` (six render surfaces), `flow.status` (engine gates binding + execution since `497bda853`) |
+| `live`, evidence corrected to the real reader | `action.execute` (the spec transform's parse-time lowering — the second reader, objectui's ActionRunner, resolved the `target`/`execute` pair in the *opposite* direction; aligned and the alias dropped from the parsed output in #3713), `action.disabled` (six render surfaces), `flow.status` (engine gates binding + execution since `497bda853`) |
 | corrected to `dead` + `authorWarn` | `action.shortcut`, `action.bulkEnabled`, `flow.active`, `skill.triggerPhrases`, `tool.category`, `tool.requiresConfirmation`, `tool.active`, `tool.builtIn`, `skill.permissions`*, `agent.knowledge` |
 
 \* `skill.permissions` was subsequently pruned outright — it was never enforced.

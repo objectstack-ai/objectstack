@@ -61,12 +61,18 @@ export const ChartTypeSchema = lazySchema(() => z.enum([
 //    (choropleth/bubble-map/gl-map), or extra renderers (sunburst, heatmap,
 //    word-cloud, waterfall).
 // 2. VARIANTS that only render as their base chart, so advertising them lies
-//    about the output: grouped-bar / stacked-bar / bi-polar-bar (→ bar, no
-//    multi-series grouping/stacking), stacked-area (→ area), step-line / spline
-//    (→ line), pyramid (→ funnel), bubble (→ scatter, no size encoding).
+//    about the output: bi-polar-bar (→ bar), step-line / spline (→ line),
+//    pyramid (→ funnel), bubble (→ scatter, no size encoding).
 //
 // Both can return via an opt-in renderer once there is a real renderer and a
-// data model to back them. (`metric`/`kpi` are kept as honest single-value
+// data model to back them.
+//
+// Grouped/stacked bar and stacked area are absent for a DIFFERENT reason, and
+// a better one: stacking is not a chart family, it is a property of the series
+// (`ChartSeries.stack` — series sharing a group id stack, otherwise they
+// group). One `bar` family plus a series-level stack group expresses all three
+// without multiplying the taxonomy. The renderer honors it (objectui#2880);
+// before that it did not, which is why they once sat in the list above. (`metric`/`kpi` are kept as honest single-value
 // synonyms; `gauge`/`solid-gauge`/`bullet` render a value today and gain a dial
 // when a gauge renderer lands.)
 
@@ -159,9 +165,15 @@ export const ChartAnnotationSchema = lazySchema(() => z.object({
  * Chart Interaction Schema
  */
 export const ChartInteractionSchema = lazySchema(() => z.object({
-  tooltips: z.boolean().default(true),
-  zoom: z.boolean().default(false),
-  brush: z.boolean().default(false),
+  tooltips: z.boolean().default(true).describe('Show the hover tooltip'),
+  /**
+   * ⚠️ Declared, not delivered. The default Recharts renderer has no zoom
+   * primitive, so this draws nothing today — `brush` is the shipped way to
+   * narrow a range. Kept in the schema because an opt-in renderer can honor it;
+   * tracked with the rest of the chart-contract work in framework#3729.
+   */
+  zoom: z.boolean().default(false).describe('Pan/zoom the plot — NOT implemented by the default renderer; use `brush`'),
+  brush: z.boolean().default(false).describe('Show the range selector under the plot'),
   clickAction: z.string().optional().describe('Action ID to trigger on click'),
 }));
 
@@ -201,10 +213,12 @@ export const ChartConfigSchema = lazySchema(() => z.object({
   showDataLabels: z.boolean().default(false).describe('Display data labels'),
   
   /** Annotations & Reference Lines */
-  annotations: z.array(ChartAnnotationSchema).optional(),
+  annotations: z.array(ChartAnnotationSchema).optional()
+    .describe('Reference lines/bands drawn over the plot: { type: "line" | "region", axis: "x" | "y", value, endValue?, color?, label?, style? }'),
   
   /** Interactions */
-  interaction: ChartInteractionSchema.optional(),
+  interaction: ChartInteractionSchema.optional()
+    .describe('Interaction toggles: { tooltips?, brush?, zoom?, clickAction? }'),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

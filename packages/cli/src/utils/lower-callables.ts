@@ -105,7 +105,8 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
   }
 
   // 1b. Lower inline action handlers found inside `objects[*].actions[*]`
-  //     and `actions[*]`. We accept either `execute: fn` or `target: fn`.
+  //     and `actions[*]`. We accept either `target: fn` or the deprecated
+  //     `execute: fn`; `target` wins when both are present (#3713).
   if (Array.isArray(lowered.objects)) {
     lowered.objects = (lowered.objects as unknown[]).map((rawObj) => {
       if (!isPlainObject(rawObj)) return rawObj;
@@ -173,9 +174,10 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
 }
 
 /**
- * Lower a single action definition: detect callable on `execute` or
- * `target`, register it, optionally extract a metadata body. Mutates a
- * shallow clone, never the input.
+ * Lower a single action definition: detect a callable on `target` or on the
+ * deprecated `execute` alias (canonical `target` first — #3713), register it,
+ * optionally extract a metadata body, and drop the alias. Mutates a shallow
+ * clone, never the input.
  */
 function lowerActionCallable(
   raw: unknown,
@@ -189,11 +191,17 @@ function lowerActionCallable(
   const baseName = typeof action.name === 'string' && action.name.length > 0
     ? `${ownerLabel}_${action.name}`
     : `${ownerLabel}_anon_action`;
+  // #3713: `target` is the canonical slot and `execute` its deprecated alias, so
+  // probe `target` FIRST. This used to prefer `execute`, which made the compile
+  // step the third reader of this pair — and it disagreed with the spec transform
+  // (which keeps `target` when both are set). An author who inlined a function in
+  // both slots got the `execute` one bundled while `action.target = ref` below
+  // silently overwrote the `target` function they had actually declared.
   const handlerSlot: 'execute' | 'target' | null =
-    typeof action.execute === 'function'
-      ? 'execute'
-      : typeof action.target === 'function'
-        ? 'target'
+    typeof action.target === 'function'
+      ? 'target'
+      : typeof action.execute === 'function'
+        ? 'execute'
         : null;
   if (!handlerSlot) return action;
   const fn = action[handlerSlot] as AnyFn;
@@ -206,6 +214,10 @@ function lowerActionCallable(
   }
   // Keep a string-named target so the legacy executor can still resolve it.
   action.target = ref;
-  if (handlerSlot === 'execute') delete action.execute;
+  // Drop the alias unconditionally, matching the spec transform's "canonical wins,
+  // alias disappears" rule (#3713). Once `target` carries the bundled ref, any
+  // leftover `execute` is stale by construction — and a function-valued one would
+  // fail `ActionSchema` (it expects a string) further down the pipeline.
+  if ('execute' in action) delete action.execute;
   return action;
 }

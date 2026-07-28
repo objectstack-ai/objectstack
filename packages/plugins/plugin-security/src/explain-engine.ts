@@ -146,6 +146,8 @@ export interface ExplainEngineDeps {
     isPrivate: boolean;
     requiredPermissions: any;
     fieldRequiredPermissions: Record<string, string[]>;
+    /** [#3545] Posture could not be read — the middleware denies (fail-closed). */
+    unresolved?: boolean;
   }>;
   /** The middleware's requiredPermissions AND-gate resolution for an operation. */
   requiredCaps: (meta: any, engineOperation: string) => string[];
@@ -840,22 +842,35 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   const delegatorCrud = delegatorSets
     ? deps.evaluator.checkObjectPermission(engineOp, object, delegatorSets, { isPrivate: secMeta.isPrivate })
     : true;
-  const crudAllowed = agentCrud && delegatorCrud && !delegatorMissing;
-  const granting = sets
-    .filter((s) => deps.evaluator.checkObjectPermission(engineOp, object, [s], { isPrivate: secMeta.isPrivate }))
-    .map((s: any) => String(s.name ?? '?'));
+  // [#3545] An UNRESOLVED posture is a denial in the middleware, so it must read
+  // as one here too — explain and enforcement disagreeing on a security surface
+  // is the same `declared ≠ enforced` gap this engine exists to expose. Reported
+  // on the existing `object_crud` layer (no new layer kind): the posture is what
+  // that layer's grant is computed FROM, and reporting the real cause beats a
+  // misleading "no set grants it" when the sets were never the problem.
+  const postureUnresolved = secMeta.unresolved === true;
+  const crudAllowed = agentCrud && delegatorCrud && !delegatorMissing && !postureUnresolved;
+  const granting = postureUnresolved
+    ? []
+    : sets
+        .filter((s) => deps.evaluator.checkObjectPermission(engineOp, object, [s], { isPrivate: secMeta.isPrivate }))
+        .map((s: any) => String(s.name ?? '?'));
   layers.push({
     layer: 'object_crud',
     verdict: crudAllowed ? 'grants' : 'denies',
     detail: crudAllowed
       ? `${operation} on '${object}' is granted by [${granting.join(', ')}]` +
         (delegatorSets ? ' AND by the delegator (D10 intersection).' : '.')
-      : delegatorMissing
-        ? `Delegator no longer exists — D10 fails closed (access denied).`
-        : agentCrud && !delegatorCrud
-          ? `The agent grants ${operation} on '${object}' but the DELEGATOR does not — D10 intersection denies (an agent may not exceed the user it acts for).`
-          : `No resolved permission set grants ${operation} on '${object}'` +
-            (secMeta.isPrivate ? " (object is 'private' posture — non-superuser '*' wildcards are excluded, ADR-0066 D2)." : '.'),
+      : postureUnresolved
+        ? `The security posture of '${object}' could not be resolved (neither the live schema nor the ` +
+          `metadata service returned it) — its 'private' flag and required-capability contract are ` +
+          `unknown, so access fails CLOSED rather than defaulting to public/uncontracted (#3545).`
+        : delegatorMissing
+          ? `Delegator no longer exists — D10 fails closed (access denied).`
+          : agentCrud && !delegatorCrud
+            ? `The agent grants ${operation} on '${object}' but the DELEGATOR does not — D10 intersection denies (an agent may not exceed the user it acts for).`
+            : `No resolved permission set grants ${operation} on '${object}'` +
+              (secMeta.isPrivate ? " (object is 'private' posture — non-superuser '*' wildcards are excluded, ADR-0066 D2)." : '.'),
     contributors: granting.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })),
   });
 

@@ -267,7 +267,20 @@ export class LocalStorageAdapter implements IStorageService {
       method: 'PUT',
       headers: options?.contentType ? { 'content-type': options.contentType } : { 'content-type': 'application/octet-stream' },
       expiresIn,
-      downloadUrl: `${this.baseUrl}${this.basePath}/_local/file/${encodeURIComponent(key)}`,
+      // `downloadUrl` is deliberately OMITTED (it is optional on the
+      // descriptor). It used to be `${basePath}/_local/file/<key>` — a URL no
+      // registrar has ever mounted, so anyone following it got a 404 (#3641).
+      //
+      // Nothing read it, which is why it survived: the presigned-upload route
+      // builds its own `downloadUrl` (`${basePath}/files/:fileId/url`) and
+      // ignores this field, and the three real readers of `desc.downloadUrl`
+      // all take it from `getPresignedDownload`, whose URL IS mounted
+      // (`_local/raw/<token>`).
+      //
+      // Not repaired into a working URL, because this adapter cannot build
+      // one: the capability URL is keyed by `sys_file.id`, and an adapter only
+      // ever sees the storage key. Emitting nothing is honest; emitting a
+      // 404 was not.
     };
   }
 

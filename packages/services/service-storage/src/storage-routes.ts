@@ -543,7 +543,11 @@ export function registerStorageRoutes(
       } else if (storage.getSignedUrl) {
         url = await storage.getSignedUrl(file.key, ttl, downloadOpts);
       } else {
-        url = `${basePath}/_local/file/${encodeURIComponent(file.key)}`;
+        // See the sibling branch on `GET /files/:fileId`: no adapter capability
+        // means no download URL, and handing back an unmounted one is worse
+        // than admitting it (#3641).
+        sendError(res, 501, 'NOT_IMPLEMENTED', 'This storage adapter cannot issue download URLs');
+        return;
       }
 
       res.json({ url });
@@ -583,7 +587,13 @@ export function registerStorageRoutes(
       } else if (storage.getSignedUrl) {
         url = await storage.getSignedUrl(file.key, ttl, downloadOpts);
       } else {
-        url = `${basePath}/_local/file/${encodeURIComponent(file.key)}`;
+        // An adapter with neither `getPresignedDownload` nor `getSignedUrl`
+        // cannot produce a download URL. This used to redirect to
+        // `${basePath}/_local/file/<key>`, which no registrar mounts — a 302
+        // straight into a 404 (#3641). Say so instead: the caller learns the
+        // adapter is the limitation, rather than chasing a broken link.
+        sendError(res, 501, 'NOT_IMPLEMENTED', 'This storage adapter cannot issue download URLs');
+        return;
       }
 
       res.status(302).header('Location', url).send('');

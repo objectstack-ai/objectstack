@@ -35,8 +35,20 @@
  * ObjectQL security middleware (CRUD / FLS / RLS) on the data call regardless of
  * the outcome here. So a fail-open on unresolvable metadata cannot bypass data
  * authorization; at worst an operation the author meant to HIDE from the API is
- * transiently reachable (still fully access-controlled). Given that, the tiered
- * decision is:
+ * transiently reachable (still fully access-controlled).
+ *
+ * That premise is load-bearing, so it was VERIFIED rather than assumed — and as
+ * first stated it was wrong. The middleware does run unconditionally, but two of
+ * its INPUTS were read from this same object metadata and defaulted permissively
+ * when it could not be resolved: `access.default` read as PUBLIC (so a plain `'*'`
+ * wildcard covered an object ADR-0066 D2 excludes from it) and `requiredPermissions`
+ * read as NO CONTRACT (so the D3 capability AND-gate was skipped). The very trigger
+ * this issue is about therefore reached one layer PAST the surface-area gate, into
+ * the boundary itself. Closed in plugin-security's `getObjectSecurityMeta`, which
+ * now flags an unresolved posture so the middleware, `canExport` and
+ * `getReadableFields` fail CLOSED on it (pinned by
+ * `metadata-unresolvable-posture.test.ts`). With the boundary now actually
+ * unconditional, the tiered decision below stands:
  *   • Metadata service not ready / whole registry unavailable (cold start,
  *     registration race, scoped kernel warming) → KEEP fail-open. Failing closed
  *     would 405 every request during the normal startup window for no security
