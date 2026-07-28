@@ -30,8 +30,8 @@ Industry alignment: Salesforce Bulk API, Microsoft Dynamics Bulk Operations
 ## TypeScript Usage
 
 ```typescript
-import { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRequest } from '@objectstack/spec/api';
-import type { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRequest } from '@objectstack/spec/api';
+import { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchDroppedFields, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRequest } from '@objectstack/spec/api';
+import type { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchDroppedFields, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRequest } from '@objectstack/spec/api';
 
 // Validate data
 const result = BatchConfig.parse(data);
@@ -138,6 +138,22 @@ const result = BatchConfig.parse(data);
 
 ---
 
+## CrossObjectBatchDroppedFields
+
+A cross-object batch strip event: dropped fields plus the operation index
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the write targeted (resolved object name) |
+| **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
+| **reason** | `Enum<'readonly' \| 'readonly_when'>` | ✅ | Why the fields were dropped: static readonly (#2948) or a TRUE readonlyWhen predicate (#3042) |
+| **index** | `integer` | ✅ | Index of the operation in the request `operations` array |
+
+
+---
+
 ## CrossObjectBatchOperation
 
 ### Properties
@@ -171,6 +187,7 @@ const result = BatchConfig.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **results** | `any[]` | ✅ | Per-operation result, index-aligned with the request operations |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when'>; index: integer }[]` | optional | Write-observability (#3407/#3431/#3455/#3794): caller-supplied fields the engine LEGALLY stripped from an operation before it was written — static `readonly` (#2948) or a TRUE `readonlyWhen` predicate (#3042). This endpoint is the console record form's save path (master-detail writes parent + children in one transaction), so without it the ONE surface where a user edits a `readonlyWhen` field reported plain success while the value never landed. Each event carries the `index` of its operation. Present ONLY when ≥1 field was dropped; the batch still committed without them (results/success semantics unchanged). Optional — omit-when-empty keeps the shape backward-compatible. |
 
 
 ---
