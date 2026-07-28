@@ -1663,24 +1663,34 @@ export class SqlDriver implements IDataDriver {
       this.applyFilters(builder, query.where);
     }
 
+    // The same coercion key `applyFilters` just used, so every part of this
+    // statement agrees on how each column is stored — the WHERE window, the
+    // GROUP BY bucket expression (#3773) and the result presentation (#3797).
+    const table = this.coercionKey(builder);
+
+    // Result columns that carry a raw temporal VALUE, keyed by the column name
+    // the caller will read. Collected while the statement is built because that
+    // is the only point where a column name and its meaning are both known: a
+    // `min()` lands under its alias (never under the field name), and a
+    // date-BUCKETED column lands under the field name while holding a label
+    // (`'2026-01'`), not an instant. Matching on names after the fact gets both
+    // of those backwards. See {@link presentTemporalColumns}.
+    const temporalOutput = new Map<string, 'datetime' | 'date'>();
+
     if (query.groupBy) {
       // groupBy items may be plain strings ('region') or structured objects
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
       // items we emit a dialect-specific bucket expression aliased as the
       // field name so the resulting row keys match in-memory bucketDateValue.
-      //
-      // The bucket expression needs the same coercion key `applyFilters` just
-      // used above, so the WHERE window and the GROUP BY buckets agree on how
-      // the column is stored — disagreeing is exactly how #3773 produced an
-      // in-window total spread over a single `(null)` bucket.
-      const bucketTable = this.coercionKey(builder);
       for (const g of query.groupBy as Array<string | { field: string; dateGranularity?: string }>) {
         if (typeof g === 'string') {
           builder.groupBy(g);
           builder.select(g);
+          const kind = this.temporalFieldKind(table, g);
+          if (kind) temporalOutput.set(g, kind);
         } else if (g && typeof g === 'object' && g.field) {
           if (g.dateGranularity) {
-            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity as any, bucketTable);
+            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity as any, table);
             if (!bucket) {
               throw new Error(
                 `SqlDriver: dateGranularity '${g.dateGranularity}' not supported on dialect ` +
@@ -1692,6 +1702,8 @@ export class SqlDriver implements IDataDriver {
           } else {
             builder.groupBy(g.field);
             builder.select(g.field);
+            const kind = this.temporalFieldKind(table, g.field);
+            if (kind) temporalOutput.set(g.field, kind);
           }
         }
       }
@@ -1710,6 +1722,16 @@ export class SqlDriver implements IDataDriver {
           } else {
             builder.select(this.knex.raw(`${rawFunc}(??) as ??`, [fieldExpr, agg.alias]));
           }
+          // `min`/`max` are the only supported functions that hand back a value
+          // OF the column rather than a count/total derived from it, so they are
+          // the only ones whose result is still an instant. `alias` is required
+          // by `AggregationNodeSchema`; the unaliased branch below lands under a
+          // dialect-dependent column name (`max("closed_at")` on SQLite, `max` on
+          // Postgres) and is defensive only, so it is deliberately not tracked.
+          if ((funcName === 'min' || funcName === 'max') && agg.field) {
+            const kind = this.temporalFieldKind(table, agg.field);
+            if (kind) temporalOutput.set(agg.alias, kind);
+          }
         } else {
           if (fieldExpr === '*') {
             builder.select(this.knex.raw(`${rawFunc}(*)`));
@@ -1720,7 +1742,8 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    return await builder;
+    const rows = await builder;
+    return this.presentTemporalColumns(rows, temporalOutput);
   }
 
   // ===================================
@@ -1736,7 +1759,17 @@ export class SqlDriver implements IDataDriver {
 
     builder.distinct(field);
     const results = await builder;
-    return results.map((row: any) => row[field]);
+    const values = results.map((row: any) => row[field]);
+
+    // Same presentation `find()` gives the column (#3797) — a caller listing a
+    // datetime's values should not get epoch integers here and ISO strings
+    // there. Re-deduplicate afterwards: SQL `DISTINCT` compares STORED values,
+    // and one SQLite `Field.datetime` column holds both INTEGER epoch ms and
+    // ISO TEXT, so two rows recording the same instant survive as two rows and
+    // then collapse to the same presented value.
+    const kind = this.temporalFieldKind(this.coercionKey(builder), field);
+    if (!kind) return values;
+    return [...new Set(values.map((v: any) => this.presentTemporalValue(kind, v)))];
   }
 
   // ===================================
@@ -3484,6 +3517,56 @@ export class SqlDriver implements IDataDriver {
    * division on purpose: integer `/1000` truncates toward zero, which pushes a
    * pre-1970 instant forward a day (`-1` → 1970-01-01 instead of 1969-12-31).
    */
+  /**
+   * Which temporal presentation rule, if any, a declared field takes —
+   * `null` for everything that is not a `Field.datetime` / `Field.date`.
+   */
+  protected temporalFieldKind(
+    table: string | null | undefined,
+    field: string,
+  ): 'datetime' | 'date' | null {
+    if (!table) return null;
+    if (this.datetimeFields[table]?.has(field)) return 'datetime';
+    if (this.dateFields[table]?.has(field)) return 'date';
+    return null;
+  }
+
+  /**
+   * Present one temporal value exactly the way `formatOutput` presents it on a
+   * `find()` row, for the read paths that return raw builder output instead
+   * (`aggregate`, `distinct` — #3797).
+   *
+   * The dialect gating mirrors `formatOutput`: the `Field.datetime` repair is
+   * SQLite-only (it is the one dialect where storage ≠ presentation), while the
+   * `Field.date` → `YYYY-MM-DD` collapse runs everywhere.
+   */
+  protected presentTemporalValue(kind: 'datetime' | 'date', value: any): any {
+    if (value == null) return value;
+    if (kind === 'date') return this.toDateOnly(value);
+    return this.isSqlite ? normalizeSqliteDatetimeOutput(value) : value;
+  }
+
+  /**
+   * Apply {@link presentTemporalValue} to the result columns a caller of
+   * `aggregate()` will read as instants.
+   *
+   * Which columns those are cannot be recovered from the rows — the driver has
+   * to be told, because the mapping from column name to meaning is only
+   * unambiguous while the statement is being built (a `min()` lands under its
+   * alias; a date-BUCKETED column lands under the field name but holds a label).
+   * Rows are mutated in place, as `formatOutput` does.
+   */
+  protected presentTemporalColumns(rows: any, columns: Map<string, 'datetime' | 'date'>): any {
+    if (columns.size === 0 || !Array.isArray(rows)) return rows;
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      for (const [column, kind] of columns) {
+        if (row[column] !== undefined) row[column] = this.presentTemporalValue(kind, row[column]);
+      }
+    }
+    return rows;
+  }
+
   protected sqliteTemporalArg(
     field: string,
     table: string | null | undefined,
