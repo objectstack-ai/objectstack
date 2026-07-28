@@ -136,6 +136,12 @@ columns: [
     align: 'right',
     summary: 'sum',
   },
+  {
+    field: 'opportunity_name',
+    prefix: { field: 'stage', type: 'badge' },   // compound cell: [Badge] Text
+    // Object form of `summary` — aggregate a *different* field in this footer
+    summary: { type: 'sum', field: 'amount_in_base_currency' },
+  },
 ]
 ```
 
@@ -149,7 +155,8 @@ columns: [
 | `sortable` | `boolean` | Allow column sorting |
 | `resizable` | `boolean` | Allow column resize |
 | `wrap` | `boolean` | Allow text wrapping |
-| `summary` | `enum` | Footer aggregation: `none`, `count`, `count_empty`, `count_filled`, `count_unique`, `percent_empty`, `percent_filled`, `sum`, `avg`, `min`, `max` |
+| `summary` | `enum \| { type, field? }` | Footer aggregation: `none`, `count`, `count_empty`, `count_filled`, `count_unique`, `percent_empty`, `percent_filled`, `sum`, `avg`, `min`, `max`. The object form aggregates a different field than the column's own |
+| `prefix` | `{ field, type?: 'badge' \| 'text' }` | Compound cell — render another field's value inline before this cell's value |
 | `align` | `'left' \| 'center' \| 'right'` | Text alignment |
 | `link` | `boolean` | Cell functions as the primary navigation link |
 

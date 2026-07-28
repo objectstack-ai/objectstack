@@ -16,8 +16,8 @@ Migrated to [shared/http.zod.ts](/docs/references/shared/http). Re-exported here
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, FormButtonConfig, FormField, FormSection, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, ListView, NavigationConfig, NavigationMode, ObjectListView, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnSummary, FormButtonConfig, FormField, FormSection, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, ListView, NavigationConfig, NavigationMode, ObjectListView, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, FormButtonConfig, FormField, FormSection, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, ListView, NavigationConfig, NavigationMode, ObjectListView, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, FormButtonConfig, FormField, FormSection, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, GroupingField, KanbanConfig, ListChartConfig, ListColumn, ListView, NavigationConfig, NavigationMode, ObjectListView, ObjectUserFilters, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfig.parse(data);
@@ -69,6 +69,20 @@ Appearance and visualization configuration
 
 ---
 
+## ColumnPrefix
+
+Compound-cell prefix configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field whose value renders before the cell value |
+| **type** | `Enum<'badge' \| 'text'>` | ✅ | How the prefix value is rendered |
+
+
+---
+
 ## ColumnSummary
 
 Aggregation function for column footer summary
@@ -86,6 +100,20 @@ Aggregation function for column footer summary
 * `avg`
 * `min`
 * `max`
+
+
+---
+
+## ColumnSummaryConfig
+
+Column footer summary configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation function |
+| **field** | `string` | optional | Field to aggregate (defaults to the column field) |
 
 
 ---
@@ -323,7 +351,8 @@ List chart view configuration
 | **wrap** | `boolean` | optional | Allow text wrapping |
 | **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
 | **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
-| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | optional | Footer aggregation function for this column |
+| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
+| **prefix** | `{ field: string; type: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
