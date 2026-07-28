@@ -8,7 +8,7 @@ import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
-import { resolveDriverType, createStorageDriver, UnsupportedDriverError } from '../utils/storage-driver.js';
+import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from '../utils/storage-driver.js';
 import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, resolveSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
@@ -887,14 +887,22 @@ export default class Serve extends Command {
          const driverType = resolveDriverType(process.env.OS_DATABASE_DRIVER, databaseUrl);
 
          try {
-           const { DriverPlugin } = await import('@objectstack/runtime');
-           const resolution = await createStorageDriver(driverType, {
-             databaseUrl,
-             isDev,
-             warn: (m) => console.warn(chalk.yellow(m)),
-           });
+           // #3826: the fallback no longer constructs a driver — it declares
+           // the `default` datasource and lets the runtime's
+           // DefaultDatasourcePlugin connect it at boot through the shared
+           // DatasourceConnectionService (one connect path, one failure
+           // verdict incl. OS_ALLOW_DRIVER_CONNECT_FAILURE, retained status in
+           // Setup → Datasources). URL→config translation stays host-side in
+           // resolveStorageDefinition. The dev sqlite step-down (#2229) and
+           // the loosen-only self-heal (#2186, via config.autoMigrate) now run
+           // inside the factory at connect.
+           const { DriverPlugin, DefaultDatasourcePlugin } = await import('@objectstack/runtime');
+           const resolution = resolveStorageDefinition(driverType, { databaseUrl, isDev });
            if (resolution) {
-             await kernel.use(new DriverPlugin(resolution.driver as any));
+             await kernel.use(new DefaultDatasourcePlugin(
+               { driver: resolution.driverId, config: resolution.config },
+               { dev: isDev },
+             ));
              trackPlugin(resolution.trackName);
              resolvedDriverLabel = resolution.label;
              resolvedDatabaseUrl = resolution.displayUrl;
@@ -906,9 +914,14 @@ export default class Serve extends Command {
              // for file-backed primaries; `OS_TELEMETRY_DB=0` opts out,
              // `OS_TELEMETRY_DB=<path>` opts in anywhere (incl. serve). Gated on
              // an explicit SQLite primary (`sqliteFilePath`, unset for the mingo
-             // memory driver AND the dev-default `:memory:` store) whose resolved
-             // engine is real SQLite — never mingo in-memory.
-             if (resolution.sqliteFilePath && resolution.engine !== 'memory') {
+             // memory driver AND the dev-default `:memory:` store). The old
+             // `resolution.engine !== 'memory'` refinement is unknowable now
+             // that the primary connects later (#3826); the telemetry
+             // provision's own `telemetry.engine !== 'memory'` check below
+             // still guards the ABI-broken step-down case. The telemetry
+             // driver itself stays a pre-built DriverPlugin — the documented
+             // escape hatch for named auxiliary drivers.
+             if (resolution.sqliteFilePath) {
                const { resolveTelemetryDbPath } = await import('../utils/telemetry-datasource.js');
                const telemetryPath = resolveTelemetryDbPath({ primaryPath: resolution.sqliteFilePath, env: process.env, dev: isDev });
                if (telemetryPath) {

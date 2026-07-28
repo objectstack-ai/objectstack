@@ -9,9 +9,13 @@
  *
  *   1. {@link resolveDriverType} — pick a canonical driver KIND from the
  *      explicit `OS_DATABASE_DRIVER` override plus the `OS_DATABASE_URL` scheme.
- *   2. {@link createStorageDriver} — construct the concrete driver instance for
- *      that kind. Driver packages are dynamically imported so the CLI carries no
- *      static dependency on any one of them.
+ *   2. {@link resolveStorageDefinition} — translate that kind + URL into the
+ *      `default` datasource DEFINITION (`{ driverId, config }`). Since #3826
+ *      the CLI constructs no driver here: the runtime's
+ *      `DefaultDatasourcePlugin` connects the definition at boot through the
+ *      shared `DatasourceConnectionService`, so the config-load fallback shares
+ *      the same connect path, failure verdict, and escape hatch as every other
+ *      datasource.
  *
  * ## #3276 — the `memory` driver was advertised but had no dispatch branch
  *
@@ -33,7 +37,7 @@
 export type SqliteFamilyEngine = 'better-sqlite3' | 'sqlite-wasm' | 'memory';
 
 /**
- * Thrown by {@link createStorageDriver} when a driver kind is *recognized* but the
+ * Thrown by {@link resolveStorageDefinition} when a driver kind is *recognized* but the
  * open-core CLI cannot construct it — currently `turso`/libSQL, which ships in the
  * ObjectStack cloud / enterprise distribution (`@objectstack/driver-turso`, an
  * extension of SqlDriver over `@libsql/client`), composed by the cloud runtime's
@@ -67,7 +71,7 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (/^mysql2?:\/\//i.test(u)) return 'mysql';
   // libSQL / Turso URLs are DELIBERATELY still classified as `turso` (not left
   // unrecognized). Open-core can't construct that driver, but classifying it
-  // lets createStorageDriver fail LOUDLY with a clear cloud/EE message — if we
+  // lets resolveStorageDefinition fail LOUDLY with a clear cloud/EE message — if we
   // returned '' here instead, a `libsql://` URL would fall through to the SQLite
   // default and silently ignore the remote connection (the very bug we're fixing).
   if (/^libsql:\/\//i.test(u)) return 'turso';
@@ -94,66 +98,71 @@ export function resolveDriverType(
   return explicit || inferDriverTypeFromUrl(databaseUrl);
 }
 
-export interface CreateStorageDriverOptions {
-  /** Raw `OS_DATABASE_URL` (scheme stripped per-branch as before). */
+export interface ResolveStorageDefinitionOptions {
+  /** Raw `OS_DATABASE_URL` (scheme stripped per-branch, as the old constructor did). */
   databaseUrl?: string;
-  /** Dev mode — enables the sqlite native→wasm→in-memory step-down + loosen-only auto-migrate. */
+  /** Dev mode — arms the sqlite step-down + the loosen-only auto-migrate (#2186). */
   isDev: boolean;
-  /** Warning sink for the sqlite step-down banners (serve.ts wraps in `chalk.yellow`). */
-  warn?: (message: string) => void;
 }
 
-export interface StorageDriverResolution {
-  /** The concrete driver instance to wrap in `DriverPlugin` and register. */
-  driver: unknown;
+/**
+ * A `default`-datasource DEFINITION for a canonical driver kind (#3826).
+ *
+ * This replaced `createStorageDriver`: serve no longer constructs a driver and
+ * wraps it in `DriverPlugin` — it hands `{ driverId, config }` to the runtime's
+ * `DefaultDatasourcePlugin`, which connects it at boot through the shared
+ * `DatasourceConnectionService` (one connect path, one failure verdict, one
+ * `OS_ALLOW_DRIVER_CONNECT_FAILURE` escape hatch, retained status in
+ * Setup → Datasources). URL→config translation stays here — a host concern,
+ * exactly like `standalone-stack`'s.
+ *
+ * Two knowingly-static fields, because nothing is constructed yet:
+ *  - `label`/`trackName` name the REQUESTED engine. The dev sqlite step-down
+ *    (#2229) may resolve to wasm/in-memory at connect; its own banner says so.
+ *  - `sqliteFilePath` keys the telemetry-sibling provisioning. The old
+ *    `resolution.engine !== 'memory'` refinement is unknowable pre-connect;
+ *    the telemetry provision's OWN step-down check (`telemetry.engine !==
+ *    'memory'`) still guards the ABI-broken case.
+ */
+export interface StorageDefinitionResolution {
+  /** Driver id the shared datasource factory can build. */
+  driverId: string;
+  /** Factory config, incl. the `autoMigrate`/`persist` host passthroughs. */
+  config: Record<string, unknown>;
   /** Short name for the boot banner's plugin list (serve.ts `trackPlugin`). */
   trackName: string;
-  /** Human label for the startup banner's "driver" row. */
+  /** Human label for the startup banner's "driver" row (requested engine). */
   label: string;
   /** Display-shaped database URL for the startup banner (e.g. `(in-memory)`). */
   displayUrl: string | undefined;
-  /** sqlite-family resolved engine, else undefined. Keys the telemetry-sibling guard. */
-  engine?: SqliteFamilyEngine;
-  /**
-   * On-disk sqlite path the telemetry datasource is provisioned next to. Set
-   * ONLY for the explicit `sqlite`/`sql` driver — never the dev-default
-   * `:memory:` path — so serve.ts provisions the telemetry sibling exactly where
-   * it did before this extraction.
-   */
+  /** On-disk sqlite path the telemetry datasource is provisioned next to. */
   sqliteFilePath?: string;
 }
 
 /**
- * Construct the storage driver for a canonical driver kind. Returns `null` when
- * nothing matches and we are NOT in dev (production with an unknown/absent
- * driver registers no driver, matching the prior inline behavior).
+ * Resolve the `default` datasource definition for a canonical driver kind.
+ * Returns `null` when nothing matches and we are NOT in dev (production with an
+ * unknown/absent driver registers no datasource, so the missing driver surfaces
+ * loudly downstream — the pre-#3826 behavior).
  *
- * Throws {@link UnsupportedDriverError} for `turso`/libSQL — a cloud/EE driver the
- * open-core CLI cannot construct. serve.ts surfaces that as a fatal, actionable
- * boot error so the selection never silently degrades to SQLite.
- *
- * @see {@link resolveDriverType}
+ * Throws {@link UnsupportedDriverError} for `turso`/libSQL — a cloud/EE driver
+ * open-core cannot build. serve.ts surfaces that as a fatal, actionable boot
+ * error so the selection never silently degrades to SQLite.
  */
-export async function createStorageDriver(
+export function resolveStorageDefinition(
   driverType: string,
-  opts: CreateStorageDriverOptions,
-): Promise<StorageDriverResolution | null> {
+  opts: ResolveStorageDefinitionOptions,
+): StorageDefinitionResolution | null {
   const { databaseUrl, isDev } = opts;
-  const warn =
-    opts.warn ??
-    ((message: string) => {
-      try {
-        console.warn(message);
-      } catch {
-        /* ignore */
-      }
-    });
+  // #2186: dev-only loosen-only self-heal, honored by the factory for the SQL
+  // kinds. Never in production, never destructive.
+  const autoMigrate = isDev ? ({ autoMigrate: 'safe' } as const) : {};
 
   if (driverType === 'mongodb' || driverType === 'mongo') {
-    const { MongoDBDriver } = await import('@objectstack/driver-mongodb');
     const url = databaseUrl ?? 'mongodb://localhost:27017/objectstack';
     return {
-      driver: new MongoDBDriver({ url }) as any,
+      driverId: 'mongodb',
+      config: { url },
       trackName: 'MongoDBDriver',
       label: 'MongoDBDriver',
       displayUrl: url,
@@ -165,43 +174,29 @@ export async function createStorageDriver(
       .replace(/^file:/, '')
       .replace(/^sqlite:/, '')
       .replace(/^sql:\/\//, '');
-    // Probe-by-connect with a dev-only native → wasm → in-memory step-down
-    // (#2229). better-sqlite3 loads its native addon lazily (first query), so an
-    // ABI mismatch is invisible here and would otherwise surface much later as a
-    // runtime crash. resolveSqliteDriver forces the load and degrades gracefully
-    // in dev / fails loudly in prod.
-    const { resolveSqliteDriver } = await import('@objectstack/service-datasource');
-    const resolved = await resolveSqliteDriver({
-      filename: filePath,
-      dev: isDev,
-      // #2186: in dev, self-heal a persisted DB when a metadata change relaxes a
-      // constraint (loosen-only; never destructive / never in prod).
-      autoMigrate: isDev ? 'safe' : undefined,
-      warn,
-    });
     return {
-      driver: resolved.driver,
-      trackName:
-        resolved.engine === 'memory'
-          ? 'MemoryDriver'
-          : resolved.engine === 'sqlite-wasm'
-            ? 'SqliteWasmDriver'
-            : 'SqlDriver',
-      label: resolved.label,
-      displayUrl: resolved.engine === 'memory' ? '(in-memory)' : (databaseUrl ?? ':memory:'),
-      engine: resolved.engine,
+      driverId: 'sqlite',
+      config: { filename: filePath, ...autoMigrate },
+      trackName: 'SqlDriver',
+      label: 'SqlDriver(better-sqlite3)',
+      displayUrl: databaseUrl ?? ':memory:',
+      // Only the explicit sqlite kind gets a telemetry sibling — never the
+      // dev-default `:memory:` branch below (resolveTelemetryDbPath also
+      // returns undefined for `:memory:`; both gates preserved).
       sqliteFilePath: filePath,
     };
   }
 
   if (driverType === 'sqlite-wasm' || driverType === 'wasm-sqlite' || driverType === 'wasm') {
-    const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
     const filePath = (databaseUrl ?? ':memory:')
       .replace(/^file:/, '')
       .replace(/^wasm-sqlite:\/\//, '')
       .replace(/^sqlite:/, '');
     return {
-      driver: new SqliteWasmDriver({ filename: filePath, persist: 'on-disconnect' }) as any,
+      driverId: 'sqlite-wasm',
+      // `persist` passthrough: the CLI kept `on-disconnect` semantics here
+      // (the factory's default for file-backed wasm is `on-write`).
+      config: { filename: filePath, persist: 'on-disconnect' },
       trackName: 'SqliteWasmDriver',
       label: 'SqliteWasmDriver',
       displayUrl: databaseUrl ?? ':memory:',
@@ -209,14 +204,9 @@ export async function createStorageDriver(
   }
 
   if (driverType === 'postgres' || driverType === 'postgresql' || driverType === 'pg') {
-    const { SqlDriver } = await import('@objectstack/driver-sql');
     return {
-      driver: new SqlDriver({
-        client: 'pg',
-        connection: databaseUrl,
-        pool: { min: 0, max: 5 },
-        autoMigrate: isDev ? 'safe' : undefined, // #2186 dev loosen-only self-heal
-      }) as any,
+      driverId: 'postgres',
+      config: { url: databaseUrl, ...autoMigrate },
       trackName: 'PostgresDriver',
       label: 'SqlDriver(pg)',
       displayUrl: databaseUrl,
@@ -224,14 +214,9 @@ export async function createStorageDriver(
   }
 
   if (driverType === 'mysql' || driverType === 'mysql2') {
-    const { SqlDriver } = await import('@objectstack/driver-sql');
     return {
-      driver: new SqlDriver({
-        client: 'mysql2',
-        connection: databaseUrl,
-        pool: { min: 0, max: 5 },
-        autoMigrate: isDev ? 'safe' : undefined, // #2186 dev loosen-only self-heal
-      }) as any,
+      driverId: 'mysql',
+      config: { url: databaseUrl, ...autoMigrate },
       trackName: 'MySQLDriver',
       label: 'SqlDriver(mysql2)',
       displayUrl: databaseUrl,
@@ -240,12 +225,10 @@ export async function createStorageDriver(
 
   // turso / libSQL: recognized but NOT constructible by the open-core CLI. The
   // driver (`@objectstack/driver-turso`) ships in the cloud / enterprise
-  // distribution and is composed by the cloud runtime's own kernel factory —
-  // runtime/standalone-stack.ts explicitly stopped consuming its auth token, and
-  // its config schema lives in the cloud package so it never pollutes open-core
-  // `@objectstack/spec`. Fail LOUDLY here rather than let the selection fall
-  // through to the SQLite default (the reported "declared ≠ enforced" bug):
-  // serve.ts turns this typed error into a fatal, actionable boot message.
+  // distribution and is composed by the cloud runtime's own kernel factory.
+  // Fail LOUDLY here rather than let the selection fall through to the SQLite
+  // default (the reported "declared ≠ enforced" bug): serve.ts turns this typed
+  // error into a fatal, actionable boot message.
   if (driverType === 'turso' || driverType === 'libsql') {
     throw new UnsupportedDriverError(
       'turso',
@@ -261,46 +244,30 @@ export async function createStorageDriver(
 
   // #3276: explicit in-memory (mingo) driver. Honored in dev AND production — an
   // operator asking for `memory` gets the mingo InMemoryDriver (ephemeral, not
-  // real SQL), never the SQLite `:memory:` default. This is the branch whose
-  // absence caused the reported "declared ≠ enforced" fall-through to SQLite.
+  // real SQL), never the SQLite `:memory:` default.
   if (driverType === 'memory' || driverType === 'mingo' || driverType === 'in-memory') {
-    const { InMemoryDriver } = await import('@objectstack/driver-memory');
     return {
-      driver: new InMemoryDriver(),
+      driverId: 'memory',
+      config: {},
       trackName: 'MemoryDriver',
       label: 'InMemoryDriver',
       displayUrl: '(in-memory)',
-      engine: 'memory',
     };
   }
 
   // Default (no driver configured): dev prefers native SQLite for production-like
-  // SQL at native speed, with a graceful step-down to wasm SQLite then in-memory
-  // when the native better-sqlite3 binary is unavailable (#2229). Production
-  // registers nothing here so a missing driver surfaces loudly downstream.
+  // SQL at native speed; the factory's step-down (#2229) degrades to wasm then
+  // in-memory when the native binary is unavailable. Production returns null so
+  // a missing driver surfaces loudly downstream.
   if (isDev) {
-    const { resolveSqliteDriver } = await import('@objectstack/service-datasource');
-    const resolved = await resolveSqliteDriver({
-      filename: ':memory:',
-      dev: true,
-      autoMigrate: 'safe', // #2186 dev loosen-only self-heal
-      warn,
-    });
     return {
-      driver: resolved.driver,
-      trackName:
-        resolved.engine === 'memory'
-          ? 'MemoryDriver'
-          : resolved.engine === 'sqlite-wasm'
-            ? 'SqliteWasmDriver'
-            : 'SqlDriver',
-      label: resolved.label,
-      displayUrl: resolved.engine === 'memory' ? '(in-memory)' : ':memory:',
-      engine: resolved.engine,
+      driverId: 'sqlite',
+      config: { filename: ':memory:', ...autoMigrate },
+      trackName: 'SqlDriver',
+      label: 'SqlDriver(better-sqlite3)',
+      displayUrl: ':memory:',
       // No sqliteFilePath: the dev-default `:memory:` store never gets a
-      // telemetry sibling (resolveTelemetryDbPath returns undefined for it), so
-      // leaving this unset keeps serve.ts from provisioning one — matching the
-      // pre-extraction behavior where this branch never touched telemetry.
+      // telemetry sibling.
     };
   }
 
