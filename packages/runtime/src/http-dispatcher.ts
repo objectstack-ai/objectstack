@@ -3,7 +3,7 @@
 import {
     ObjectKernel, getEnv, evaluateAuthGate, isAuthGateAllowlisted,
 } from '@objectstack/core';
-import { isMcpServerEnabled } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName } from '@objectstack/spec/system';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
@@ -448,10 +448,37 @@ export class HttpDispatcher {
         };
     }
 
+    /**
+     * The single construction point for every error response this dispatcher
+     * RETURNS. Distinct from `dispatcher-plugin`'s `errorResponseBase`, which
+     * covers the errors that are THROWN out of `dispatch()` — a returned
+     * `{handled: true, response}` goes to `sendResult`, never through that
+     * catch. #3867 sanitised the thrown path; this is the returned one, and it
+     * needs the same guard for the same reason.
+     *
+     * Reachable with a raw driver/engine message today via
+     * {@link errorFromThrown} (`/meta` save, `/packages` install) and the MCP
+     * transport's `deps.error(err?.message, 500)` — any of which can be
+     * carrying a SQL dump naming physical tables and columns.
+     *
+     * Scoped to 5xx: a 4xx message is a deliberate business/validation answer
+     * (`Path must be /actions/:object/:action`, a hook's own `throw`, a
+     * `saveMetaItem` field error) and must reach the caller intact. `details`
+     * is left alone — it carries structured `code`/`issues` the UI maps to
+     * fields, never free-form driver prose.
+     *
+     * The unsanitised error is not lost: callers that THREW still hand the
+     * original to `errorReporter` via `__obsRecordedError`, and every 5xx is
+     * logged server-side.
+     */
     private error(message: string, code: number = 500, details?: any) {
+        const safe =
+            code >= 500 && looksLikeInternalErrorLeak(message)
+                ? INTERNAL_ERROR_MESSAGE
+                : message;
         return {
             status: code,
-            body: { success: false, error: { message, code, details } }
+            body: { success: false, error: { message: safe, code, details } }
         };
     }
 
