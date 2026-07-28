@@ -106,7 +106,7 @@ const aliasProbe = (key: string): string => key.toLowerCase().replace(/[_\-\s]/g
  * *fixable*: it names the offending key(s) and, when one is a recognisable
  * spelling of a declared key, points at the canonical one.
  */
-export const actionParamUnknownKeyError: z.core.$ZodErrorMap = (issue) => {
+const actionParamUnknownKeyError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'unrecognized_keys') return undefined;
   const keys = (issue as { keys?: readonly string[] }).keys ?? [];
   const suggestions = keys.flatMap((key) => {
