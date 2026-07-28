@@ -273,6 +273,14 @@ query. That covers a mistyped field (`{record.ownr}`), an input the run never
 received, and a lookup hop (`{record.account.name}` — the trigger record
 carries a scalar id; add the relation to the start node's `config.expand`).
 
+Two of those three are caught earlier: `objectstack validate` **fails** on a
+`{record.<path>}` filter token naming an unknown field, or hopping through a
+relation the start node does not `expand`, because the runtime has already
+committed to refusing that node. The same reference outside a filter — in a
+message body, an `http` url, a write payload — stays a warning, since there it
+renders a blank rather than widening a query. An unresolved *flow variable*
+(`{someInput}`) is not statically checkable and still surfaces at run time.
+
 **Unknown tokens are rejected, not ignored.** `{current_user}` (the RLS
 expression root) and `{this_quarter_start}` are near-misses, not tokens:
 `objectstack build` fails on them and the runtime resolver throws. A filter
