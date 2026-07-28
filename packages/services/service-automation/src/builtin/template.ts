@@ -23,6 +23,7 @@
  */
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { isKnownFilterToken } from '@objectstack/spec/data';
 
 export type VariableMap = Map<string, unknown>;
 
@@ -183,6 +184,62 @@ export function interpolate<T = unknown>(
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
             out[k] = interpolate(v, variables, context);
+        }
+        return out as unknown as T;
+    }
+    return value;
+}
+
+/**
+ * Interpolate a node's **filter** block (framework#3810).
+ *
+ * A filter value position is the one place where two `{…}` dialects meet: the
+ * flow template dialect (`{record.owner}`, `{$User.Id}`) and the filter
+ * placeholder dialect (`{current_user_id}`, `{current_year_start}` — declared
+ * in `@objectstack/spec` and resolved by `resolveFilterTokens()` in the query
+ * engine). Evaluation order decided the winner by accident: the flow
+ * interpolator ran first, found no flow variable named `current_year_start`,
+ * and returned `undefined` — so the placeholder never reached the engine that
+ * knows how to resolve it, and the condition silently vanished from the query.
+ *
+ * This hands that position back to the dialect that owns it. A whole-string
+ * token that (a) no flow variable resolves and (b) IS a recognised filter
+ * placeholder is passed through **verbatim** for the engine to expand. That is
+ * a transfer of ownership, not a lenient fallback: flow variables still win
+ * when both could match, and a token belonging to neither dialect is left to
+ * the caller's collapse guard to report.
+ *
+ * Only filter blocks use this. Everywhere else (`title`, `message`, `fields`,
+ * `url`) keeps plain {@link interpolate}, where a bare `{current_year_start}`
+ * is a nonsense reference rather than a query bound.
+ */
+export function interpolateFilter<T = unknown>(
+    value: T,
+    variables: VariableMap,
+    context: AutomationContext,
+): T {
+    if (typeof value === 'string') {
+        const single = /^\{([^{}]+)\}$/.exec(value);
+        if (single) {
+            const resolved = resolveToken(single[1], variables, context);
+            // Flow variables keep precedence — only an unresolved token is
+            // considered for hand-off, so a flow variable that happens to share
+            // a placeholder's name still shadows it (no silent reinterpretation
+            // of a template that works today).
+            if (resolved === undefined && isKnownFilterToken(single[1].trim())) {
+                return value;
+            }
+            return resolved as unknown as T;
+        }
+        return interpolateString(value, variables, context) as unknown as T;
+    }
+    if (Array.isArray(value)) {
+        return value.map(v => interpolateFilter(v, variables, context)) as unknown as T;
+    }
+    if (value && typeof value === 'object') {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+            out[k] = interpolateFilter(v, variables, context);
         }
         return out as unknown as T;
     }

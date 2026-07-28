@@ -2556,6 +2556,25 @@ export class ObjectQL implements IDataEngine {
     ast.where = resolveFilterTokens(ast.where, filterTokenContextFrom(execCtx));
   }
 
+  /**
+   * The write-path counterpart of {@link resolveWhereTokens}: return `options`
+   * with `where` placeholders expanded (#3810).
+   *
+   * Returns the SAME object when nothing resolved — `resolveFilterTokens`
+   * returns its input by reference on a placeholder-free tree, so the common
+   * path allocates nothing. When something does resolve, a shallow copy is
+   * made rather than assigning through: `options` belongs to the caller, and
+   * writing back would bake one request's user id into a filter object the
+   * caller may reuse (view metadata and flow node config both get reused).
+   */
+  private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContextInput } | undefined>(
+    options: T,
+  ): T {
+    if (!options || options.where == null) return options;
+    const resolved = resolveFilterTokens(options.where, filterTokenContextFrom(options.context));
+    return resolved === options.where ? options : ({ ...options, where: resolved } as T);
+  }
+
   async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     this.logger.debug('Find operation starting', { object, query });
@@ -3067,7 +3086,20 @@ export class ObjectQL implements IDataEngine {
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      const driver = this.getDriver(object);
-     
+
+     // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
+     // The read path resolves them; without the same call here the SAME filter
+     // selected different rows depending on the verb — `find({owner:
+     // '{current_user_id}'})` matched the signed-in user's rows while
+     // `update`/`delete` compared the literal token text and matched none. That
+     // is the #3106 shape one layer down: the evaluator existed, but only some
+     // call sites reached it.
+     //
+     // Ordering matters: a scalar `where.id` becomes the by-id fast path below,
+     // so an unresolved `{current_user_id}` would be bound as the primary key
+     // itself. Resolve first, then extract.
+     options = this.withResolvedWhere(options);
+
      // 1. Extract ID from data or where if it's a single update by ID.
      //    Only a SCALAR `where.id` means "update one row by primary key". An
      //    operator object ({ $in: [...] }, { $ne: ... }, …) is a multi-row
@@ -3445,6 +3477,10 @@ export class ObjectQL implements IDataEngine {
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     const driver = this.getDriver(object);
+
+    // Expand `{filter-placeholder}` values before the id is extracted — same
+    // reasoning as update() above (#3810).
+    options = this.withResolvedWhere(options);
 
     // Extract ID logic mirroring update(): only a SCALAR `where.id` means
     // "delete one row by primary key". An operator object ({ $in: [...] }, …)

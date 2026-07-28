@@ -5,9 +5,91 @@ import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationEngine } from '../engine.js';
-import { interpolate } from './template.js';
+import { interpolate, interpolateFilter, type VariableMap } from './template.js';
 import { readAliasedConfig } from './config-aliases.js';
 import { resolveRunDataContext } from '../runtime-identity.js';
+
+/**
+ * A filter condition that an author WROTE but that interpolation erased
+ * (framework#3810).
+ *
+ * The flow interpolator expresses "this token did not resolve" as `undefined`.
+ * In every other config block that is harmless — an unresolved `{x}` in a
+ * message renders as empty text. In a FILTER it is the opposite of harmless:
+ * a condition whose value is `undefined` is not a narrower query, it is an
+ * ABSENT one, and an absent condition matches MORE rows. When the erased
+ * condition was the only one, `{ owner: '{record.ownr}' }` becomes `{}` — and
+ * `{}` handed to `deleteMany` is every row in the table.
+ *
+ * So a single mistyped field name in a `delete_record` node silently emptied
+ * the object. Not a hypothetical: `{record.ownr}` (typo), `{someInput}` (an
+ * input the run did not receive) and `{record.account.name}` (a lookup hop —
+ * the trigger record carries a scalar id) all reach this state, and none of
+ * them produced a diagnostic anywhere.
+ *
+ * The guard below refuses to execute such a node. It is deliberately keyed on
+ * "a condition the author wrote is gone", not on "the filter is empty": losing
+ * ONE of two conditions still silently widens the blast radius from "my open
+ * records" to "all open records".
+ */
+function erasedFilterConditions(
+    before: unknown,
+    after: unknown,
+    path: string[] = [],
+): Array<{ path: string; template: string }> {
+    const out: Array<{ path: string; template: string }> = [];
+    const at = (p: string[]) => p.join('.') || '(root)';
+
+    if (typeof before === 'string') {
+        if (after === undefined && before.includes('{')) {
+            out.push({ path: at(path), template: before });
+        }
+        return out;
+    }
+    if (Array.isArray(before)) {
+        before.forEach((v, i) =>
+            out.push(...erasedFilterConditions(v, (after as unknown[] | undefined)?.[i], [...path, String(i)])),
+        );
+        return out;
+    }
+    if (before && typeof before === 'object') {
+        const afterRec = (after ?? {}) as Record<string, unknown>;
+        for (const [k, v] of Object.entries(before as Record<string, unknown>)) {
+            out.push(...erasedFilterConditions(v, afterRec[k], [...path, k]));
+        }
+    }
+    return out;
+}
+
+/**
+ * Interpolate a node's filter and refuse the node if any authored condition was
+ * erased. Returns either the usable filter or a ready-to-return failure.
+ *
+ * `verb` names the operation in the error so the message says what WOULD have
+ * happened ("would have matched every row and deleted it").
+ */
+function resolveNodeFilter(
+    rawFilter: unknown,
+    variables: VariableMap,
+    context: Parameters<typeof interpolateFilter>[2],
+    nodeType: string,
+    consequence: string,
+): { filter: Record<string, unknown> } | { error: string } {
+    const filter = interpolateFilter(rawFilter ?? {}, variables, context) as Record<string, unknown>;
+    const erased = erasedFilterConditions(rawFilter ?? {}, filter);
+    if (erased.length > 0) {
+        const detail = erased.map((e) => `\`${e.template}\` (at ${e.path})`).join(', ');
+        return {
+            error:
+                `${nodeType}: refusing to run — ${erased.length} filter condition(s) resolved to nothing ` +
+                `and were dropped from the query: ${detail}. An absent condition does not narrow a query, ` +
+                `it widens it, so this ${consequence}. Check the field name, confirm the flow variable is ` +
+                `set on this run, and note that a relation field holds a scalar id — a \`{record.<lookup>.<field>}\` ` +
+                `hop needs the relation in the start node's \`config.expand\`.`,
+        };
+    }
+    return { filter };
+}
 
 /**
  * #3407 — render a data-layer strip event as a step warning. The write itself
@@ -84,7 +166,12 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // `filters` → `filter` is now handled at load by the ADR-0087 D2
                 // conversion layer ('flow-node-crud-filter-alias'), so the executor
                 // reads the canonical key directly (PD #12 fallback retired).
-                const filter = interpolate(cfg.filter ?? {}, variables, context) as Record<string, unknown>;
+                const filterResult = resolveNodeFilter(
+                    cfg.filter, variables, context, 'get_record',
+                    'would have read rows the filter was written to exclude',
+                );
+                if ('error' in filterResult) return { success: false, error: filterResult.error };
+                const filter = filterResult.filter;
                 const fields = cfg.fields as string[] | undefined;
                 const limit = typeof cfg.limit === 'number' ? cfg.limit : undefined;
                 const outputVariable = cfg.outputVariable as string | undefined;
@@ -219,7 +306,12 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 if (!objectName) return { success: false, error: 'update_record: objectName required' };
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
-                const filter = interpolate(cfg.filter ?? {}, variables, context) as Record<string, unknown>;
+                const filterResult = resolveNodeFilter(
+                    cfg.filter, variables, context, 'update_record',
+                    'would have matched — and overwritten — rows the filter was written to exclude',
+                );
+                if ('error' in filterResult) return { success: false, error: filterResult.error };
+                const filter = filterResult.filter;
                 // `fields` is the single canonical write-map key — no alias (the wrong key
                 // `fieldValues` is corrected at the authoring source + rejected by graph-lint).
                 const fields = interpolate(cfg.fields ?? {}, variables, context) as Record<string, unknown>;
@@ -287,7 +379,14 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 if (!objectName) return { success: false, error: 'delete_record: objectName required' };
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
-                const filter = interpolate(cfg.filter ?? {}, variables, context) as Record<string, unknown>;
+                // The highest-stakes of the three: an erased condition here is the
+                // difference between deleting one row and emptying the object.
+                const filterResult = resolveNodeFilter(
+                    cfg.filter, variables, context, 'delete_record',
+                    'would have matched every remaining row and deleted it',
+                );
+                if ('error' in filterResult) return { success: false, error: filterResult.error };
+                const filter = filterResult.filter;
 
                 const data = getData();
                 if (!data) return { success: true };

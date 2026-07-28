@@ -24,6 +24,14 @@
 // produces output (a blank), nothing is fully broken, and the head object may
 // legitimately come from another installed package (skipped — see below).
 //
+// One position is no longer merely blank at run time: inside a CRUD node's
+// `config.filter`, an unresolved token used to DELETE the condition from the
+// query, which widens it — `delete_record` with its only condition gone matched
+// every row. Since framework#3810 those nodes refuse to execute instead. This
+// rule still earns its place there: catching the typo at build time beats a
+// failed run, and it is the only signal for the other config blocks, where the
+// blank-output behaviour is unchanged.
+//
 // Deliberately conservative to keep false positives near zero:
 //   - Only `record.`-prefixed tokens are checked. Other `{var}` tokens address
 //     flow variables / node outputs the rule cannot resolve statically.

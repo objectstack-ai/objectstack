@@ -253,14 +253,25 @@ where: { owner: '{current_user_id}', close_date: { $gte: '{current_year_start}' 
 filter behaves the same wherever it runs — client-side by `resolveDateMacros()`
 / `resolveContextTokens()` in `@object-ui/core`, and server-side by
 `resolveFilterTokens()` in `@objectstack/core` (wired into the ObjectQL read
-path and the analytics dataset executor). The driver only ever sees ISO
-date/timestamp strings and concrete ids, never `{tokens}`. You may therefore
-use tokens in a query issued directly against the engine — and you should:
-computing "today" at module load freezes the date into the built artifact.
+AND write paths — `find`/`findOne`/`count`/`aggregate`/`update`/`delete` — plus
+the analytics dataset executor). The driver only ever sees ISO date/timestamp
+strings and concrete ids, never `{tokens}`. You may therefore use tokens in a
+query issued directly against the engine — and you should: computing "today" at
+module load freezes the date into the built artifact.
 
-One exception: a **flow node's** `config.filter` is interpolated by the flow
-template engine first, which owns `{…}` in that position and blanks anything
-that is not a flow variable. Compute the bound in an earlier node instead.
+This includes a **flow node's** `config.filter`. The flow template engine runs
+first there, but it hands a recognised filter placeholder through untouched for
+the engine to expand. Flow variables still win — `{record.owner}` resolves as
+always, and a flow variable named after a placeholder shadows it.
+
+**A flow filter that loses a condition refuses to run.** In a filter, a token
+that resolves to nothing does not narrow the query — it removes the condition,
+which matches *more* rows, and a `delete_record` with every condition gone
+means the whole object. So `get_record` / `update_record` / `delete_record`
+fail the step, naming the offending template, rather than executing a widened
+query. That covers a mistyped field (`{record.ownr}`), an input the run never
+received, and a lookup hop (`{record.account.name}` — the trigger record
+carries a scalar id; add the relation to the start node's `config.expand`).
 
 **Unknown tokens are rejected, not ignored.** `{current_user}` (the RLS
 expression root) and `{this_quarter_start}` are near-misses, not tokens:
