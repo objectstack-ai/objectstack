@@ -22,9 +22,12 @@
  *   1. The deployment's tenancy posture is not `single` (deployment-level signal)
  *      → {@link assertSingleTenantPosture}, called from the `MongoDBDriver`
  *      **constructor** and re-checked in `connect()` before a socket is opened.
- *      The constructor is the seam that fails loudly: `ObjectQLEngine.init()`
- *      catches a driver's connect rejection and boots anyway, so a connect-only
- *      guard would degrade into a query-time failure.
+ *      Both seams now abort boot: `ObjectQLEngine.init()` propagates a driver's
+ *      connect rejection since framework#3741 (it used to catch it and boot
+ *      anyway, which is why the check was hoisted into the constructor). The
+ *      constructor check is kept because it fails earliest — before a host can
+ *      hand the driver to anything — and the `connect()` re-check covers a host
+ *      that flips the posture between construction and connect.
  *   2. An object declares `tenancy.enabled: true` (metadata-level signal) →
  *      {@link assertObjectsNotTenantScoped}, called from the `syncSchema` /
  *      `syncSchemasBatch` paths.

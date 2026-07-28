@@ -167,6 +167,29 @@ export function resolveAllowDegradedTenancy(): boolean {
 }
 
 /**
+ * Escape hatch for the driver-connect boot guard (framework#3741).
+ *
+ * `ObjectQLEngine.init()` connects every boot-registered driver and, by
+ * default, refuses to boot when any of them fails — a server whose database is
+ * unreachable must not report itself started and then 500 every request with an
+ * error that reads nothing like "the database is down". Failing there is also
+ * what gives a driver the ability to REFUSE STARTUP at all: any fatal startup
+ * check a driver wants to run (licence, server version, incompatible
+ * configuration, missing capability) can simply throw from `connect()`.
+ *
+ * Setting this to a truthy value (`true`/`1`/`on`/`yes`, case-insensitive)
+ * boots anyway, in an explicitly degraded state that is logged loudly at
+ * startup. There is NO reconnection: the drivers that failed stay dead for the
+ * process lifetime and every query routed to them fails. Defaults OFF — an
+ * unset flag means "fail fast".
+ */
+export function resolveAllowDriverConnectFailure(): boolean {
+  const raw = readEnvWithDeprecation('OS_ALLOW_DRIVER_CONNECT_FAILURE', [], { silent: true });
+  if (raw == null) return false;
+  return ['1', 'true', 'on', 'yes'].includes(String(raw).trim().toLowerCase());
+}
+
+/**
  * SINGLE decision point for "is the MCP HTTP surface (`/api/v1/mcp`) on?".
  *
  * MCP is a core platform capability and defaults ON: an unset

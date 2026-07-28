@@ -129,11 +129,11 @@ export class MongoDBDriver implements IDataDriver {
 
   constructor(config: MongoDBDriverConfig) {
     // Refuse to even EXIST in a multi-tenant deployment (#3724). The check is
-    // repeated in `connect()`, but construction is the only seam guaranteed to
-    // fail loudly: `ObjectQLEngine.init()` catches a driver's connect rejection
-    // and logs it, then boots anyway ("may recover via lazy reconnection"), so
-    // a connect-only guard would degrade from "refuses to start" to "starts,
-    // then throws at query time".
+    // repeated in `connect()`; construction just fails earliest, before a host
+    // can hand this driver to anything. (Originally the constructor was the
+    // ONLY seam that failed loudly, because `ObjectQLEngine.init()` caught a
+    // driver's connect rejection and booted anyway — fixed in framework#3741,
+    // so `connect()` now aborts boot too.)
     assertSingleTenantPosture();
 
     this.config = config;

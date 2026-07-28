@@ -87,6 +87,11 @@ the [HARDENING.md recipes](https://github.com/objectstack-ai/objectstack/blob/ma
       deployment requesting multi-org without `@objectstack/organizations` now
       refuses to boot unless `OS_ALLOW_DEGRADED_TENANCY=1`; never set that flag
       in production. See [Tenancy Modes & Membership](/docs/deployment/tenancy-modes).
+- [ ] `OS_ALLOW_DRIVER_CONNECT_FAILURE` is **unset**. A data driver that cannot
+      connect at startup refuses the boot, so a bad `OS_DATABASE_URL`, a rotated
+      password, or a closed network path surfaces as a failed deploy instead of
+      a "started" server that 500s every request. Setting the flag boots without
+      the database and never reconnects; never set it in production.
 - [ ] Backup / restore drill documented and tested.
 - [ ] Data-retention windows reviewed (ADR-0057): the platform's default
       `lifecycle` declarations bound telemetry (activity 14d, job runs 30d,

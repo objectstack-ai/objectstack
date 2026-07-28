@@ -39,6 +39,12 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
 export type { ObjectQLHostContext, HookHandler, HookEntry, OperationContext, EngineMiddleware } from './engine.js';
 
+// Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
+// fails (framework#3741). Embedders that boot the engine themselves can catch
+// it to render their own "database unreachable" message.
+export { DriverConnectError } from './driver-connect-errors.js';
+export type { DriverConnectFailure } from './driver-connect-errors.js';
+
 // In-memory aggregation fallback
 export { applyInMemoryAggregation, bucketDateValue } from './in-memory-aggregation.js';
 

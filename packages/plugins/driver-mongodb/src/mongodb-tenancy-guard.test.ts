@@ -145,8 +145,8 @@ describe('multi-tenancy boot guard (#3724)', () => {
   describe('MongoDBDriver wiring', () => {
     it('the constructor refuses in multi-tenant mode', () => {
       process.env.OS_MULTI_ORG_ENABLED = 'true';
-      // Construction is the seam that fails loudly: ObjectQLEngine.init()
-      // catches a connect() rejection and boots anyway.
+      // Construction is the earliest seam — it fails before a host can hand
+      // the driver anywhere. (`connect()` also aborts boot since #3741.)
       expect(() => makeDriver()).toThrow(MongoDBMultiTenantUnsupportedError);
     });
 

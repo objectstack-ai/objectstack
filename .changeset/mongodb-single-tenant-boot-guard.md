@@ -22,10 +22,11 @@ Rather than serve unisolated, the driver now fails fast at startup:
   `isolated`, including the posture derived from `OS_MULTI_ORG_ENABLED=true`),
   resolved through the shared `resolveTenancyPosture()` so the driver can never
   disagree with auth / the registry / the CLI about the mode. The check sits in
-  the constructor and not only in `connect()` because `ObjectQLEngine.init()`
-  *catches* a driver's connect rejection and boots anyway — a connect-only guard
-  would have degraded "refuses to start" into "starts, then throws at query
-  time". `connect()` re-checks in case a host flips the posture in between.
+  the constructor because that is the earliest seam — it fails before a host can
+  hand the driver anywhere — and `connect()` re-checks in case a host flips the
+  posture in between. (It originally had to live in the constructor because
+  `ObjectQLEngine.init()` *caught* a driver's connect rejection and booted
+  anyway; that is fixed in the same release, #3741, so both seams abort boot.)
 - `syncSchema()` / `syncSchemasBatch()` call `assertObjectsNotTenantScoped()` and
   refuse objects declaring `tenancy.enabled: true`, naming every offender in one
   message.

@@ -21,6 +21,8 @@ import {
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import { IDataDriver, IDataEngine, Logger, createLogger, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import { DriverConnectError, emitDegradedBootBanner, type DriverConnectFailure } from './driver-connect-errors.js';
+import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -1859,33 +1861,65 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
-   * Initialize the engine and all registered drivers
+   * Initialize the engine and all registered drivers.
+   *
+   * **Fail-fast by default** (framework#3741): if any boot-registered driver's
+   * `connect()` rejects, this throws {@link DriverConnectError} and kernel
+   * bootstrap aborts. Two reasons, both load-bearing:
+   *
+   *  1. A driver that did not connect never recovers — there is no lazy
+   *     reconnection anywhere in `driver-sql` / `driver-mongodb`. Booting
+   *     anyway produces a server that reports itself started, may even answer
+   *     health checks, and then 500s every request with an error that reads
+   *     nothing like "the database is unreachable". The caller immediately
+   *     makes it worse: `ObjectQLPlugin.start()` runs `syncRegisteredSchemas()`
+   *     right after this, issuing DDL against a driver that isn't there.
+   *  2. Swallowing the rejection removed a driver's ability to REFUSE STARTUP.
+   *     Any fatal startup check — licence, server version, incompatible
+   *     configuration, missing capability, not just an unreachable socket — is
+   *     expressed by throwing from `connect()`, and every one of them used to
+   *     be silently downgraded to a runtime error. (That is why
+   *     driver-mongodb's multi-tenancy guard had to be hoisted into its
+   *     constructor in #3734; `connect()` is a supported place for it now.)
+   *
+   * Operators who need the old lenient behaviour opt in explicitly with
+   * `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`, which boots in a state that is warned
+   * about loudly rather than assumed.
    */
   async init() {
-    this.logger.info('Initializing ObjectQL engine', { 
+    this.logger.info('Initializing ObjectQL engine', {
       driverCount: this.drivers.size,
       drivers: Array.from(this.drivers.keys())
     });
-    
-    const failedDrivers: string[] = [];
+
+    const failures: DriverConnectFailure[] = [];
     for (const [name, driver] of this.drivers) {
       try {
         await driver.connect();
         this.logger.info('Driver connected successfully', { driverName: name });
       } catch (e) {
-        failedDrivers.push(name);
+        failures.push({ driverName: name, error: e });
         this.logger.error('Failed to connect driver', e as Error, { driverName: name });
       }
     }
 
-    if (failedDrivers.length > 0) {
-      this.logger.warn(
-        `${failedDrivers.length} of ${this.drivers.size} driver(s) failed initial connect. ` +
-        `Operations may recover via lazy reconnection or fail at query time.`,
-        { failedDrivers }
-      );
+    if (failures.length > 0) {
+      if (!resolveAllowDriverConnectFailure()) {
+        throw new DriverConnectError(failures, this.drivers.size);
+      }
+      const failedDrivers = failures.map(f => f.driverName);
+      const banner =
+        `⚠️ DEGRADED BOOT: ${failures.length} of ${this.drivers.size} driver(s) failed to connect ` +
+        `(${failedDrivers.join(', ')}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting anyway. ` +
+        `These drivers are NOT retried and NOT reconnected: every query and every schema sync routed ` +
+        `to them fails for the lifetime of this process. Unset OS_ALLOW_DRIVER_CONNECT_FAILURE to ` +
+        `restore fail-fast boot.`;
+      this.logger.warn(banner, { failedDrivers });
+      // …and again on a channel the host cannot silence — see the helper's note
+      // on `os serve`'s boot-quiet stdout capture.
+      emitDegradedBootBanner(banner);
     }
-    
+
     this.logger.info('ObjectQL engine initialization complete');
   }
 
