@@ -46,7 +46,7 @@ import { FlowSchema } from '../automation/flow.zod';
 
 import { JobSchema } from '../system/job.zod';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
-import { AppTranslationBundleSchema } from '../system/translation.zod';
+import { TranslationItemSchema } from '../system/translation.zod';
 import { DocSchema } from '../system/doc.zod';
 import { BookSchema } from '../system/book.zod';
 
@@ -97,7 +97,7 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
 
   // System Protocol
   datasource: DatasourceSchema,
-  translation: AppTranslationBundleSchema,
+  translation: TranslationItemSchema,
   email_template: EmailTemplateDefinitionSchema,
   doc: DocSchema, // ADR-0046: flat Markdown package documentation
   book: BookSchema as unknown as z.ZodType, // ADR-0046 §6: documentation navigation spine

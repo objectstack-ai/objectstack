@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { printHeader, printSuccess, printError } from '../utils/format.js';
+import { printHeader, printSuccess, printError, emitJson } from '../utils/format.js';
 import { deleteAuthConfig, readAuthConfig } from '../utils/auth-config.js';
 import { ObjectStackClient } from '@objectstack/client';
 
@@ -40,20 +40,20 @@ export default class AuthLogout extends Command {
       await deleteAuthConfig();
 
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           success: true,
           message: 'Credentials cleared',
-        }, null, 2));
+        });
       } else {
         printSuccess('Credentials cleared');
         console.log('');
       }
     } catch (error: any) {
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           success: false,
           error: error.message,
-        }, null, 2));
+        });
         this.exit(1);
       }
       printError(error.message || String(error));

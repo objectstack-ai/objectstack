@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { printError } from '../../utils/format.js';
+import { printError, emitJson } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -53,9 +53,9 @@ export default class ProjectsList extends Command {
       const projects = res?.projects ?? [];
 
       if (flags.format === 'json') {
-        formatOutput(res, 'json');
+        await formatOutput(res, 'json');
       } else if (flags.format === 'yaml') {
-        formatOutput(res, 'yaml');
+        await formatOutput(res, 'yaml');
       } else {
         console.log(`\nProjects (${projects.length}):\n`);
         if (projects.length === 0) {
@@ -76,7 +76,7 @@ export default class ProjectsList extends Command {
       }
     } catch (error: any) {
       if (flags.format === 'json') {
-        console.log(JSON.stringify({ success: false, error: error.message }, null, 2));
+        await emitJson({ success: false, error: error.message });
         this.exit(1);
       }
       printError(error.message || String(error));

@@ -13,6 +13,7 @@ import {
   createTimer,
   collectMetadataStats,
   printMetadataStats,
+  emitJson,
 } from '../utils/format.js';
 
 export default class Info extends Command {
@@ -40,7 +41,7 @@ export default class Info extends Command {
       const stats = collectMetadataStats(config);
 
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           config: absolutePath,
           manifest: config.manifest || null,
           stats,
@@ -50,7 +51,7 @@ export default class Info extends Command {
             fields: o.fields ? Object.keys(o.fields).length : 0,
           })),
           loadTime: duration,
-        }, null, 2));
+        });
         return;
       }
 
@@ -114,7 +115,7 @@ export default class Info extends Command {
 
     } catch (error: any) {
       if (flags.json) {
-        console.log(JSON.stringify({ error: error.message }));
+        await emitJson({ error: error.message }, 0, { compact: true });
         process.exit(1);
       }
       console.log('');

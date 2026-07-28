@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { printError } from '../../utils/format.js';
+import { printError, emitJson, isExitSignal } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
@@ -106,9 +106,9 @@ export default class ProjectsCreate extends Command {
       }
 
       if (flags.format === 'json') {
-        formatOutput(res, 'json');
+        await formatOutput(res, 'json');
       } else if (flags.format === 'yaml') {
-        formatOutput(res, 'yaml');
+        await formatOutput(res, 'yaml');
       } else {
         const p = res?.project ?? {};
         console.log(`\n✓ Project created: ${p.display_name ?? p.id} (${p.id})`);
@@ -118,8 +118,9 @@ export default class ProjectsCreate extends Command {
         console.log('');
       }
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (flags.format === 'json') {
-        console.log(JSON.stringify({ success: false, error: error.message }, null, 2));
+        await emitJson({ success: false, error: error.message });
         this.exit(1);
       }
       printError(error.message || String(error));

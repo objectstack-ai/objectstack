@@ -20,7 +20,14 @@ import { registerApprovalNode } from './approval-node.js';
 import { bindApprovalLockHook, APPROVALS_HOOK_PACKAGE } from './lifecycle-hooks.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
-const USER_CTX = { isSystem: false, positions: [], permissions: [] } as any;
+
+/**
+ * The signed-in caller. An approval action is recorded against the
+ * AUTHENTICATED caller (#3800), so each call below presents the context of the
+ * person it names — an identity-less context can no longer act by naming one.
+ */
+const asUser = (userId: string) =>
+  ({ isSystem: false, userId, positions: [], permissions: [] }) as any;
 
 const noopLogger = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -156,7 +163,7 @@ describe('Send back for revision (ADR-0044)', () => {
     registerReviseFlow();
     const { runId, req } = await startFlow();
 
-    const sent = await service.sendBack(req.id, { actorId: 'u1', comment: 'fix the totals' }, USER_CTX);
+    const sent = await service.sendBack(req.id, { actorId: 'u1', comment: 'fix the totals' }, asUser('u1'));
     expect(sent.resumed).toBe(true);
     expect(sent.autoRejected).toBeUndefined();
     expect(sent.request.status).toBe('returned');
@@ -166,7 +173,7 @@ describe('Send back for revision (ADR-0044)', () => {
     expect(automation.listSuspendedRuns()).toMatchObject([{ runId, nodeId: 'wait_revision' }]);
     expect(await actionsOf(req.id)).toEqual(['submit', 'revise']);
 
-    const re = await service.resubmit(req.id, { actorId: 'submitter', comment: 'totals fixed' }, USER_CTX);
+    const re = await service.resubmit(req.id, { actorId: 'submitter', comment: 'totals fixed' }, asUser('submitter'));
     expect(re.resumed).toBe(true);
     expect(await actionsOf(req.id)).toEqual(['submit', 'revise', 'resubmit']);
 
@@ -189,13 +196,13 @@ describe('Send back for revision (ADR-0044)', () => {
     const { req } = await startFlow();
     expect((await service.getRequest(req.id, SYSTEM_CTX))?.round).toBeUndefined(); // round 1
 
-    await service.sendBack(req.id, { actorId: 'u1' }, USER_CTX);
-    await service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX);
+    await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
+    await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
     const round2 = await pendingReq();
     expect((await service.getRequest(round2.id, SYSTEM_CTX))?.round).toBe(2);
 
-    await service.sendBack(round2.id, { actorId: 'u1' }, USER_CTX);
-    await service.resubmit(round2.id, { actorId: 'submitter' }, USER_CTX);
+    await service.sendBack(round2.id, { actorId: 'u1' }, asUser('u1'));
+    await service.resubmit(round2.id, { actorId: 'submitter' }, asUser('submitter'));
     const round3 = await pendingReq();
     expect((await service.getRequest(round3.id, SYSTEM_CTX))?.round).toBe(3);
   });
@@ -205,12 +212,12 @@ describe('Send back for revision (ADR-0044)', () => {
     const { req } = await startFlow();
 
     // Send-back #1 fits the budget.
-    await service.sendBack(req.id, { actorId: 'u1' }, USER_CTX);
-    await service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX);
+    await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
+    await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
     const round2 = await pendingReq();
 
     // Send-back #2 exceeds it → auto-reject, flow takes the reject branch.
-    const out = await service.sendBack(round2.id, { actorId: 'u1', comment: 'still wrong' }, USER_CTX);
+    const out = await service.sendBack(round2.id, { actorId: 'u1', comment: 'still wrong' }, asUser('u1'));
     expect(out.autoRejected).toBe(true);
     expect(out.resumed).toBe(true);
     expect(out.request.status).toBe('rejected');
@@ -224,7 +231,7 @@ describe('Send back for revision (ADR-0044)', () => {
   it('maxRevisions 0 disables send-back (immediate auto-reject)', async () => {
     registerReviseFlow({ maxRevisions: 0 });
     const { req } = await startFlow();
-    const out = await service.sendBack(req.id, { actorId: 'u1' }, USER_CTX);
+    const out = await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
     expect(out.autoRejected).toBe(true);
     expect(marks).toEqual(['on_rejected']);
   });
@@ -246,7 +253,7 @@ describe('Send back for revision (ADR-0044)', () => {
     await automation.execute('no_revise', { object: 'fin_expense', record: { id: 'x2' }, userId: 'submitter' });
     const req = await pendingReq();
 
-    await expect(service.sendBack(req.id, { actorId: 'u1' }, USER_CTX)).rejects.toThrow(/no 'revise' out-edge/);
+    await expect(service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'))).rejects.toThrow(/no 'revise' out-edge/);
     // Nothing moved: still pending, no revise audit row.
     expect((await fake.find('sys_approval_request', { where: { id: req.id } }))[0].status).toBe('pending');
     expect(await actionsOf(req.id)).toEqual(['submit']);
@@ -264,10 +271,10 @@ describe('Send back for revision (ADR-0044)', () => {
     expect(first.finalized).toBe(false);
 
     // u2 sends back instead: finalizes despite u1's earlier approval.
-    const sent = await service.sendBack(req.id, { actorId: 'u2', comment: 'rework' }, USER_CTX);
+    const sent = await service.sendBack(req.id, { actorId: 'u2', comment: 'rework' }, asUser('u2'));
     expect(sent.request.status).toBe('returned');
 
-    await service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX);
+    await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
     const round2 = await pendingReq();
     // Fresh slate: BOTH approvers pending again — prior approvals are stale.
     expect((round2.pending_approvers as string).split(',').sort()).toEqual(['u1', 'u2']);
@@ -292,21 +299,21 @@ describe('Send back for revision (ADR-0044)', () => {
     });
 
     await expect(editAttempt()).rejects.toThrow(/RECORD_LOCKED/);          // pending → locked
-    await service.sendBack(req.id, { actorId: 'u1' }, USER_CTX);
+    await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
     await expect(editAttempt()).resolves.toBeUndefined();                  // returned → unlocked
-    await service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX);
+    await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
     await expect(editAttempt()).rejects.toThrow(/RECORD_LOCKED/);          // round 2 pending → re-locked
   });
 
   it('recall crossing the revise window cancels the run (returned → recalled)', async () => {
     registerReviseFlow();
     const { runId, req } = await startFlow();
-    await service.sendBack(req.id, { actorId: 'u1' }, USER_CTX);
+    await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
 
     // Only the submitter may abandon the revision.
-    await expect(service.recall(req.id, { actorId: 'u1' }, USER_CTX)).rejects.toThrow(/FORBIDDEN/);
+    await expect(service.recall(req.id, { actorId: 'u1' }, asUser('u1'))).rejects.toThrow(/FORBIDDEN/);
 
-    const out = await service.recall(req.id, { actorId: 'submitter' }, USER_CTX);
+    const out = await service.recall(req.id, { actorId: 'submitter' }, asUser('submitter'));
     expect(out.request.status).toBe('recalled');
     expect(out.resumed).toBe(false);
     // The run was terminally cancelled, not resumed down any branch.
@@ -317,13 +324,13 @@ describe('Send back for revision (ADR-0044)', () => {
     expect(log.id).toBe(runId);
 
     // The window is closed: resubmit is no longer possible.
-    await expect(service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX)).rejects.toThrow(/INVALID_STATE/);
+    await expect(service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'))).rejects.toThrow(/INVALID_STATE/);
   });
 
   it('refuses resubmit while another pending request collides on the record (run stays resumable)', async () => {
     registerReviseFlow();
     const { runId, req } = await startFlow();
-    await service.sendBack(req.id, { actorId: 'u1' }, USER_CTX);
+    await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
 
     // Simulate a record-change trigger re-firing off an edit made inside the
     // revise window: a second, unrelated run opened its own pending request.
@@ -334,38 +341,38 @@ describe('Send back for revision (ADR-0044)', () => {
       created_at: new Date().toISOString(),
     });
 
-    await expect(service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX)).rejects.toThrow(/DUPLICATE_REQUEST/);
+    await expect(service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'))).rejects.toThrow(/DUPLICATE_REQUEST/);
     // The refusal happened BEFORE the suspension was consumed — clearing the
     // collision makes the same resubmit succeed.
     expect(automation.listSuspendedRuns().some(r => r.runId === runId)).toBe(true);
     await fake.delete('sys_approval_request', { where: { id: 'areq_collider' } });
-    const re = await service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX);
+    const re = await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
     expect(re.resumed).toBe(true);
   });
 
   it('a superseded returned request can neither resubmit again nor be recalled', async () => {
     registerReviseFlow();
     const { req } = await startFlow();
-    await service.sendBack(req.id, { actorId: 'u1' }, USER_CTX);
-    await service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX);
+    await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
+    await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
 
     // Round 2 is the live frontier; the round-1 row is history.
-    await expect(service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX)).rejects.toThrow(/supersedes/);
-    await expect(service.recall(req.id, { actorId: 'submitter' }, USER_CTX)).rejects.toThrow(/supersedes/);
+    await expect(service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'))).rejects.toThrow(/supersedes/);
+    await expect(service.recall(req.id, { actorId: 'submitter' }, asUser('submitter'))).rejects.toThrow(/supersedes/);
   });
 
   it('enforces the actor matrix: only pending approvers send back, only the submitter resubmits', async () => {
     registerReviseFlow();
     const { req } = await startFlow();
 
-    await expect(service.sendBack(req.id, { actorId: 'intruder' }, USER_CTX)).rejects.toThrow(/FORBIDDEN/);
-    await expect(service.sendBack(req.id, { actorId: 'submitter' }, USER_CTX)).rejects.toThrow(/FORBIDDEN/);
+    await expect(service.sendBack(req.id, { actorId: 'intruder' }, asUser('intruder'))).rejects.toThrow(/FORBIDDEN/);
+    await expect(service.sendBack(req.id, { actorId: 'submitter' }, asUser('submitter'))).rejects.toThrow(/FORBIDDEN/);
 
-    await service.sendBack(req.id, { actorId: 'u1' }, USER_CTX);
-    await expect(service.resubmit(req.id, { actorId: 'u1' }, USER_CTX)).rejects.toThrow(/FORBIDDEN/);
+    await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
+    await expect(service.resubmit(req.id, { actorId: 'u1' }, asUser('u1'))).rejects.toThrow(/FORBIDDEN/);
     // Resubmit only applies to returned requests — a pending one rejects.
     const fresh = await startFlowSecondRecord();
-    await expect(service.resubmit(fresh.id, { actorId: 'submitter' }, USER_CTX)).rejects.toThrow(/INVALID_STATE/);
+    await expect(service.resubmit(fresh.id, { actorId: 'submitter' }, asUser('submitter'))).rejects.toThrow(/INVALID_STATE/);
   });
 
   /** A second record's pending request, to probe resubmit-on-pending. */
@@ -403,9 +410,9 @@ describe('Send back for revision (ADR-0044)', () => {
     const mirror = async () => (await fake.find('fin_expense', { where: { id: 'm1' } }))[0].approval_status;
 
     expect(await mirror()).toBe('pending');
-    await service.sendBack(req.id, { actorId: 'u1' }, USER_CTX);
+    await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
     expect(await mirror()).toBe('returned');
-    await service.resubmit(req.id, { actorId: 'submitter' }, USER_CTX);
+    await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
     expect(await mirror()).toBe('pending'); // round 2 re-mirrors
   });
 });

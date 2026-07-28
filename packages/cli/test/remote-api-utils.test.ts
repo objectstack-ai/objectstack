@@ -154,42 +154,66 @@ describe('Output Formatter Utilities', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
-  it('should format JSON output', () => {
+  // The two MACHINE formats deliberately bypass console.log: they go through
+  // `emitText`, which awaits the stdout write callback so the payload cannot be
+  // cut off at one 64 KiB pipe buffer when the command exits right after. See
+  // packages/cli/test/emit-json-pipe.test.ts for the end-to-end proof.
+  it('should format JSON output', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((
+      _chunk: any,
+      cb?: any,
+    ) => {
+      if (typeof cb === 'function') cb();
+      return true;
+    }) as any);
     const data = { name: 'test', value: 123 };
-    formatOutput(data, 'json');
+    await formatOutput(data, 'json');
 
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('"name": "test"')
+    expect(write).toHaveBeenCalledWith(
+      expect.stringContaining('"name": "test"'),
+      expect.any(Function)
     );
+    write.mockRestore();
   });
 
-  it('should format YAML output', () => {
+  it('should format YAML output', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((
+      _chunk: any,
+      cb?: any,
+    ) => {
+      if (typeof cb === 'function') cb();
+      return true;
+    }) as any);
     const data = { name: 'test', value: 123 };
-    formatOutput(data, 'yaml');
+    await formatOutput(data, 'yaml');
 
-    expect(console.log).toHaveBeenCalled();
+    expect(write).toHaveBeenCalledWith(
+      expect.stringContaining('name: test'),
+      expect.any(Function)
+    );
+    write.mockRestore();
   });
 
-  it('should format table output for arrays', () => {
+  it('should format table output for arrays', async () => {
     const data = [
       { name: 'item1', value: 1 },
       { name: 'item2', value: 2 },
     ];
-    formatOutput(data, 'table');
+    await formatOutput(data, 'table');
 
     expect(console.log).toHaveBeenCalled();
   });
 
-  it('should format table output for single object', () => {
+  it('should format table output for single object', async () => {
     const data = { name: 'test', value: 123 };
-    formatOutput(data, 'table');
+    await formatOutput(data, 'table');
 
     expect(console.log).toHaveBeenCalled();
   });
 
-  it('should handle empty arrays', () => {
+  it('should handle empty arrays', async () => {
     const data: any[] = [];
-    formatOutput(data, 'table');
+    await formatOutput(data, 'table');
 
     expect(console.log).toHaveBeenCalled();
   });

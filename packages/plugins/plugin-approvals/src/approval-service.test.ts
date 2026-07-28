@@ -118,6 +118,15 @@ function makeFakeEngine() {
 const CTX = { userId: 'u1', tenantId: 't1', positions: [], permissions: [] } as any;
 const SYS = { isSystem: true, positions: [], permissions: [] } as any;
 
+/**
+ * The signed-in caller, when it is someone other than {@link CTX}'s `u1`.
+ * An approval action is recorded against the AUTHENTICATED caller (#3800), so a
+ * test that acts as `u9` has to present `u9`'s context — naming them in
+ * `actorId` while calling as `u1` is the impersonation the service now refuses.
+ */
+const asUser = (userId: string) =>
+  ({ userId, tenantId: 't1', positions: [], permissions: [] }) as any;
+
 function nodeConfig(approvers: string[], extra: Record<string, any> = {}) {
   return {
     approvers: approvers.map(v => ({ type: 'user' as const, value: v })),
@@ -908,7 +917,7 @@ describe('ApprovalService (node era)', () => {
 
   it('reassign: hands the slot to a new approver and audits the move', async () => {
     const req = await svc.openNodeRequest(openInput(['u9', 'u2']), CTX);
-    const out = await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, CTX);
+    const out = await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
     expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
     const actions = await svc.listActions(req.id, SYS);
     expect(actions.at(-1)).toMatchObject({ action: 'reassign', actor_id: 'u9', comment: 'u9 → u7' });
@@ -918,15 +927,15 @@ describe('ApprovalService (node era)', () => {
     const emitted: any[] = [];
     svc.attachMessaging({ async emit(input) { emitted.push(input); } });
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
-    await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, CTX);
+    await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({ topic: 'approval.reassigned', audience: ['u7'] });
   });
 
   it('reassign: blocks a non-holder and duplicate targets', async () => {
     const req = await svc.openNodeRequest(openInput(['u9', 'u2']), CTX);
-    await expect(svc.reassign(req.id, { actorId: 'intruder', to: 'u7' }, CTX)).rejects.toThrow(/FORBIDDEN/);
-    await expect(svc.reassign(req.id, { actorId: 'u9', to: 'u2' }, CTX)).rejects.toThrow(/VALIDATION_FAILED/);
+    await expect(svc.reassign(req.id, { actorId: 'intruder', to: 'u7' }, asUser('intruder'))).rejects.toThrow(/FORBIDDEN/);
+    await expect(svc.reassign(req.id, { actorId: 'u9', to: 'u2' }, asUser('u9'))).rejects.toThrow(/VALIDATION_FAILED/);
   });
 
   it('remind: notifies pending approvers, audits, and throttles repeats', async () => {
@@ -975,7 +984,7 @@ describe('ApprovalService (node era)', () => {
     const emitted: any[] = [];
     svc.attachMessaging({ async emit(input) { emitted.push(input); } });
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
-    const out = await svc.requestInfo(req.id, { actorId: 'u9', comment: 'Need the Q3 numbers' }, CTX);
+    const out = await svc.requestInfo(req.id, { actorId: 'u9', comment: 'Need the Q3 numbers' }, asUser('u9'));
     expect(out.request.status).toBe('pending');
     expect(out.request.pending_approvers).toEqual(['u9']);
     expect(emitted[0]).toMatchObject({ topic: 'approval.request_info', audience: ['u1'] });
@@ -986,8 +995,8 @@ describe('ApprovalService (node era)', () => {
   it('comment: submitter and approver may reply; outsiders may not', async () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
     await svc.comment(req.id, { actorId: 'u1', comment: 'Numbers attached.' }, CTX);
-    await svc.comment(req.id, { actorId: 'u9', comment: 'Thanks, reviewing.' }, CTX);
-    await expect(svc.comment(req.id, { actorId: 'outsider', comment: 'hi' }, { positions: [], permissions: [] } as any))
+    await svc.comment(req.id, { actorId: 'u9', comment: 'Thanks, reviewing.' }, asUser('u9'));
+    await expect(svc.comment(req.id, { actorId: 'outsider', comment: 'hi' }, asUser('outsider')))
       .rejects.toThrow(/FORBIDDEN/);
     const actions = await svc.listActions(req.id, SYS);
     expect(actions.filter(a => a.action === 'comment')).toHaveLength(2);
@@ -1039,7 +1048,7 @@ describe('ApprovalService (node era)', () => {
     expect(await svc.redeemActionToken(short.approve)).toMatchObject({ ok: false, reason: 'expired' });
 
     const live = await svc.issueActionTokens(req.id, 'u9');
-    await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, CTX);
+    await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
     expect(await svc.redeemActionToken(live.approve)).toMatchObject({ ok: false, reason: 'not_approver' });
 
     const forU7 = await svc.issueActionTokens(req.id, 'u7');
@@ -2405,19 +2414,29 @@ describe('ApprovalService — participant visibility (#3590)', () => {
     expect(await svc.countRequests(undefined, asUser('u1'))).toBe(1);
   });
 
-  it('a write path still echoes back its own result when the context has no userId', async () => {
+  it('a write path still echoes back its own result to the user who made it', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
 
-    // Flow-driven resumes and service-to-service calls carry no userId. The
-    // operation authorized itself; re-gating the echo would turn a successful
-    // write into a null result.
-    const res = await svc.decideNode(
-      req.id,
-      { decision: 'approve', actorId: 'u9' },
-      { isSystem: false, positions: [], permissions: [] } as any,
-    );
+    // Approving CLEARS `pending_approvers`, so the approver stops being a
+    // participant the instant their own write lands. The operation authorized
+    // itself; re-gating the echo would turn a successful write into a null
+    // result for the very person who made it.
+    const res = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, asUser('u9'));
+    expect(res.request).not.toBeNull();
+    expect(res.request.status).toBe('approved');
+  });
+
+  it('a service-to-service write echoes back too (no session at all)', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+
+    // Flow-driven resumes and the SLA sweep carry no user. Since #3800 that is
+    // expressible only as a SYSTEM context — a user-less non-system caller can
+    // no longer act by naming an approver.
+    const res = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
     expect(res.request).not.toBeNull();
     expect(res.request.status).toBe('approved');
   });
@@ -2513,7 +2532,7 @@ describe('in-band transitions finalise before they resume (#3456 invariant)', ()
 
   it('sendBack finalises before resuming', async () => {
     const req = await open();
-    await svc.sendBack(req.id, { actorId: 'u9', comment: 'fix the totals' }, CTX);
+    await svc.sendBack(req.id, { actorId: 'u9', comment: 'fix the totals' }, asUser('u9'));
     expectCleanHandoffs();
   });
 
@@ -2521,14 +2540,14 @@ describe('in-band transitions finalise before they resume (#3456 invariant)', ()
     // `maxRevisions: 0` takes the ADR-0044 loop-guard branch on the first
     // send-back — a separate resume site from the normal path above.
     const req = await open({ maxRevisions: 0 });
-    const out = await svc.sendBack(req.id, { actorId: 'u9' }, CTX);
+    const out = await svc.sendBack(req.id, { actorId: 'u9' }, asUser('u9'));
     expect(out.autoRejected, 'expected the auto-reject branch').toBe(true);
     expectCleanHandoffs();
   });
 
   it('recall inside the revise window cancels the run without a pending request', async () => {
     const req = await open();
-    await svc.sendBack(req.id, { actorId: 'u9' }, CTX);
+    await svc.sendBack(req.id, { actorId: 'u9' }, asUser('u9'));
     handoffs = [];                                   // isolate the recall's own hand-back
     await svc.recall(req.id, { actorId: 'u1' }, CTX);
     expect(handoffs.map(h => h.hook)).toContain('cancelRun');
@@ -2537,7 +2556,7 @@ describe('in-band transitions finalise before they resume (#3456 invariant)', ()
 
   it('resubmit re-enters the node without leaving the old request pending', async () => {
     const req = await open();
-    await svc.sendBack(req.id, { actorId: 'u9' }, CTX);
+    await svc.sendBack(req.id, { actorId: 'u9' }, asUser('u9'));
     handoffs = [];                                   // isolate the resubmit's own hand-back
     await svc.resubmit(req.id, { actorId: 'u1' }, CTX);
     expectCleanHandoffs();
@@ -2633,14 +2652,19 @@ describe('status mirror identity (#3783)', () => {
   });
 
   it('never takes the identity from the caller-supplied actorId', async () => {
-    // `actorId` arrives in the REST body (`body.actorId ?? context.userId`) and
-    // is only checked against the pending slate, never against the caller. It is
-    // fine on an audit row; making it the identity of an RLS-scoped write would
-    // let any authenticated caller borrow a slot holder's identity.
+    // `actorId` arrives in the REST body (`body.actorId ?? context.userId`).
+    // #3783 kept it out of the mirror identity; #3800 then stopped it from
+    // reaching the slate check too, so borrowing a slot holder's identity now
+    // fails outright rather than merely mislabelling the write. The mirror is
+    // the second line here, not the first — assert both, so neither can regress
+    // silently behind the other.
     const req = await open();
     const someoneElse = { ...CTX, userId: 'intruder' };
-    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, someoneElse as any);
-    expect(mirrorContext()?.userId).toBe('intruder');
+    await expect(
+      svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, someoneElse as any),
+    ).rejects.toThrow(/FORBIDDEN/);
+    expect(engine._tables['opportunity'][0].approval_status).toBe('pending');
+    expect(mirrorContext()?.userId).not.toBe('u9');
   });
 
   it('SLA auto-decision: stays user-less — no human did it', async () => {

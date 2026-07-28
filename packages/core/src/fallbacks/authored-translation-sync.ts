@@ -18,12 +18,16 @@
  * computes the full authored layer from the rows and REPLACES it wholesale
  * (clear-then-reload), so deleted items/keys stop resolving.
  *
- * Item payload is a single-locale `AppTranslationBundle` (the `translation`
- * type's canonical schema). Locale resolution, in order: `_meta.locale`, a
- * top-level `locale` string, then the item name when it looks like a BCP-47
- * tag (an item named `zh-CN` translates that locale). Items with no
- * resolvable locale are skipped with a warning. Multiple items on one locale
- * deep-merge in name order (deterministic).
+ * Item payload is a single-locale `TranslationItem` — the same `objects.`
+ * groups the file-authored bundles use, plus the `locale` it translates
+ * (#3778; before that, this type was registered against an object-first
+ * `o.<object>` dialect no resolver read, so an authored translation saved
+ * cleanly and rendered nothing). Locale resolution: the top-level `locale`,
+ * then the item name when it looks like a BCP-47 tag — the name fallback
+ * covers rows written before `locale` became required. Rows still carrying
+ * the retired shape are skipped with a warning naming the row, since their
+ * content can never resolve. Multiple items on one locale deep-merge in name
+ * order (deterministic).
  *
  * Trigger points (wired by {@link wireAuthoredTranslationSync}):
  *   • `kernel:ready`      — cold-boot coverage;
@@ -38,6 +42,8 @@
  * rows are taken across all organizations. Best-effort: a failed read keeps
  * the currently applied authored layer.
  */
+
+import { LEGACY_OBJECT_FIRST_KEYS } from '@objectstack/spec/system';
 
 import { deepMerge } from './memory-i18n.js';
 
@@ -99,20 +105,41 @@ export async function readAuthoredTranslationLayer(
       continue; // malformed row — skip it, keep the rest
     }
     if (!data || typeof data !== 'object') continue;
+
+    // Rows written against the retired object-first shape resolve to nothing
+    // no matter what locale they claim, so say that plainly rather than
+    // letting them look loaded. New saves are rejected at the metadata door
+    // by `TranslationItemSchema`; this covers rows that predate it.
+    const legacyKeys = LEGACY_OBJECT_FIRST_KEYS.filter((key) => data[key] !== undefined);
+    if (legacyKeys.length > 0) {
+      logger?.warn?.(
+        `[i18n] authored translation '${row?.name}' uses the retired object-first shape `
+        + `(${legacyKeys.join(', ')}) — nothing resolves from it; re-author it under `
+        + "'objects.<object_name>' with a top-level 'locale' — skipped",
+      );
+      continue;
+    }
+
     const locale: string | undefined =
-      (typeof data?._meta?.locale === 'string' && data._meta.locale)
-      || (typeof data?.locale === 'string' && data.locale)
+      (typeof data?.locale === 'string' && data.locale)
       || (typeof row?.name === 'string' && LOCALE_LIKE.test(row.name) ? row.name : undefined)
       || undefined;
     if (!locale) {
       logger?.warn?.(
         `[i18n] authored translation '${row?.name}' has no resolvable locale `
-        + '(set _meta.locale, or name the item after its BCP-47 locale) — skipped',
+        + "(set the top-level 'locale', or name the item after its BCP-47 locale) — skipped",
       );
       continue;
     }
-    // Strip authoring bookkeeping; everything else is translation data.
-    const { name: _n, locale: _l, _packageId: _p, _provenance: _pr, _lock: _lk, ...payload } = data;
+    // Strip authoring bookkeeping; everything else is translation data. The
+    // lock/package fields are stamped by the metadata protocol on published
+    // rows — merging them would seed junk keys into the i18n layer.
+    const {
+      name: _n, locale: _l,
+      _packageId: _p, _packageVersion: _pv, _provenance: _pr,
+      _lock: _lk, _lockReason: _lr, _lockDocsUrl: _ld, _lockSource: _ls,
+      ...payload
+    } = data;
     byLocale[locale] = deepMerge(byLocale[locale] ?? {}, payload as Record<string, unknown>);
   }
   return byLocale;

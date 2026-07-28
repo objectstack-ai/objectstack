@@ -4,7 +4,7 @@ import { Command, Flags, Args } from '@oclif/core';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { printError, printStep, printKV } from '../../utils/format.js';
+import { printError, printStep, printKV, emitJson, isExitSignal } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -127,9 +127,9 @@ export default class ProjectsBind extends Command {
       }
 
       if (flags.format === 'json') {
-        formatOutput(res, 'json');
+        await formatOutput(res, 'json');
       } else if (flags.format === 'yaml') {
-        formatOutput(res, 'yaml');
+        await formatOutput(res, 'yaml');
       } else {
         console.log(`\n✓ Project bound to artifact`);
         console.log(`  ${args.environmentId} → ${artifactAbs}`);
@@ -137,8 +137,9 @@ export default class ProjectsBind extends Command {
         console.log('');
       }
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (flags.format === 'json') {
-        console.log(JSON.stringify({ success: false, error: error.message }, null, 2));
+        await emitJson({ success: false, error: error.message });
         this.exit(1);
       }
       printError(error.message || String(error));

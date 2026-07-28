@@ -598,21 +598,68 @@ export class SqlDriver implements IDataDriver {
    * knows better (a deliberately slow cross-region replica) sets its own
    * `pool.createTimeoutMillis` and this leaves it alone.
    *
-   * NOTE this bounds the wait but not the diagnosis: knex reports it as
-   * "Timeout acquiring a connection. The pool is probably full", which points
-   * at pool sizing rather than the network. Making the message accurate needs a
-   * dialect-specific connect timeout (pg's `connectionTimeoutMillis`), which
-   * changes the shape of `connection` — tracked in #3769.
+   * Applied in two layers, because the outer one bounds the wait but misstates
+   * the cause. Knex reports its own timeout as "Timeout acquiring a connection.
+   * The pool is probably full" — which sends an operator to tune `pool.max`
+   * while the actual problem is the network. So each network dialect ALSO gets
+   * its own connect timeout, which fails with a message that names what really
+   * happened (`timeout expired` from pg, `connect ETIMEDOUT` from mysql2).
+   *
+   * **The two bounds must not be equal.** They race, and knex wins a tie — set
+   * to the same value, the pool timeout fires first and the accurate message is
+   * never seen (caught by the black-hole test, which asserts the wording). So
+   * the dialect timeout is the effective bound at 10s and the pool timeout is a
+   * strictly looser backstop at 15s, reached only by a dialect that has no
+   * connect-timeout knob (SQLite) or ignores the one we set.
    */
-  private static readonly DEFAULT_CREATE_TIMEOUT_MS = 10_000;
+  private static readonly DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+  private static readonly DEFAULT_CREATE_TIMEOUT_MS = 15_000;
+
+  /**
+   * Per-dialect connect timeout: how the driver spells "how long may
+   * establishing ONE connection take", and where a URL goes once `connection`
+   * has to become an object to carry it.
+   *
+   * SQLite (`better-sqlite3` / `sqlite3`) is deliberately absent — it opens a
+   * file, so there is no handshake to time out and nothing to inject.
+   */
+  private static readonly DIALECT_CONNECT_TIMEOUT: Record<string, { key: string; urlKey: string }> = {
+    pg: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
+    postgres: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
+    postgresql: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
+    cockroachdb: { key: 'connectionTimeoutMillis', urlKey: 'connectionString' },
+    mysql: { key: 'connectTimeout', urlKey: 'uri' },
+    mysql2: { key: 'connectTimeout', urlKey: 'uri' },
+  };
 
   private static withConnectBound(knexConfig: Record<string, any>): Record<string, any> {
     const pool = knexConfig.pool as Record<string, any> | undefined;
-    if (pool?.createTimeoutMillis !== undefined) return knexConfig; // host chose its own
-    return {
-      ...knexConfig,
-      pool: { ...(pool ?? {}), createTimeoutMillis: SqlDriver.DEFAULT_CREATE_TIMEOUT_MS },
-    };
+    const bounded: Record<string, any> =
+      pool?.createTimeoutMillis === undefined
+        ? {
+          ...knexConfig,
+          pool: { ...(pool ?? {}), createTimeoutMillis: SqlDriver.DEFAULT_CREATE_TIMEOUT_MS },
+        }
+        : { ...knexConfig }; // host chose its own bound — respect it
+
+    const dialect = SqlDriver.DIALECT_CONNECT_TIMEOUT[String(knexConfig.client ?? '')];
+    if (!dialect) return bounded; // sqlite / unknown client — nothing to inject
+
+    const conn = knexConfig.connection;
+    if (typeof conn === 'string') {
+      // The URL must move into the dialect's own URL slot so the timeout can
+      // ride alongside it. Verified for both dialects: the connection attempt
+      // still goes to the URL's host/port, `?sslmode=` is still honoured.
+      bounded.connection = {
+        [dialect.urlKey]: conn,
+        [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS,
+      };
+    } else if (conn && typeof conn === 'object' && (conn as any)[dialect.key] === undefined) {
+      bounded.connection = { ...(conn as object), [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS };
+    }
+    // A function-valued `connection` (knex's per-acquire provider) is left
+    // alone: the host is building each connection itself and owns its timeouts.
+    return bounded;
   }
 
   /**
@@ -1616,24 +1663,34 @@ export class SqlDriver implements IDataDriver {
       this.applyFilters(builder, query.where);
     }
 
+    // The same coercion key `applyFilters` just used, so every part of this
+    // statement agrees on how each column is stored — the WHERE window, the
+    // GROUP BY bucket expression (#3773) and the result presentation (#3797).
+    const table = this.coercionKey(builder);
+
+    // Result columns that carry a raw temporal VALUE, keyed by the column name
+    // the caller will read. Collected while the statement is built because that
+    // is the only point where a column name and its meaning are both known: a
+    // `min()` lands under its alias (never under the field name), and a
+    // date-BUCKETED column lands under the field name while holding a label
+    // (`'2026-01'`), not an instant. Matching on names after the fact gets both
+    // of those backwards. See {@link presentTemporalColumns}.
+    const temporalOutput = new Map<string, 'datetime' | 'date'>();
+
     if (query.groupBy) {
       // groupBy items may be plain strings ('region') or structured objects
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
       // items we emit a dialect-specific bucket expression aliased as the
       // field name so the resulting row keys match in-memory bucketDateValue.
-      //
-      // The bucket expression needs the same coercion key `applyFilters` just
-      // used above, so the WHERE window and the GROUP BY buckets agree on how
-      // the column is stored — disagreeing is exactly how #3773 produced an
-      // in-window total spread over a single `(null)` bucket.
-      const bucketTable = this.coercionKey(builder);
       for (const g of query.groupBy as Array<string | { field: string; dateGranularity?: string }>) {
         if (typeof g === 'string') {
           builder.groupBy(g);
           builder.select(g);
+          const kind = this.temporalFieldKind(table, g);
+          if (kind) temporalOutput.set(g, kind);
         } else if (g && typeof g === 'object' && g.field) {
           if (g.dateGranularity) {
-            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity as any, bucketTable);
+            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity as any, table);
             if (!bucket) {
               throw new Error(
                 `SqlDriver: dateGranularity '${g.dateGranularity}' not supported on dialect ` +
@@ -1645,6 +1702,8 @@ export class SqlDriver implements IDataDriver {
           } else {
             builder.groupBy(g.field);
             builder.select(g.field);
+            const kind = this.temporalFieldKind(table, g.field);
+            if (kind) temporalOutput.set(g.field, kind);
           }
         }
       }
@@ -1663,6 +1722,16 @@ export class SqlDriver implements IDataDriver {
           } else {
             builder.select(this.knex.raw(`${rawFunc}(??) as ??`, [fieldExpr, agg.alias]));
           }
+          // `min`/`max` are the only supported functions that hand back a value
+          // OF the column rather than a count/total derived from it, so they are
+          // the only ones whose result is still an instant. `alias` is required
+          // by `AggregationNodeSchema`; the unaliased branch below lands under a
+          // dialect-dependent column name (`max("closed_at")` on SQLite, `max` on
+          // Postgres) and is defensive only, so it is deliberately not tracked.
+          if ((funcName === 'min' || funcName === 'max') && agg.field) {
+            const kind = this.temporalFieldKind(table, agg.field);
+            if (kind) temporalOutput.set(agg.alias, kind);
+          }
         } else {
           if (fieldExpr === '*') {
             builder.select(this.knex.raw(`${rawFunc}(*)`));
@@ -1673,7 +1742,8 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    return await builder;
+    const rows = await builder;
+    return this.presentTemporalColumns(rows, temporalOutput);
   }
 
   // ===================================
@@ -1689,7 +1759,17 @@ export class SqlDriver implements IDataDriver {
 
     builder.distinct(field);
     const results = await builder;
-    return results.map((row: any) => row[field]);
+    const values = results.map((row: any) => row[field]);
+
+    // Same presentation `find()` gives the column (#3797) — a caller listing a
+    // datetime's values should not get epoch integers here and ISO strings
+    // there. Re-deduplicate afterwards: SQL `DISTINCT` compares STORED values,
+    // and one SQLite `Field.datetime` column holds both INTEGER epoch ms and
+    // ISO TEXT, so two rows recording the same instant survive as two rows and
+    // then collapse to the same presented value.
+    const kind = this.temporalFieldKind(this.coercionKey(builder), field);
+    if (!kind) return values;
+    return [...new Set(values.map((v: any) => this.presentTemporalValue(kind, v)))];
   }
 
   // ===================================
@@ -3437,6 +3517,56 @@ export class SqlDriver implements IDataDriver {
    * division on purpose: integer `/1000` truncates toward zero, which pushes a
    * pre-1970 instant forward a day (`-1` → 1970-01-01 instead of 1969-12-31).
    */
+  /**
+   * Which temporal presentation rule, if any, a declared field takes —
+   * `null` for everything that is not a `Field.datetime` / `Field.date`.
+   */
+  protected temporalFieldKind(
+    table: string | null | undefined,
+    field: string,
+  ): 'datetime' | 'date' | null {
+    if (!table) return null;
+    if (this.datetimeFields[table]?.has(field)) return 'datetime';
+    if (this.dateFields[table]?.has(field)) return 'date';
+    return null;
+  }
+
+  /**
+   * Present one temporal value exactly the way `formatOutput` presents it on a
+   * `find()` row, for the read paths that return raw builder output instead
+   * (`aggregate`, `distinct` — #3797).
+   *
+   * The dialect gating mirrors `formatOutput`: the `Field.datetime` repair is
+   * SQLite-only (it is the one dialect where storage ≠ presentation), while the
+   * `Field.date` → `YYYY-MM-DD` collapse runs everywhere.
+   */
+  protected presentTemporalValue(kind: 'datetime' | 'date', value: any): any {
+    if (value == null) return value;
+    if (kind === 'date') return this.toDateOnly(value);
+    return this.isSqlite ? normalizeSqliteDatetimeOutput(value) : value;
+  }
+
+  /**
+   * Apply {@link presentTemporalValue} to the result columns a caller of
+   * `aggregate()` will read as instants.
+   *
+   * Which columns those are cannot be recovered from the rows — the driver has
+   * to be told, because the mapping from column name to meaning is only
+   * unambiguous while the statement is being built (a `min()` lands under its
+   * alias; a date-BUCKETED column lands under the field name but holds a label).
+   * Rows are mutated in place, as `formatOutput` does.
+   */
+  protected presentTemporalColumns(rows: any, columns: Map<string, 'datetime' | 'date'>): any {
+    if (columns.size === 0 || !Array.isArray(rows)) return rows;
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      for (const [column, kind] of columns) {
+        if (row[column] !== undefined) row[column] = this.presentTemporalValue(kind, row[column]);
+      }
+    }
+    return rows;
+  }
+
   protected sqliteTemporalArg(
     field: string,
     table: string | null | undefined,
@@ -3674,6 +3804,22 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
+  /**
+   * Compiles a Filter Protocol condition onto `builder`.
+   *
+   * `logicalOp` controls only how this condition attaches to `builder`
+   * (`where` vs `orWhere`) — never how its contents combine. It is never
+   * `'or'` on any in-repo path: the sole caller passes `'and'` and every
+   * combinator recurses with `'and'`, because all keys in one filter object
+   * AND at every depth. The `orWhere` that OR-s `$or`'s branches is applied
+   * to each branch's own sub-builder; handing `'or'` down instead is exactly
+   * what widened every `$or` filter (#3774 — see sql-driver-or-filter.test.ts).
+   *
+   * So the `logicalOp === 'or'` arms below are unreachable **by design**, not
+   * dead weight to prune: the method is `protected`, i.e. subclass API, and
+   * the flag is the seam an override needs to attach a condition into an OR
+   * group. Do not "fix" them by making a branch propagate `'or'` again.
+   */
   protected applyFilterCondition(builder: Knex.QueryBuilder, condition: any, logicalOp: 'and' | 'or' = 'and', tableHint?: string | null) {
     if (!condition || typeof condition !== 'object') return;
     const table = tableHint ?? this.coercionKey(builder);
@@ -4123,7 +4269,10 @@ export class SqlDriver implements IDataDriver {
       return; // Unsupported dialect for auto-creation
     }
 
-    const adminKnex = knex(adminConfig);
+    // Same connect bound as the main pool (#3769) — this admin connection is
+    // opened during boot against the very server we already suspect might be
+    // unreachable, so it must not be the one place that waits 30s.
+    const adminKnex = knex(SqlDriver.withConnectBound(adminConfig));
     try {
       if (this.isPostgres) {
         await adminKnex.raw(`CREATE DATABASE "${dbName}"`);

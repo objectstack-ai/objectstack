@@ -4,6 +4,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { wireAuthoredTranslationSync } from '@objectstack/core';
 import type { IHttpServer, IHttpRequest, IHttpResponse } from '@objectstack/spec/contracts';
 import type { II18nService } from '@objectstack/spec/contracts';
+import type { TranslationData } from '@objectstack/spec/system';
 import { FileI18nAdapter } from './file-i18n-adapter.js';
 import type { FileI18nAdapterOptions } from './file-i18n-adapter.js';
 
@@ -229,14 +230,17 @@ export class I18nServicePlugin implements Plugin {
             .getFieldLabels(objectName, locale);
           res.json({ success: true, data: { object: objectName, locale, labels } });
         } else {
-          // Fallback: derive field labels from full translation bundle
-          const translations = i18n.getTranslations(locale);
-          const prefix = `o.${objectName}.fields.`;
+          // Fallback: read field labels out of the locale's translation data.
+          // That data is NESTED (`objects.<obj>.fields.<field>.label`) — the
+          // flat dotted `o.<obj>.fields.<field>` keys this used to scan were a
+          // third translation dialect that no producer ever wrote, so the
+          // fallback always returned `{}` (#3778).
+          const data = i18n.getTranslations(locale) as TranslationData | undefined;
+          const fields = data?.objects?.[objectName]?.fields ?? {};
           const labels: Record<string, string> = {};
-          for (const [key, value] of Object.entries(translations)) {
-            if (key.startsWith(prefix)) {
-              labels[key.substring(prefix.length)] = value as string;
-            }
+          for (const [fieldName, field] of Object.entries(fields)) {
+            const label = field?.label;
+            if (typeof label === 'string' && label.length > 0) labels[fieldName] = label;
           }
           res.json({ success: true, data: { object: objectName, locale, labels } });
         }

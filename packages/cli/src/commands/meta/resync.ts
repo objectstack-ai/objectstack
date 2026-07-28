@@ -11,6 +11,7 @@ import {
   printInfo,
   printStep,
   createTimer,
+  emitJson,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { bootstrapPlatformAdmin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
@@ -84,7 +85,7 @@ export default class MetaResync extends Command {
     try {
       stack = await bootSchemaStack({ databaseUrl: flags['database-url'] });
     } catch (error: any) {
-      if (flags.json) console.log(JSON.stringify({ error: error.message }));
+      if (flags.json) await emitJson({ error: error.message }, 0, { compact: true });
       else printError(error.message || String(error));
       process.exit(1);
     }
@@ -100,7 +101,7 @@ export default class MetaResync extends Command {
 
       if (!ql) {
         if (flags.json) {
-          console.log(JSON.stringify({ error: 'objectql_unavailable' }));
+          await emitJson({ error: 'objectql_unavailable' }, 0, { compact: true });
           return;
         }
         printError('ObjectQL service is not available — cannot resync.');
@@ -108,7 +109,7 @@ export default class MetaResync extends Command {
       }
       if (!Array.isArray(sets) || sets.length === 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ resynced: 0, resyncSkipped: 0, inserted: 0, message: 'no_default_permission_sets' }));
+          await emitJson({ resynced: 0, resyncSkipped: 0, inserted: 0, message: 'no_default_permission_sets' }, 0, { compact: true });
           return;
         }
         printWarning('No default permission sets are available to resync.');
@@ -121,7 +122,7 @@ export default class MetaResync extends Command {
       if (!flags.yes) {
         if (flags.json || !process.stdin.isTTY) {
           if (flags.json) {
-            console.log(JSON.stringify({ resynced: 0, resyncSkipped: 0, inserted: 0, message: 'confirmation_required', hint: 'pass --yes' }));
+            await emitJson({ resynced: 0, resyncSkipped: 0, inserted: 0, message: 'confirmation_required', hint: 'pass --yes' }, 0, { compact: true });
             return;
           }
           printWarning('Confirmation required. Re-run with --yes to resync.');
@@ -150,7 +151,7 @@ export default class MetaResync extends Command {
       const inserted = Math.max(0, (report.seeded ?? 0) - resynced - resyncSkipped);
 
       if (flags.json) {
-        console.log(JSON.stringify({ database: stack.dbLabel, resynced, resyncSkipped, inserted, duration: timer.elapsed() }, null, 2));
+        await emitJson({ database: stack.dbLabel, resynced, resyncSkipped, inserted, duration: timer.elapsed() });
         return;
       }
 
@@ -167,7 +168,7 @@ export default class MetaResync extends Command {
       console.log('');
     } catch (error: any) {
       exitCode = 1;
-      if (flags.json) console.log(JSON.stringify({ error: error.message }));
+      if (flags.json) await emitJson({ error: error.message }, 0, { compact: true });
       else printError(error.message || String(error));
     } finally {
       await stack.shutdown();

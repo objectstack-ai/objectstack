@@ -178,8 +178,14 @@ describe('I18nServicePlugin', () => {
       await plugin.init!(ctx as any);
       // Load some translations after init so the service has data
       const i18n = ctx.registerService.mock.calls[0][1];
-      i18n.loadTranslations('en', { greeting: 'Hello', 'o.account.fields.name': 'Account Name' });
-      i18n.loadTranslations('zh-CN', { greeting: '你好', 'o.account.fields.name': '账户名称' });
+      // Nested `objects.` data — the shape every producer actually writes and
+      // every resolver reads. The flat `o.account.fields.name` key this
+      // fixture used before was a dialect nothing emitted (#3778).
+      const accountName = (label: string) => ({
+        objects: { account: { fields: { name: { label } } } },
+      });
+      i18n.loadTranslations('en', { greeting: 'Hello', ...accountName('Account Name') });
+      i18n.loadTranslations('zh-CN', { greeting: '你好', ...accountName('账户名称') });
       await plugin.start!(ctx as any);
       await ctx.trigger('kernel:ready');
       return { plugin, i18n };
@@ -220,7 +226,10 @@ describe('I18nServicePlugin', () => {
         success: true,
         data: {
           locale: 'en',
-          translations: { greeting: 'Hello', 'o.account.fields.name': 'Account Name' },
+          translations: {
+            greeting: 'Hello',
+            objects: { account: { fields: { name: { label: 'Account Name' } } } },
+          },
         },
       });
     });

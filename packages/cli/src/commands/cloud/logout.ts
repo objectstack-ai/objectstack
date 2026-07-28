@@ -8,7 +8,7 @@
 
 import { Command, Flags } from '@oclif/core';
 import { ObjectStackClient } from '@objectstack/client';
-import { printHeader, printSuccess, printError } from '../../utils/format.js';
+import { printHeader, printSuccess, printError, emitJson } from '../../utils/format.js';
 import { deleteCloudConfig, tryReadCloudConfig } from '../../utils/cloud-config.js';
 
 export default class CloudLogout extends Command {
@@ -39,14 +39,14 @@ export default class CloudLogout extends Command {
       await deleteCloudConfig();
 
       if (flags.json) {
-        console.log(JSON.stringify({ success: true, message: 'Cloud credentials cleared' }, null, 2));
+        await emitJson({ success: true, message: 'Cloud credentials cleared' });
       } else {
         printSuccess('Cloud credentials cleared');
         console.log('');
       }
     } catch (error: any) {
       if (flags.json) {
-        console.log(JSON.stringify({ success: false, error: error.message }, null, 2));
+        await emitJson({ success: false, error: error.message });
         this.exit(1);
       }
       printError(error.message || String(error));

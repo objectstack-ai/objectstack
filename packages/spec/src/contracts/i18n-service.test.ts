@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { II18nService } from './i18n-service';
-import type { AppTranslationBundle, TranslationCoverageResult, TranslationDiffItem } from '../system/translation.zod';
+import type { TranslationCoverageResult, TranslationDiffItem } from '../system/translation.zod';
 
 describe('I18n Service Contract', () => {
   it('should allow a minimal II18nService implementation with required methods', () => {
@@ -87,37 +87,6 @@ describe('I18n Service Contract', () => {
     expect(service.getDefaultLocale!()).toBe('zh-CN');
   });
 
-  it('should allow implementation with getAppBundle and loadAppBundle', () => {
-    const bundles = new Map<string, AppTranslationBundle>();
-
-    const service: II18nService = {
-      t: () => '',
-      getTranslations: () => ({}),
-      loadTranslations: () => {},
-      getLocales: () => Array.from(bundles.keys()),
-      getAppBundle: (locale) => bundles.get(locale),
-      loadAppBundle: (locale, bundle) => { bundles.set(locale, bundle); },
-    };
-
-    const zhBundle: AppTranslationBundle = {
-      o: {
-        account: {
-          label: '客户',
-          fields: { name: { label: '客户名称' } },
-          _views: { all_accounts: { label: '全部客户' } },
-        },
-      },
-      messages: { 'common.save': '保存' },
-    };
-
-    service.loadAppBundle!('zh-CN', zhBundle);
-    const loaded = service.getAppBundle!('zh-CN');
-    expect(loaded).toBeDefined();
-    expect(loaded?.o?.account.label).toBe('客户');
-    expect(loaded?.o?.account._views?.all_accounts.label).toBe('全部客户');
-    expect(loaded?.messages?.['common.save']).toBe('保存');
-  });
-
   it('should allow implementation with getCoverage', () => {
     const service: II18nService = {
       t: () => '',
@@ -135,7 +104,7 @@ describe('I18n Service Contract', () => {
           staleKeys: 0,
           coveragePercent: 90,
           items: [
-            { key: 'o.account.fields.website.label', status: 'missing', objectName: 'account', locale },
+            { key: 'objects.account.fields.website.label', status: 'missing', objectName: 'account', locale },
           ],
         };
         return result;
@@ -159,8 +128,6 @@ describe('I18n Service Contract', () => {
       getLocales: () => [],
     };
 
-    expect(minimalService.getAppBundle).toBeUndefined();
-    expect(minimalService.loadAppBundle).toBeUndefined();
     expect(minimalService.getCoverage).toBeUndefined();
     expect(minimalService.suggestTranslations).toBeUndefined();
   });
@@ -181,11 +148,11 @@ describe('I18n Service Contract', () => {
     };
 
     const items: TranslationDiffItem[] = [
-      { key: 'o.account.fields.website.label', status: 'missing', locale: 'zh-CN' },
+      { key: 'objects.account.fields.website.label', status: 'missing', locale: 'zh-CN' },
     ];
     const suggestions = await service.suggestTranslations!('zh-CN', items);
     expect(suggestions).toHaveLength(1);
-    expect(suggestions[0].aiSuggested).toBe('AI翻译: o.account.fields.website.label');
+    expect(suggestions[0].aiSuggested).toBe('AI翻译: objects.account.fields.website.label');
     expect(suggestions[0].aiConfidence).toBe(0.85);
   });
 });

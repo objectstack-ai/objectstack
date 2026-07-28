@@ -147,11 +147,17 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
  * Who is acting, for the purpose of a data write made on their behalf (#3783).
  *
  * Reads the AUTHENTICATED principal off the execution context — deliberately not
- * `input.actorId`. Every public entrypoint takes `actorId` from the request body
- * (`body.actorId ?? context.userId`, see the REST approval routes) and the
- * service only checks that it names a pending approver, never that it is the
- * caller. Tolerable on an audit row; promoting it to the identity of an
- * RLS-scoped write would turn a mislabelled audit trail into identity spoofing.
+ * `input.actorId`. When this was written the two could still disagree: every
+ * public entrypoint took `actorId` from the request body (`body.actorId ??
+ * context.userId`, see the REST approval routes) and the service only checked
+ * that it named a pending approver, never that it was the caller. That was
+ * called tolerable on an audit row — but the same unchecked value was the
+ * authorization key, so it was in fact impersonation, and #3800 closed it:
+ * {@link ApprovalService.resolveActor} now pins the actor to an identity the
+ * server can prove belongs to the caller. This helper stays the separate,
+ * stricter answer for a DATA WRITE, which wants the bare human id and never a
+ * `type:value` slot literal or a machine sentinel.
+ *
  * A caller holding a trustworthy actor with no session behind it — the ADR-0043
  * action link, whose token cryptographically binds exactly one approver — puts
  * that actor ON the context instead of relying on this.
@@ -507,6 +513,81 @@ export class ApprovalService implements IApprovalService {
     // global and any admin may release it.
     const actorTenant = (context as any).tenantId ?? (context as any).organizationId ?? null;
     return requestOrg == null || (actorTenant != null && String(requestOrg) === String(actorTenant));
+  }
+
+  /**
+   * Pin the acting identity to the AUTHENTICATED CALLER (#3800).
+   *
+   * Every public entrypoint accepts an `actorId`, and the REST routes fill it
+   * from `body.actorId ?? body.actor_id ?? context.userId` — so before this
+   * gate the body won. The authorization checks downstream all read that value
+   * (`pending_approvers.includes(input.actorId)`, `submitter_id === actorId`),
+   * which made the body-supplied string not merely the audit label but the key
+   * that opens the door: any authenticated user could name a pending approver
+   * and have that approver's decision recorded and the owning flow resumed.
+   * #3783 drew this line for the data-write identity ({@link actingUserId});
+   * this closes the authorization half.
+   *
+   * A caller may still name an identity OTHER than their bare user id, because
+   * a slot legitimately can be keyed by one: `resolveApproverSpec` stores the
+   * `type:value` literal when a graph lookup yields nothing, and an author may
+   * write an email as a `user` approver. So the rule is not "actorId must equal
+   * userId" — it is **"actorId must be an identity the SERVER can prove belongs
+   * to the caller"**. Anything else is `FORBIDDEN`.
+   *
+   * A system context is exempt and keeps its explicit actor: the SLA sweep
+   * passes the reserved {@link SLA_ACTOR_ID} sentinel, and the ADR-0043 action
+   * link passes the approver its single-use token is cryptographically bound to
+   * (having also put them on the context). Those are the only two callers that
+   * hold a trustworthy actor with no session behind them.
+   *
+   * A caller with NO identity at all cannot act. That case is reachable: the
+   * REST anonymous-deny only fires when `api.requireAuth` is set, so without it
+   * an anonymous request previously decided approvals outright by naming one.
+   */
+  private async resolveActor(
+    actorId: string | undefined,
+    context: SharingExecutionContext,
+  ): Promise<string> {
+    // The machine callers — their actor is server-minted, not caller-supplied.
+    if (context?.isSystem) {
+      if (!actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+      return actorId;
+    }
+    const uid = actingUserId(context);
+    if (!uid) {
+      throw new Error('FORBIDDEN: an approval action requires an authenticated caller');
+    }
+    // The common case: no actor named, or the caller named themselves.
+    if (!actorId || String(actorId) === uid) return uid;
+
+    // Named something else — allow it ONLY if the server can prove the caller
+    // holds that identity. `positions` is resolved by the shared authz resolver
+    // (never client-supplied); `role:` is the ADR-0090 D3 deprecated spelling
+    // that 15.x-era slots and the Console's own identity list still carry.
+    const named = String(actorId);
+    for (const position of context.positions ?? []) {
+      if (named === `position:${position}` || named === `role:${position}`) return named;
+    }
+    // Email last — it costs a read, so only when nothing cheaper matched.
+    if (named.includes('@') && await this.callerHasEmail(uid, named)) return named;
+
+    throw new Error(
+      `FORBIDDEN: cannot act as '${named}' — an approval action is recorded against the authenticated caller`,
+    );
+  }
+
+  /** Does `userId`'s own account carry `email`? (Slots keyed by email, #3800.) */
+  private async callerHasEmail(userId: string, email: string): Promise<boolean> {
+    try {
+      const rows = await this.engine.find('sys_user', {
+        where: { id: userId }, limit: 1, context: SYSTEM_CTX,
+      });
+      const row: any = Array.isArray(rows) ? rows[0] : null;
+      return !!row?.email && String(row.email).toLowerCase() === email.toLowerCase();
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -1356,7 +1437,7 @@ export class ApprovalService implements IApprovalService {
     context: SharingExecutionContext,
   ): Promise<{ request: ApprovalRequestRow; runId: string | null; nodeId: string | null; finalized: boolean; decision: 'approve' | 'reject'; outputs?: Record<string, unknown> }> {
     if (!requestId) throw new Error('VALIDATION_FAILED: requestId is required');
-    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const actorId = await this.resolveActor(input?.actorId, context);
     if (input.decision !== 'approve' && input.decision !== 'reject') {
       throw new Error('VALIDATION_FAILED: decision must be approve|reject');
     }
@@ -1374,9 +1455,9 @@ export class ApprovalService implements IApprovalService {
     // hold no slot — the escape hatch for an approval routed to an unstaffed
     // position or to approvers who have all left.
     const isOverride = this.isOverrideActor(context, raw.organization_id ?? null);
-    const isSlotHolder = pendingApprovers.includes(input.actorId);
+    const isSlotHolder = pendingApprovers.includes(actorId);
     if (!isSlotHolder && !isOverride) {
-      throw new Error(`FORBIDDEN: actor '${input.actorId}' is not a pending approver`);
+      throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
     }
 
     const config = parseJson<ApprovalNodeConfig>(raw.node_config_json, { approvers: [], behavior: 'first_response' } as any);
@@ -1424,7 +1505,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: input.decision,
-      actor_id: input.actorId, comment: input.comment ?? null,
+      actor_id: actorId, comment: input.comment ?? null,
       attachments: input.attachments?.length ? input.attachments : null,
       created_at: now,
     }, { context: SYSTEM_CTX });
@@ -1572,7 +1653,7 @@ export class ApprovalService implements IApprovalService {
     context: SharingExecutionContext,
   ): Promise<ApprovalRecallResult> {
     if (!requestId) throw new Error('VALIDATION_FAILED: requestId is required');
-    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const actorId = await this.resolveActor(input?.actorId, context);
 
     const rawRows = await this.engine.find('sys_approval_request', {
       where: { id: requestId }, limit: 1, context: SYSTEM_CTX,
@@ -1586,7 +1667,7 @@ export class ApprovalService implements IApprovalService {
     // The submitter withdraws their own request; a privileged admin may recall
     // any pending request to release a stuck record (#3424).
     if (!this.isOverrideActor(context, raw.organization_id ?? null)
-      && raw.submitter_id && String(raw.submitter_id) !== String(input.actorId)) {
+      && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
       throw new Error(`FORBIDDEN: only the submitter may recall this request`);
     }
     // A returned request is only recallable while it is still the run's live
@@ -1602,7 +1683,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'recall',
-      actor_id: input.actorId, comment: input.comment ?? null, created_at: now,
+      actor_id: actorId, comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
     await this.engine.update('sys_approval_request', {
@@ -1667,11 +1748,11 @@ export class ApprovalService implements IApprovalService {
     input: ApprovalSendBackInput,
     context: SharingExecutionContext,
   ): Promise<ApprovalSendBackResult> {
-    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const actorId = await this.resolveActor(input?.actorId, context);
     const raw = await this.loadPendingRow(requestId);
     const pending = csvSplit(raw.pending_approvers);
-    if (!context.isSystem && !pending.includes(input.actorId)) {
-      throw new Error(`FORBIDDEN: actor '${input.actorId}' is not a pending approver`);
+    if (!context.isSystem && !pending.includes(actorId)) {
+      throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
     }
 
     const config = parseJson<ApprovalNodeConfig>(raw.node_config_json, { approvers: [], behavior: 'first_response' } as any);
@@ -1697,7 +1778,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'revise',
-      actor_id: input.actorId, comment: input.comment ?? null, created_at: now,
+      actor_id: actorId, comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
     if (priorSendBacks >= maxRevisions) {
@@ -1705,7 +1786,7 @@ export class ApprovalService implements IApprovalService {
       await this.engine.insert('sys_approval_action', {
         id: uid('aact'), request_id: requestId, organization_id: org,
         step_name: nodeId, step_index: 0, action: 'reject',
-        actor_id: input.actorId,
+        actor_id: actorId,
         comment: `Auto-rejected: revision limit (${maxRevisions}) exceeded`, created_at: now,
       }, { context: SYSTEM_CTX });
       await this.engine.update('sys_approval_request', {
@@ -1736,7 +1817,7 @@ export class ApprovalService implements IApprovalService {
         await this.notify({
           topic: 'approval.returned',
           audience: [String(raw.submitter_id)],
-          actorId: input.actorId,
+          actorId: actorId,
           source: { object: 'sys_approval_request', id: requestId },
           payload: {
             title: 'Approval auto-rejected',
@@ -1779,7 +1860,7 @@ export class ApprovalService implements IApprovalService {
       await this.notify({
         topic: 'approval.returned',
         audience: [String(raw.submitter_id)],
-        actorId: input.actorId,
+        actorId: actorId,
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'Sent back for revision',
@@ -1805,7 +1886,7 @@ export class ApprovalService implements IApprovalService {
     input: ApprovalResubmitInput,
     context: SharingExecutionContext,
   ): Promise<ApprovalResubmitResult> {
-    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const actorId = await this.resolveActor(input?.actorId, context);
     const rawRows = await this.engine.find('sys_approval_request', {
       where: { id: requestId }, limit: 1, context: SYSTEM_CTX,
     });
@@ -1814,7 +1895,7 @@ export class ApprovalService implements IApprovalService {
     if (raw.status !== 'returned') {
       throw new Error(`INVALID_STATE: request is ${raw.status} (resubmit applies to returned requests)`);
     }
-    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(input.actorId)) {
+    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
       throw new Error('FORBIDDEN: only the submitter may resubmit');
     }
     await this.assertLatestForRun(raw);
@@ -1842,7 +1923,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'resubmit',
-      actor_id: input.actorId, comment: input.comment ?? null, created_at: now,
+      actor_id: actorId, comment: input.comment ?? null, created_at: now,
     }, { context: SYSTEM_CTX });
 
     // The next round only exists if this resume lands — surface `resumed`
@@ -1924,7 +2005,7 @@ export class ApprovalService implements IApprovalService {
     input: { actorId: string; to: string; from?: string; comment?: string },
     context: SharingExecutionContext,
   ): Promise<{ request: ApprovalRequestRow }> {
-    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const actorId = await this.resolveActor(input?.actorId, context);
     const to = String(input?.to ?? '').trim();
     if (!to) throw new Error('VALIDATION_FAILED: `to` (new approver) is required');
     const raw = await this.loadPendingRow(requestId);
@@ -1934,13 +2015,13 @@ export class ApprovalService implements IApprovalService {
       throw new Error(`VALIDATION_FAILED: '${to}' is already a pending approver`);
     }
     const isOverride = this.isOverrideActor(context, raw.organization_id ?? null);
-    const from = String(input.from ?? input.actorId).trim();
+    const from = String(input.from ?? actorId).trim();
     let next: string[];
     if (pending.includes(from)) {
       // Normal hand-off: the actor holds the slot being moved (or is a
       // system/admin caller acting on a real holder's slot).
-      if (!context.isSystem && !isOverride && input.actorId !== from && !pending.includes(input.actorId)) {
-        throw new Error(`FORBIDDEN: actor '${input.actorId}' is not a pending approver`);
+      if (!context.isSystem && !isOverride && actorId !== from && !pending.includes(actorId)) {
+        throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
       }
       next = pending.map(a => (a === from ? to : a));
     } else if (isOverride) {
@@ -1957,7 +2038,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'reassign',
-      actor_id: input.actorId, comment: input.comment ?? `${from} → ${to}`, created_at: now,
+      actor_id: actorId, comment: input.comment ?? `${from} → ${to}`, created_at: now,
     }, { context: SYSTEM_CTX });
     // per_group / quorum (#3266): carry the delegated slot's group membership to
     // the new approver in the snapshot, so their approval still counts for the
@@ -1980,7 +2061,7 @@ export class ApprovalService implements IApprovalService {
     await this.notify({
       topic: 'approval.reassigned',
       audience: [to],
-      actorId: input.actorId,
+      actorId: actorId,
       source: { object: 'sys_approval_request', id: requestId },
       dedupKey: `approval-reassign-${requestId}-${to}`,
       payload: {
@@ -2003,9 +2084,9 @@ export class ApprovalService implements IApprovalService {
     input: { actorId: string; comment?: string },
     context: SharingExecutionContext,
   ): Promise<{ request: ApprovalRequestRow; notified: number }> {
-    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const actorId = await this.resolveActor(input?.actorId, context);
     const raw = await this.loadPendingRow(requestId);
-    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(input.actorId)) {
+    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
       throw new Error('FORBIDDEN: only the submitter may send reminders');
     }
 
@@ -2024,7 +2105,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'remind',
-      actor_id: input.actorId, comment: input.comment ?? null, created_at: nowIso,
+      actor_id: actorId, comment: input.comment ?? null, created_at: nowIso,
     }, { context: SYSTEM_CTX });
 
     // Per-approver fan-out: concrete identities (user ids / emails) each get
@@ -2039,7 +2120,7 @@ export class ApprovalService implements IApprovalService {
         notified += await this.notify({
           topic: 'approval.reminder',
           audience: [approver],
-          actorId: input.actorId,
+          actorId: actorId,
           source: { object: 'sys_approval_request', id: requestId },
           dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
           payload: {
@@ -2062,7 +2143,7 @@ export class ApprovalService implements IApprovalService {
       notified += await this.notify({
         topic: 'approval.reminder',
         audience: literals,
-        actorId: input.actorId,
+        actorId: actorId,
         source: { object: 'sys_approval_request', id: requestId },
         dedupKey: `approval-remind-${requestId}-${nowIso}`,
         payload: {
@@ -2190,26 +2271,26 @@ export class ApprovalService implements IApprovalService {
     input: { actorId: string; comment: string },
     context: SharingExecutionContext,
   ): Promise<{ request: ApprovalRequestRow }> {
-    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
     const raw = await this.loadPendingRow(requestId);
     const pending = csvSplit(raw.pending_approvers);
-    if (!context.isSystem && !pending.includes(input.actorId)) {
-      throw new Error(`FORBIDDEN: actor '${input.actorId}' is not a pending approver`);
+    if (!context.isSystem && !pending.includes(actorId)) {
+      throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
     }
 
     const now = this.clock.now().toISOString();
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'request_info',
-      actor_id: input.actorId, comment: input.comment.trim(), created_at: now,
+      actor_id: actorId, comment: input.comment.trim(), created_at: now,
     }, { context: SYSTEM_CTX });
 
     if (raw.submitter_id) {
       await this.notify({
         topic: 'approval.request_info',
         audience: [String(raw.submitter_id)],
-        actorId: input.actorId,
+        actorId: actorId,
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'More information requested',
@@ -2229,20 +2310,20 @@ export class ApprovalService implements IApprovalService {
     input: { actorId: string; comment: string; attachments?: string[] },
     context: SharingExecutionContext,
   ): Promise<{ request: ApprovalRequestRow }> {
-    if (!input?.actorId) throw new Error('VALIDATION_FAILED: actorId is required');
+    const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
     const raw = await this.loadPendingRow(requestId);
     const pending = csvSplit(raw.pending_approvers);
-    const isSubmitter = raw.submitter_id && String(raw.submitter_id) === String(input.actorId);
-    if (!context.isSystem && !isSubmitter && !pending.includes(input.actorId)) {
-      throw new Error(`FORBIDDEN: actor '${input.actorId}' is not on this request`);
+    const isSubmitter = raw.submitter_id && String(raw.submitter_id) === String(actorId);
+    if (!context.isSystem && !isSubmitter && !pending.includes(actorId)) {
+      throw new Error(`FORBIDDEN: actor '${actorId}' is not on this request`);
     }
 
     const now = this.clock.now().toISOString();
     await this.engine.insert('sys_approval_action', {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'comment',
-      actor_id: input.actorId, comment: input.comment.trim(),
+      actor_id: actorId, comment: input.comment.trim(),
       attachments: input.attachments?.length ? input.attachments : null,
       created_at: now,
     }, { context: SYSTEM_CTX });
@@ -2252,7 +2333,7 @@ export class ApprovalService implements IApprovalService {
     await this.notify({
       topic: 'approval.comment',
       audience,
-      actorId: input.actorId,
+      actorId: actorId,
       source: { object: 'sys_approval_request', id: requestId },
       payload: {
         title: 'New comment on an approval',

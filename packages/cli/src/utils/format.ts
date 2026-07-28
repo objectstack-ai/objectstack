@@ -9,6 +9,23 @@ export const CLI_ALIAS = 'os';
 
 // ─── Machine-readable output ────────────────────────────────────────
 
+export interface EmitJsonOptions {
+  /**
+   * Emit on a single line instead of 2-space-indented.
+   *
+   * Exists so the sweep onto `emitJson` could be a pure truncation fix with no
+   * observable output change: roughly half the CLI's `--json` sites were
+   * already compact and half indented, and this preserves whichever each one
+   * emitted. The split is accidental rather than designed — `os login --json`
+   * prints a compact payload and then an indented one in the same run — so
+   * unifying it is worth doing, but as its own decision, not as a side effect
+   * of fixing truncated pipes.
+   *
+   * New code should use the default.
+   */
+  compact?: boolean;
+}
+
 /**
  * Emit a `--json` payload and record the exit code, without truncating.
  *
@@ -20,14 +37,70 @@ export const CLI_ALIAS = 'os';
  * scripted consumer got invalid JSON while an interactive run (stdout is a TTY,
  * written synchronously) looked perfect. Silent, and invisible to the author.
  *
- * Waiting for the write callback drains the buffer first, and setting
- * `process.exitCode` instead of calling `process.exit` lets Node exit on its
- * own once nothing is pending.
+ * The exit does not have to be an explicit `process.exit` to bite. oclif's
+ * `handle()` ends every failing command with `Exit.exit()` → `process.exit()`
+ * and performs no flush on that path, so a plain `this.exit(1)` — or any
+ * thrown error — truncates exactly the same way. `flush()` runs only on the
+ * SUCCESS path of `execute()`. That is why the fix belongs at the write, not
+ * at the exit: awaiting the write callback drains the buffer before any of
+ * those paths can tear the process down.
+ *
+ * Deliberately NOT fixed by forcing stdout into blocking mode process-wide
+ * (`process.stdout._handle.setBlocking(true)`), which would cover every
+ * command in one line: the same binary runs `os serve` / `os dev`, and a
+ * blocking write to a pipe whose reader is slow blocks the event loop — it
+ * would trade truncated JSON for a server that stalls on its own logs.
+ *
+ * Setting `process.exitCode` rather than calling `process.exit` lets Node exit
+ * on its own once nothing is pending. Callers that must unwind immediately can
+ * still `this.exit(n)` after awaiting this — the buffer is already drained by
+ * then.
  */
-export async function emitJson(payload: unknown, exitCode = 0): Promise<void> {
-  const text = JSON.stringify(payload, null, 2) + '\n';
+export async function emitJson(
+  payload: unknown,
+  exitCode = 0,
+  opts: EmitJsonOptions = {},
+): Promise<void> {
+  const text = opts.compact ? JSON.stringify(payload) : JSON.stringify(payload, null, 2);
+  await emitText(text, exitCode);
+}
+
+/**
+ * True for the `ExitError` oclif's `this.exit(n)` throws.
+ *
+ * A command whose whole body sits in one `try` has a problem the truncation
+ * masked: `this.exit(1)` does not exit, it THROWS, so an inner "report the
+ * failure and stop" unwinds into the outer `catch`, which reports a second
+ * time. `os validate --json` on a bad config emitted two JSON documents back
+ * to back — unparseable as either one document or as JSONL. Nobody noticed
+ * because the payload was being cut off at 64 KiB before the second one could
+ * appear; draining the write is what made it visible.
+ *
+ * A catch that reports failures must re-throw this first — it is a
+ * control-flow signal from our own code, not a failure to describe:
+ *
+ *     } catch (error: any) {
+ *       if (isExitSignal(error)) throw error;
+ *       …
+ *     }
+ */
+export function isExitSignal(error: unknown): boolean {
+  const e = error as { code?: unknown; oclif?: { exit?: unknown } } | null | undefined;
+  return e?.code === 'EEXIT' || typeof e?.oclif?.exit === 'number';
+}
+
+/**
+ * The drain-aware write `emitJson` is built on, for machine payloads that are
+ * not JSON — `formatOutput`'s `--format yaml` truncates on a pipe exactly like
+ * the JSON one, and for the same reason.
+ *
+ * Appends the trailing newline. Everything in `emitJson`'s doc comment about
+ * why this cannot be fixed at the exit, or globally via blocking stdout,
+ * applies here too.
+ */
+export async function emitText(text: string, exitCode = 0): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    process.stdout.write(text, (err) => (err ? reject(err) : resolve()));
+    process.stdout.write(text + '\n', (err) => (err ? reject(err) : resolve()));
   });
   if (exitCode !== 0) process.exitCode = exitCode;
 }

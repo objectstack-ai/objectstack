@@ -78,6 +78,56 @@ export default [
       }],
     },
   },
+  // Machine output must not be written with `console.log`.
+  //
+  // `console.log(big)` followed by an exit hands a PIPE reader a payload cut
+  // off at one 64 KiB buffer: Node writes stdout asynchronously to a pipe and
+  // the exit tears the process down mid-drain. `os lint … --json` shipped that
+  // for months at exactly 65536 bytes, and it is invisible to whoever writes
+  // it — stdout to a TTY is synchronous, so every interactive run looks right
+  // while every scripted consumer, the only audience `--json` has, gets
+  // invalid JSON. The exit need not be explicit: oclif ends failing commands
+  // with `handle()` → `Exit.exit()` → `process.exit()` and flushes nothing on
+  // that path, so a plain `this.exit(1)` truncates the same way.
+  //
+  // `emitJson` / `emitText` (packages/cli/src/utils/format.ts) await the write
+  // callback first. The whole CLI was swept onto them; this keeps the pattern
+  // from growing back one command at a time. Note the root lint script runs
+  // with `--no-inline-config`, so there is no per-site opt-out — which is the
+  // point: every past instance of this was written by someone who had no
+  // reason to suspect it.
+  {
+    files: ['packages/cli/src/**/*.{ts,tsx,mts,cts}'],
+    ignores: ['**/node_modules/**', '**/dist/**', '**/*.test.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+    },
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector:
+            "CallExpression[callee.object.name='console'][callee.property.name='log']" +
+            " > CallExpression[callee.object.name='JSON'][callee.property.name='stringify']",
+          message:
+            'Write machine output with `await emitJson(payload)` from utils/format.js, not ' +
+            'console.log(JSON.stringify(…)). On a pipe, console.log followed by an exit ' +
+            '(including oclif\'s this.exit / any thrown error) truncates the payload at 64 KiB. ' +
+            'Pass `{ compact: true }` as the third argument to keep single-line output.',
+        },
+        {
+          // `formatOutput` became async for the same reason — its json and yaml
+          // branches go through emitText. An un-awaited call at statement
+          // position silently reopens the hole. (An awaited one nests under an
+          // AwaitExpression and does not match.)
+          selector: "ExpressionStatement > CallExpression[callee.name='formatOutput']",
+          message:
+            '`formatOutput` is async — await it. Its json/yaml branches drain stdout before ' +
+            'the command can exit; dropping the await reintroduces the 64 KiB pipe truncation.',
+        },
+      ],
+    },
+  },
   // issue #2035 — authoring-entry guard. Flags exported consts in metadata
   // files that are annotated with a spec domain type (simple `Page` or qualified
   // `UI.Page`) instead of being wrapped in the `defineX` factory. AST-only (no

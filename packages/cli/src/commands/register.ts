@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { printHeader, printSuccess, printError, printKV } from '../utils/format.js';
+import { printHeader, printSuccess, printError, printKV, emitJson } from '../utils/format.js';
 import { writeAuthConfig } from '../utils/auth-config.js';
 import { ObjectStackClient } from '@objectstack/client';
 import * as readline from 'node:readline/promises';
@@ -141,7 +141,7 @@ export default class AuthRegister extends Command {
       });
 
       if (flags.json) {
-        console.log(JSON.stringify({ success: true, email: user?.email || email, userId: user?.id }, null, 2));
+        await emitJson({ success: true, email: user?.email || email, userId: user?.id });
       } else {
         printSuccess('Account created and logged in');
         printKV('Email', user?.email || email);
@@ -152,7 +152,7 @@ export default class AuthRegister extends Command {
       }
     } catch (error: any) {
       if (flags.json) {
-        console.log(JSON.stringify({ success: false, error: error.message }, null, 2));
+        await emitJson({ success: false, error: error.message });
         this.exit(1);
       }
       printError(error.message || String(error));

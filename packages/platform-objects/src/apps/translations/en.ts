@@ -117,6 +117,7 @@ export const en: TranslationData = {
       description: 'Metadata workbench for developers, analysts, and implementers',
       navigation: {
         group_overview: { label: 'Overview' },
+        nav_app_builder: { label: 'App Builder' },
         nav_metadata_directory: { label: 'All Metadata Types' },
         nav_packages: { label: 'Packages' },
         group_data_model: { label: 'Data Model' },
@@ -134,7 +135,6 @@ export const en: TranslationData = {
         nav_hooks: { label: 'Hooks' },
         group_automation: { label: 'Automation' },
         nav_flows: { label: 'Flows' },
-        nav_workflows: { label: 'Workflow Rules' },
         group_ai: { label: 'AI' },
         nav_agents: { label: 'Agents' },
         nav_tools: { label: 'Tools' },

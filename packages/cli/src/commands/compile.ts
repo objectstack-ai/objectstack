@@ -37,6 +37,8 @@ import {
   formatZodErrors,
   collectMetadataStats,
   printMetadataStats,
+  emitJson,
+  isExitSignal,
 } from '../utils/format.js';
 import { checkSpecVersionGap } from '../utils/spec-version.js';
 
@@ -119,7 +121,7 @@ export default class Compile extends Command {
         ];
         if (issues.length > 0) {
           if (flags.json) {
-            console.log(JSON.stringify({ success: false, error: 'strict-body: missing body', issues }));
+            await emitJson({ success: false, error: 'strict-body: missing body', issues }, 0, { compact: true });
             this.exit(1);
           }
           console.log('');
@@ -137,7 +139,7 @@ export default class Compile extends Command {
 
       if (!result.success) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, errors: (result.error as unknown as ZodError).issues }));
+          await emitJson({ success: false, errors: (result.error as unknown as ZodError).issues }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -157,7 +159,7 @@ export default class Compile extends Command {
       const exprWarnings = exprIssues.filter((i) => i.severity === 'warning');
       if (exprErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'expression validation failed', issues: exprErrors, warnings: exprWarnings }));
+          await emitJson({ success: false, error: 'expression validation failed', issues: exprErrors, warnings: exprWarnings }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -195,11 +197,11 @@ export default class Compile extends Command {
       });
       if (capPreflight.errors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({
+          await emitJson({
             success: false,
             error: 'capability provider preflight failed',
             issues: capPreflight.errors.map((c) => ({ token: c.token, message: renderCapabilityMessage(c) })),
-          }));
+          }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -243,7 +245,7 @@ export default class Compile extends Command {
       const widgetWarnings = widgetFindings.filter((f) => f.severity === 'warning');
       if (widgetErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'widget binding validation failed', issues: widgetErrors }));
+          await emitJson({ success: false, error: 'widget binding validation failed', issues: widgetErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -276,7 +278,7 @@ export default class Compile extends Command {
       const actionRefWarnings = actionRefFindings.filter((f) => f.severity === 'warning');
       if (actionRefErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'dashboard action reference validation failed', issues: actionRefErrors }));
+          await emitJson({ success: false, error: 'dashboard action reference validation failed', issues: actionRefErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -309,7 +311,7 @@ export default class Compile extends Command {
       const filterTokenErrors = filterTokenFindings.filter((f) => f.severity === 'error');
       if (filterTokenErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'filter placeholder validation failed', issues: filterTokenErrors }));
+          await emitJson({ success: false, error: 'filter placeholder validation failed', issues: filterTokenErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -347,7 +349,7 @@ export default class Compile extends Command {
       const refWarnings = refFindings.filter((f) => f.severity === 'warning');
       if (refErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'reference integrity validation failed', issues: refErrors }));
+          await emitJson({ success: false, error: 'reference integrity validation failed', issues: refErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -376,7 +378,7 @@ export default class Compile extends Command {
       const styleWarnings = styleFindings.filter((f) => f.severity === 'warning');
       if (styleErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'SDUI styling validation failed', issues: styleErrors }));
+          await emitJson({ success: false, error: 'SDUI styling validation failed', issues: styleErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -461,7 +463,7 @@ export default class Compile extends Command {
       const autonumberWarnings = autonumberLint.filter((f) => f.severity === 'warning');
       if (autonumberErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'autonumber format validation failed', issues: autonumberErrors }));
+          await emitJson({ success: false, error: 'autonumber format validation failed', issues: autonumberErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -493,7 +495,7 @@ export default class Compile extends Command {
       const viewRefWarnings = viewRefLint.filter((f) => f.severity === 'warning');
       if (viewRefErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'view reference validation failed', issues: viewRefErrors }));
+          await emitJson({ success: false, error: 'view reference validation failed', issues: viewRefErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -533,7 +535,7 @@ export default class Compile extends Command {
       const securityAdvisories = securityFindings.filter((f) => f.severity !== 'error');
       if (securityErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'security posture validation failed', issues: securityErrors }));
+          await emitJson({ success: false, error: 'security posture validation failed', issues: securityErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -566,7 +568,7 @@ export default class Compile extends Command {
       const readonlyWriteAdvisories = readonlyWriteFindings.filter((f) => f.severity !== 'error');
       if (readonlyWriteErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'readonly flow-write validation failed', issues: readonlyWriteErrors }));
+          await emitJson({ success: false, error: 'readonly flow-write validation failed', issues: readonlyWriteErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -614,7 +616,7 @@ export default class Compile extends Command {
             const drift = diffAccessMatrix(committed, currentMatrix);
             if (drift.length > 0) {
               if (flags.json) {
-                console.log(JSON.stringify({ success: false, error: 'access matrix drift', changes: drift }));
+                await emitJson({ success: false, error: 'access matrix drift', changes: drift }, 0, { compact: true });
                 this.exit(1);
               }
               console.log('');
@@ -638,7 +640,7 @@ export default class Compile extends Command {
       const docWarnings = docsResult.issues.filter((i) => i.severity === 'warning');
       if (docErrors.length > 0) {
         if (flags.json) {
-          console.log(JSON.stringify({ success: false, error: 'docs validation failed', issues: docErrors }));
+          await emitJson({ success: false, error: 'docs validation failed', issues: docErrors }, 0, { compact: true });
           this.exit(1);
         }
         console.log('');
@@ -694,7 +696,7 @@ export default class Compile extends Command {
           // pipelines can guard against accidental regressions.
           const msg = `--no-runtime-bundle requires every callable to have a metadata body (${stillNeeded} missing, ${lowering.bodyExtractionWarnings.length} extraction warning(s)). Re-run with --strict-body to see details, or omit --no-runtime-bundle.`;
           if (flags.json) {
-            console.log(JSON.stringify({ success: false, error: msg }));
+            await emitJson({ success: false, error: msg }, 0, { compact: true });
             this.exit(1);
           }
           console.log('');
@@ -718,7 +720,7 @@ export default class Compile extends Command {
             cleanupOldRuntimeBundles(artifactDir, runtimeBundle.outputFileName);
           } catch (err: any) {
             if (flags.json) {
-              console.log(JSON.stringify({ success: false, error: `runtime bundle failed: ${err.message}` }));
+              await emitJson({ success: false, error: `runtime bundle failed: ${err.message}` }, 0, { compact: true });
               this.exit(1);
             }
             console.log('');
@@ -739,7 +741,7 @@ export default class Compile extends Command {
       const specGap = checkSpecVersionGap((config as { manifest?: { specVersion?: unknown } }).manifest);
 
       if (flags.json) {
-        console.log(JSON.stringify({
+        await emitJson({
           success: true,
           output: artifactPath,
           size: jsonContent.length,
@@ -750,7 +752,7 @@ export default class Compile extends Command {
           specVersionGap: specGap,
           stats,
           duration: timer.elapsed(),
-        }));
+        }, 0, { compact: true });
         return;
       }
 
@@ -779,8 +781,9 @@ export default class Compile extends Command {
       console.log('');
 
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (flags.json) {
-        console.log(JSON.stringify({ success: false, error: error.message }));
+        await emitJson({ success: false, error: error.message }, 0, { compact: true });
         this.exit(1);
       }
       console.log('');
