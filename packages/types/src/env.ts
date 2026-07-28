@@ -179,9 +179,11 @@ export function resolveAllowDegradedTenancy(): boolean {
  *
  * Setting this to a truthy value (`true`/`1`/`on`/`yes`, case-insensitive)
  * boots anyway, in an explicitly degraded state that is logged loudly at
- * startup. There is NO reconnection: the drivers that failed stay dead for the
- * process lifetime and every query routed to them fails. Defaults OFF — an
- * unset flag means "fail fast".
+ * startup. Every query routed to a failed driver fails until the datasource
+ * becomes reachable — the underlying clients do re-establish connections on
+ * their own (framework#3759) — but the boot-time schema sync those drivers
+ * missed is never re-run, so their tables may simply not exist afterwards.
+ * Defaults OFF — an unset flag means "fail fast".
  */
 export function resolveAllowDriverConnectFailure(): boolean {
   const raw = readEnvWithDeprecation('OS_ALLOW_DRIVER_CONNECT_FAILURE', [], { silent: true });

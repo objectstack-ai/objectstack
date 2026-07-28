@@ -78,17 +78,24 @@ bootstrap. If any `connect()` rejects, the boot is **refused**
 ([#3741](https://github.com/objectstack-ai/objectstack/issues/3741)) — the error
 names each failed driver and its cause, and `objectstack serve` exits 1.
 
-There is no lazy reconnection. A driver that did not connect at startup stays
-disconnected for the process lifetime, so booting anyway would produce a server
-that reports itself started, answers health checks, and then fails every request
-with an error nothing like *the database is unreachable* — while the schema sync
-that follows `init()` issues DDL against a datasource that isn't there.
+Booting without a reachable datasource would produce a server that reports
+itself started, answers health checks, and then fails every request with an
+error nothing like *the database is unreachable* — while the schema sync that
+follows `init()` issues DDL against a datasource that isn't there.
+
+The reason is **not** that the connection can never come back. Client libraries
+do re-establish connections on their own — the MongoDB driver's topology monitor
+reconnects, and knex/pg opens a fresh connection per acquire (verified in
+[#3759](https://github.com/objectstack-ai/objectstack/issues/3759)). What never
+comes back is the **boot sequence that was skipped**: nothing re-runs the schema
+sync, so those objects can be left with no tables even after the database
+returns.
 
 <Callout type="warn">
 `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` boots anyway, in an explicitly degraded
-state announced by a `DEGRADED BOOT` banner. The failed drivers are never
-retried and never reconnected: every query and every schema sync routed to them
-fails until the process restarts. Do not set it in production.
+state announced by a `DEGRADED BOOT` banner. Queries to a failed driver fail
+until the datasource becomes reachable, and its boot-time schema sync is skipped
+for good. Do not set it in production.
 </Callout>
 
 ### Writing a driver: `connect()` is where you refuse to start

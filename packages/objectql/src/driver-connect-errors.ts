@@ -67,10 +67,10 @@ export class DriverConnectError extends Error {
     super(
       `${failures.length} of ${totalDrivers} data driver(s) failed to connect — refusing to boot.\n` +
       `${detail}\n` +
-      `A driver that did not connect cannot serve queries (there is no lazy reconnection) and the ` +
-      `schema sync that runs right after init would issue DDL against it. Fix the datasource ` +
-      `configuration (e.g. OS_DATABASE_URL), or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway ` +
-      `in an explicitly degraded state where every query to those drivers fails.`,
+      `A driver that did not connect cannot serve queries, and the schema sync that runs right ` +
+      `after init would issue DDL against it. Fix the datasource configuration (e.g. ` +
+      `OS_DATABASE_URL), or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway and serve errors ` +
+      `until the datasource becomes reachable.`,
     );
     this.name = 'DriverConnectError';
     if (failures[0]?.error instanceof Error) {

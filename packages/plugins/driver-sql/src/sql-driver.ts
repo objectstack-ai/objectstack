@@ -569,8 +569,40 @@ export class SqlDriver implements IDataDriver {
     this.schemaMode = schemaMode ?? 'managed';
     this.autoMigrate = autoMigrate ?? 'off';
     this.config = knexConfig;
-    this.knex = knex(knexConfig);
+    this.knex = knex(SqlDriver.withConnectBound(knexConfig));
     this.installQueryTiming();
+  }
+
+  /**
+   * Default bound on establishing ONE connection (framework#3769).
+   *
+   * A database endpoint that accepts the TCP connection but never completes the
+   * handshake — an overloaded instance, a half-open firewall, a load balancer
+   * mid-failover — is the failure mode that hurts most, because nothing fails:
+   * the query just waits. Left to tarn's default that wait is **30 seconds**,
+   * per query, on the request path; with a small `pool.max` a handful of them
+   * saturate the pool and everything queues behind it.
+   *
+   * 10s matches driver-mongodb's existing `connectTimeoutMS ?? 10_000`, so both
+   * drivers give up on an unreachable server at the same point. A host that
+   * knows better (a deliberately slow cross-region replica) sets its own
+   * `pool.createTimeoutMillis` and this leaves it alone.
+   *
+   * NOTE this bounds the wait but not the diagnosis: knex reports it as
+   * "Timeout acquiring a connection. The pool is probably full", which points
+   * at pool sizing rather than the network. Making the message accurate needs a
+   * dialect-specific connect timeout (pg's `connectionTimeoutMillis`), which
+   * changes the shape of `connection` — tracked in #3769.
+   */
+  private static readonly DEFAULT_CREATE_TIMEOUT_MS = 10_000;
+
+  private static withConnectBound(knexConfig: Record<string, any>): Record<string, any> {
+    const pool = knexConfig.pool as Record<string, any> | undefined;
+    if (pool?.createTimeoutMillis !== undefined) return knexConfig; // host chose its own
+    return {
+      ...knexConfig,
+      pool: { ...(pool ?? {}), createTimeoutMillis: SqlDriver.DEFAULT_CREATE_TIMEOUT_MS },
+    };
   }
 
   /**

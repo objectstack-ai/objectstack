@@ -298,13 +298,14 @@ cleanly and a replica that lost its database stops receiving traffic instead of
 serving 500s. Before setting `replicas > 1`, read the multi-node note below.
 
 <Callout type="info">
-Drivers do **not** reconnect on their own
-([#3759](https://github.com/objectstack-ai/objectstack/issues/3759)). Once a
-connection is lost the process stays broken until it restarts, so on Kubernetes
-the readiness probe above is what removes the replica — pair it with your
-normal restart policy. Without an orchestrator (bare `os serve`, systemd, a
-single container with no health check), plan for a supervisor that restarts on
-a failing `/api/v1/ready`.
+A replica **does** recover on its own once the database returns — client
+libraries re-establish connections without help (the MongoDB driver's topology
+monitor; knex/pg opening a fresh connection per acquire, verified in
+[#3759](https://github.com/objectstack-ai/objectstack/issues/3759)). So a
+transient outage — a failover, a maintenance window — needs no restart: the
+readiness probe drains the replica while the database is away and re-admits it
+afterwards. Restart only when the process is genuinely stuck, and note that a
+replica which *booted* without its database never re-runs its schema sync.
 </Callout>
 
 ## Reverse proxy & TLS

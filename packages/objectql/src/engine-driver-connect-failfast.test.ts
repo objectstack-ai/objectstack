@@ -132,7 +132,9 @@ describe('ObjectQL.init() — driver connect fail-fast (framework#3741)', () => 
     await expect(engine.init()).resolves.toBeUndefined();
     const warned = warnings.join('\n');
     expect(warned).toContain('DEGRADED BOOT');
-    expect(warned).toContain('NOT reconnected');
+    // The durable consequence is the SKIPPED SCHEMA SYNC, not a dead connection:
+    // the client reconnects on its own, but nothing re-runs the DDL (#3759).
+    expect(warned).toContain('SKIPPED FOR GOOD');
     expect(warned).toContain('sql');
   });
 

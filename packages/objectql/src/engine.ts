@@ -1891,13 +1891,15 @@ export class ObjectQL implements IDataEngine {
    * `connect()` rejects, this throws {@link DriverConnectError} and kernel
    * bootstrap aborts. Two reasons, both load-bearing:
    *
-   *  1. A driver that did not connect never recovers — there is no lazy
-   *     reconnection anywhere in `driver-sql` / `driver-mongodb`. Booting
-   *     anyway produces a server that reports itself started, may even answer
-   *     health checks, and then 500s every request with an error that reads
+   *  1. Booting without a reachable datasource produces a server that reports
+   *     itself started and then 500s every request with an error that reads
    *     nothing like "the database is unreachable". The caller immediately
    *     makes it worse: `ObjectQLPlugin.start()` runs `syncRegisteredSchemas()`
-   *     right after this, issuing DDL against a driver that isn't there.
+   *     right after this, issuing DDL against a driver that isn't there — so
+   *     the boot leaves the schema half-applied even if the database appears
+   *     a second later. Recovery is not the point: the underlying clients DO
+   *     re-establish connections on their own (framework#3759 verified this),
+   *     but nothing re-runs the boot sequence that was skipped.
    *  2. Swallowing the rejection removed a driver's ability to REFUSE STARTUP.
    *     Any fatal startup check — licence, server version, incompatible
    *     configuration, missing capability, not just an unreachable socket — is
@@ -1935,9 +1937,10 @@ export class ObjectQL implements IDataEngine {
       const banner =
         `⚠️ DEGRADED BOOT: ${failures.length} of ${this.drivers.size} driver(s) failed to connect ` +
         `(${failedDrivers.join(', ')}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting anyway. ` +
-        `These drivers are NOT retried and NOT reconnected: every query and every schema sync routed ` +
-        `to them fails for the lifetime of this process. Unset OS_ALLOW_DRIVER_CONNECT_FAILURE to ` +
-        `restore fail-fast boot.`;
+        `Every query routed to them fails until the datasource becomes reachable, and the boot-time ` +
+        `schema sync is SKIPPED FOR GOOD — the client will reconnect on its own, but nothing re-runs ` +
+        `the DDL, so those objects may have no tables even after the database comes back. Unset ` +
+        `OS_ALLOW_DRIVER_CONNECT_FAILURE to restore fail-fast boot.`;
       this.logger.warn(banner, { failedDrivers });
       // …and again on a channel the host cannot silence — see the helper's note
       // on `os serve`'s boot-quiet stdout capture.
