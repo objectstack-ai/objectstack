@@ -397,23 +397,10 @@ export const supportAgent = defineAgent({
   instructions: `You are a helpful customer support agent. 
     You can search for customer records, look up order status, 
     and create support tickets. Always be polite and professional.`,
-  tools: [
-    {
-      type: 'query',
-      name: 'contact',
-      description: 'Search customer records'
-    },
-    {
-      type: 'query',
-      name: 'order',
-      description: 'Look up order status'
-    },
-    {
-      type: 'action',
-      name: 'create_support_ticket',
-      description: 'Create a support ticket'
-    }
-  ]
+  // Capability lives in skills, never inline on the agent (ADR-0064): a
+  // skill names the platform data tools plus the `action_<name>` tools
+  // materialised from your own AI-exposed Actions.
+  skills: ['customer_lookup', 'order_status', 'ticket_intake']
 });
 ```
 

@@ -256,12 +256,9 @@ Always be professional and data-driven.`,
     maxTokens: 2000,
   },
 
-  // References to Actions/Flows exposed as tools (see "Actions as Tools").
-  tools: [
-    { type: 'flow', name: 'analyze_lead', description: 'Analyze a lead and provide a qualification score' },
-    { type: 'flow', name: 'suggest_next_action', description: 'Suggest the next best action for an opportunity' },
-    { type: 'action', name: 'generate_email', description: 'Generate a personalized email template' },
-  ],
+  // Capability comes from skills — the only tool-bearing slot (ADR-0064).
+  // Each skill names the platform tools and `action_<name>` tools it needs.
+  skills: ['lead_qualification', 'opportunity_coaching', 'email_drafting'],
 
   // RAG access: sources to recruit knowledge from + vector store indexes.
   knowledge: {
@@ -296,11 +293,10 @@ Always be empathetic and solution-focused.`,
     maxTokens: 1500,
   },
 
-  // `search_knowledge` is provided by the Knowledge Protocol tool, not declared inline.
-  tools: [
-    { type: 'flow', name: 'triage_case', description: 'Analyze a case and assign priority' },
-    { type: 'action', name: 'generate_response', description: 'Generate a customer response' },
-  ],
+  // Skills carry the tools. `case_triage` names the platform data tools it
+  // reads with; `knowledge_search` names `search_knowledge` (Knowledge
+  // Protocol). Neither needs a `defineTool` record.
+  skills: ['case_triage', 'knowledge_search', 'response_drafting'],
 
   knowledge: {
     sources: ['support-kb', 'cases'],
@@ -334,10 +330,10 @@ Use reputable data sources.`,
     maxTokens: 1000,
   },
 
-  tools: [
-    { type: 'flow', name: 'lookup_company', description: 'Look up company information' },
-    { type: 'flow', name: 'enrich_contact', description: 'Enrich contact information' },
-  ],
+  // The enrichment Flows are exposed with `ai.exposed`, so the runtime
+  // materialises `action_lookup_company` / `action_enrich_contact` for the
+  // skill to name.
+  skills: ['contact_enrichment'],
 });
 ```
 
@@ -370,11 +366,10 @@ Use the data tools to query records and aggregate metrics.`,
     maxTokens: 3000,
   },
 
-  // Built-in data tools (query_records / get_record / aggregate_data) are
-  // available to agents automatically once registered — see "Natural Language Queries".
-  tools: [
-    { type: 'flow', name: 'analyze_pipeline', description: 'Analyze sales pipeline health' },
-  ],
+  // Pipeline analysis is reasoning over the platform's own data tools
+  // (query_records / aggregate_data / visualize_data), which the skill
+  // names directly — see "Natural Language Queries".
+  skills: ['revenue_forecasting'],
 
   knowledge: {
     sources: ['opportunities', 'pipeline'],
