@@ -16,7 +16,7 @@
 // "restricts" something — carries opposite meanings when it is empty:
 //
 //   object.apiMethods       `undefined` = unrestricted, `[]` = deny-all   (closed on empty)
-//   allowedSources          "(empty = all allowed)"                       (open on empty)
+//   allowedSources          "(empty = all allowed)"  — REMOVED with its schema (#3896 follow-up)
 //   sharing criteria        was match-all, now matches nothing            (closed on empty)
 //
 // Nothing in the metadata distinguishes them. A maintainer knows by memory which
@@ -97,14 +97,6 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     rationale:
       'Deliberate default-open, and the reference example of stating it fully: `undefined` = unrestricted (an object is API-exposed unless it opts into a whitelist — exposure is the CRUD default), `[]` = deny-all, a subset = the derived closure (#3391/#3543). The empty ARRAY is closed; only ABSENCE is open. That two-part contract is what makes it safe to author against, and object.zod.ts additionally emits a ⚠ in its describe text when stripping leaves the whitelist empty.',
     evidence: 'packages/spec/src/data/api-derivation.ts',
-  },
-  {
-    file: 'packages/spec/src/kernel/plugin-runtime.zod.ts',
-    property: 'allowedSources',
-    semantics: 'open',
-    rationale:
-      'A source allow-list for dynamically loaded plugins — a supply-chain gate. Corrected to the `apiMethods` three-state: absence stays open (no policy declared, matching how every other config default behaves and how the runtime behaves today), but `[]` now DENIES instead of admitting everything. The vacuous allow-list was the whole defect: emptiness was both the likeliest authoring slip and the widest grant. Registered `open` rather than `closed` because absence really is permissive here — evading the scanner with softer wording would be the same silence this gate exists to break. NOTE it has no runtime consumer at all: the whole DynamicLoadingConfig block (with `requireIntegrity`, `defaultSandbox`) is declared-but-unenforced, ADR-0049 false compliance, tracked separately — an unimplemented gate is read as the specification by whoever implements it.',
-    evidence: 'packages/spec/src/kernel/plugin-runtime.zod.ts',
   },
   {
     file: 'packages/spec/src/security/sharing.zod.ts',

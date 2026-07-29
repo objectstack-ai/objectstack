@@ -38,8 +38,8 @@ This protocol enables:
 ## TypeScript Usage
 
 ```typescript
-import { DynamicLoadRequest, DynamicLoadingConfig, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginDiscoveryConfig, PluginDiscoverySource, PluginSource } from '@objectstack/spec/kernel';
-import type { DynamicLoadRequest, DynamicLoadingConfig, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginDiscoveryConfig, PluginDiscoverySource, PluginSource } from '@objectstack/spec/kernel';
+import { DynamicLoadRequest, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginSource } from '@objectstack/spec/kernel';
+import type { DynamicLoadRequest, DynamicPluginOperation, DynamicPluginResult, DynamicUnloadRequest, PluginSource } from '@objectstack/spec/kernel';
 
 // Validate data
 const result = DynamicLoadRequest.parse(data);
@@ -62,25 +62,6 @@ Request to dynamically load a plugin at runtime
 | **priority** | `integer` | ✅ | Loading priority (lower is higher) |
 | **sandbox** | `boolean` | ✅ | Run in an isolated sandbox |
 | **timeout** | `integer` | ✅ | Maximum time to complete loading in ms |
-
-
----
-
-## DynamicLoadingConfig
-
-Dynamic plugin loading subsystem configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable runtime load/unload of plugins |
-| **maxDynamicPlugins** | `integer` | ✅ | Upper limit on runtime-loaded plugins |
-| **discovery** | `{ enabled: boolean; sources: { type: Enum<'registry' \| 'npm' \| 'directory' \| 'url'>; endpoint: string; pollInterval: integer; filter?: object }[]; autoLoad: boolean; requireApproval: boolean }` | optional | Runtime plugin discovery configuration |
-| **defaultSandbox** | `boolean` | ✅ | Sandbox dynamically loaded plugins by default |
-| **allowedSources** | `Enum<'npm' \| 'local' \| 'url' \| 'registry' \| 'git'>[]` | optional | [EXPERIMENTAL — not enforced] Restrict which plugin source types are permitted: undefined = any source, [] = deny-all, a subset = exactly those types |
-| **requireIntegrity** | `boolean` | ✅ | Require integrity hash verification for remote sources |
-| **operationTimeout** | `integer` | ✅ | Default timeout for load/unload operations in ms |
 
 
 ---
@@ -132,38 +113,6 @@ Request to dynamically unload a plugin at runtime
 | **timeout** | `integer` | ✅ | Maximum time to complete unloading in ms |
 | **cleanupCache** | `boolean` | ✅ | Remove cached code and assets after unload |
 | **dependentAction** | `Enum<'cascade' \| 'warn' \| 'block'>` | ✅ | How to handle plugins that depend on this one |
-
-
----
-
-## PluginDiscoveryConfig
-
-Runtime plugin discovery configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **sources** | `{ type: Enum<'registry' \| 'npm' \| 'directory' \| 'url'>; endpoint: string; pollInterval: integer; filter?: object }[]` | ✅ |  |
-| **autoLoad** | `boolean` | ✅ | Automatically load newly discovered plugins |
-| **requireApproval** | `boolean` | ✅ | Require admin approval before loading discovered plugins |
-
-
----
-
-## PluginDiscoverySource
-
-Source for runtime plugin discovery
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'registry' \| 'npm' \| 'directory' \| 'url'>` | ✅ | Discovery source type |
-| **endpoint** | `string` | ✅ | Registry URL, directory path, or manifest URL |
-| **pollInterval** | `integer` | ✅ | How often to re-scan for new plugins (0 = manual) |
-| **filter** | `{ tags?: string[]; vendors?: string[]; minTrustLevel?: Enum<'verified' \| 'trusted' \| 'community' \| 'untrusted'> }` | optional |  |
 
 
 ---
