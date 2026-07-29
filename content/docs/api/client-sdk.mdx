@@ -517,6 +517,34 @@ try {
 }
 ```
 
+`error.code` is always the **semantic** code as a string — the numeric HTTP
+status lives on `error.httpStatus` and nowhere else. This holds regardless of
+which server surface answered: the REST server replies with a flat
+`{ error, code, fields }` body while the runtime dispatcher replies with a
+wrapped `{ success, error: { message, code, details } }` body whose `error.code`
+is the HTTP status, and the client normalizes both before throwing.
+
+### Per-field validation errors
+
+A validation failure additionally carries `error.fields` — one entry per
+offending field, ready to attach to the inputs that produced them:
+
+```typescript
+try {
+  await client.data.create('contact', { email: 'not-an-email' });
+} catch (error) {
+  if (error.code === 'VALIDATION_FAILED') {
+    for (const f of error.fields ?? []) {
+      showFieldError(f.field, f.message);   // 'email', 'email must be a valid email address'
+    }
+  }
+}
+```
+
+`error.fields` is left **unset** (not `[]`) when the server reported no
+per-field detail, so `if (error.fields)` is a safe test for "this failure is
+field-anchored".
+
 ### Error Codes
 
 | Code | HTTP | Category | Retryable | Description |

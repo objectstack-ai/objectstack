@@ -4378,20 +4378,55 @@ export class ObjectStackClient {
           ?? errorBody?.error?.message
           ?? (typeof errorBody?.error === 'string' ? errorBody.error : undefined)
           ?? res.statusText;
-        const errorCode = errorBody?.code || errorBody?.error?.code;
+        // Two server envelopes are in play, and they disagree about where the
+        // SEMANTIC code and the per-field list live:
+        //
+        //   @objectstack/rest, flat:
+        //     { error, code: 'VALIDATION_FAILED', fields: [...] }
+        //   runtime dispatcher, wrapped:
+        //     { success: false, error: { message, code: 400,
+        //         details: { code: 'VALIDATION_FAILED', fields: [...] } } }
+        //
+        // Note `error.code` in the WRAPPED form is the HTTP status, not a
+        // semantic code. Reading it straight into `err.code` handed callers the
+        // number 400 where the flat form handed them 'VALIDATION_FAILED', so the
+        // branch our own docs teach —
+        //   `if (err.code === 'VALIDATION_FAILED') err.fields.forEach(…)`
+        // — simply never matched on a dispatcher-served surface. #3918 put the
+        // field list on the wire for those routes; this is what lets a caller
+        // reach it without knowing which surface answered.
+        //
+        // So: `err.code` is always the semantic STRING (the numeric status is on
+        // `err.httpStatus`, where it always was), and `err.fields` is always the
+        // per-field list when the server sent one.
+        const asSemanticCode = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+        const errorCode =
+          asSemanticCode(errorBody?.code)
+          ?? asSemanticCode(errorBody?.error?.details?.code)
+          ?? asSemanticCode(errorBody?.error?.code);
+        const fieldErrors =
+          Array.isArray(errorBody?.fields) ? errorBody.fields
+          : Array.isArray(errorBody?.error?.details?.fields) ? errorBody.error.details.fields
+          : undefined;
         // `.message` is what UIs (e.g. the console's error toast) show to end
         // users verbatim, so keep it to the server's human-readable message —
         // no `[ObjectStack]` branding and no `CODE:` prefix. The code stays
         // available programmatically via `error.code`, and the full response
         // body was already logged above for debugging.
         const error = new Error(errorMessage) as any;
-        
+
         // Attach error details for programmatic access
         error.code = errorCode;
         error.category = errorBody?.category;
         error.httpStatus = res.status;
         error.retryable = errorBody?.retryable;
-        error.details = errorBody?.details || errorBody;
+        // Prefer the wrapped envelope's own `details` over the whole body. The
+        // flat envelope has no top-level `details`, so it keeps falling through
+        // to `errorBody` exactly as before — only the wrapped shape changes,
+        // and only from "the entire response" to the structured object it
+        // actually carries.
+        error.details = errorBody?.details ?? errorBody?.error?.details ?? errorBody;
+        if (fieldErrors) error.fields = fieldErrors;
         
         throw error;
     }
