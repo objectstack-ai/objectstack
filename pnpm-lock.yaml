@@ -1610,6 +1610,9 @@ importers:
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../../plugins/plugin-security
+      '@objectstack/plugin-sharing':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-sharing
       '@objectstack/plugin-webhooks':
         specifier: workspace:*
         version: link:../../plugins/plugin-webhooks
