@@ -41,6 +41,11 @@ export const reportForm = defineForm({
         { field: 'rows', widget: 'string-tags', helpText: 'Dimension names (from the dataset) to group rows by' },
         // CEL visibility — only Matrix reports pivot across a second dimension.
         { field: 'columns', widget: 'string-tags', visibleWhen: "data.type == 'matrix'", helpText: 'Dimension names across (matrix only)' },
+        // #3916 — ordering is authorable here or it is not authorable at all:
+        // `DatasetSelection.order` has always existed on the wire, but a report
+        // author had no channel to reach it. Optional — a selected time
+        // dimension is chronological by default without declaring anything.
+        { field: 'order', type: 'repeater', helpText: 'Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default.' },
         { field: 'drilldown', helpText: 'Click an aggregated row/cell to open the underlying records' },
       ],
     },

@@ -3369,6 +3369,9 @@
     "ReportNavItem (type)",
     "ReportNavItemSchema (const)",
     "ReportSchema (const)",
+    "ReportSort (type)",
+    "ReportSortInput (type)",
+    "ReportSortSchema (const)",
     "ReportType (const)",
     "ResolvedActionParam (interface)",
     "ResponsiveConfig (type)",
@@ -3482,6 +3485,7 @@
     "normalizeFilterOperator (function)",
     "pageForm (const)",
     "reportForm (const)",
+    "reportSelectionOrder (function)",
     "validateActionParams (function)",
     "viewForm (const)"
   ],

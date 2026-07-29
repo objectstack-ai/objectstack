@@ -18,7 +18,8 @@
 
 ## 🔴 Obsolete sub-schemas (type-only re-exports, fully superseded by ADR-0021)
 - `ReportColumnSchema` (`field/label/aggregate/responsive`) — replaced by plain `string[]` `values`; per-column aggregate/label now live in the **dataset** definition.
-- `ReportGroupingSchema` (`field/sortOrder/dateGranularity`) — replaced by `string[]` `rows`; sort/granularity now in the **dataset**.
+- `ReportGroupingSchema` (`field/sortOrder/dateGranularity`) — replaced by `string[]` `rows`; granularity now in the **dataset** (`dimensions[].dateGranularity`).
+  > **Correction — 2026-07-29 (#3916).** The retired `sortOrder` did **not** land on the dataset: no dataset-level sort field ever existed, and `DatasetSelection.order` was unreachable for report authors. A matrix report's date columns therefore rendered in row-arrival order. Ordering now lives on the **report** (`ReportSchema.order` / `blocks[].order`, lowered to `DatasetSelection.order` by `reportSelectionOrder`), and a selected time dimension defaults to ascending server-side.
 - `ReportChartSchema` (`xAxis/yAxis/groupBy`) — **naming drift**: the only chart code (`ReportViewer.tsx:329`) reads legacy `xAxisField/yAxisFields`, never the spec's `xAxis/yAxis` → spec chart field names are dead.
 
 ## Studio gap (PARTIAL)
