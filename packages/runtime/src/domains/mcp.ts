@@ -376,9 +376,7 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // identity forwarded. No `@objectstack/service-ai`.
         listActions: async () => {
             const meta: any = await getMeta();
-            const hasAutomation = Boolean(
-                await deps.resolveService('automation', envId).catch(() => null),
-            );
+            const hasAutomation = Boolean(await actionExec.resolveAutomationService(deps, envId));
             const out: any[] = [];
             for (const { action, objectName, obj } of await actionExec.collectActionDeclarations(deps, meta)) {
                 if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*

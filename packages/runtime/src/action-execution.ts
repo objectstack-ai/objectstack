@@ -260,6 +260,114 @@ export function isHeadlessInvokableAction(deps: ActionExecutionDeps, action: any
     return false;
 }
 
+/**
+ * The action types a headless caller can actually invoke through a server
+ * dispatch — the two {@link isHeadlessInvokableAction} accepts. Kept next to
+ * it so the predicate and the explanation below can never drift apart.
+ */
+const SERVER_DISPATCHED_ACTION_TYPES: ReadonlySet<string> = new Set(['script', 'flow']);
+
+/**
+ * Explain why a declared action has NO server-side dispatch — `null` when it
+ * does have one (`script` / `flow`).
+ *
+ * The spec is explicit (`packages/spec/src/ui/action.zod.ts`): every
+ * non-`script` type dispatches on `target`, and only `flow` has a server-side
+ * runner (the automation engine). `url` / `modal` / `form` are renderer
+ * navigation and `api` names a *different* endpoint the client calls itself —
+ * none of them is the script-handler registry. Pre-#3915 the REST route had
+ * no type branching at all, so every one of them fell through to
+ * `executeAction` and came back as the misleading
+ * `Action '' on object '*' not found`. Naming the type and the prescription
+ * turns that dead end into an actionable 400.
+ */
+export function headlessActionTypeError(deps: ActionExecutionDeps, action: any, objectName?: string): string | null {
+    const type: string = action?.type ?? 'script';
+    if (SERVER_DISPATCHED_ACTION_TYPES.has(type)) return null;
+    const name: string = action?.name ?? 'unknown';
+    const on = objectName ? ` on '${objectName}'` : '';
+    const target: string | undefined = typeof action?.target === 'string' ? action.target : undefined;
+    if (type === 'api') {
+        return (
+            `Action '${name}'${on} is \`type: 'api'\` — it dispatches on \`target\`, ` +
+            `not through the action registry. Call ${target ? `\`${target}\`` : 'its `target` endpoint'} directly` +
+            `${typeof action?.method === 'string' ? ` (${action.method})` : ''}.`
+        );
+    }
+    return (
+        `Action '${name}'${on} is \`type: '${type}'\` — a client-side action with no server dispatch. ` +
+        `The renderer opens its \`target\`${target ? ` ('${target}')` : ''}; there is nothing for the server to run.`
+    );
+}
+
+/**
+ * The automation service when this kernel has a usable one, else `null` —
+ * the single availability probe behind `type: 'flow'` dispatch (both the
+ * headless-invokability filter and the two invoke paths ask through it).
+ */
+export async function resolveAutomationService(deps: ActionExecutionDeps, envId?: string): Promise<any | null> {
+    try {
+        const svc: any = await deps.resolveService('automation', envId);
+        return svc && typeof svc.execute === 'function' ? svc : null;
+    } catch {
+        return null; // no automation service on this kernel
+    }
+}
+
+/** Message for a flow action on a kernel with no automation service (a 503-shaped condition). */
+export function flowActionUnavailableError(action: any): string {
+    return `Action '${action?.name ?? 'unknown'}' is a flow but no automation service is available`;
+}
+
+/**
+ * Dispatch a `type: 'flow'` action through the automation service.
+ *
+ * The ONE implementation both headless surfaces share — the MCP `run_action`
+ * tool and the REST `/actions/:object/:action` route (#3915, which is exactly
+ * the asymmetry that let this branch exist on only one of them). Throws on a
+ * missing automation service and converts a `{ success: false }` engine result
+ * into a throw so both callers report failure the same way; returns the raw
+ * automation result otherwise.
+ *
+ * Forwarding the caller's identity (rather than just executing the flow) is
+ * what lets a `runAs: 'user'` flow enforce RLS as the invoker instead of
+ * falling into the user-less UNSCOPED path (#2849, ADR-0049 / #1888; mirrors
+ * the record-change trigger's context shape).
+ */
+export async function dispatchFlowAction(deps: ActionExecutionDeps,
+    action: any,
+    wiring: {
+        objectName: string;
+        record: Record<string, unknown>;
+        params: Record<string, unknown>;
+        ec: any;
+        envId?: string;
+    },
+): Promise<any> {
+    const { objectName, record, params, ec, envId } = wiring;
+    const automation = await resolveAutomationService(deps, envId);
+    if (!automation) {
+        throw new Error(flowActionUnavailableError(action));
+    }
+    // Pass a proper AutomationContext (the engine never read the former
+    // `triggerData` envelope).
+    const result: any = await automation.execute(action.target, {
+        record,
+        ...(objectName !== 'global' ? { object: objectName } : {}),
+        userId: ec?.userId,
+        ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
+        ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
+        ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
+        // Record fields seed flows' named `isInput` variables (like the
+        // record-change trigger); explicit action params win on clash.
+        params: { ...record, ...params },
+    });
+    if (result && typeof result === 'object' && 'success' in result && result.success === false) {
+        throw new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
+    }
+    return result ?? null;
+}
+
 export function actionLooksDestructive(deps: ActionExecutionDeps, action: any): boolean {
     if (action?.ai?.requiresConfirmation !== undefined) return Boolean(action.ai.requiresConfirmation);
     return Boolean(action?.confirmText || action?.mode === 'delete' || action?.variant === 'danger');
@@ -486,7 +594,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     if (isSystemObjectName(objectName)) {
         throw new Error(`Action '${name}' is on a system object and is not exposed via MCP`);
     }
-    const hasAutomation = Boolean(await deps.resolveService('automation', envId).catch(() => null));
+    const hasAutomation = Boolean(await resolveAutomationService(deps, envId));
     if (!isHeadlessInvokableAction(deps, action, hasAutomation)) {
         throw new Error(
             `Action '${name}' (type='${action?.type ?? 'script'}') cannot be invoked via MCP`,
@@ -535,32 +643,10 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
           }
         : { id: 'system', name: 'system' };
 
-    // ── flow dispatch ──
+    // ── flow dispatch ── (shared with the REST /actions route, #3915)
     if (action.type === 'flow') {
-        const automation: any = await deps.resolveService('automation', envId).catch(() => null);
-        if (!automation || typeof automation.execute !== 'function') {
-            throw new Error(`Action '${name}' is a flow but no automation service is available`);
-        }
-        // Pass a proper AutomationContext (the engine never read the former
-        // `triggerData` envelope). Forwarding the caller's identity is what
-        // lets a `runAs:'user'` flow enforce RLS as the invoker instead of
-        // falling into the user-less UNSCOPED path (#2849, ADR-0049 / #1888;
-        // mirrors the record-change trigger's context shape).
-        const result: any = await automation.execute(action.target, {
-            record,
-            ...(objectName !== 'global' ? { object: objectName } : {}),
-            userId: ec?.userId,
-            ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
-            ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
-            ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
-            // Record fields seed flows' named `isInput` variables (like the
-            // record-change trigger); explicit action params win on clash.
-            params: { ...record, ...params },
-        });
-        if (result && typeof result === 'object' && 'success' in result && result.success === false) {
-            throw new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
-        }
-        return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: result ?? null };
+        const result = await dispatchFlowAction(deps, action, { objectName, record, params, ec, envId });
+        return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
     }
 
     // ── script/body dispatch via the engine's executeAction ──
@@ -695,4 +781,68 @@ export function standaloneActionObjectName(deps: ActionExecutionDeps, action: an
     if (typeof action?.objectName === 'string' && action.objectName.length > 0) return action.objectName;
     if (typeof action?.object === 'string' && action.object.length > 0) return action.object;
     return 'global';
+}
+
+/**
+ * Resolve the DECLARATION behind a `<object>/<action>` route pair — the
+ * single source the REST `/actions` route reads for the ADR-0066 D4
+ * permission gate, the ADR-0104 param contract, and (since #3915) the action
+ * TYPE it must dispatch on.
+ *
+ * Three sources, in the same precedence the execution layer uses:
+ *  1. the object's own `actions[]` (bundle/artifact objects + authored object
+ *     rows) — object-embedded wins, mirroring `collectActionDeclarations`;
+ *  2. the ObjectQL registry's standalone `action` items — `defineAction`
+ *     artifacts and rehydrated authored rows, which never appear inside any
+ *     object definition;
+ *  3. the metadata service's standalone `action` rows — the env-scoped
+ *     kernels where the registry carries no copy.
+ *
+ * Sources 2 and 3 are what the route was missing: a Studio-authored or
+ * standalone `defineAction` declaration was invisible here, so its declared
+ * `type` (and its `requiredPermissions`) were never read on the REST path
+ * even though the MCP path honoured both. A standalone declaration is
+ * accepted only when it belongs to the routed object or to the `'global'`
+ * wildcard — the same `<object>:<name>` / `'*'` key rotation the handler
+ * lookup performs.
+ */
+export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
+    args: { ql: any; objectName: string; actionName: string; envId?: string },
+): Promise<{ action: any; obj: any } | undefined> {
+    const { ql, objectName, actionName, envId } = args;
+
+    let obj: any;
+    try {
+        obj =
+            (typeof ql?.getSchema === 'function' ? ql.getSchema(objectName) : undefined) ??
+            ql?.registry?.getObject?.(objectName);
+    } catch {
+        obj = undefined; // schema unresolved → handler-only action
+    }
+    const embedded = Array.isArray(obj?.actions)
+        ? obj.actions.find((a: any) => a?.name === actionName)
+        : undefined;
+    if (embedded) return { action: embedded, obj };
+
+    const ownsRoute = (action: any): boolean => {
+        const owner = standaloneActionObjectName(deps, action);
+        return owner === objectName || owner === 'global';
+    };
+
+    try {
+        const fromRegistry: any = ql?.registry?.getItem?.('action', actionName);
+        if (fromRegistry && ownsRoute(fromRegistry)) return { action: fromRegistry, obj };
+    } catch {
+        /* registry without an item lookup → fall through to the metadata service */
+    }
+
+    try {
+        const meta: any = await deps.resolveService('metadata', envId);
+        const fromMeta: any = await meta?.load?.('action', actionName);
+        if (fromMeta && ownsRoute(fromMeta)) return { action: fromMeta, obj };
+    } catch {
+        /* no metadata service on this kernel → no declaration to resolve */
+    }
+
+    return obj ? { action: undefined, obj } : undefined;
 }

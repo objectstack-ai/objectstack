@@ -2598,7 +2598,12 @@ describe('HttpDispatcher', () => {
 
 
 describe('HttpDispatcher — ADR-0066 D4 action requiredPermissions gate', () => {
-  const gated = { name: 'issue_and_sign', label: 'Issue', type: 'api', requiredPermissions: ['manage_platform_settings'] };
+  // `type: 'script'` (with a handler `target`) is what this fixture needs: the
+  // gate is type-agnostic, but since #3915 the route dispatches on the declared
+  // type, and a `type: 'api'` action never reaches `executeAction` at all — it
+  // dispatches on `target`, at another endpoint. The permitted cases below
+  // assert the handler DID run, so the declaration has to be a dispatchable one.
+  const gated = { name: 'issue_and_sign', label: 'Issue', type: 'script', target: 'issueAndSign', requiredPermissions: ['manage_platform_settings'] };
   const make = (actionDef: any, execCtx: any) => {
     const executeAction = vi.fn().mockResolvedValue({ ran: true });
     const schemaOf = (name: string) => ({ name, actions: actionDef ? [actionDef] : [] });

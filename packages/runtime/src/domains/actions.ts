@@ -13,6 +13,13 @@
  *  - `POST /actions/:object/:action`              — record-scoped action
  *  - `POST /actions/:object/:action/:recordId`    — record-scoped action with id in URL
  *  - `POST /actions/global/:action`               — wildcard ("*") action
+ *
+ * The route dispatches on the declared action TYPE (#3915), the same way the
+ * MCP `run_action` bridge does — `script` through the handler registry,
+ * `flow` through the automation service. Before that it was script-only, so
+ * a spec-faithful REST/SDK caller could not invoke a `type: 'flow'` action at
+ * all: it fell through to the registry and came back as
+ * `Action '' on object '*' not found`.
  */
 
 import * as actionExec from '../action-execution.js';
@@ -43,6 +50,15 @@ export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
  *   `{ record, user, engine, params }`
  * where `engine` exposes the slimmed CRUD surface used by CRM handlers
  * (`insert`, `update`, `delete`, `find`).
+ *
+ * Dispatch follows the DECLARED action type (#3915):
+ *  - `script` (and any action with no resolvable declaration, which is
+ *    handler-only by definition) → the registered handler, as before;
+ *  - `flow` → `automation.execute(action.target, …)` with the caller's
+ *    identity forwarded, so `runAs: 'user'` enforces RLS as the invoker;
+ *  - `url` / `modal` / `form` / `api` → 400. They dispatch on `target` in the
+ *    client (or at another endpoint entirely) and have no server dispatch
+ *    here; saying so beats the registry's `not found`.
  */
 export async function handleActionsRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     if (method.toUpperCase() !== 'POST') {
@@ -87,18 +103,47 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     let actionSchema: any;
     let actionDef: any;
     try {
-        actionSchema =
-            (typeof ql.getSchema === 'function' ? ql.getSchema(objectName) : undefined) ??
-            ql.registry?.getObject?.(objectName);
-        actionDef = Array.isArray(actionSchema?.actions)
-            ? actionSchema.actions.find((a: any) => a?.name === actionName)
-            : undefined;
+        // Standalone declarations (ObjectQL registry artifacts / Studio-
+        // authored `action` rows) resolve here too, so a route whose action
+        // never appears inside an object definition is gated and dispatched
+        // like any other (#3915).
+        const declaration = await actionExec.resolveRouteActionDeclaration(deps, {
+            ql,
+            objectName,
+            actionName,
+            envId: _context?.environmentId,
+        });
+        actionSchema = declaration?.obj;
+        actionDef = declaration?.action;
         const gateError = actionExec.actionPermissionError(deps, actionDef, _context?.executionContext, objectName);
         if (gateError) {
             return { handled: true, response: deps.error(gateError, 403) };
         }
     } catch {
         /* schema unresolved → no declared gate to enforce (handler-only action) */
+    }
+
+    // [#3915] Action-TYPE dispatch. Per spec every non-`script` type
+    // dispatches on `target`, and only `flow` has a server-side runner — so
+    // a `url`/`modal`/`form`/`api` action reaching this endpoint has nowhere
+    // to go. It used to fall through to the script registry and come back as
+    // the misleading `Action '' on object '*' not found`; reject it with the
+    // prescription instead. `script` — and an UNDECLARED action, which is
+    // handler-only by definition — keeps the registry path below; `flow` is
+    // dispatched to the automation service once the param contract and the
+    // record load have run, exactly as the MCP `run_action` path does.
+    const actionType: string = typeof actionDef?.type === 'string' ? actionDef.type : 'script';
+    if (actionDef) {
+        const typeError = actionExec.headlessActionTypeError(deps, actionDef, objectName);
+        if (typeError) {
+            return { handled: true, response: deps.error(typeError, 400) };
+        }
+    }
+    // A flow action on a kernel with no automation service is a deployment
+    // gap, not a business failure — report it like the missing data engine
+    // above (503) instead of burying it in a `{ success: false }` body.
+    if (actionType === 'flow' && !(await actionExec.resolveAutomationService(deps, _context?.environmentId))) {
+        return { handled: true, response: deps.error(actionExec.flowActionUnavailableError(actionDef), 503) };
     }
 
     // Resolve the handler — fall back to wildcard '*' if the object-specific key is missing.
@@ -183,13 +228,31 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         params: { ...reqParams, recordId, objectName },
     };
 
-    // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.
-    console.info(
-        `[action-audit] REST action '${objectName}/${actionName}' — body executes TRUSTED ` +
-        `(context-less engine, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
-    );
-
     try {
+        // ── flow dispatch (#3915) ── the same `dispatchFlowAction` the MCP
+        // `run_action` path uses: the automation engine runs `action.target`
+        // with the caller's identity forwarded, so a `runAs: 'user'` flow
+        // enforces RLS as the invoker (ADR-0049). No trusted-mode audit line
+        // here — RLS/FLS-bypassing elevation is a script-BODY property, and a
+        // flow does not get it.
+        if (actionType === 'flow') {
+            const result = await actionExec.dispatchFlowAction(deps, actionDef, {
+                objectName,
+                record,
+                params: reqParams,
+                ec,
+                envId: _context?.environmentId,
+            });
+            return { handled: true, response: deps.success({ success: true, data: result }) };
+        }
+
+        // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.
+        console.info(
+            `[action-audit] REST action '${objectName}/${actionName}' — body executes TRUSTED ` +
+            `(context-less engine, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
+        );
+
+        // ── script/body dispatch ──
         // Try object-specific first; on "not found" error, fall back to wildcard.
         let result: any;
         try {
