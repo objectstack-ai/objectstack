@@ -148,8 +148,8 @@ writable.
 | `response_code`   | number   | Last HTTP status code received.                                              |
 | `response_body`   | textarea | Truncated to the first 16 KB.                                                |
 | `error`           | textarea | Last transport-level error (DNS, connect, timeout).                         |
-| `created_at`      | datetime | Native TIMESTAMP column — written as a `Date`, not an epoch-ms number.       |
-| `updated_at`      | datetime | Native TIMESTAMP column — written as a `Date`, not an epoch-ms number.       |
+| `created_at`      | datetime | A `Field.datetime` UTC instant — not an epoch-ms number like the columns above. |
+| `updated_at`      | datetime | A `Field.datetime` UTC instant — not an epoch-ms number like the columns above. |
 
 > **Why store full payload?** Receivers may be down for hours; we must
 > retry the *exact* bytes we promised to send. Recomputing payload from
@@ -304,16 +304,16 @@ same time.
 
 ## 5. Payload format
 
-The POST body is the realtime event payload with a small fixed prefix merged
+The POST body is the realtime event payload with a small fixed envelope merged
 on top:
 
 ```json
 {
+  // ...fields from the originating event payload
   "object": "account",
   "recordId": "acc_123",
   "action": "updated",
   "timestamp": "2024-10-27T00:00:00.000Z"
-  // ...remaining fields from the originating event payload
 }
 ```
 
@@ -326,7 +326,11 @@ Notes:
   unchanged from the originating realtime event's `timestamp` field — not
   an epoch-ms number).
 - Any additional fields the event carried (e.g. record snapshot data) are
-  spread in after these four.
+  spread in first. These four are written **last**, so the envelope always
+  describes the event even if a publisher's payload happens to carry a field
+  with one of these names (#3946). The platform's own `data.record.*` events
+  nest the record under `after` / `changes`, so nothing collides in practice —
+  the ordering is what guarantees it.
 
 Idempotency and event correlation are carried in **headers**, not the body.
 Every attempt sends:

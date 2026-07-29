@@ -61,6 +61,14 @@ interface DriverLike {
    * timestamp / non-temporal → unchanged). Optional — only SqlDriver implements it.
    */
   temporalFilterValue?(objectName: string, field: string, value: unknown): unknown;
+  /**
+   * Normalise the column reference to that same storage form. Required alongside
+   * `temporalFilterValue` on any dialect whose column is mixed-form — a SQLite
+   * `Field.datetime` holds an INTEGER epoch and ISO TEXT at once, so coercing
+   * only the value fixes one half and leaves the other empty (#3912). Optional —
+   * only SqlDriver implements it.
+   */
+  temporalFilterColumnSql?(objectName: string, field: string, columnSql: string): string;
 }
 
 /**
@@ -473,6 +481,29 @@ export class AnalyticsServicePlugin implements Plugin {
       return value;
     };
 
+    // The column half of the same fix (#3912). A SQLite `Field.datetime` column
+    // holds BOTH storage forms — INTEGER epoch from a `Date` write, ISO TEXT from
+    // a REST/JSON write or a `NOW()` default — so coercing the comparand alone
+    // matched whichever half the writer produced and returned an empty window for
+    // the other. Ask the driver for the column expression that normalises both.
+    const coerceTemporalFilterColumn = (
+      objectName: string,
+      fieldName: string,
+      columnSql: string,
+    ): string => {
+      try {
+        const svc = ctx.getService<DataEngineLike>('data');
+        const driver = svc?.getDriverForObject?.(objectName);
+        if (driver && typeof driver.temporalFilterColumnSql === 'function') {
+          return driver.temporalFilterColumnSql(objectName, fieldName, columnSql);
+        }
+      } catch {
+        // Same tiering as above — an unresolvable driver emits the bare column,
+        // which is today's behaviour and correct on every non-mixed dialect.
+      }
+      return columnSql;
+    };
+
     const config: AnalyticsServiceConfig = {
       cubes: this.options.cubes,
       logger: ctx.logger,
@@ -483,6 +514,7 @@ export class AnalyticsServicePlugin implements Plugin {
       getReadScope,
       getAllowedRelationships: this.options.getAllowedRelationships,
       coerceTemporalFilterValue,
+      coerceTemporalFilterColumn,
       relationshipResolver,
       labelResolver,
       // ADR-0053 — source-field currency metadata for the measure currency chain.

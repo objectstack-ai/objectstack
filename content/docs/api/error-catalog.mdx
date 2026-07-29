@@ -349,6 +349,50 @@ ObjectStack uses a structured error system with **9 error categories** and **51 
 
 ---
 
+## Action Errors (`/api/v1/actions`)
+
+<Callout type="warn">
+**`/actions` is the one route where a failure is not always a non-2xx.** An
+action that runs and *rejects* is a business outcome, so it is reported inside
+the payload at HTTP 200. Only failures where no handler produced that outcome
+carry a status. Branch on both.
+</Callout>
+
+| What happened | HTTP | Body |
+|:---|:---:|:---|
+| Action ran, returned | **200** | `{ success: true, data: { success: true, data } }` |
+| Action ran, **rejected** (business rule, validation) | **200** | `{ success: true, data: { success: false, error, code?, fields? } }` |
+| No such action registered | **404** | `{ success: false, error: { message, code } }` |
+| Caller lacks `requiredPermissions` | **403** | `{ success: false, error: { message, code } }` |
+| Type has no server dispatch (`url`/`modal`/`form`/`api`), or a param-contract violation | **400** | `{ success: false, error: { message, code } }` |
+| Data engine or automation service unavailable | **503** | `{ success: false, error: { message, code } }` |
+| Handler **crashed** (`TypeError`, driver error, sandbox timeout) | **500** | `{ success: false, error: { message, code } }` |
+
+A rejection and a crash are told apart by the thrown error: a plain
+`throw new Error(msg)`, a sandboxed body's deliberate throw, or a
+`ValidationError` is a rejection; a `TypeError` / `ReferenceError` / a driver's
+own error class is a crash. An error carrying its own `status` is served with
+it.
+
+```typescript
+const res = await fetch(`/api/v1/actions/${object}/${action}`, { /* … */ });
+const json = await res.json();
+
+// BOTH checks are required — neither one alone is sufficient.
+if (!res.ok) throw new Error(json.error?.message);             // never dispatched, or crashed
+if (json.data?.success === false) showToast(json.data.error);  // ran and rejected
+```
+
+Using `@objectstack/client` removes the footgun: `client.actions.invoke()`
+folds both shapes into one result and never throws.
+
+```typescript
+const res = await client.actions.invoke(object, action, { recordId, params });
+if (!res.success) showToast(res.error);
+```
+
+---
+
 ## Error Response Structure
 
 Every error response follows the `EnhancedApiError` schema:

@@ -176,6 +176,14 @@ export interface AnalyticsServiceConfig {
    */
   coerceTemporalFilterValue?: (objectName: string, fieldName: string, value: unknown) => unknown;
   /**
+   * Normalise the COLUMN side of the same comparison to that storage form — the
+   * other half of the fix, needed because a SQLite `Field.datetime` holds both an
+   * INTEGER epoch (a `Date` write) and ISO TEXT (a REST/JSON write, a `NOW()`
+   * default) at once, so coercing only the comparand matches one of them and
+   * misses the other (#3912). See `StrategyContext.coerceTemporalFilterColumn`.
+   */
+  coerceTemporalFilterColumn?: (objectName: string, fieldName: string, columnSql: string) => string;
+  /**
    * ADR-0062 D6 — report whether an object is federated (external datasource).
    * Threaded into the StrategyContext so `NativeSQLStrategy` declines external
    * objects (which it would otherwise query against the wrong physical table),
@@ -331,6 +339,7 @@ export class AnalyticsService implements IAnalyticsService {
         this.datasetRegistry.get(cubeName)?.allowedRelationships
         ?? config.getAllowedRelationships?.(cubeName),
       coerceTemporalFilterValue: config.coerceTemporalFilterValue,
+      coerceTemporalFilterColumn: config.coerceTemporalFilterColumn,
       isExternalObject: config.isExternalObject,
     };
 

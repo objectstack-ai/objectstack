@@ -52,8 +52,25 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
 
         // POST /data/:object/query
         if (action === 'query' && m === 'POST') {
-            // Spec: returns FindDataResponse = { object, records, total?, hasMore? }
-            const result = await actionExec.callData(deps, 'query', { object: objectName, ...body }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            // [#3946] The PATH object is written LAST. The body used to be
+            // spread OVER `object: objectName`, so `{"object":"other", …}`
+            // moved the read to a different object than the URL named — the
+            // same shape #3933 fixed on the REST bulk routes, found by the
+            // follow-up sweep.
+            //
+            // Not an authorization bypass here: `callData` gates exposure on
+            // `params.object` (action-execution.ts), so the gate followed the
+            // body and agreed with the read. What broke is that the URL stopped
+            // describing the operation — audit trails, logs and anything keyed
+            // on the request path saw object A while object B was read — and
+            // that one endpoint spoke a second dialect of a contract the REST
+            // side had just standardised (path wins).
+            //
+            // The sibling handlers below never had this: they nest the caller's
+            // data (`data: body`, `query: normalized`) instead of splatting it,
+            // and the GET-by-id branch even allowlists its query params against
+            // exactly this kind of parameter pollution.
+            const result = await actionExec.callData(deps, 'query', { ...body, object: objectName }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 

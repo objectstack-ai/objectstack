@@ -1,6 +1,6 @@
 # ADR-0053: `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone
 
-**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 (`temporalFilterValue` promotion onto the `IDataDriver` contract) still open as the ADR predicted.
+**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 (`temporalFilterValue` promotion onto the `IDataDriver` contract) still open as the ADR predicted. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
 **Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
@@ -402,3 +402,160 @@ time, the matrix proves runtime correctness across drivers.
   inventing a semantic" stance. No change to Phase 2's reference-timezone plan.
 - Until D-A2 lands, the hook depends on a duck-typed driver method — a known,
   intentionally-temporary seam tracked here.
+
+---
+
+## Addendum (2026-07-29) — `Field.datetime` has ONE storage form per dialect, always a UTC instant
+
+> **Status:** landed. This addendum **revises** the storage half of Phase 1 (which
+> left `Field.datetime` "stored as UTC epoch ms" on SQLite) and **extends**
+> D-A1 from the 2026-06-18 addendum to the column side of the comparison.
+> Closes #3912; supersedes the epoch-ms convention referenced there.
+
+### What the epoch-ms convention actually was
+
+It was never a convention — it was a description of what better-sqlite3 happened
+to do with a bound JS `Date`. Nothing enforced it: `formatInput` deliberately left
+`datetime` untouched, so the storage form was decided by whichever writer got
+there first.
+
+- A JS `Date` (seed loader, import, server-side code) → INTEGER epoch ms.
+- A REST/JSON write → ISO **TEXT**, because JSON has no `Date` type.
+- A `defaultValue: 'NOW()'` slot → ISO TEXT.
+- The platform's own `created_at` / `updated_at` → ISO TEXT (they are stamped
+  with `toISOString()`), on **every** object in the system.
+
+One column therefore held both forms at once, while the read path coerced filter
+comparands to epoch ms purely from the DECLARED type. On SQLite's type ordering
+(`INTEGER < TEXT`) that made a two-sided window collapse to zero rows and a
+one-sided `>=` match every TEXT row regardless of the bound — the reported symptom
+in #3912 (a dashboard `last_30_days` reading 0 with 29 rows in range). It also
+left `ORDER BY` sorting all INTEGER rows before all TEXT ones (#3928).
+
+### D-B1 — The canonical storage form is `YYYY-MM-DDTHH:MM:SS.sssZ`
+
+`Field.datetime` is stored as fixed-width, zone-explicit UTC text on SQLite, and
+written to Postgres/MySQL as that same string. `canonicalUtcDatetime()` is the one
+function that produces it, applied on write (`formatInput`) and to every filter
+comparand (`coerceFilterValue`) so the two sides of a comparison cannot disagree
+about shape.
+
+Chosen over the epoch integer because:
+
+- Lexicographic order **is** chronological order, so range filters and `ORDER BY`
+  read the column directly and can use an index. An epoch convention forces an
+  expression wrapper on every temporal predicate — it moves the cost rather than
+  removing it.
+- `strftime`/`julianday` parse it, so the date-bucket expression needs no
+  epoch↔text CASE (#3773).
+- It is what `formatOutput` already presents, so storage and presentation stop
+  disagreeing — the asymmetry Phase 1 removed for `date`, now removed for
+  `datetime`.
+- It matches the `Field.date` convention, so the platform has one temporal
+  storage story instead of one per field type.
+- It was already the majority of rows on disk, so the migration is the smaller
+  one.
+
+### D-B2 — The comparand rule is dialect-INDEPENDENT, which fixes Postgres too
+
+`coerceFilterValue` previously canonicalised only on SQLite and passed the value
+through on native-timestamp dialects. That was not neutral. Measured against
+PostgreSQL 16 with `TimeZone = Asia/Shanghai`:
+
+- A zone-**naive** write (`'2026-03-20 12:00:00'`) bound into `timestamptz` was
+  resolved against the SERVER's timezone and stored as `2026-03-20T04:00:00Z` —
+  8 hours off the instant SQLite records for the same write, in direct violation
+  of this ADR's "a naive wall clock is UTC" rule.
+- A bare `YYYY-MM-DD` comparand (what a `{30_days_ago}` token expands to) meant
+  midnight in the SERVER's timezone, so the identical query over the identical
+  instant put a row on a **different calendar day** than it did on SQLite.
+
+Stating the `Z` on both sides removes the server's timezone from the answer.
+Postgres storage itself needed no change — knex's `table.timestamp` already
+creates `timestamptz` (`useTz` defaults true, verified) — so this is a write- and
+comparand-side fix there, not a migration. Regression cover is
+`sql-driver-datetime-postgres-timezone.test.ts`, opt-in via `OS_TEST_POSTGRES_URL`
+because CI provisions no server; it asserts it is pointed at a non-UTC server so
+it cannot pass vacuously.
+
+### D-B3 — Existing rows converge at schema sync; correctness never depends on it
+
+`backfillCanonicalDatetimes` runs inside `initObjects`, rewriting SQLite rows that
+are not already canonical (INTEGER/REAL epoch, zone-naive text, offset-bearing
+text). It is idempotent, skips freshly-created tables entirely, and preserves
+values SQLite cannot parse rather than nulling them.
+
+It is allowed to fail. On error it logs and marks nothing, and the read paths keep
+the `sqliteCanonicalDatetimeSql` repair that makes an un-migrated column compare
+and bucket correctly — just without an index. A migration must never be able to
+take boot down, and query correctness must never be contingent on one having run.
+The corollary is that the repair expression stays in the codebase permanently: it
+also covers external/unmanaged tables (ADR-0015), which never get a backfill.
+
+`needsLegacyDatetimeRepair` is the single predicate every read path asks, so the
+filter, bucket and analytics surfaces cannot drift apart about whether a column
+is clean.
+
+### Consequences
+
+- D-A2 (promote `temporalFilterValue` onto the `IDataDriver` contract) now has a
+  second method to carry with it: `temporalFilterColumnSql`, the column-side
+  companion threaded to analytics as
+  `StrategyContext.coerceTemporalFilterColumn`. Coercing the value alone is not
+  sufficient on a mixed-form column, so any surface that binds a comparand into
+  raw SQL must wrap its column reference too. Both remain duck-typed until D-A2.
+- D-A3's conformance matrix should gain a **storage-form** axis (canonical,
+  legacy-epoch, legacy-naive) and a **server-timezone** axis, since both are now
+  known to have produced dialect-divergent row results.
+- #3928 (datetime `ORDER BY` mis-sorted on mixed storage) is closed by
+  construction rather than by a sort-side fix.
+### D-B4 — MySQL stores the same instant, spelled the way MySQL parses it
+
+MySQL was the third dialect, and measurement (MariaDB 10.11, `default_time_zone
+= '+08:00'`, process on `America/New_York`) found it the worst off — including
+one defect D-B1 *introduced*:
+
+- MySQL accepts neither the `T` separator nor the `Z` suffix in a datetime
+  literal, so the canonical form failed the statement outright with *Incorrect
+  datetime value*. An ISO comparand or REST/JSON write had **always** failed this
+  way; canonicalising the write path extended it to `Date` writes too.
+- `table.timestamp` emits MySQL `TIMESTAMP`: a 32-bit epoch that cannot hold an
+  instant outside 1970..2038 (a contract end date in 2040 was rejected), carries
+  no fractional digits so the canonical form's milliseconds were truncated, and
+  converts on read/write using the session timezone.
+- mysql2's `connection.timezone` defaults to the HOST's local zone and
+  `@@session.time_zone` to the server's, so a zone-naive value landed 12 hours
+  off with the two misconfigurations compounding.
+
+The resolution keeps the logical canon and changes only the physical spelling:
+
+1. `Field.datetime` maps to **`DATETIME(3)`** — range 1000..9999, milliseconds
+   kept, and no timezone conversion of its own, so the column holds the UTC wall
+   clock the driver writes. This is the ServiceNow model. Postgres deliberately
+   keeps `timestamptz`: asking for precision 3 there would *reduce* it from
+   microseconds. The builtin `created_at`/`updated_at` take the same type — the
+   registry declares them `Field.datetime`, and they are what most list views
+   sort by.
+2. The connection is **pinned to UTC on both layers** — `connection.timezone =
+   'Z'` for mysql2 and `SET time_zone = '+00:00'` via `pool.afterCreate` for the
+   server. This is what makes the wall clock *be* the instant, and it keeps a
+   not-yet-migrated `TIMESTAMP` column correct too. An explicit host choice is
+   left alone; an existing `afterCreate` is chained, not replaced.
+3. `storageDatetimeValue` respells the canonical instant as a MySQL literal for
+   the bind, on the write path and the filter path alike. Deliberately strict:
+   only an exactly-canonical string is rewritten, so an unparseable value or a
+   year outside 1000..9999 reaches MySQL untouched and fails loudly.
+
+`migrateMysqlDatetimeColumns` widens legacy `TIMESTAMP` columns at schema sync,
+under the same failure policy as D-B3 — a `TIMESTAMP` column keeps *working*
+(the driver binds the same literal and the session is UTC), it merely keeps the
+range and precision limits. Verified on a real server: the ALTER moves no stored
+instant, correctly-stored legacy rows round-trip exactly, and it is idempotent.
+
+The same caveat as Postgres applies and is worth stating plainly: the migration
+**cannot repair instants the old timezone-ambiguous write path recorded wrongly**
+— that information is gone. It preserves what is on disk.
+
+Regression cover is `sql-driver-datetime-mysql-storage.test.ts`, opt-in via
+`OS_TEST_MYSQL_URL` (CI provisions no server), asserting a non-UTC server so it
+cannot pass vacuously. 10 of its 13 cases fail without this change.
