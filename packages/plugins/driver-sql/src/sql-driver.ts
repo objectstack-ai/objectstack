@@ -28,6 +28,7 @@ import {
   type PhysicalIndex,
   type SqlDialectName,
   type PhysicalColumn,
+  type PendingSchemaWork,
 } from './schema-drift.js';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
@@ -579,6 +580,12 @@ export class SqlDriver implements IDataDriver {
 
   /** De-dup set for boot-time drift warnings (keyed by {@link driftKey}). */
   protected driftWarned = new Set<string>();
+
+  /** Deferred-DDL mode (#3917) — see {@link setDeferredDdl}. */
+  protected deferredDdl = false;
+
+  /** Object defs `initObjects` registered but did not physically sync while {@link deferredDdl}. */
+  protected deferredSchemaObjects = new Map<string, { name: string; fields?: Record<string, any> }>();
 
   constructor(config: SqlDriverConfig) {
     // `schemaMode` / `autoMigrate` are ObjectStack concerns, not Knex options —
@@ -2365,6 +2372,17 @@ export class SqlDriver implements IDataDriver {
       this.autoNumberFields[tableName] = autoNumberCols;
       this.tenantFieldByTable[tableName] = tenantField;
 
+      // Deferred-DDL mode (#3917): everything above is in-memory metadata
+      // registration — coercion maps, tenancy, and the `managedObjectFields`
+      // entry `detectManagedDrift()` diffs against. Everything below issues
+      // DDL. `os migrate plan` / `apply` boot with the deferral armed so the
+      // plan is computed against the database as it actually is, and nothing
+      // is created until the operator has seen (and confirmed) the plan.
+      if (this.deferredDdl) {
+        this.deferredSchemaObjects.set(tableName, { ...obj, name: tableName });
+        continue;
+      }
+
       // ADR-0057 P2: rotation-declared telemetry is physically time-sharded —
       // the Rotator owns its DDL (shard tables + a read view under the base
       // name); the plain create/alter path below would collide with the view.
@@ -2471,9 +2489,82 @@ export class SqlDriver implements IDataDriver {
     const usesAutoNumber = Object.values(this.autoNumberFields).some(
       (cols) => Array.isArray(cols) && cols.length > 0,
     );
-    if (usesAutoNumber) {
+    if (usesAutoNumber && !this.deferredDdl) {
       await this.ensureSequencesTable();
     }
+  }
+
+  // ── Deferred schema DDL (#3917) ────────────────────────────────────────────
+
+  /**
+   * Arm/disarm DDL deferral for {@link initObjects}.
+   *
+   * `os migrate plan` promises a dry run and `os migrate apply` promises a
+   * confirmation prompt, but both booted the full plugin set first — and boot
+   * schema-sync ran create-table / add-column DDL against the target database
+   * *before* either promise was kept (#3917). With the deferral armed,
+   * `initObjects` still registers all in-memory metadata (so drift detection
+   * sees the same authoritative field set) but records the physical work
+   * instead of performing it. {@link previewDeferredSchemaWork} renders it into
+   * the plan; {@link flushDeferredSchemaDdl} performs it once the operator has
+   * said yes.
+   *
+   * Off by default: every other boot (serve/dev/start) wants the additive sync
+   * to run exactly as before.
+   */
+  setDeferredDdl(deferred: boolean): void {
+    this.deferredDdl = deferred;
+  }
+
+  /** How many objects are waiting for {@link flushDeferredSchemaDdl}. */
+  get deferredSchemaObjectCount(): number {
+    return this.deferredSchemaObjects.size;
+  }
+
+  /**
+   * What the deferred sync *would* do, without doing it.
+   *
+   * Read-only: `hasTable` + `columnInfo`, the same two probes the additive sync
+   * uses to decide between create and alter. Tables and columns that already
+   * match metadata produce no entry, so an in-sync database returns `[]`.
+   */
+  async previewDeferredSchemaWork(): Promise<PendingSchemaWork[]> {
+    const out: PendingSchemaWork[] = [];
+    for (const [tableName, obj] of this.deferredSchemaObjects) {
+      const declared = Object.keys(obj.fields ?? {});
+      if (!(await this.knex.schema.hasTable(tableName))) {
+        out.push({ table: tableName, kind: 'create_table', columns: declared });
+        continue;
+      }
+      const existing = new Set(Object.keys(await this.knex(tableName).columnInfo()));
+      const missing = declared.filter((c) => !existing.has(c));
+      if (missing.length > 0) {
+        out.push({ table: tableName, kind: 'add_columns', columns: missing });
+      }
+    }
+    out.sort((a, b) => a.table.localeCompare(b.table));
+    return out;
+  }
+
+  /**
+   * Run the deferred sync and disarm the deferral. Returns the work that was
+   * outstanding (captured before the DDL ran, so the caller can report what it
+   * just did). A no-op when nothing was deferred.
+   */
+  async flushDeferredSchemaDdl(): Promise<PendingSchemaWork[]> {
+    const pending = [...this.deferredSchemaObjects.values()];
+    if (pending.length === 0) {
+      this.deferredDdl = false;
+      return [];
+    }
+    const performed = await this.previewDeferredSchemaWork();
+    this.deferredSchemaObjects.clear();
+    this.deferredDdl = false;
+    // Re-entering initObjects re-registers the same metadata (idempotent) and
+    // this time takes the DDL path, so create/alter/index/rotation handling
+    // stays in exactly one place.
+    await this.initObjects(pending);
+    return performed;
   }
 
   // ── Managed-schema drift & reconcile (#2186) ───────────────────────────────

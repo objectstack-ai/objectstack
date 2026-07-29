@@ -59,10 +59,24 @@ export class AppPlugin implements Plugin {
     private projectContext?: AppPluginProjectContext;
     /** When true, init/start become no-ops — env has no app payload. */
     private readonly empty: boolean = false;
+    /**
+     * Suppress the inline boot seed (#3917). One-shot schema commands
+     * (`os migrate plan` / `os migrate apply`) boot the full plugin set purely
+     * to read metadata, and a boot that writes demo rows into the operator's
+     * live database before they have confirmed anything is the same class of
+     * bug as boot-time DDL. The `seed-replayer` service is still registered —
+     * it only writes when something calls it.
+     */
+    private readonly skipSeedData: boolean;
 
-    constructor(bundle: any, projectContext?: AppPluginProjectContext) {
+    constructor(
+        bundle: any,
+        projectContext?: AppPluginProjectContext,
+        opts: { skipSeedData?: boolean } = {},
+    ) {
         this.bundle = bundle;
         this.projectContext = projectContext;
+        this.skipSeedData = opts.skipSeedData ?? false;
         // Support both direct manifest (legacy) and Stack Definition (nested manifest)
         const sys = bundle?.manifest || bundle;
         const appId = sys?.id || sys?.name;
@@ -871,7 +885,11 @@ export class AppPlugin implements Plugin {
              // legacy behaviour: seed immediately at boot so there's
              // always demo data without needing an org insert.
              const multiTenant = resolveMultiOrgEnabled();
-             if (multiTenant) {
+             if (this.skipSeedData) {
+                 // #3917: this boot exists to READ metadata (os migrate
+                 // plan/apply). It must not write to the target database.
+                 ctx.logger.info('[Seeder] skipSeedData — inline seed suppressed; no rows written by this boot');
+             } else if (multiTenant) {
                  ctx.logger.info('[Seeder] multi-tenant mode — skipping inline seed; per-org replay will run on sys_organization insert');
              } else {
              // Inline seed budget: large bundles (e.g. CRM Starter's 10

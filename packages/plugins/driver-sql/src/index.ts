@@ -37,6 +37,7 @@ export type {
   PhysicalIndex,
   ExpectedIndex,
   LegacyUniqueReplacement,
+  PendingSchemaWork,
   FieldDef as DriftFieldDef,
 } from './schema-drift.js';
 
