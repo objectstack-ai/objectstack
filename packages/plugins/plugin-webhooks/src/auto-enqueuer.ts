@@ -333,12 +333,21 @@ export class AutoEnqueuer {
                 headers: sub.headers,
                 signingSecret: sub.secret,
                 timeoutMs: sub.timeoutMs,
+                // [#3946] Envelope keys are written LAST so the event payload
+                // cannot rewrite them. Behaviour-neutral for the engine's own
+                // publishers — `data.record.*` payloads are
+                // `{ recordId, after, changes }`, with record fields nested
+                // under `after`, so none of these four keys collide today. It
+                // is the shape that was wrong: a publisher that flattened
+                // record fields into the payload (the `payload.id` fallback
+                // above suggests some do) would have silently rewritten the
+                // `object` / `action` / `timestamp` a subscriber receives.
                 payload: {
+                    ...payload,
                     object: event.object,
                     recordId,
                     action,
                     timestamp: event.timestamp,
-                    ...payload,
                 },
             }).catch((err) =>
                 this.logger.warn?.('[webhook-auto-enqueuer] enqueue failed', {
