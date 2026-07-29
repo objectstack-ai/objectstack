@@ -277,6 +277,48 @@ describe('seed reference resolution — multi-value lookup (multiple: true)', ()
     expect(store.book[0].reviewer).toBeUndefined();
     expect(store.book[0].name).toBe('Refactoring');
     expect(logger.warn).toHaveBeenCalled();
+
+    // framework#3932: the row WAS written, so `errored` stays 0 and the row
+    // counters all look healthy — the loss only shows up here.
+    expect(result.summary.totalErrored).toBe(0);
+    expect(result.summary.totalReferencesDropped).toBe(1);
+    expect(result.results.find((r) => r.object === 'book')!.referencesDropped).toBe(1);
+  });
+
+  it('counts a dropped reference field without disturbing the row counters (#3932)', async () => {
+    const { engine, store } = createEngine(SCHEMAS);
+
+    const result = await new SeedLoaderService(engine, createEmptyMetadata(), createLogger()).load({
+      seeds: [AUTHOR_SEED, bookSeed([
+        { name: 'Refactoring', authors: [{ externalId: 'Alice' }] },
+        { name: 'Clean Code', authors: ['Alice'] },
+      ])] as any,
+      config: CONFIG,
+    });
+
+    const book = result.results.find((r) => r.object === 'book')!;
+    // Both rows were written — one just lost its association.
+    expect(store.book).toHaveLength(2);
+    expect(book.inserted).toBe(2);
+    expect(book.errored).toBe(0);
+    expect(book.referencesDropped).toBe(1);
+    // The reconciliation `errored` must not break: inserted + updated + skipped
+    // still accounts for every record in the dataset.
+    expect(book.inserted + book.updated + book.skipped + book.errored).toBe(book.total);
+    // Still a failed load — the counter reports damage, it does not excuse it.
+    expect(result.success).toBe(false);
+  });
+
+  it('reports zero dropped references on a clean load', async () => {
+    const { engine } = createEngine(SCHEMAS);
+
+    const result = await new SeedLoaderService(engine, createEmptyMetadata(), createLogger()).load({
+      seeds: [AUTHOR_SEED, bookSeed([{ name: 'Refactoring', authors: ['Alice', 'Bob'] }])] as any,
+      config: CONFIG,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.summary.totalReferencesDropped).toBe(0);
   });
 
   it('still rejects a wrapper object inside a multi-value array', async () => {

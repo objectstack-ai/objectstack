@@ -251,6 +251,13 @@ export class SeedLoaderService implements ISeedLoaderService {
     let errored = 0;
     let referencesResolved = 0;
     let referencesDeferred = 0;
+    /**
+     * Reference FIELDS dropped from records that were still written — the
+     * "wrote the row, lost the link" outcome. Kept apart from `errored` (which
+     * counts dropped RECORDS) so `inserted + updated + skipped + errored`
+     * still reconciles against `total`. See framework#3932.
+     */
+    let referencesDropped = 0;
     const errors: ReferenceResolutionError[] = [];
 
     // Ensure the object's record map exists
@@ -507,8 +514,12 @@ export class SeedLoaderService implements ISeedLoaderService {
           this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex: i });
           // Drop the unwritable value so it never reaches the driver. Removing
           // the key (not writing null) matters on the upsert UPDATE path — see
-          // the deferred-reference note below.
+          // the deferred-reference note below. The row itself still gets
+          // written, so this is a dropped FIELD, not a dropped record — counted
+          // separately (framework#3932) or every count-driven surface, notably
+          // the CLI boot banner, reads clean over a severed association.
           delete record[ref.field];
+          referencesDropped++;
           continue;
         }
 
@@ -558,7 +569,9 @@ export class SeedLoaderService implements ISeedLoaderService {
           // Removing the key (not writing null) matters on the upsert UPDATE
           // path: an explicit null would overwrite the existing row's valid
           // reference, silently severing the link on every seed replay.
+          // Counted as a dropped FIELD (see the array branch above).
           delete record[ref.field];
+          referencesDropped++;
           continue;
         }
 
@@ -720,6 +733,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       total: dataset.records.length,
       referencesResolved,
       referencesDeferred,
+      referencesDropped,
       errors,
     };
   }
@@ -1458,6 +1472,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         totalErrored: 0,
         totalReferencesResolved: 0,
         totalReferencesDeferred: 0,
+        totalReferencesDropped: 0,
         circularDependencyCount: 0,
         durationMs,
       },
@@ -1480,6 +1495,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       totalErrored: results.reduce((sum, r) => sum + r.errored, 0),
       totalReferencesResolved: results.reduce((sum, r) => sum + r.referencesResolved, 0),
       totalReferencesDeferred: results.reduce((sum, r) => sum + r.referencesDeferred, 0),
+      totalReferencesDropped: results.reduce((sum, r) => sum + (r.referencesDropped ?? 0), 0),
       circularDependencyCount: graph.circularDependencies.length,
       durationMs,
     };

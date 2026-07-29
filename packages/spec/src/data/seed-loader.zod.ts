@@ -335,6 +335,26 @@ export const SeedLoadResultSchema = lazySchema(() => z.object({
   /** Number of references deferred to pass 2 (circular dependencies) */
   referencesDeferred: z.number().int().min(0).describe('References deferred to second pass'),
 
+  /**
+   * Number of reference FIELDS dropped from a record that was still written.
+   *
+   * `errored` already covers records the loader could not write as authored —
+   * dropped for an unresolvable reference, rejected by the engine, or left
+   * with a deferred reference that never resolved. This counter covers the
+   * remaining case, which nothing else counted: an unusable reference value
+   * (an object where a natural key belongs, an array on a single-value field)
+   * is removed from the record — never written as NULL, which would sever an
+   * existing link on upsert replay — and the row is written WITHOUT it. The
+   * row is real but incomplete.
+   *
+   * Folding that into `errored` would break the `inserted + updated + skipped`
+   * reconciliation, so it gets its own counter. Without it a load that quietly
+   * severed N associations reported `totalErrored: 0`, and any count-driven
+   * surface — notably the CLI boot banner — read clean (framework#3932).
+   */
+  referencesDropped: z.number().int().min(0).default(0)
+    .describe('Reference fields dropped from records that were still written'),
+
   /** Reference resolution errors for this object */
   errors: z.array(ReferenceResolutionErrorSchema).default([])
     .describe('Reference resolution errors'),
@@ -391,6 +411,13 @@ export const SeedLoaderResultSchema = lazySchema(() => z.object({
 
     /** Total references deferred to second pass */
     totalReferencesDeferred: z.number().int().min(0).describe('Total references deferred'),
+
+    /**
+     * Total reference fields dropped from rows that were still written —
+     * "wrote the row, lost the link". See `SeedLoadResult.referencesDropped`.
+     */
+    totalReferencesDropped: z.number().int().min(0).default(0)
+      .describe('Total reference fields dropped from written records'),
 
     /** Number of circular dependency chains detected */
     circularDependencyCount: z.number().int().min(0).describe('Circular dependency chains detected'),

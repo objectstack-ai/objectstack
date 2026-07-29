@@ -3752,6 +3752,7 @@
     "data/SeedLoadResult:mode",
     "data/SeedLoadResult:object",
     "data/SeedLoadResult:referencesDeferred",
+    "data/SeedLoadResult:referencesDropped",
     "data/SeedLoadResult:referencesResolved",
     "data/SeedLoadResult:skipped",
     "data/SeedLoadResult:total",

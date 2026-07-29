@@ -332,6 +332,12 @@ export interface SeedSourceSummary {
   /** Records dropped by validation/reference errors — the silent-loss case. */
   rejected: number;
   /**
+   * Reference FIELDS dropped from rows that WERE written (#3932). The row
+   * count stays healthy — the association is what went missing — so unless
+   * this is said out loud, nothing on this line hints at it.
+   */
+  droppedRefs?: number;
+  /**
    * Rows were (re)seeded onto a fresh/empty database during rehydrate — the
    * "swap the DB out from under an installed package" self-heal (#3430).
    */
@@ -460,20 +466,26 @@ function printSeedSummary(sources: SeedSourceSummary[]) {
   const shown = sources.filter((s) => {
     // Empty installs and rejections are ALWAYS shown (they're the whole point);
     // a source that touched no rows and had no problem is noise — drop it.
-    if (s.emptyInstall || s.rejected > 0) return true;
+    if (s.emptyInstall || s.rejected > 0 || (s.droppedRefs ?? 0) > 0) return true;
     return s.inserted + s.updated + s.skipped > 0;
   });
   if (shown.length === 0) return;
 
-  const anyProblem = shown.some((s) => s.rejected > 0 || s.emptyInstall);
+  const anyProblem = shown.some((s) => s.rejected > 0 || (s.droppedRefs ?? 0) > 0 || s.emptyInstall);
 
   const fragment = (s: SeedSourceSummary): string => {
     const label = s.marketplace ? `${s.source}(marketplace)` : s.source;
     if (s.emptyInstall) return `${label} installed but 0 rows ⚠`;
     const ok = s.inserted + s.updated + s.skipped;
+    // A dropped reference leaves the row in place, so it never shows up in the
+    // row counts — name it separately or the line reads clean over a severed
+    // association (#3932).
+    const dropped = s.droppedRefs ?? 0;
+    const lostLinks = dropped > 0 ? ` / ${dropped} lost link${dropped === 1 ? '' : 's'}` : '';
     if (s.rejected > 0) {
-      return `${label} ${ok} ok / ${s.rejected} error${s.rejected === 1 ? '' : 's'} ⚠`;
+      return `${label} ${ok} ok / ${s.rejected} error${s.rejected === 1 ? '' : 's'}${lostLinks} ⚠`;
     }
+    if (dropped > 0) return `${label} ${ok} ok${lostLinks} ⚠`;
     return `${label} ${ok} rows${s.healed ? ' (healed on fresh db)' : ''}`;
   };
 

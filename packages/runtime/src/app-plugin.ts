@@ -893,6 +893,11 @@ export class AppPlugin implements Plugin {
                       });
                       const result = await seedLoader.load(request);
                       const { totalInserted, totalUpdated, totalSkipped, totalErrored } = result.summary;
+                      // "Wrote the row, lost the link" (#3932): a reference field
+                      // dropped from a row that WAS written moves none of the row
+                      // counters, so it needs carrying separately or the banner
+                      // reads clean over a severed association.
+                      const totalRefsDropped = result.summary.totalReferencesDropped ?? 0;
                       // #3415/#3430: stash a per-source outcome on the kernel so
                       // the CLI boot banner can print a Seeds line. The logs below
                       // never reach `os dev` output — info is under the default
@@ -905,6 +910,7 @@ export class AppPlugin implements Plugin {
                           updated: totalUpdated,
                           skipped: totalSkipped,
                           rejected: totalErrored,
+                          droppedRefs: totalRefsDropped,
                       });
                       if (result.success) {
                           ctx.logger.info('[Seeder] Seed loading complete', {
@@ -918,13 +924,20 @@ export class AppPlugin implements Plugin {
                           // invisible (the summary only logged errors.length and
                           // omitted totalErrored). Report the count AND each
                           // actionable reason so broken seeds can't pass silently.
+                          // Dropped reference FIELDS are named separately — the
+                          // old line said "0 dropped record(s)" over a load that
+                          // had severed associations, which is true and useless.
+                          const lostLinks = totalRefsDropped > 0
+                              ? `, ${totalRefsDropped} dropped reference field(s) on written rows,`
+                              : '';
                           ctx.logger.warn(
-                              `[Seeder] Seed loading completed with ${totalErrored} dropped record(s) and ${result.errors.length} error(s) for ${appId}`,
+                              `[Seeder] Seed loading completed with ${totalErrored} dropped record(s)${lostLinks} and ${result.errors.length} error(s) for ${appId}`,
                               {
                                   inserted: totalInserted,
                                   updated: totalUpdated,
                                   skipped: totalSkipped,
                                   errored: totalErrored,
+                                  referencesDropped: totalRefsDropped,
                               },
                           );
                           for (const e of result.errors.slice(0, 20)) {
