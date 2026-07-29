@@ -122,6 +122,12 @@ Batch update multiple records.
 }
 ```
 
+The body is validated against the contract and unknown keys are dropped. The
+target object always comes from the URL — an `object` key in the body is
+ignored, on this route and on `deleteMany`.
+
+**Response**: `BatchUpdateResponse`, one `results` entry per record.
+
 ### `POST /data/:object/deleteMany`
 
 Batch delete records by ID list.

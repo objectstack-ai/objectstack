@@ -6817,15 +6817,38 @@ export class RestServer {
                         if (this.enforceAuth(req, res, context)) return;
                         // [#3391] bulk ∧ update — updateMany requires the `bulk` primitive.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'update' })) return;
-                        const result = await p.updateManyData!({
+                        // [#3933] Validate against the spec contract, and write the
+                        // PATH object last. The body used to be spread over
+                        // `object: req.params.object`, so `{"object":"other", …}`
+                        // moved the write to a different object than the one
+                        // `enforceApiAccess` had just cleared — that gate reads
+                        // `req.params.object`, so `enable.apiEnabled` / `apiMethods`
+                        // (ADR-0049) was enforced on A while B was written. Zod also
+                        // strips unknown keys, which keeps a body `context` from
+                        // becoming the execution context on a deployment where none
+                        // resolves (anonymous-reachable `requireAuth: false`).
+                        const { UpdateManyDataRequestSchema } = await import('@objectstack/spec/api');
+                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse({
+                            ...(req.body ?? {}),
                             object: req.params.object,
-                            ...req.body,
+                        });
+                        if (!parsedUpdate.success) {
+                            res.status(400).json({
+                                error: 'Invalid updateMany request',
+                                code: 'VALIDATION_FAILED',
+                                object: req.params?.object,
+                                issues: parsedUpdate.error?.issues,
+                            });
+                            return;
+                        }
+                        const result = await p.updateManyData!({
+                            ...parsedUpdate.data,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
                         res.json(result);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
+                        if (error?.code !== 'VALIDATION_FAILED') logError("[REST] Unhandled error:", error);
                         sendError(res, error, req.params?.object);
                     }
                 },
@@ -6861,10 +6884,14 @@ export class RestServer {
                         // refuses the same shapes independently (defence in
                         // depth) — this stops them one hop earlier, with a 400
                         // the caller can act on.
+                        // [#3933] The PATH object is written LAST for the same
+                        // reason: `enforceApiAccess` gates on `req.params.object`,
+                        // so a body `object` would move the delete to an object
+                        // whose exposure policy was never checked.
                         const { DeleteManyDataRequestSchema } = await import('@objectstack/spec/api');
                         const parsed = (DeleteManyDataRequestSchema as any).safeParse({
-                            object: req.params.object,
                             ...(req.body ?? {}),
+                            object: req.params.object,
                         });
                         if (!parsed.success) {
                             res.status(400).json({
