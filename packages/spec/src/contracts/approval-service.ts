@@ -69,6 +69,13 @@ export interface ApprovalRequestRow {
     label?: string;
     type?: 'text' | 'user' | 'department' | 'position' | 'team';
     multiple?: boolean;
+    /**
+     * The approver must supply this one to APPROVE (objectui#2955) — enforced
+     * by `decide()`, so a decision UI should block the approve action on a
+     * blank value rather than letting the server reject the round trip.
+     * Never enforced on reject.
+     */
+    required?: boolean;
   }>;
   completed_at?: string;
   created_at?: string;
@@ -286,6 +293,10 @@ export interface ApprovalDecisionInput {
    * `decision` / `requestId` are reserved. Accepted outputs resume the run as
    * `<nodeId>.<key>` flow variables, where a later approval node's
    * `expression` approver can read them (`vars.<nodeId>.picked_departments`).
+   *
+   * An output declared `required` must carry a non-blank value on an APPROVE
+   * (objectui#2955); the decision is rejected before any write otherwise. A
+   * reject never requires them.
    */
   outputs?: Record<string, unknown>;
 }

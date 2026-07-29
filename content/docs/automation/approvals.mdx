@@ -259,6 +259,19 @@ matching system-object picker; picker values are record ids, `multiple`
 collects an id array). The type shapes only the input widget; the whitelist
 still works by `key`, so bare strings and typed declarations mix freely.
 
+Add **`required: true`** when the next step cannot run without it — the very
+case above, where node B has nobody to route to if the lead skipped the field.
+Unlike `type` / `multiple`, this one is enforced by the runtime: an **approve**
+carrying no value (or a blank one — `''`, `[]`) for a required key is rejected
+before any write, so the run can never resume past the node with the key
+missing. A **reject** never requires it: the run leaves down the `reject` edge,
+where nothing reads the outputs. Enforcement has no elevation bypass — a
+one-click email action link and an `auto_approve` SLA escalation both fail
+rather than advance into a node that would resolve nobody, leaving the request
+pending and visibly overdue. Without the flag your only backstop is
+`onEmptyApprovers` — the next node opens, resolves nobody, and stalls for an
+admin rescue long after the approver who could have filled it in has gone.
+
 ## The full lifecycle — submit to field change
 
 What actually happens between "the flow hits the approval node" and "the record

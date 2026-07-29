@@ -41,8 +41,12 @@ export const DynamicApprovalFlow = defineFlow({
         lockRecord: true,
         // The lead hands the co-signers to the flow with their decision. The
         // TYPED declaration renders a multi-select sys_user picker in the
-        // decision dialog (bare string keys render free text).
-        decisionOutputs: [{ key: 'next_reviewers', label: 'Next Reviewers', type: 'user', multiple: true }],
+        // decision dialog (bare string keys render free text), and `required`
+        // is enforced on approve — stage 2 declares `onEmptyApprovers: 'fail'`,
+        // so a lead who skipped the field would kill the run.
+        decisionOutputs: [{
+          key: 'next_reviewers', label: 'Next Reviewers', type: 'user', multiple: true, required: true,
+        }],
       },
     },
     {

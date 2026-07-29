@@ -14,6 +14,7 @@ import {
   ApprovalEscalationSchema,
   ApprovalNodeConfigSchema,
   getApprovalNodeConfigJsonSchema,
+  normalizeDecisionOutputs,
 } from './approval.zod';
 
 describe('ApproverType', () => {
@@ -278,5 +279,41 @@ describe('ApprovalEscalationSchema', () => {
     expect(result.action).toBe('notify');
     expect(result.notifySubmitter).toBe(true);
     expect(() => ApprovalEscalationSchema.parse({ enabled: true, timeoutHours: 0 })).toThrow();
+  });
+});
+
+/**
+ * `normalizeDecisionOutputs` is the ONE reader of the bare-key | typed-object
+ * union — the runtime whitelists from it, and the request row surfaces its
+ * output to the decision UI. Anything it drops is invisible to both sides,
+ * which is how `required` has to be pinned here and not only at the service.
+ */
+describe('normalizeDecisionOutputs', () => {
+  it('lifts bare keys into the typed form', () => {
+    expect(normalizeDecisionOutputs(['next_reviewers', 'note'])).toEqual([
+      { key: 'next_reviewers' },
+      { key: 'note' },
+    ]);
+  });
+
+  it('carries the widget hints and the required flag through (objectui#2955)', () => {
+    expect(normalizeDecisionOutputs([
+      { key: 'positions', label: 'Co-signers', type: 'position', multiple: true, required: true },
+    ])).toEqual([
+      { key: 'positions', label: 'Co-signers', type: 'position', multiple: true, required: true },
+    ]);
+  });
+
+  it('omits the falsy flags rather than spelling them out', () => {
+    // The normalized shape is what the request row ships to every client, so
+    // an absent flag must stay absent instead of becoming `required: false`.
+    expect(normalizeDecisionOutputs([{ key: 'note', multiple: false, required: false }]))
+      .toEqual([{ key: 'note' }]);
+  });
+
+  it('drops entries with no usable key, and non-arrays entirely', () => {
+    expect(normalizeDecisionOutputs(['', { key: '' }, { label: 'no key' }, 42])).toEqual([]);
+    expect(normalizeDecisionOutputs(undefined)).toEqual([]);
+    expect(normalizeDecisionOutputs('next_reviewers')).toEqual([]);
   });
 });

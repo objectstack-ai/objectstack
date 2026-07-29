@@ -554,6 +554,115 @@ describe('ApprovalService (node era)', () => {
     expect(second.outputs).toEqual({ legal_note: 'ok', finance_note: 'ok too' });
   });
 
+  // ── required decision outputs (objectui#2955) ───────────────────
+  //
+  // `type`/`multiple` only shape the input widget; `required` is the one
+  // declaration the RUNTIME enforces. Without it the author's only backstop
+  // was `onEmptyApprovers`: the approve went through with the key missing, the
+  // next node's `expression` approver resolved nobody, and the run stalled for
+  // an admin rescue — long after the approver who could have supplied it left.
+
+  const requiredInput = (extra: Record<string, any> = {}) => openInput(['u9'], {}, {
+    decisionOutputs: [
+      { key: 'parallel_positions', label: 'Co-signing positions', type: 'position', multiple: true, required: true },
+      { key: 'note' },
+    ],
+    ...extra,
+  });
+
+  it('required outputs: surfaced on the request row so the UI can block before the round trip', async () => {
+    const req = await svc.openNodeRequest(requiredInput(), CTX) as any;
+    expect(req.decision_output_defs).toEqual([
+      { key: 'parallel_positions', label: 'Co-signing positions', type: 'position', multiple: true, required: true },
+      { key: 'note' },
+    ]);
+  });
+
+  it('required outputs: an approve that omits one is rejected before any write', async () => {
+    const req = await svc.openNodeRequest(requiredInput(), CTX);
+    await expect(svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u9', outputs: { note: 'looks fine' },
+    }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*parallel_positions.*required to approve/s);
+    // Atomic: the decision left no audit row (only the open-time submit), and
+    // the request is untouched.
+    expect((engine._tables['sys_approval_action'] ?? []).map((a: any) => a.action)).toEqual(['submit']);
+    expect(engine._tables['sys_approval_request'][0].status).toBe('pending');
+  });
+
+  it('required outputs: an approve carrying no outputs at all is rejected too', async () => {
+    // The regression that matters — a decision surface that collects nothing
+    // (objectui#2955: the record header) used to sail straight through here.
+    const req = await svc.openNodeRequest(requiredInput(), CTX);
+    await expect(svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u9',
+    }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*parallel_positions.*required to approve/s);
+  });
+
+  it('required outputs: present-but-blank does not satisfy the requirement', async () => {
+    // An untouched widget submits '' or [] — accepting those would hand the
+    // downstream expression approver an empty slate, i.e. the exact stall.
+    for (const blank of ['', '   ', [], [''], null]) {
+      engine._tables['sys_approval_request'] = [];
+      engine._tables['sys_approval_action'] = [];
+      const req = await svc.openNodeRequest(requiredInput(), CTX);
+      await expect(svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { parallel_positions: blank },
+      }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*required to approve/s);
+    }
+  });
+
+  it('required outputs: a filled approve goes through and hands the value to the flow', async () => {
+    const req = await svc.openNodeRequest(requiredInput(), CTX);
+    const out = await svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u9', outputs: { parallel_positions: ['pos_1', 'pos_2'] },
+    }, SYS);
+    expect(out.finalized).toBe(true);
+    expect(out.outputs).toEqual({ parallel_positions: ['pos_1', 'pos_2'] });
+  });
+
+  it('required outputs: a REJECT never needs them', async () => {
+    // The run leaves down the reject edge, where nothing reads the outputs —
+    // demanding routing data to say "no" would trap the rejection.
+    const req = await svc.openNodeRequest(requiredInput(), CTX);
+    const out = await svc.decideNode(req.id, { decision: 'reject', actorId: 'u9' }, SYS);
+    expect(out.finalized).toBe(true);
+    expect(out.decision).toBe('reject');
+  });
+
+  it('required outputs: an unrelated node is unaffected', async () => {
+    // No `required` anywhere → the pre-#2955 behaviour, byte for byte.
+    const req = await svc.openNodeRequest(
+      openInput(['u9'], {}, { decisionOutputs: ['note'] }), CTX,
+    );
+    const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expect(out.finalized).toBe(true);
+  });
+
+  it('required outputs: every approver of a multi-approver node must supply them', async () => {
+    // Enforced per decision, not per node: each approve is a decision that
+    // could be the one that resumes the run, and each approver sees the field.
+    const req = await svc.openNodeRequest(
+      openInput(['u1', 'u2'], {}, {
+        behavior: 'unanimous',
+        decisionOutputs: [{ key: 'co_signer', type: 'user', required: true }],
+      }), CTX,
+    );
+    await expect(svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u1',
+    }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*co_signer.*required to approve/s);
+    const first = await svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u1', outputs: { co_signer: 'u7' },
+    }, SYS);
+    expect(first.finalized).toBe(false);
+    const second = await svc.decideNode(req.id, {
+      decision: 'approve', actorId: 'u2', outputs: { co_signer: 'u8' },
+    }, SYS);
+    expect(second.finalized).toBe(true);
+    // Last decision wins the merge — the finalizing approver's pick is what
+    // the flow resumes with.
+    expect(second.outputs).toEqual({ co_signer: 'u8' });
+  });
+
   // ── approver expansion: position (ADR-0090 D3) ──────────────────
 
   const positionInput = (extra: Record<string, any> = {}) => ({

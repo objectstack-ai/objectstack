@@ -457,7 +457,11 @@ declares keys, approvers only fill values. Accepted outputs resume the run as
 `vars.<nodeId>.<key>` — this is how "the previous approver picks the next
 step's approvers" works without writing to a record field (see Dynamic
 approvers below). A decision carrying an undeclared key is rejected;
-`decision` / `requestId` are reserved.
+`decision` / `requestId` are reserved. A declaration marked
+`required: true` must carry a non-blank value to **approve** (never to
+reject) — enforced before any write, with no elevation bypass, so the run
+cannot resume past the node with the key a later `expression` approver reads
+still missing.
 
 ### Approver Types
 
@@ -536,10 +540,12 @@ export const DynamicApprovalFlow = defineFlow({
       // declaration renders a multi-select sys_user picker in the decision
       // dialog; the lead approves with outputs:
       //   POST …/approve { outputs: { next_reviewers: ['u2', 'u3'] } }
+      // `required: true` is enforced by the runtime on APPROVE (never on
+      // reject) — node B below has nobody to route to without it.
       id: 'lead_review', type: 'approval', label: 'Lead Review',
       config: {
         approvers: [{ type: 'org_membership_level', value: 'owner' }],
-        decisionOutputs: [{ key: 'next_reviewers', label: 'Next Reviewers', type: 'user', multiple: true }],
+        decisionOutputs: [{ key: 'next_reviewers', label: 'Next Reviewers', type: 'user', multiple: true, required: true }],
       },
     },
     {
