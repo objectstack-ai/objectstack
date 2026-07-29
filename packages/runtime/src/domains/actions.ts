@@ -272,6 +272,29 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         const inner: unknown = err?.innerMessage;
         const clientMsg = (typeof inner === 'string' && inner) ? inner : full;
         if (clientMsg !== full) console.error(`[action ${objectName}/${actionName}] ${full}`);
-        return { handled: true, response: deps.success({ success: false, error: clientMsg }) };
+        // [#3918 follow-up] Carry the structured payload when the failure was a
+        // record validation error. Until the sandbox learned to pass `code` /
+        // `fields` back OUT of the VM, this envelope was the message string and
+        // nothing else — so a form action could only ever raise a toast, never
+        // highlight the field the user actually got wrong, which is the symptom
+        // the original report was about.
+        //
+        // The HTTP status stays 200 and `success: false` remains the failure
+        // signal. `/actions` has always reported business failure in the payload
+        // (an action that "fails" is a normal outcome, not a transport error) and
+        // every existing caller branches on `data.success`; turning this into a
+        // 4xx would be a wire-contract break in exchange for a strictly additive
+        // fix.
+        const code: unknown = err?.code;
+        const fields: unknown = err?.fields;
+        return {
+            handled: true,
+            response: deps.success({
+                success: false,
+                error: clientMsg,
+                ...(typeof code === 'string' && code ? { code } : {}),
+                ...(Array.isArray(fields) ? { fields } : {}),
+            }),
+        };
     }
 }

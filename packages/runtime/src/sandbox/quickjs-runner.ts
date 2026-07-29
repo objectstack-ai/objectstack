@@ -271,16 +271,31 @@ export class QuickJSScriptRunner implements ScriptRunner {
       //   1. yield to the host event loop (lets host promises settle)
       //   2. drain QuickJS pending jobs (advances the .then chain)
       //   3. read __result/__error from the VM
+      // `__error` stays EXACTLY the flattened `<name>: <message>` string it has
+      // always been — it is what the SandboxError message/innerMessage are built
+      // from, and every existing consumer reads it. `__errorInfo` is a strictly
+      // additive side-channel carrying the structured bits
+      // (SANDBOX_ERROR_PASSTHROUGH) that the flattening discards, so a record
+      // `ValidationError` keeps its `fields[]` on the way back out to the host.
+      const REJECT_HANDLER =
+        `function(e){
+              globalThis.__error = (e && e.message) ? (e.name + ': ' + e.message) : String(e);
+              try {
+                globalThis.__errorInfo = (e && (e.code || e.fields))
+                  ? JSON.stringify({ code: e.code, fields: e.fields })
+                  : undefined;
+              } catch (_) { globalThis.__errorInfo = undefined; }
+            }`;
       const wrapped = args.origin.kind === 'hook'
-        ? `globalThis.__result = undefined; globalThis.__error = undefined;
+        ? `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined;
             (async (ctx) => { ${args.source} })(globalThis.__ctx).then(
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
-              function(e){ globalThis.__error = (e && e.message) ? (e.name + ': ' + e.message) : String(e); }
+              ${REJECT_HANDLER}
             );`
-        : `globalThis.__result = undefined; globalThis.__error = undefined;
+        : `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined;
             (async (input, ctx) => { ${args.source} })(globalThis.__input, globalThis.__ctx).then(
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
-              function(e){ globalThis.__error = (e && e.message) ? (e.name + ': ' + e.message) : String(e); }
+              ${REJECT_HANDLER}
             );`;
 
       sliceStart = Date.now();
@@ -367,6 +382,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
           throw new SandboxError(
             `${args.origin.kind} '${args.origin.name}' threw: ${errStr}`,
             userFacingMessage(String(errStr)),
+            readErrorInfo(vm),
           );
         }
 
@@ -516,10 +532,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
             deferred.resolve(vm.undefined);
           } catch (err) {
             if (!vm.alive) return;
-            const errH =
-              err instanceof Error
-                ? vm.newError({ name: err.name || 'Error', message: err.message })
-                : vm.newError({ name: 'Error', message: String(err) });
+            const errH = hostErrorToVm(vm, err);
             deferred.reject(errH);
             errH.dispose();
           }
@@ -715,10 +728,9 @@ function installApiMethod(
         h.dispose();
       } catch (err) {
         if (!vm.alive) return;
-        const errH =
-          err instanceof Error
-            ? vm.newError({ name: err.name || 'Error', message: err.message })
-            : vm.newError({ name: 'Error', message: String(err) });
+        // The load-bearing one: this is the `ctx.api.object(x).<op>()` rejection,
+        // i.e. where a record `ValidationError` enters the VM.
+        const errH = hostErrorToVm(vm, err);
         deferred.reject(errH);
         errH.dispose();
       }
@@ -762,6 +774,55 @@ function safeJsonStringify(v: unknown): string {
   // unserialisable (e.g. a bare function); normalise to a JSON literal so the
   // downstream `vm.evalCode` never receives `(undefined)`.
   return json ?? 'null';
+}
+
+/**
+ * Structured properties a HOST error may carry ACROSS the sandbox boundary,
+ * in addition to `name`/`message`.
+ *
+ * This is an explicit ALLOWLIST, and that is a security decision rather than a
+ * style one: everything placed on the handle below becomes readable by
+ * untrusted sandboxed code, and host errors routinely hang driver state,
+ * connection details, or whole record payloads off themselves. Copying the
+ * error's own enumerable keys would leak all of it. Only these two are safe and
+ * useful — they are already destined for the HTTP client.
+ *
+ * Why they need to cross at all: a record `ValidationError` reaching a body via
+ * `ctx.api.object(x).update(...)` used to arrive as bare `name`/`message`, so
+ * its `fields[]` was gone before any dispatcher exit could map it (#3918
+ * follow-up) — a form action could only ever show prose, never highlight the
+ * offending input.
+ */
+const SANDBOX_ERROR_PASSTHROUGH = ['code', 'fields'] as const;
+
+/**
+ * Marshal a HOST error into the VM as a rejectable QuickJS error handle,
+ * carrying {@link SANDBOX_ERROR_PASSTHROUGH} when present.
+ *
+ * The caller owns the returned handle and must dispose it.
+ */
+function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
+  const e = err as { name?: string; message?: string; code?: unknown; fields?: unknown };
+  const errH = err instanceof Error
+    ? vm.newError({ name: e.name || 'Error', message: e.message ?? '' })
+    : vm.newError({ name: 'Error', message: String(err) });
+  // Best-effort: a malformed `fields` must never turn an ordinary rejection
+  // into a marshalling failure, which would replace the body's real error.
+  try {
+    if (typeof e?.code === 'string' && e.code) {
+      const h = vm.newString(e.code);
+      vm.setProp(errH, 'code', h);
+      h.dispose();
+    }
+    if (Array.isArray(e?.fields)) {
+      const h = jsonToHandle(vm, e.fields);
+      vm.setProp(errH, 'fields', h);
+      h.dispose();
+    }
+  } catch {
+    /* keep the bare name/message error */
+  }
+  return errH;
 }
 
 /** Marshal a host JSON-serializable value into a QuickJS handle. */
@@ -861,11 +922,59 @@ export class SandboxError extends Error {
    * which have no user-meaningful inner message.
    */
   readonly innerMessage?: string;
-  constructor(message: string, innerMessage?: string) {
+  /**
+   * The semantic code of the error that crossed OUT of the VM, when it carried
+   * one — most usefully `'VALIDATION_FAILED'`.
+   */
+  readonly code?: string;
+  /**
+   * Per-field validation envelopes belonging to that error. Present only when a
+   * record `ValidationError` reached the body (typically via
+   * `ctx.api.object(x).update(...)`), so a caller can highlight the offending
+   * input instead of showing the message alone.
+   */
+  readonly fields?: unknown[];
+  constructor(message: string, innerMessage?: string, info?: SandboxErrorInfo) {
     super(message);
     this.name = 'SandboxError';
     this.innerMessage = innerMessage;
+    if (info?.code) this.code = info.code;
+    if (info?.fields) this.fields = info.fields;
   }
+}
+
+/** The structured payload carried out of the VM alongside the flattened message. */
+export interface SandboxErrorInfo {
+  code?: string;
+  fields?: unknown[];
+}
+
+/**
+ * Read the `__errorInfo` side-channel the wrapper's reject handler writes.
+ * Returns `undefined` when the body's error carried nothing structured — which
+ * is the common case, and keeps `SandboxError` unchanged for it.
+ */
+function readErrorInfo(vm: QuickJSContext): SandboxErrorInfo | undefined {
+  let raw: unknown;
+  try {
+    const h = vm.getProp(vm.global, '__errorInfo');
+    raw = vm.dump(h);
+    h.dispose();
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== 'string' || !raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  const p = parsed as { code?: unknown; fields?: unknown };
+  const info: SandboxErrorInfo = {};
+  if (typeof p?.code === 'string' && p.code) info.code = p.code;
+  if (Array.isArray(p?.fields)) info.fields = p.fields;
+  return info.code || info.fields ? info : undefined;
 }
 
 /**
