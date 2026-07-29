@@ -91,6 +91,8 @@ Investigator 4 flagged, as a P0 security hole, that a criteria sharing rule with
 
 So the natural authoring path **cannot** silently drop the predicate. Residual: only a hand-crafted `{dialect,source:''}` envelope or a direct `sys_sharing_rule` row could reach the match-all branch — worth a one-line belt-and-suspenders guard, **not a P0**. This is consistent with ADR-0049 already being *applied* to `SharingRuleSchema` (#1887). 
 
+> **Update (2026-07, #3896) — the residual was bigger than "hand-crafted", and is now closed.** The correction above is right about the *declared* path and wrong about the size of what it left over. The residual was not only a hand-crafted envelope: `POST {basePath}/sharing/rules` plucks its body field-by-field into `SharingRuleService.defineRule`, which validated `name` / `label` / `object` / `recipientType` / `recipientId` and **not** `criteria` — so a missing, `null`, or *misspelled* (`criterias`) key stored `criteria_json: null`, returned `201`, and evaluated as `find(object, { filter: {} })`. Authoring in Setup is a direct `sys_sharing_rule` insert, which reached the same place. Neither needs malice, only a typo. Closed by gating `defineRule` and the table's `beforeInsert`, and by making the evaluator match **nothing** on a match-all criteria so rows already stored under-share instead. The lesson below still holds — but it cuts both ways: "the schema requires it" is a claim about the schema, not about every entry that writes the same row.
+
 **Lesson** (it sets the disposition for the whole catalog): the audit produces *candidates*, not confirmed bugs. The scariest one collapsed on a 3-file read. Every Tier-A/B item gets a verification pass before it becomes a lint rule.
 
 ---

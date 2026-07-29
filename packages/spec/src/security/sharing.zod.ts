@@ -146,6 +146,17 @@ export const CriteriaSharingRuleSchema = lazySchema(() => BaseSharingRuleSchema.
  * (functions, cross-object traversal) is skipped and logged — never seeded as
  * a permissive match-all (ADR-0049).
  *
+ * That last sentence is a claim about the RUNTIME, not merely about this
+ * schema, and #3896 found the two entries that were not holding it up: the
+ * REST `POST {basePath}/sharing/rules` → `SharingRuleService.defineRule` path
+ * (which plucks a body rather than parsing it here, so a missing or misspelled
+ * `criteria` became `criteria_json: null` → the empty filter → every record of
+ * the object), and a direct `sys_sharing_rule` insert, which is what authoring
+ * a rule in Setup issues. Both now reject a match-all criteria, and the
+ * evaluator treats one as matching NOTHING — see `plugin-sharing`'s
+ * `rule-criteria.ts`. Anything added to this surface owes the same check: an
+ * authoring shape is only as safe as the least-validating path that writes it.
+ *
  * Kept as the `SharingRuleType`-discriminated form so a future enforced rule
  * type (e.g. membership-reactive owner-based) re-joins as a union member.
  */

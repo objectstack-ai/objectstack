@@ -126,7 +126,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       criteria_json: {
         label: "条件",
-        help: "どのレコードを共有するか。空欄にすると、そのオブジェクトのすべてのレコードを共有します。"
+        help: "どのレコードを共有するか。必須です。ルールは共有範囲を必ず絞り込む必要があるため、「すべてのレコードを共有する」設定はありません。"
       },
       recipient_type: {
         label: "受信者タイプ",

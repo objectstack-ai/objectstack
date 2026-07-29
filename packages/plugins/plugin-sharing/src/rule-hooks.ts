@@ -2,6 +2,7 @@
 
 import type { SharingRuleService } from './sharing-rule-service.js';
 import type { SharingRuleRow } from '@objectstack/spec/contracts';
+import { isMatchAllCriteria, SharingCriteriaValidationError } from './rule-criteria.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -14,6 +15,12 @@ export const SHARING_RULE_HOOK_PACKAGE = 'plugin-sharing:rules';
  * tear down the triggers that drive it.
  */
 export const RULE_REBIND_TRIGGER_PACKAGE = 'plugin-sharing:rule-rebind';
+
+/**
+ * Package id for the `sys_sharing_rule` criteria guard (#3896). Separate from
+ * both packages above so neither rebind can unregister it.
+ */
+export const RULE_CRITERIA_GUARD_PACKAGE = 'plugin-sharing:rule-criteria-guard';
 
 interface MinimalEngine {
   registerHook(event: string, handler: (ctx: any) => any | Promise<any>, options?: {
@@ -69,4 +76,41 @@ export function bindRuleHooks(
 
 export function unbindAllRuleHooks(engine: MinimalEngine): number {
   return engine.unregisterHooksByPackage(SHARING_RULE_HOOK_PACKAGE);
+}
+
+/**
+ * [#3896] Reject `sys_sharing_rule` writes whose criteria would share every
+ * record of the target object.
+ *
+ * `SharingRuleService.defineRule` gates the programmatic + REST
+ * (`POST {basePath}/sharing/rules`) entries, but authoring a rule in Setup is
+ * a plain data INSERT on this table — it never reaches that method. Without
+ * this hook the UI path keeps producing rules the evaluator now refuses to
+ * act on: safe, but silently inert, which is its own authoring trap
+ * (ADR-0078). Failing the write instead tells the admin the criteria is
+ * missing while they are still looking at the form.
+ *
+ * Update semantics are deliberately narrower than insert: only a patch that
+ * SUPPLIES `criteria_json` is checked. An existing row left over from before
+ * this guard has a null criteria, and an admin must still be able to
+ * `active: false` it — demanding a criteria to switch off an over-broad rule
+ * would be exactly backwards.
+ */
+export function bindRuleCriteriaGuard(engine: MinimalEngine, logger?: MinimalLogger): void {
+  if (typeof engine.registerHook !== 'function') return;
+  if (typeof engine.unregisterHooksByPackage === 'function') {
+    engine.unregisterHooksByPackage(RULE_CRITERIA_GUARD_PACKAGE);
+  }
+  const guard = (insert: boolean) => (ctx: any) => {
+    const data = ctx?.input?.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+    const supplied = Object.prototype.hasOwnProperty.call(data, 'criteria_json');
+    if (!insert && !supplied) return;
+    if (!isMatchAllCriteria(data.criteria_json)) return;
+    throw new SharingCriteriaValidationError();
+  };
+  const opts = { object: 'sys_sharing_rule', packageId: RULE_CRITERIA_GUARD_PACKAGE, priority: 100 };
+  engine.registerHook('beforeInsert', guard(true), opts);
+  engine.registerHook('beforeUpdate', guard(false), opts);
+  logger?.info?.('[sharing-rule] criteria guard bound on sys_sharing_rule (ADR-0049)');
 }

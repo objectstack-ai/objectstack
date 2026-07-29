@@ -17,6 +17,9 @@
  *   - a CEL `condition` the canonical compiler cannot lower (functions,
  *     cross-object traversal) — ADR-0058 D2. Compound predicates (AND/OR,
  *     comparisons, null, in) DO lower and are enforced (ADR-0058 D3, #1887).
+ *   - a missing or empty `condition`, which lowers to no predicate at all
+ *     (#3896). It used to seed a rule with `criteria_json: null` — the exact
+ *     permissive match-all the rest of this file exists to prevent.
  *   - defensively, any stale pre-built package that still registers an old
  *     `owner`-type / unmapped-recipient shape.
  *
@@ -28,6 +31,7 @@
 import type { SharingRuleService } from './sharing-rule-service.js';
 import type { SharingRuleRecipientType, ShareAccessLevel } from '@objectstack/spec/contracts';
 import { compileCelToFilter } from '@objectstack/formula';
+import { isMatchAllCriteria } from './rule-criteria.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -111,16 +115,20 @@ export async function bootstrapDeclaredSharingRules(
       logger?.warn?.('[sharing-rule] skipped owner-based rule (retired authoring shape — use a criteria rule)', { rule: r.name });
       skipped += 1; continue;
     }
-    // criteria rules: translate CEL → filter. Empty condition = match-all (intentional).
-    let criteria: Record<string, unknown> | undefined;
-    if (r.condition != null && String(r.condition).trim() !== '') {
-      const f = celToFilter(r.condition);
-      if (!f) {
-        logger?.warn?.('[sharing-rule] skipped (untranslatable CEL condition) [experimental]', { rule: r.name, condition: r.condition });
-        skipped += 1; continue;
-      }
-      criteria = f;
+    // criteria rules: translate CEL → filter. [#3896] A missing / empty
+    // condition used to fall through this branch with `criteria` undefined,
+    // which `defineRule` stored as `criteria_json: null` and the evaluator
+    // read as the empty filter — the one outcome this file's header forbids.
+    // It is now skipped like any other non-lowerable condition: the authoring
+    // schema requires `condition`, so reaching here means a hand-crafted
+    // `{ dialect, source: '' }` envelope or a stale pre-built package, and
+    // neither earns a match-all.
+    const f = celToFilter(r.condition);
+    if (!f || isMatchAllCriteria(f)) {
+      logger?.warn?.('[sharing-rule] skipped (missing or untranslatable CEL condition — never seeded as match-all) [experimental]', { rule: r.name, condition: r.condition });
+      skipped += 1; continue;
     }
+    const criteria: Record<string, unknown> = f;
     try {
       await ruleService.defineRule({
         name: r.name,

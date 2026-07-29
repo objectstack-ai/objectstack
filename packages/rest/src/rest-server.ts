@@ -5778,12 +5778,20 @@ export class RestServer {
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
                     const body = req.body ?? {};
+                    // Field-by-field pluck (not a schema parse): the authoring
+                    // spec shape — CEL `condition` + `sharedWith{type,value}` —
+                    // is not the runtime shape this endpoint takes, so unknown
+                    // keys are dropped rather than rejected. [#3896] That made
+                    // a typo (`criterias`) indistinguishable from "no criteria",
+                    // which used to mean "share every record". `defineRule` now
+                    // refuses a match-all criteria, so the typo surfaces as a
+                    // 400 naming the field instead of a silent 201.
                     const input = {
                         name: body.name,
                         label: body.label,
                         description: body.description,
                         object: body.object ?? body.object_name,
-                        criteria: body.criteria,
+                        criteria: body.criteria ?? body.criteria_json,
                         recipientType: body.recipientType ?? body.recipient_type,
                         recipientId: body.recipientId ?? body.recipient_id,
                         accessLevel: body.accessLevel ?? body.access_level,
