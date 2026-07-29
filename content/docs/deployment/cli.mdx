@@ -523,19 +523,38 @@ A running `os dev` / `os serve` holding the same SQLite file open is the usual
 way a migration goes wrong: the migration itself is transactional and swaps
 tables *inside* the file, but the live server keeps prepared statements and a
 schema cookie that the migration invalidates, and its writes can collide as
-`SQLITE_BUSY`. Before booting, `os migrate` asks the database whether anyone
-else is attached (`PRAGMA locking_mode = EXCLUSIVE` under `busy_timeout = 0` —
-non-destructive, and unlike a WAL checkpoint it also sees a connection that is
-merely *open* rather than actively writing).
+`SQLITE_BUSY`. Before booting, `os migrate` checks two things:
+
+1. **Which processes hold the file open** (`/proc` on Linux, `lsof` on macOS).
+   This is the signal that fires in practice. ObjectStack's sqlite driver runs
+   `journal_mode = delete`, and a rollback-journal database keeps no record of
+   who is attached — an idle server holds no lock at all, so no SQL probe can
+   see it. An open file descriptor is what it does leave, and it names the
+   process to go and stop.
+2. **A SQL lock probe** (`PRAGMA locking_mode = EXCLUSIVE` under
+   `busy_timeout = 0`). On a WAL database this catches an attached connection
+   even when step 1 cannot run — a platform without process inspection, or a
+   database held by another user's process.
+
+Either one firing counts as busy. Both are non-destructive: no row is read or
+written.
+
+```text
+✗ .objectstack/data/standalone.db is in use — it is open in pid 12367 (node).
+⚠ Stop the process using it (a running "os dev"/"os serve" is the usual one)
+  and re-run, or pass --force to migrate anyway.
+```
 
 | Command | If the database is in use |
 |---------|---------------------------|
 | `os migrate plan` | Warns and continues — a plan writes nothing either way |
 | `os migrate apply` | **Refuses** (exit 1, `error: database_busy` under `--json`). Stop the other process, or pass `--force` |
+| `os migrate files-to-references --apply` | **Refuses** likewise — it rewrites rows, so a concurrent writer is at least as dangerous |
 
-The check applies to SQLite only. Postgres and MySQL take their own server-side
-locks, and a `-wal`/`-shm` left behind by a crashed process is deliberately not
-treated as occupancy on its own.
+The check applies to SQLite only: Postgres and MySQL take their own server-side
+locks. Only same-user processes are visible without elevated privileges, and a
+`-wal`/`-shm` left behind by a crashed process is deliberately never treated as
+occupancy on its own.
 
 | Category | Examples | Applied by |
 |----------|----------|------------|
