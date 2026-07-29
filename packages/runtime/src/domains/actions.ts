@@ -34,9 +34,22 @@
  *    answers this route already gives a status (403 denied, 400 wrong type,
  *    503 unavailable). A handler that RAN and rejected still reports in the
  *    payload, unchanged: that is a business outcome, not a transport error.
+ *
+ * Its follow-up separated a third case out of that payload: an UNEXPECTED
+ * FAULT. A `TypeError` in a handler or a driver blowing up is not an outcome
+ * the action chose to report, and serving it as 200 hid every handler crash
+ * from gateway error rates, retry policy, APM and alerting. Those are 500 now,
+ * told apart by the error's NAME — a plain `Error` (or a sandbox/validation
+ * marker) is a deliberate rejection and keeps the payload; a `TypeError` /
+ * `SqliteError` / driver class is a fault.
+ *
+ * So the route answers on two axes:
+ *   did a handler run?   no  → status (404 / 403 / 400 / 503)
+ *   did it reject or crash?  reject → 200 + payload;  crash → 500
  */
 
 import * as actionExec from '../action-execution.js';
+import { validationFailureDetails } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -323,6 +336,66 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // "did a handler run": below it, the payload; above it, the status.
         const code: unknown = err?.code;
         const fields: unknown = err?.fields;
+
+        // An error that NAMES its own HTTP status is asking to be served with
+        // it — a plugin's `FORBIDDEN` (status 403), a domain error from the
+        // protocol layer. Honour that first: burying an explicit 403 in a 200
+        // payload discards the one thing the thrower was unambiguous about.
+        // Safe against #3937's cases by construction — a record
+        // `ValidationError` deliberately carries no `.status` (see
+        // `validation-failure.ts`), so it never reaches this branch.
+        if (typeof err?.status === 'number' || typeof err?.statusCode === 'number') {
+            return { handled: true, response: deps.errorFromThrown(err, 500) };
+        }
+
+        // [#3913 follow-up] …and it does not cover an UNEXPECTED FAULT either.
+        // "A failed action is a normal outcome" is a statement about the action
+        // REJECTING — a business rule saying no. A `TypeError` in a handler, a
+        // driver that blew up: those are not outcomes the action chose to
+        // report, they are the server failing to produce one. Reporting them as
+        // 200 makes them invisible to every layer that exists to catch server
+        // faults — gateway error rates, retry/circuit-breaker policy, APM
+        // auto-capture, alerting — so "customer action bodies are throwing" has
+        // no signal short of body-parsing at every hop.
+        //
+        // Told apart by the error's NAME, the same signal `@objectstack/rest`
+        // already uses on this exact distinction ("non-default names
+        // (`TypeError: …`) […] signal a genuine script bug rather than a
+        // deliberately thrown business rule"):
+        //
+        //   name === 'Error'        a deliberate `throw new Error(msg)` — the
+        //                           shape a registered handler uses to reject.
+        //   innerMessage present    the sandbox's mark for "user code threw
+        //                           this deliberately" (SandboxError).
+        //   code / fields present   a structured domain failure — the
+        //                           ValidationError shape #3937 carries out.
+        //   a ValidationError       matched by `validationFailureDetails`, the
+        //                           same predicate the dispatcher's error exits
+        //                           use, so one whose `fields` were stripped in
+        //                           transit is still recognised by NAME alone.
+        //   name absent             an unrecognisable throw; NOT confidently a
+        //                           fault, so it keeps the status quo.
+        //   any other name          TypeError / ReferenceError / SqliteError /
+        //                           a driver's own class ⇒ a fault.
+        //
+        // Deliberately the narrow direction: this only moves what it is sure
+        // about, and everything it is unsure about keeps the 200 it has today.
+        // `errorFromThrown` is the same exit every other domain catch has used
+        // since #3925, and an error carrying its own `.status` still wins there
+        // so a hand-thrown 4xx keeps it.
+        const name: unknown = err?.name;
+        const unexpectedFault =
+            typeof name === 'string'
+            && name !== 'Error'
+            && !(typeof inner === 'string' && inner)
+            && !(typeof code === 'string' && code)
+            && !Array.isArray(fields)
+            && !validationFailureDetails(err);
+        if (unexpectedFault) {
+            console.error(`[action ${objectName}/${actionName}] unexpected fault (${name}): ${full}`);
+            return { handled: true, response: deps.errorFromThrown(err, 500) };
+        }
+
         return {
             handled: true,
             response: deps.success({

@@ -232,14 +232,23 @@ curl -b cookies.txt -X POST \
 # → 200 { "success": true, "data": { "success": true, "data": ... } }
 ```
 
-Failures split by **whether a handler ran**:
+Failures split three ways:
 
 - **It ran and rejected** — HTTP **200**, `data: { "success": false, "error",
-  "code"?, "fields"? }`. An action that fails is a normal business outcome, not
-  a transport error, so it rides the payload. Always branch on `data.success`.
+  "code"?, "fields"? }`. An action that says no is a normal business outcome,
+  not a transport error, so it rides the payload. Always branch on
+  `data.success`.
 - **It never dispatched** — a real status: **404** no such action, **403**
   denied, **400** wrong action type or a param-contract violation, **503**
   unavailable — with `{ "success": false, "error": { "message", "code" } }`.
+- **It crashed** — **500**. A `TypeError` in your handler, a driver error or a
+  sandbox timeout is not an outcome your action chose to report, so it is a
+  server fault and shows up as one in logs, alerting and gateway error rates.
+  A deliberate `throw new Error('…')` is a rejection, not a crash.
+
+Full table in the [error catalog](/docs/api/error-catalog). The
+[client SDK](/docs/api/client-sdk) folds all of it into one
+`{ success, data?, error? }` result.
 
 Global (object-less) actions post to `/api/v1/actions/global/:action`, or to
 `/api/v1/actions//:action` with the object segment left empty. For credentials,
