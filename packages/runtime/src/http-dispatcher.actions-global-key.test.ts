@@ -47,6 +47,15 @@ import { HttpDispatcher } from './http-dispatcher.js';
 function makeDispatcher(opts: {
     registered?: Record<string, (ctx: any) => any>;
     objectDef?: any;
+    /**
+     * [ADR-0110 D3] This file's axis is ADDRESSING, not governance: every case
+     * below asks "which key did the route probe, and what envelope came back".
+     * An undeclared action is refused since D3, so the double declares
+     * whatever name is asked for — a plain script action bound to its own name,
+     * which is the very key the URL segment used to be taken as, so the probe
+     * order these tests pin is unchanged. Pass `false` to exercise the refusal.
+     */
+    declared?: boolean;
 } = {}) {
     const registered = opts.registered ?? {};
     const executeAction = vi.fn(async (object: string, action: string, ctx: any) => {
@@ -65,8 +74,16 @@ function makeDispatcher(opts: {
         find: vi.fn(async () => []),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
     };
+    const declareAny = opts.declared !== false;
+    const synthesize = (type: string, name: string) =>
+        (declareAny && type === 'action')
+            ? { name, type: 'script', target: name, objectName: 'global' }
+            : null;
     const metadata: any = {
-        load: vi.fn(async () => null),
+        load: vi.fn(async (type: string, name: string) => synthesize(type, name)),
+        loadDiagnosed: vi.fn(async (type: string, name: string) => ({
+            data: synthesize(type, name), degraded: false, errors: [],
+        })),
         listObjects: vi.fn(async () => (objectDef ? [objectDef] : [])),
         getObject: vi.fn(async () => objectDef),
     };
@@ -143,6 +160,22 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
 
         const probed = executeAction.mock.calls.map((c: any[]) => c[0]);
         expect(probed).toEqual(['global', '*']);
+    });
+
+    // [ADR-0110 D3] The fixture above declares whatever it is asked for so the
+    // addressing cases stay on their own axis. That must not be read as "the
+    // object-less route is exempt from governance" — it is not.
+    it('refuses an object-less action that has no declaration, before any probe', async () => {
+        const { dispatcher, executeAction } = makeDispatcher({
+            registered: { 'global:log_call': () => ({ logged: true }) },
+            declared: false,
+        });
+
+        const res = await dispatcher.handleActions('/global/log_call', 'POST', {}, ctx());
+
+        expect(res.response.status).toBe(404);
+        expect(res.response.body.error.message).toMatch(/has no declaration/i);
+        expect(executeAction).not.toHaveBeenCalled();
     });
 
     it('prefers the object-specific handler over the global one', async () => {

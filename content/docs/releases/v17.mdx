@@ -156,6 +156,44 @@ and flags whitelists the mapping would *widen* so every edit stays reviewable.
 `['upsert']`) strips to `[]`, which is **deny-all** — the object's API closes
 rather than widening.
 
+### An action must be declared to be invocable, and is identified by `name` (ADR-0110, #3935)
+
+Two halves of the `/api/v1/actions/:object/:action` contract were broken in
+complementary ways, which is why neither surfaced: the route resolved the
+**declaration** from the URL segment as a `name`, but dispatched the
+**handler** using that same segment as a registry key. For a target-bound
+action (`{ name: 'complete_task', target: 'completeTask' }`) those differ — so
+the documented `curl .../todo_task/complete_task` resolved the declaration and
+then 404ed, while the Console's `target`-addressed call dispatched fine and
+resolved **no** declaration, silently skipping the ADR-0066 D4 capability gate
+and the ADR-0104 param contract.
+
+Three changes land together:
+
+- **Identity is `name`.** The URL, MCP `run_action`, and every future surface
+  identify an action by its declarative `name`. `target` is a binding
+  expression — polymorphic per type, `${param.X}`-interpolatable, and legally
+  non-unique — so it never identifies anything. The server derives the handler
+  key from the declaration it resolved, using the rotation the MCP bridge
+  already used. The Console posts `name` (objectui ships in lockstep).
+- **An undeclared handler is refused.** `engine.registerAction` with no
+  matching declaration has no `requiredPermissions` to enforce and no param
+  contract to check, yet executes with system privileges. It now returns 404
+  naming the `defineAction` to add. Deleting a declaration used to *remove* an
+  action's gate while leaving it callable; removal now narrows.
+- **An unreachable metadata plane refuses instead of degrading.** A loader
+  failure used to be indistinguishable from "no declaration", so an outage
+  silently ungated every action it could not see. That is now a **503** — the
+  same posture as the datasource entry below.
+
+**Migration:** boot logs list every registered-but-undeclared handler under
+`[action-governance]`, alongside declared script actions bound to no handler.
+Declare each one. `OS_ALLOW_UNDECLARED_ACTIONS=1` runs them meanwhile, warning
+on every invocation; **it is removed in 18**. Apps whose actions are all
+declared — anything with working Console buttons — need no changes, other than
+gaining enforcement of the `requiredPermissions` they already declared. Callers
+that hard-coded a `target` in an action URL switch to the action's `name`.
+
 ### A flow run with no trigger user may not touch data (#3760)
 
 An effective `runAs: 'user'` run that resolved **no trigger user** used to

@@ -29,6 +29,19 @@ function actionParamsStrict(): boolean {
     return typeof process !== 'undefined' && process.env?.OS_ACTION_PARAMS_STRICT_ENABLED === '1';
 }
 
+/**
+ * [ADR-0110 D3/D6] Migration valve for executing an action that has no
+ * declaration. Enforcement is the DEFAULT and this opts OUT of it — the
+ * direction matters: a security gate whose strictness is opt-in (as
+ * `OS_ACTION_PARAMS_STRICT_ENABLED` is, acceptably, for a DX contract) ships
+ * open for everyone who never read the release notes. `OS_ALLOW_*` is the
+ * sanctioned shape for a security escape hatch; it warns on every invocation
+ * and is slated for removal in 18.
+ */
+export function undeclaredActionsAllowed(deps: ActionExecutionDeps): boolean {
+    return typeof process !== 'undefined' && process.env?.OS_ALLOW_UNDECLARED_ACTIONS === '1';
+}
+
 const _warnedActionParams = new Set<string>();
 function warnActionParamsOnce(key: string, message: string): void {
     if (_warnedActionParams.has(key)) return;
@@ -813,25 +826,15 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         executionContext: buildActionExecutionContext(ec),
         params: { ...params, recordId, objectName },
     };
-    // Handler key: body-based actions register under `name` (AppPlugin);
-    // target-bound script actions register under `target` (user code).
-    // Probe both, then the object-less keys (#3913), distinguishing the
-    // engine's "action not registered" miss from a genuine handler error.
-    const primary = action.body ? action.name : (action.target || action.name);
-    const candidates = [primary, action.target, action.name].filter(
-        (k: unknown, i: number, a: unknown[]): k is string => typeof k === 'string' && a.indexOf(k) === i,
+    // [ADR-0110 D2] Handler-key derivation + the probe rotation are shared with
+    // the REST `/actions` route — one addressing algorithm, not two.
+    const dispatch = await executeRegisteredAction(
+        deps, ql, objectName, resolveActionHandlerKeys(action), actionContext,
     );
-    for (const obj of actionHandlerObjectKeys(objectName)) {
-        for (const key of candidates) {
-            try {
-                const result = await ql.executeAction(obj, key, actionContext);
-                return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: result ?? null };
-            } catch (err: any) {
-                if (!isActionNotRegisteredError(err)) throw err; // real handler failure → surface
-            }
-        }
+    if (!dispatch.dispatched) {
+        throw new Error(`No handler registered for action '${name}' on '${objectName}'`);
     }
-    throw new Error(`No handler registered for action '${name}' on '${objectName}'`);
+    return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: dispatch.result ?? null };
 }
 
 /**
@@ -915,6 +918,72 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
 }
 
 /**
+ * [ADR-0110 D5] Reconcile the two halves of the declaration↔executable
+ * bijection and report the orphans on both sides.
+ *
+ * ADR-0078 outlaws a declaration nothing executes (silently *inert*); D3
+ * outlaws an executable nothing declares (silently *ungoverned*). Together
+ * they are one invariant — everything declared runs, everything that runs is
+ * declared — and this is the mechanism that makes a violation visible instead
+ * of waiting for someone to invoke the route.
+ *
+ * Two findings:
+ *  - `undeclared_handler` — a registered key that reconciles to no
+ *    declaration. Since D3 those are REFUSED at dispatch, so this list is the
+ *    upgrade checklist: everything on it is an endpoint that stopped working
+ *    and the exact `defineAction` that fixes it.
+ *  - `unbound_declaration` — a declared `script` action with no `body` and no
+ *    handler under any candidate key: a button wired to nothing.
+ *
+ * A handler reconciles when some declaration for its object (or an object-less
+ * one) yields it among {@link resolveActionHandlerKeys} — the SAME derivation
+ * dispatch uses, so the inventory cannot disagree with the router.
+ */
+export function reconcileActionRegistrations(deps: ActionExecutionDeps,
+    registered: Array<{ objectName: string; actionName: string; package?: string }>,
+    declarations: Array<{ action: any; objectName: string }>,
+): {
+    undeclaredHandlers: Array<{ objectName: string; actionName: string; package?: string }>;
+    unboundDeclarations: Array<{ objectName: string; actionName: string }>;
+} {
+    // Every key any declaration can address, per owning object key.
+    const addressable = new Map<string, Set<string>>();
+    const addKey = (objectKey: string, handlerKey: string) => {
+        let set = addressable.get(objectKey);
+        if (!set) addressable.set(objectKey, (set = new Set<string>()));
+        set.add(handlerKey);
+    };
+    for (const { action, objectName } of declarations) {
+        for (const key of resolveActionHandlerKeys(action)) addKey(objectName, key);
+    }
+
+    const covers = (objectName: string, actionName: string): boolean => {
+        if (addressable.get(objectName)?.has(actionName)) return true;
+        // A handler registered under an object-less key is addressable by any
+        // object-less declaration, mirroring `actionHandlerObjectKeys`.
+        if (!isObjectLessActionKey(objectName)) return false;
+        for (const [objectKey, keys] of addressable) {
+            if (isObjectLessActionKey(objectKey) && keys.has(actionName)) return true;
+        }
+        return false;
+    };
+
+    const undeclaredHandlers = registered.filter((r) => !covers(r.objectName, r.actionName));
+
+    const registeredKeys = new Set(registered.map((r) => `${r.objectName}:${r.actionName}`));
+    const unboundDeclarations: Array<{ objectName: string; actionName: string }> = [];
+    for (const { action, objectName } of declarations) {
+        if ((action?.type ?? 'script') !== 'script') continue; // only script needs a handler
+        if (action?.body) continue;                            // its handler is synthesized
+        const bound = resolveActionHandlerKeys(action).some((key) =>
+            actionHandlerObjectKeys(objectName).some((obj) => registeredKeys.has(`${obj}:${key}`)));
+        if (!bound) unboundDeclarations.push({ objectName, actionName: action?.name });
+    }
+
+    return { undeclaredHandlers, unboundDeclarations };
+}
+
+/**
  * Owning object of a standalone `action` item — must stay in lockstep with
  * the ObjectQL plugin's `actionObjectKey` (the engine registration key), so
  * the declaration the MCP surface resolves is the one whose handler
@@ -969,6 +1038,69 @@ export function isActionNotRegisteredError(err: any): boolean {
 }
 
 /**
+ * [ADR-0110 D2] Handler-key candidates for an action, most-specific first —
+ * the *addressing* half of "resolve, then address".
+ *
+ * A registration key is NOT an action's identity. `app-plugin.ts`
+ * auto-registers **body** actions under `name`, while user code registers a
+ * **target-bound** script action under `target`
+ * (`engine.registerAction('todo_task', 'completeTask', …)`). Identity is
+ * always the declarative `name` (D1); which key the handler happens to live
+ * under is derived HERE, from the already-resolved declaration, so no caller
+ * ever has to know it.
+ *
+ * `fallbackKey` (the routed URL segment) is the last candidate and exists for
+ * the UNDECLARED case, where there is no declaration to derive anything from.
+ * It is deduped away whenever the declaration already yields it, so it never
+ * widens what a declared action can reach.
+ */
+export function resolveActionHandlerKeys(action: any, fallbackKey?: string): string[] {
+    const primary = action ? (action.body ? action.name : (action.target || action.name)) : undefined;
+    return [primary, action?.target, action?.name, fallbackKey].filter(
+        (k: unknown, i: number, a: unknown[]): k is string =>
+            typeof k === 'string' && k.length > 0 && a.indexOf(k) === i,
+    );
+}
+
+/**
+ * [ADR-0110 D2] Run a script/body action through the engine's handler
+ * registry: rotate the derived key candidates across the object-key rotation
+ * (`actionHandlerObjectKeys`), telling an "unregistered key" miss apart from
+ * a genuine handler failure.
+ *
+ * Shared by the REST `/actions` route and the MCP `run_action` bridge so both
+ * surfaces address handlers identically. Before it was shared, REST rotated
+ * only the OBJECT and used the URL segment verbatim as the key — strictly
+ * weaker than MCP, and the reason the documented
+ * `POST /api/v1/actions/todo_task/complete_task` curl 404ed for every
+ * target-bound action while the Console's `target`-addressed call worked
+ * (and skipped the D4 gate on the way past).
+ *
+ * Reports a total miss as `{ dispatched: false }` rather than throwing, so
+ * neither surface has to pattern-match this function's own error message to
+ * tell "no handler anywhere" (a routing miss — 404) from "the handler ran and
+ * failed" (a business outcome, which propagates). Each surface words its own
+ * miss: REST 404s naming the routed object, MCP throws naming the action.
+ */
+export async function executeRegisteredAction(deps: ActionExecutionDeps,
+    ql: any,
+    objectName: string,
+    candidates: string[],
+    actionContext: any,
+): Promise<{ dispatched: boolean; result?: any }> {
+    for (const obj of actionHandlerObjectKeys(objectName)) {
+        for (const key of candidates) {
+            try {
+                return { dispatched: true, result: await ql.executeAction(obj, key, actionContext) };
+            } catch (err: any) {
+                if (!isActionNotRegisteredError(err)) throw err; // real handler failure → surface
+            }
+        }
+    }
+    return { dispatched: false };
+}
+
+/**
  * True when the routed "object" is the object-less placeholder rather than a
  * real object — the canonical `'global'`, the legacy `'*'`, or nothing at all
  * (`POST /actions//:action`). Callers use it to skip work that only makes
@@ -1004,7 +1136,7 @@ export function isObjectLessActionKey(objectName: string | undefined | null): bo
  */
 export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     args: { ql: any; objectName: string; actionName: string; envId?: string },
-): Promise<{ action: any; obj: any } | undefined> {
+): Promise<{ action: any; obj: any; degraded?: boolean; reason?: string }> {
     const { ql, objectName, actionName, envId } = args;
 
     let obj: any;
@@ -1032,13 +1164,35 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
         /* registry without an item lookup → fall through to the metadata service */
     }
 
+    // [ADR-0110 D3] A miss and an OUTAGE are different facts. `load` answers
+    // `null` for both — a loader that throws is warn-logged and skipped — so
+    // reading its `null` as "no declaration, hence no gate to enforce" lets an
+    // unreachable metadata plane silently ungate every action it can't see.
+    // `loadDiagnosed` reports whether the answer is trustworthy; a service
+    // that predates it (or a test double) simply reports nothing degraded.
+    let degraded = false;
+    let reason: string | undefined;
     try {
         const meta: any = await deps.resolveService('metadata', envId);
-        const fromMeta: any = await meta?.load?.('action', actionName);
-        if (fromMeta && ownsRoute(fromMeta)) return { action: fromMeta, obj };
-    } catch {
-        /* no metadata service on this kernel → no declaration to resolve */
+        if (meta && typeof meta.loadDiagnosed === 'function') {
+            const diag: any = await meta.loadDiagnosed('action', actionName);
+            if (diag?.data && ownsRoute(diag.data)) return { action: diag.data, obj };
+            if (diag?.degraded) {
+                degraded = true;
+                reason = Array.isArray(diag.errors) && diag.errors.length > 0
+                    ? diag.errors.join('; ')
+                    : 'the metadata plane reported a loader failure';
+            }
+        } else {
+            const fromMeta: any = await meta?.load?.('action', actionName);
+            if (fromMeta && ownsRoute(fromMeta)) return { action: fromMeta, obj };
+        }
+    } catch (err: any) {
+        // `resolveService` swallows its own resolution failures, so reaching
+        // here means the metadata service itself threw while answering.
+        degraded = true;
+        reason = err?.message ?? String(err);
     }
 
-    return obj ? { action: undefined, obj } : undefined;
+    return { action: undefined, obj, degraded, reason };
 }
