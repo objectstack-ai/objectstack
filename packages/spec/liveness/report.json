@@ -39,10 +39,10 @@
       "note": "objectui: render-time scope filter ANDed at query time (`?? filter`, mergeFilters) — DatasetReportRenderer."
     },
     "order": {
-      "status": "planned",
-      "authorWarn": true,
-      "authorHint": "A selected date dimension is ALREADY chronological (ascending) without `order` — that default is live server-side. Only the explicit declaration is pending its renderer wiring.",
-      "note": "[planned] framework#3916. The FRAMEWORK half is complete and live: the schema accepts `order`, `reportSelectionOrder` (ui/report.zod.ts) lowers it to `DatasetSelection.order`, and the executor applies that ordering over the assembled grid (services/service-analytics/src/dataset-executor.ts, resolveOrdering/applyOrdering). What is NOT yet wired is the objectui side — `DatasetReportRenderer` builds the selection it posts and does not carry `report.order` into it, so an authored `order` does not reach the server yet. Marked `planned` + authorWarn until objectui lowers it, per enforce-or-mark. NOTE the separate, already-live default this issue also shipped: a selected TIME dimension defaults to ascending server-side, so month/quarter matrix columns are chronological with no `order` declared at all."
+      "status": "live",
+      "verifiedAt": "2026-07-29",
+      "evidence": "packages/spec/src/ui/report.zod.ts (reportSelectionOrder), packages/services/service-analytics/src/dataset-executor.ts (resolveOrdering/applyOrdering)",
+      "note": "framework#3916. Authored ordering, most significant key first; each `by` names a `rows`/`columns` dimension or a `values` measure the report selects (validated by the schema's superRefine; a `joined` report orders per block). `reportSelectionOrder` lowers the list to `DatasetSelection.order` and the executor applies it over the ASSEMBLED grid — after measure-scoped filters merge, `__compare` columns attach and derived measures evaluate — so a derived measure is a valid sort key. objectui: `DatasetReportRenderer`'s `useDatasetRows` (the single fetch choke point) carries it onto the posted selection across all four paths — grouped table, embedded chart, matrix cross-tab, per joined block — with `readOrder` lowering and `scopeOrder` narrowing it to each sub-selection, plus the ordering in the refetch signature (objectui#2964). Flipped from `planned` + authorWarn once that landed. Separate and independently live: a selected TIME dimension defaults to ascending server-side, so month/quarter matrix columns are chronological with no `order` declared at all."
     },
     "drilldown": {
       "status": "live",
