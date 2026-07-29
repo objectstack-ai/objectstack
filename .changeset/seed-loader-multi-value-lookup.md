@@ -29,3 +29,13 @@ rejected, now with advice an author can act on: declare the field
 `ReferenceResolution` (`@objectstack/spec/data`) gains an optional `multiple`
 flag carrying the field's array-ness into resolution; it is additive and
 defaulted-absent, so existing dependency graphs are unaffected.
+
+**Authoring types.** `defineSeed`'s per-field value type now widens a
+`multiple: true` lookup to `string | string[] | null` (a lone string stays legal
+— the loader accepts it as one-element shorthand). `master_detail` is inherently
+single and is not widened, and an array on a single-value lookup is still a
+compile error. To make that reachable, `Field.lookup` became generic over its
+config (`<const C extends FieldInput>`) so `multiple: true` survives as a
+literal instead of widening to `boolean`; the return type is intersected with
+`FieldInput` so its optional surface is unchanged. Type-level only — the
+returned object is byte-identical at runtime.
