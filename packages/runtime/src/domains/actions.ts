@@ -40,9 +40,11 @@ export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
  *
  * Body shape: `{ recordId?: string, params?: Record<string, unknown> }`.
  * The handler is invoked with an `ActionContext` of:
- *   `{ record, user, engine, params }`
+ *   `{ record, user, session, engine, api, params }`
  * where `engine` exposes the slimmed CRUD surface used by CRM handlers
- * (`insert`, `update`, `delete`, `find`).
+ * (`insert`, `update`, `delete`, `find`) and `api` is the ScopedContext a
+ * sandboxed body reaches through `ctx.api.object(...)`. Both are bound to the
+ * caller's ExecutionContext elevated with `isSystem` (#3914).
  */
 export async function handleActionsRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     if (method.toUpperCase() !== 'POST') {
@@ -130,28 +132,6 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     }
     if (record && (record as any).id == null && recordId) (record as any).id = recordId;
 
-    // Slim engine facade matching the ActionContext.engine shape used by CRM
-    // handlers. ⚠️ TRUSTED — context-less, RLS/FLS-bypassing by design; see
-    // buildActionEngineFacade for the full security-model rationale (#2849).
-    const engineFacade = {
-        async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-            const res = await ql.insert(object, data);
-            const id = (res && (res as any).id) ?? (data as any).id;
-            return { id };
-        },
-        async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-            await ql.update(object, data, { where: { id } });
-        },
-        async delete(object: string, id: string): Promise<void> {
-            await ql.delete(object, { where: { id } });
-        },
-        async find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-            const opts = query && Object.keys(query).length ? { where: query } : undefined;
-            const rows = await ql.find(object, opts as any);
-            return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
-        },
-    };
-
     // Resolve the caller identity from the request's ExecutionContext — the
     // single source `dispatch()` populates via `resolveExecutionContext`,
     // the same envelope the MCP `runAction` and record-change trigger paths
@@ -179,14 +159,27 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         record,
         user: userFromAuth,
         session: actionExec.buildActionSession(deps, ec),
-        engine: engineFacade,
+        // Slim engine facade matching the ActionContext.engine shape used by
+        // CRM handlers. ⚠️ TRUSTED — system-elevated, RLS/FLS-bypassing by
+        // design; see buildActionEngineFacade + buildActionExecutionContext
+        // for the full security-model rationale (#2849, #3914).
+        engine: actionExec.buildActionEngineFacade(deps, ql, ec),
+        // [#3914] `ctx.api` — the ScopedContext a body's `ctx.api.object(...)`
+        // resolves to. Absent here, the sandbox synthesized a context-less
+        // facade and every owner-scoped write died FORBIDDEN. `executionContext`
+        // is the same envelope, carried so the sandbox's own last-resort facade
+        // is elevated identically instead of falling back to no identity.
+        api: actionExec.buildActionApi(deps, ql, ec),
+        executionContext: actionExec.buildActionExecutionContext(ec),
         params: { ...reqParams, recordId, objectName },
     };
 
     // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.
+    // [#3914] Wording tracks what the body ACTUALLY gets — a system-elevated
+    // context carrying the caller's identity, not a context-less engine.
     console.info(
         `[action-audit] REST action '${objectName}/${actionName}' — body executes TRUSTED ` +
-        `(context-less engine, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
+        `(system-elevated context, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
     );
 
     try {

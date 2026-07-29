@@ -125,9 +125,11 @@ export const onEnable = async (ctx: { ql: { registerAction: (...args: unknown[])
 themselves. A `script` action whose `target` names a handler that was never
 `registerAction`-ed compiles fine but throws `Action 'x' on object 'y' not
 found` at click time. (An action with *neither* `body` nor `target` is
-rejected at authoring time.) Also note the handler's `engine` facade is
-**trusted** — it bypasses row- and field-level security, so enforce any
-caller-specific rules yourself.
+rejected at authoring time.) Also note that both data surfaces a body reaches
+— `ctx.api.object(name)` and the handler's `ctx.engine` facade — are
+**trusted**: they run under the caller's identity elevated to system, so they
+bypass row- and field-level security (writes stay attributed to the caller and
+scoped to their organization). Enforce any caller-specific rules yourself.
 </Callout>
 
 <Callout type="warn">

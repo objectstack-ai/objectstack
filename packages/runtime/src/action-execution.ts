@@ -231,11 +231,12 @@ export function actionPermissionError(deps: ActionExecutionDeps, actionDef: any,
  * into the AI surface with `ai.exposed: true`, or `null` when exposed.
  *
  * This gate is the REAL agent-facing boundary for actions: script/body
- * handlers execute as TRUSTED application code (the engine facade carries no
- * ExecutionContext — see {@link buildActionEngineFacade}), so once invoked, a
- * body's reads/writes are NOT bounded by the caller's RLS/FLS or an agent's
- * data ceiling (ADR-0090 D10). The author's explicit opt-in — not a data-layer
- * backstop — therefore decides what AI may trigger. Fail-closed by default.
+ * handlers execute as TRUSTED application code (the engine facade and
+ * `ctx.api` run `isSystem` — see {@link buildActionExecutionContext}), so once
+ * invoked, a body's reads/writes are NOT bounded by the caller's RLS/FLS or an
+ * agent's data ceiling (ADR-0090 D10). The author's explicit opt-in — not a
+ * data-layer backstop — therefore decides what AI may trigger. Fail-closed by
+ * default.
  */
 export function actionAiExposureError(deps: ActionExecutionDeps, actionDef: any, objectName?: string): string | null {
     if (actionDef?.ai?.exposed === true) return null;
@@ -413,27 +414,91 @@ export function buildActionSession(deps: ActionExecutionDeps, ec: any): any | un
     };
 }
 
-export function buildActionEngineFacade(deps: ActionExecutionDeps, ql: any): any {
+/**
+ * The ExecutionContext an action BODY's own reads/writes execute under —
+ * the caller's envelope, elevated with `isSystem: true` (#3914).
+ *
+ * This is what makes the `[action-audit]` line TRUE. Before #3914 the body's
+ * engine facade called `ql.update(...)` with NO context at all, which is not
+ * "trusted" — it is IDENTITY-LESS, and identity-less is strictly WORSE than
+ * either coherent posture: plugin-sharing's write gate short-circuits on
+ * `!context.userId` (there is no user to own anything) and its bypass needs
+ * `context.isSystem`, so every owner-scoped write from an action body died
+ * `FORBIDDEN` — as the built-in admin — while the audit line announced
+ * RLS-bypassing trusted execution. Objects with a `public` sharing model or
+ * no owner field passed the gate early, which is why only *some* actions
+ * broke and the defect read as object-dependent flakiness.
+ *
+ * Elevating (rather than binding to the caller's RLS) is the posture #2849
+ * already documents and gates for: an action body is trusted code, admitted
+ * by the invoke-time capability + `ai.exposed` checks, and hook bodies
+ * already get exactly this (the engine's `buildHookApi` falls back to
+ * `{ isSystem: true }`). Spreading the caller's envelope FIRST keeps the
+ * write attributable and correctly scoped — `userId` stamps `created_by` /
+ * `updated_by`, `tenantId` stamps the org column and drives driver-level
+ * tenant isolation, `transaction` joins an open transaction — instead of the
+ * unattributable, org-less rows a bare `{ isSystem: true }` would write.
+ */
+export function buildActionExecutionContext(ec: any): Record<string, unknown> {
+    const base = ec && typeof ec === 'object' ? { ...(ec as Record<string, unknown>) } : {};
+    return { ...base, isSystem: true };
+}
+
+/**
+ * Build the action-body `ctx.api` — a real `ScopedContext` bound to
+ * {@link buildActionExecutionContext}, mirroring what hook bodies get from
+ * `HookContext.api` (#3914).
+ *
+ * Without this the sandbox's `buildSandboxApi` fell through to a repo facade
+ * synthesized against the raw engine's CRUD primitives: the raw `ObjectQL`
+ * engine has no `.object()` (that lives on `ScopedContext`, reachable only
+ * via `engine.createContext()`, which the action path never called), so the
+ * facade proxied every call context-less. Returns `undefined` when the engine
+ * predates `createContext`, leaving the sandbox's own fallback in charge.
+ */
+export function buildActionApi(deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
+    if (!ql || typeof ql.createContext !== 'function') return undefined;
+    try {
+        return ql.createContext(buildActionExecutionContext(ec));
+    } catch {
+        // A malformed caller envelope must not sink the action — fall back to
+        // the bare elevated context (the same shape hooks default to).
+        try {
+            return ql.createContext({ isSystem: true });
+        } catch {
+            return undefined;
+        }
+    }
+}
+
+/**
+ * Build the action-body `ctx.engine` — the slim CRUD surface handler suites
+ * use. Every call carries {@link buildActionExecutionContext} so `ctx.engine`
+ * and `ctx.api` write under the SAME identity (#3914); passing `ec` is what
+ * separates a trusted write from a context-less one.
+ */
+export function buildActionEngineFacade(deps: ActionExecutionDeps, ql: any, ec?: any): any {
+    const context = buildActionExecutionContext(ec);
     return {
         async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-            const res = await ql.insert(object, data);
+            const res = await ql.insert(object, data, { context });
             const id = (res && (res as any).id) ?? (data as any).id;
             return { id };
         },
         async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-            await ql.update(object, data, { where: { id } });
+            await ql.update(object, data, { where: { id }, context });
         },
         // Tolerant of both the single-id and array conventions handler suites
         // use (CRM handlers pass one id; todo handlers pass an id array).
         async delete(object: string, idOrIds: string | string[]): Promise<void> {
             const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
             for (const id of ids) {
-                if (id != null) await ql.delete(object, { where: { id } });
+                if (id != null) await ql.delete(object, { where: { id }, context });
             }
         },
         async find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-            const opts = query && Object.keys(query).length ? { where: query } : undefined;
-            const rows = await ql.find(object, opts as any);
+            const where = query && Object.keys(query).length ? { where: query } : {};
+            const rows = await ql.find(object, { ...where, context } as any);
             return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
         },
     };
@@ -448,12 +513,14 @@ export function buildActionEngineFacade(deps: ActionExecutionDeps, ql: any): any
  * Throws on denial / not-found / handler failure so the tool surfaces a
  * clean tool-error. No service-ai dependency.
  *
- * SECURITY MODEL (#2849): all gating happens at INVOKE time. A script/body
- * handler then runs as trusted code — its engine facade performs
- * context-less reads/writes that bypass RLS/FLS (SECURITY-DEFINER-like), so
- * the caller's permissions and an agent's ADR-0090 D10 data ceiling do NOT
- * bound what the body does internally. Flow actions differ: the flow engine
- * receives the caller's identity below and honours `runAs` (ADR-0049).
+ * SECURITY MODEL (#2849, #3914): all gating happens at INVOKE time. A
+ * script/body handler then runs as trusted code — its `ctx.engine` and
+ * `ctx.api` perform `isSystem` reads/writes that bypass RLS/FLS
+ * (SECURITY-DEFINER-like), so the caller's permissions and an agent's
+ * ADR-0090 D10 data ceiling do NOT bound what the body does internally. The
+ * caller's identity still RIDES the elevated context so those writes stay
+ * attributable and org-scoped. Flow actions differ: the flow engine receives
+ * the caller's identity below and honours `runAs` (ADR-0049).
  */
 export async function invokeBusinessAction(deps: ActionExecutionDeps, 
     name: string,
@@ -568,18 +635,27 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     if (!ql || typeof ql.executeAction !== 'function') {
         throw new Error('Data engine not available for action dispatch');
     }
-    // [#2849] Trusted-mode elevation must be AUDIBLE: the body's engine
-    // facade bypasses RLS/FLS, so record who triggered which action.
+    // [#2849] Trusted-mode elevation must be AUDIBLE: the body's `ctx.engine`
+    // and `ctx.api` bypass RLS/FLS, so record who triggered which action.
+    // [#3914] Wording tracks what the body ACTUALLY gets — a system-elevated
+    // context carrying the caller's identity, not a context-less engine.
     console.info(
         `[action-audit] MCP run_action '${action.name}' on '${objectName}' — body executes TRUSTED ` +
-        `(context-less engine, RLS/FLS-bypassing) for user '${ec?.userId ?? 'anonymous'}'` +
+        `(system-elevated context, RLS/FLS-bypassing) for user '${ec?.userId ?? 'anonymous'}'` +
         (ec?.principalKind === 'agent' ? ` (AGENT on behalf of '${ec?.onBehalfOf?.userId ?? 'unknown'}')` : ''),
     );
     const actionContext: any = {
         record,
         user,
         session: buildActionSession(deps, ec),
-        engine: buildActionEngineFacade(deps, ql),
+        engine: buildActionEngineFacade(deps, ql, ec),
+        // [#3914] `ctx.api` — the ScopedContext a body's `ctx.api.object(...)`
+        // resolves to. Absent here, the sandbox synthesized a context-less
+        // facade and every owner-scoped write died FORBIDDEN. `executionContext`
+        // is the same envelope, carried so the sandbox's own last-resort facade
+        // is elevated identically instead of falling back to no identity.
+        api: buildActionApi(deps, ql, ec),
+        executionContext: buildActionExecutionContext(ec),
         params: { ...params, recordId, objectName },
     };
     // Handler key: body-based actions register under `name` (AppPlugin);
