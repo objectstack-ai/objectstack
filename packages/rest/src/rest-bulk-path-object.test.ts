@@ -132,6 +132,11 @@ describe('updateMany ingress validation (#3933)', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('VALIDATION_FAILED');
+    // The documented data-surface envelope (`fields[]`, wire-format §7), not a
+    // second per-route shape.
+    expect(res.body.fields).toEqual([
+      { field: 'records.0.id', code: 'invalid_type', message: expect.any(String) },
+    ]);
     expect(updateManyData).not.toHaveBeenCalled();
   });
 });

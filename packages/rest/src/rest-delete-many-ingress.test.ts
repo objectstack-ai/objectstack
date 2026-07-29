@@ -109,6 +109,12 @@ describe('POST /data/:object/deleteMany — ingress validation (#3897)', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('VALIDATION_FAILED');
+    // Same `fields[]` envelope a validator-thrown VALIDATION_FAILED uses
+    // (#3918 / wire-format §7) — one shape per code on the wire.
+    expect(res.body.fields).toEqual([
+      { field: 'ids.0', code: 'invalid_type', message: expect.any(String) },
+    ]);
+    expect(res.body.object).toBe('invoice');
     expect(deleteManyData).not.toHaveBeenCalled();
   });
 

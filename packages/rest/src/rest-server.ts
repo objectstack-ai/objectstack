@@ -76,6 +76,25 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
  * not permitted …" — trips the `'<obj>' … not` substring check and
  * returns a misleading 404.
  */
+/**
+ * Zod issues → the data surface's `fields[]` validation envelope
+ * (`{ field, code, message }`, docs/api/wire-format §7).
+ *
+ * A schema `.parse()` at a route ingress must report failures in the SAME shape
+ * a validator-thrown `VALIDATION_FAILED` does through {@link mapDataError}
+ * (#3918) — otherwise a client keying on `fields` has to learn a second shape
+ * per route, and `code: 'VALIDATION_FAILED'` stops meaning one thing on the
+ * wire.
+ */
+export function zodIssuesToFields(issues: unknown): Array<{ field: string; code: string; message: string }> {
+    if (!Array.isArray(issues)) return [];
+    return issues.map((i: any) => ({
+        field: Array.isArray(i?.path) ? i.path.join('.') : String(i?.path ?? ''),
+        code: String(i?.code ?? 'invalid'),
+        message: String(i?.message ?? 'Invalid value'),
+    }));
+}
+
 export function mapDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
     // Referential-integrity restrict on delete → 409 with the dependent count.
     // Surfaced FIRST so the structured fields survive the generic catch-alls.
@@ -6836,8 +6855,8 @@ export class RestServer {
                             res.status(400).json({
                                 error: 'Invalid updateMany request',
                                 code: 'VALIDATION_FAILED',
+                                fields: zodIssuesToFields(parsedUpdate.error?.issues),
                                 object: req.params?.object,
-                                issues: parsedUpdate.error?.issues,
                             });
                             return;
                         }
@@ -6897,8 +6916,8 @@ export class RestServer {
                             res.status(400).json({
                                 error: 'Invalid deleteMany request',
                                 code: 'VALIDATION_FAILED',
+                                fields: zodIssuesToFields(parsed.error?.issues),
                                 object: req.params?.object,
-                                issues: parsed.error?.issues,
                             });
                             return;
                         }
