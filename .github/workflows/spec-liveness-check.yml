@@ -43,3 +43,10 @@ jobs:
 
       - name: Check spec liveness
         run: pnpm --filter @objectstack/spec check:liveness
+
+      # #3896 follow-up. The liveness ledger asks whether a property does anything;
+      # this asks what its EMPTY value MEANS. A restriction-shaped property whose
+      # empty state is permissive has to be classified on purpose — omission is the
+      # commonest authoring error, and it must not also be the widest grant.
+      - name: Check empty-state semantics
+        run: pnpm --filter @objectstack/spec check:empty-state
