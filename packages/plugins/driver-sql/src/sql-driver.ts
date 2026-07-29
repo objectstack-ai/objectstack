@@ -3647,6 +3647,117 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * SQL that reads a SQLite `Field.datetime` column as epoch **milliseconds**,
+   * whatever form the row actually stored it in.
+   *
+   * A `Field.datetime` column on SQLite is genuinely MIXED-form, and always has
+   * been: a value bound as a JS `Date` lands as INTEGER epoch ms, while a REST /
+   * JSON write (JSON has no `Date`, so the payload carries an ISO string) and a
+   * `defaultValue: 'NOW()'` slot — including the platform's own `created_at` /
+   * `updated_at` audit stamps — land as ISO TEXT. `formatOutput` →
+   * `normalizeSqliteDatetimeOutput` already repairs that mix on read, and
+   * {@link sqliteTemporalArg} already dispatches on `typeof()` for bucketing
+   * (#3773). The filter path had no equivalent: it coerced the COMPARAND to
+   * epoch ms purely from the DECLARED type, so an ISO-TEXT-stored row failed the
+   * TEXT-vs-INTEGER affinity compare and every datetime window filter returned
+   * empty (#3912) — the exact failure the epoch coercion was added to prevent,
+   * just with the two storage forms swapped.
+   *
+   * Normalising the COLUMN (rather than guessing at the comparand) is what makes
+   * the comparison correct for both forms at once. The julian-day round trip is
+   * used instead of `unixepoch(x, 'subsec')` because the latter needs SQLite
+   * 3.42+; `julianday()` is exact to the millisecond on every version (SQLite
+   * carries the julian day as integer ms internally), so `round()` recovers the
+   * epoch exactly and equality filters keep matching. An unparseable TEXT value
+   * yields NULL, which compares false — the same non-match it produced before.
+   */
+  protected sqliteEpochMsSql(columnSql: string): string {
+    return (
+      `(case when typeof(${columnSql}) in ('integer','real') then ${columnSql} ` +
+      `else cast(round((julianday(${columnSql}) - 2440587.5) * 86400000.0) as integer) end)`
+    );
+  }
+
+  /**
+   * The left-hand side of a filter comparison on `column`, normalised to the
+   * storage form {@link coerceFilterValue} coerces the comparand into.
+   *
+   * `null` — the overwhelmingly common answer — means the plain column
+   * identifier is already correct, so the caller keeps using the ordinary Knex
+   * builder call (and its index-friendly `col op ?` SQL). Only a SQLite
+   * `Field.datetime` needs the {@link sqliteEpochMsSql} CASE.
+   */
+  protected filterColumnExpr(
+    table: string | null | undefined,
+    field: string,
+    column: string,
+  ): { sql: string; bindings: any[] } | null {
+    if (!this.isEpochStoredDatetime(table, field)) return null;
+    return { sql: this.sqliteEpochMsSql('??'), bindings: [column, column, column] };
+  }
+
+  /**
+   * Compile one VALUE comparison against a storage-normalised column expression
+   * ({@link filterColumnExpr}), for the operators where the stored form actually
+   * matters.
+   *
+   * Returns `false` — "not handled, carry on" — for everything else, so the
+   * caller's normal Knex path still owns: null predicates (`IS NULL` reads the
+   * raw column and is form-independent), the `LIKE` family (a substring match on
+   * an instant is meaningless, and the raw column is what the user typed
+   * against), an empty `in`/`nin` set (Knex's `1 = 0` / `1 = 1` shortcuts), and a
+   * malformed `between` (so the caller still throws its descriptive error).
+   */
+  private applyNormalizedComparison(
+    builder: any,
+    join: 'and' | 'or',
+    expr: { sql: string; bindings: any[] },
+    op: string,
+    value: unknown,
+  ): boolean {
+    const raw = join === 'or' ? 'orWhereRaw' : 'whereRaw';
+    const binary = (sqlOp: string): boolean => {
+      // A null comparand is a null PREDICATE, not a comparison — hand it back so
+      // the caller compiles `IS NULL` / `IS NOT NULL` as it always has.
+      if (value == null) return false;
+      builder[raw](`${expr.sql} ${sqlOp} ?`, [...expr.bindings, value]);
+      return true;
+    };
+    const list = (sqlOp: 'in' | 'not in'): boolean => {
+      if (!Array.isArray(value) || value.length === 0) return false;
+      const placeholders = value.map(() => '?').join(', ');
+      builder[raw](`${expr.sql} ${sqlOp} (${placeholders})`, [...expr.bindings, ...value]);
+      return true;
+    };
+
+    switch (op) {
+      case '=': case '==': case '$eq':
+        return binary('=');
+      case '!=': case '<>': case '$ne':
+        return binary('<>');
+      case '>': case '$gt':
+        return binary('>');
+      case '>=': case '$gte':
+        return binary('>=');
+      case '<': case '$lt':
+        return binary('<');
+      case '<=': case '$lte':
+        return binary('<=');
+      case 'in': case '$in':
+        return list('in');
+      case 'nin': case 'not_in': case 'notin': case '$nin':
+        return list('not in');
+      case 'between': case '$between': {
+        if (!Array.isArray(value) || value.length !== 2) return false;
+        builder[raw](`${expr.sql} between ? and ?`, [...expr.bindings, value[0], value[1]]);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /**
    * Public, dialect-correct temporal filter-value coercion for callers that
    * build SQL *outside* the normal `find()`/`applyFilters()` path — chiefly the
    * analytics native-SQL strategy, which compiles a raw `SELECT … WHERE col >= $N`
@@ -3670,6 +3781,25 @@ export class SqlDriver implements IDataDriver {
     return this.coerceFilterValue(objectName, field, value);
   }
 
+  /**
+   * The companion of {@link temporalFilterValue} for the same outside-the-builder
+   * callers: given the SQL they were going to put on the LEFT of the comparison
+   * (an already-quoted, possibly join-qualified column reference), return the SQL
+   * they must use instead so the column reads in the storage form the coerced
+   * comparand is in.
+   *
+   * Everything but a SQLite `Field.datetime` gets its `columnSql` back verbatim.
+   * That one case gets the {@link sqliteEpochMsSql} CASE, because the column is
+   * mixed INTEGER-epoch / ISO-TEXT and coercing only the value matches whichever
+   * half the writer happened to produce (#3912). Coercing the value is therefore
+   * necessary but NOT sufficient — a caller that binds `temporalFilterValue`
+   * must wrap its column with this too, or it keeps half the bug.
+   */
+  public temporalFilterColumnSql(objectName: string, field: string, columnSql: string): string {
+    if (!this.isEpochStoredDatetime(objectName, field)) return columnSql;
+    return this.sqliteEpochMsSql(columnSql);
+  }
+
   protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
     if (!filters) return;
     const table = this.coercionKey(builder);
@@ -3690,7 +3820,11 @@ export class SqlDriver implements IDataDriver {
 
       for (const [key, value] of Object.entries(filters)) {
         if (['limit', 'offset', 'fields', 'orderBy'].includes(key)) continue;
-        builder.where(this.remoteColumn(table, key, key), this.coerceFilterValue(table, key, value) as any);
+        const column = this.remoteColumn(table, key, key);
+        const coerced = this.coerceFilterValue(table, key, value);
+        const expr = this.filterColumnExpr(table, key, column);
+        if (expr && this.applyNormalizedComparison(builder, 'and', expr, '=', coerced)) continue;
+        builder.where(column, coerced as any);
       }
       return;
     }
@@ -3714,7 +3848,10 @@ export class SqlDriver implements IDataDriver {
           const localField = this.mapSortField(fieldRaw);
           const field = this.remoteColumn(table, fieldRaw, localField);
           const coerced = this.coerceFilterValue(table, localField, value);
-          this.applyAstComparison(builder, nextJoin, field, op, value, coerced);
+          this.applyAstComparison(
+            builder, nextJoin, field, op, value, coerced,
+            this.filterColumnExpr(table, localField, field),
+          );
         } else {
           const method = nextJoin === 'or' ? 'orWhere' : 'where';
           (builder as any)[method]((qb: any) => {
@@ -3779,6 +3916,12 @@ export class SqlDriver implements IDataDriver {
    * null predicates compile to a real `IS NULL` / `IS NOT NULL` (unified with
    * the `{field, equals, null}` path), and any operator off the whitelist
    * throws instead of ever reaching Knex.
+   *
+   * `columnExpr` (from {@link filterColumnExpr}) is the storage-normalised form
+   * of `field` — non-null only for a SQLite `Field.datetime`, where comparing the
+   * raw column would compare against whichever of the two stored forms the writer
+   * happened to produce (#3912). It is optional so the protected signature stays
+   * source-compatible for subclasses; omitting it just keeps the raw column.
    */
   protected applyAstComparison(
     builder: any,
@@ -3787,11 +3930,17 @@ export class SqlDriver implements IDataDriver {
     op: string,
     rawValue: unknown,
     coerced: unknown,
+    columnExpr?: { sql: string; bindings: any[] } | null,
   ): void {
     const where = join === 'or' ? 'orWhere' : 'where';
     const whereNull = join === 'or' ? 'orWhereNull' : 'whereNull';
     const whereNotNull = join === 'or' ? 'orWhereNotNull' : 'whereNotNull';
     const opLower = String(op).toLowerCase();
+
+    // Value comparisons on a mixed-storage column read it through the CASE; every
+    // other operator (null predicates, the LIKE family, a malformed `between`)
+    // declines and falls through to the ordinary handling below.
+    if (columnExpr && this.applyNormalizedComparison(builder, join, columnExpr, opLower, coerced)) return;
 
     switch (opLower) {
       // Equality — 2-arg form so Knex renders `IS NULL` for a null comparand,
@@ -3937,9 +4086,13 @@ export class SqlDriver implements IDataDriver {
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         const localField = this.mapSortField(key);
         const field = this.remoteColumn(table, key, localField);
+        // Non-null only for a SQLite `Field.datetime`, whose two stored forms
+        // (INTEGER epoch / ISO TEXT) must be unified before comparing (#3912).
+        const columnExpr = this.filterColumnExpr(table, localField, field);
         for (const [op, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
           const coerced = this.coerceFilterValue(table, localField, opValue);
+          if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;
           switch (op) {
             case '$eq':
               (builder as any)[method](field, coerced);
@@ -4025,7 +4178,10 @@ export class SqlDriver implements IDataDriver {
         const localField = this.mapSortField(key);
         const field = this.remoteColumn(table, key, localField);
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
-        (builder as any)[method](field, this.coerceFilterValue(table, localField, value) as any);
+        const coerced = this.coerceFilterValue(table, localField, value);
+        const columnExpr = this.filterColumnExpr(table, localField, field);
+        if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;
+        (builder as any)[method](field, coerced as any);
       }
     }
   }
