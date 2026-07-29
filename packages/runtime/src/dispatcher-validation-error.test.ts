@@ -1,0 +1,305 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * #3918 — the runtime dispatcher's two error exits vs. `ValidationError`.
+ *
+ * `ValidationError` (objectql's record/rule validators) carries
+ * `.code = 'VALIDATION_FAILED'` and `.fields[]`, and deliberately carries no
+ * `.status` / `.statusCode` and no `.issues`. `@objectstack/rest` maps it to a
+ * 400 with `fields[]` (`mapDataError`); both dispatcher exits used to do
+ * neither, because each read exactly the properties this error lacks:
+ *
+ *  - `HttpDispatcher.errorFromThrown` — no `.status` → fell back to the
+ *    caller's `fallbackStatus` (500 on `/packages` publish), and built
+ *    `details` from `.issues` only, so `fields[]` was dropped.
+ *  - `dispatcher-plugin`'s `errorResponseBase` — same 500 fallback, and a body
+ *    of only `{message, code}`. Worse, landing on 5xx dragged the message
+ *    through the #3867 leak sanitiser, so a bad email address came back as a
+ *    500 "Internal server error" with nothing to attach to the input.
+ *
+ * Both exits are private/module-local, so these drive them the way real
+ * traffic does: `errorFromThrown` through `dispatch()` on a route whose
+ * service throws, `errorResponseBase` through the real route handler the
+ * plugin registers.
+ *
+ * The fixture below is structurally identical to a real `ValidationError` —
+ * same `name`, same `code`, same `.fields[]`, and no status — but hand-built so
+ * this package's tests take no dependency on objectql.
+ */
+
+import { describe, it, expect } from 'vitest';
+
+import { HttpDispatcher } from './http-dispatcher.js';
+import { createDispatcherPlugin } from './dispatcher-plugin.js';
+
+const FIELDS = [
+    { field: 'email', code: 'invalid_email', message: 'email must be a valid email address' },
+    { field: 'name', code: 'required', message: 'name is required' },
+];
+
+/** What `new ValidationError(FIELDS)` looks like on the wire side of a throw. */
+function makeValidationError() {
+    const err = new Error(
+        'email must be a valid email address; name is required',
+    ) as Error & { code: string; fields: unknown[] };
+    err.name = 'ValidationError';
+    err.code = 'VALIDATION_FAILED';
+    err.fields = FIELDS;
+    return err;
+}
+
+// ---------------------------------------------------------------------------
+// Exit 1 — HttpDispatcher.errorFromThrown (the RETURNED error path)
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /packages/:id/publish-drafts` catches and returns
+ * `errorFromThrown(e, 500)` — the 500-fallback caller, i.e. the one where the
+ * missing `.status` actually cost a status downgrade. (`/meta` saves pass
+ * `400`, so they masked the downgrade while still dropping `fields[]`.)
+ */
+function makeDispatcher(publishError: unknown) {
+    const protocol = {
+        publishPackageDrafts: async () => { throw publishError; },
+    };
+    // The route's 503 pre-check: it needs an objectql service with a registry
+    // before it will reach the protocol call at all.
+    const objectql = { registry: {} };
+    const resolve = (name: string) =>
+        name === 'protocol' ? protocol : name === 'objectql' ? objectql : undefined;
+    const kernel: any = {
+        getService: resolve,
+        getServiceAsync: async (name: string) => resolve(name),
+    };
+    return new HttpDispatcher(kernel);
+}
+
+async function publishPackage(publishError: unknown) {
+    const dispatcher = makeDispatcher(publishError);
+    const result: any = await dispatcher.dispatch(
+        'POST',
+        '/packages/demo/publish-drafts',
+        {},
+        {},
+        {} as any,
+    );
+    return result.response;
+}
+
+describe('#3918 — HttpDispatcher.errorFromThrown maps VALIDATION_FAILED', () => {
+    it('answers 400, not the caller\'s 500 fallback', async () => {
+        const res = await publishPackage(makeValidationError());
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe(400);
+    });
+
+    it('passes `fields[]` through in `details` so the UI can anchor each error', async () => {
+        const res = await publishPackage(makeValidationError());
+
+        expect(res.body.error.details).toEqual({
+            code: 'VALIDATION_FAILED',
+            fields: FIELDS,
+        });
+    });
+
+    it('keeps the human message intact (400 never reaches the 5xx sanitiser)', async () => {
+        const res = await publishPackage(makeValidationError());
+
+        expect(res.body.error.message).toBe('email must be a valid email address; name is required');
+    });
+
+    it('recognises the shape by `code` alone, for hand-thrown validation errors', async () => {
+        // A hook or service that throws `{ code: 'VALIDATION_FAILED', fields }`
+        // without extending ValidationError must be served identically — the
+        // same both-ways predicate `mapDataError` uses.
+        const err = Object.assign(new Error('quantity must be at least 1'), {
+            code: 'VALIDATION_FAILED',
+            fields: [{ field: 'quantity', code: 'min_value', message: 'quantity must be at least 1' }],
+        });
+        const res = await publishPackage(err);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.details.fields).toEqual(err.fields);
+    });
+
+    it('pins `details.code` to VALIDATION_FAILED when matched by `name` alone', async () => {
+        const err = new Error('name is required');
+        err.name = 'ValidationError';
+        (err as any).fields = [{ field: 'name', code: 'required', message: 'name is required' }];
+        const res = await publishPackage(err);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.details.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('defaults `fields` to [] when the error carries none', async () => {
+        // `details.fields` is the contract; a caller mapping it must never have
+        // to guard for `undefined`.
+        const err = Object.assign(new Error('invalid'), { code: 'VALIDATION_FAILED' });
+        const res = await publishPackage(err);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.details.fields).toEqual([]);
+    });
+
+    it('still lets an explicit `status` win — 400 is only the fallback', async () => {
+        const err = Object.assign(makeValidationError(), { status: 422 });
+        const res = await publishPackage(err);
+
+        expect(res.status).toBe(422);
+        expect(res.body.error.details.fields).toEqual(FIELDS);
+    });
+
+    it('leaves a non-validation error on its old path', async () => {
+        // Anti-regression for the #3867 tier this sits next to: an ordinary
+        // throw still takes the caller's 500 fallback and its `issues`/`code`
+        // details shape.
+        const err = Object.assign(new Error('publish backend unavailable'), {
+            code: 'STORAGE_FAILURE',
+            issues: [{ path: 'a', message: 'b', code: 'c' }],
+        });
+        const res = await publishPackage(err);
+
+        expect(res.status).toBe(500);
+        expect(res.body.error.details).toEqual({
+            code: 'STORAGE_FAILURE',
+            issues: [{ path: 'a', message: 'b', code: 'c' }],
+        });
+        expect(res.body.error.details.fields).toBeUndefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Exit 2 — dispatcher-plugin's errorResponseBase (the THROWN error path)
+// ---------------------------------------------------------------------------
+
+function makeFakeServer() {
+    const handlers: Record<string, (req: any, res: any) => any> = {};
+    const rec = (verb: string) => (path: string, handler: any) => {
+        handlers[`${verb} ${path}`] = handler;
+    };
+    return {
+        handlers,
+        server: {
+            get: rec('GET'),
+            post: rec('POST'),
+            put: rec('PUT'),
+            delete: rec('DELETE'),
+            patch: rec('PATCH'),
+        },
+    };
+}
+
+function makeCtx(fakeServer: any, analyticsError: unknown) {
+    const analytics = {
+        query: async () => { throw analyticsError; },
+        getMeta: async () => ({ cubes: [] }),
+        generateSql: async () => ({ sql: null }),
+    };
+    const kernel = {
+        getService: (name: string) => (name === 'analytics' ? analytics : undefined),
+        getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : undefined),
+    };
+    return {
+        getKernel: () => kernel,
+        getService: (name: string) => (name === 'http.server' ? fakeServer : undefined),
+        environmentId: undefined,
+        logger: { info() {}, warn() {}, error() {}, debug() {} },
+        hook: () => {},
+        on: () => {},
+    } as any;
+}
+
+function makeRes() {
+    const res: any = {
+        statusCode: undefined as number | undefined,
+        body: undefined as any,
+        status(c: number) { res.statusCode = c; return res; },
+        header() { return res; },
+        json(b: any) { res.body = b; return res; },
+    };
+    return res;
+}
+
+/** Drive `POST /analytics/query` with a service that throws `err`. */
+async function postAnalyticsQuery(err: unknown) {
+    const { server, handlers } = makeFakeServer();
+    const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+    await plugin.start?.(makeCtx(server, err));
+
+    const handler = handlers['POST /api/v1/analytics/query'];
+    expect(handler, 'POST /api/v1/analytics/query must be mounted').toBeTypeOf('function');
+
+    const res = makeRes();
+    await handler({ body: { cube: 'x', query: {} }, query: {} }, res);
+    return res;
+}
+
+describe('#3918 — dispatcher-plugin errorResponseBase maps VALIDATION_FAILED', () => {
+    it('answers 400 instead of 500', async () => {
+        const res = await postAnalyticsQuery(makeValidationError());
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.error.code).toBe(400);
+    });
+
+    it('carries `fields[]` — the body used to be `{message, code}` only', async () => {
+        const res = await postAnalyticsQuery(makeValidationError());
+
+        expect(res.body.error.details).toEqual({
+            code: 'VALIDATION_FAILED',
+            fields: FIELDS,
+        });
+    });
+
+    it('keeps the human message — the 500 fallback used to replace it', async () => {
+        // The regression that motivated the issue: on 5xx the #3867 sanitiser
+        // swaps the message for INTERNAL_ERROR_MESSAGE, so a user-input mistake
+        // was served as a generic "internal error".
+        const res = await postAnalyticsQuery(makeValidationError());
+
+        expect(res.body.error.message).toBe('email must be a valid email address; name is required');
+        expect(res.body.error.message).not.toBe('Internal server error');
+    });
+
+    it('does not record a validation failure as a server fault', async () => {
+        // `__obsRecordedError` feeds errorReporter and is set on 5xx only. A bad
+        // payload is not an incident — at 400 the side-channel stays clear.
+        const res = await postAnalyticsQuery(makeValidationError());
+
+        expect((res as any).__obsRecordedError).toBeUndefined();
+    });
+
+    it('still lets an explicit `status` win', async () => {
+        const res = await postAnalyticsQuery(Object.assign(makeValidationError(), { status: 422 }));
+
+        expect(res.statusCode).toBe(422);
+        expect(res.body.error.details.fields).toEqual(FIELDS);
+    });
+
+    it('leaves non-validation errors with the exact two-key body they had', async () => {
+        const res = await postAnalyticsQuery(new Error('analytics engine unavailable'));
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body.error).toEqual({ message: 'analytics engine unavailable', code: 500 });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Parity with the surface that already got this right
+// ---------------------------------------------------------------------------
+
+describe('#3918 — both dispatcher exits agree with @objectstack/rest', () => {
+    it('serves the same status and the same `fields[]` from either exit', async () => {
+        const returned = await publishPackage(makeValidationError());
+        const thrown = await postAnalyticsQuery(makeValidationError());
+
+        // `mapDataError` answers 400 with `fields` = the error's `.fields`.
+        expect(returned.status).toBe(400);
+        expect(thrown.statusCode).toBe(400);
+        expect(returned.body.error.details.fields).toEqual(FIELDS);
+        expect(thrown.body.error.details.fields).toEqual(FIELDS);
+    });
+});

@@ -35,6 +35,7 @@ import {
     resolveExecutionContext,
     isPermissionDeniedError,
 } from './security/resolve-execution-context.js';
+import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 
 // randomUUID moved to ./domains/auth.ts with its only consumer (D11③ PR-7).
 
@@ -491,16 +492,33 @@ export class HttpDispatcher {
      * banner; carrying `issues` (and the semantic `code`) in `details` lets it
      * map each error back to the offending field. Falls back to `fallbackStatus`
      * and behaves exactly like `error()` for errors that carry neither.
+     *
+     * [#3918] A record-level `ValidationError` is the third structured shape,
+     * and it used to fall through BOTH branches: it carries no `.status` (so a
+     * `/meta`-style 400 fallback saved it, but a 500-fallback caller did not)
+     * and no `.issues` (so its `.fields[]` — the whole point — was dropped and
+     * the UI could only show a banner). It now maps the way
+     * `@objectstack/rest`'s `mapDataError` has always mapped it: status 400,
+     * `fields[]` passed through in `details`. An explicit `.status` /
+     * `.statusCode` still wins, so this only supplies the fallback.
      */
     private errorFromThrown(e: any, fallbackStatus = 500) {
+        const validation = validationFailureDetails(e);
         const status =
             typeof e?.status === 'number' ? e.status
             : typeof e?.statusCode === 'number' ? e.statusCode
+            : validation ? VALIDATION_FAILED_STATUS
             : fallbackStatus;
         const issues = Array.isArray(e?.issues) ? e.issues : undefined;
         const details =
-            issues || e?.code
-                ? { ...(e?.code ? { code: e.code } : {}), ...(issues ? { issues } : {}) }
+            issues || e?.code || validation
+                ? {
+                    ...(e?.code ? { code: e.code } : {}),
+                    ...(issues ? { issues } : {}),
+                    // Last so `code` is pinned to VALIDATION_FAILED even when the
+                    // error was matched by `name` alone and carries no `.code`.
+                    ...(validation ?? {}),
+                }
                 : undefined;
         return this.error(e?.message ?? String(e), status, details);
     }

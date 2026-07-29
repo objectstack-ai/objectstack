@@ -3,6 +3,7 @@
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
+import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import {
     buildSecurityHeaders,
     type SecurityHeadersOptions,
@@ -374,12 +375,25 @@ function sendResultBase(
  *
  * Sanitising costs no diagnostics: the untouched error is still handed to
  * `errorReporter` through the `__obsRecordedError` side-channel below.
+ *
+ * [#3918] A third defect, of the same family as (1): a record-level
+ * `ValidationError` carries neither `status` nor `statusCode`, so it landed on
+ * the 500 fallback — and because the body was only `{message, code}`, its
+ * `fields[]` was dropped AND the 5xx sanitiser above replaced the human message
+ * with the generic INTERNAL_ERROR_MESSAGE. A user typing a bad email got back a
+ * 500 "internal error" with nothing to attach to the offending input.
+ * `@objectstack/rest` has mapped this shape to a 400 with `fields[]` since
+ * forever (`mapDataError`); this exit now does the same, so a form served by
+ * the dispatcher can highlight the field the way a form served by /data can.
+ * `details` is only emitted for that shape — everything else keeps the exact
+ * two-key body it had.
  */
 function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, string>): void {
+    const validation = validationFailureDetails(err);
     const code =
         (typeof err?.status === 'number' ? err.status : undefined) ??
         (typeof err?.statusCode === 'number' ? err.statusCode : undefined) ??
-        500;
+        (validation ? VALIDATION_FAILED_STATUS : 500);
     res.status(code);
     if (securityHeaders) {
         for (const [k, v] of Object.entries(securityHeaders)) {
@@ -404,7 +418,7 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
             : raw || 'Internal Server Error';
     res.json({
         success: false,
-        error: { message, code },
+        error: { message, code, ...(validation ? { details: validation } : {}) },
     });
 }
 
