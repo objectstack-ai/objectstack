@@ -700,7 +700,10 @@ export class AppPlugin implements Plugin {
         // checklist, so this list is the whole point of shipping the refusal
         // and the inventory in the same release. Best-effort and warn-only —
         // a diagnostic must never be the reason a kernel fails to boot.
-        ctx.hook('kernel:ready', async () => {
+        // A host whose context predates `hook` (or a partial test double) must
+        // not lose its kernel to a DIAGNOSTIC — the guard keeps this block's
+        // own promise, which registering unconditionally did not.
+        ctx.hook?.('kernel:ready', async () => {
             try {
                 const engine: any = ctx.getService('objectql');
                 if (!engine || typeof engine.listRegisteredActions !== 'function') return;
