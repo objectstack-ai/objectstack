@@ -30,6 +30,13 @@ regenerate; never edit the mirrors.
    fixed, false positives (so the next run can skip re-judging them), and
    out-of-scope findings (file an issue per Prime Directive #10).
 
+Complementary deep pass: the fingerprint grep above is cheap and targeted at
+*removals*; for a full implementation-accuracy re-verification of prose that
+merely *references* changed code, use the `docs-accuracy-audit` workflow the
+`docs-drift-check` PR bot advertises — scope it with
+`node scripts/docs-audit/affected-docs.mjs <since-rev>` and pass the list as
+`args.docs`. Worth one scoped run before `changeset pre exit`.
+
 ## Fingerprints (v17 removals/renames → what a hit means)
 
 | Pattern | Drift if the doc… | Source changeset |
