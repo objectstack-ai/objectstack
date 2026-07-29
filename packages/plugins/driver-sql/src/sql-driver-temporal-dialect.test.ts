@@ -47,18 +47,43 @@ function makeDriver(client: string): ProbeDriver {
 
 const ISO = '2025-06-18';
 const CANONICAL = '2025-06-18T00:00:00.000Z';
+/** The same UTC wall clock, spelled the only way MySQL parses it (#3942). */
+const MYSQL_LITERAL = '2025-06-18 00:00:00.000';
+
+/** What each dialect physically binds for one canonical instant. */
+const PHYSICAL: Record<string, string> = {
+  'better-sqlite3': CANONICAL,
+  pg: CANONICAL,
+  mysql2: MYSQL_LITERAL,
+};
 
 describe('temporalFilterValue dialect gating', () => {
-  it('every dialect canonicalises a bare calendar day to UTC midnight (#3912)', () => {
-    // The uniformity IS the contract now. On Postgres this is the fix for the
-    // measured cross-dialect divergence: an un-anchored '2025-06-18' was read as
-    // midnight in the server's timezone, so a window put the same instant on a
-    // different day than SQLite did.
-    for (const client of ['better-sqlite3', 'pg', 'mysql2']) {
+  it('every dialect anchors a bare calendar day to UTC midnight (#3912)', () => {
+    // The SEMANTICS are uniform — one instant, midnight UTC — even though MySQL
+    // spells it differently. On Postgres this is the fix for the measured
+    // cross-dialect divergence: an un-anchored '2025-06-18' was read as midnight
+    // in the server's timezone, so a window put the same instant on a different
+    // day than SQLite did.
+    for (const [client, expected] of Object.entries(PHYSICAL)) {
       const d = makeDriver(client);
       d.seedDatetime('t', 'at');
-      expect(d.temporalFilterValue('t', 'at', ISO)).toBe(CANONICAL);
+      expect(d.temporalFilterValue('t', 'at', ISO), client).toBe(expected);
     }
+  });
+
+  it('MySQL gets the same instant in a MySQL-parseable literal (#3942)', () => {
+    // MySQL rejects both the `T` separator and the `Z` suffix — an ISO-8601
+    // comparand fails the statement outright with *Incorrect datetime value*
+    // (measured on MariaDB 10.11), so the canonical form has to be respelled for
+    // the bind. It is the SAME UTC wall clock: the column is `DATETIME(3)`, which
+    // does no timezone conversion, and the connection is pinned to UTC.
+    const d = makeDriver('mysql2');
+    d.seedDatetime('t', 'at');
+    expect(d.temporalFilterValue('t', 'at', ISO)).toBe(MYSQL_LITERAL);
+    expect(d.temporalFilterValue('t', 'at', '2025-06-18T08:00:00+08:00')).toBe(MYSQL_LITERAL);
+    expect(d.temporalFilterValue('t', 'at', new Date(CANONICAL))).toBe(MYSQL_LITERAL);
+    // Never ISO — that is precisely what MySQL cannot parse.
+    expect(String(d.temporalFilterValue('t', 'at', CANONICAL))).not.toMatch(/[TZ]/);
   });
 
   it('never binds an epoch integer — that would break a native TIMESTAMP compare', () => {

@@ -270,6 +270,35 @@ function canonicalUtcDatetime(value: unknown): unknown {
   return Number.isFinite(ms) ? new Date(ms).toISOString() : value;
 }
 
+/**
+ * The canonical instant rendered as a MySQL datetime literal — the same UTC wall
+ * clock, spelled the only way MySQL will parse it (#3942).
+ *
+ * MySQL/MariaDB reject the ISO-8601 the rest of the platform speaks: neither the
+ * `T` separator nor the `Z` suffix is accepted in a datetime literal, so
+ * `'2026-03-20T12:34:56.789Z'` fails the INSERT outright with *Incorrect datetime
+ * value* (measured on MariaDB 10.11). MySQL 8.0.19+ added `±HH:MM` offsets, but
+ * still not `Z`, and the platform supports older servers — so the offset is
+ * dropped and the value is stored as the UTC wall clock in a `DATETIME(3)`
+ * column, which does no timezone conversion of its own.
+ *
+ * This is a PHYSICAL spelling, not a semantic change: the column still holds the
+ * same instant, and every layer above the bind — API payloads, filter authoring,
+ * CEL — keeps the canonical `…Z` form. Reads convert back (the connection is
+ * pinned to UTC, so mysql2 reconstructs the instant correctly).
+ *
+ * Total, and deliberately strict: only an exactly-canonical string is rewritten.
+ * Anything else — an unparseable value `canonicalUtcDatetime` passed through, or
+ * a year outside MySQL's 1000..9999 range, which `toISOString` renders in
+ * expanded `+0YYYYY` form — is handed to MySQL untouched, so it fails loudly
+ * rather than being silently reinterpreted.
+ */
+function mysqlDatetimeLiteral(canonical: unknown): unknown {
+  if (typeof canonical !== 'string') return canonical;
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}\.\d{3})Z$/.exec(canonical);
+  return m ? `${m[1]} ${m[2]}` : canonical;
+}
+
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 export interface IntrospectedColumn {
@@ -742,7 +771,59 @@ export class SqlDriver implements IDataDriver {
     }
     // A function-valued `connection` (knex's per-acquire provider) is left
     // alone: the host is building each connection itself and owns its timeouts.
-    return bounded;
+    return SqlDriver.withUtcSession(bounded);
+  }
+
+  /**
+   * Pin a MySQL connection to UTC, in both directions (#3942).
+   *
+   * MySQL is the one supported dialect where the SESSION timezone participates
+   * in what a datetime means, on two independent layers, and both default to
+   * something machine-dependent:
+   *
+   *   - **mysql2** (`connection.timezone`, default `'local'`) decides how a bound
+   *     JS `Date` is rendered and how a returned `DATETIME` string is parsed back.
+   *     Left at `'local'`, two app servers in different zones write the same
+   *     instant as different values, and read the same row as different instants.
+   *   - **The server** (`@@session.time_zone`, default `SYSTEM`) decides how a
+   *     zone-naive literal is interpreted for a `TIMESTAMP` column, and what
+   *     `CURRENT_TIMESTAMP` renders. Measured at 8 hours off on a server
+   *     configured `+08:00`.
+   *
+   * Setting both to UTC makes the wall clock the driver writes *be* the instant,
+   * which is what {@link mysqlDatetimeLiteral} relies on — and it keeps legacy
+   * `TIMESTAMP` columns correct too, so a deployment stays right whether or not
+   * the `DATETIME(3)` migration has run.
+   *
+   * A host that set either one explicitly is left alone; an existing
+   * `pool.afterCreate` is chained rather than replaced, since it is a documented
+   * knex extension point the host may already be using.
+   */
+  private static withUtcSession(knexConfig: Record<string, any>): Record<string, any> {
+    const client = String(knexConfig.client ?? '');
+    if (client !== 'mysql' && client !== 'mysql2') return knexConfig;
+
+    const out: Record<string, any> = { ...knexConfig };
+    const conn = out.connection;
+    if (conn && typeof conn === 'object' && (conn as any).timezone === undefined) {
+      out.connection = { ...(conn as object), timezone: 'Z' };
+    }
+
+    const pool = (out.pool ?? {}) as Record<string, any>;
+    const hostAfterCreate = pool.afterCreate as
+      | ((conn: unknown, done: (err?: unknown) => void) => void)
+      | undefined;
+    out.pool = {
+      ...pool,
+      afterCreate(connection: any, done: (err?: unknown, conn?: unknown) => void) {
+        connection.query(`SET time_zone = '+00:00'`, (err: unknown) => {
+          if (err) return done(err);
+          if (!hostAfterCreate) return done(undefined, connection);
+          hostAfterCreate(connection, (hostErr?: unknown) => done(hostErr, connection));
+        });
+      },
+    };
+    return out;
   }
 
   /**
@@ -2154,8 +2235,8 @@ export class SqlDriver implements IDataDriver {
     if (!exists) {
       await this.knex.schema.createTable(shardName, (table) => {
         table.string('id').primary();
-        table.timestamp('created_at').defaultTo(this.knex.fn.now());
-        table.timestamp('updated_at').defaultTo(this.knex.fn.now());
+        this.createAuditTimestampColumn(table, 'created_at');
+        this.createAuditTimestampColumn(table, 'updated_at');
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (builtinColumns.has(name)) continue;
           this.createColumn(table, name, field);
@@ -2470,8 +2551,8 @@ export class SqlDriver implements IDataDriver {
       if (!exists) {
         await this.knex.schema.createTable(tableName, (table) => {
           table.string('id').primary();
-          table.timestamp('created_at').defaultTo(this.knex.fn.now());
-          table.timestamp('updated_at').defaultTo(this.knex.fn.now());
+          this.createAuditTimestampColumn(table, 'created_at');
+          this.createAuditTimestampColumn(table, 'updated_at');
           if (obj.fields) {
             for (const [name, field] of Object.entries(obj.fields)) {
               if (builtinColumns.has(name)) continue;
@@ -2538,6 +2619,8 @@ export class SqlDriver implements IDataDriver {
       // UTC-text storage form. A table this call just CREATED has no rows, so it
       // is canonical by construction — record that without touching the disk.
       await this.backfillCanonicalDatetimes(tableName, exists);
+      // #3942: the MySQL twin — widen legacy `TIMESTAMP` columns to `DATETIME(3)`.
+      if (exists) await this.migrateMysqlDatetimeColumns(tableName, obj.fields ?? {});
     }
 
     // Pre-create the auto_number counter table now, while we hold a fresh pooled
@@ -2627,6 +2710,80 @@ export class SqlDriver implements IDataDriver {
           { error: err instanceof Error ? err.message : String(err) },
         );
       }
+    }
+  }
+
+  /**
+   * Widen a table's legacy MySQL `TIMESTAMP` datetime columns to `DATETIME(3)`
+   * (#3942) — the MySQL counterpart of {@link backfillCanonicalDatetimes}.
+   *
+   * `TIMESTAMP` cannot hold an instant past 2038-01-19 or before 1970, keeps no
+   * milliseconds, and converts using the session timezone. `ALTER … MODIFY` moves
+   * the column to `DATETIME(3)`, which has none of those properties. The instants
+   * survive because the connection pins `@@session.time_zone` to UTC
+   * ({@link withUtcSession}): MySQL renders each `TIMESTAMP` in the session zone
+   * to produce the `DATETIME` wall clock, so UTC in gives the UTC wall clock the
+   * driver's own writes use.
+   *
+   * Only the audit columns and declared `Field.datetime` columns are touched, and
+   * only when they are still `timestamp` — so this is idempotent and re-running
+   * costs one `information_schema` lookup.
+   *
+   * Failures are logged and swallowed, like the SQLite backfill and for the same
+   * reason: a `TIMESTAMP` column keeps working (the driver binds the same UTC
+   * wall-clock literal either way, and the session is pinned to UTC), it merely
+   * keeps the range and precision limits. Correctness must not depend on a
+   * migration having run, and a migration must never take boot down.
+   */
+  protected async migrateMysqlDatetimeColumns(
+    table: string,
+    fields: Record<string, any>,
+  ): Promise<void> {
+    if (!this.isMysql) return;
+    const candidates = new Set<string>(AUDIT_TIMESTAMP_COLUMNS);
+    for (const [name, field] of Object.entries(fields)) {
+      if ((field?.type ?? 'string') === 'datetime' && !field?.multiple) candidates.add(name);
+    }
+    if (candidates.size === 0) return;
+
+    try {
+      const res: any = await this.knex.raw(
+        `select column_name, is_nullable from information_schema.columns
+         where table_schema = database() and table_name = ? and data_type = 'timestamp'`,
+        [table],
+      );
+      // mysql2 returns [rows, fields]; column names vary in case by server.
+      const rows: any[] = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
+      const legacy = rows
+        .map((r) => ({
+          name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
+          nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
+        }))
+        .filter((c) => c.name && candidates.has(c.name));
+      if (legacy.length === 0) return;
+
+      for (const col of legacy) {
+        // The default is re-stated because MySQL drops a column's DEFAULT when
+        // MODIFY does not repeat it, and an audit column without
+        // `CURRENT_TIMESTAMP(3)` would start inserting NULL.
+        const isAudit = (AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(col.name);
+        const nullClause = col.nullable ? 'null' : 'not null';
+        const defaultClause = isAudit ? ' default current_timestamp(3)' : '';
+        await this.knex.raw(
+          `alter table ?? modify column ?? datetime(3) ${nullClause}${defaultClause}`,
+          [table, col.name],
+        );
+      }
+      this.logger.info?.(
+        `[sql-driver] widened MySQL TIMESTAMP → DATETIME(3) (#3942) on ${table}`,
+        { columns: legacy.map((c) => c.name) },
+      );
+    } catch (err) {
+      this.logger.warn(
+        `[sql-driver] could not widen MySQL datetime columns on ${table}; ` +
+        `writes stay correct, but the 2038 ceiling and millisecond truncation remain`,
+        { error: err instanceof Error ? err.message : String(err) },
+      );
     }
   }
 
@@ -3619,7 +3776,7 @@ export class SqlDriver implements IDataDriver {
 
     const kind = this.temporalFieldKind(table, field);
     if (!kind) return value;
-    return kind === 'datetime' ? canonicalUtcDatetime(value) : this.toDateOnly(value);
+    return kind === 'datetime' ? this.storageDatetimeValue(value) : this.toDateOnly(value);
   }
 
   /**
@@ -3645,6 +3802,21 @@ export class SqlDriver implements IDataDriver {
    * That last exit is what makes the convention pay off rather than just move the
    * cost around: after migration the emitted SQL is a plain `col >= ?` again.
    */
+  /**
+   * The physical form a `Field.datetime` value takes on THIS dialect — what is
+   * actually bound, on both the write path (`formatInput`) and the filter path
+   * (`coerceFilterValue`), so the two can never disagree.
+   *
+   * The logical canon is {@link canonicalUtcDatetime}'s `…Z` string everywhere.
+   * MySQL is the one dialect that cannot parse it, so it gets the same instant
+   * spelled as a MySQL literal (see {@link mysqlDatetimeLiteral}); SQLite stores
+   * the canonical string as-is and Postgres parses it straight into `timestamptz`.
+   */
+  protected storageDatetimeValue(value: unknown): unknown {
+    const canonical = canonicalUtcDatetime(value);
+    return this.isMysql ? mysqlDatetimeLiteral(canonical) : canonical;
+  }
+
   protected needsLegacyDatetimeRepair(table: string | null | undefined, field: string): boolean {
     if (!table || !this.isSqlite) return false;
     if (this.datetimeFields[table]?.has(field) !== true) return false;
@@ -4416,6 +4588,25 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
+  /**
+   * DDL for a builtin `created_at` / `updated_at` audit column.
+   *
+   * These are created directly rather than through {@link createColumn} (they are
+   * not declared fields), but the objectql registry DOES declare them as
+   * `Field.datetime` on every audited object — so they are filtered, sorted and
+   * bucketed like one, and must take the same physical type or they inherit the
+   * `TIMESTAMP` problems on MySQL: no milliseconds, and a 2038 ceiling on the
+   * column every list view sorts by (#3942). `CURRENT_TIMESTAMP` has to carry
+   * matching precision for a `DATETIME(3)` default, hence `now(3)`.
+   */
+  protected createAuditTimestampColumn(table: Knex.CreateTableBuilder, name: string): void {
+    if (this.isMysql) {
+      table.datetime(name, { precision: 3 }).defaultTo(this.knex.fn.now(3));
+      return;
+    }
+    table.timestamp(name).defaultTo(this.knex.fn.now());
+  }
+
   protected createColumn(table: Knex.CreateTableBuilder, name: string, field: any) {
     if (field.multiple) {
       table.json(name);
@@ -4469,7 +4660,18 @@ export class SqlDriver implements IDataDriver {
         col = table.date(name);
         break;
       case 'datetime':
-        col = table.timestamp(name);
+        // MySQL's `TIMESTAMP` is a 32-bit epoch: it cannot represent an instant
+        // outside 1970-01-01..2038-01-19 (a contract end date, a subscription
+        // expiry, a retention horizon — all rejected outright), it carries no
+        // fractional seconds by default so the canonical form's milliseconds are
+        // silently truncated, and it CONVERTS on read/write using the session
+        // timezone, which makes the stored instant depend on server config.
+        // `DATETIME(3)` has none of those properties: 1000..9999, milliseconds
+        // kept, and stored verbatim — so the column holds the UTC wall clock the
+        // driver writes, exactly as ServiceNow stores its MySQL timestamps
+        // (#3942). Postgres deliberately keeps `table.timestamp` → `timestamptz`:
+        // asking for precision 3 there would REDUCE it from microseconds.
+        col = this.isMysql ? table.datetime(name, { precision: 3 }) : table.timestamp(name);
         break;
       case 'time':
         col = table.time(name);
@@ -4675,7 +4877,7 @@ export class SqlDriver implements IDataDriver {
         if (v == null) continue;
         // `NOW()` was already replaced with an ISO instant above; anything else
         // that is not interpretable as a time passes through untouched.
-        const normalized = canonicalUtcDatetime(v);
+        const normalized = this.storageDatetimeValue(v);
         if (normalized !== v) {
           if (!copied) { copy = { ...copy }; copied = true; }
           copy[field] = normalized;

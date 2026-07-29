@@ -1,6 +1,6 @@
 # ADR-0053: `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone
 
-**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 (`temporalFilterValue` promotion onto the `IDataDriver` contract) still open as the ADR predicted. **Partly superseded (2026-07-29, addendum D-B1):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by a canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text storage form, applied on write and to filter comparands on every dialect — see the final addendum (#3912).
+**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 (`temporalFilterValue` promotion onto the `IDataDriver` contract) still open as the ADR predicted. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
 **Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
@@ -405,7 +405,7 @@ time, the matrix proves runtime correctness across drivers.
 
 ---
 
-## Addendum (2026-07-29) — `Field.datetime` has ONE storage form: canonical UTC text
+## Addendum (2026-07-29) — `Field.datetime` has ONE storage form per dialect, always a UTC instant
 
 > **Status:** landed. This addendum **revises** the storage half of Phase 1 (which
 > left `Field.datetime` "stored as UTC epoch ms" on SQLite) and **extends**
@@ -509,8 +509,53 @@ is clean.
   known to have produced dialect-divergent row results.
 - #3928 (datetime `ORDER BY` mis-sorted on mixed storage) is closed by
   construction rather than by a sort-side fix.
-- MySQL is **not** covered here. `table.timestamp` emits a MySQL `TIMESTAMP`,
-  whose range ends at 2038-01-19, and the connection sets no `timezone`, so
-  mysql2 serialises a `Date` in the Node process's local zone. That is a separate
-  defect from #3912 and is filed on its own; it needs a real MySQL to verify and
-  a column-type migration to fix.
+### D-B4 — MySQL stores the same instant, spelled the way MySQL parses it
+
+MySQL was the third dialect, and measurement (MariaDB 10.11, `default_time_zone
+= '+08:00'`, process on `America/New_York`) found it the worst off — including
+one defect D-B1 *introduced*:
+
+- MySQL accepts neither the `T` separator nor the `Z` suffix in a datetime
+  literal, so the canonical form failed the statement outright with *Incorrect
+  datetime value*. An ISO comparand or REST/JSON write had **always** failed this
+  way; canonicalising the write path extended it to `Date` writes too.
+- `table.timestamp` emits MySQL `TIMESTAMP`: a 32-bit epoch that cannot hold an
+  instant outside 1970..2038 (a contract end date in 2040 was rejected), carries
+  no fractional digits so the canonical form's milliseconds were truncated, and
+  converts on read/write using the session timezone.
+- mysql2's `connection.timezone` defaults to the HOST's local zone and
+  `@@session.time_zone` to the server's, so a zone-naive value landed 12 hours
+  off with the two misconfigurations compounding.
+
+The resolution keeps the logical canon and changes only the physical spelling:
+
+1. `Field.datetime` maps to **`DATETIME(3)`** — range 1000..9999, milliseconds
+   kept, and no timezone conversion of its own, so the column holds the UTC wall
+   clock the driver writes. This is the ServiceNow model. Postgres deliberately
+   keeps `timestamptz`: asking for precision 3 there would *reduce* it from
+   microseconds. The builtin `created_at`/`updated_at` take the same type — the
+   registry declares them `Field.datetime`, and they are what most list views
+   sort by.
+2. The connection is **pinned to UTC on both layers** — `connection.timezone =
+   'Z'` for mysql2 and `SET time_zone = '+00:00'` via `pool.afterCreate` for the
+   server. This is what makes the wall clock *be* the instant, and it keeps a
+   not-yet-migrated `TIMESTAMP` column correct too. An explicit host choice is
+   left alone; an existing `afterCreate` is chained, not replaced.
+3. `storageDatetimeValue` respells the canonical instant as a MySQL literal for
+   the bind, on the write path and the filter path alike. Deliberately strict:
+   only an exactly-canonical string is rewritten, so an unparseable value or a
+   year outside 1000..9999 reaches MySQL untouched and fails loudly.
+
+`migrateMysqlDatetimeColumns` widens legacy `TIMESTAMP` columns at schema sync,
+under the same failure policy as D-B3 — a `TIMESTAMP` column keeps *working*
+(the driver binds the same literal and the session is UTC), it merely keeps the
+range and precision limits. Verified on a real server: the ALTER moves no stored
+instant, correctly-stored legacy rows round-trip exactly, and it is idempotent.
+
+The same caveat as Postgres applies and is worth stating plainly: the migration
+**cannot repair instants the old timezone-ambiguous write path recorded wrongly**
+— that information is gone. It preserves what is on disk.
+
+Regression cover is `sql-driver-datetime-mysql-storage.test.ts`, opt-in via
+`OS_TEST_MYSQL_URL` (CI provisions no server), asserting a non-UTC server so it
+cannot pass vacuously. 10 of its 13 cases fail without this change.
