@@ -227,11 +227,17 @@ curl -b cookies.txt -X POST \
   https://your-app.example.com/api/v1/actions/todo_task/complete_task \
   -H "Content-Type: application/json" \
   -d '{ "recordId": "rec_123", "params": {} }'
-# → { "success": true, "data": ... }   (errors: { "success": false, "error": ... })
+# → 200 { "success": true, "data": { "success": true, "data": ... } }
 ```
 
-Global (object-less) actions post to `/api/v1/actions/global/:action`. For
-credentials, see [API Authentication](/docs/api#authentication).
+A failure carries a **real HTTP status** — 403 denied, 404 no such action, 400
+for a business rejection or a param-contract violation, 500 for an unexpected
+fault — with `{ "success": false, "error": { "message", "code" } }`. Read the
+status; a 200 is the only answer that means the handler ran.
+
+Global (object-less) actions post to `/api/v1/actions/global/:action`, or to
+`/api/v1/actions//:action` with the object segment left empty. For credentials,
+see [API Authentication](/docs/api#authentication).
 
 The endpoint dispatches on the **declared `type`**, exactly like the MCP
 `run_action` tool — so the same URL invokes a script handler or a flow:

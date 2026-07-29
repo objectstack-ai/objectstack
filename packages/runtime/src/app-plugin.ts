@@ -10,6 +10,7 @@ import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IMetadataService, II18nService } from '@objectstack/spec/contracts';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
+import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
 import { countServerTiming } from '@objectstack/observability';
 
 /**
@@ -637,10 +638,14 @@ export class AppPlugin implements Plugin {
                 for (const action of actions) {
                     const handler = actionBodyRunner(action);
                     if (!handler) continue;
+                    // Object-less actions register under the canonical
+                    // `'global'` key (#3913) — the literal every reader probes
+                    // (`actionHandlerObjectKeys`), since `executeAction` is an
+                    // exact-string Map lookup with no wildcard semantics.
                     const objectKey =
                         typeof action.object === 'string' && action.object.length > 0
                             ? action.object
-                            : 'global';
+                            : GLOBAL_ACTION_OBJECT_KEY;
                     try {
                         ql.registerAction(objectKey, action.name, handler, `app:${appId}`);
                         registered++;

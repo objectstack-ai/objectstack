@@ -391,16 +391,17 @@ if (run.status === 'paused') {
 await client.automation.getScreen('convert_lead', runId);
 
 // Actions — Invoke server-registered action handlers
-// (engine.registerAction). The result envelope is the HANDLER's own
-// `{ success, data | error }` — a business failure comes back as
-// `success: false` + `error` instead of a thrown exception, so it can be
-// surfaced as a toast.
+// (engine.registerAction). The result is `{ success, data | error }` — a
+// failure comes back as `success: false` + `error` instead of a thrown
+// exception, so it can be surfaced as a toast. This surface is the one place
+// a non-2xx does NOT throw: the server answers a failed action with a real
+// status (403 / 404 / 400 / 500) and the SDK folds it into the envelope.
 const res = await client.actions.invoke('crm_lead', 'convert', {
   recordId,
   params: { create_opportunity: true },
 });
 if (!res.success) console.warn(res.error);
-// Global (object-less) actions dispatch to the wildcard handler:
+// Global (object-less) actions dispatch to the server's 'global' handler key:
 await client.actions.invokeGlobal('nightly_cleanup', { params: { dryRun: true } });
 
 // API Keys — the raw secret is returned exactly ONCE; store it immediately.

@@ -353,7 +353,7 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     // `triggerData` envelope).
     const result: any = await automation.execute(action.target, {
         record,
-        ...(objectName !== 'global' ? { object: objectName } : {}),
+        ...(isObjectLessActionKey(objectName) ? {} : { object: objectName }),
         userId: ec?.userId,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
         ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
@@ -363,7 +363,15 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         params: { ...record, ...params },
     });
     if (result && typeof result === 'object' && 'success' in result && result.success === false) {
-        throw new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
+        // The flow RAN and rejected — a business outcome, not a server fault.
+        // Tagged 400 so the REST route's error exit serves it as one (#3913):
+        // `errorFromThrown` reads `.status`, and staying under 500 also keeps
+        // the message out of the internal-error-leak sanitiser, which a flow's
+        // own wording has no reason to trip.
+        const err: any = new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
+        err.status = 400;
+        err.code = 'FLOW_FAILED';
+        throw err;
     }
     return result ?? null;
 }
@@ -621,7 +629,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // Load the subject record under RLS when row-context (engages the same
     // permission path as get_record — an unseen record reads as not-found).
     let record: Record<string, unknown> = {};
-    if (recordId && objectName !== 'global') {
+    if (recordId && !isObjectLessActionKey(objectName)) {
         try {
             const got: any = await callData('get', { object: objectName, id: recordId }, driver, envId, ec);
             if (got?.record) record = got.record;
@@ -670,20 +678,19 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     };
     // Handler key: body-based actions register under `name` (AppPlugin);
     // target-bound script actions register under `target` (user code).
-    // Probe both, then the wildcard object, distinguishing the engine's
-    // "action not registered" miss from a genuine handler error.
+    // Probe both, then the object-less keys (#3913), distinguishing the
+    // engine's "action not registered" miss from a genuine handler error.
     const primary = action.body ? action.name : (action.target || action.name);
     const candidates = [primary, action.target, action.name].filter(
         (k: unknown, i: number, a: unknown[]): k is string => typeof k === 'string' && a.indexOf(k) === i,
     );
-    const notRegistered = (err: any) => /Action '.+' on object '.+' not found/i.test(String(err?.message ?? err));
-    for (const obj of [objectName, '*']) {
+    for (const obj of actionHandlerObjectKeys(objectName)) {
         for (const key of candidates) {
             try {
                 const result = await ql.executeAction(obj, key, actionContext);
                 return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: result ?? null };
             } catch (err: any) {
-                if (!notRegistered(err)) throw err; // real handler failure → surface
+                if (!isActionNotRegisteredError(err)) throw err; // real handler failure → surface
             }
         }
     }
@@ -780,7 +787,59 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
 export function standaloneActionObjectName(deps: ActionExecutionDeps, action: any): string {
     if (typeof action?.objectName === 'string' && action.objectName.length > 0) return action.objectName;
     if (typeof action?.object === 'string' && action.object.length > 0) return action.object;
-    return 'global';
+    return GLOBAL_ACTION_OBJECT_KEY;
+}
+
+/**
+ * The engine object key an object-LESS ("global") action registers under.
+ *
+ * Canonical since #3913, and it is `'global'` because that is what the two
+ * writers have always written: `AppPlugin` (`action.object || 'global'`) and
+ * `ObjectQLPlugin.actionObjectKey`. `engine.executeAction` is an exact-string
+ * `Map` lookup with no wildcard semantics, so the READERS have to probe the
+ * same literal — before this, the REST route and the MCP bridge both rotated
+ * to `'*'`, which nothing ever registers, and every global action came back as
+ * `Action '<name>' on object '*' not found`.
+ */
+export const GLOBAL_ACTION_OBJECT_KEY = 'global';
+
+/**
+ * The engine object keys to probe, in order, for a route's action handler.
+ *
+ * The routed object first, then the canonical object-less key (#3913), then
+ * the legacy `'*'` — kept last so a handler that user code registered directly
+ * against the wildcard still resolves. Deduped, so a request routed AT
+ * `/actions/global/:action` probes `'global'` exactly once.
+ */
+export function actionHandlerObjectKeys(objectName: string): string[] {
+    return [objectName, GLOBAL_ACTION_OBJECT_KEY, '*'].filter(
+        (k, i, all) => all.indexOf(k) === i,
+    );
+}
+
+/**
+ * True when the error is `executeAction`'s "no such key in the registry" miss
+ * rather than a genuine handler failure — the difference between rotating to
+ * the next candidate key and surfacing the error to the caller.
+ *
+ * Matched on the message because that is all `executeAction` throws
+ * (`engine.ts`: `Action '<name>' on object '<object>' not found`). A handler
+ * whose own message happens to read that way is misclassified as a miss; the
+ * rotation ends in a 404 either way, so the blast radius is the status code.
+ */
+export function isActionNotRegisteredError(err: any): boolean {
+    return /Action '.+' on object '.+' not found/i.test(String(err?.message ?? err));
+}
+
+/**
+ * True when the routed "object" is the object-less placeholder rather than a
+ * real object — the canonical `'global'`, the legacy `'*'`, or nothing at all
+ * (`POST /actions//:action`). Callers use it to skip work that only makes
+ * sense for a record-scoped action: loading `ctx.record`, and naming an
+ * `object` on the flow-automation context.
+ */
+export function isObjectLessActionKey(objectName: string | undefined | null): boolean {
+    return !objectName || objectName === GLOBAL_ACTION_OBJECT_KEY || objectName === '*';
 }
 
 /**
@@ -802,9 +861,9 @@ export function standaloneActionObjectName(deps: ActionExecutionDeps, action: an
  * standalone `defineAction` declaration was invisible here, so its declared
  * `type` (and its `requiredPermissions`) were never read on the REST path
  * even though the MCP path honoured both. A standalone declaration is
- * accepted only when it belongs to the routed object or to the `'global'`
- * wildcard — the same `<object>:<name>` / `'*'` key rotation the handler
- * lookup performs.
+ * accepted only when it belongs to the routed object or is object-less — the
+ * same key rotation {@link actionHandlerObjectKeys} performs for the handler
+ * lookup.
  */
 export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     args: { ql: any; objectName: string; actionName: string; envId?: string },
@@ -826,7 +885,7 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
 
     const ownsRoute = (action: any): boolean => {
         const owner = standaloneActionObjectName(deps, action);
-        return owner === objectName || owner === 'global';
+        return owner === objectName || isObjectLessActionKey(owner);
     };
 
     try {

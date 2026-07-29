@@ -149,7 +149,7 @@ describe('REST /actions — flow dispatch (#3915)', () => {
         expect(passed).not.toHaveProperty('object');
     });
 
-    it('surfaces a flow failure through the action error envelope', async () => {
+    it('surfaces a flow failure as a 400, not as a 200 wrapping success:false (#3913)', async () => {
         const execute = vi.fn(async () => ({ success: false, error: 'lead already converted' }));
         const { dispatcher } = makeDispatcher({
             objectDef: { name: 'crm_lead', actions: [flowAction] },
@@ -158,8 +158,14 @@ describe('REST /actions — flow dispatch (#3915)', () => {
 
         const res = await dispatcher.handleActions('/crm_lead/convert_lead', 'POST', {}, ctxFor());
 
-        expect(res.response.body.data.success).toBe(false);
-        expect(res.response.body.data.error).toMatch(/crm_convert_lead_wizard.*lead already converted/i);
+        // The flow ran and rejected — a business outcome, so a 400 carrying the
+        // flow's own wording. It used to be HTTP 200 `{success: true, data:
+        // {success: false, error}}`, which any caller that skipped the inner
+        // envelope read as a success.
+        expect(res.response.status).toBe(400);
+        expect(res.response.body.success).toBe(false);
+        expect(res.response.body.error.message).toMatch(/crm_convert_lead_wizard.*lead already converted/i);
+        expect(res.response.body.error.details?.code).toBe('FLOW_FAILED');
     });
 
     it('reports a missing automation service as 503, not as a business failure', async () => {

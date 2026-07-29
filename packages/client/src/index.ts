@@ -312,6 +312,38 @@ async function* parseEventStream(res: Response): AsyncIterable<AiStreamChunk> {
   yield* emit(decoder.decode());
 }
 
+/** Best human-readable text for an action failure, whatever shape carried it. */
+function actionErrorMessage(e: any): string {
+  if (typeof e === 'string' && e) return e;
+  if (typeof e?.message === 'string' && e.message) return e.message;
+  return 'Action failed';
+}
+
+/**
+ * Fold a 2xx `POST /api/v1/actions/...` body into the `{ success, data?,
+ * error? }` shape `client.actions.invoke` has always returned.
+ *
+ * `payload` is what `unwrapResponse` produced — the INNER envelope. Two shapes
+ * arrive on a 2xx and a caller must not have to tell them apart:
+ *
+ *  - `{ success: true, data }` — the only 2xx a post-#3913 server sends.
+ *  - `{ success: false, error: '…' }` — a server older than #3913 answering a
+ *    handler failure with HTTP 200. A current SDK still has to talk to those,
+ *    so the inner envelope stays authoritative when it reports a failure.
+ *
+ * The non-2xx case never reaches here: `fetch` throws on it, and `invoke`
+ * catches (this surface does not throw — a failed business action is a toast,
+ * not a crash, which is the property #3913 kept while fixing the status code).
+ */
+function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; error?: string } {
+  if (payload && typeof payload === 'object' && 'success' in payload) {
+    return payload.success === false
+      ? { success: false, error: actionErrorMessage(payload.error) }
+      : { success: true, data: payload.data as T };
+  }
+  return { success: true, data: payload as T };
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -2879,16 +2911,23 @@ export class ObjectStackClient {
    *
    * The dispatcher accepts the record id either in the URL or in the body;
    * this client always sends it in the body (`{ recordId, params }`), which
-   * both server shapes honor. The HTTP envelope is
-   * `{ success, data: { success, data | error } }` — the OUTER envelope is
-   * transport success; the INNER `success:false` + `error` is the action
-   * handler's own (business) failure, deliberately not thrown so callers can
-   * surface it as a toast rather than a crash.
+   * both server shapes honor.
+   *
+   * Result shape is `{ success, data | error }` and this surface still does
+   * NOT throw — callers surface a failure as a toast rather than a crash.
+   * What changed in #3913 is the WIRE: a handler failure used to come back as
+   * HTTP 200 `{success: true, data: {success: false, error}}`, so any caller
+   * that forgot to unwrap the inner envelope read the outer `success: true`
+   * and reported a success it never had. The server now answers a failure
+   * with a real status (404 unregistered, 403 denied, 400 business/validation,
+   * 500 otherwise) and `{success: false, error: {message, code, details}}`;
+   * {@link normalizeActionResult} folds both shapes — old server, new server —
+   * into the same `{ success, data?, error? }` with `error` as a plain string.
    */
   actions = {
       /**
        * Invoke a server-registered action on an object.
-       * Falls back to the server's wildcard ('*') handler when no
+       * Falls back to the server's object-less ('global') handler when no
        * object-specific handler is registered.
        */
       invoke: async <T = any>(
@@ -2896,20 +2935,30 @@ export class ObjectStackClient {
           actionName: string,
           opts?: { recordId?: string; params?: Record<string, unknown> },
       ): Promise<{ success: boolean; data?: T; error?: string }> => {
-          const res = await this.fetch(
-              `${this.baseUrl}/api/v1/actions/${encodeURIComponent(objectName)}/${encodeURIComponent(actionName)}`,
-              {
-                  method: 'POST',
-                  body: JSON.stringify({ recordId: opts?.recordId, params: opts?.params ?? {} }),
-              },
-          );
-          return this.unwrapResponse(res) as Promise<{ success: boolean; data?: T; error?: string }>;
+          try {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/actions/${encodeURIComponent(objectName)}/${encodeURIComponent(actionName)}`,
+                  {
+                      method: 'POST',
+                      body: JSON.stringify({ recordId: opts?.recordId, params: opts?.params ?? {} }),
+                  },
+              );
+              return normalizeActionResult<T>(await this.unwrapResponse<any>(res));
+          } catch (err: any) {
+              // [#3913] `fetch` throws on every non-2xx, and a handler failure
+              // IS a non-2xx now — but this surface's contract is to report,
+              // not throw. `fetch` has already lifted the server's
+              // human-readable message onto `err.message` (with `err.code` /
+              // `err.httpStatus` kept for programmatic use), so the toast text
+              // is unchanged from the pre-#3913 wire.
+              return { success: false, error: actionErrorMessage(err) };
+          }
       },
 
       /**
        * Invoke a global (object-less) action — the server's
-       * `POST /actions/global/:action` shape, dispatched to the wildcard
-       * handler registry.
+       * `POST /actions/global/:action` shape, dispatched to the `'global'`
+       * handler-registry key.
        */
       invokeGlobal: async <T = any>(
           actionName: string,

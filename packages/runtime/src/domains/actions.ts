@@ -12,7 +12,8 @@
  *
  *  - `POST /actions/:object/:action`              — record-scoped action
  *  - `POST /actions/:object/:action/:recordId`    — record-scoped action with id in URL
- *  - `POST /actions/global/:action`               — wildcard ("*") action
+ *  - `POST /actions/global/:action`               — object-less ("global") action
+ *  - `POST /actions//:action`                     — object-less action, empty segment
  *
  * The route dispatches on the declared action TYPE (#3915), the same way the
  * MCP `run_action` bridge does — `script` through the handler registry,
@@ -20,6 +21,16 @@
  * a spec-faithful REST/SDK caller could not invoke a `type: 'flow'` action at
  * all: it fell through to the registry and came back as
  * `Action '' on object '*' not found`.
+ *
+ * #3913 closed the last two holes:
+ *  - object-less actions register under `'global'` (AppPlugin +
+ *    ObjectQLPlugin) but the handler fallback probed `'*'`, which nothing
+ *    registers — so a global action was reachable only by spelling `global`
+ *    into the URL, and `POST /actions//:action` never resolved at all;
+ *  - every handler failure came back as HTTP 200
+ *    `{success: true, data: {success: false, error}}`, so a caller that did
+ *    not hand-inspect the INNER envelope silently swallowed it. Failures now
+ *    carry a real status (404 unregistered, 400 validation, 500 otherwise).
  */
 
 import * as actionExec from '../action-execution.js';
@@ -43,7 +54,8 @@ export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
  *
  *  - `POST /actions/:object/:action`              — record-scoped action
  *  - `POST /actions/:object/:action/:recordId`    — record-scoped action with id in URL
- *  - `POST /actions/global/:action`               — wildcard ("*") action
+ *  - `POST /actions/global/:action`               — object-less ("global") action
+ *  - `POST /actions//:action`                     — object-less action, empty segment
  *
  * Body shape: `{ recordId?: string, params?: Record<string, unknown> }`.
  * The handler is invoked with an `ActionContext` of:
@@ -65,12 +77,18 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         return { handled: true, response: deps.error('Method not allowed', 405) };
     }
     const parts = path.split('/').filter(Boolean);
-    if (parts.length < 2) {
+    if (parts.length < 1) {
         return { handled: true, response: deps.error('Path must be /actions/:object/:action', 400) };
     }
-    const objectName = parts[0];
-    const actionName = parts[1];
-    const recordIdFromPath = parts[2];
+    // A single segment is an OBJECT-LESS action (#3913): `POST /actions//log_call`
+    // is what an SDK that has no object to name emits, and `filter(Boolean)`
+    // already ate the empty segment. Route it at the canonical `'global'` key
+    // rather than 400-ing — before this it was the one global-action shape that
+    // could never work, and `/actions/global/log_call` only worked by accident
+    // (the literal path segment happened to match the registration key).
+    const objectName = parts.length > 1 ? parts[0] : actionExec.GLOBAL_ACTION_OBJECT_KEY;
+    const actionName = parts.length > 1 ? parts[1] : parts[0];
+    const recordIdFromPath = parts.length > 1 ? parts[2] : undefined;
 
     // Resolve project scope so the right project kernel's ObjectQL is
     // used (single-environment default when unset), then let the host
@@ -146,13 +164,6 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         return { handled: true, response: deps.error(actionExec.flowActionUnavailableError(actionDef), 503) };
     }
 
-    // Resolve the handler — fall back to wildcard '*' if the object-specific key is missing.
-    // Since engine.executeAction throws when the key is unknown, we probe via the internal
-    // map by attempting the call inside a try/catch and rotating to '*'.
-    const tryExecute = async (obj: string) => {
-        return ql.executeAction(obj, actionName, actionContext);
-    };
-
     const reqBody = body && typeof body === 'object' ? body : {};
     const recordId = recordIdFromPath ?? reqBody.recordId;
     const reqParams = (reqBody.params && typeof reqBody.params === 'object') ? reqBody.params : {};
@@ -167,7 +178,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
 
     // Load the record (best-effort) so handlers can rely on `ctx.record`.
     let record: Record<string, unknown> = {};
-    if (recordId && objectName !== 'global') {
+    if (recordId && !actionExec.isObjectLessActionKey(objectName)) {
         try {
             const got = await actionExec.callData(deps, 'get', { object: objectName, id: recordId }, _context.dataDriver, _context.environmentId, _context.executionContext);
             if (got?.record) record = got.record;
@@ -253,28 +264,59 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         );
 
         // ── script/body dispatch ──
-        // Try object-specific first; on "not found" error, fall back to wildcard.
+        // Probe the routed object first, then the object-less keys (#3913):
+        // the canonical `'global'` both writers register under, then the legacy
+        // `'*'`. `executeAction` is an exact-string Map lookup with no wildcard
+        // semantics, so every candidate key has to be tried for real; only its
+        // "not registered" miss rotates, a genuine handler error propagates.
+        let dispatched = false;
         let result: any;
-        try {
-            result = await tryExecute(objectName);
-        } catch (err: any) {
-            const msg = String(err?.message ?? err ?? '');
-            if (/not found/i.test(msg) && objectName !== '*') {
-                result = await tryExecute('*');
-            } else {
-                throw err;
+        for (const obj of actionExec.actionHandlerObjectKeys(objectName)) {
+            try {
+                result = await ql.executeAction(obj, actionName, actionContext);
+                dispatched = true;
+                break;
+            } catch (err: any) {
+                if (!actionExec.isActionNotRegisteredError(err)) throw err;
             }
+        }
+        if (!dispatched) {
+            // No key carried a handler. That is a routing miss, not a server
+            // fault — 404, and named after the ROUTED object rather than
+            // whichever probe happened to run last (the old fallback reported
+            // `on object '*'`, an object the caller never asked for).
+            return {
+                handled: true,
+                response: deps.error(`Action '${actionName}' on object '${objectName}' not found`, 404),
+            };
         }
         return { handled: true, response: deps.success({ success: true, data: result }) };
     } catch (err: any) {
+        // [#3913] A handler failure is a REAL failure. It used to come back as
+        // HTTP 200 `{success: true, data: {success: false, error}}` — transport
+        // success wrapping a business error — so every caller that did not
+        // hand-check the INNER envelope (including the shipped console, which
+        // showed a green success toast) swallowed it silently. Failures now
+        // exit through the dispatcher's error path with a real status.
         const full = err?.message ?? String(err);
         // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` for
         // server logs; surface only the business `<msg>` (SandboxError.innerMessage)
         // to the client so an action's error toast reads as plain text instead of
         // leaking the debug prefix. Keep the full wrapper in the log for debugging.
         const inner: unknown = err?.innerMessage;
-        const clientMsg = (typeof inner === 'string' && inner) ? inner : full;
-        if (clientMsg !== full) console.error(`[action ${objectName}/${actionName}] ${full}`);
-        return { handled: true, response: deps.success({ success: false, error: clientMsg }) };
+        if (typeof inner === 'string' && inner) {
+            console.error(`[action ${objectName}/${actionName}] ${full}`);
+            // A deliberate `throw` from inside an action BODY is a business
+            // rule, not a server fault — 400, exactly as `@objectstack/rest`'s
+            // `mapDataError` has always served the identical SandboxError from
+            // the data routes. 400 also keeps the message intact: the 5xx leak
+            // sanitiser would rewrite a business message that merely opens with
+            // "Update …" as a generic internal error.
+            return { handled: true, response: deps.error(inner, 400) };
+        }
+        // Anything else is unexpected: an error carrying its own `.status` wins,
+        // a record `ValidationError` maps to 400 with `fields[]` (#3918), and
+        // the rest are 500 — sanitised by the dispatcher's leak guard.
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
     }
 }

@@ -1340,7 +1340,14 @@ export class ObjectQLPlugin implements Plugin {
    * Resolve the engine object key an action registers under. Standalone
    * `action` metadata declares `objectName` (spec `ActionSchema`); bundle
    * collectors attach `object`; object-less actions register under the
-   * `'global'` wildcard key, matching AppPlugin's bundle registration.
+   * `'global'` key, matching AppPlugin's bundle registration.
+   *
+   * `'global'` is the CANONICAL object-less key (#3913) — not a wildcard.
+   * `executeAction` is an exact-string `Map` lookup, so every reader has to
+   * probe this literal; the runtime's `actionHandlerObjectKeys` does, and the
+   * runtime's `standaloneActionObjectName` must stay in lockstep with this
+   * method or the declaration the MCP surface resolves stops matching the
+   * handler that actually runs.
    */
   private actionObjectKey(action: any): string {
     if (typeof action?.objectName === 'string' && action.objectName.length > 0) return action.objectName;
