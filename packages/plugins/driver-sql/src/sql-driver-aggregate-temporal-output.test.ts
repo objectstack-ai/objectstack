@@ -22,6 +22,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { LegacyStorageDriver } from '../src/legacy-datetime-storage.testkit.js';
 
 const TABLE = 'deal';
 
@@ -43,7 +44,7 @@ describe('temporal values leaving aggregate()/distinct() (#3797)', () => {
       {
         name: TABLE,
         fields: {
-          closed_at: { type: 'datetime' }, // INTEGER epoch ms under better-sqlite3
+          closed_at: { type: 'datetime' }, // canonical ISO-Z TEXT since #3912
           closed_on: { type: 'date' },     // YYYY-MM-DD TEXT
           region: { type: 'string' },
           amount: { type: 'number' },
@@ -100,27 +101,38 @@ describe('temporal values leaving aggregate()/distinct() (#3797)', () => {
     });
 
     it('collapses two storage forms of the same instant into one value', async () => {
-      // SQL `DISTINCT` compares STORED values, and one SQLite `Field.datetime`
-      // column holds both forms — `formatInput` passes datetime values through,
-      // so a `Date` lands as INTEGER epoch ms and an ISO string lands as TEXT.
-      // Two rows recording the SAME instant therefore survive `DISTINCT` as two
-      // rows and then present identically, which is a duplicate unless the
-      // presented values are re-deduplicated.
-      await driver.create(
-        TABLE,
-        { id: 'd4', closed_at: ISO, closed_on: '2026-01-10', region: 'east', amount: 8 },
-        { bypassTenantAudit: true },
-      );
+      // SQL `DISTINCT` compares STORED values. A pre-#3912 SQLite
+      // `Field.datetime` column held both forms — `formatInput` passed datetime
+      // values through, so a `Date` landed as INTEGER epoch ms and an ISO string
+      // as TEXT. Two rows recording the SAME instant therefore survived
+      // `DISTINCT` as two rows and then presented identically: a duplicate
+      // unless the presented values are re-deduplicated.
+      //
+      // Canonical storage means new writes can no longer produce that pair, so
+      // the fixture is an UN-MIGRATED database — where this dedup is still what
+      // stands between a legacy row and a duplicated chart axis label.
+      const legacy = new LegacyStorageDriver({
+        client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true,
+      });
+      try {
+        await legacy.initObjects([
+          { name: TABLE, fields: { closed_at: { type: 'datetime' }, region: { type: 'string' } } },
+        ]);
+        await legacy.seedLegacyRows(TABLE, 'closed_at', [
+          { id: 'l1', closed_at: Date.parse(ISO), region: 'east' },       // INTEGER epoch
+          { id: 'l2', closed_at: ISO, region: 'east' },                   // canonical TEXT
+          { id: 'l3', closed_at: ISO_LATER, region: 'west' },
+        ]);
 
-      const raw: any = await driver.execute(
-        `SELECT DISTINCT typeof("closed_at") AS t FROM "${TABLE}" ORDER BY t`,
-      );
-      const forms = (Array.isArray(raw) ? raw : (raw?.rows ?? [])).map((r: any) => r.t);
-      expect(forms).toContain('text'); // the row just written
-      expect(forms.some((f: string) => f === 'integer' || f === 'real')).toBe(true);
+        const forms = (await legacy.storedForms(TABLE, 'closed_at')).map((r) => r.type);
+        expect(forms).toContain('text');
+        expect(forms.some((f) => f === 'integer' || f === 'real')).toBe(true);
 
-      // Three stored rows for two instants → two values, not three.
-      expect((await driver.distinct(TABLE, 'closed_at')).sort()).toEqual([ISO, ISO_LATER]);
+        // Three stored rows for two instants → two values, not three.
+        expect((await legacy.distinct(TABLE, 'closed_at')).sort()).toEqual([ISO, ISO_LATER]);
+      } finally {
+        await legacy.disconnect();
+      }
     });
   });
 

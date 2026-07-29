@@ -3,22 +3,24 @@
 /**
  * Regression #3912 — the OTHER half of the SQLite `Field.datetime` storage mix.
  *
- * `sql-driver-datetime-filter.test.ts` covers rows written with a JS `Date`, so
- * better-sqlite3 stores them as INTEGER epoch ms. But the REST / JSON write path
- * cannot produce a `Date` (JSON has no such type) and a `defaultValue: 'NOW()'`
- * slot stamps an ISO string, so a production table is dominated by ISO **TEXT**
- * — and the filter path coerced its comparand to epoch ms purely from the
- * DECLARED type. Every datetime window filter then compared INTEGER-vs-TEXT and
- * returned nothing: a dashboard `last_30_days` on `created_date` read 0 while 29
- * rows matched.
+ * `sql-driver-datetime-filter.test.ts` covers rows written with a JS `Date`,
+ * which better-sqlite3 used to store as INTEGER epoch ms. But the REST / JSON
+ * write path cannot produce a `Date` (JSON has no such type) and a
+ * `defaultValue: 'NOW()'` slot stamps an ISO string, so a production table was
+ * dominated by ISO **TEXT** — and the filter path coerced its comparand to epoch
+ * ms purely from the DECLARED type. Every datetime window filter then compared
+ * INTEGER-vs-TEXT and returned nothing: a dashboard `last_30_days` on
+ * `created_date` read 0 while 29 rows matched.
  *
- * These tests write the way REST does (ISO strings) and assert the same filters
- * that already pass for `Date`-written rows. The mixed-storage suite at the end
- * is the real production shape: one table holding both forms at once.
+ * The fix made the storage form itself canonical, so these tests write the way
+ * REST does (ISO strings) and assert that every filter shape works against it —
+ * which is now the same shape a `Date` write produces. The legacy suite at the
+ * end covers the un-migrated database: one column holding both forms at once.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { LegacyStorageDriver } from '../src/legacy-datetime-storage.testkit.js';
 
 const OBJECT = {
   name: 'lead',
@@ -220,31 +222,29 @@ describe('SqlDriver datetime filters on the created_at audit column (#3912)', ()
   });
 });
 
-describe('SqlDriver datetime filters on a MIXED-storage column (#3912)', () => {
-  let driver: SqlDriver;
+describe('SqlDriver datetime filters on a legacy MIXED-storage column (#3912)', () => {
+  let driver: LegacyStorageDriver;
 
   beforeEach(async () => {
-    driver = new SqlDriver({
+    driver = new LegacyStorageDriver({
       client: 'better-sqlite3',
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
     });
     await driver.initObjects([OBJECT]);
 
-    // The production shape: seeds/imports bind a `Date` (INTEGER epoch) while the
-    // REST API writes ISO strings (TEXT) — into the same column.
-    await driver.create('lead', {
-      id: 'int-old', name: 'int-old', created_date: new Date('2025-02-01T00:00:00Z'),
-    }, { bypassTenantAudit: true });
-    await driver.create('lead', {
-      id: 'txt-old', name: 'txt-old', created_date: '2025-02-02T00:00:00.000Z',
-    }, { bypassTenantAudit: true });
-    await driver.create('lead', {
-      id: 'int-new', name: 'int-new', created_date: new Date('2026-06-01T00:00:00Z'),
-    }, { bypassTenantAudit: true });
-    await driver.create('lead', {
-      id: 'txt-new', name: 'txt-new', created_date: '2026-06-02T00:00:00.000Z',
-    }, { bypassTenantAudit: true });
+    // A database written by a pre-#3912 build: seeds/imports bound a `Date`
+    // (INTEGER epoch) while the REST API wrote ISO strings (TEXT) — into the same
+    // column. `formatInput` cannot produce this any more, and the backfill
+    // converges it at schema sync, so the fixture is seeded raw with the
+    // canonical marker cleared: the state of a database whose backfill has not
+    // run (it is allowed to fail — correctness must not depend on it).
+    await driver.seedLegacyRows('lead', 'created_date', [
+      { id: 'int-old', name: 'int-old', created_date: Date.parse('2025-02-01T00:00:00Z') },
+      { id: 'txt-old', name: 'txt-old', created_date: '2025-02-02T00:00:00.000Z' },
+      { id: 'int-new', name: 'int-new', created_date: Date.parse('2026-06-01T00:00:00Z') },
+      { id: 'txt-new', name: 'txt-new', created_date: '2026-06-02T00:00:00.000Z' },
+    ]);
   });
 
   afterEach(async () => {
@@ -252,10 +252,8 @@ describe('SqlDriver datetime filters on a MIXED-storage column (#3912)', () => {
   });
 
   it('really does hold both storage forms', async () => {
-    const rows: any = await (driver as any).knex.raw(
-      `select id, typeof(created_date) as t from lead order by id`,
-    );
-    expect(Object.fromEntries(rows.map((r: any) => [r.id, r.t]))).toEqual({
+    const forms = await driver.storedForms('lead', 'created_date');
+    expect(Object.fromEntries(forms.map((r) => [r.id, r.type]))).toEqual({
       'int-new': 'integer', 'int-old': 'integer', 'txt-new': 'text', 'txt-old': 'text',
     });
   });

@@ -5,22 +5,26 @@
  *
  * `sql-driver-date-bucket.test.ts` builds its fixture with
  * `knex.schema.createTable` + `t.string('ts')`, so every value it buckets is ISO
- * TEXT. That is only half of what SQLite actually holds: a `Field.datetime`
- * declared through `initObjects` becomes INTEGER epoch **milliseconds** (knex
- * binds a JS `Date` as `.getTime()`), and `strftime` reads a bare integer as a
- * Julian day number — epoch ms is orders of magnitude outside the legal range,
- * so every row bucketed as NULL and any datetime trend chart rendered as one
- * `(null)` bar carrying the whole total.
+ * TEXT. That was only half of what SQLite actually held: a `Field.datetime`
+ * declared through `initObjects` used to become INTEGER epoch **milliseconds**
+ * (knex binds a JS `Date` as `.getTime()`), and `strftime` reads a bare integer
+ * as a Julian day number — epoch ms is orders of magnitude outside the legal
+ * range, so every row bucketed as NULL and any datetime trend chart rendered as
+ * one `(null)` bar carrying the whole total.
  *
- * So this suite goes through `driver.initObjects([...])` — the path a real
- * object takes — and sweeps every supported granularity against BOTH storage
- * forms, asserting against the same `bucketDateValue` labels the in-memory
- * fallback produces. Anything that buckets differently depending on how the
- * column happens to be stored is the bug this file exists to catch.
+ * Since #3912 writes are canonicalised, so a freshly written column is uniform
+ * TEXT — but the epoch form still sits in every database written by an earlier
+ * build, so both must keep bucketing identically. This suite goes through
+ * `driver.initObjects([...])` — the path a real object takes — and sweeps every
+ * supported granularity against BOTH storage forms, asserting against the same
+ * `bucketDateValue` labels the in-memory fallback produces. Anything that
+ * buckets differently depending on how the column happens to be stored is the
+ * bug this file exists to catch.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { LegacyStorageDriver } from '../src/legacy-datetime-storage.testkit.js';
 
 type Granularity = 'day' | 'month' | 'quarter' | 'year';
 
@@ -115,7 +119,7 @@ describe('SqlDriver date bucketing is storage-form independent (#3773)', () => {
       {
         name: TABLE,
         fields: {
-          closed_at: { type: 'datetime' }, // INTEGER epoch ms under better-sqlite3
+          closed_at: { type: 'datetime' }, // canonical ISO-Z TEXT since #3912
           closed_on: { type: 'date' },     // YYYY-MM-DD TEXT
           amount: { type: 'number' },
         },
@@ -137,20 +141,25 @@ describe('SqlDriver date bucketing is storage-form independent (#3773)', () => {
     await driver.disconnect();
   });
 
-  it('really does store the two columns in the two different forms', async () => {
-    // The premise of this whole file. If better-sqlite3 ever stops binding a
-    // `Date` as an integer, this fails first and explains the rest.
+  it('stores both temporal columns as canonical text (#3912)', async () => {
+    // The premise of this whole file. Since #3912 `formatInput` canonicalises a
+    // `Field.datetime` write to `YYYY-MM-DDTHH:MM:SS.sssZ`, so a bound `Date` no
+    // longer lands as an INTEGER epoch — the storage form is now the one
+    // `Field.date` already used, with a time part. The legacy epoch form still
+    // exists in un-migrated databases and is covered by the MIXED-form suite
+    // below, which writes it the only way it can still be produced: raw SQL.
     const res: any = await driver.execute(
-      `SELECT typeof("closed_at") AS at_t, typeof("closed_on") AS on_t FROM "${TABLE}" WHERE id = 'r3'`,
+      `SELECT typeof("closed_at") AS at_t, "closed_at" AS at_v, typeof("closed_on") AS on_t FROM "${TABLE}" WHERE id = 'r3'`,
     );
     const row = Array.isArray(res) ? res[0] : (res?.rows?.[0] ?? res);
-    expect(['integer', 'real']).toContain(row.at_t);
+    expect(row.at_t).toBe('text');
+    expect(row.at_v).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(row.on_t).toBe('text');
   });
 
   for (const g of GRANULARITIES) {
     describe(`granularity '${g}'`, () => {
-      it('buckets the epoch-stored datetime column', async () => {
+      it('buckets the datetime column', async () => {
         expect(await bucketSums(driver, 'closed_at', g)).toEqual(expectedBuckets(g));
       });
 
@@ -179,17 +188,23 @@ describe('SqlDriver date bucketing is storage-form independent (#3773)', () => {
 });
 
 describe('SqlDriver date bucketing over a MIXED-form datetime column (#3773)', () => {
-  // One SQLite `Field.datetime` column legitimately holds both forms at once:
-  // `formatInput` leaves datetime values alone, so a `Date` lands as INTEGER
-  // epoch ms while an ISO string (what an unresolved `defaultValue: 'NOW()'`
-  // slot and any string-valued write produce) lands as TEXT. A bucket
-  // expression that assumed epoch for the whole column would divide the TEXT by
-  // 1000 — `'2026-01-10T…' / 1000.0` is 2.026 seconds past the epoch — and file
-  // live rows under 1970, which is worse than the NULL it replaced.
-  let driver: SqlDriver;
+  // A legacy, UN-MIGRATED database: before #3912 `formatInput` left datetime
+  // values alone, so a `Date` landed as INTEGER epoch ms while an ISO string
+  // (an unresolved `defaultValue: 'NOW()'` slot, any string-valued write) landed
+  // as TEXT — in the same column. A bucket expression that assumed epoch for the
+  // whole column would divide the TEXT by 1000 — `'2026-01-10T…' / 1000.0` is
+  // 2.026 seconds past the epoch — and file live rows under 1970, which is worse
+  // than the NULL it replaced.
+  //
+  // Writes are canonical now, so the only way to reach this state is a database
+  // whose backfill has not run: rows inserted raw, with the column's canonical
+  // marker cleared. That is exactly the state `backfillCanonicalDatetimes` logs
+  // and swallows into when it cannot run — where queries must stay CORRECT via
+  // the read-side repair, just unindexed.
+  let driver: LegacyStorageDriver;
 
   beforeEach(async () => {
-    driver = new SqlDriver({
+    driver = new LegacyStorageDriver({
       client: 'better-sqlite3',
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
@@ -197,10 +212,12 @@ describe('SqlDriver date bucketing over a MIXED-form datetime column (#3773)', (
     await driver.initObjects([
       { name: TABLE, fields: { closed_at: { type: 'datetime' }, amount: { type: 'number' } } },
     ]);
-    await driver.create(TABLE, { id: 'int', closed_at: new Date('2026-01-10T09:00:00Z'), amount: 1 }, { bypassTenantAudit: true });
-    await driver.create(TABLE, { id: 'txt', closed_at: '2026-02-14T09:00:00Z', amount: 2 }, { bypassTenantAudit: true });
-    await driver.create(TABLE, { id: 'naive', closed_at: '2026-02-20 09:00:00', amount: 4 }, { bypassTenantAudit: true });
-    await driver.create(TABLE, { id: 'nil', closed_at: null, amount: 8 }, { bypassTenantAudit: true });
+    await driver.seedLegacyRows(TABLE, 'closed_at', [
+      { id: 'int', closed_at: Date.parse('2026-01-10T09:00:00Z'), amount: 1 }, // INTEGER epoch ms
+      { id: 'txt', closed_at: '2026-02-14T09:00:00Z', amount: 2 },             // zone-explicit TEXT
+      { id: 'naive', closed_at: '2026-02-20 09:00:00', amount: 4 },            // CURRENT_TIMESTAMP TEXT
+      { id: 'nil', closed_at: null, amount: 8 },
+    ]);
   });
 
   afterEach(async () => {

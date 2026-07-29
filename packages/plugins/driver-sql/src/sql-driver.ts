@@ -202,6 +202,74 @@ function normalizeSqliteDatetimeOutput(value: unknown): unknown {
   return repairNaiveUtcAuditTimestamp(s);
 }
 
+/**
+ * The CANONICAL on-disk form of a `Field.datetime` value: a fixed-width,
+ * zone-explicit UTC instant — `YYYY-MM-DDTHH:MM:SS.sssZ` (`Date#toISOString`).
+ *
+ * ADR-0053 already declares `datetime` to be "an instant stored as UTC"; this is
+ * the function that makes the STORAGE match the declaration instead of leaving
+ * it to whatever the caller happened to pass. It is applied on write
+ * ({@link SqlDriver.formatInput}) and to filter comparands
+ * ({@link SqlDriver.coerceFilterValue}) so both sides of every comparison are
+ * the same shape, on every dialect.
+ *
+ * Why THIS form (#3912):
+ *   - Fixed width + UTC means lexicographic order IS chronological order, so a
+ *     SQLite TEXT column sorts and range-compares correctly *through an index* —
+ *     no expression wrapper, which is what an epoch-integer convention forces.
+ *   - `strftime`/`julianday` parse it directly, so the date-bucket expression
+ *     needs no epoch↔text CASE (#3773).
+ *   - It is what `formatOutput`/`normalizeSqliteDatetimeOutput` ALREADY present
+ *     on read, so storage and presentation stop disagreeing.
+ *   - It matches the `Field.date` convention (ISO TEXT), so the platform has one
+ *     temporal storage story rather than one per field type.
+ *   - Postgres parses it into `timestamptz` unambiguously, which is precisely
+ *     what a zone-naive string does NOT do (it is read in the SERVER's
+ *     timezone — an 8-hour shift on an Asia/Shanghai server).
+ *
+ * Distinct from {@link repairNaiveUtcAuditTimestamp}, which is deliberately
+ * idempotent on any zone-EXPLICIT string and so preserves a `+08:00` offset.
+ * That is right for a read repair and wrong for a storage canon: `'…T12:00+08:00'`
+ * and `'…T04:00Z'` are the same instant but sort differently as text. Everything
+ * lands in `Z` here.
+ *
+ * Total: `null`/`undefined`, empty strings and unparseable junk pass through
+ * untouched rather than becoming `Invalid Date` — a value the driver cannot
+ * interpret is never silently rewritten.
+ */
+function canonicalUtcDatetime(value: unknown): unknown {
+  if (value == null) return value;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? value : value.toISOString();
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return value;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d.toISOString();
+  }
+  if (typeof value !== 'string') return value;
+  const s = value.trim();
+  if (s === '') return value;
+  // A bare integer (in either JS or string form) is epoch milliseconds — the
+  // shape better-sqlite3 wrote for every `Date` bound before this convention.
+  if (/^-?\d+$/.test(s)) {
+    const d = new Date(Number(s));
+    return Number.isNaN(d.getTime()) ? value : d.toISOString();
+  }
+  // A bare calendar day means midnight UTC. Stated explicitly so it cannot be
+  // re-read as midnight in the server's local zone — the Postgres divergence
+  // where the same query lands a row on a different calendar day.
+  const iso = /^\d{4}-\d{2}-\d{2}$/.test(s)
+    ? `${s}T00:00:00.000Z`
+    // Zone-naive `YYYY-MM-DD[ T]HH:MM[:SS[.fff]]` → its wall-clock IS UTC, the
+    // same rule `CURRENT_TIMESTAMP`-written rows take on read (ADR-0074).
+    : /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)
+      ? `${s.replace(' ', 'T')}Z`
+      : s;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : value;
+}
+
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 export interface IntrospectedColumn {
@@ -343,6 +411,13 @@ export class SqlDriver implements IDataDriver {
   protected numericFields: Record<string, string[]> = {};
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
+  /**
+   * SQLite `Field.datetime` columns proven to hold ONLY canonical UTC text —
+   * either backfilled by {@link backfillCanonicalDatetimes} or created empty in
+   * this process. Read by {@link needsLegacyDatetimeRepair} to drop the repair
+   * expression, so a migrated deployment gets plain indexable `col op ?` SQL.
+   */
+  protected canonicalDatetimeFields: Record<string, Set<string>> = {};
   protected timeFields: Record<string, Set<string>> = {};
   /**
    * Federation read path (ADR-0015). For external objects whose physical
@@ -2458,6 +2533,11 @@ export class SqlDriver implements IDataDriver {
       if (exists) {
         await this.reconcileAndWarnDrift(tableName, obj.fields ?? {}, declaredIndexes);
       }
+
+      // #3912: converge this table's `Field.datetime` columns on the canonical
+      // UTC-text storage form. A table this call just CREATED has no rows, so it
+      // is canonical by construction — record that without touching the disk.
+      await this.backfillCanonicalDatetimes(tableName, exists);
     }
 
     // Pre-create the auto_number counter table now, while we hold a fresh pooled
@@ -2473,6 +2553,80 @@ export class SqlDriver implements IDataDriver {
     );
     if (usesAutoNumber) {
       await this.ensureSequencesTable();
+    }
+  }
+
+  /**
+   * Converge one table's `Field.datetime` columns on the canonical UTC-text
+   * storage form (#3912), then mark them clean so the read paths can drop their
+   * repair expression.
+   *
+   * SQLite only, and this is the whole reason the convention is affordable.
+   * Postgres/MySQL store a real temporal type, so their rows are already one
+   * shape — there is nothing on disk to rewrite. (What Postgres CANNOT recover is
+   * an instant written from a zone-naive string before this change: it was
+   * resolved against the server's timezone at write time and the original wall
+   * clock is gone. `formatInput` stops producing those going forward; existing
+   * rows are simply the instants the server recorded.)
+   *
+   * ONE `UPDATE` per column, whose SET expression is the very same
+   * {@link sqliteCanonicalDatetimeSql} the read paths use — so "what canonical
+   * means" has a single definition and the migration cannot drift from the repair
+   * it retires. It converts every non-canonical shape in one pass: INTEGER/REAL
+   * epoch ms, zone-naive `CURRENT_TIMESTAMP` output, an offset-bearing `+08:00`
+   * value, a bare `YYYY-MM-DD`.
+   *
+   * `col IS NOT <canonical>` is the whole `WHERE`. `IS NOT` rather than `<>`
+   * because it is null-safe AND type-aware: an INTEGER value is never equal to
+   * the text the expression yields, so epoch rows match; an already-canonical
+   * string equals it exactly and is skipped. A value SQLite cannot parse falls
+   * through the expression's `coalesce` unchanged, compares equal to itself, and
+   * is left alone rather than destroyed. So a converged table costs one scan and
+   * zero writes, and re-running is a no-op.
+   *
+   * Failures are logged and swallowed: the column simply stays un-marked, the
+   * read paths keep their repair, and queries stay CORRECT (just unindexed). A
+   * migration that cannot run must never be able to take the process down at
+   * boot, and correctness must never be contingent on one having run.
+   */
+  protected async backfillCanonicalDatetimes(table: string, tableExisted: boolean): Promise<void> {
+    const fields = this.datetimeFields[table];
+    if (!this.isSqlite || !fields || fields.size === 0) return;
+
+    const clean = (this.canonicalDatetimeFields[table] ??= new Set<string>());
+    // A table created by this very call is empty, so every datetime column in it
+    // is canonical without a single row being read.
+    if (!tableExisted) {
+      for (const field of fields) clean.add(field);
+      return;
+    }
+
+    const canonical = this.sqliteCanonicalDatetimeSql('??');
+    // The expression spells `??` 4×, and the statement uses it twice (the SET
+    // value and the WHERE guard) — hence the column name repeated per use.
+    const exprBindings = (field: string) => [field, field, field, field];
+    for (const field of fields) {
+      try {
+        const res = await this.knex.raw(
+          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical}`,
+          [table, field, ...exprBindings(field), field, field, ...exprBindings(field)],
+        );
+        const converted = (res as any)?.changes ?? 0;
+        if (converted) {
+          this.logger.info?.(
+            `[sql-driver] canonicalised datetime storage (#3912) for ${table}.${field}`,
+            { rowsConverted: converted },
+          );
+        }
+        clean.add(field);
+      } catch (err) {
+        // Correctness does not depend on this succeeding — only performance does.
+        this.logger.warn(
+          `[sql-driver] could not canonicalise datetime storage for ${table}.${field}; ` +
+          `queries stay correct via the read-side repair`,
+          { error: err instanceof Error ? err.message : String(err) },
+        );
+      }
     }
   }
 
@@ -3439,111 +3593,89 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Normalise a filter value for a single column so the comparison the
-   * driver sends to SQLite matches the on-disk representation.
+   * Put a filter comparand into the same canonical form the column is STORED in,
+   * so a comparison can never be decided by the two sides' shapes disagreeing.
    *
-   * The platform stores `Field.datetime()` values as INTEGER milliseconds
-   * (the result of passing a JS `Date` through better-sqlite3) but date
-   * macros like `{last_quarter_start}` expand to an ISO `YYYY-MM-DD` string
-   * client-side. Without coercion the SQL becomes `published_at >= '2026-…'`
-   * which collapses to a TEXT-vs-INTEGER affinity compare and never
-   * matches. We translate the ISO/Date/numeric inputs into the storage
-   * type so the comparison works.
+   * `Field.datetime` → canonical UTC ISO ({@link canonicalUtcDatetime}), the
+   * exact function `formatInput` applies on write. One rule, every dialect:
+   *   - It is what a SQLite column now holds, as TEXT that sorts chronologically,
+   *     so the comparison is a plain indexable string compare.
+   *   - It is unambiguous for a Postgres `timestamptz`. This part is a FIX, not a
+   *     no-op: the comparand used to be passed through untouched there, so a bare
+   *     `YYYY-MM-DD` from a `{30_days_ago}` token meant midnight in the SERVER's
+   *     timezone. Measured on an `Asia/Shanghai` server, the identical query put
+   *     the identical instant on a different calendar day than SQLite did — a
+   *     silently wrong window rather than an empty one.
    *
-   * For `Field.date()` we keep ISO TEXT but normalise Date objects to
-   * `YYYY-MM-DD` for the same reason.
+   * The previous rule coerced to an epoch INTEGER on SQLite only, which assumed
+   * a storage form the write path never guaranteed; see #3912 for why that could
+   * not be made correct without also rewriting what the writer produces.
+   *
+   * `Field.date` keeps ISO TEXT, normalised to `YYYY-MM-DD` (ADR-0053 Phase 1).
    */
   protected coerceFilterValue(table: string | null, field: string, value: any): any {
     if (value == null || !table) return value;
     if (Array.isArray(value)) return value.map((v) => this.coerceFilterValue(table, field, v));
 
-    const isDatetime = this.datetimeFields[table]?.has(field);
-    const isDate = this.dateFields[table]?.has(field);
-    if (!isDatetime && !isDate) return value;
-
-    const toMs = (v: any): number | null => {
-      if (v instanceof Date) return v.getTime();
-      if (typeof v === 'number' && Number.isFinite(v)) return v;
-      if (typeof v === 'string') {
-        const trimmed = v.trim();
-        if (trimmed === '') return null;
-        if (/^-?\d+$/.test(trimmed)) {
-          const n = Number(trimmed);
-          if (Number.isFinite(n)) return n;
-        }
-        // Treat bare YYYY-MM-DD as start-of-day UTC; full ISO is parsed
-        // as-is so timezones round-trip correctly.
-        const iso = /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? `${trimmed}T00:00:00.000Z` : trimmed;
-        const n = Date.parse(iso);
-        return Number.isFinite(n) ? n : null;
-      }
-      return null;
-    };
-
-    if (isDatetime) {
-      // Only SQLite stores `Field.datetime` as an INTEGER epoch (better-sqlite3
-      // binds a JS `Date` as `.getTime()`); there the ISO/text comparand MUST be
-      // coerced to epoch ms or it collapses to a TEXT-vs-INTEGER affinity compare
-      // that never matches. Postgres/MySQL map datetime to a native TIMESTAMP
-      // (see `defineColumn` → `table.timestamp`), where Knex binds an ISO string
-      // or `Date` correctly — coercing to an epoch integer there would compare an
-      // INTEGER against a TIMESTAMP and break the query. So gate on the storage
-      // form, via the predicate the bucket expression reads too.
-      if (!this.isEpochStoredDatetime(table, field)) return value;
-      const ms = toMs(value);
-      return ms == null ? value : ms;
-    }
-
-    // Field.date — normalise the comparand to YYYY-MM-DD (ADR-0053 Phase 1).
-    return this.toDateOnly(value);
+    const kind = this.temporalFieldKind(table, field);
+    if (!kind) return value;
+    return kind === 'datetime' ? canonicalUtcDatetime(value) : this.toDateOnly(value);
   }
 
   /**
-   * Does this column store instants as epoch **milliseconds** rather than as a
-   * temporal type SQL understands natively?
+   * Might this SQLite `Field.datetime` column still hold values written BEFORE
+   * the canonical-UTC-text convention (#3912) — an INTEGER/REAL epoch from a
+   * bound JS `Date`, a zone-naive `CURRENT_TIMESTAMP` string, an offset-bearing
+   * `+08:00` string — and therefore need
+   * {@link sqliteCanonicalDatetimeSql} wrapped around it before it is compared
+   * or bucketed?
    *
-   * True for a SQLite `Field.datetime` and nothing else: better-sqlite3 binds a
-   * JS `Date` as `.getTime()`, while Postgres/MySQL get a real TIMESTAMP column
-   * (`defineColumn` → `table.timestamp`) and `Field.date` is ISO TEXT on every
-   * dialect.
+   * This is the ONE predicate for that question. Every consumer of it has already
+   * been bitten by disagreeing about storage — the filter comparand (#2034, then
+   * #3912) and the aggregate bucket expression (#3773) — so they share it rather
+   * than each carrying a copy of the rule.
    *
-   * This is the ONE predicate for that storage convention. Both consumers of it
-   * have already been bitten by disagreeing about storage — the filter comparand
-   * (#2034: an ISO string compared against an INTEGER column matched nothing)
-   * and the aggregate bucket expression (#3773: `strftime` read the same INTEGER
-   * as a Julian day and bucketed everything as NULL) — so they share it rather
-   * than each carrying their own copy of the rule.
+   * `false` in three cases, and the third is the point of the whole exercise:
+   *   - not SQLite (Postgres/MySQL have a real temporal type);
+   *   - not a declared `Field.datetime`;
+   *   - the column has been BACKFILLED to the canonical form in this process
+   *     ({@link backfillCanonicalDatetimes}), so every row is already canonical
+   *     text and the repair would only cost an unindexable expression.
+   *
+   * That last exit is what makes the convention pay off rather than just move the
+   * cost around: after migration the emitted SQL is a plain `col >= ?` again.
    */
-  protected isEpochStoredDatetime(table: string | null | undefined, field: string): boolean {
+  protected needsLegacyDatetimeRepair(table: string | null | undefined, field: string): boolean {
     if (!table || !this.isSqlite) return false;
-    return this.datetimeFields[table]?.has(field) === true;
+    if (this.datetimeFields[table]?.has(field) !== true) return false;
+    return this.canonicalDatetimeFields[table]?.has(field) !== true;
   }
 
   /**
-   * The value expression to hand SQLite's `strftime()` for a bucketed column.
+   * Read a possibly-legacy SQLite `Field.datetime` column as canonical UTC text
+   * — the SQL twin of {@link canonicalUtcDatetime}, for rows written before the
+   * convention existed and not yet backfilled.
    *
-   * A TEXT-stored column is passed straight through — `strftime` already parses
-   * `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SSZ` and the zone-naive `CURRENT_TIMESTAMP`
-   * form. An epoch-stored `Field.datetime` (see {@link isEpochStoredDatetime})
-   * must first be converted, or `strftime` reads the bare integer as a Julian
-   * day number — epoch ms is far outside the legal range, so every row buckets
-   * as NULL and a trend chart collapses into a single `(null)` bar.
+   * `strftime('%Y-%m-%dT%H:%M:%fZ', …)` is the same format string
+   * {@link nowColumnDefault} already writes, so a repaired value is
+   * byte-identical to a freshly written one — which is what lets the comparison
+   * be a plain text compare. The `typeof()` dispatch is load-bearing: an epoch
+   * INTEGER handed to `strftime` unconverted is read as a Julian day (#3773),
+   * while `'unixepoch'` applied to text would read its leading year as seconds.
    *
-   * The conversion dispatches on the STORED value's type, not just the declared
-   * one, because a SQLite `Field.datetime` column is genuinely mixed-form: an
-   * explicit value bound as a JS `Date` lands as INTEGER/REAL epoch ms, while a
-   * `defaultValue: 'NOW()'` slot lands as TEXT (the same mix `formatOutput` →
-   * `normalizeSqliteDatetimeOutput` already repairs on read). Dividing a TEXT
-   * timestamp by 1000 would coerce it to its leading year — `'2026-01-10T…'/1000.0`
-   * is `2.026` seconds past the epoch, bucketing real rows into 1970 — which is
-   * strictly worse than the NULL it replaces, so the CASE is load-bearing.
-   *
-   * Normalising to a julian day (rather than emitting `strftime(fmt, x/1000.0,
-   * 'unixepoch')`) keeps ONE reusable scalar the caller can drop into any format
-   * string, including the two-reference quarter expression. `/1000.0` is real
-   * division on purpose: integer `/1000` truncates toward zero, which pushes a
-   * pre-1970 instant forward a day (`-1` → 1970-01-01 instead of 1969-12-31).
+   * `coalesce(…, col)` preserves genuinely uninterpretable junk instead of
+   * turning it into NULL, matching `canonicalUtcDatetime`'s totality — a value
+   * the driver cannot parse keeps failing the comparison, rather than silently
+   * becoming "no value".
    */
+  protected sqliteCanonicalDatetimeSql(columnSql: string): string {
+    return (
+      `(case when typeof(${columnSql}) in ('integer','real') ` +
+      `then strftime('%Y-%m-%dT%H:%M:%fZ', ${columnSql}/1000.0, 'unixepoch') ` +
+      `else coalesce(strftime('%Y-%m-%dT%H:%M:%fZ', ${columnSql}), ${columnSql}) end)`
+    );
+  }
+
   /**
    * Which temporal presentation rule, if any, a declared field takes —
    * `null` for everything that is not a `Field.datetime` / `Field.date`.
@@ -3635,65 +3767,51 @@ export class SqlDriver implements IDataDriver {
     return rows;
   }
 
+  /**
+   * The value expression to hand SQLite's `strftime()` for a bucketed column.
+   *
+   * Canonical UTC text (#3912) is passed straight through — `strftime` parses it,
+   * `YYYY-MM-DD`, and the zone-naive `CURRENT_TIMESTAMP` form alike. A column
+   * that may still hold PRE-canonical values gets {@link sqliteCanonicalDatetimeSql}
+   * wrapped around it, which is likewise text, so `strftime` sees one shape
+   * either way.
+   *
+   * Without that repair an epoch INTEGER reaches `strftime` as a bare number,
+   * which SQLite reads as a Julian DAY — epoch ms is far outside the legal range,
+   * so every row buckets as NULL and a trend chart collapses to one `(null)` bar
+   * (#3773). The `typeof()` dispatch inside the repair is equally load-bearing in
+   * the other direction: dividing a TEXT timestamp by 1000 coerces it to its
+   * leading year (`'2026-01-10T…'/1000.0` = 2.026 seconds past the epoch),
+   * bucketing live rows into 1970 — strictly worse than the NULL it replaces.
+   */
   protected sqliteTemporalArg(
     field: string,
     table: string | null | undefined,
   ): { sql: string; bindings: any[] } {
-    if (!this.isEpochStoredDatetime(table, field)) return { sql: '??', bindings: [field] };
-    return {
-      sql: `(case when typeof(??) in ('integer','real') then julianday(??/1000.0, 'unixepoch') else julianday(??) end)`,
-      bindings: [field, field, field],
-    };
+    if (!this.needsLegacyDatetimeRepair(table, field)) return { sql: '??', bindings: [field] };
+    return { sql: this.sqliteCanonicalDatetimeSql('??'), bindings: [field, field, field, field] };
   }
 
   /**
-   * SQL that reads a SQLite `Field.datetime` column as epoch **milliseconds**,
-   * whatever form the row actually stored it in.
+   * The left-hand side of a filter comparison on `column`, read in the same
+   * canonical form {@link coerceFilterValue} puts the comparand in.
    *
-   * A `Field.datetime` column on SQLite is genuinely MIXED-form, and always has
-   * been: a value bound as a JS `Date` lands as INTEGER epoch ms, while a REST /
-   * JSON write (JSON has no `Date`, so the payload carries an ISO string) and a
-   * `defaultValue: 'NOW()'` slot — including the platform's own `created_at` /
-   * `updated_at` audit stamps — land as ISO TEXT. `formatOutput` →
-   * `normalizeSqliteDatetimeOutput` already repairs that mix on read, and
-   * {@link sqliteTemporalArg} already dispatches on `typeof()` for bucketing
-   * (#3773). The filter path had no equivalent: it coerced the COMPARAND to
-   * epoch ms purely from the DECLARED type, so an ISO-TEXT-stored row failed the
-   * TEXT-vs-INTEGER affinity compare and every datetime window filter returned
-   * empty (#3912) — the exact failure the epoch coercion was added to prevent,
-   * just with the two storage forms swapped.
-   *
-   * Normalising the COLUMN (rather than guessing at the comparand) is what makes
-   * the comparison correct for both forms at once. The julian-day round trip is
-   * used instead of `unixepoch(x, 'subsec')` because the latter needs SQLite
-   * 3.42+; `julianday()` is exact to the millisecond on every version (SQLite
-   * carries the julian day as integer ms internally), so `round()` recovers the
-   * epoch exactly and equality filters keep matching. An unparseable TEXT value
-   * yields NULL, which compares false — the same non-match it produced before.
-   */
-  protected sqliteEpochMsSql(columnSql: string): string {
-    return (
-      `(case when typeof(${columnSql}) in ('integer','real') then ${columnSql} ` +
-      `else cast(round((julianday(${columnSql}) - 2440587.5) * 86400000.0) as integer) end)`
-    );
-  }
-
-  /**
-   * The left-hand side of a filter comparison on `column`, normalised to the
-   * storage form {@link coerceFilterValue} coerces the comparand into.
-   *
-   * `null` — the overwhelmingly common answer — means the plain column
-   * identifier is already correct, so the caller keeps using the ordinary Knex
-   * builder call (and its index-friendly `col op ?` SQL). Only a SQLite
-   * `Field.datetime` needs the {@link sqliteEpochMsSql} CASE.
+   * `null` — the answer for every dialect, every non-datetime column, and every
+   * SQLite datetime column that has been backfilled — means the plain identifier
+   * is already correct, so the caller keeps the ordinary Knex builder call and
+   * its indexable `col op ?` SQL. Only a column that may still hold PRE-canonical
+   * values ({@link needsLegacyDatetimeRepair}) is wrapped.
    */
   protected filterColumnExpr(
     table: string | null | undefined,
     field: string,
     column: string,
   ): { sql: string; bindings: any[] } | null {
-    if (!this.isEpochStoredDatetime(table, field)) return null;
-    return { sql: this.sqliteEpochMsSql('??'), bindings: [column, column, column] };
+    if (!this.needsLegacyDatetimeRepair(table, field)) return null;
+    return {
+      sql: this.sqliteCanonicalDatetimeSql('??'),
+      bindings: [column, column, column, column],
+    };
   }
 
   /**
@@ -3796,8 +3914,8 @@ export class SqlDriver implements IDataDriver {
    * must wrap its column with this too, or it keeps half the bug.
    */
   public temporalFilterColumnSql(objectName: string, field: string, columnSql: string): string {
-    if (!this.isEpochStoredDatetime(objectName, field)) return columnSql;
-    return this.sqliteEpochMsSql(columnSql);
+    if (!this.needsLegacyDatetimeRepair(objectName, field)) return columnSql;
+    return this.sqliteCanonicalDatetimeSql(columnSql);
   }
 
   protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
@@ -4533,12 +4651,43 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
+    // ADR-0053: a `Field.datetime` is an instant stored as UTC. Make the STORAGE
+    // say so — collapse every accepted input shape (JS `Date`, epoch number, ISO
+    // string, zone-naive wall clock, bare calendar day) to one canonical
+    // `YYYY-MM-DDTHH:MM:SS.sssZ` before it hits the wire (#3912).
+    //
+    // This is the write half of the fix; `coerceFilterValue` applies the SAME
+    // function to comparands, so the two sides of a comparison can no longer
+    // disagree about shape. It runs on EVERY dialect, for two different reasons:
+    //   - SQLite has no temporal type, so whatever is bound is what is stored. A
+    //     `Date` landed as INTEGER epoch and a REST/JSON write as ISO TEXT, in
+    //     the same column — the mixed storage that made every window filter
+    //     return the wrong rows, and that still makes ORDER BY sort all INTEGER
+    //     rows before all TEXT ones (#3928).
+    //   - Postgres/MySQL do have one, but a zone-NAIVE string bound into it is
+    //     interpreted in the SERVER's timezone, not UTC — measured at 8 hours off
+    //     on an `Asia/Shanghai` server. Sending an explicit `Z` removes the
+    //     server's timezone from the write path entirely.
+    const datetimeFields = this.datetimeFields[object];
+    if (datetimeFields && datetimeFields.size > 0 && copy && typeof copy === 'object') {
+      for (const field of datetimeFields) {
+        const v = copy[field];
+        if (v == null) continue;
+        // `NOW()` was already replaced with an ISO instant above; anything else
+        // that is not interpretable as a time passes through untouched.
+        const normalized = canonicalUtcDatetime(v);
+        if (normalized !== v) {
+          if (!copied) { copy = { ...copy }; copied = true; }
+          copy[field] = normalized;
+        }
+      }
+    }
+
     // ADR-0053 Phase 1: a `Field.date` is a timezone-naive calendar day, not
     // an instant. Collapse any `Date` or full-ISO value to `YYYY-MM-DD` before
     // it hits the wire so storage matches the date-only contract the filter
     // layer (`coerceFilterValue`) already enforces — the write/filter
     // asymmetry was the root cause of the silent date-equality miss.
-    // `Field.datetime` is untouched (it keeps full-instant semantics).
     const dateFields = this.dateFields[object];
     if (dateFields && dateFields.size > 0 && copy && typeof copy === 'object') {
       for (const field of dateFields) {
