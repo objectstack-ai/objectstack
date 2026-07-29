@@ -33,8 +33,10 @@ import { z } from 'zod';
  *
  * Either way the DRIVER only ever sees ISO date / timestamp strings,
  * never `{tokens}`. Translating an ISO comparand into a column's on-disk
- * form (SQLite epoch-ms, `YYYY-MM-DD` text, native timestamp) is the
- * driver's job — see `SqlDriver.temporalFilterValue`.
+ * form — canonical UTC text on SQLite, a native `timestamptz` on
+ * Postgres, a `DATETIME(3)` literal on MySQL, and `YYYY-MM-DD` text for
+ * a calendar day on every dialect — is the driver's job; see
+ * `SqlDriver.temporalFilterValue`.
  *
  * A token OUTSIDE this vocabulary is rejected rather than passed
  * through: `@objectstack/lint`'s `validate-filter-tokens` fails the

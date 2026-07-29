@@ -53,11 +53,11 @@ Either way the DRIVER only ever sees ISO date / timestamp strings,
 
 never `\{tokens\}`. Translating an ISO comparand into a column's on-disk
 
-form — canonical UTC text on SQLite, a native `timestamptz` on Postgres,
+form — canonical UTC text on SQLite, a native `timestamptz` on
 
-a `DATETIME(3)` literal on MySQL, and `YYYY-MM-DD` text for a calendar
+Postgres, a `DATETIME(3)` literal on MySQL, and `YYYY-MM-DD` text for
 
-day on every dialect — is the driver's job; see
+a calendar day on every dialect — is the driver's job; see
 
 `SqlDriver.temporalFilterValue`.
 
