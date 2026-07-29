@@ -151,6 +151,31 @@ Per-invocation budgets default to **250ms** (hooks) / **5000ms** (actions) of **
 
 A body may write *other* objects — e.g. `await ctx.api.object('parent').update({ ... })` from a child's `afterInsert`/`afterUpdate` (requires `api.write`). The target's own hooks fire too: the nested write runs in a **fresh sandbox VM** while the calling body is suspended, and this composes to any depth. This is the natural "when a child changes, roll the total up to the parent" automation — it does **not** need a denormalized, hand-maintained mirror field. Because each body's budget is **CPU time** (ADR-0102), the caller is **not** charged for the nested write's own run — so the stock 250ms default comfortably covers deep rollup chains, and you rarely need to raise `timeoutMs` (the spec still permits up to 30_000ms for a genuinely CPU-heavy body).
 
+### Errors from `ctx.api`
+
+A rejected `ctx.api` call gives your body the host error's `name` and `message`, plus two structured properties when the host supplied them:
+
+| Property | Meaning |
+|:---|:---|
+| `e.code` | The semantic code, e.g. `'VALIDATION_FAILED'` |
+| `e.fields` | Per-field validation envelopes — `{ field, code, message }[]` |
+
+```js
+try {
+  await ctx.api.object('invoice').update({ id: input.id, status: 'sent' });
+} catch (e) {
+  if (e.code === 'VALIDATION_FAILED') {
+    // e.fields → [{ field: 'issued_on', code: 'required', message: 'issued_on is required' }]
+    throw e;   // re-throwing keeps the payload; see below
+  }
+  throw e;
+}
+```
+
+Nothing else crosses into the VM. That is a deliberate **allowlist**, not an oversight: host errors routinely carry driver state, connection details or whole record payloads, and anything reachable on a rejection is readable by body code.
+
+An error your body lets escape — or re-throws — keeps `code` and `fields` on the way back out too, so an action's HTTP response can carry them (`data.code` / `data.fields`) and a form can highlight the offending input rather than only raising a toast. Errors you construct yourself are treated the same way: set `e.code` before throwing and it reaches the caller.
+
 ## L3 — Compiled modules (intentionally disabled)
 
 An earlier design allowed the CLI to emit a sibling `objectstack-runtime.<hash>.mjs` that `objectos` would `import()` at runtime. We removed that path because:
