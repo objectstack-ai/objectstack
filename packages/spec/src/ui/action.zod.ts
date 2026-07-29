@@ -580,13 +580,22 @@ export const ActionSchema = lazySchema(() => z.object({
 
   /**
    * [ADR-0066 D4] System capabilities required to INVOKE this action — a
-   * dual-surface gate from ONE declaration: the server (action route) rejects
+   * dual-surface gate from ONE declaration: the PLATFORM ACTION ROUTE rejects
    * the call with 403 when the caller's systemPermissions don't cover these (the
-   * source of truth), and the objectui ActionRunner hides/disables the button
-   * using the same requirement. Independent of `visible` (CEL): this is the RBAC
+   * source of truth), and the objectui action surfaces hide the button using the
+   * same requirement. Independent of `visible` (CEL): this is the RBAC
    * capability contract, mirroring `App.requiredPermissions`.
+   *
+   * **Server enforcement covers the platform's own invocation paths only** —
+   * `POST /api/v1/actions/<object>/<action>` (and the MCP/AI path), which is
+   * where `type: 'script' | 'flow' | 'modal'` actions land. A `type: 'api'`
+   * action whose `target` is a self-authored endpoint is called by the browser
+   * DIRECTLY: the platform never sees the request, so nothing checks this
+   * declaration server-side. Such an endpoint MUST re-check the capability
+   * itself (framework#3923) — treat the UI gate there as a courtesy, not a
+   * boundary.
    */
-  requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action (server-enforced 403 + UI hide/disable).'),
+  requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there.'),
 
   /** Keyboard Shortcut */
   shortcut: z.string().optional().describe('Keyboard shortcut to trigger this action (e.g., "Ctrl+S")'),

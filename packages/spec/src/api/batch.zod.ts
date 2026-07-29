@@ -86,7 +86,13 @@ export type BatchOptions = z.infer<typeof BatchOptionsSchema>;
  */
 export const BatchUpdateRequestSchema = lazySchema(() => z.object({
   operation: BatchOperationType.describe('Type of batch operation'),
-  records: z.array(BatchRecordSchema).min(1).max(200).describe('Array of records to process (max 200 per batch)'),
+  // [#3939] No `.max()` here: the batch-size cap is DEPLOYMENT policy
+  // (`RestServerConfig.batch.maxBatchSize`, 1..1000, default 200), enforced at
+  // the route so one place decides it. A hardcoded bound in the spec was a
+  // second source of truth that never matched — it said 200 while the routes
+  // enforced nothing at all. `.min(1)` is gone too: an empty batch is a no-op
+  // (`total: 0`), not a client error.
+  records: z.array(BatchRecordSchema).describe('Array of records to process (server caps the count — see batch.maxBatchSize)'),
   options: BatchOptionsSchema.optional().describe('Batch operation options'),
 }));
 
@@ -106,8 +112,29 @@ export type BatchUpdateRequest = z.input<typeof BatchUpdateRequestSchema>;
  *   "options": { "atomic": true }
  * }
  */
+/**
+ * One row of an `updateMany` batch.
+ *
+ * [#3939] Deliberately NOT {@link BatchRecordSchema}, which makes `id` and
+ * `data` optional because the generic `/batch` route serves create (no id) and
+ * delete (no data) through the same shape. `updateMany` needs both on every
+ * row — `updateManyData` reads `record.id` and `record.data` unconditionally —
+ * so reusing the loose shape declared a contract that accepted `{}` and an
+ * implementation that could not. This is the shape the route actually
+ * validates; {@link UpdateManyDataRequestSchema} extends it with the object
+ * name from the URL path.
+ */
+export const UpdateManyRecordSchema = lazySchema(() => z.object({
+  id: z.string().describe('Record ID'),
+  data: RecordDataSchema.describe('Fields to update'),
+}));
+
+export type UpdateManyRecord = z.infer<typeof UpdateManyRecordSchema>;
+
 export const UpdateManyRequestSchema = lazySchema(() => z.object({
-  records: z.array(BatchRecordSchema).min(1).max(200).describe('Array of records to update (max 200 per batch)'),
+  // [#3939] Cap lives at the route (`batch.maxBatchSize`), not here — see
+  // BatchUpdateRequestSchema above.
+  records: z.array(UpdateManyRecordSchema).describe('Array of records to update (server caps the count — see batch.maxBatchSize)'),
   options: BatchOptionsSchema.optional().describe('Update options'),
 }));
 
@@ -208,7 +235,11 @@ export type BatchUpdateResponse = z.infer<typeof BatchUpdateResponseSchema>;
  * }
  */
 export const DeleteManyRequestSchema = lazySchema(() => z.object({
-  ids: z.array(z.string()).min(1).max(200).describe('Array of record IDs to delete (max 200)'),
+  // [#3939] Cap lives at the route (`batch.maxBatchSize`), not here — see
+  // BatchUpdateRequestSchema above. This matters more since #3897 made the
+  // route delete per id by primary key (for cascade + per-row results): an
+  // unbounded list is now N engine round-trips, not one statement.
+  ids: z.array(z.string()).describe('Array of record IDs to delete (server caps the count — see batch.maxBatchSize)'),
   options: BatchOptionsSchema.optional().describe('Delete options'),
 }));
 

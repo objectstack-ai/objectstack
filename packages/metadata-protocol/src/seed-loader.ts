@@ -13,7 +13,7 @@ import type {
   SeedLoadResult,
   Seed,
 } from '@objectstack/spec/data';
-import { SeedLoaderConfigSchema } from '@objectstack/spec/data';
+import { SeedLoaderConfigSchema, isMultiValueField } from '@objectstack/spec/data';
 import { resolveSeedRecord } from '@objectstack/formula';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
 
@@ -178,6 +178,11 @@ export class SeedLoaderService implements ISeedLoaderService {
               targetObject,
               targetField: DEFAULT_EXTERNAL_ID_FIELD,
               fieldType: fieldDef.type as 'lookup' | 'master_detail' | 'user',
+              // `multiple: true` (lookup/user) stores an ARRAY of ids, so the
+              // seed value is an array of natural keys — carried here so
+              // resolution knows to map over it instead of rejecting the array
+              // as a non-string reference value (framework#3911).
+              multiple: isMultiValueField(fieldDef as { type: string; multiple?: boolean }) || undefined,
             });
           }
         }
@@ -246,6 +251,13 @@ export class SeedLoaderService implements ISeedLoaderService {
     let errored = 0;
     let referencesResolved = 0;
     let referencesDeferred = 0;
+    /**
+     * Reference FIELDS dropped from records that were still written — the
+     * "wrote the row, lost the link" outcome. Kept apart from `errored` (which
+     * counts dropped RECORDS) so `inserted + updated + skipped + errored`
+     * still reconciles against `total`. See framework#3932.
+     */
+    let referencesDropped = 0;
     const errors: ReferenceResolutionError[] = [];
 
     // Ensure the object's record map exists
@@ -472,56 +484,105 @@ export class SeedLoaderService implements ISeedLoaderService {
         const fieldValue = record[ref.field];
         if (fieldValue === undefined || fieldValue === null) continue;
 
-        // LOUD FAILURE: a reference must be a natural-key string (or an
-        // internal id). An object value — e.g. the wrapper `{ externalId: 'X' }`
-        // — never resolves: it would otherwise fall through unresolved and reach
-        // the driver as a non-bindable value ("SQLite3 can only bind ..."). This
-        // used to be silently skipped (and only crashed on a persistent DB's
-        // update path), so catch it here and report the actionable fix instead.
-        if (typeof fieldValue === 'object') {
-          const wrapped = (fieldValue as Record<string, unknown>).externalId;
-          const hint =
-            wrapped !== undefined
-              ? ` Pass the natural key directly: ${ref.field}: ${JSON.stringify(wrapped)}.`
-              : ` Pass the target's ${ref.targetField} value as a plain string.`;
+        const pushError = (message: string, attemptedValue: unknown): ReferenceResolutionError => {
           const error: ReferenceResolutionError = {
             sourceObject: objectName,
             field: ref.field,
             targetObject: ref.targetObject,
             targetField: ref.targetField,
-            attemptedValue: fieldValue,
+            attemptedValue,
             recordIndex: i,
-            message:
-              `Invalid reference for ${objectName}.${ref.field}: expected a ` +
-              `${ref.targetObject}.${ref.targetField} natural-key string but got an object.${hint}`,
+            message,
           };
           errors.push(error);
           allErrors.push(error);
+          return error;
+        };
+
+        // LOUD FAILURE: an ARRAY of natural keys is only writable by a field
+        // that stores an array — `Field.lookup(..., { multiple: true })` (or a
+        // multi `user` field). On a single-value field it can never resolve, so
+        // report the actionable fix instead of letting it reach the driver.
+        if (Array.isArray(fieldValue) && !ref.multiple) {
+          const error = pushError(
+            `Invalid reference for ${objectName}.${ref.field}: expected a single ` +
+              `${ref.targetObject}.${ref.targetField} natural-key string but got an array. ` +
+              `Declare the field as \`multiple: true\` to store several references, ` +
+              `or pass one natural key.`,
+            fieldValue,
+          );
           this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex: i });
+          // Drop the unwritable value so it never reaches the driver. Removing
+          // the key (not writing null) matters on the upsert UPDATE path — see
+          // the deferred-reference note below. The row itself still gets
+          // written, so this is a dropped FIELD, not a dropped record — counted
+          // separately (framework#3932) or every count-driven surface, notably
+          // the CLI boot banner, reads clean over a severed association.
+          delete record[ref.field];
+          referencesDropped++;
+          continue;
+        }
+
+        // A `multiple: true` field's stored shape IS an array, so a lone
+        // natural key is one-element shorthand for it; a single-value field
+        // keeps its scalar shape. Either way every element resolves the same.
+        const items = Array.isArray(fieldValue) ? fieldValue : [fieldValue];
+        const resolvedItems: unknown[] = [];
+        let invalidItem = false;
+        let unresolvedItem: unknown;
+        let sawUnresolved = false;
+
+        for (const item of items) {
+          // A null/undefined hole carries no reference — drop it rather than
+          // writing it into the stored array.
+          if (item === undefined || item === null) continue;
+
+          const outcome = await this.resolveReferenceItem(ref, item, insertedRecords, config);
+          if (outcome.status === 'invalid') {
+            // LOUD FAILURE: a reference must be a natural-key string (or an
+            // internal id). An object value — e.g. the wrapper
+            // `{ externalId: 'X' }` — never resolves: it would otherwise fall
+            // through unresolved and reach the driver as a non-bindable value
+            // ("SQLite3 can only bind ..."). This used to be silently skipped
+            // (and only crashed on a persistent DB's update path), so catch it
+            // here and report the actionable fix instead.
+            const error = pushError(
+              `Invalid reference for ${objectName}.${ref.field}: expected a ` +
+                `${ref.targetObject}.${ref.targetField} natural-key string but got an object.${outcome.hint}`,
+              item,
+            );
+            this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex: i });
+            invalidItem = true;
+            break;
+          }
+          if (outcome.status === 'unresolved') {
+            unresolvedItem = item;
+            sawUnresolved = true;
+            break;
+          }
+          if (outcome.status === 'resolved') referencesResolved++;
+          resolvedItems.push(outcome.value);
+        }
+
+        if (invalidItem) {
           // Drop the unresolvable value so it never reaches the driver.
           // Removing the key (not writing null) matters on the upsert UPDATE
           // path: an explicit null would overwrite the existing row's valid
           // reference, silently severing the link on every seed replay.
+          // Counted as a dropped FIELD (see the array branch above).
           delete record[ref.field];
+          referencesDropped++;
           continue;
         }
 
-        // Skip if value looks like an internal ID (not a natural key)
-        if (typeof fieldValue !== 'string' || this.looksLikeInternalId(fieldValue)) continue;
-
-        // Try to resolve via already-inserted records
-        const targetMap = insertedRecords.get(ref.targetObject);
-        const resolvedId = targetMap?.get(String(fieldValue));
-
-        if (resolvedId) {
-          record[ref.field] = resolvedId;
-          referencesResolved++;
-        } else if (!config.dryRun) {
-          // Try to resolve from existing data in the database
-          const dbId = await this.resolveFromDatabase(ref.targetObject, ref.targetField, fieldValue, config.organizationId);
-          if (dbId) {
-            record[ref.field] = dbId;
-            referencesResolved++;
+        if (sawUnresolved) {
+          if (config.dryRun) {
+            // Dry-run: report the miss but leave the authored value untouched.
+            pushError(
+              `[dry-run] Reference may not resolve: ${objectName}.${ref.field} = ` +
+                `'${String(unresolvedItem)}' → ${ref.targetObject}.${ref.targetField}`,
+              unresolvedItem,
+            );
           } else if (config.multiPass) {
             // Defer to pass 2. REMOVE the field rather than writing null:
             // on insert a missing column lands NULL anyway (placeholder until
@@ -530,6 +591,10 @@ export class SeedLoaderService implements ISeedLoaderService {
             // reference — every dev-server restart severed one link per
             // replayed record (NOT NULL columns turned this into a loud
             // constraint error; nullable ones silently lost the association).
+            //
+            // A multi-value field defers as a WHOLE (the original authored
+            // array): a partially-written array is a corrupt association, and
+            // pass 2 re-resolves every element from the same authored keys.
             delete record[ref.field];
             deferredUpdates.push({
               objectName,
@@ -538,6 +603,7 @@ export class SeedLoaderService implements ISeedLoaderService {
               targetObject: ref.targetObject,
               targetField: ref.targetField,
               attemptedValue: fieldValue,
+              multiple: ref.multiple === true,
               recordIndex: i,
             });
             referencesDeferred++;
@@ -546,36 +612,20 @@ export class SeedLoaderService implements ISeedLoaderService {
             // (LOUD: counted + reported). Writing it anyway would either
             // carry the raw natural-key string into the FK column or, on
             // update, corrupt the existing row.
-            const error: ReferenceResolutionError = {
-              sourceObject: objectName,
-              field: ref.field,
-              targetObject: ref.targetObject,
-              targetField: ref.targetField,
-              attemptedValue: fieldValue,
-              recordIndex: i,
-              message: `Cannot resolve reference: ${objectName}.${ref.field} = '${fieldValue}' → ${ref.targetObject}.${ref.targetField} not found`,
-            };
-            errors.push(error);
-            allErrors.push(error);
+            pushError(
+              `Cannot resolve reference: ${objectName}.${ref.field} = '${String(unresolvedItem)}' → ` +
+                `${ref.targetObject}.${ref.targetField} not found`,
+              unresolvedItem,
+            );
             unresolvedRefError = true;
           }
-        } else {
-          // Dry-run: attempt resolution, report error if not found
-          const targetMap2 = insertedRecords.get(ref.targetObject);
-          if (!targetMap2?.has(String(fieldValue))) {
-            const error: ReferenceResolutionError = {
-              sourceObject: objectName,
-              field: ref.field,
-              targetObject: ref.targetObject,
-              targetField: ref.targetField,
-              attemptedValue: fieldValue,
-              recordIndex: i,
-              message: `[dry-run] Reference may not resolve: ${objectName}.${ref.field} = '${fieldValue}' → ${ref.targetObject}.${ref.targetField}`,
-            };
-            errors.push(error);
-            allErrors.push(error);
-          }
+          continue;
         }
+
+        // Every element resolved (or was already an internal id). A
+        // `multiple: true` field always lands an ARRAY — including when the
+        // seed authored a lone key — because that is its stored shape.
+        record[ref.field] = ref.multiple ? resolvedItems : resolvedItems[0];
       }
 
       // A definitively unresolvable reference (no pass 2 to fix it) drops the
@@ -683,6 +733,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       total: dataset.records.length,
       referencesResolved,
       referencesDeferred,
+      referencesDropped,
       errors,
     };
   }
@@ -715,6 +766,57 @@ export class SeedLoaderService implements ISeedLoaderService {
       // sys_organization may not exist (single-tenant runtime) — ignore.
     }
     return undefined;
+  }
+
+  /**
+   * Resolve ONE reference value — the whole value of a single-value field, or
+   * one element of a `multiple: true` field's array — against the records
+   * seeded so far and then the database.
+   *
+   * Splitting this out is what lets a multi-value lookup work at all: the
+   * authored `authors: ['Alice', 'Bob']` is N independent natural keys, not one
+   * unresolvable "object" (framework#3911). Both passes share it so an element
+   * deferred to pass 2 resolves by exactly the same rules.
+   */
+  private async resolveReferenceItem(
+    ref: { field: string; targetObject: string; targetField: string },
+    value: unknown,
+    insertedRecords: Map<string, Map<string, string>>,
+    config: { dryRun?: boolean; organizationId?: string },
+  ): Promise<
+    | { status: 'resolved'; value: string }
+    | { status: 'kept'; value: unknown }
+    | { status: 'invalid'; hint: string }
+    | { status: 'unresolved' }
+  > {
+    if (typeof value === 'object') {
+      const wrapped = (value as Record<string, unknown>).externalId;
+      return {
+        status: 'invalid',
+        hint:
+          wrapped !== undefined
+            ? ` Pass the natural key directly: ${ref.field}: ${JSON.stringify(wrapped)}.`
+            : ` Pass the target's ${ref.targetField} value as a plain string.`,
+      };
+    }
+
+    // Not a natural key (an internal id, or a non-string the engine will
+    // reject on its own terms) — keep it verbatim.
+    if (typeof value !== 'string' || this.looksLikeInternalId(value)) {
+      return { status: 'kept', value };
+    }
+
+    // Records seeded during THIS load first, then existing rows in the DB.
+    const fromThisLoad = insertedRecords.get(ref.targetObject)?.get(value);
+    if (fromThisLoad) return { status: 'resolved', value: fromThisLoad };
+
+    // Dry-run never probes the database — an in-memory miss is the verdict.
+    if (config.dryRun) return { status: 'unresolved' };
+
+    const fromDatabase = await this.resolveFromDatabase(
+      ref.targetObject, ref.targetField, value, config.organizationId,
+    );
+    return fromDatabase ? { status: 'resolved', value: fromDatabase } : { status: 'unresolved' };
   }
 
   private async resolveFromDatabase(
@@ -767,18 +869,36 @@ export class SeedLoaderService implements ISeedLoaderService {
     organizationId?: string,
   ): Promise<void> {
     for (const deferred of deferredUpdates) {
-      // Try to resolve from inserted records
-      const targetMap = insertedRecords.get(deferred.targetObject);
-      let resolvedId = targetMap?.get(String(deferred.attemptedValue));
+      // A multi-value field deferred its WHOLE authored array (see pass 1), so
+      // re-resolve every element here; a single-value field has exactly one.
+      const items = Array.isArray(deferred.attemptedValue)
+        ? deferred.attemptedValue
+        : [deferred.attemptedValue];
+      const resolvedItems: unknown[] = [];
+      let missingItem: unknown;
+      let stillUnresolved = false;
 
-      // Try database fallback
-      if (!resolvedId) {
-        resolvedId = (await this.resolveFromDatabase(
-          deferred.targetObject, deferred.targetField, deferred.attemptedValue, organizationId
-        )) ?? undefined;
+      for (const item of items) {
+        if (item === undefined || item === null) continue;
+        const outcome = await this.resolveReferenceItem(
+          deferred, item, insertedRecords, { organizationId },
+        );
+        if (outcome.status === 'resolved' || outcome.status === 'kept') {
+          resolvedItems.push(outcome.value);
+          continue;
+        }
+        // 'invalid' can't reach pass 2 (pass 1 drops it), but treat it as a
+        // miss rather than writing an unresolvable value.
+        missingItem = item;
+        stillUnresolved = true;
+        break;
       }
 
-      if (resolvedId) {
+      // A multi-value field writes the array it re-resolved; a single-value one
+      // writes its lone id. An empty result is never a resolution.
+      const resolvedValue: unknown = deferred.multiple ? resolvedItems : resolvedItems[0];
+
+      if (!stillUnresolved && resolvedItems.length > 0) {
         // Find the record and update the reference
         const objectRecordMap = insertedRecords.get(deferred.objectName);
         const recordId = objectRecordMap?.get(deferred.recordExternalId);
@@ -793,7 +913,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // self-trigger vector SEED_OPTIONS exists to prevent (#3760).
             await withTransientRetry(() => this.engine.update(deferred.objectName, {
               id: recordId,
-              [deferred.field]: resolvedId,
+              [deferred.field]: resolvedValue,
             }, SeedLoaderService.SEED_OPTIONS as any));
 
             // Update result stats
@@ -816,13 +936,15 @@ export class SeedLoaderService implements ISeedLoaderService {
               error: err?.message,
             });
             this.recordDeferredError(deferred, allResults, allErrors,
-              `Failed to write deferred reference: ${deferred.objectName}.${deferred.field} = '${deferred.attemptedValue}' → ${deferred.targetObject}.${deferred.targetField}: ${err?.message ?? String(err)}`);
+              `Failed to write deferred reference: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField}: ${err?.message ?? String(err)}`);
           }
         }
       } else {
-        // Still unresolved after pass 2 — the target never materialized.
+        // Still unresolved after pass 2 — the target never materialized. Name
+        // the element that missed: on a multi-value field only one of several
+        // natural keys is usually at fault.
         this.recordDeferredError(deferred, allResults, allErrors,
-          `Deferred reference unresolved after pass 2: ${deferred.objectName}.${deferred.field} = '${deferred.attemptedValue}' → ${deferred.targetObject}.${deferred.targetField} not found`);
+          `Deferred reference unresolved after pass 2: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(stillUnresolved ? missingItem : deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField} not found`);
       }
     }
   }
@@ -1324,6 +1446,11 @@ export class SeedLoaderService implements ISeedLoaderService {
     return String(record[externalId] ?? '');
   }
 
+  /** Readable rendering of an attempted reference value (`['a','b']` for a multi-value field). */
+  private formatAttempted(value: unknown): string {
+    return Array.isArray(value) ? JSON.stringify(value) : String(value);
+  }
+
   /** Human-readable label for an externalId (single field, or `a+b` for a composite). */
   private externalIdLabel(externalId: string | string[]): string {
     return Array.isArray(externalId) ? externalId.join('+') : externalId;
@@ -1345,6 +1472,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         totalErrored: 0,
         totalReferencesResolved: 0,
         totalReferencesDeferred: 0,
+        totalReferencesDropped: 0,
         circularDependencyCount: 0,
         durationMs,
       },
@@ -1367,6 +1495,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       totalErrored: results.reduce((sum, r) => sum + r.errored, 0),
       totalReferencesResolved: results.reduce((sum, r) => sum + r.referencesResolved, 0),
       totalReferencesDeferred: results.reduce((sum, r) => sum + r.referencesDeferred, 0),
+      totalReferencesDropped: results.reduce((sum, r) => sum + (r.referencesDropped ?? 0), 0),
       circularDependencyCount: graph.circularDependencies.length,
       durationMs,
     };
@@ -1394,6 +1523,9 @@ interface DeferredUpdate {
   field: string;
   targetObject: string;
   targetField: string;
+  /** Authored value — one natural key, or the WHOLE array for a `multiple: true` field. */
   attemptedValue: unknown;
+  /** Source field stores an array of references, so pass 2 back-fills an array. */
+  multiple?: boolean;
   recordIndex: number;
 }

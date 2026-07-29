@@ -447,9 +447,9 @@ const result = AiAgentCapabilities.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **object** | `string` | ✅ | Object name |
-| **ids** | `string[]` | ✅ | Array of record IDs to delete |
+| **ids** | `string[]` | ✅ | Array of record IDs to delete (server caps the count — see batch.maxBatchSize) |
 | **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Delete options |
+| **object** | `string` | ✅ | Object name |
 
 
 ---
@@ -1403,9 +1403,9 @@ const result = AiAgentCapabilities.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **object** | `string` | ✅ | Object name |
-| **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of updates |
+| **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of records to update (server caps the count — see batch.maxBatchSize) |
 | **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Update options |
+| **object** | `string` | ✅ | Object name |
 
 
 ---

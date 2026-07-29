@@ -1,13 +1,21 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { TeamGraphService, expandPrincipal } from './team-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 import { celToFilter } from './bootstrap-declared-sharing-rules.js';
+import { isMatchAllCriteria } from './rule-criteria.js';
+import { bindRuleCriteriaGuard } from './rule-hooks.js';
 
 interface Row { [k: string]: any }
+
+/** Stored criteria of a rule row, parsed back out of `criteria_json`. */
+function rowCriteria(engine: { _tables: Record<string, Row[]> }, id: string): unknown {
+  const row = (engine._tables.sys_sharing_rule ?? []).find((r) => r.id === id);
+  return row?.criteria_json == null ? undefined : JSON.parse(row.criteria_json);
+}
 
 function makeEngine() {
   const tables: Record<string, Row[]> = {};
@@ -226,8 +234,8 @@ describe('SharingRuleService', () => {
   });
 
   it('defineRule upserts on duplicate name within org', async () => {
-    await rules.defineRule({ name: 'x', label: 'X', object: 'opportunity', recipientType: 'user', recipientId: 'a' }, SYS);
-    await rules.defineRule({ name: 'x', label: 'X-renamed', object: 'opportunity', recipientType: 'user', recipientId: 'b' }, SYS);
+    await rules.defineRule({ name: 'x', label: 'X', object: 'opportunity', criteria: { amount: 200000 }, recipientType: 'user', recipientId: 'a' }, SYS);
+    await rules.defineRule({ name: 'x', label: 'X-renamed', object: 'opportunity', criteria: { amount: 200000 }, recipientType: 'user', recipientId: 'b' }, SYS);
     expect(engine._tables.sys_sharing_rule).toHaveLength(1);
     expect(engine._tables.sys_sharing_rule[0].label).toBe('X-renamed');
     expect(engine._tables.sys_sharing_rule[0].recipient_id).toBe('b');
@@ -332,9 +340,10 @@ describe('SharingRuleService', () => {
   });
 
   it('listRules filters by object + activeOnly', async () => {
-    await rules.defineRule({ name: 'a', label: 'A', object: 'opportunity', recipientType: 'user', recipientId: 'x' }, SYS);
-    await rules.defineRule({ name: 'b', label: 'B', object: 'account',     recipientType: 'user', recipientId: 'y' }, SYS);
-    await rules.defineRule({ name: 'c', label: 'C', object: 'opportunity', recipientType: 'user', recipientId: 'z', active: false }, SYS);
+    const anyOpen = { stage: 'open' };
+    await rules.defineRule({ name: 'a', label: 'A', object: 'opportunity', criteria: anyOpen, recipientType: 'user', recipientId: 'x' }, SYS);
+    await rules.defineRule({ name: 'b', label: 'B', object: 'account',     criteria: anyOpen, recipientType: 'user', recipientId: 'y' }, SYS);
+    await rules.defineRule({ name: 'c', label: 'C', object: 'opportunity', criteria: anyOpen, recipientType: 'user', recipientId: 'z', active: false }, SYS);
     const opps = await rules.listRules({ object: 'opportunity' }, SYS);
     expect(opps).toHaveLength(2);
     const active = await rules.listRules({ object: 'opportunity', activeOnly: true }, SYS);
@@ -411,5 +420,216 @@ describe('#1887 — compound sharing condition compiled + enforced (ADR-0058 D3)
       .filter((sh: any) => sh.recipient_id === 'alice')
       .map((sh: any) => sh.record_id);
     expect(shared).toEqual(['opp1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #3896 — a rule with no criteria must share NOTHING, never everything
+//
+// `SharingRuleSchema` requires `condition` and its doc is explicit: a
+// predicate the compiler cannot lower is "skipped and logged — never seeded as
+// a permissive match-all (ADR-0049)". The seed path honoured that; the two
+// other ways to create a rule did not:
+//
+//   1. `defineRule` — which `POST {basePath}/sharing/rules` plucks its body
+//      into without ever running the schema. A missing, null, or MISSPELLED
+//      (`criterias`) key stored `criteria_json: null`, returned 201, and then
+//      evaluated as `find(object, { filter: {}, context: SYSTEM_CTX })` —
+//      every record of the object, granted to the recipient.
+//   2. A direct `sys_sharing_rule` insert, which is what authoring a rule in
+//      the Setup UI issues.
+//
+// Both are now refused, and the evaluator refuses to act on such a row
+// regardless of how it got there — so rules stored before this gate existed
+// under-share instead of over-sharing.
+// ---------------------------------------------------------------------------
+describe('#3896 — missing criteria never becomes "share every record" (ADR-0049)', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let sharing: SharingService;
+  let rules: SharingRuleService;
+  const SYS = { isSystem: true, organizationId: 'org1' } as any;
+  const BASE = {
+    name: 'won_deals', label: 'Won Deals', object: 'opportunity',
+    recipientType: 'position' as const, recipientId: 'sales_rep', accessLevel: 'read' as const,
+  };
+
+  beforeEach(() => {
+    engine = makeEngine();
+    engine._tables.opportunity = [
+      { id: 'opp1', stage: 'won',  amount: 200000 },
+      { id: 'opp2', stage: 'lost', amount: 150000 },
+      { id: 'opp3', stage: 'open', amount: 5000 },
+    ];
+    sharing = new SharingService({ engine: engine as any });
+    rules = new SharingRuleService({ engine: engine as any, sharing });
+  });
+
+  describe('isMatchAllCriteria', () => {
+    it('flags every shape that reaches the engine as an unconstrained filter', () => {
+      for (const shape of [undefined, null, '', '   ', {}, [], '{}', '[]', true, 42,
+                           { $and: [] }, { $or: [] }, { $and: [{}] }, { $or: [{ a: 1 }, {}] },
+                           'record.stage == "won"' /* CEL, not JSON — engine ignores it */]) {
+        expect(isMatchAllCriteria(shape), `${JSON.stringify(shape) ?? String(shape)} should be match-all`).toBe(true);
+      }
+    });
+
+    it('passes anything that actually narrows the result set', () => {
+      for (const shape of [{ stage: 'won' }, '{"stage":"won"}', { amount: { $gte: 1 } },
+                           [{ stage: 'won' }], { $and: [{ stage: 'won' }] }, { $or: [{ a: 1 }, { b: 2 }] }]) {
+        expect(isMatchAllCriteria(shape), `${JSON.stringify(shape)} should NOT be match-all`).toBe(false);
+      }
+    });
+  });
+
+  describe('defineRule (the REST + programmatic entry)', () => {
+    it('rejects the reported typo — `criterias` instead of `criteria` — instead of sharing everything', async () => {
+      // Verbatim from the issue: the author means "share won deals" and the
+      // extra key is dropped by the REST pluck, leaving criteria undefined.
+      await expect(
+        rules.defineRule({ ...BASE, criterias: { stage: 'won' } } as any, SYS),
+      ).rejects.toThrow(/VALIDATION_FAILED/);
+      expect(engine._tables.sys_sharing_rule ?? []).toHaveLength(0);
+    });
+
+    it('rejects every match-all criteria shape, writing no row', async () => {
+      for (const criteria of [undefined, null, '', {}, [], '{}', { $and: [] }, 'record.stage == "won"']) {
+        await expect(
+          rules.defineRule({ ...BASE, criteria } as any, SYS),
+          `criteria=${JSON.stringify(criteria) ?? 'undefined'}`,
+        ).rejects.toThrow(/VALIDATION_FAILED: criteria is required/);
+      }
+      expect(engine._tables.sys_sharing_rule ?? []).toHaveLength(0);
+    });
+
+    it('names the field and the misspelling risk so the 400 is actionable', async () => {
+      await expect(rules.defineRule({ ...BASE } as any, SYS)).rejects.toThrow(/criterias/);
+    });
+
+    it('still accepts a real predicate (the guard is not a blanket refusal)', async () => {
+      const r = await rules.defineRule({ ...BASE, criteria: { stage: 'won' } }, SYS);
+      expect(r.criteria).toEqual({ stage: 'won' });
+      const res = await rules.evaluateRule(r.id, SYS);
+      expect(res.matchedRecords).toBe(1);
+    });
+
+    it('rejects an UPSERT that would widen an existing rule to match-all', async () => {
+      const r = await rules.defineRule({ ...BASE, criteria: { stage: 'won' } }, SYS);
+      await expect(rules.defineRule({ ...BASE, criteria: {} } as any, SYS)).rejects.toThrow(/VALIDATION_FAILED/);
+      // The stored rule keeps its original narrow criteria.
+      expect(rowCriteria(engine, r.id)).toEqual({ stage: 'won' });
+    });
+  });
+
+  describe('evaluator backstop (rows that predate the gate / bypass defineRule)', () => {
+    /** A row as the Setup UI's data-API insert would leave it: no criteria. */
+    function seedRawRule(overrides: Record<string, any> = {}): string {
+      const id = 'srule_legacy';
+      (engine._tables.sys_sharing_rule ??= []).push({
+        id, organization_id: 'org1', name: 'legacy_all', label: 'Legacy',
+        object_name: 'opportunity', criteria_json: null,
+        recipient_type: 'user', recipient_id: 'alice',
+        access_level: 'read', active: true, ...overrides,
+      });
+      return id;
+    }
+
+    it('THE GATE: a rule with missing criteria produces NO sys_record_share row', async () => {
+      const id = seedRawRule();
+      const res = await rules.evaluateRule(id, SYS);
+      expect(res.matchedRecords).toBe(0);
+      expect(res.grantsCreated).toBe(0);
+      expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+    });
+
+    it('revokes grants a match-all rule had already materialised', async () => {
+      const id = seedRawRule();
+      // Pretend a pre-fix boot had already shared the whole object.
+      for (const recordId of ['opp1', 'opp2', 'opp3']) {
+        await sharing.grant({
+          object: 'opportunity', recordId, recipientType: 'user', recipientId: 'alice',
+          accessLevel: 'read', source: 'rule', sourceId: id, reason: 'rule:legacy_all',
+        } as any, SYS);
+      }
+      expect(engine._tables.sys_record_share).toHaveLength(3);
+      const res = await rules.evaluateRule(id, SYS);
+      expect(res.grantsRevoked).toBe(3);
+      expect(engine._tables.sys_record_share).toHaveLength(0);
+    });
+
+    it('logs the refusal rather than failing silently', async () => {
+      const warn = vi.fn();
+      const svc = new SharingRuleService({ engine: engine as any, sharing, logger: { warn } });
+      await svc.evaluateRule(seedRawRule(), SYS);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('ADR-0049'), expect.objectContaining({ rule: 'legacy_all' }));
+    });
+
+    it('the per-record path (write hooks) refuses too — recordMatches is not a second hole', async () => {
+      seedRawRule();
+      const res = await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);
+      expect(res[0].matchedRecords).toBe(0);
+      expect(res[0].grantsCreated).toBe(0);
+      expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+    });
+
+    it('an unparsable criteria_json (a CEL source typed into the textarea) is inert, not match-all', async () => {
+      const id = seedRawRule({ criteria_json: 'record.stage == "won"' });
+      const res = await rules.evaluateRule(id, SYS);
+      expect(res.matchedRecords).toBe(0);
+      expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+    });
+  });
+
+  describe('bindRuleCriteriaGuard (the Setup UI data-API entry)', () => {
+    function makeHookEngine() {
+      const hooks: Array<{ event: string; handler: (ctx: any) => any; options: any }> = [];
+      return {
+        hooks,
+        registerHook(event: string, handler: (ctx: any) => any, options: any = {}) { hooks.push({ event, handler, options }); },
+        unregisterHooksByPackage(packageId: string) {
+          let removed = 0;
+          for (let i = hooks.length - 1; i >= 0; i--) if (hooks[i].options.packageId === packageId) { hooks.splice(i, 1); removed++; }
+          return removed;
+        },
+        async fire(event: string, data: any, id?: string) {
+          for (const h of hooks.filter((x) => x.event === event)) await h.handler({ input: { data, id } });
+        },
+      };
+    }
+
+    it('fails the INSERT of a rule with no criteria_json', async () => {
+      const e = makeHookEngine();
+      bindRuleCriteriaGuard(e as any);
+      await expect(e.fire('beforeInsert', { name: 'all_opps', object_name: 'opportunity', recipient_id: 'alice' }))
+        .rejects.toThrow(/criteria is required/);
+      await expect(e.fire('beforeInsert', { name: 'all_opps', criteria_json: '{}' })).rejects.toThrow(/criteria is required/);
+    });
+
+    it('reports the failure as a field-level VALIDATION_FAILED (a 400, not a 500)', async () => {
+      const e = makeHookEngine();
+      bindRuleCriteriaGuard(e as any);
+      const err = await e.fire('beforeInsert', { name: 'all_opps' }).catch((x: any) => x);
+      expect(err.code).toBe('VALIDATION_FAILED');
+      expect(err.fields).toEqual([expect.objectContaining({ field: 'criteria_json' })]);
+    });
+
+    it('allows an insert that carries a real predicate', async () => {
+      const e = makeHookEngine();
+      bindRuleCriteriaGuard(e as any);
+      await expect(e.fire('beforeInsert', { name: 'won', criteria_json: '{"stage":"won"}' })).resolves.toBeUndefined();
+    });
+
+    it('lets an admin DEACTIVATE a legacy criteria-less rule (patch does not supply criteria_json)', async () => {
+      const e = makeHookEngine();
+      bindRuleCriteriaGuard(e as any);
+      // The whole point of the update carve-out: switching off an over-broad
+      // rule must not require first inventing a criteria for it.
+      await expect(e.fire('beforeUpdate', { active: false }, 'srule_legacy')).resolves.toBeUndefined();
+    });
+
+    it('still rejects an update that BLANKS the criteria of a live rule', async () => {
+      const e = makeHookEngine();
+      bindRuleCriteriaGuard(e as any);
+      await expect(e.fire('beforeUpdate', { criteria_json: '' }, 'srule_1')).rejects.toThrow(/criteria is required/);
+    });
   });
 });

@@ -266,6 +266,7 @@ export const ShowcaseTranslationBundle = {
       },
       showcase_field_zoo: {
         label: '字段动物园', pluralLabel: '字段动物园',
+        fields: { f_lookups: { label: '查找 → 客户（多值）' } },
       },
     },
   },

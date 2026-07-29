@@ -327,10 +327,21 @@ export const DynamicLoadingConfigSchema = lazySchema(() => z.object({
     .describe('Sandbox dynamically loaded plugins by default'),
   
   /**
-   * Allowed plugin sources (empty = all allowed)
+   * Allowed plugin sources — three-state, the same contract as
+   * `object.apiMethods` (#3391/#3543): `undefined` = no source policy declared,
+   * `[]` = deny-all, a subset = exactly those source types.
+   *
+   * The empty ARRAY is closed; only ABSENCE is open. The previous wording
+   * collapsed the two, making this a vacuous allow-list — one where the value an
+   * author reaches by mistake is also the widest grant. That is the shape #3896
+   * turned into an over-share, and this is a supply-chain gate.
+   *
+   * Nothing enforces this field yet (hence the marker), which is precisely why
+   * the wording mattered: an unimplemented property's description is the
+   * specification whoever implements it builds to.
    */
   allowedSources: z.array(z.enum(['npm', 'local', 'url', 'registry', 'git'])).optional()
-    .describe('Restrict which source types are permitted'),
+    .describe('[EXPERIMENTAL — not enforced] Restrict which plugin source types are permitted: undefined = any source, [] = deny-all, a subset = exactly those types'),
   
   /**
    * Require integrity verification for remote plugins

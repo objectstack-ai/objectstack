@@ -99,10 +99,22 @@ export const FieldZoo = ObjectSchema.create({
 
     // ── Relational ───────────────────────────────────────────────────────
     f_lookup: Field.lookup('showcase_account', { label: 'Lookup → Account' }),
+    // Multi-value reference — stores an ARRAY of account ids (JSON column).
+    // Seeded from an array of natural keys, one per element (framework#3911);
+    // this is the seedable half of the `multiple: true` reference surface —
+    // see `f_users` below for the half that a fresh boot cannot seed.
+    f_lookups: Field.lookup('showcase_account', { label: 'Lookup → Accounts (multiple)', multiple: true }),
     f_master_detail: Field.masterDetail('showcase_project', { label: 'Master-Detail → Project' }),
     f_tree: { type: 'tree', label: 'Tree (self/category)', reference: 'showcase_category' },
 
     // ── User (lookup specialized to sys_user) ────────────────────────────
+    // NOT seeded, and deliberately so: `sys_user` rows are created by SIGN-UP,
+    // not by seeds (see security/seed-approval-demo.ts — "users can't be
+    // seeded (they sign up)"), so on a fresh boot there is no human user for a
+    // natural key to resolve against. Authoring one here would make the whole
+    // showcase seed load report `success: false` on every first boot. The
+    // multi-value REFERENCE mechanics these fields share are demonstrated by
+    // `f_lookups` above; assign these two in the UI once you have signed up.
     f_user: Field.user({ label: 'User → sys_user (single)' }),
     f_users: Field.user({ label: 'Users (multiple)', multiple: true }),
     f_owner: Field.user({ label: 'Owner (current_user default)', defaultValue: 'current_user' }),

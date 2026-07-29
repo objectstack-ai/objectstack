@@ -78,7 +78,7 @@ Dynamic plugin loading subsystem configuration
 | **maxDynamicPlugins** | `integer` | ✅ | Upper limit on runtime-loaded plugins |
 | **discovery** | `{ enabled: boolean; sources: { type: Enum<'registry' \| 'npm' \| 'directory' \| 'url'>; endpoint: string; pollInterval: integer; filter?: object }[]; autoLoad: boolean; requireApproval: boolean }` | optional | Runtime plugin discovery configuration |
 | **defaultSandbox** | `boolean` | ✅ | Sandbox dynamically loaded plugins by default |
-| **allowedSources** | `Enum<'npm' \| 'local' \| 'url' \| 'registry' \| 'git'>[]` | optional | Restrict which source types are permitted |
+| **allowedSources** | `Enum<'npm' \| 'local' \| 'url' \| 'registry' \| 'git'>[]` | optional | [EXPERIMENTAL — not enforced] Restrict which plugin source types are permitted: undefined = any source, [] = deny-all, a subset = exactly those types |
 | **requireIntegrity** | `boolean` | ✅ | Require integrity hash verification for remote sources |
 | **operationTimeout** | `integer` | ✅ | Default timeout for load/unload operations in ms |
 

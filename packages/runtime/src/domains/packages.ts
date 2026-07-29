@@ -37,6 +37,17 @@ export function createPackagesDomain(deps: DomainHandlerDeps): DomainRoute {
  * - POST   /packages/:id/revert  → revert a package to last published state
  * 
  * Uses ObjectQL SchemaRegistry directly (via the 'objectql' service).
+ *
+ * **Error handling.** Every `catch` here goes through `deps.errorFromThrown(e,
+ * 500)` — never `deps.error(e.message, …)`. Each of these routes calls into the
+ * protocol service, whose errors carry their own HTTP status as `status` (the
+ * codebase convention: `OBJECT_NOT_FOUND`, `RECORD_NOT_FOUND`, `CLONE_DISABLED`,
+ * …), and can be a record `ValidationError` carrying `fields[]`. Hand-rolling
+ * `e.statusCode || 500` saw neither — #3867 fixed exactly that read in
+ * `errorResponseBase` and #3918 taught `errorFromThrown` the validation shape,
+ * but these call sites bypassed both, so a deliberate 404 still rendered as a
+ * 500 and `fields[]` was still dropped. Route new handlers through the shared
+ * helper rather than re-deriving the status here.
  */
 export async function handlePackagesRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     const m = method.toUpperCase();
@@ -275,7 +286,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
-                    return { handled: true, response: deps.error(e.message, e.statusCode || 500) };
+                    return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
             return { handled: true, response: deps.error('Draft discarding not supported', 501) };
@@ -296,7 +307,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     });
                     return { handled: true, response: deps.success({ commits }) };
                 } catch (e: any) {
-                    return { handled: true, response: deps.error(e.message, e.statusCode || 500) };
+                    return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
             return { handled: true, response: deps.error('Commit history not supported', 501) };
@@ -318,7 +329,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
-                    return { handled: true, response: deps.error(e.message, e.statusCode || 500) };
+                    return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
             return { handled: true, response: deps.error('Commit revert not supported', 501) };
@@ -341,7 +352,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
-                    return { handled: true, response: deps.error(e.message, e.statusCode || 500) };
+                    return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
             return { handled: true, response: deps.error('Commit rollback not supported', 501) };
@@ -387,7 +398,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
-                return { handled: true, response: deps.error(e.message, e.statusCode || 500) };
+                return { handled: true, response: deps.errorFromThrown(e, 500) };
             }
         }
 
@@ -416,7 +427,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
-                return { handled: true, response: deps.error(e.message, e.statusCode || 500) };
+                return { handled: true, response: deps.errorFromThrown(e, 500) };
             }
         }
 
@@ -457,7 +468,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     const updated = await (protocol as any).updatePackage({ packageId: id, patch });
                     return { handled: true, response: deps.success((updated as any)?.package ?? updated) };
                 } catch (e: any) {
-                    return { handled: true, response: deps.error(e.message, e.statusCode || 500) };
+                    return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
             // Fallback: no protocol service — in-memory registry only.
@@ -490,7 +501,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         ...(keepData ? { keepData: true } : {}),
                     });
                 } catch (e: any) {
-                    return { handled: true, response: deps.error(e.message, e.statusCode || 500) };
+                    return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
 
@@ -501,7 +512,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             return { handled: true, response: deps.success({ success: true, registryRemoved, persisted }) };
         }
     } catch (e: any) {
-        return { handled: true, response: deps.error(e.message, e.statusCode || 500) };
+        return { handled: true, response: deps.errorFromThrown(e, 500) };
     }
 
     return { handled: false };

@@ -407,6 +407,28 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
       + 'for the rule\'s recipient kind.',
   },
   {
+    id: 'sharing-rule-criteria-required',
+    label: 'Sharing rule — criteria is required',
+    summary:
+      'a sharing rule with no criteria must share NOTHING. `criteria_json: null` used to evaluate as '
+      + '`find(object, { filter: {} })` under the system context — every record of the object, granted '
+      + 'to the recipient — reachable by a typo through three write paths that never parsed the schema '
+      + '(#3896). The proof POSTs the reported body against a booted stack and asserts no '
+      + '`sys_record_share` row appears, and covers the already-stored legacy row whose grants the next '
+      + 'reconcile REVOKES rather than leaving materialised.',
+    proofId: 'sharing-rule-criteria-required',
+    proofRef:
+      'packages/qa/dogfood/test/sharing-rule-criteria-required.dogfood.test.ts#sharing-rule-criteria-required',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'same shape as `showcase-bu-hierarchy-sharing`: the criteria is authored at STACK level '
+      + '(`sharingRules[].condition`), not as a property of a governed metadata type, so there is no '
+      + 'ledger entry to ratchet. Registered so the tag is not an orphan; it runs unconditionally in '
+      + 'the dogfood suite. The invariant itself is recorded in the empty-state registry '
+      + '(sharing `condition` → `closed`), which is the surface that CAN carry it.',
+  },
+  {
     id: 'declarative-rbac-seeding',
     label: 'Declarative RBAC seeding',
     summary:

@@ -279,6 +279,23 @@ function csvSplit(raw: unknown): string[] {
 }
 
 /**
+ * Is a submitted decision output blank — i.e. does it fail a `required`
+ * declaration (objectui#2955)?
+ *
+ * "Present but empty" has to count as missing: a decision UI sends whatever
+ * its widget holds, and an untouched picker/text box is `''` or `[]`. Letting
+ * those through would satisfy `required` with a value the downstream
+ * `expression` approver then resolves to nobody — the exact stall the flag
+ * exists to prevent. `false` and `0` are real values and pass.
+ */
+function isBlankDecisionOutput(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (Array.isArray(value)) return value.filter(v => v !== null && v !== undefined && String(v).trim() !== '').length === 0;
+  return false;
+}
+
+/**
  * Humanize a machine name for display fallback: strips a `flow:` prefix and
  * title-cases underscore/dash segments (`flow:manager_review` → "Manager
  * Review"). Used only when no authored label was snapshotted on the row.
@@ -1641,10 +1658,11 @@ export class ApprovalService implements IApprovalService {
     // caller bug; `decision`/`requestId` are reserved by the resume envelope.
     const outputKeys = input.outputs ? Object.keys(input.outputs) : [];
     let acceptedOutputs: Record<string, unknown> | undefined;
+    // Typed declarations and bare keys whitelist identically — one normalizer
+    // (spec) is the single reader of the union shape.
+    const declaredDefs = normalizeDecisionOutputs((config as any).decisionOutputs);
     if (outputKeys.length) {
-      // Typed declarations and bare keys whitelist identically — one
-      // normalizer (spec) is the single reader of the union shape.
-      const declared = normalizeDecisionOutputs((config as any).decisionOutputs).map(d => d.key);
+      const declared = declaredDefs.map(d => d.key);
       if (!declared.length) {
         throw new Error(
           `VALIDATION_FAILED: this approval node declares no decisionOutputs — outputs are not accepted. `
@@ -1667,6 +1685,35 @@ export class ApprovalService implements IApprovalService {
         );
       }
       acceptedOutputs = { ...input.outputs };
+    }
+
+    // objectui#2955: `required` outputs. Unlike `type`/`multiple` — which only
+    // shape the input widget — this one is a runtime contract: the flow must
+    // never resume past this node with a required key missing, because that is
+    // precisely what a downstream `expression` approver reads. Before this,
+    // an author's only backstop was `onEmptyApprovers` (the next node opens,
+    // resolves nobody, and stalls for an admin rescue).
+    //
+    // APPROVE only. A reject leaves down the reject edge, where the outputs
+    // are not read — demanding routing data to say "no" would block the
+    // rejection. Outputs still ride a reject when the approver filled them.
+    //
+    // Enforced for EVERY approve path, with no elevation bypass: a one-click
+    // email action link cannot fill a form, and an `auto_approve` SLA
+    // escalation has nobody to ask — both must fail rather than resume the run
+    // with the key missing. The escalation sweep already isolates a throwing
+    // request (it catches per-request), so that decision simply stays pending
+    // and visibly overdue instead of advancing into a broken node.
+    if (input.decision === 'approve') {
+      const missing = declaredDefs
+        .filter(d => d.required === true && isBlankDecisionOutput(input.outputs?.[d.key]))
+        .map(d => d.key);
+      if (missing.length) {
+        throw new Error(
+          `VALIDATION_FAILED: decision output(s) \`${missing.join('`, `')}\` are required to approve this `
+          + `request — open the approval and fill them in before approving.`,
+        );
+      }
     }
 
     // Audit the decision first so the quorum/per_group tally below sees it.

@@ -263,6 +263,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     updated: summary.updated ?? 0,
                     skipped: summary.skipped ?? 0,
                     rejected: summary.errors ?? 0,
+                    droppedRefs: summary.droppedRefs ?? 0,
                     healed: true,
                 });
             } else {
@@ -310,6 +311,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             updated: number;
             skipped: number;
             rejected: number;
+            droppedRefs?: number;
             healed?: boolean;
             emptyInstall?: boolean;
         },
@@ -1014,7 +1016,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         ctx: PluginContext,
         datasets: any[],
         organizationId?: string,
-    ): Promise<{ inserted: number; updated: number; skipped: number; errors: number; errorSample?: string }> => {
+    ): Promise<{ inserted: number; updated: number; skipped: number; errors: number; droppedRefs: number; errorSample?: string }> => {
         const ql: any = ctx.getService('objectql');
         let metadata: any;
         try { metadata = ctx.getService('metadata'); } catch { /* none */ }
@@ -1040,6 +1042,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             updated: result.summary.totalUpdated,
             skipped: result.summary.totalSkipped ?? 0,
             errors: result.errors.length,
+            // Reference fields dropped from rows that WERE written (#3932) —
+            // invisible in every row count, so carried explicitly.
+            droppedRefs: result.summary.totalReferencesDropped ?? 0,
             // Surface the first write/resolution failure so the caller can
             // report WHY nothing landed (e.g. a locked DB, a missing table,
             // a failed validation) instead of a bare "0 rows".

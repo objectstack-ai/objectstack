@@ -126,7 +126,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       criteria_json: {
         label: "条件",
-        help: "共享哪些记录。留空表示共享该对象的全部记录。"
+        help: "共享哪些记录。必填 —— 规则必须缩小共享范围，因此没有「共享全部记录」这一选项。"
       },
       recipient_type: {
         label: "接收方类型",

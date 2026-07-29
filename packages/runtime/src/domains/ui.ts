@@ -41,7 +41,7 @@ export async function handleUiRequest(
                 const result = await protocol.getUiView({ object: objectName, type });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
-                return { handled: true, response: deps.error(e.message, 500) };
+                return { handled: true, response: deps.errorFromThrown(e, 500) };
             }
         } else {
             return { handled: true, response: deps.error('Protocol service not available', 503) };

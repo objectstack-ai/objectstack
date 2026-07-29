@@ -457,6 +457,22 @@ export const DecisionOutputDefSchema = lazySchema(() => z.object({
     .describe("Decision-dialog input widget (default 'text')"),
   /** Collect an id array instead of a single value (multi-select picker). */
   multiple: z.boolean().optional().describe('Collect multiple values (id array)'),
+  /**
+   * The approver must supply this output to APPROVE (objectui#2955).
+   *
+   * Unlike `type`/`multiple` — which only shape the input widget — this one
+   * IS enforced by the runtime: an approve carrying no value for a required
+   * key is rejected before any write, so a downstream `expression` approver
+   * reading `vars.<nodeId>.<key>` can never face a missing key. Without it an
+   * author's only backstop was `onEmptyApprovers` — the run reaches the next
+   * node, finds nobody, and stalls for an admin rescue.
+   *
+   * NOT enforced on reject: the run leaves down the reject edge, where the
+   * outputs are not read, and demanding routing data to say "no" would block
+   * the rejection. Outputs are still accepted on a reject if the approver
+   * filled them in.
+   */
+  required: z.boolean().optional().describe('Approver must supply this output to approve'),
 }));
 export type DecisionOutputDef = z.infer<typeof DecisionOutputDefSchema>;
 
@@ -482,6 +498,7 @@ export function normalizeDecisionOutputs(
         ...(typeof e.label === 'string' && e.label ? { label: e.label } : {}),
         ...(typeof e.type === 'string' && e.type !== 'text' ? { type: e.type as DecisionOutputDef['type'] } : {}),
         ...(e.multiple === true ? { multiple: true } : {}),
+        ...(e.required === true ? { required: true } : {}),
       });
     }
   }

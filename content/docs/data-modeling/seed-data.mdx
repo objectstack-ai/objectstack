@@ -238,6 +238,36 @@ const contactsSeed = defineSeed(Contact, {
 export const SeedData = [accountsSeed, contactsSeed];
 ```
 
+### Multi-Value Lookups (`multiple: true`)
+
+A lookup declared `multiple: true` stores an **array** of related record ids, so its
+seed value is an **array of natural keys**. Each element resolves independently.
+
+```typescript
+const Book = ObjectSchema.create({
+  name: 'book',
+  fields: {
+    name: Field.text({ label: 'Title', required: true }),
+    authors: Field.lookup('author', { label: 'Authors', multiple: true }),
+  },
+});
+
+const booksSeed = defineSeed(Book, {
+  externalId: 'name',
+  records: [
+    { name: 'Refactoring', authors: ['Alice', 'Bob'] },  // one natural key per author
+  ],
+});
+```
+
+A lone string is accepted as one-element shorthand (`authors: 'Alice'` stores
+`[<alice id>]`). Resolution is **all-or-nothing per field**: if any element is still
+missing, the whole array is deferred to pass 2 rather than written half-resolved, and
+a key that never materializes is reported as a load error naming that element.
+
+Passing an array to a **single-value** lookup is rejected with a load error — declare
+the field `multiple: true`, or pass one natural key.
+
 ### Composite `externalId` — Join / Junction Tables
 
 A join (junction) table linking two objects many-to-many has **no single-field

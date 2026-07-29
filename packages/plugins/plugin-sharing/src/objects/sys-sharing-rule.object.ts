@@ -136,6 +136,12 @@ export const SysSharingRule = ObjectSchema.create({
 
     criteria_json: Field.textarea({
       label: 'Criteria',
+      // [#3896] Mandatory in substance, `required: false` in metadata: the
+      // column is nullable in every already-deployed tenant (rows predating
+      // this gate), and flipping it to `required` would only translate into a
+      // destructive NOT NULL migration that those nulls block. The invariant
+      // is enforced where it can also explain itself — `bindRuleCriteriaGuard`
+      // fails the INSERT, and `defineRule` fails the API call.
       required: false,
       // Rendered as a visual criteria builder scoped to the selected object's
       // fields (dependsOn: object_name), storing the same JSON FilterCondition.
@@ -143,7 +149,10 @@ export const SysSharingRule = ObjectSchema.create({
       // editable. Falls back to a textarea when the widget is unavailable.
       widget: 'filter-condition',
       dependsOn: ['object_name'],
-      description: 'Which records to share. Leave empty to share every record of the object.',
+      // Deliberately NOT "leave empty to share everything" (#3896): an empty
+      // criteria never shared everything on purpose, it just failed open —
+      // ADR-0049 forbids the shape, and a rule saved without one is rejected.
+      description: 'Which records to share. Required — a rule must narrow the records it shares, so there is no "share every record" setting.',
       group: 'Target',
     }),
 

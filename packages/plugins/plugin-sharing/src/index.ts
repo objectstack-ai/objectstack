@@ -30,7 +30,19 @@ export {
 } from './share-link-routes.js';
 export { TeamGraphService, expandPrincipal, type TeamGraphOptions } from './team-graph.js';
 export { BusinessUnitGraphService, type BusinessUnitGraphOptions } from './business-unit-graph.js';
-export { bindRuleHooks, unbindAllRuleHooks, SHARING_RULE_HOOK_PACKAGE } from './rule-hooks.js';
+export {
+  bindRuleHooks,
+  unbindAllRuleHooks,
+  bindRuleCriteriaGuard,
+  SHARING_RULE_HOOK_PACKAGE,
+  RULE_CRITERIA_GUARD_PACKAGE,
+} from './rule-hooks.js';
+export {
+  parseCriteria,
+  isMatchAllCriteria,
+  MATCH_ALL_CRITERIA_MESSAGE,
+  SharingCriteriaValidationError,
+} from './rule-criteria.js';
 export {
   bindRuleProvenanceStamp,
   unbindRuleProvenanceStamp,

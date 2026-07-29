@@ -56,13 +56,16 @@ describe('showcase: business-unit hierarchy sharing rule (ADR-0057 D6 / #2077)',
       noteId = row?.id;
     }
 
-    // Define a sharing rule: share ALL private notes with the PARENT business
+    // Define a sharing rule: share the BU-shared note with the PARENT business
     // unit (and, via the tree, its descendants). Recipient = business_unit.
+    // The criteria is not optional — a rule without one would share every
+    // record of the object, which defineRule now rejects (#3896).
     const rules: any = stack.kernel.getService('sharingRules');
     await rules.defineRule({
       name: 'share_notes_with_region',
       label: 'Notes → Region (BU subtree)',
       object: 'showcase_private_note',
+      criteria: { title: 'BU-shared note' },
       recipientType: 'business_unit',
       recipientId: 'bu_h_parent',
       accessLevel: 'read',

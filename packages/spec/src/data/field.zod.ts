@@ -717,11 +717,25 @@ export const Field = {
   },
 
   
-  lookup: (reference: string, config: FieldInput = {}) => ({ 
-    type: 'lookup', 
-    reference, 
-    ...config 
-  } as const),
+  /**
+   * Lookup — a reference to another object's record.
+   *
+   * Generic over `config` (with a `const` type parameter) so literal values
+   * SURVIVE into the returned field definition. A plain `config: FieldInput`
+   * widens `multiple: true` to `boolean`, which erases exactly the fact
+   * `defineSeed` needs to know: a `multiple: true` lookup is seeded from an
+   * ARRAY of natural keys, a single-value one from a lone string
+   * (framework#3911). Widening is purely a type-level change — the returned
+   * object is identical at runtime.
+   */
+  lookup: <const C extends FieldInput>(
+    reference: string,
+    config: C = {} as C,
+  ): FieldInput & C & { readonly type: 'lookup'; readonly reference: string } => ({
+    type: 'lookup',
+    reference,
+    ...config,
+  } as FieldInput & C & { readonly type: 'lookup'; readonly reference: string }),
   
   masterDetail: (reference: string, config: FieldInput = {}) => ({
     type: 'master_detail',

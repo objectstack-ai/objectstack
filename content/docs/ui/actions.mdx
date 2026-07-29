@@ -125,9 +125,11 @@ export const onEnable = async (ctx: { ql: { registerAction: (...args: unknown[])
 themselves. A `script` action whose `target` names a handler that was never
 `registerAction`-ed compiles fine but throws `Action 'x' on object 'y' not
 found` at click time. (An action with *neither* `body` nor `target` is
-rejected at authoring time.) Also note the handler's `engine` facade is
-**trusted** — it bypasses row- and field-level security, so enforce any
-caller-specific rules yourself.
+rejected at authoring time.) Also note that both data surfaces a body reaches
+— `ctx.api.object(name)` and the handler's `ctx.engine` facade — are
+**trusted**: they run under the caller's identity elevated to system, so they
+bypass row- and field-level security (writes stay attributed to the caller and
+scoped to their organization). Enforce any caller-specific rules yourself.
 </Callout>
 
 <Callout type="warn">
@@ -227,11 +229,21 @@ curl -b cookies.txt -X POST \
   https://your-app.example.com/api/v1/actions/todo_task/complete_task \
   -H "Content-Type: application/json" \
   -d '{ "recordId": "rec_123", "params": {} }'
-# → { "success": true, "data": ... }   (errors: { "success": false, "error": ... })
+# → 200 { "success": true, "data": { "success": true, "data": ... } }
 ```
 
-Global (object-less) actions post to `/api/v1/actions/global/:action`. For
-credentials, see [API Authentication](/docs/api#authentication).
+Failures split by **whether a handler ran**:
+
+- **It ran and rejected** — HTTP **200**, `data: { "success": false, "error",
+  "code"?, "fields"? }`. An action that fails is a normal business outcome, not
+  a transport error, so it rides the payload. Always branch on `data.success`.
+- **It never dispatched** — a real status: **404** no such action, **403**
+  denied, **400** wrong action type or a param-contract violation, **503**
+  unavailable — with `{ "success": false, "error": { "message", "code" } }`.
+
+Global (object-less) actions post to `/api/v1/actions/global/:action`, or to
+`/api/v1/actions//:action` with the object segment left empty. For credentials,
+see [API Authentication](/docs/api#authentication).
 
 The endpoint dispatches on the **declared `type`**, exactly like the MCP
 `run_action` tool — so the same URL invokes a script handler or a flow:

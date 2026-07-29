@@ -90,6 +90,23 @@ export type DriftOp =
       unique: boolean;
     };
 
+/**
+ * Physical schema work the *additive* boot sync is holding back (#3917).
+ *
+ * Distinct from {@link DriftOp}: drift is divergence between metadata and an
+ * EXISTING column/index that only a deliberate reconcile may resolve, whereas
+ * this is the create-table / add-column work `initObjects` performs on its own
+ * — captured rather than executed while the driver runs with DDL deferred, so
+ * `os migrate plan` can show it and `os migrate apply` can gate it behind the
+ * confirmation prompt.
+ */
+export interface PendingSchemaWork {
+  table: string;
+  kind: 'create_table' | 'add_columns';
+  /** Declared columns for a create; the missing ones for an add. */
+  columns: string[];
+}
+
 /** Ops that act on an index rather than a column — reconciled without a table rebuild. */
 export const INDEX_DRIFT_OPS: ReadonlySet<DriftOp['type']> = new Set([
   'replace_unique_index',

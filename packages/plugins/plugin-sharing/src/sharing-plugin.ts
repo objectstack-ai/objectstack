@@ -10,7 +10,7 @@ import { SharingService, type SharingEngine } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
-import { bindRuleHooks, unbindAllRuleHooks, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
+import { bindRuleHooks, unbindAllRuleHooks, bindRuleCriteriaGuard, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
 import { bindRuleProvenanceStamp, unbindRuleProvenanceStamp } from './sharing-rule-provenance.js';
 import { bindPrimaryBuHooks, backfillPrimaryBu } from './primary-bu-projection.js';
 import { bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
@@ -449,6 +449,11 @@ export class SharingServicePlugin implements Plugin {
             unbindAllRuleHooks(engine);
             bindRuleHooks(engine, this.ruleService, rules, ctx.logger as any);
             this.bindRuleRebindTriggers(engine, ctx);
+
+            // [#3896] Authoring a rule in Setup is a plain INSERT on
+            // sys_sharing_rule — it bypasses defineRule's validation, so the
+            // match-all criteria gate has to sit on the table itself too.
+            bindRuleCriteriaGuard(engine, ctx.logger as any);
 
             // [#2909 T1] Stamp `customized` on admin edits of seeded rules so
             // the boot seeder stops overwriting them (seed-not-clobber).

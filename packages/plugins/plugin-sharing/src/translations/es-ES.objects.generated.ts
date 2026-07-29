@@ -126,7 +126,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       criteria_json: {
         label: "Criterios",
-        help: "Qué registros se comparten. Déjalo vacío para compartir todos los registros del objeto."
+        help: "Qué registros se comparten. Obligatorio: una regla debe acotar los registros que comparte, por lo que no existe la opción de «compartir todos los registros»."
       },
       recipient_type: {
         label: "Tipo de destinatario",

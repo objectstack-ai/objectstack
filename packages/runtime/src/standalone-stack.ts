@@ -83,6 +83,13 @@ export const StandaloneStackConfigSchema = z.object({
      * failure is NOT silently swapped for wasm/mingo (fail-closed).
      */
     dev: z.boolean().optional(),
+    /**
+     * Suppress the artifact's inline boot seed (#3917). Set by one-shot
+     * commands that boot the stack only to READ metadata — `os migrate plan` /
+     * `os migrate apply` — so the boot cannot write demo rows into the
+     * operator's live database before they have confirmed anything.
+     */
+    skipSeedData: z.boolean().optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -136,6 +143,70 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     );
 }
 
+/** URL→filename for the two sqlite kinds. Throws on a URL that isn't a path. */
+function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): string {
+    if (kind === 'sqlite-wasm') {
+        return dbUrl
+            .replace(/^wasm-sqlite:(\/\/)?/i, '')
+            .replace(/^file:(\/\/)?/i, '') || ':memory:';
+    }
+    const filename = dbUrl.replace(/^file:(\/\/)?/, '');
+    if (!filename || /^[a-z][a-z0-9+.-]*:\/\//i.test(filename)) {
+        throw new Error(
+            `[StandaloneStack] sqlite driver was selected but the URL does not look like a file path: "${dbUrl}". ` +
+            `Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.`
+        );
+    }
+    return filename;
+}
+
+/** Which database a standalone boot would talk to, and how. */
+export interface ResolvedStandaloneDatabase {
+    url: string;
+    driver: ResolvedDriverKind;
+    /**
+     * The sqlite file this boot would open, or `null` for every non-sqlite
+     * target and for `:memory:`. Callers that must inspect the file BEFORE a
+     * boot — `os migrate`'s occupancy probe (#3917) — need the path without
+     * the side effects of building the stack.
+     */
+    sqliteFile: string | null;
+}
+
+/**
+ * Resolve the database target WITHOUT building anything.
+ *
+ * Same precedence `createStandaloneStack` applies (explicit config →
+ * `OS_DATABASE_URL`/`DATABASE_URL` → `TURSO_DATABASE_URL` → `OS_HOME` →
+ * project root → user home), factored out so a caller can answer "which file
+ * am I about to open?" first. Pure: reads env, touches no filesystem.
+ */
+export function resolveStandaloneDatabase(config?: StandaloneStackConfig): ResolvedStandaloneDatabase {
+    const cfg = StandaloneStackConfigSchema.parse(config ?? {});
+    const url = resolveDatabaseUrl(cfg);
+    const explicitDriver = cfg.databaseDriver
+        ?? (process.env.OS_DATABASE_DRIVER?.trim() as ResolvedDriverKind | undefined);
+    const driver: ResolvedDriverKind = explicitDriver || detectDriverFromUrl(url);
+    const isSqlite = driver === 'sqlite' || driver === 'sqlite-wasm';
+    const filename = isSqlite ? sqliteFilenameFromUrl(url, driver) : null;
+    return {
+        url,
+        driver,
+        sqliteFile: filename && filename !== ':memory:' && !filename.startsWith(':') ? filename : null,
+    };
+}
+
+function resolveDatabaseUrl(cfg: z.output<typeof StandaloneStackConfigSchema>): string {
+    return cfg.databaseUrl
+        ?? readEnvWithDeprecation('OS_DATABASE_URL', 'DATABASE_URL', { silent: true })?.trim()
+        ?? process.env.TURSO_DATABASE_URL?.trim()
+        ?? (process.env.OS_HOME?.trim()
+            ? `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`
+            : (cfg.projectRoot
+                ? `file:${resolvePath(cfg.projectRoot, '.objectstack/data/standalone.db')}`
+                : `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`));
+}
+
 export async function createStandaloneStack(config?: StandaloneStackConfig): Promise<StandaloneStackResult> {
     const cfg = StandaloneStackConfigSchema.parse(config ?? {});
 
@@ -155,20 +226,10 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             ? artifactPathInput
             : resolvePath(cwd, artifactPathInput));
 
-    const dbUrl = cfg.databaseUrl
-        ?? readEnvWithDeprecation('OS_DATABASE_URL', 'DATABASE_URL', { silent: true })?.trim()
-        ?? process.env.TURSO_DATABASE_URL?.trim()
-        ?? (process.env.OS_HOME?.trim()
-            ? `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`
-            : (cfg.projectRoot
-                ? `file:${resolvePath(cfg.projectRoot, '.objectstack/data/standalone.db')}`
-                : `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`));
     // `databaseAuthToken` / `OS_DATABASE_AUTH_TOKEN` are preserved in the
     // config schema for cloud builds that compose their own turso driver;
     // the standalone (open-core) runtime no longer consumes them directly.
-    const explicitDriver = cfg.databaseDriver
-        ?? (process.env.OS_DATABASE_DRIVER?.trim() as ResolvedDriverKind | undefined);
-    const dbDriver: ResolvedDriverKind = explicitDriver ?? detectDriverFromUrl(dbUrl);
+    const { url: dbUrl, driver: dbDriver } = resolveStandaloneDatabase(cfg);
 
     // Translate the database URL into the `default` datasource DEFINITION
     // (ADR-0062 D1, #3826). The stack no longer builds a driver: the definition
@@ -200,9 +261,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         driverConfig = { url: dbUrl };
     } else if (dbDriver === 'sqlite-wasm') {
         driverId = 'sqlite-wasm';
-        const filename = dbUrl
-            .replace(/^wasm-sqlite:(\/\/)?/i, '')
-            .replace(/^file:(\/\/)?/i, '') || ':memory:';
+        const filename = sqliteFilenameFromUrl(dbUrl, 'sqlite-wasm');
         if (filename !== ':memory:') {
             mkdirSync(resolvePath(filename, '..'), { recursive: true });
         }
@@ -210,13 +269,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     } else {
         // sqlite (better-sqlite3)
         driverId = 'sqlite';
-        const filename = dbUrl.replace(/^file:(\/\/)?/, '');
-        if (!filename || /^[a-z][a-z0-9+.-]*:\/\//i.test(filename)) {
-            throw new Error(
-                `[StandaloneStack] sqlite driver was selected but the URL does not look like a file path: "${dbUrl}". ` +
-                `Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.`
-            );
-        }
+        const filename = sqliteFilenameFromUrl(dbUrl, 'sqlite');
         mkdirSync(resolvePath(filename, '..'), { recursive: true });
         driverConfig = { filename };
     }
@@ -254,7 +307,9 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         }),
         new ObjectQLPlugin({ environmentId }),
     ];
-    if (artifactBundle) plugins.push(new AppPlugin(artifactBundle));
+    if (artifactBundle) {
+        plugins.push(new AppPlugin(artifactBundle, undefined, { skipSeedData: cfg.skipSeedData ?? false }));
+    }
 
     // Surface artifact-declared metadata so a caller using this result
     // directly as a `defineStack()`-shaped config (no host
