@@ -3,7 +3,7 @@
 
 # Metadata protocol upgrade guide
 
-Current protocol: **16.0.0** · chain support floor: **protocol 10** · generated from the ADR-0087 registries (`@objectstack/spec` `conversions/` + `migrations/`).
+Current protocol: **17.0.0** · chain support floor: **protocol 10** · generated from the ADR-0087 registries (`@objectstack/spec` `conversions/` + `migrations/`).
 
 ## How to upgrade — from any past major
 
@@ -113,6 +113,24 @@ Protocol 16 flipped `DashboardWidgetSchema` to `.strict()` (framework#3251, ADR-
 - **`dashboard-widget-strict-unknown-keys`** — `dashboard widgets (undeclared top-level keys — legacy inline analytics, objectui-internal `component`/`data`, or typos)` → declared keys only (`dataset` + `dimensions` + `values` for analytics; `options` for renderer-specific extras)
   - Why not automatic: The `.strict()` flip turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: bind a `dataset` and select `dimensions`/`values`, move a renderer setting under `options`, or delete the dead key.
   - Done when: `objectstack validate` passes with no unknown-key parse errors on dashboard widgets.
+
+## Protocol 16 → 17
+
+Protocol 17 removes the last three deprecated authorable aliases: action `execute` (use `target`), field `conditionalRequired` (use `requiredWhen`), and agent `knowledge.topics` (use `knowledge.sources`). Each was already lowered into its canonical key at parse time and dropped from the parsed output, so no runtime behaviour changes — only the authorable surface shrinks to one spelling per slot. All three are pure key renames with unchanged values and replay losslessly; the schemas reject the removed spellings with a fix-it error naming the replacement.
+
+It also removes the sharing-rule access level `full` (#3865): declared as "Full Access (Transfer, Share, Delete)" but never enforced as anything but `edit` — both gates matched `edit`/`full` alike, so Setup promised admins a delete grant it never issued (ADR-0078). Unlike the OWD `sharingModel: 'full'` alias retired at step 13, this one HAS a lossless target precisely because it was inert — old and new shapes are behaviourally identical — so it converts mechanically and leaves no semantic residue. It is the one protocol-17 conversion that keeps a load-path acceptance window: it had no prior deprecation, and a removed enum value cannot carry the fix-it error the three key renames tombstone theirs with.
+
+Finally it removes agent `tools` (#3894): the legacy inline `{type,name,description}[]` fallback, which the runtime resolved against the FULL tool registry with no surface check — the one seam that broke ADR-0064's "an agent reaches exactly its surface-compatible skills' tools, nothing falls through to the global registry". Unlike the renames above this has NO lossless target: each entry has to become a reference inside a skill, which is a human decision about which skill. The conversion therefore drops the dead key (the runtime stopped reading it in cloud#910, so it already contributes nothing) and emits a notice per agent so the author knows where capability must be re-declared; the schema tombstones the key with a fix-it error naming `skills`.
+
+### Mechanical (applied for you)
+
+| Conversion | Surface | Change | Load window |
+|---|---|---|---|
+| `action-execute-to-target` | `action.execute` | action key 'execute' → 'target' (the deprecated handler alias, #3713) | retired — `migrate meta` only |
+| `field-conditionalRequired-to-requiredWhen` | `field.conditionalRequired` | field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, #3754) | retired — `migrate meta` only |
+| `agent-knowledge-topics-to-sources` | `agent.knowledge.topics` | agent knowledge key 'topics' → 'sources' (the deprecated RAG-source alias, #1891) | retired — `migrate meta` only |
+| `agent-tools-to-skills` | `agent.tools` | agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894) | retired — `migrate meta` only |
+| `sharing-rule-access-level-full-to-edit` | `sharingRule.accessLevel` | sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`) | live — protocol 17 loader accepts the old shape |
 
 ---
 
