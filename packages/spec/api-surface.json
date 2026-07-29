@@ -3026,6 +3026,8 @@
     "UpdateManyDataRequestSchema (const)",
     "UpdateManyDataResponse (type)",
     "UpdateManyDataResponseSchema (const)",
+    "UpdateManyRecord (type)",
+    "UpdateManyRecordSchema (const)",
     "UpdateManyRequest (type)",
     "UpdateManyRequestSchema (const)",
     "UpdateNotificationPreferencesRequest (type)",

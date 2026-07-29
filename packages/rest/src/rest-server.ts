@@ -1243,6 +1243,39 @@ export class RestServer {
     }
 
     /**
+     * [#3939] Enforce the deployment's batch-size cap on a bulk write route.
+     * Returns `true` when a response was sent (the caller must return).
+     *
+     * The cap was declared in three places in `batch.zod.ts` (`.max(200)` on
+     * `BatchUpdateRequestSchema` / `UpdateManyRequestSchema` /
+     * `DeleteManyRequestSchema`, plus "max 200" in the docs) and enforced in
+     * exactly one route — the cross-object `/batch`, which checked the
+     * CONFIGURED `maxBatchSize` rather than the hardcoded 200. Every per-object
+     * bulk route accepted an unbounded list.
+     *
+     * That went from nuisance to real with #3897: `deleteMany` now deletes per
+     * id by primary key (so `deleteBehavior` cascades run and each row gets its
+     * own result), which turns a 10k-id body into 10k sequential engine
+     * round-trips inside one request instead of one statement.
+     *
+     * The cap is deployment policy — `RestServerConfig.batch.maxBatchSize`
+     * (1..1000, default 200) — so it lives here and the schemas carry shape
+     * only. One place decides it, and it is the place that knows the
+     * deployment's configured value.
+     */
+    private enforceBatchSize(res: any, count: number, max: number, object?: string): boolean {
+        if (count <= max) return false;
+        res.status(400).json({
+            error: `Batch too large: ${count} records (max ${max})`,
+            code: 'BATCH_TOO_LARGE',
+            count,
+            max,
+            ...(object ? { object } : {}),
+        });
+        return true;
+    }
+
+    /**
      * [#3544] Enforce the USER-LEVEL export axis on a bulk-egress route, after
      * {@link enforceApiAccess} has cleared the object-level one. Returns `true`
      * when a response was sent (the caller must return).
@@ -6588,6 +6621,10 @@ export class RestServer {
         const isScoped = basePath.includes('/environments/:environmentId');
 
         const operations = batch.operations;
+        // [#3939] One cap, read once, applied by every bulk route below via
+        // {@link enforceBatchSize} — see that method for why it lives here and
+        // not in the Zod schemas.
+        const maxBatch = batch.maxBatchSize ?? 200;
 
         // POST /batch — cross-object transactional batch (issue #1604 / ADR-0034).
         // Runs heterogeneous create/update/delete across objects in ONE engine
@@ -6627,9 +6664,11 @@ export class RestServer {
                         res.status(400).json({ error: 'Cross-object batch is always atomic; use POST /data/:object/batch for non-atomic per-object batches', code: 'BATCH_NOT_ATOMIC' });
                         return;
                     }
-                    const max = batch.maxBatchSize ?? 200;
                     if (ops.length === 0) { res.json({ results: [] }); return; }
-                    if (ops.length > max) { res.status(400).json({ error: `Batch too large (max ${max})` }); return; }
+                    // [#3939] Same check, same envelope as every other bulk route
+                    // now — this one used to be the only one that capped at all,
+                    // and it answered without a `code` for clients to key on.
+                    if (this.enforceBatchSize(res, ops.length, maxBatch)) return;
 
                     // update/delete need a target id — the schema can't express this
                     // conditionally, so surface it as a 400 up front.
@@ -6772,6 +6811,11 @@ export class RestServer {
                         // [#3391] bulk ∧ child(body.operation) — the object must grant
                         // the `bulk` primitive AND the batched write kind.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: req.body?.operation })) return;
+                        // [#3939] `BatchUpdateRequestSchema` declared `max(200)`,
+                        // but this route hands the body straight to the protocol
+                        // without validating it — so nothing enforced the bound.
+                        if (Array.isArray(req.body?.records)
+                            && this.enforceBatchSize(res, req.body.records.length, maxBatch, req.params?.object)) return;
                         const result = await p.batchData!({
                             object: req.params.object,
                             request: req.body,
@@ -6804,6 +6848,9 @@ export class RestServer {
                         if (this.enforceAuth(req, res, context)) return;
                         // [#3391] bulk ∧ create — createMany requires the `bulk` primitive.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'create' })) return;
+                        // [#3939] Body IS the records array on this route.
+                        if (Array.isArray(req.body)
+                            && this.enforceBatchSize(res, req.body.length, maxBatch, req.params?.object)) return;
                         const result = await p.createManyData!({
                             object: req.params.object,
                             records: req.body || [],
@@ -6860,6 +6907,9 @@ export class RestServer {
                             });
                             return;
                         }
+                        // [#3939] Cap AFTER the shape check, so a caller gets the
+                        // more specific answer first.
+                        if (this.enforceBatchSize(res, parsedUpdate.data.records.length, maxBatch, req.params?.object)) return;
                         const result = await p.updateManyData!({
                             ...parsedUpdate.data,
                             ...(environmentId ? { environmentId } : {}),
@@ -6921,6 +6971,10 @@ export class RestServer {
                             });
                             return;
                         }
+                        // [#3939] The cap that matters most: since #3897 this
+                        // route deletes per id, so the list length IS the engine
+                        // round-trip count.
+                        if (this.enforceBatchSize(res, parsed.data.ids.length, maxBatch, req.params?.object)) return;
                         const result = await p.deleteManyData!({
                             ...parsed.data,
                             ...(environmentId ? { environmentId } : {}),

@@ -2020,6 +2020,8 @@
     "api/UpdateManyDataResponse:succeeded",
     "api/UpdateManyDataResponse:success",
     "api/UpdateManyDataResponse:total",
+    "api/UpdateManyRecord:data",
+    "api/UpdateManyRecord:id",
     "api/UpdateManyRequest:options",
     "api/UpdateManyRequest:records",
     "api/UpdateNotificationPreferencesRequest:preferences",

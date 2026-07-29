@@ -94,16 +94,21 @@ describe('BatchUpdateRequestSchema', () => {
     expect(request.options?.atomic).toBe(true);
   });
 
-  it('should require at least one record', () => {
+  // [#3939] The count bounds moved OUT of the schema. They were a second source
+  // of truth that never matched reality: the schema said 1..200 while the routes
+  // enforced nothing, and the one route that did cap read the deployment's
+  // configured `batch.maxBatchSize` (1..1000) instead. The cap is now enforced
+  // at the route from that config, and the schema carries shape only.
+  it('accepts an empty record list — an empty batch is a no-op, not a client error', () => {
     expect(() =>
       BatchUpdateRequestSchema.parse({
         operation: 'create',
         records: [],
       })
-    ).toThrow();
+    ).not.toThrow();
   });
 
-  it('should limit to 200 records', () => {
+  it('does not cap the record count — that is the route\'s job (batch.maxBatchSize)', () => {
     const records = Array(201)
       .fill(null)
       .map((_, i) => ({ id: String(i), data: {} }));
@@ -113,7 +118,7 @@ describe('BatchUpdateRequestSchema', () => {
         operation: 'update',
         records,
       })
-    ).toThrow();
+    ).not.toThrow();
   });
 
   it('should accept exactly 200 records', () => {
@@ -151,6 +156,49 @@ describe('UpdateManyRequestSchema', () => {
 
     expect(request.records).toHaveLength(1);
     expect(request.options).toBeUndefined();
+  });
+
+  // [#3939] This schema used to reuse `BatchRecordSchema`, whose `id`/`data` are
+  // optional because the generic /batch route serves create (no id) and delete
+  // (no data) through it. updateMany needs both on every row — `updateManyData`
+  // reads them unconditionally — so the declared contract accepted rows the
+  // implementation could not process.
+  it('requires id AND data on every row', () => {
+    expect(() => UpdateManyRequestSchema.parse({ records: [{}] })).toThrow();
+    expect(() => UpdateManyRequestSchema.parse({ records: [{ id: '1' }] })).toThrow();
+    expect(() => UpdateManyRequestSchema.parse({ records: [{ data: { name: 'x' } }] })).toThrow();
+  });
+});
+
+// [#3939] Prime Directive #7 — one Zod source per contract. The protocol-level
+// request schemas ARE the wire-body schemas plus the `object` the REST route
+// takes from the URL path (#3933). They used to be hand-maintained copies that
+// had already drifted: batch.zod's accepted `{}` rows, protocol.zod's required
+// id+data, and only the latter was ever enforced. Pin the relationship so a
+// future edit to one cannot silently fork them again.
+describe('protocol request schemas derive from the wire-body schemas (#3939)', () => {
+  it('updateMany: same record shape, plus object', async () => {
+    const { UpdateManyDataRequestSchema } = await import('./protocol.zod');
+    const records = [{ id: '1', data: { name: 'x' } }];
+
+    expect(() => UpdateManyDataRequestSchema.parse({ object: 'task', records })).not.toThrow();
+    // The object is required here and absent from the body schema.
+    expect(() => UpdateManyDataRequestSchema.parse({ records })).toThrow();
+    // Row shape is inherited, not re-declared.
+    expect(() => UpdateManyDataRequestSchema.parse({ object: 'task', records: [{ id: '1' }] })).toThrow();
+  });
+
+  it('deleteMany: same ids shape, plus object', async () => {
+    const { DeleteManyDataRequestSchema } = await import('./protocol.zod');
+
+    expect(() => DeleteManyDataRequestSchema.parse({ object: 'task', ids: ['1'] })).not.toThrow();
+    expect(() => DeleteManyDataRequestSchema.parse({ ids: ['1'] })).toThrow();
+    expect(() => DeleteManyDataRequestSchema.parse({ object: 'task', ids: [{ $ne: null }] })).toThrow();
+    // No count bound inherited either — the route owns that.
+    expect(() => DeleteManyDataRequestSchema.parse({
+      object: 'task',
+      ids: Array(201).fill(null).map((_, i) => String(i)),
+    })).not.toThrow();
   });
 });
 
@@ -285,15 +333,16 @@ describe('DeleteManyRequestSchema', () => {
     expect(request.options?.atomic).toBe(true);
   });
 
-  it('should require at least one ID', () => {
+  // [#3939] See BatchUpdateRequestSchema above — bounds live at the route now.
+  it('accepts an empty ID list — deleting nothing is a no-op, not an error', () => {
     expect(() =>
       DeleteManyRequestSchema.parse({
         ids: [],
       })
-    ).toThrow();
+    ).not.toThrow();
   });
 
-  it('should limit to 200 IDs', () => {
+  it('does not cap the ID count — that is the route\'s job (batch.maxBatchSize)', () => {
     const ids = Array(201)
       .fill(null)
       .map((_, i) => String(i));
@@ -302,7 +351,7 @@ describe('DeleteManyRequestSchema', () => {
       DeleteManyRequestSchema.parse({
         ids,
       })
-    ).toThrow();
+    ).not.toThrow();
   });
 });
 

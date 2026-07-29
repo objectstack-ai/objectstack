@@ -473,6 +473,7 @@
     "api/UpdateFlowResponse",
     "api/UpdateManyDataRequest",
     "api/UpdateManyDataResponse",
+    "api/UpdateManyRecord",
     "api/UpdateManyRequest",
     "api/UpdateNotificationPreferencesRequest",
     "api/UpdateNotificationPreferencesResponse",

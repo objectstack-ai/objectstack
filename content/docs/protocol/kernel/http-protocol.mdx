@@ -645,7 +645,10 @@ Content-Type: application/json
 ```
 
 **Behavior:**
-- Maximum batch size: 200 operations by default (configurable via `maxBatchSize`)
+- Maximum batch size: 200 operations by default (configurable via `maxBatchSize`).
+  Over the cap is `400 BATCH_TOO_LARGE`, carrying the `count` sent and the `max`
+  allowed. The same cap and the same code apply to every bulk write route
+  (`createMany` / `updateMany` / `deleteMany` / per-object `batch`)
 - The entire batch runs inside **one engine transaction** — if any operation
   fails, all are rolled back (commit-all-or-nothing). The batch is always
   atomic; an explicit `"atomic": false` is rejected with `400 BATCH_NOT_ATOMIC`

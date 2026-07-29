@@ -143,6 +143,25 @@ deleted one at a time by primary key, so each honours `deleteBehavior`
 (default) stops the run at the first failure; `atomic: false` with
 `continueOnError: true` processes the remaining ids and reports the failures.
 
+### Batch size
+
+Every bulk route above — `batch`, `createMany`, `updateMany`, `deleteMany` —
+caps how many records one request may carry. The limit is the deployment's
+`batch.maxBatchSize` (default **200**, configurable 1–1000); over it the request
+is rejected with `400 BATCH_TOO_LARGE` before anything is written:
+
+```json
+{
+  "error": "Batch too large: 500 records (max 200)",
+  "code": "BATCH_TOO_LARGE",
+  "count": 500,
+  "max": 200,
+  "object": "account"
+}
+```
+
+An empty batch is not an error — it is a no-op that returns `total: 0`.
+
 ---
 
 ### `POST /data/:object/:id/clone`
