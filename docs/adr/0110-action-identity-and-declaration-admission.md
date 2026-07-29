@@ -1,6 +1,6 @@
 # ADR-0110: An action's identity is its `name`; anything executable over a governed surface must have a declaration (the declaration-admission gate)
 
-**Status**: Proposed (2026-07-29)
+**Status**: Proposed (2026-07-29) — **targeted at protocol 17** (`@objectstack/spec@17.0.0-rc.0`, in RC now). The fail-closed inversion lands in that major rather than staging across two, joining its two siblings already in the v17 breaking set: *"A flow run with no trigger user may not touch data"* (#3760 — missing identity fails closed) and *"A datasource that cannot connect fails the boot"* (#3741/#3758/#3826 — an unreachable dependency refuses rather than degrades).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove gate; a security property that parses but does nothing is worse than absent), [ADR-0066](./0066-unified-authorization-model.md) (D4 — action `requiredPermissions`, dual-surface, server is source of truth), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert metadata — this ADR is its **converse**: no silently ungoverned executable), [ADR-0096](./0096-execution-surface-identity-admission.md) (missing **identity** must not fail open; this ADR extends the same posture to missing **declaration**), [ADR-0104](./0104-field-runtime-value-shape-contract.md) (D2 — declared action param contract), [ADR-0109](./0109-ai-tool-authoring-model.md) (every declarative action materialises `action_<name>`; the declaration IS the AI-facing capability)
 **Consumers**: `@objectstack/runtime` (`domains/actions.ts`, `action-execution.ts`), `@objectstack/objectql` (`registerAction` contract), `@objectstack/lint` (new reconciliation rule), `../objectui` (`useConsoleActionRuntime` invocation URL), `content/docs/ui/actions.mdx` (public REST contract)
@@ -51,13 +51,13 @@ on every surface — `target` is never an identity key; **D2** every dispatch
 surface resolves the declaration *first* and derives handler-key candidates
 *from* it (the MCP order becomes the shared order); **D3** declaration
 resolution is a trichotomy — found → gate-then-dispatch, metadata plane
-unreachable → 503, genuinely undeclared → refuse with a prescriptive error
-(escape hatch `OS_ALLOW_UNDECLARED_ACTIONS=1`, staged warn-first);
-**D4** "declared but hidden" is the blessed pattern for headless actions —
-"undeclared but executable" has no remaining legitimate use;
-**D5** a reconciliation lint + boot check: every `registerAction` key must
-reconcile to a declaration; **D6** security-gate strictness is opt-**out**,
-never opt-in.
+unreachable → 503, genuinely undeclared → **refuse, fail-closed in 17**,
+with `OS_ALLOW_UNDECLARED_ACTIONS=1` as a documented migration valve slated
+for removal in 18; **D4** "declared but hidden" is the blessed pattern for
+headless actions — "undeclared but executable" has no remaining legitimate
+use; **D5** a reconciliation lint + boot check: every `registerAction` key
+must reconcile to a declaration; **D6** security-gate strictness is
+opt-**out**, never opt-in.
 
 ---
 
@@ -182,16 +182,18 @@ identity means routing on URLs. The spec already rules this: `name` is the
 `SnakeCaseIdentifierSchema` machine name.)
 
 The console's `target || name` URL construction is a bug under this ruling
-and is fixed to `name` (objectui ships in lockstep with the framework — no
-compatibility window is needed). The documented curl contract
+and is fixed to `name`. The documented curl contract
 (`content/docs/ui/actions.mdx`) is already D1-conformant and becomes true
 once D2 lands.
 
-*Transitional note*: until the objectui fix ships, the server MAY accept a
-target-shaped segment **only** when it resolves unambiguously to exactly one
-declaration on the routed object, gating on that declaration — and MUST
-refuse on ambiguity. It never runs anything ungated because the segment
-looked like a target (that is #3935's bug, not a compatibility feature).
+**No transitional target-acceptance path.** An earlier draft proposed the
+server accept a target-shaped segment during a compatibility window, gated
+on unambiguous resolution. That window does not exist: objectui ships in
+lockstep with the framework, and both ship inside the 17 major. Admitting
+`target` as an identity key "temporarily" would mean building the exact
+second namespace D1 exists to prohibit, complete with a uniqueness rule, and
+then removing it one release later. A caller that posts a `target` gets the
+same treatment as any other unresolvable segment (D3).
 
 ### D2 — Resolve, then address: declaration first, handler-key candidates derived from it
 
@@ -214,23 +216,43 @@ documented curl 404s.
 |---|---|
 | **Declaration found** | Gate against it, then dispatch (D2). |
 | **Metadata plane unreachable** | **503.** An availability failure is not an authorization decision; the gate an author declared must not evaporate during an outage. (The ADR-0096 posture — "no context" is a defect, never an authorization — applied to "no declaration source".) |
-| **Genuinely undeclared** | **Refuse** (404) with a prescriptive error: `Action 'x' on 'y' has no declaration — add defineAction({ name: 'x', … }) or register it under a declared action's target`. Escape hatch: `OS_ALLOW_UNDECLARED_ACTIONS=1` executes it (dev/bring-up mode) and warns at boot, listing every registered-but-undeclared handler key. |
+| **Genuinely undeclared** | **Refuse** (404) with a prescriptive error: `Action 'x' on 'y' has no declaration — add defineAction({ name: 'x', … }) or register it under a declared action's target`. Migration valve: `OS_ALLOW_UNDECLARED_ACTIONS=1` executes it and warns per invocation. |
 
-**Staging** (the ADR-0096 D5 idiom — evidence-gated, not date-gated):
+**Fail-closed in 17 — no cross-major staging.** An earlier draft staged this
+over two majors (warn → CI-only → flip). Protocol 17 is in RC *now*, so the
+breaking window this ADR was waiting for is the one already open, and
+staging would keep a known-open authorization hole through an entire
+additional major. Two rulings the platform already holds make waiting
+untenable: ADR-0049 prohibits a security property that parses but does not
+enforce — and a warn-only gate is precisely that fourth state; and v17
+already lands two siblings of this exact inversion (a trigger-user-less flow
+may not touch data; an unreachable datasource fails the boot). A third
+fail-closed ruling belongs in the same release, not the next one.
 
-- **Phase 1 (now, with the #3935 fix)**: D1/D2 land; unreachable-metadata
-  becomes 503; the undeclared branch **warns loudly** on every invocation
-  (`[action-governance] executing UNDECLARED handler 'x' — this will be
-  refused in a future major`) but still executes. This phase is
-  non-breaking by construction: with D2 in place, every *declared* action
-  resolves, so the warning fires only for genuinely undeclared handlers.
-- **Phase 2**: the reconciliation lint (D5) ships; CI/dogfood run with
-  refusal ON; boot telemetry counts undeclared invocations.
-- **Phase 3**: refusal becomes the default at the next major, when
-  telemetry shows the warning silent across dogfood and example apps.
+Three things must ship **together, in 17**, or the refusal is undiagnosable:
 
-The deletion inversion closes at Phase 1: deleting a declaration moves the
-action from "gated" to "warn + (eventually) refuse" — removal now narrows.
+1. **D2 first, unconditionally.** Without the shared handler-key rotation,
+   every *declared* target-bound action misresolves and would be refused as
+   "undeclared" — the refusal must land on top of correct resolution, never
+   before it. This ordering is an invariant, not a preference.
+2. **The D5 reconciliation lint**, so an app finds its orphaned handlers at
+   build time *before* upgrading, not at runtime after.
+3. **The boot listing** — startup enumerates every registered-but-undeclared
+   handler key. A hard failure without an inventory is a support ticket; with
+   one it is a checklist.
+
+Plus a `content/docs/releases/v17.mdx` migration entry, alongside its two
+siblings, naming the valve and its removal target.
+
+**The valve is temporary by construction.** `OS_ALLOW_UNDECLARED_ACTIONS=1`
+exists so an upgrade is never blocked at 3am, not so the old behaviour
+survives. It warns on every invocation (not just at boot), is documented as
+a migration aid rather than a supported mode, and is **slated for removal in
+18** — recorded here so it does not silently become permanent, which is the
+usual fate of escape hatches with no stated end.
+
+The deletion inversion closes in 17: deleting a declaration moves the action
+from "gated" straight to "refused". Removal narrows, immediately.
 
 ### D4 — "Declared but hidden" is the blessed headless pattern
 
@@ -279,8 +301,10 @@ flags are not renamed by this ADR; new ones conform.
   platform must then keep unique, non-interpolated, and matchable forever —
   cementing the confusion #3935 exposed. Non-uniqueness alone is
   disqualifying (two actions sharing a handler is legal; which declaration
-  gates the call?). The transitional note in D1 is the narrow, refuse-on-
-  ambiguity exception, and it exists only until the lockstep client ships.
+  gates the call?). Also rejected in its narrow, transitional form (accept
+  only on unambiguous resolution, for one release): with objectui shipping
+  lockstep inside the same major, that window is empty, and building a
+  second namespace to delete it a release later is pure cost.
 - **Keep fail-open and document it.** Rejected by ADR-0049 verbatim: a
   security property that parses but does nothing manufactures false
   compliance. The declaration *says* `requiredPermissions`; the surface
@@ -290,10 +314,14 @@ flags are not renamed by this ADR; new ones conform.
   clients vary; and without D2 the documented-curl half stays broken (no
   key rotation), while any non-console caller that posts `target` keeps
   executing ungated.
-- **Big-bang: refuse undeclared handlers immediately.** Rejected for the
-  staged ratchet (D3): Phase 1 must land D2 first — otherwise every
-  *declared* target-bound action would be misclassified as undeclared and
-  refused, manufacturing the outage the staging exists to avoid.
+- **Stage the refusal across two majors (warn in 17, refuse in 18).** The
+  original draft's plan; rejected once the timing was checked. It keeps a
+  known authorization hole open for a full extra major in exchange for a
+  softer landing that the D5 lint and the boot inventory already provide —
+  and it parks the gate in ADR-0049's prohibited "parses but does not
+  enforce" state for that whole period. What the staging was really
+  protecting against is refusing *correctly declared* actions; the D2-first
+  invariant addresses that directly and is preserved verbatim in D3.
 - **Register every handler under both `name` and `target` at
   registration time (aliasing), instead of candidate rotation at dispatch.**
   Deferred, not rejected: it would simplify dispatch but touches the
@@ -311,27 +339,34 @@ the invocable surface (the 0078 bijection); AI authors get a prescriptive
 build-time error instead of an unobservable runtime hole; one addressing
 algorithm serves both dispatch surfaces.
 
-**Negative / cost.** A transitional target-acceptance path exists until the
-lockstep objectui ships (bounded, refuse-on-ambiguity); genuinely
-undeclared handlers — if any exist in the wild — get a warning phase and
-then break at a major (the lint and boot listing make them findable long
-before); the boot reconciliation adds a startup pass over the action
-registry (bounded by registry size, warn-only).
+**Negative / cost.** Genuinely undeclared handlers break at 17 rather than
+18 — mitigated by the build-time lint, the boot inventory, the migration
+valve, and a v17 migration entry, but it is a real break and is owned as
+one. A caller (script, integration, bookmark) that posts a `target` segment
+starts 404-ing at 17 with no transitional acceptance; the prescriptive error
+names the correct `name` to use. The boot reconciliation adds a startup pass
+over the action registry (bounded by registry size, warn-only).
 
 **Explicitly out of scope.** Renaming existing env flags (D6 governs new
 ones); the engine-side aliasing alternative (deferred); any change to how
 `body` actions register (already `name`-keyed, already conformant).
 
-## Sequencing
+## Sequencing — one release (17), ordered within it
 
-1. **#3935 fix** (unblocks everything, breaks nothing): D2 shared rotation
-   + REST adopts resolve-then-address; D1 objectui `name` URL; D3
-   503-on-unreachable + undeclared warning; docs curl gains a REST
-   contract test. Lands as one lockstep change.
-2. **D5 lint + boot reconciliation**; CI/dogfood flip refusal ON (Phase 2).
-3. **Default flip at the next major** (Phase 3), evidence-gated on the
-   Phase-2 telemetry; same PR flips this ADR to Accepted — implemented
-   (the PRIORITIZATION status-hygiene rule).
+1. **D2 + D1** — the #3935 fix: shared handler-key rotation in
+   `action-execution.ts`, REST adopts resolve-then-address, objectui posts
+   `name`, 503 on an unreachable metadata plane, and a REST contract test
+   pinning the documented curl. Lands as one lockstep change and is
+   non-breaking for every correctly-declared action.
+2. **D5** — reconciliation lint + boot inventory, so orphans are findable
+   before the refusal exists.
+3. **D3/D6** — refusal ON by default, `OS_ALLOW_UNDECLARED_ACTIONS` as the
+   documented valve, plus the `v17.mdx` migration entry. Same PR flips this
+   ADR to `Accepted — implemented` with evidence (the PRIORITIZATION
+   status-hygiene rule).
+
+Steps 1→3 may land in separate PRs but **must not ship in separate
+releases**: step 3 without step 1 refuses correctly-declared actions.
 
 ## References
 
@@ -345,3 +380,7 @@ ones); the engine-side aliasing alternative (deferred); any change to how
   (`target || name` URL construction)
 - `packages/spec/src/ui/action.zod.ts` (`name` vs `target` semantics),
   `content/docs/ui/actions.mdx` (public REST contract + the equal-gate claim)
+- `content/docs/releases/v17.mdx` — the target major, and the two sibling
+  fail-closed inversions this one joins: *"A flow run with no trigger user
+  may not touch data"* (#3760) and *"A datasource that cannot connect fails
+  the boot"* (#3741, #3758, #3826)
