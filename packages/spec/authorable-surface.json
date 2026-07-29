@@ -3692,6 +3692,7 @@
     "data/QueryFilter:where",
     "data/ReferenceResolution:field",
     "data/ReferenceResolution:fieldType",
+    "data/ReferenceResolution:multiple",
     "data/ReferenceResolution:targetField",
     "data/ReferenceResolution:targetObject",
     "data/ReferenceResolutionError:attemptedValue",

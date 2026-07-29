@@ -51,6 +51,14 @@ export const ReferenceResolutionSchema = lazySchema(() => z.object({
 
   /** The field type that triggered this resolution (lookup, master_detail, or user) */
   fieldType: z.enum(['lookup', 'master_detail', 'user']).describe('Relationship field type'),
+
+  /**
+   * Mirrors `FieldSchema.multiple`: the field stores an ARRAY of references, so
+   * its seed value is an array of natural keys and every element resolves
+   * independently to a target id. A single-value field (the default) carries
+   * exactly one natural key.
+   */
+  multiple: z.boolean().optional().describe('Field stores an array of references (multiple: true)'),
 }).describe('Describes how a field reference is resolved during seed loading'));
 
 export type ReferenceResolution = z.infer<typeof ReferenceResolutionSchema>;
