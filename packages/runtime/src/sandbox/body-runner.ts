@@ -158,45 +158,61 @@ function applyMutationsToInput(engineCtx: any, result: ScriptResult): void {
   }
 }
 
-function buildEngineRepoFacade(ql: any, objectName: string) {
-  // Minimal repository surface that proxies to the raw engine.
-  // Actions execute as the system user (no user context at HTTP boundary
-  // beyond `actionCtx.user`); ObjectQL's permission middleware will still
-  // gate writes via the engine's standard insert/update path.
+/**
+ * Last-resort repository surface proxying to the raw engine, used only when
+ * the host context carried no `api` and the engine exposes no `.object()`.
+ *
+ * `context` is the ExecutionContext every call is threaded with. It is NOT
+ * optional in spirit: proxying context-less is what #3914 was — the write
+ * reaches plugin-sharing's gate with no `userId` to own the record and no
+ * `isSystem` to bypass, so it is denied FORBIDDEN even for an admin. A caller
+ * that has no context to give gets the same identity-less behavior as before,
+ * which is why the action path now always supplies one.
+ */
+function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
+  const withCtx = (opts?: any) =>
+    context ? { ...(opts && typeof opts === 'object' ? opts : {}), context } : opts;
   return {
-    async find(opts?: any) { return ql.find(objectName, opts); },
+    async find(opts?: any) { return ql.find(objectName, withCtx(opts)); },
     async findOne(opts?: any) {
-      const rows = await ql.find(objectName, opts);
+      const rows = await ql.find(objectName, withCtx(opts));
       return Array.isArray(rows) ? rows[0] ?? null : null;
     },
     async count(opts?: any) {
-      if (typeof ql.count === 'function') return ql.count(objectName, opts);
-      const rows = await ql.find(objectName, opts);
+      if (typeof ql.count === 'function') return ql.count(objectName, withCtx(opts));
+      const rows = await ql.find(objectName, withCtx(opts));
       return Array.isArray(rows) ? rows.length : 0;
     },
-    async insert(data: any) { return ql.insert(objectName, data); },
-    async update(data: any, opts?: any) { return ql.update(objectName, data, opts); },
+    async insert(data: any) { return ql.insert(objectName, data, withCtx(undefined)); },
+    async update(data: any, opts?: any) { return ql.update(objectName, data, withCtx(opts)); },
     async upsert(data: any, opts?: any) {
-      if (typeof ql.upsert === 'function') return ql.upsert(objectName, data, opts);
-      return ql.insert(objectName, data);
+      if (typeof ql.upsert === 'function') return ql.upsert(objectName, data, withCtx(opts));
+      return ql.insert(objectName, data, withCtx(undefined));
     },
-    async delete(opts?: any) { return ql.delete(objectName, opts); },
+    async delete(opts?: any) { return ql.delete(objectName, withCtx(opts)); },
   };
 }
 
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
   const engineApi = engineCtx?.api;
   if (engineApi && typeof engineApi.object === 'function') return engineApi;
+  // [#3914] The host's own execution envelope, when it supplied one. Hooks get
+  // `api` from the engine and never reach here; actions now supply both, so
+  // this stays the fallback for hosts that predate either.
+  const execCtx = engineCtx?.executionContext;
   return {
     object: (objectName: string) => {
       if (!ql) throw new Error(`ObjectQL engine unavailable to ${errLabel}`);
       // Prefer the engine's own ScopedContext-based `.object()` when
       // present; otherwise synthesize a minimal repo facade against the
       // engine's CRUD primitives (so the body can call .insert/.find/etc).
+      if (typeof ql.createContext === 'function' && execCtx) {
+        try { return ql.createContext(execCtx).object(objectName); } catch { /* fall through */ }
+      }
       if (typeof ql.object === 'function') {
         try { return ql.object(objectName); } catch { /* fall through */ }
       }
-      return buildEngineRepoFacade(ql, objectName);
+      return buildEngineRepoFacade(ql, objectName, execCtx);
     },
   };
 }

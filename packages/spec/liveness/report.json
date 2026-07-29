@@ -38,6 +38,12 @@
       "status": "live",
       "note": "objectui: render-time scope filter ANDed at query time (`?? filter`, mergeFilters) — DatasetReportRenderer."
     },
+    "order": {
+      "status": "planned",
+      "authorWarn": true,
+      "authorHint": "A selected date dimension is ALREADY chronological (ascending) without `order` — that default is live server-side. Only the explicit declaration is pending its renderer wiring.",
+      "note": "[planned] framework#3916. The FRAMEWORK half is complete and live: the schema accepts `order`, `reportSelectionOrder` (ui/report.zod.ts) lowers it to `DatasetSelection.order`, and the executor applies that ordering over the assembled grid (services/service-analytics/src/dataset-executor.ts, resolveOrdering/applyOrdering). What is NOT yet wired is the objectui side — `DatasetReportRenderer` builds the selection it posts and does not carry `report.order` into it, so an authored `order` does not reach the server yet. Marked `planned` + authorWarn until objectui lowers it, per enforce-or-mark. NOTE the separate, already-live default this issue also shipped: a selected TIME dimension defaults to ascending server-side, so month/quarter matrix columns are chronological with no `order` declared at all."
+    },
     "drilldown": {
       "status": "live",
       "note": "objectui: DatasetReportRenderer.tsx:697 — click-through to underlying records (default on; set false to disable)."

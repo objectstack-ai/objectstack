@@ -174,7 +174,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     const data = await (metaSvc as any).saveItem(type, name, body);
                     return { handled: true, response: deps.success(data) };
                 } catch (e: any) {
-                    return { handled: true, response: deps.error(e.message || 'Save not supported', 501) };
+                    // 501 stays the FALLBACK (this branch is reached only when
+                    // the protocol has no `saveMetaItem`, so "unsupported" is
+                    // the honest default) — but a save that fails validation is
+                    // a 400 the caller can fix, not a capability gap.
+                    return { handled: true, response: deps.errorFromThrown(e, 501) };
                 }
             }
             return { handled: true, response: deps.error('Save not supported', 501) };
@@ -261,8 +265,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             return { handled: true, response: deps.error('Not found', 404) };
         } catch (e: any) {
             // Fallback: treat first part as object name if only 1 part (handled below)
-            // But here we are deep in 2 parts. Must be an error.
-            return { handled: true, response: deps.error(e.message, 404) };
+            // But here we are deep in 2 parts. Must be an error — 404 remains the
+            // default, but an error carrying its own status keeps it.
+            return { handled: true, response: deps.errorFromThrown(e, 404) };
         }
     }
     
@@ -283,7 +288,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 });
                 return { handled: true, response: deps.success(data) };
             } catch (e: any) {
-                return { handled: true, response: deps.error(e.message, 500) };
+                return { handled: true, response: deps.errorFromThrown(e, 500) };
             }
         }
         return { handled: true, response: deps.error('Draft listing not supported', 501) };

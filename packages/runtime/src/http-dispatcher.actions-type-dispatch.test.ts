@@ -109,6 +109,95 @@ describe('REST /actions — flow dispatch (#3915)', () => {
         expect(res.response.body.data).toEqual({ success: true, data: { success: true, output: { converted: true } } });
     });
 
+    // ── params seeding ── the half a mocked automation service could not
+    // catch. Found by invoking the CRM's real `crm_convert_lead` against a
+    // running server: the bag carried the record's `id` but never `recordId`,
+    // so the flow's `get_lead` node died on `{recordId}` resolving to nothing
+    // while `/automation/crm_convert_lead_wizard/trigger` ran the same flow
+    // fine. Invoking the ACTION and triggering its FLOW must land the same run.
+    it('seeds the row id under `recordId` and the `<objectName>Id` alias, like the trigger route', async () => {
+        const execute = vi.fn(async () => ({ success: true }));
+        const { dispatcher } = makeDispatcher({
+            objectDef: { name: 'crm_lead', actions: [flowAction] },
+            automation: { execute },
+            record: { id: 'lead_1', company: 'Radium Labs' },
+        });
+
+        await dispatcher.handleActions('/crm_lead/convert_lead/lead_1', 'POST', {}, ctxFor());
+
+        expect(execute.mock.calls[0]?.[1]).toMatchObject({
+            params: { id: 'lead_1', recordId: 'lead_1', crmLeadId: 'lead_1', company: 'Radium Labs' },
+        });
+    });
+
+    it('honours a declared `recordIdParam` naming a key of its own', async () => {
+        const execute = vi.fn(async () => ({ success: true }));
+        const { dispatcher } = makeDispatcher({
+            objectDef: {
+                name: 'crm_lead',
+                actions: [{ ...flowAction, recordIdParam: 'leadToConvert' }],
+            },
+            automation: { execute },
+            record: { id: 'lead_1' },
+        });
+
+        await dispatcher.handleActions('/crm_lead/convert_lead/lead_1', 'POST', {}, ctxFor());
+
+        expect((execute.mock.calls[0]?.[1] as any).params).toMatchObject({
+            leadToConvert: 'lead_1',
+            recordId: 'lead_1',
+        });
+    });
+
+    it('seeds from `recordIdField` when the declaration wants a non-id value', async () => {
+        const execute = vi.fn(async () => ({ success: true }));
+        const { dispatcher } = makeDispatcher({
+            objectDef: {
+                name: 'crm_lead',
+                actions: [{ ...flowAction, recordIdParam: 'token', recordIdField: 'session_token' }],
+            },
+            automation: { execute },
+            record: { id: 'lead_1', session_token: 'tok_abc' },
+        });
+
+        await dispatcher.handleActions('/crm_lead/convert_lead/lead_1', 'POST', {}, ctxFor());
+
+        expect((execute.mock.calls[0]?.[1] as any).params.token).toBe('tok_abc');
+    });
+
+    it('lets an explicit param win over every seeded key', async () => {
+        const execute = vi.fn(async () => ({ success: true }));
+        const { dispatcher } = makeDispatcher({
+            objectDef: { name: 'crm_lead', actions: [flowAction] },
+            automation: { execute },
+            record: { id: 'lead_1' },
+        });
+
+        await dispatcher.handleActions(
+            '/crm_lead/convert_lead/lead_1',
+            'POST',
+            { params: { recordId: 'explicit_override' } },
+            ctxFor(),
+        );
+
+        expect((execute.mock.calls[0]?.[1] as any).params.recordId).toBe('explicit_override');
+    });
+
+    it('seeds `recordId` from the URL even when the record never loaded', async () => {
+        // New-record / unreadable-record invocations pass an empty record; the
+        // flow still needs the id the caller named.
+        const execute = vi.fn(async () => ({ success: true }));
+        const { dispatcher } = makeDispatcher({
+            objectDef: { name: 'crm_lead', actions: [flowAction] },
+            automation: { execute },
+            // no `record` → the best-effort load returns nothing
+        });
+
+        await dispatcher.handleActions('/crm_lead/convert_lead/lead_404', 'POST', {}, ctxFor());
+
+        expect((execute.mock.calls[0]?.[1] as any).params.recordId).toBe('lead_404');
+    });
+
     it('forwards the caller identity so a `runAs: user` flow enforces RLS as the invoker', async () => {
         const execute = vi.fn(async () => ({ success: true }));
         const { dispatcher } = makeDispatcher({
@@ -149,7 +238,7 @@ describe('REST /actions — flow dispatch (#3915)', () => {
         expect(passed).not.toHaveProperty('object');
     });
 
-    it('surfaces a flow failure as a 400, not as a 200 wrapping success:false (#3913)', async () => {
+    it('surfaces a flow failure through the action error envelope', async () => {
         const execute = vi.fn(async () => ({ success: false, error: 'lead already converted' }));
         const { dispatcher } = makeDispatcher({
             objectDef: { name: 'crm_lead', actions: [flowAction] },
@@ -158,14 +247,8 @@ describe('REST /actions — flow dispatch (#3915)', () => {
 
         const res = await dispatcher.handleActions('/crm_lead/convert_lead', 'POST', {}, ctxFor());
 
-        // The flow ran and rejected — a business outcome, so a 400 carrying the
-        // flow's own wording. It used to be HTTP 200 `{success: true, data:
-        // {success: false, error}}`, which any caller that skipped the inner
-        // envelope read as a success.
-        expect(res.response.status).toBe(400);
-        expect(res.response.body.success).toBe(false);
-        expect(res.response.body.error.message).toMatch(/crm_convert_lead_wizard.*lead already converted/i);
-        expect(res.response.body.error.details?.code).toBe('FLOW_FAILED');
+        expect(res.response.body.data.success).toBe(false);
+        expect(res.response.body.data.error).toMatch(/crm_convert_lead_wizard.*lead already converted/i);
     });
 
     it('reports a missing automation service as 503, not as a business failure', async () => {

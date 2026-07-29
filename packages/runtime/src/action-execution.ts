@@ -231,11 +231,12 @@ export function actionPermissionError(deps: ActionExecutionDeps, actionDef: any,
  * into the AI surface with `ai.exposed: true`, or `null` when exposed.
  *
  * This gate is the REAL agent-facing boundary for actions: script/body
- * handlers execute as TRUSTED application code (the engine facade carries no
- * ExecutionContext — see {@link buildActionEngineFacade}), so once invoked, a
- * body's reads/writes are NOT bounded by the caller's RLS/FLS or an agent's
- * data ceiling (ADR-0090 D10). The author's explicit opt-in — not a data-layer
- * backstop — therefore decides what AI may trigger. Fail-closed by default.
+ * handlers execute as TRUSTED application code (the engine facade and
+ * `ctx.api` run `isSystem` — see {@link buildActionExecutionContext}), so once
+ * invoked, a body's reads/writes are NOT bounded by the caller's RLS/FLS or an
+ * agent's data ceiling (ADR-0090 D10). The author's explicit opt-in — not a
+ * data-layer backstop — therefore decides what AI may trigger. Fail-closed by
+ * default.
  */
 export function actionAiExposureError(deps: ActionExecutionDeps, actionDef: any, objectName?: string): string | null {
     if (actionDef?.ai?.exposed === true) return null;
@@ -320,6 +321,66 @@ export function flowActionUnavailableError(action: any): string {
 }
 
 /**
+ * The params bag a flow action hands the automation engine.
+ *
+ * Three seeds, weakest first — each only fills a key the stronger one left
+ * unset:
+ *  1. the subject record's fields, which populate a flow's named `isInput`
+ *     variables the way the record-change trigger does;
+ *  2. the row id under the keys a flow author actually writes —
+ *     `recordId` and the `<objectName>Id` camelCase alias — the SAME two
+ *     `POST /automation/:name/trigger` seeds (`domains/automation.ts`), plus
+ *     the action's own declared `recordIdParam` (seeded from `recordIdField`,
+ *     default `id`) when it names a third key;
+ *  3. the caller's explicit action params, which win outright.
+ *
+ * Seed 2 is the one #3915's first pass missed, and only a real run caught it:
+ * the params bag carried the record's `id` but never `recordId`, so the CRM's
+ * own `crm_convert_lead` action — which declares `recordIdParam: 'recordId'`
+ * and whose flow reads `{recordId}` — reached the engine and died at its first
+ * node ("1 filter condition(s) resolved to nothing"), while the identical run
+ * through `/automation/crm_convert_lead_wizard/trigger` succeeded. A declared
+ * `recordIdParam` that nothing honours is the `declared ≠ enforced` shape in
+ * miniature.
+ */
+export function seedFlowActionParams(deps: ActionExecutionDeps,
+    action: any,
+    input: {
+        objectName: string;
+        record: Record<string, unknown>;
+        params: Record<string, unknown>;
+        recordId?: string;
+    },
+): Record<string, unknown> {
+    const { objectName, record, params, recordId } = input;
+    const seeded: Record<string, unknown> = { ...record };
+
+    // `recordIdField` names the row field whose value seeds the key (default
+    // `id`) — a declaration may want a non-id value (spec: `token` for
+    // revoke-session). Fall back to the explicit recordId when the record
+    // never loaded (a record-less / new-record invocation).
+    const idField: string = typeof action?.recordIdField === 'string' && action.recordIdField
+        ? action.recordIdField
+        : 'id';
+    const rowId: unknown = record?.[idField] ?? (idField === 'id' ? recordId : undefined);
+
+    if (rowId != null) {
+        const keys = new Set<string>(['recordId']);
+        if (objectName && objectName !== 'global') {
+            keys.add(`${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`);
+        }
+        if (typeof action?.recordIdParam === 'string' && action.recordIdParam) {
+            keys.add(action.recordIdParam);
+        }
+        for (const key of keys) {
+            if (seeded[key] === undefined) seeded[key] = rowId;
+        }
+    }
+
+    return { ...seeded, ...params };
+}
+
+/**
  * Dispatch a `type: 'flow'` action through the automation service.
  *
  * The ONE implementation both headless surfaces share — the MCP `run_action`
@@ -333,6 +394,12 @@ export function flowActionUnavailableError(action: any): string {
  * what lets a `runAs: 'user'` flow enforce RLS as the invoker instead of
  * falling into the user-less UNSCOPED path (#2849, ADR-0049 / #1888; mirrors
  * the record-change trigger's context shape).
+ *
+ * The params bag is seeded exactly like `POST /automation/:name/trigger`
+ * (`domains/automation.ts`) — see {@link seedFlowActionParams}. Invoking a
+ * flow ACTION and triggering its flow directly must land the same run, or
+ * "the actions endpoint dispatches flows for you" is a claim the runtime
+ * doesn't keep.
  */
 export async function dispatchFlowAction(deps: ActionExecutionDeps,
     action: any,
@@ -340,11 +407,12 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         objectName: string;
         record: Record<string, unknown>;
         params: Record<string, unknown>;
+        recordId?: string;
         ec: any;
         envId?: string;
     },
 ): Promise<any> {
-    const { objectName, record, params, ec, envId } = wiring;
+    const { objectName, record, params, recordId, ec, envId } = wiring;
     const automation = await resolveAutomationService(deps, envId);
     if (!automation) {
         throw new Error(flowActionUnavailableError(action));
@@ -358,20 +426,14 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
         ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
         ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
-        // Record fields seed flows' named `isInput` variables (like the
-        // record-change trigger); explicit action params win on clash.
-        params: { ...record, ...params },
+        params: seedFlowActionParams(deps, action, { objectName, record, params, recordId }),
     });
     if (result && typeof result === 'object' && 'success' in result && result.success === false) {
-        // The flow RAN and rejected — a business outcome, not a server fault.
-        // Tagged 400 so the REST route's error exit serves it as one (#3913):
-        // `errorFromThrown` reads `.status`, and staying under 500 also keeps
-        // the message out of the internal-error-leak sanitiser, which a flow's
-        // own wording has no reason to trip.
-        const err: any = new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
-        err.status = 400;
-        err.code = 'FLOW_FAILED';
-        throw err;
+        // The flow RAN and rejected — a business outcome, so the REST route
+        // reports it in the payload (`{success: false, error}`, HTTP 200), the
+        // same as a script body that throws. Only a route that never dispatched
+        // gets a status (#3913).
+        throw new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
     }
     return result ?? null;
 }
@@ -529,27 +591,91 @@ export function buildActionSession(deps: ActionExecutionDeps, ec: any): any | un
     };
 }
 
-export function buildActionEngineFacade(deps: ActionExecutionDeps, ql: any): any {
+/**
+ * The ExecutionContext an action BODY's own reads/writes execute under —
+ * the caller's envelope, elevated with `isSystem: true` (#3914).
+ *
+ * This is what makes the `[action-audit]` line TRUE. Before #3914 the body's
+ * engine facade called `ql.update(...)` with NO context at all, which is not
+ * "trusted" — it is IDENTITY-LESS, and identity-less is strictly WORSE than
+ * either coherent posture: plugin-sharing's write gate short-circuits on
+ * `!context.userId` (there is no user to own anything) and its bypass needs
+ * `context.isSystem`, so every owner-scoped write from an action body died
+ * `FORBIDDEN` — as the built-in admin — while the audit line announced
+ * RLS-bypassing trusted execution. Objects with a `public` sharing model or
+ * no owner field passed the gate early, which is why only *some* actions
+ * broke and the defect read as object-dependent flakiness.
+ *
+ * Elevating (rather than binding to the caller's RLS) is the posture #2849
+ * already documents and gates for: an action body is trusted code, admitted
+ * by the invoke-time capability + `ai.exposed` checks, and hook bodies
+ * already get exactly this (the engine's `buildHookApi` falls back to
+ * `{ isSystem: true }`). Spreading the caller's envelope FIRST keeps the
+ * write attributable and correctly scoped — `userId` stamps `created_by` /
+ * `updated_by`, `tenantId` stamps the org column and drives driver-level
+ * tenant isolation, `transaction` joins an open transaction — instead of the
+ * unattributable, org-less rows a bare `{ isSystem: true }` would write.
+ */
+export function buildActionExecutionContext(ec: any): Record<string, unknown> {
+    const base = ec && typeof ec === 'object' ? { ...(ec as Record<string, unknown>) } : {};
+    return { ...base, isSystem: true };
+}
+
+/**
+ * Build the action-body `ctx.api` — a real `ScopedContext` bound to
+ * {@link buildActionExecutionContext}, mirroring what hook bodies get from
+ * `HookContext.api` (#3914).
+ *
+ * Without this the sandbox's `buildSandboxApi` fell through to a repo facade
+ * synthesized against the raw engine's CRUD primitives: the raw `ObjectQL`
+ * engine has no `.object()` (that lives on `ScopedContext`, reachable only
+ * via `engine.createContext()`, which the action path never called), so the
+ * facade proxied every call context-less. Returns `undefined` when the engine
+ * predates `createContext`, leaving the sandbox's own fallback in charge.
+ */
+export function buildActionApi(deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
+    if (!ql || typeof ql.createContext !== 'function') return undefined;
+    try {
+        return ql.createContext(buildActionExecutionContext(ec));
+    } catch {
+        // A malformed caller envelope must not sink the action — fall back to
+        // the bare elevated context (the same shape hooks default to).
+        try {
+            return ql.createContext({ isSystem: true });
+        } catch {
+            return undefined;
+        }
+    }
+}
+
+/**
+ * Build the action-body `ctx.engine` — the slim CRUD surface handler suites
+ * use. Every call carries {@link buildActionExecutionContext} so `ctx.engine`
+ * and `ctx.api` write under the SAME identity (#3914); passing `ec` is what
+ * separates a trusted write from a context-less one.
+ */
+export function buildActionEngineFacade(deps: ActionExecutionDeps, ql: any, ec?: any): any {
+    const context = buildActionExecutionContext(ec);
     return {
         async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-            const res = await ql.insert(object, data);
+            const res = await ql.insert(object, data, { context });
             const id = (res && (res as any).id) ?? (data as any).id;
             return { id };
         },
         async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-            await ql.update(object, data, { where: { id } });
+            await ql.update(object, data, { where: { id }, context });
         },
         // Tolerant of both the single-id and array conventions handler suites
         // use (CRM handlers pass one id; todo handlers pass an id array).
         async delete(object: string, idOrIds: string | string[]): Promise<void> {
             const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
             for (const id of ids) {
-                if (id != null) await ql.delete(object, { where: { id } });
+                if (id != null) await ql.delete(object, { where: { id }, context });
             }
         },
         async find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-            const opts = query && Object.keys(query).length ? { where: query } : undefined;
-            const rows = await ql.find(object, opts as any);
+            const where = query && Object.keys(query).length ? { where: query } : {};
+            const rows = await ql.find(object, { ...where, context } as any);
             return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
         },
     };
@@ -564,12 +690,14 @@ export function buildActionEngineFacade(deps: ActionExecutionDeps, ql: any): any
  * Throws on denial / not-found / handler failure so the tool surfaces a
  * clean tool-error. No service-ai dependency.
  *
- * SECURITY MODEL (#2849): all gating happens at INVOKE time. A script/body
- * handler then runs as trusted code — its engine facade performs
- * context-less reads/writes that bypass RLS/FLS (SECURITY-DEFINER-like), so
- * the caller's permissions and an agent's ADR-0090 D10 data ceiling do NOT
- * bound what the body does internally. Flow actions differ: the flow engine
- * receives the caller's identity below and honours `runAs` (ADR-0049).
+ * SECURITY MODEL (#2849, #3914): all gating happens at INVOKE time. A
+ * script/body handler then runs as trusted code — its `ctx.engine` and
+ * `ctx.api` perform `isSystem` reads/writes that bypass RLS/FLS
+ * (SECURITY-DEFINER-like), so the caller's permissions and an agent's
+ * ADR-0090 D10 data ceiling do NOT bound what the body does internally. The
+ * caller's identity still RIDES the elevated context so those writes stay
+ * attributable and org-scoped. Flow actions differ: the flow engine receives
+ * the caller's identity below and honours `runAs` (ADR-0049).
  */
 export async function invokeBusinessAction(deps: ActionExecutionDeps, 
     name: string,
@@ -653,7 +781,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 
     // ── flow dispatch ── (shared with the REST /actions route, #3915)
     if (action.type === 'flow') {
-        const result = await dispatchFlowAction(deps, action, { objectName, record, params, ec, envId });
+        const result = await dispatchFlowAction(deps, action, { objectName, record, params, recordId, ec, envId });
         return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
     }
 
@@ -662,18 +790,27 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     if (!ql || typeof ql.executeAction !== 'function') {
         throw new Error('Data engine not available for action dispatch');
     }
-    // [#2849] Trusted-mode elevation must be AUDIBLE: the body's engine
-    // facade bypasses RLS/FLS, so record who triggered which action.
+    // [#2849] Trusted-mode elevation must be AUDIBLE: the body's `ctx.engine`
+    // and `ctx.api` bypass RLS/FLS, so record who triggered which action.
+    // [#3914] Wording tracks what the body ACTUALLY gets — a system-elevated
+    // context carrying the caller's identity, not a context-less engine.
     console.info(
         `[action-audit] MCP run_action '${action.name}' on '${objectName}' — body executes TRUSTED ` +
-        `(context-less engine, RLS/FLS-bypassing) for user '${ec?.userId ?? 'anonymous'}'` +
+        `(system-elevated context, RLS/FLS-bypassing) for user '${ec?.userId ?? 'anonymous'}'` +
         (ec?.principalKind === 'agent' ? ` (AGENT on behalf of '${ec?.onBehalfOf?.userId ?? 'unknown'}')` : ''),
     );
     const actionContext: any = {
         record,
         user,
         session: buildActionSession(deps, ec),
-        engine: buildActionEngineFacade(deps, ql),
+        engine: buildActionEngineFacade(deps, ql, ec),
+        // [#3914] `ctx.api` — the ScopedContext a body's `ctx.api.object(...)`
+        // resolves to. Absent here, the sandbox synthesized a context-less
+        // facade and every owner-scoped write died FORBIDDEN. `executionContext`
+        // is the same envelope, carried so the sandbox's own last-resort facade
+        // is elevated identically instead of falling back to no identity.
+        api: buildActionApi(deps, ql, ec),
+        executionContext: buildActionExecutionContext(ec),
         params: { ...params, recordId, objectName },
     };
     // Handler key: body-based actions register under `name` (AppPlugin);

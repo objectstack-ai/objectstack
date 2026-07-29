@@ -126,6 +126,43 @@ export const SalesByStageReport = {
 `rows` are the pivot's down-axis dimensions; `values` are measure names. A matrix
 report adds across-axis dimensions; `runtimeFilter` is the render-time scope.
 
+## Ordering the result
+
+A selected **date dimension is chronological by default** — ascending, on the
+down axis and the across axis alike — so a month-bucketed matrix reads
+left-to-right in time without declaring anything. Every other dimension keeps
+the order the grouping produced until you ask for one.
+
+To ask, declare `order`: a list of sort keys, most significant first. Each key
+names a dimension the report groups by (`rows` / `columns`) or a measure it
+displays (`values`); anything else is an authoring error rather than an ordering
+that silently does nothing.
+
+{/* os:check */}
+```ts
+export const HoursByOwnerReport = {
+  name: 'hours_by_owner',
+  label: 'Hours by Owner',
+  type: 'matrix',
+  dataset: 'tasks',
+  rows: ['owner'],            // down axis
+  columns: ['closed_month'],  // across axis — a month-bucketed date dimension
+  values: ['est_hours'],
+  order: [
+    { by: 'closed_month', direction: 'desc' }, // newest month first (overrides the default)
+    { by: 'est_hours', direction: 'desc' },    // then the biggest owner first
+  ],
+};
+```
+
+Ordering is applied **server-side over the whole grid** — after measure-scoped
+filters merge and derived measures evaluate — so a derived measure is a valid
+sort key even though no single SQL statement computes it. Null / empty buckets
+sort last in both directions.
+
+A `joined` report orders per block: put `order` on each `blocks[]` entry, not on
+the container.
+
 Placeholders inside a `filter` / `runtimeFilter` — `{date-macro}`s and the
 session tokens `{current_user_id}` / `{current_org_id}` — are resolved on **both**
 sides: by the renderer before it queries, and by the analytics dataset executor

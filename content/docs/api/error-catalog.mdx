@@ -389,30 +389,49 @@ interface FieldError {
 ## Client-Side Error Handling
 
 <Callout type="warn">
-The `@objectstack/client` SDK's built-in fetch error handling attaches only
-`code`, `category`, `httpStatus`, `retryable`, and `details` to the thrown
-error — not `fieldErrors`, `retryAfter`, or `requestId` directly. If your
-server populates those on the response body, read them from
-`apiError.details` (e.g. `apiError.details?.fieldErrors`) until the client
-surfaces them at the top level.
+The `@objectstack/client` SDK's built-in fetch error handling attaches
+`code`, `category`, `httpStatus`, `retryable`, `details`, and — for validation
+failures — `fields`. It does **not** attach `retryAfter` or `requestId`
+directly; if your server populates those on the response body, read them from
+`apiError.details` until the client surfaces them at the top level.
+
+Two naming details matter here:
+
+- The per-field list is `apiError.fields`, matching the wire (`fields[]`), not
+  the spec contract's `fieldErrors`. Each entry is `{ field, code, message }`.
+  It is left **unset** when the server reported no per-field detail, so
+  `if (apiError.fields)` tests "this failure is field-anchored".
+- `apiError.code` is always the semantic code as a **string**. The numeric HTTP
+  status is on `apiError.httpStatus` and nowhere else. This holds for both wire
+  formats: the flat REST envelope carries the code at the top level, the runtime
+  dispatcher's wrapped envelope carries it in `error.details.code` (its
+  `error.code` is the HTTP status), and the client normalizes both before
+  throwing.
 </Callout>
 
 ### TypeScript Example
 
 ```typescript
-import type { EnhancedApiError } from '@objectstack/spec/api';
+import type { EnhancedApiError, FieldError } from '@objectstack/spec/api';
+
+// The spec type names the per-field list `fieldErrors`; what the client
+// actually attaches at runtime is `fields` (the wire name). Widen the cast
+// until the two names converge.
+type ThrownApiError = EnhancedApiError & { fields?: FieldError[] };
 
 async function handleApiCall() {
   try {
     const result = await client.data.create('task', { title: 'New Task' });
     return result;
   } catch (error) {
-    const apiError = error as EnhancedApiError;
+    const apiError = error as ThrownApiError;
 
     switch (apiError.category) {
       case 'validation':
-        // Show field-level errors to the user
-        apiError.fieldErrors?.forEach(fe => {
+        // Show field-level errors to the user. `fields` is what the client
+        // attaches (the wire name); the spec type calls the same idea
+        // `fieldErrors`.
+        apiError.fields?.forEach(fe => {
           showFieldError(fe.field, fe.message);
         });
         break;

@@ -394,8 +394,9 @@ await client.automation.getScreen('convert_lead', runId);
 // (engine.registerAction). The result is `{ success, data | error }` — a
 // failure comes back as `success: false` + `error` instead of a thrown
 // exception, so it can be surfaced as a toast. This surface is the one place
-// a non-2xx does NOT throw: the server answers a failed action with a real
-// status (403 / 404 / 400 / 500) and the SDK folds it into the envelope.
+// a non-2xx does NOT throw: a handler that rejects answers 200 with the inner
+// envelope, a request that never dispatched answers 404 / 403 / 400 / 503,
+// and the SDK folds both into the same result.
 const res = await client.actions.invoke('crm_lead', 'convert', {
   recordId,
   params: { create_opportunity: true },
@@ -517,6 +518,34 @@ try {
   console.error(error.details);    // { ... }
 }
 ```
+
+`error.code` is always the **semantic** code as a string — the numeric HTTP
+status lives on `error.httpStatus` and nowhere else. This holds regardless of
+which server surface answered: the REST server replies with a flat
+`{ error, code, fields }` body while the runtime dispatcher replies with a
+wrapped `{ success, error: { message, code, details } }` body whose `error.code`
+is the HTTP status, and the client normalizes both before throwing.
+
+### Per-field validation errors
+
+A validation failure additionally carries `error.fields` — one entry per
+offending field, ready to attach to the inputs that produced them:
+
+```typescript
+try {
+  await client.data.create('contact', { email: 'not-an-email' });
+} catch (error) {
+  if (error.code === 'VALIDATION_FAILED') {
+    for (const f of error.fields ?? []) {
+      showFieldError(f.field, f.message);   // 'email', 'email must be a valid email address'
+    }
+  }
+}
+```
+
+`error.fields` is left **unset** (not `[]`) when the server reported no
+per-field detail, so `if (error.fields)` is a safe test for "this failure is
+field-anchored".
 
 ### Error Codes
 

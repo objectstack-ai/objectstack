@@ -8,8 +8,8 @@ export { Runtime } from './runtime.js';
 export type { RuntimeConfig } from './runtime.js';
 
 // Export Standalone Stack
-export { createStandaloneStack, resolveObjectStackHome } from './standalone-stack.js';
-export type { StandaloneStackConfig, StandaloneStackResult } from './standalone-stack.js';
+export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase } from './standalone-stack.js';
+export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDatabase } from './standalone-stack.js';
 
 // Export Default Host (artifact-first, no objectstack.config.ts required)
 export { createDefaultHostConfig, resolveDefaultArtifactPath } from './default-host.js';

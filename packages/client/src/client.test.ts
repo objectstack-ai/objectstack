@@ -1458,6 +1458,111 @@ describe('HTTP error shaping', () => {
     });
 });
 
+// ---------------------------------------------------------------------------
+// #3918 follow-up — one error shape across both server envelopes.
+//
+// `@objectstack/rest` answers flat (`{ error, code, fields }`); the runtime
+// dispatcher answers wrapped (`{ success, error: { message, code, details } }`)
+// where `error.code` is the HTTP STATUS and the semantic code lives in
+// `details.code`. Reading the wrapped `error.code` straight through handed
+// callers the number 400 where the flat form handed them 'VALIDATION_FAILED',
+// so the branch our own docs teach never matched on a dispatcher-served
+// surface. These pin the normalisation that makes `err.code` / `err.fields`
+// mean the same thing whichever surface answered.
+// ---------------------------------------------------------------------------
+describe('HTTP error shaping — envelope normalisation', () => {
+    const FIELDS = [
+        { field: 'email', code: 'invalid_email', message: 'email must be a valid email address' },
+    ];
+
+    /** What @objectstack/rest's `mapDataError` puts on the wire. */
+    const FLAT = { error: 'Validation failed', code: 'VALIDATION_FAILED', fields: FIELDS };
+
+    /** What the runtime dispatcher puts on the wire since #3918. */
+    const WRAPPED = {
+        success: false,
+        error: {
+            message: 'Validation failed',
+            code: 400,
+            details: { code: 'VALIDATION_FAILED', fields: FIELDS },
+        },
+    };
+
+    it('exposes the SEMANTIC code from the flat envelope', async () => {
+        const { client } = createMockClient(FLAT, 400);
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.code).toBe('VALIDATION_FAILED');
+        expect(caught.httpStatus).toBe(400);
+    });
+
+    it('exposes the SEMANTIC code from the wrapped envelope, not the HTTP status', async () => {
+        // The regression this guards: `caught.code` used to be the number 400.
+        const { client } = createMockClient(WRAPPED, 400);
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.code).toBe('VALIDATION_FAILED');
+        expect(caught.code).not.toBe(400);
+        // The status is still available — it just isn't `code`.
+        expect(caught.httpStatus).toBe(400);
+    });
+
+    it('exposes `fields[]` at the same place for BOTH envelopes', async () => {
+        const flat: any = await createMockClient(FLAT, 400).client.data
+            .delete('pm_base', 'rec_1').catch((e) => e);
+        const wrapped: any = await createMockClient(WRAPPED, 400).client.data
+            .delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(flat.fields).toEqual(FIELDS);
+        expect(wrapped.fields).toEqual(FIELDS);
+    });
+
+    it('leaves `fields` unset when the server sent none', async () => {
+        // Callers branch on presence; an empty array would be a lie about a
+        // failure that had nothing to do with per-field validation.
+        const { client } = createMockClient({ error: 'nope', code: 'PERMISSION_DENIED' }, 403);
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.fields).toBeUndefined();
+        expect(caught.code).toBe('PERMISSION_DENIED');
+    });
+
+    it('never reports a numeric code, even with no details to fall back on', async () => {
+        // A pre-#3918 dispatcher body: wrapped, but no `details` at all.
+        const { client } = createMockClient(
+            { success: false, error: { message: 'boom', code: 500 } },
+            500,
+        );
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.code).toBeUndefined();
+        expect(caught.message).toBe('boom');
+        expect(caught.httpStatus).toBe(500);
+    });
+
+    it('keeps `details` = the whole body for the flat envelope (unchanged)', async () => {
+        const { client } = createMockClient(FLAT, 400);
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.details).toEqual(FLAT);
+    });
+
+    it('points `details` at the structured object for the wrapped envelope', async () => {
+        const { client } = createMockClient(WRAPPED, 400);
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.details).toEqual({ code: 'VALIDATION_FAILED', fields: FIELDS });
+    });
+
+    it('still honours a top-level `details` when the server sends one', async () => {
+        const body = { message: 'bad', code: 'X', details: { limit: 1000 } };
+        const { client } = createMockClient(body, 400);
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.details).toEqual({ limit: 1000 });
+    });
+});
+
 describe('packages.install', () => {
     const MANIFEST = { id: 'com.acme.crm', name: 'Acme CRM', version: '1.0.0', type: 'app' };
 

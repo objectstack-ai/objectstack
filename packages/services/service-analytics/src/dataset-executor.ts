@@ -314,10 +314,26 @@ export function applyWindow(
  * When `limit`/`offset` is requested WITHOUT an order, the selected dimensions
  * ascending become the implicit ordering, so the truncated window is
  * reproducible instead of "whatever the group-by happened to emit".
+ *
+ * Failing both, a selected TIME dimension defaults to ASCENDING (#3916). A time
+ * axis has one order a reader expects — chronological — and until this default
+ * existed nothing supplied it anywhere in the stack: the aggregate path has no
+ * ordering grammar, so buckets came back in Map-insertion order, and the pivot
+ * builds its column headers in row-arrival order. A month-bucketed matrix
+ * therefore rendered `2026-07-01, 2026-07-05, …, 2026-07-02`. Bucket keys are
+ * minted sort-stable for exactly this (`2026-07`, `2026-Q3`, `2026-W31`), so
+ * ascending IS chronological. An explicit `order` still wins outright — this is
+ * a default, not a policy — and non-time dimensions keep whatever order the
+ * grouping produced unless the caller asks.
+ *
+ * @param timeDimensions - The selected dimensions the cube types as `time`, in
+ *   selection order. The executor resolves these (it owns the cube); passing
+ *   them in keeps this function pure and directly testable.
  */
 export function resolveOrdering(
   selection: DatasetSelection,
   dimensions: string[],
+  timeDimensions: string[] = [],
 ): Record<string, 'asc' | 'desc'> | undefined {
   const order = selection.order;
   if (order && Object.keys(order).length > 0) {
@@ -339,6 +355,11 @@ export function resolveOrdering(
   // Implicit, deterministic ordering so a bare `limit` is reproducible.
   if ((selection.limit != null || selection.offset != null) && dimensions.length > 0) {
     return Object.fromEntries(dimensions.map((d) => [d, 'asc' as const]));
+  }
+  // #3916 — chronological by default on the time axis.
+  const timeKeys = timeDimensions.filter((d) => dimensions.includes(d));
+  if (timeKeys.length > 0) {
+    return Object.fromEntries(timeKeys.map((d) => [d, 'asc' as const]));
   }
   return undefined;
 }
@@ -476,8 +497,9 @@ export class DatasetExecutor {
     const dimensions = selection.dimensions ?? [];
 
     // Effective ordering — validated against what this selection projects, with
-    // a deterministic dimension order synthesized for a bare `limit` (#3588).
-    const order = resolveOrdering(selection, dimensions);
+    // a deterministic dimension order synthesized for a bare `limit` (#3588) and
+    // an ascending default on the time axis (#3916).
+    const order = resolveOrdering(selection, dimensions, this.timeDimensionsOf(compiled, dimensions));
 
     // #3680 — order keys naming a select/lookup dimension sort by the DISPLAY
     // label the response will carry, not the stored value / FK id. Resolved
@@ -573,6 +595,20 @@ export class DatasetExecutor {
     result.rows = applyWindow(result.rows, selection.limit, selection.offset);
 
     return result;
+  }
+
+  /**
+   * The selected dimensions the compiled cube types as `time`, in selection
+   * order (#3916) — the axis {@link resolveOrdering} defaults to ascending.
+   *
+   * Membership is decided by the DIMENSION's declared type, not by whether the
+   * selection happens to bucket it: a `date` dimension left ungranulated groups
+   * raw timestamps, and those want chronological order every bit as much as
+   * month buckets do. (Both sort correctly — `compareValues` compares Dates and
+   * ISO strings chronologically, and bucket keys are minted sort-stable.)
+   */
+  private timeDimensionsOf(compiled: CompiledDataset, dimensions: string[]): string[] {
+    return dimensions.filter((d) => compiled.cube.dimensions[d]?.type === 'time');
   }
 
   private buildQuery(

@@ -22,15 +22,18 @@
  * all: it fell through to the registry and came back as
  * `Action '' on object '*' not found`.
  *
- * #3913 closed the last two holes:
+ * #3913 closed two holes:
  *  - object-less actions register under `'global'` (AppPlugin +
  *    ObjectQLPlugin) but the handler fallback probed `'*'`, which nothing
  *    registers — so a global action was reachable only by spelling `global`
  *    into the URL, and `POST /actions//:action` never resolved at all;
- *  - every handler failure came back as HTTP 200
- *    `{success: true, data: {success: false, error}}`, so a caller that did
- *    not hand-inspect the INNER envelope silently swallowed it. Failures now
- *    carry a real status (404 unregistered, 400 validation, 500 otherwise).
+ *  - an action that no key carried came back as HTTP 200
+ *    `{success: true, data: {success: false, error: "… not found"}}`, so a
+ *    caller that did not hand-inspect the INNER envelope read it as a success.
+ *    Nothing DISPATCHED there, so it is a 404 now — joining the pre-dispatch
+ *    answers this route already gives a status (403 denied, 400 wrong type,
+ *    503 unavailable). A handler that RAN and rejected still reports in the
+ *    payload, unchanged: that is a business outcome, not a transport error.
  */
 
 import * as actionExec from '../action-execution.js';
@@ -59,9 +62,11 @@ export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
  *
  * Body shape: `{ recordId?: string, params?: Record<string, unknown> }`.
  * The handler is invoked with an `ActionContext` of:
- *   `{ record, user, engine, params }`
+ *   `{ record, user, session, engine, api, params }`
  * where `engine` exposes the slimmed CRUD surface used by CRM handlers
- * (`insert`, `update`, `delete`, `find`).
+ * (`insert`, `update`, `delete`, `find`) and `api` is the ScopedContext a
+ * sandboxed body reaches through `ctx.api.object(...)`. Both are bound to the
+ * caller's ExecutionContext elevated with `isSystem` (#3914).
  *
  * Dispatch follows the DECLARED action type (#3915):
  *  - `script` (and any action with no resolvable declaration, which is
@@ -71,6 +76,10 @@ export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
  *  - `url` / `modal` / `form` / `api` → 400. They dispatch on `target` in the
  *    client (or at another endpoint entirely) and have no server dispatch
  *    here; saying so beats the registry's `not found`.
+ *
+ * A `flow` action is NOT trusted-elevated: the flow engine receives the
+ * caller's identity and honours `runAs` (ADR-0049). The `isSystem` elevation
+ * above is a script-BODY property only.
  */
 export async function handleActionsRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     if (method.toUpperCase() !== 'POST') {
@@ -186,28 +195,6 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     }
     if (record && (record as any).id == null && recordId) (record as any).id = recordId;
 
-    // Slim engine facade matching the ActionContext.engine shape used by CRM
-    // handlers. ⚠️ TRUSTED — context-less, RLS/FLS-bypassing by design; see
-    // buildActionEngineFacade for the full security-model rationale (#2849).
-    const engineFacade = {
-        async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-            const res = await ql.insert(object, data);
-            const id = (res && (res as any).id) ?? (data as any).id;
-            return { id };
-        },
-        async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-            await ql.update(object, data, { where: { id } });
-        },
-        async delete(object: string, id: string): Promise<void> {
-            await ql.delete(object, { where: { id } });
-        },
-        async find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-            const opts = query && Object.keys(query).length ? { where: query } : undefined;
-            const rows = await ql.find(object, opts as any);
-            return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
-        },
-    };
-
     // Resolve the caller identity from the request's ExecutionContext — the
     // single source `dispatch()` populates via `resolveExecutionContext`,
     // the same envelope the MCP `runAction` and record-change trigger paths
@@ -235,7 +222,18 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         record,
         user: userFromAuth,
         session: actionExec.buildActionSession(deps, ec),
-        engine: engineFacade,
+        // Slim engine facade matching the ActionContext.engine shape used by
+        // CRM handlers. ⚠️ TRUSTED — system-elevated, RLS/FLS-bypassing by
+        // design; see buildActionEngineFacade + buildActionExecutionContext
+        // for the full security-model rationale (#2849, #3914).
+        engine: actionExec.buildActionEngineFacade(deps, ql, ec),
+        // [#3914] `ctx.api` — the ScopedContext a body's `ctx.api.object(...)`
+        // resolves to. Absent here, the sandbox synthesized a context-less
+        // facade and every owner-scoped write died FORBIDDEN. `executionContext`
+        // is the same envelope, carried so the sandbox's own last-resort facade
+        // is elevated identically instead of falling back to no identity.
+        api: actionExec.buildActionApi(deps, ql, ec),
+        executionContext: actionExec.buildActionExecutionContext(ec),
         params: { ...reqParams, recordId, objectName },
     };
 
@@ -251,6 +249,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 objectName,
                 record,
                 params: reqParams,
+                recordId,
                 ec,
                 envId: _context?.environmentId,
             });
@@ -258,9 +257,11 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         }
 
         // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.
+        // [#3914] Wording tracks what the body ACTUALLY gets — a system-elevated
+        // context carrying the caller's identity, not a context-less engine.
         console.info(
             `[action-audit] REST action '${objectName}/${actionName}' — body executes TRUSTED ` +
-            `(context-less engine, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
+            `(system-elevated context, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
         );
 
         // ── script/body dispatch ──
@@ -292,31 +293,44 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         }
         return { handled: true, response: deps.success({ success: true, data: result }) };
     } catch (err: any) {
-        // [#3913] A handler failure is a REAL failure. It used to come back as
-        // HTTP 200 `{success: true, data: {success: false, error}}` — transport
-        // success wrapping a business error — so every caller that did not
-        // hand-check the INNER envelope (including the shipped console, which
-        // showed a green success toast) swallowed it silently. Failures now
-        // exit through the dispatcher's error path with a real status.
         const full = err?.message ?? String(err);
         // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` for
         // server logs; surface only the business `<msg>` (SandboxError.innerMessage)
         // to the client so an action's error toast reads as plain text instead of
         // leaking the debug prefix. Keep the full wrapper in the log for debugging.
         const inner: unknown = err?.innerMessage;
-        if (typeof inner === 'string' && inner) {
-            console.error(`[action ${objectName}/${actionName}] ${full}`);
-            // A deliberate `throw` from inside an action BODY is a business
-            // rule, not a server fault — 400, exactly as `@objectstack/rest`'s
-            // `mapDataError` has always served the identical SandboxError from
-            // the data routes. 400 also keeps the message intact: the 5xx leak
-            // sanitiser would rewrite a business message that merely opens with
-            // "Update …" as a generic internal error.
-            return { handled: true, response: deps.error(inner, 400) };
-        }
-        // Anything else is unexpected: an error carrying its own `.status` wins,
-        // a record `ValidationError` maps to 400 with `fields[]` (#3918), and
-        // the rest are 500 — sanitised by the dispatcher's leak guard.
-        return { handled: true, response: deps.errorFromThrown(err, 500) };
+        const clientMsg = (typeof inner === 'string' && inner) ? inner : full;
+        if (clientMsg !== full) console.error(`[action ${objectName}/${actionName}] ${full}`);
+        // [#3918 follow-up] Carry the structured payload when the failure was a
+        // record validation error. Until the sandbox learned to pass `code` /
+        // `fields` back OUT of the VM, this envelope was the message string and
+        // nothing else — so a form action could only ever raise a toast, never
+        // highlight the field the user actually got wrong, which is the symptom
+        // the original report was about.
+        //
+        // The HTTP status stays 200 and `success: false` remains the failure
+        // signal. `/actions` has always reported business failure in the payload
+        // (an action that "fails" is a normal outcome, not a transport error) and
+        // every existing caller branches on `data.success`; turning this into a
+        // 4xx would be a wire-contract break in exchange for a strictly additive
+        // fix.
+        //
+        // [#3913] That reasoning covers a handler that RAN and rejected — it
+        // does NOT cover a route that never dispatched at all. An unregistered
+        // action has no business outcome to report, so it exits above as a 404,
+        // alongside the pre-dispatch gates this route already answers with a
+        // status (403 denied, 400 wrong type, 503 unavailable). The line is
+        // "did a handler run": below it, the payload; above it, the status.
+        const code: unknown = err?.code;
+        const fields: unknown = err?.fields;
+        return {
+            handled: true,
+            response: deps.success({
+                success: false,
+                error: clientMsg,
+                ...(typeof code === 'string' && code ? { code } : {}),
+                ...(Array.isArray(fields) ? { fields } : {}),
+            }),
+        };
     }
 }

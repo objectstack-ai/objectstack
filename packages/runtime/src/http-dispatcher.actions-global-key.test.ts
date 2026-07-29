@@ -16,12 +16,20 @@
  *     happened to spell the registration key) and `POST /actions//log_call`
  *     never worked at all.
  *
- *  2. **Every handler failure was wrapped as transport success.** Both exits
- *     called `deps.success(...)`, which is always `{status: 200, body:
- *     {success: true, data}}` — so a failure went out as HTTP 200
- *     `{success: true, data: {success: false, error}}` and every caller that
+ *  2. **A miss was wrapped as transport success.** The not-found exit called
+ *     `deps.success(...)`, which is always `{status: 200, body: {success:
+ *     true, data}}` — so "this action does not exist" went out as HTTP 200
+ *     `{success: true, data: {success: false, error}}`, and every caller that
  *     did not hand-unwrap the inner envelope (the shipped console among them,
  *     which showed a green toast) swallowed it.
+ *
+ *     Only the DISPATCH FAILURE moved to a status. A handler that RAN and
+ *     rejected still reports `{success: false, error, code?, fields?}` at HTTP
+ *     200 — that is a business outcome, not a transport error, and #3937 pins
+ *     it (`actions-validation-envelope.test.ts`). The line this file asserts is
+ *     "did a handler run": below it the payload, above it the status, alongside
+ *     the pre-dispatch answers the route already gives one (403 denied, 400
+ *     wrong type, 503 unavailable).
  *
  * The engine double here is deliberately faithful on the one point that
  * matters: a real `Map` keyed `<object>:<action>` that throws
@@ -201,11 +209,13 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
     });
 });
 
-describe('REST /actions — handler failures carry a real status (#3913)', () => {
-    it('serves a deliberate throw from an action body as 400 with the business message', async () => {
-        // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` and
-        // preserves the business message on `.innerMessage` — the same shape
-        // `@objectstack/rest`'s `mapDataError` has always served as a 400.
+describe('REST /actions — dispatch failure vs business failure (#3913)', () => {
+    it('a handler that RAN and rejected still reports in the payload at HTTP 200', async () => {
+        // The line #3913 draws is "did a handler run". This one did, so the
+        // failure is a business outcome and stays in the envelope — the
+        // contract #3937 pins. Asserted here too so the not-found 404 above
+        // can never be widened into "every action failure is a 4xx" by
+        // someone reading only this file.
         const { dispatcher } = makeDispatcher({
             registered: {
                 'global:log_call': () => {
@@ -218,52 +228,19 @@ describe('REST /actions — handler failures carry a real status (#3913)', () =>
 
         const res = await dispatcher.handleActions('/global/log_call', 'POST', {}, ctx());
 
-        expect(res.response.status).toBe(400);
-        expect(res.response.body.success).toBe(false);
+        expect(res.response.status).toBe(200);
+        expect(res.response.body.data.success).toBe(false);
         // The debug wrapper stays in the server log, not on the wire.
-        expect(res.response.body.error.message).toBe('Contact has no phone number');
+        expect(res.response.body.data.error).toBe('Contact has no phone number');
     });
 
-    it('never reports a failure as HTTP 200 {success:true, data:{success:false}}', async () => {
-        const { dispatcher } = makeDispatcher({
-            registered: { 'global:log_call': () => { throw new Error('handler exploded'); } },
-        });
-
-        const res = await dispatcher.handleActions('/global/log_call', 'POST', {}, ctx());
-
-        expect(res.response.status).toBe(500);
-        expect(res.response.body.success).toBe(false);
-        // The regression in one assertion: the outer envelope must not claim
-        // success while the inner one reports failure.
-        expect(res.response.body.data).toBeUndefined();
-    });
-
-    it('honours an error that carries its own status — a FORBIDDEN stays a 403', async () => {
-        const { dispatcher } = makeDispatcher({
-            registered: {
-                'global:log_call': () => {
-                    const err: any = new Error('Not allowed to write crm_call');
-                    err.status = 403;
-                    err.code = 'FORBIDDEN';
-                    throw err;
-                },
-            },
-        });
-
-        const res = await dispatcher.handleActions('/global/log_call', 'POST', {}, ctx());
-
-        expect(res.response.status).toBe(403);
-        expect(res.response.body.error.message).toBe('Not allowed to write crm_call');
-        expect(res.response.body.error.details?.code).toBe('FORBIDDEN');
-    });
-
-    it('maps a record ValidationError to 400 with fields[] (#3918 parity)', async () => {
+    it('carries a validation failure\'s code/fields in the payload, unchanged (#3937)', async () => {
         const { dispatcher } = makeDispatcher({
             registered: {
                 'global:log_call': () => {
                     const err: any = new Error('Validation failed');
                     err.code = 'VALIDATION_FAILED';
-                    err.fields = [{ name: 'phone', message: 'required' }];
+                    err.fields = [{ field: 'phone', message: 'required' }];
                     throw err;
                 },
             },
@@ -271,15 +248,16 @@ describe('REST /actions — handler failures carry a real status (#3913)', () =>
 
         const res = await dispatcher.handleActions('/global/log_call', 'POST', {}, ctx());
 
-        expect(res.response.status).toBe(400);
-        expect(res.response.body.error.details).toMatchObject({
+        expect(res.response.status).toBe(200);
+        expect(res.response.body.data).toMatchObject({
+            success: false,
             code: 'VALIDATION_FAILED',
-            fields: [{ name: 'phone', message: 'required' }],
+            fields: [{ field: 'phone', message: 'required' }],
         });
     });
 
     it('leaves the success envelope untouched', async () => {
-        // Only the FAILURE wire changed; a successful action keeps the
+        // Only the not-found exit moved; a successful action keeps the
         // `{success: true, data: {success: true, data}}` shape the SDK reads.
         const { dispatcher } = makeDispatcher({
             registered: { 'global:log_call': () => ({ id: 'call_1' }) },

@@ -13,8 +13,10 @@
  * not in the loaded metadata are never examined or altered.
  */
 import chalk from 'chalk';
-import type { ManagedDriftEntry, DriftCategory } from '@objectstack/driver-sql';
+import type { ManagedDriftEntry, DriftCategory, PendingSchemaWork } from '@objectstack/driver-sql';
 import { describeDriverConnection } from './connection-display.js';
+
+export type { PendingSchemaWork };
 
 export interface SqlDriverLike {
   detectManagedDrift(): Promise<ManagedDriftEntry[]>;
@@ -22,6 +24,10 @@ export interface SqlDriverLike {
     entries: ManagedDriftEntry[],
     opts: { allowDestructive?: boolean },
   ): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }>;
+  /** Deferred-DDL surface (#3917) — optional, so a driver without it still boots. */
+  setDeferredDdl?: (deferred: boolean) => void;
+  previewDeferredSchemaWork?: () => Promise<PendingSchemaWork[]>;
+  flushDeferredSchemaDdl?: () => Promise<PendingSchemaWork[]>;
   config?: any;
   disconnect?: () => Promise<void>;
 }
@@ -33,6 +39,16 @@ export interface SchemaStack {
   /** The booted kernel — `getService('objectql')` etc. for one-shot commands
    *  beyond schema migration (e.g. `os meta resync`, #2705). */
   kernel: any;
+  /**
+   * Create-table / add-column work the boot sync was held back from running
+   * (#3917). Always `[]` unless the stack was booted with `deferSchemaDdl`.
+   */
+  pendingSchemaWork: PendingSchemaWork[];
+  /**
+   * Perform the deferred sync — call only once the operator has confirmed the
+   * plan. Returns the work it actually ran (`[]` when nothing was deferred).
+   */
+  flushSchemaDdl: () => Promise<PendingSchemaWork[]>;
   shutdown: () => Promise<void>;
 }
 
@@ -42,15 +58,59 @@ const SQL_DRIVER_SERVICES = [
   'driver.sql',
 ];
 
-function findSqlDriver(kernel: any): SqlDriverLike | null {
+/** Locate the SQL driver behind any `getService`-shaped lookup (kernel or plugin ctx). */
+function findSqlDriverVia(getService: (name: string) => any): SqlDriverLike | null {
   for (const name of SQL_DRIVER_SERVICES) {
     let d: any;
-    try { d = kernel?.getService?.(name); } catch { /* not registered */ }
+    try { d = getService(name); } catch { /* not registered */ }
     if (d && typeof d.detectManagedDrift === 'function' && typeof d.applyMigrationEntries === 'function') {
       return d as SqlDriverLike;
     }
   }
   return null;
+}
+
+function findSqlDriver(kernel: any): SqlDriverLike | null {
+  return findSqlDriverVia((name) => kernel?.getService?.(name));
+}
+
+/**
+ * Arms the SQL driver's deferred-DDL mode before boot schema-sync can run
+ * (#3917).
+ *
+ * Timing is the whole point, and it is why this is a plugin rather than a call
+ * in `bootSchemaStack`. The kernel runs **every** plugin's `init()` (Phase 1)
+ * before **any** `start()` (Phase 2). `DefaultDatasourcePlugin` connects the
+ * driver and registers it as `driver.*` in its `init()`; `ObjectQLPlugin` runs
+ * `syncRegisteredSchemas` — the create-table/add-column DDL this issue is about
+ * — in its `start()`. An `init()` that depends on the datasource plugin
+ * therefore lands in the one window where the driver exists and no DDL has run.
+ */
+class DeferSchemaDdlPlugin {
+  name = 'com.objectstack.cli.defer-schema-ddl';
+  version = '1.0.0';
+  /** Ordering, not optionality: our init must follow the one that registers `driver.*`. */
+  dependencies = ['com.objectstack.runtime.default-datasource'];
+
+  driver: SqlDriverLike | null = null;
+
+  init = async (ctx: any) => {
+    this.driver = findSqlDriverVia((name) => ctx.getService(name));
+    if (!this.driver) {
+      // No SQL driver (memory/mongo) — nothing issues DDL, nothing to defer.
+      ctx.logger?.debug?.('[defer-schema-ddl] no SQL driver — deferral not armed');
+      return;
+    }
+    if (typeof this.driver.setDeferredDdl !== 'function') {
+      // Fail loudly rather than silently boot-syncing: the caller asked for a
+      // dry run and this driver cannot give one.
+      throw new Error(
+        'The active SQL driver does not support deferred schema DDL, so this command cannot ' +
+        'guarantee a dry run. Upgrade @objectstack/driver-sql.',
+      );
+    }
+    this.driver.setDeferredDdl(true);
+  };
 }
 
 /**
@@ -79,13 +139,32 @@ export async function bootSchemaStack(
      * adapter are present. Plain schema commands pass nothing.
      */
     extraPlugins?: unknown[];
+    /**
+     * Boot WITHOUT touching the target database (#3917).
+     *
+     * Boot schema-sync issues create-table / add-column DDL, and the artifact's
+     * inline seed writes rows — both used to happen before `os migrate plan`
+     * rendered its "dry run" and before `os migrate apply` asked `[y/N]`. With
+     * this set, the driver registers metadata but records the physical work
+     * instead of performing it ({@link SchemaStack.pendingSchemaWork}), and the
+     * seed is suppressed, so the boot is read-only and the plan describes the
+     * database as it actually is. Call {@link SchemaStack.flushSchemaDdl} after
+     * confirmation to perform the work.
+     *
+     * Commands that boot in order to READ AND WRITE DATA (`os meta resync`,
+     * `os migrate files-to-references`) must leave this off — they need the
+     * tables to exist.
+     */
+    deferSchemaDdl?: boolean;
   } = {},
 ): Promise<SchemaStack> {
   const { createStandaloneStack, Runtime } = await import('@objectstack/runtime');
+  const defer = opts.deferSchemaDdl === true;
 
   const stack = await createStandaloneStack({
     projectRoot: process.cwd(),
     ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}),
+    ...(defer ? { skipSeedData: true } : {}),
   });
 
   // No HTTP, no cluster — this is a one-shot schema operation.
@@ -94,6 +173,9 @@ export async function bootSchemaStack(
   for (const plugin of stack.plugins) {
     await kernel.use(plugin);
   }
+  if (defer) {
+    await kernel.use(new DeferSchemaDdlPlugin() as any);
+  }
   for (const plugin of opts.extraPlugins ?? []) {
     await kernel.use(plugin as any);
   }
@@ -101,12 +183,19 @@ export async function bootSchemaStack(
 
   const driver = findSqlDriver(kernel);
   const managedTableCount = driver ? (driver as any).managedObjectFields?.size ?? 0 : 0;
+  const pendingSchemaWork = defer && driver?.previewDeferredSchemaWork
+    ? await driver.previewDeferredSchemaWork()
+    : [];
 
   return {
     driver,
     dbLabel: describeDb(driver),
     managedTableCount,
     kernel,
+    pendingSchemaWork,
+    flushSchemaDdl: async () => (defer && driver?.flushDeferredSchemaDdl
+      ? await driver.flushDeferredSchemaDdl()
+      : []),
     shutdown: async () => {
       try { await (runtime as any).stop?.(); } catch { /* ignore */ }
       try { await driver?.disconnect?.(); } catch { /* ignore */ }
@@ -159,4 +248,32 @@ export function renderPlan(drift: ManagedDriftEntry[]): void {
 export function summarize(drift: ManagedDriftEntry[]): string {
   const g = groupByCategory(drift);
   return `${drift.length} change(s): ${g.safe.length} safe, ${g.needs_confirm.length} needs-confirm, ${g.destructive.length} destructive`;
+}
+
+/**
+ * Render the additive work the boot sync was held back from doing (#3917).
+ *
+ * Deliberately its own section rather than a `DriftCategory`: this is not
+ * divergence between metadata and an existing column — it is the create/add
+ * that used to happen silently at boot, now shown before it runs. Purely
+ * additive and never data-losing, so it carries no `--allow-destructive` gate.
+ */
+export function renderPendingSchemaWork(pending: PendingSchemaWork[]): void {
+  if (pending.length === 0) return;
+  console.log(`  ${chalk.bold('New (additive — created when you apply)')}`);
+  for (const p of pending) {
+    const detail = p.kind === 'create_table'
+      ? `[create_table, ${p.columns.length} column(s)]`
+      : `[add_columns: ${p.columns.join(', ')}]`;
+    console.log(`    ${chalk.cyan('+')} ${chalk.cyan(p.table)} ${chalk.dim(detail)}`);
+  }
+  console.log('');
+}
+
+export function summarizePendingSchemaWork(pending: PendingSchemaWork[]): string {
+  const creates = pending.filter((p) => p.kind === 'create_table').length;
+  const columns = pending
+    .filter((p) => p.kind === 'add_columns')
+    .reduce((n, p) => n + p.columns.length, 0);
+  return `${creates} table(s) to create, ${columns} column(s) to add`;
 }

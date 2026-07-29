@@ -1232,6 +1232,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "列",
         helpText: "レポートに表示する列"
       },
+      order: {
+        label: "並び順",
+        helpText: "ソートキー（優先度の高い順）。rows/columns のディメンション、または values のメジャーを指定します。時間ディメンションは既定で時系列順です。"
+      },
       drilldown: {
         label: "Drilldown",
         helpText: "Click an aggregated row/cell to open the underlying records"

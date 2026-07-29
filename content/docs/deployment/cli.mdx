@@ -494,8 +494,48 @@ os migrate plan                              # Preview drift (no changes)
 os migrate apply                             # Apply safe (loosening) changes, with a confirm prompt
 os migrate apply --yes                       # Skip the prompt (CI / scripts)
 os migrate apply --allow-destructive --yes   # Also drop orphaned columns, tighten NOT NULL, narrow types
+os migrate apply --force                     # Migrate even though another process is using the database
 os migrate plan --json                       # Machine-readable output
 ```
+
+#### Nothing is written before you confirm
+
+Both commands boot your app to read its metadata. That boot no longer touches
+the target database: the additive schema sync (create missing tables, add
+missing columns) and the artifact's inline seed data are **deferred**, not
+performed. So `plan` really is a dry run, and everything `apply` is about to do
+— additive work included — is on screen before the `[y/N]` prompt:
+
+```text
+  New (additive — created when you apply)
+    + crm_quote [create_table, 9 column(s)]
+    + crm_contact [add_columns: nickname, region]
+
+  Safe (loosening — applied without --allow-destructive)
+    ✓ crm_contact.email [relax_not_null]
+```
+
+Answering `n` leaves the database exactly as it was.
+
+#### Occupancy check (SQLite)
+
+A running `os dev` / `os serve` holding the same SQLite file open is the usual
+way a migration goes wrong: the migration itself is transactional and swaps
+tables *inside* the file, but the live server keeps prepared statements and a
+schema cookie that the migration invalidates, and its writes can collide as
+`SQLITE_BUSY`. Before booting, `os migrate` asks the database whether anyone
+else is attached (`PRAGMA locking_mode = EXCLUSIVE` under `busy_timeout = 0` —
+non-destructive, and unlike a WAL checkpoint it also sees a connection that is
+merely *open* rather than actively writing).
+
+| Command | If the database is in use |
+|---------|---------------------------|
+| `os migrate plan` | Warns and continues — a plan writes nothing either way |
+| `os migrate apply` | **Refuses** (exit 1, `error: database_busy` under `--json`). Stop the other process, or pass `--force` |
+
+The check applies to SQLite only. Postgres and MySQL take their own server-side
+locks, and a `-wal`/`-shm` left behind by a crashed process is deliberately not
+treated as occupancy on its own.
 
 | Category | Examples | Applied by |
 |----------|----------|------------|

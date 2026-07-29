@@ -35,6 +35,84 @@ export const ReportChartSchema = lazySchema(() => ChartConfigSchema.extend({
 }));
 
 /**
+ * Report Sort Schema (framework#3916)
+ *
+ * One ordering key of a report's `order` list. `by` names something the report
+ * actually SELECTS — a `rows`/`columns` dimension or a `values` measure — which
+ * is validated at authoring time rather than at render time, because a mistyped
+ * sort key that quietly returns arbitrarily-ordered rows is the exact failure
+ * this exists to remove.
+ *
+ * An ARRAY (not a `Record<string, direction>`) because a report's ordering is
+ * multi-key and its key order is significant, and JSON object key order is not
+ * a contract an author should have to rely on. The renderer lowers the list to
+ * `DatasetSelection.order` in list order — see {@link reportSelectionOrder}.
+ */
+export const ReportSortSchema = lazySchema(() => z.object({
+  /** A dimension (`rows`/`columns`) or measure (`values`) name this report selects. */
+  by: z.string().describe('Dimension or measure name to order by (must be selected by this report)'),
+  /** Sort direction. Null/empty cells sort LAST in both directions. */
+  direction: z.enum(['asc', 'desc']).default('asc').describe('Sort direction (default ascending)'),
+}));
+
+/**
+ * Validate a report/block's `order` against what it selects, in place.
+ *
+ * Shared by `ReportSchema` and `JoinedReportBlockSchema` so a block's ordering
+ * is held to the same contract as a top-level report's.
+ */
+function checkReportOrder(
+  r: { order?: Array<{ by: string }>; rows?: string[]; columns?: string[]; values?: string[] },
+  ctx: z.RefinementCtx,
+): void {
+  if (!r.order?.length) return;
+  const selectable = new Set<string>([...(r.rows ?? []), ...(r.columns ?? []), ...(r.values ?? [])]);
+  const seen = new Set<string>();
+  for (const key of r.order) {
+    if (seen.has(key.by)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `duplicate order key "${key.by}" — each dimension/measure may be ordered once.`,
+        path: ['order'],
+      });
+    }
+    seen.add(key.by);
+    if (!selectable.has(key.by)) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          `order key "${key.by}" is not selected by this report — ` +
+          `name a \`rows\`/\`columns\` dimension or a \`values\` measure. ` +
+          `Selectable here: ${[...selectable].join(', ') || '(none)'}.`,
+        path: ['order'],
+      });
+    }
+  }
+}
+
+/**
+ * Lower a report's authored `order` into the `DatasetSelection.order` a
+ * preview/query request posts (framework#3916).
+ *
+ * The array's element order becomes the object's key insertion order, which is
+ * how `DatasetSelection.order` expresses sort significance (first key = primary
+ * sort). Returns `undefined` for an absent or empty list so the caller omits
+ * the field entirely and the runtime's own defaults apply — a selected time
+ * dimension still comes back chronological without the author asking.
+ *
+ * Duplicate keys are rejected by the schema, so the last-write-wins collapse an
+ * object build would otherwise hide cannot reach here from validated metadata.
+ */
+export function reportSelectionOrder(
+  order?: Array<{ by: string; direction?: 'asc' | 'desc' }>,
+): Record<string, 'asc' | 'desc'> | undefined {
+  if (!order?.length) return undefined;
+  const out: Record<string, 'asc' | 'desc'> = {};
+  for (const key of order) out[key.by] = key.direction ?? 'asc';
+  return out;
+}
+
+/**
  * Joined Report Block Schema
  *
  * Represents a single sub-report inside a `type: 'joined'` report. Each block
@@ -80,7 +158,9 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => z.object({
   values: z.array(z.string()).optional().describe('Measure names to show (dataset-bound)'),
   /** Render-time scope filter, ANDed at query time. Dataset-bound only. */
   runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter (dataset-bound)'),
-}));
+  /** Result ordering for this block, most significant key first (framework#3916). */
+  order: z.array(ReportSortSchema).optional().describe('Result ordering, most significant key first'),
+}).superRefine(checkReportOrder));
 
 /**
  * Report Schema
@@ -115,6 +195,31 @@ export const ReportSchema = lazySchema(() => z.object({
   values: z.array(z.string()).optional().describe('Measure names to show'),
   /** Render-time scope filter, ANDed at query time. */
   runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter'),
+  /**
+   * Result ordering — most significant key first (framework#3916).
+   *
+   * Each key names a dimension this report groups by (`rows` or `columns`) or a
+   * measure it displays (`values`); anything else is an authoring-time error.
+   * The renderer lowers this to `DatasetSelection.order` via
+   * {@link reportSelectionOrder}, so the ordering is applied SERVER-SIDE over
+   * the whole grid — after measure-scoped filters merge and derived measures
+   * evaluate — not by the pivot over whatever rows happened to arrive.
+   *
+   * For a `matrix` report the ordering drives BOTH axes: a key naming a
+   * `columns` dimension orders the across-axis headers, a key naming a `rows`
+   * dimension orders the down-axis groups. List the columns key first when the
+   * across-axis order is the one that matters (the header sequence then follows
+   * the primary sort exactly).
+   *
+   * Ordering is OPTIONAL, not required for a sane result: a selected date/time
+   * dimension already defaults to ascending (chronological) server-side, so a
+   * month-bucketed matrix reads left-to-right in time without this field.
+   * Declare `order` to sort by a measure ("biggest region first"), to reverse a
+   * time axis (newest first), or to order a non-time dimension.
+   *
+   * A `joined` report orders per block — see `blocks[].order`.
+   */
+  order: z.array(ReportSortSchema).optional().describe('Result ordering, most significant key first'),
   /**
    * ADR-0021 D2 — click an aggregated row/cell to open the underlying
    * records (dataset-backed; the host resolves the dataset's object and
@@ -166,6 +271,18 @@ export const ReportSchema = lazySchema(() => z.object({
       path: ['dataset'],
     });
   }
+  // A `joined` report selects nothing itself — its ordering lives per block.
+  if (r.type === 'joined') {
+    if (r.order?.length) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'a `joined` report orders per block — move `order` onto `blocks[]`.',
+        path: ['order'],
+      });
+    }
+  } else {
+    checkReportOrder(r, ctx);
+  }
 }));
 
 export type JoinedReportBlock = z.infer<typeof JoinedReportBlockSchema>;
@@ -179,6 +296,7 @@ export type JoinedReportBlockInput = z.input<typeof JoinedReportBlockSchema>;
  */
 export type Report = z.infer<typeof ReportSchema>;
 export type ReportChart = z.infer<typeof ReportChartSchema>;
+export type ReportSort = z.infer<typeof ReportSortSchema>;
 
 /**
  * Input Types for Report Configuration
@@ -186,6 +304,7 @@ export type ReportChart = z.infer<typeof ReportChartSchema>;
  */
 export type ReportInput = z.input<typeof ReportSchema>;
 export type ReportChartInput = z.input<typeof ReportChartSchema>;
+export type ReportSortInput = z.input<typeof ReportSortSchema>;
 
 /**
  * Report Factory Helper

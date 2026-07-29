@@ -1232,6 +1232,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "列",
         helpText: "报表中显示的列"
       },
+      order: {
+        label: "排序",
+        helpText: "排序键，最重要的在前（rows/columns 维度或 values 度量）。时间维度默认按时间顺序排列。"
+      },
       drilldown: {
         label: "Drilldown",
         helpText: "Click an aggregated row/cell to open the underlying records"
