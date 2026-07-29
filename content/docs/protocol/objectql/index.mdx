@@ -48,7 +48,7 @@ Traditional software development chains you to specific database technologies:
 ┌─────────────────────────────────────────────────────────────┐
 │                      APPLICATION LAYER                       │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   REST API  │  │   GraphQL   │  │   UI Forms  │         │
+│  │   REST API  │  │  Client SDK │  │   UI Forms  │         │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
 └─────────┼─────────────────┼─────────────────┼───────────────┘
           │                 │                 │
@@ -193,7 +193,7 @@ validations:
 **Validation executes:**
 - Before database write (server-side)
 - In UI forms (compiled to JavaScript)
-- In API requests (REST/GraphQL)
+- In API requests (REST)
 - In bulk imports (CSV, Excel)
 
 ## Real-World Use Cases
@@ -300,7 +300,7 @@ ObjectQL (Data Layer)
     │  └→ Row-level security, field-level access
     │
     ├→ API Protocol
-    │  └→ REST/GraphQL endpoints
+    │  └→ REST endpoints
     │
     └→ Automation Protocol
        └→ Triggers, workflows, scheduled jobs

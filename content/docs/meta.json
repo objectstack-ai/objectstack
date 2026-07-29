@@ -17,6 +17,7 @@
     "deployment",
     "plugins",
     "kernel",
-    "protocol"
+    "protocol",
+    "releases"
   ]
 }

@@ -51,7 +51,7 @@ ObjectStack ships **9 domain-specific skills**. Each is self-contained — an AI
 | 4 | [UI](#ui) | `ui` | `skills/objectstack-ui/` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
 | 5 | [Automation](#automation) | `automation` | `skills/objectstack-automation/` | Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, scheduled jobs, and webhooks. |
 | 6 | [AI](#ai) | `ai` | `skills/objectstack-ai/` | Design ObjectStack AI skills, tools, knowledge sources, conversations, model registry entries, and MCP integrations. |
-| 7 | [API](#api) | `api` | `skills/objectstack-api/` | Design the server-side API surface that an ObjectStack runtime exposes — REST/GraphQL endpoints, auth providers, realtime channels, error envelopes, batch/versioning contracts. |
+| 7 | [API](#api) | `api` | `skills/objectstack-api/` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch/versioning contracts. |
 | 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout. |
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. |
 
@@ -145,9 +145,9 @@ Do not use for general LLM prompting questions unrelated to ObjectStack metadata
 
 **Domain** `api` · **Path** `skills/objectstack-api/`
 
-Design the server-side API surface that an ObjectStack runtime exposes — REST/GraphQL endpoints, auth providers, realtime channels, error envelopes, batch/versioning contracts.
+Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch/versioning contracts.
 
-Use when the user is adding `*.endpoint.ts`, configuring auth providers, defining custom routes, or extending the REST/GraphQL generator.
+Use when the user is adding `*.endpoint.ts`, configuring auth providers, defining custom routes, or extending the REST generator.
 
 Do not use for: consuming an ObjectStack API from a client (that is just standard HTTP — no skill needed); the auto-generated CRUD endpoints (those follow from objectstack-data); request-side query syntax (see objectstack-query). CEL expressions in route guards or auth predicates: load objectstack-formula alongside.
 

@@ -325,6 +325,11 @@ call was a guaranteed 404. They are removed, along with the four unconsumed
   flag was accepted, transmitted and dropped with no seeding, no error and no
   stored trace
 
+**Console consumers:** the companion objectui change trims the matching dead
+delegates from `useClientNotifications` (`@object-ui/react`), so a host calling
+`registerDevice` / `unregisterDevice` / `getPreferences` / `updatePreferences`
+through that hook loses them at the same time (objectui#2862).
+
 Kept: `client.events` (explicitly a local in-memory buffer), the
 dispatcher-served `notifications.list/markRead/markAllRead`, `approvals.*`, and
 `meta.getLegalNextStates`. Re-adding any removed surface now requires the server
@@ -472,6 +477,11 @@ import or the authored key.
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
 | `ChartInteraction.zoom` / `.clickAction` | never implemented (#3752) |
+
+The Console side follows: `@object-ui/types` drops its
+`ObjectStack`/`ObjectOS`/`ObjectQL`/`ObjectUI` Capabilities re-exports, which
+pointed at the same retired cluster (objectui#2860). Import what you still need
+from `@objectstack/spec` directly.
 
 ### Smaller breaking changes
 
@@ -695,8 +705,8 @@ most of its rows in silence.
 
 ## New in Console (Studio) — bundled objectui 17.0
 
-The v17 line bundles four Console refreshes, landing on the pin
-`4a4829d0ef39` (`.objectui-sha`).
+The v17 Console window is `cf2d56e32a11 → 4a4829d0ef39` (`.objectui-sha`) — 128
+objectui commits on top of the pin 16.1.0 shipped.
 
 ### Files, actions and forms
 
@@ -707,7 +717,9 @@ The v17 line bundles four Console refreshes, landing on the pin
   object; the spec's `disabled` predicate is honored on every action-rendering
   surface; inline `lookup` action params get a real record picker.
 - Forms consume spec-aligned `FormView` buttons/defaults, and an invalid submit
-  scrolls to and focuses the first errored field.
+  scrolls to and focuses the first errored field; the flow-node repeater stops
+  committing during render.
+- Image fields render consistently and support click-to-zoom.
 
 ### Approvals
 
@@ -735,7 +747,12 @@ The v17 line bundles four Console refreshes, landing on the pin
 - A toast fires when a save silently dropped read-only fields, and write
   warnings stop being lost on the detail page.
 - Real per-caller **FLS** is wired into import targets and grid columns, and the
-  Import Wizard gains an **"Import as historical data"** option.
+  Import Wizard gains an **"Import as historical data"** option; the import
+  preview validates email format up front.
+- **Detail and form edit/delete are gated on the server's effective operation
+  set** (#3546), the same adjudication the grid rows use — the Console stops
+  offering a verb the server would refuse.
+- Dashboard and chart widget filters resolve `{current_user_id}` (#3574).
 - The five per-view-type configs and `ListView` read the spec-canonical
   vocabulary (`filter`, `$notContains`, type/label/maxLength keys), and `secret`
   stays out of inline edit.
@@ -753,7 +770,10 @@ The v17 line bundles four Console refreshes, landing on the pin
   operator-facing reason; the sharing-rule dialog becomes usable (i18n, a picker
   that lists people, permission-aware CTAs); `delegated_admin` is reachable and
   both of its pickers are narrowed; scoped-invitation placement invites straight
-  into a unit and its positions.
+  into a unit and its positions; the flow designer reads approver value sources
+  off the schema, and approver values become **record lookups** (#3508).
+- **Group tenancy posture affordances** (ADR-0105 Phase 1): the org switcher
+  becomes the write context, and records carry org attribution.
 - The API console lists the whole **AI family** and the routes that exist, and
   the tool preview stops linking to a 404.
 
@@ -762,9 +782,13 @@ The v17 line bundles four Console refreshes, landing on the pin
 - **The locale backfill completes: all ten packs reach full key parity.** The
   four highest-traffic namespaces are translated into the eight trailing locales,
   hand-rolled zh/en branches and `pick({en,zh})` clones are retired, and `en`
-  becomes the complete source of truth for grid import and set-password.
+  becomes the complete source of truth for grid import and set-password. The
+  system-settings hub is localized.
 - ESLint runs on PRs across every package, and the last five unchecked packages
   are type-checked — which surfaced two runtime bugs hiding there.
+- Console build dependencies take three major bumps — `maplibre-gl` 5→6 (the
+  `plugin-map` default import is dropped to match), `chalk` 5→6, and `jsdom`
+  29→30 (dev) — relevant if you build the Console from source.
 
 ## Upgrade checklist
 
@@ -804,6 +828,11 @@ The v17 line bundles four Console refreshes, landing on the pin
   device/preference helpers, `client.ai.{nlq,suggest,insights}` and
   `projects.listTemplates()`; repoint marketplace publish to
   `POST /api/v1/packages/publish`; drop `os environments create --template`.
+- **Console hosts:** the same removals land in objectui — drop the
+  `useClientNotifications` device/preference delegates (`@object-ui/react`) and
+  replace the retired `@object-ui/types` Capabilities re-exports with imports
+  from `@objectstack/spec`. If you build the Console from source, note the
+  `maplibre-gl` 5→6 / `chalk` 5→6 major bumps.
 - **Type importers:** replace `ObjectStackProtocol` / `ObjectStackProtocolSchema`
   with the narrowest per-domain slices; drop GraphQL types and any of the removed
   dead spec clusters.

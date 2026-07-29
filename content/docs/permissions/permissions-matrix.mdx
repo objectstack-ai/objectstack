@@ -157,7 +157,7 @@ Sharing rules extend access beyond ownership and the depth axis. The declarative
 | **Criteria-Based** | `criteria` | Share records matching a CEL predicate over field values | All opportunities where `record.amount > 100000` are shared with "VP Sales" |
 
 <Callout type="warn">
-**Enforcement status:** only **criteria** rules are enforced today. Declared `owner`-type rules, and rules with `group` / `guest` recipients, are skipped at seed time with a warning (ADR-0049 — never silently advertised as live). See [Sharing Rules](/docs/permissions/sharing-rules#owner-based-sharing-rules).
+**Enforcement status:** every authorable rule and recipient type is enforced. v17 reconciled the surface with the runtime (#1878): `owner`-type rules and `group` / `guest` recipients — previously declared but skipped at seed time — no longer parse; `group` became the enforced `team` and `business_unit` joined the enum. See [Sharing Rules](/docs/permissions/sharing-rules#recipient-types).
 </Callout>
 
 <Callout type="info">

@@ -2,10 +2,10 @@
 name: objectstack-api
 description: >
   Design the server-side API surface that an ObjectStack runtime exposes —
-  REST/GraphQL endpoints, auth providers, realtime channels, error envelopes,
+  REST endpoints, auth providers, realtime channels, error envelopes,
   batch/versioning contracts. Use when the user is adding `*.endpoint.ts`,
   configuring auth providers, defining custom routes, or extending the
-  REST/GraphQL generator. Do not use for: consuming an ObjectStack API from
+  REST generator. Do not use for: consuming an ObjectStack API from
   a client (that is just standard HTTP — no skill needed); the auto-generated
   CRUD endpoints (those follow from objectstack-data); request-side query
   syntax (see objectstack-query). CEL expressions in route guards or auth

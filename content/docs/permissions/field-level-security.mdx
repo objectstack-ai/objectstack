@@ -41,7 +41,7 @@ fields: {
 The client-side ObjectForm / inline grid hides non-editable fields from
 the UI — but that is a **UX layer only**. The SecurityPlugin middleware
 enforces field-level write rules on the server, regardless of how the
-request arrived (REST, GraphQL, raw ObjectQL call).
+request arrived (REST, SDK, raw ObjectQL call).
 
 **On read** — `find` / `findOne` results have non-readable fields
 stripped from every record before the response leaves the engine.

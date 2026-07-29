@@ -13,7 +13,7 @@ for the protocol-method inventory; treat the per-service status columns as
 historical until this page is regenerated.
 </Callout>
 
-The ObjectStack protocol defines **17 kernel services** registered via the `CoreServiceName` enum. Each service maps to a set of protocol methods (57 total), governed by the `ObjectStackProtocol` interface.
+The ObjectStack protocol defines **16 kernel services** registered via the `CoreServiceName` enum (the never-implemented `graphql` entry was removed in v17). Each service maps to a set of protocol methods governed by its per-domain contract (`DataProtocol`, `MetadataProtocol`, ...) — the transitional `ObjectStackProtocol` composition alias was dissolved in v17 (ADR-0076 D9); capability availability comes from the runtime discovery `services` registry.
 
 **Key architecture principle**: The kernel itself only provides **data** and **metadata** (framework). Everything else — including **auth** and **automation** — is delivered by **plugins**. The current `@objectstack/objectql` package is an example kernel implementation to get the basic API running; production kernels will be rebuilt as new plugins.
 
@@ -42,7 +42,7 @@ The ObjectStack protocol defines **17 kernel services** registered via the `Core
 ├─────────────────────────────────────────────────────────┤
 │                    Plugin Layer                           │
 │  All other services: auth, automation, workflow, ui,     │
-│  realtime, notification, ai, i18n, graphql, search,     │
+│  realtime, notification, ai, i18n, search,              │
 │  file-storage, cache, queue, job                         │
 │                                                          │
 │  Discovery API reports: enabled/unavailable/degraded     │
@@ -72,7 +72,6 @@ The ObjectStack protocol defines **17 kernel services** registered via the `Core
 | 14 | **cache** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-cache` |
 | 15 | **queue** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-queue` |
 | 16 | **job** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-job` |
-| 17 | **graphql** | `optional` | — | ❌ Plugin Required | TBD plugin |
 
 <Callout type="warn">
 **Criticality Levels**
@@ -282,7 +281,7 @@ The i18n service is a **core built-in service** with automatic in-memory fallbac
 // Production (overrides built-in fallback)
 kernel.use(new I18nServicePlugin({ defaultLocale: 'en', localesDir: './i18n' }));
 
-// Development (automatic — DevPlugin registers i18n stub for all 17 core services)
+// Development (automatic — DevPlugin registers i18n stub for all 16 core services)
 kernel.use(new DevPlugin());
 
 // No plugin required — kernel auto-injects in-memory fallback if none registered
@@ -331,9 +330,9 @@ AppPlugin will:
 
 ---
 
-## 12–17. Infrastructure Services
+## 12–16. Infrastructure Services
 
-`cache`, `queue`, and `job` are `core` services: like `i18n`, the kernel auto-injects an in-memory fallback when no plugin registers them (see `CORE_FALLBACK_FACTORIES` in `packages/core/src/fallbacks/`). The `optional` services (`file-storage`, `search`, `graphql`) stay disabled until a plugin provides them.
+`cache`, `queue`, and `job` are `core` services: like `i18n`, the kernel auto-injects an in-memory fallback when no plugin registers them (see `CORE_FALLBACK_FACTORIES` in `packages/core/src/fallbacks/`). The `optional` services (`file-storage`, `search`) stay disabled until a plugin provides them.
 
 | Service | Description |
 |:--------|:------------|
@@ -342,7 +341,6 @@ AppPlugin will:
 | **cache** | General-purpose cache. In-memory fallback; Redis via `@objectstack/service-cache`. |
 | **queue** | Message queue. In-memory fallback; BullMQ / Redis via `@objectstack/service-queue`. |
 | **job** | Scheduled task execution. In-memory fallback; cron-based, concurrency control. |
-| **graphql** | Auto-generate GraphQL schema from Object metadata. |
 
 ---
 
@@ -373,8 +371,7 @@ AppPlugin will:
 |:-------|:------------|
 | **plugin-realtime** | WebSocket / SSE real-time push |
 | **plugin-notification** | Notification engine |
-| **plugin-ai** | NLQ, chat, suggestions, insights |
-| **plugin-graphql** | GraphQL API endpoint |
+| **plugin-ai** | Chat, completion, models, conversations (`service-ai`, Cloud/EE) |
 | **plugin-search** | Full-text search |
 | **plugin-job** | Scheduled tasks |
 | **plugin-queue** | Message queue |

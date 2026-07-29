@@ -562,10 +562,11 @@ Delete returns a `DeleteDataResponse`: the `object` name, the record `id`, and a
 ```
 
 <Callout type="warn">
-`enable.trash` exists as an object flag, but there is currently **no soft-delete /
-recycle-bin runtime** (ADR-0049): `DELETE` performs a hard delete and returns the
-`{ object, id, success }` shape above. Records are removed permanently — there are no
-`deleted_at` / `deleted_by` fields and no restore semantics.
+There is **no soft-delete / recycle-bin runtime**: `DELETE` performs a hard delete and
+returns the `{ object, id, success }` shape above. Records are removed permanently —
+there are no `deleted_at` / `deleted_by` fields and no restore semantics. The
+`enable.trash` flag that once promised this was removed in v17 (#2377, ADR-0049
+enforce-or-remove): authoring it is now a parse error rather than a silent no-op.
 </Callout>
 
 **Constraint Violations:**
