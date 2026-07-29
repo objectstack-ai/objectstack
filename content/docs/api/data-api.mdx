@@ -126,7 +126,16 @@ Batch update multiple records.
 
 Batch delete records by ID list.
 
-**Body**: `{ ids: ["1", "2", "3"] }`
+**Body**: `{ "ids": ["1", "2", "3"], "options": { "atomic": true } }` — `options` is
+the same `BatchOptions` bag `/batch` takes. The body is validated against the
+contract and unknown keys are dropped: the id list is the *only* thing that
+selects rows, so no body key can widen the delete into a filter.
+
+**Response**: `BatchUpdateResponse` — one `results` entry per id. Records are
+deleted one at a time by primary key, so each honours `deleteBehavior`
+(`cascade` / `set_null` / `restrict`) on relations pointing at it. `atomic`
+(default) stops the run at the first failure; `atomic: false` with
+`continueOnError: true` processes the remaining ids and reports the failures.
 
 ---
 

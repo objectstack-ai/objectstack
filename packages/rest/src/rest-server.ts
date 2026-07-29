@@ -6849,15 +6849,40 @@ export class RestServer {
                         if (this.enforceAuth(req, res, context)) return;
                         // [#3391] bulk ∧ delete — deleteMany requires the `bulk` primitive.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'delete' })) return;
-                        const result = await p.deleteManyData!({
+                        // [#3897] Validate against the spec contract instead of
+                        // splatting the raw body into the protocol request. Zod
+                        // object schemas STRIP unknown keys, which is what makes
+                        // this a security boundary and not just an error message:
+                        // `options` is narrowed to `BatchOptions`, so a body key
+                        // (`options.where`, `options.multi`) can no longer ride
+                        // into the engine's delete options, and a top-level
+                        // `context` can no longer forge the caller's principal on
+                        // a route reachable without auth. The protocol layer
+                        // refuses the same shapes independently (defence in
+                        // depth) — this stops them one hop earlier, with a 400
+                        // the caller can act on.
+                        const { DeleteManyDataRequestSchema } = await import('@objectstack/spec/api');
+                        const parsed = (DeleteManyDataRequestSchema as any).safeParse({
                             object: req.params.object,
-                            ...req.body,
+                            ...(req.body ?? {}),
+                        });
+                        if (!parsed.success) {
+                            res.status(400).json({
+                                error: 'Invalid deleteMany request',
+                                code: 'VALIDATION_FAILED',
+                                object: req.params?.object,
+                                issues: parsed.error?.issues,
+                            });
+                            return;
+                        }
+                        const result = await p.deleteManyData!({
+                            ...parsed.data,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
                         res.json(result);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
+                        if (error?.code !== 'VALIDATION_FAILED') logError("[REST] Unhandled error:", error);
                         sendError(res, error, req.params?.object);
                     }
                 },
