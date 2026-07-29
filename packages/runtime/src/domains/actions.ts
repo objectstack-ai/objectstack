@@ -240,6 +240,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 objectName,
                 record,
                 params: reqParams,
+                recordId,
                 ec,
                 envId: _context?.environmentId,
             });

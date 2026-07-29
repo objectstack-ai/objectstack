@@ -320,6 +320,66 @@ export function flowActionUnavailableError(action: any): string {
 }
 
 /**
+ * The params bag a flow action hands the automation engine.
+ *
+ * Three seeds, weakest first — each only fills a key the stronger one left
+ * unset:
+ *  1. the subject record's fields, which populate a flow's named `isInput`
+ *     variables the way the record-change trigger does;
+ *  2. the row id under the keys a flow author actually writes —
+ *     `recordId` and the `<objectName>Id` camelCase alias — the SAME two
+ *     `POST /automation/:name/trigger` seeds (`domains/automation.ts`), plus
+ *     the action's own declared `recordIdParam` (seeded from `recordIdField`,
+ *     default `id`) when it names a third key;
+ *  3. the caller's explicit action params, which win outright.
+ *
+ * Seed 2 is the one #3915's first pass missed, and only a real run caught it:
+ * the params bag carried the record's `id` but never `recordId`, so the CRM's
+ * own `crm_convert_lead` action — which declares `recordIdParam: 'recordId'`
+ * and whose flow reads `{recordId}` — reached the engine and died at its first
+ * node ("1 filter condition(s) resolved to nothing"), while the identical run
+ * through `/automation/crm_convert_lead_wizard/trigger` succeeded. A declared
+ * `recordIdParam` that nothing honours is the `declared ≠ enforced` shape in
+ * miniature.
+ */
+export function seedFlowActionParams(deps: ActionExecutionDeps,
+    action: any,
+    input: {
+        objectName: string;
+        record: Record<string, unknown>;
+        params: Record<string, unknown>;
+        recordId?: string;
+    },
+): Record<string, unknown> {
+    const { objectName, record, params, recordId } = input;
+    const seeded: Record<string, unknown> = { ...record };
+
+    // `recordIdField` names the row field whose value seeds the key (default
+    // `id`) — a declaration may want a non-id value (spec: `token` for
+    // revoke-session). Fall back to the explicit recordId when the record
+    // never loaded (a record-less / new-record invocation).
+    const idField: string = typeof action?.recordIdField === 'string' && action.recordIdField
+        ? action.recordIdField
+        : 'id';
+    const rowId: unknown = record?.[idField] ?? (idField === 'id' ? recordId : undefined);
+
+    if (rowId != null) {
+        const keys = new Set<string>(['recordId']);
+        if (objectName && objectName !== 'global') {
+            keys.add(`${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`);
+        }
+        if (typeof action?.recordIdParam === 'string' && action.recordIdParam) {
+            keys.add(action.recordIdParam);
+        }
+        for (const key of keys) {
+            if (seeded[key] === undefined) seeded[key] = rowId;
+        }
+    }
+
+    return { ...seeded, ...params };
+}
+
+/**
  * Dispatch a `type: 'flow'` action through the automation service.
  *
  * The ONE implementation both headless surfaces share — the MCP `run_action`
@@ -333,6 +393,12 @@ export function flowActionUnavailableError(action: any): string {
  * what lets a `runAs: 'user'` flow enforce RLS as the invoker instead of
  * falling into the user-less UNSCOPED path (#2849, ADR-0049 / #1888; mirrors
  * the record-change trigger's context shape).
+ *
+ * The params bag is seeded exactly like `POST /automation/:name/trigger`
+ * (`domains/automation.ts`) — see {@link seedFlowActionParams}. Invoking a
+ * flow ACTION and triggering its flow directly must land the same run, or
+ * "the actions endpoint dispatches flows for you" is a claim the runtime
+ * doesn't keep.
  */
 export async function dispatchFlowAction(deps: ActionExecutionDeps,
     action: any,
@@ -340,11 +406,12 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         objectName: string;
         record: Record<string, unknown>;
         params: Record<string, unknown>;
+        recordId?: string;
         ec: any;
         envId?: string;
     },
 ): Promise<any> {
-    const { objectName, record, params, ec, envId } = wiring;
+    const { objectName, record, params, recordId, ec, envId } = wiring;
     const automation = await resolveAutomationService(deps, envId);
     if (!automation) {
         throw new Error(flowActionUnavailableError(action));
@@ -358,9 +425,7 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
         ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
         ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
-        // Record fields seed flows' named `isInput` variables (like the
-        // record-change trigger); explicit action params win on clash.
-        params: { ...record, ...params },
+        params: seedFlowActionParams(deps, action, { objectName, record, params, recordId }),
     });
     if (result && typeof result === 'object' && 'success' in result && result.success === false) {
         throw new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
@@ -645,7 +710,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 
     // ── flow dispatch ── (shared with the REST /actions route, #3915)
     if (action.type === 'flow') {
-        const result = await dispatchFlowAction(deps, action, { objectName, record, params, ec, envId });
+        const result = await dispatchFlowAction(deps, action, { objectName, record, params, recordId, ec, envId });
         return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
     }
 
