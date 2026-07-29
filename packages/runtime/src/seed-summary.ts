@@ -32,6 +32,13 @@ export interface SeedSourceOutcome {
     /** Rows dropped by validation/reference errors — the silent-loss case. */
     rejected: number;
     /**
+     * Reference FIELDS dropped from rows that were still written — "wrote the
+     * row, lost the link" (framework#3932). A distinct loss from `rejected`:
+     * the row is there, so a row count looks healthy while an association is
+     * silently missing. Surfaced separately so the banner can say so.
+     */
+    droppedRefs?: number;
+    /**
      * The rows were (re)seeded onto a fresh/empty database during rehydrate —
      * the "swap the DB out from under an installed package" self-heal. Surfaced
      * so that event is observable instead of confirmable only by querying the DB.
@@ -91,6 +98,7 @@ export function recordSeedOutcome(ctx: unknown, outcome: SeedSourceOutcome): voi
             existing.updated += outcome.updated;
             existing.skipped += outcome.skipped;
             existing.rejected += outcome.rejected;
+            existing.droppedRefs = (existing.droppedRefs ?? 0) + (outcome.droppedRefs ?? 0);
             existing.healed = existing.healed || outcome.healed;
             existing.emptyInstall = existing.emptyInstall || outcome.emptyInstall;
         } else {

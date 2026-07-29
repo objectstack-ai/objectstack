@@ -95,9 +95,19 @@ export type SeedImportMode = z.infer<typeof SeedMode>;
  * strings, bigints, buffers, and null" (silently masked on an always-empty
  * `:memory:` DB, fatal-looking on a persistent one). Constrain those fields to
  * `string | null` at compile time; every other field stays `unknown`.
+ *
+ * A `multiple: true` lookup is the one exception: it stores an ARRAY of ids, so
+ * it is seeded from an ARRAY of natural keys — one per element (framework#3911).
+ * A lone string stays legal there because the loader accepts it as one-element
+ * shorthand for the array shape the field stores. `master_detail` is inherently
+ * single-valued and so is never widened.
  */
 type SeedFieldValue<TFieldDef> =
-  TFieldDef extends { type: 'lookup' | 'master_detail' } ? string | null : unknown;
+  TFieldDef extends { type: 'lookup' | 'master_detail' }
+    ? TFieldDef extends { multiple: true }
+      ? string | string[] | null
+      : string | null
+    : unknown;
 
 /** Shape of a single seed record, derived from the object's field definitions. */
 type SeedRecord<TFields> = {

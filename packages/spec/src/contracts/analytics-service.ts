@@ -395,6 +395,32 @@ export interface StrategyContext {
     coerceTemporalFilterValue?(objectName: string, fieldName: string, value: unknown): unknown;
 
     /**
+     * The companion of {@link StrategyContext.coerceTemporalFilterValue} for the
+     * LEFT side of the same comparison: given the SQL the strategy was going to
+     * emit for the column (an already-quoted, possibly alias-qualified reference),
+     * return the SQL it must emit instead so the column reads in the same storage
+     * form the coerced comparand is in.
+     *
+     * Why coercing the value alone is not enough: a SQLite `Field.datetime` column
+     * is MIXED-form in practice. A JS `Date` binds as an INTEGER epoch, but a REST
+     * / JSON write carries an ISO string (JSON has no `Date`) and a `NOW()` default
+     * — including the platform's own `created_at` / `updated_at` stamps — lands as
+     * ISO TEXT. Coercing the comparand to epoch ms therefore fixes the INTEGER rows
+     * and breaks the TEXT ones, which is why a dashboard `dateRange: last_30_days`
+     * still read 0 while the rows existed (#3912). The driver answers with an
+     * expression that normalises whatever is stored, so both halves match.
+     *
+     * Everything else — `Field.date`, native-timestamp dialects, non-temporal
+     * columns — gets `columnSql` back verbatim, and when the hook is absent the
+     * strategy emits the bare column exactly as before, so it is purely additive.
+     *
+     * @param objectName Logical object / table backing the cube.
+     * @param fieldName  Bare column name the filter targets.
+     * @param columnSql  The SQL reference the strategy resolved for that column.
+     */
+    coerceTemporalFilterColumn?(objectName: string, fieldName: string, columnSql: string): string;
+
+    /**
      * ADR-0062 D6 — is `objectName` a federated (external-datasource) object?
      *
      * The `NativeSQLStrategy` compiles its own `FROM "<object>"` and column

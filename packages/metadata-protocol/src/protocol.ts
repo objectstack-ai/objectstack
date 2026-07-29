@@ -3805,13 +3805,92 @@ export class ObjectStackProtocolImplementation implements
         throw new Error('triggerAutomation requires plugin-automation service. Install and register a plugin that provides the "automation" service.');
     }
 
-    async deleteManyData(request: DeleteManyDataRequest): Promise<any> {
-        this.assertObjectRegistered(request.object); // [#3770]
-        // This expects deleting by IDs.
-        return this.engine.delete(request.object, {
-            where: { id: { $in: request.ids } },
-            ...request.options
-        });
+    /**
+     * Bulk delete by id — the `POST /data/:object/deleteMany` ingress.
+     *
+     * [#3897] This used to build `{ where: { id: { $in: ids } } }` and then
+     * spread `...request.options` OVER it. `options` is caller-supplied (the
+     * REST route splats the whole request body into the protocol request), so
+     * a body key replaced the predicate the endpoint is named after:
+     *
+     *   {"ids":["a"],"options":{"multi":true,"where":{}}}
+     *
+     * reached `engine.delete` as an unscoped bulk delete — widening "delete
+     * these 3 records" into "delete everything this caller is allowed to
+     * delete" (RLS/sharing middleware still composes onto the AST, so the blast
+     * radius is the caller's visible set, not the whole table). The same spread
+     * could smuggle in `context`, i.e. a forged principal on any deployment
+     * where the route is reachable without auth.
+     *
+     * The fix is structural rather than a re-ordered spread: caller `options`
+     * is a `BatchOptions` bag (`atomic` / `returnRecords` /
+     * `continueOnError` / `validateOnly`) and carries NOTHING `engine.delete`
+     * consumes, so it is never merged into the engine options. The engine call
+     * is built here from the validated id list alone, and each id is deleted by
+     * scalar primary key — the same shape `batchData`'s `delete` case uses.
+     *
+     * Deleting per id (instead of one `$in` bulk delete) also fixes the second
+     * half of #3897 and two silent gaps behind it:
+     *   - the endpoint's happy path never worked at all — `deleteManyData` never
+     *     set `multi`, so a well-formed `{"ids":[…]}` hit engine.ts's
+     *     `'Delete requires an ID or options.multi=true'` throw, and ONLY the
+     *     requests that triggered the override above got through;
+     *   - the bulk branch skips `cascadeDeleteRelations`, so `deleteBehavior`
+     *     (`cascade` / `set_null` / `restrict`) was not honoured for the rows it
+     *     removed;
+     *   - the declared {@link BatchUpdateResponse} contract (per-record results,
+     *     `atomic` / `continueOnError`) was unimplementable from a bulk row
+     *     count. It is now actually delivered.
+     */
+    async deleteManyData(request: DeleteManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
+        const { object, options, context } = request;
+        this.assertObjectRegistered(object); // [#3770]
+
+        // Fail CLOSED on anything that is not a list of scalar ids. A non-scalar
+        // entry (`{"ids":[{"$ne":null}]}`) must never reach `where.id` as an
+        // operator object — that is the same "predicate widening" this endpoint
+        // was just hardened against, one layer down.
+        const isScalarId = (v: unknown) =>
+            (typeof v === 'string' && v.length > 0) || typeof v === 'number' || typeof v === 'bigint';
+        const ids = request.ids as unknown;
+        if (!Array.isArray(ids) || ids.some((id) => !isScalarId(id))) {
+            const err: any = new Error(
+                `deleteMany on '${object}' requires 'ids' to be an array of record ids`,
+            );
+            err.code = 'VALIDATION_FAILED';
+            err.status = 400;
+            throw err;
+        }
+
+        const results: Array<{ id?: string; success: boolean; error?: string }> = [];
+        let succeeded = 0;
+        let failed = 0;
+        const ctxOpt = context !== undefined ? { context } : {};
+
+        for (const id of ids) {
+            try {
+                await this.engine.delete(object, { where: { id }, ...ctxOpt } as any);
+                results.push({ id: String(id), success: true });
+                succeeded++;
+            } catch (err: any) {
+                results.push({ id: String(id), success: false, error: err?.message });
+                failed++;
+                // Same stop semantics as `batchData`: `atomic` aborts the rest on
+                // the first failure, and without `continueOnError` a failure ends
+                // the run rather than silently ploughing on.
+                if (options?.atomic) break;
+                if (!options?.continueOnError) break;
+            }
+        }
+
+        return {
+            success: failed === 0,
+            operation: 'delete',
+            total: ids.length,
+            succeeded,
+            failed,
+            results,
+        } as BatchUpdateResponse;
     }
 
     /**

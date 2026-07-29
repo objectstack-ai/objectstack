@@ -3,7 +3,12 @@
 import { z } from 'zod';
 import { ViewSchema } from '../ui/view.zod';
 import { DiscoverySchema } from './discovery.zod';
-import { BatchUpdateRequestSchema, BatchUpdateResponseSchema, BatchOptionsSchema } from './batch.zod';
+import {
+  BatchUpdateRequestSchema,
+  BatchUpdateResponseSchema,
+  UpdateManyRequestSchema,
+  DeleteManyRequestSchema,
+} from './batch.zod';
 import { MetadataCacheRequestSchema, MetadataCacheResponseSchema } from './http-cache.zod';
 import { QuerySchema } from '../data/query.zod';
 import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
@@ -516,14 +521,16 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
 
 /**
  * Update Many Data Request
+ *
+ * [#3939] The wire body IS {@link UpdateManyRequestSchema} — one Zod source per
+ * contract (Prime Directive #7). This adds only `object`, which the REST route
+ * takes from the URL path and never from the body (#3933). The two used to be
+ * hand-maintained copies that had already drifted apart: the batch.zod one
+ * accepted `{}` rows, this one required `id` + `data`, and only this one was
+ * ever enforced.
  */
-export const UpdateManyDataRequestSchema = lazySchema(() => z.object({
+export const UpdateManyDataRequestSchema = lazySchema(() => UpdateManyRequestSchema.extend({
   object: z.string().describe('Object name'),
-  records: z.array(z.object({
-    id: z.string().describe('Record ID'),
-    data: z.record(z.string(), z.unknown()).describe('Fields to update'),
-  })).describe('Array of updates'),
-  options: BatchOptionsSchema.optional().describe('Update options'),
 }));
 
 /**
@@ -534,11 +541,13 @@ export const UpdateManyDataResponseSchema = lazySchema(() => BatchUpdateResponse
 
 /**
  * Delete Many Data Request
+ *
+ * [#3939] The wire body IS {@link DeleteManyRequestSchema}; this adds only the
+ * `object` the REST route takes from the URL path (#3933). See
+ * {@link UpdateManyDataRequestSchema} for why the copies were merged.
  */
-export const DeleteManyDataRequestSchema = lazySchema(() => z.object({
+export const DeleteManyDataRequestSchema = lazySchema(() => DeleteManyRequestSchema.extend({
   object: z.string().describe('Object name'),
-  ids: z.array(z.string()).describe('Array of record IDs to delete'),
-  options: BatchOptionsSchema.optional().describe('Delete options'),
 }));
 
 /**

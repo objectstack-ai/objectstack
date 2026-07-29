@@ -90,36 +90,55 @@ describe('User NOW()-default temporal fields — canonical format (SQLite)', () 
 
   // ── Read presentation: mixed storage → one canonical instant ────────────────
 
-  it('an explicit Date (stored as INTEGER epoch ms) reads back as canonical ISO-8601-Z', async () => {
+  it('an explicit Date is STORED canonical, not just presented canonical (#3912)', async () => {
     const when = new Date('2026-03-20T12:34:56.789Z');
     await driver.create('event', { id: 'e3', label: 'C', starts_at: when }, { bypassTenantAudit: true });
 
-    // Raw on disk is the INTEGER epoch (better-sqlite3 binds a Date as getTime()).
+    // On disk it used to be the INTEGER epoch (better-sqlite3 binds a Date as
+    // getTime()); `formatInput` now canonicalises the write, so storage and
+    // presentation are the same string. That equality is the whole point — it is
+    // what lets a window filter and an ORDER BY read the column directly.
     const rawRow = await raw('event').where('id', 'e3').first();
-    expect(typeof rawRow.starts_at).toBe('number');
-    expect(rawRow.starts_at).toBe(when.getTime());
+    expect(typeof rawRow.starts_at).toBe('string');
+    expect(rawRow.starts_at).toBe('2026-03-20T12:34:56.789Z');
 
-    // …but formatOutput presents the canonical instant.
     const row: any = await driver.findOne('event', 'e3', { bypassTenantAudit: true });
-    expect(typeof row.starts_at).toBe('string');
-    expect(row.starts_at).toBe('2026-03-20T12:34:56.789Z');
+    expect(row.starts_at).toBe(rawRow.starts_at);
   });
 
-  it('CONSISTENT PRESENTATION: an explicit-Date row and a defaulted row both read back as ISO-Z, despite genuinely mixed on-disk storage', async () => {
+  it('CONSISTENT STORAGE: an explicit-Date row and a defaulted row land in the SAME form (#3912)', async () => {
     await driver.create('event', { id: 'explicit', label: 'X', starts_at: new Date('2026-01-02T03:04:05.006Z') }, { bypassTenantAudit: true });
     await driver.create('event', { id: 'defaulted', label: 'Y' }, { bypassTenantAudit: true }); // omitted → DDL default
 
-    // On disk: one INTEGER, one TEXT — exactly the mixed storage the fix targets.
+    // This assertion is the inverse of the one it replaces. The two write paths
+    // used to produce INTEGER and TEXT in one column — the mixed storage that
+    // broke every window filter (#3912) and still mis-orders ORDER BY (#3928).
+    // `formatInput` and `nowColumnDefault` now agree on one shape.
     const rawRows = await raw('event').whereIn('id', ['explicit', 'defaulted']).select('id', 'starts_at');
-    const onDiskTypes = new Set(rawRows.map((r: any) => typeof r.starts_at));
-    expect(onDiskTypes).toEqual(new Set(['number', 'string']));
+    expect(new Set(rawRows.map((r: any) => typeof r.starts_at))).toEqual(new Set(['string']));
+    for (const r of rawRows as any[]) expect(r.starts_at).toMatch(ISO_Z);
 
-    // On read: uniform canonical ISO-Z, both parse to a real instant.
+    // Lexicographic order is chronological order — what fixed-width UTC buys.
+    const sorted = [...rawRows].sort((a: any, b: any) => String(a.starts_at).localeCompare(String(b.starts_at)));
+    expect(sorted.map((r: any) => r.id)).toEqual(['explicit', 'defaulted']);
+
     for (const id of ['explicit', 'defaulted']) {
       const row: any = await driver.findOne('event', id, { bypassTenantAudit: true });
       expect(row.starts_at).toMatch(ISO_Z);
       expect(Number.isNaN(new Date(row.starts_at).getTime())).toBe(false);
     }
+  });
+
+  it('still repairs a LEGACY epoch row on read (un-migrated database)', async () => {
+    // Rows written by a pre-#3912 build are INTEGER epoch ms. The read-side
+    // repair that presented them canonically has not gone anywhere — a database
+    // whose backfill has not run must keep reading correctly.
+    await raw('event').insert({ id: 'legacy', label: 'L', starts_at: Date.parse('2026-03-20T12:34:56.789Z') });
+    const rawRow = await raw('event').where('id', 'legacy').first();
+    expect(typeof rawRow.starts_at).toBe('number');
+
+    const row: any = await driver.findOne('event', 'legacy', { bypassTenantAudit: true });
+    expect(row.starts_at).toBe('2026-03-20T12:34:56.789Z');
   });
 
   it('an explicit ISO-8601-Z string is preserved (idempotent) on read', async () => {

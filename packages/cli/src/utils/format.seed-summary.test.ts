@@ -47,6 +47,28 @@ describe('printServerReady seed summary (#3415/#3430)', () => {
     expect(lines.some((l) => l.includes('OS_LOG_LEVEL=info'))).toBe(true);
   });
 
+  it('screams about lost links even when every row landed (#3932)', () => {
+    // The "wrote the row, lost the link" case: nothing rejected, the row counts
+    // look perfect, an association is silently missing. This line used to read
+    // `showcase 42 rows` — clean, and wrong.
+    printServerReady({ ...base, seeds: [s({ source: 'showcase', inserted: 42, droppedRefs: 3 })] });
+    expect(seedLines()).toHaveLength(1);
+    expect(seedLines()[0]).toContain('showcase 42 ok / 3 lost links ⚠');
+    expect(lines.some((l) => l.includes('OS_LOG_LEVEL=info'))).toBe(true);
+  });
+
+  it('reports rejected records and lost links together, singular-aware', () => {
+    printServerReady({ ...base, seeds: [s({ source: 'showcase', inserted: 20, rejected: 1, droppedRefs: 1 })] });
+    expect(seedLines()[0]).toContain('showcase 20 ok / 1 error / 1 lost link ⚠');
+  });
+
+  it('stays quiet when no reference was dropped', () => {
+    printServerReady({ ...base, seeds: [s({ source: 'showcase', inserted: 42, droppedRefs: 0 })] });
+    expect(seedLines()[0]).toContain('showcase 42 rows');
+    expect(seedLines()[0]).not.toContain('lost link');
+    expect(seedLines()[0]).not.toContain('⚠');
+  });
+
   it('labels a marketplace package and marks a fresh-DB heal', () => {
     printServerReady({
       ...base,

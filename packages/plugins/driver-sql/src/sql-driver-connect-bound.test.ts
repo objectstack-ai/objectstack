@@ -71,7 +71,35 @@ describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
       expect((d as any).knex.client.config.connection).toEqual({
         uri: 'mysql://u:p@host:3306/d',
         connectTimeout: 10_000,
+        // #3942 — mysql2 renders a bound `Date` and parses a returned DATETIME in
+        // `connection.timezone`, which defaults to the HOST's local zone. Pinned
+        // to UTC so the recorded instant cannot depend on which machine wrote it.
+        timezone: 'Z',
       });
+    });
+
+    it('pins MySQL to UTC on both layers, and leaves an explicit choice alone (#3942)', () => {
+      const pinned = make({ client: 'mysql2', connection: { host: 'db', database: 'app' } });
+      expect((pinned as any).knex.client.config.connection.timezone).toBe('Z');
+      // The server side is the other half: `@@session.time_zone` decides how a
+      // zone-naive literal is read for a legacy TIMESTAMP column, and what
+      // CURRENT_TIMESTAMP renders. Measured 8h off on a `+08:00` server.
+      expect(typeof (pinned as any).knex.client.config.pool.afterCreate).toBe('function');
+
+      const explicit = make({
+        client: 'mysql2',
+        connection: { host: 'db', database: 'app', timezone: '+08:00' },
+      });
+      expect((explicit as any).knex.client.config.connection.timezone).toBe('+08:00');
+    });
+
+    it('does not touch the connection timezone on non-MySQL dialects', () => {
+      // Postgres resolves an explicit-offset literal itself and SQLite has no
+      // session zone at all, so neither needs (or should get) the mysql2 knob.
+      for (const client of ['pg', 'better-sqlite3']) {
+        const d = make({ client, connection: { host: 'db', database: 'app', filename: ':memory:' } });
+        expect((d as any).knex.client.config.connection.timezone).toBeUndefined();
+      }
     });
 
     it('adds the timeout to an object connection without disturbing its fields', () => {

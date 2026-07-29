@@ -349,6 +349,50 @@ ObjectStack uses a structured error system with **9 error categories** and **51 
 
 ---
 
+## Action Errors (`/api/v1/actions`)
+
+<Callout type="warn">
+**`/actions` is the one route where a failure is not always a non-2xx.** An
+action that runs and *rejects* is a business outcome, so it is reported inside
+the payload at HTTP 200. Only failures where no handler produced that outcome
+carry a status. Branch on both.
+</Callout>
+
+| What happened | HTTP | Body |
+|:---|:---:|:---|
+| Action ran, returned | **200** | `{ success: true, data: { success: true, data } }` |
+| Action ran, **rejected** (business rule, validation) | **200** | `{ success: true, data: { success: false, error, code?, fields? } }` |
+| No such action registered | **404** | `{ success: false, error: { message, code } }` |
+| Caller lacks `requiredPermissions` | **403** | `{ success: false, error: { message, code } }` |
+| Type has no server dispatch (`url`/`modal`/`form`/`api`), or a param-contract violation | **400** | `{ success: false, error: { message, code } }` |
+| Data engine or automation service unavailable | **503** | `{ success: false, error: { message, code } }` |
+| Handler **crashed** (`TypeError`, driver error, sandbox timeout) | **500** | `{ success: false, error: { message, code } }` |
+
+A rejection and a crash are told apart by the thrown error: a plain
+`throw new Error(msg)`, a sandboxed body's deliberate throw, or a
+`ValidationError` is a rejection; a `TypeError` / `ReferenceError` / a driver's
+own error class is a crash. An error carrying its own `status` is served with
+it.
+
+```typescript
+const res = await fetch(`/api/v1/actions/${object}/${action}`, { /* … */ });
+const json = await res.json();
+
+// BOTH checks are required — neither one alone is sufficient.
+if (!res.ok) throw new Error(json.error?.message);             // never dispatched, or crashed
+if (json.data?.success === false) showToast(json.data.error);  // ran and rejected
+```
+
+Using `@objectstack/client` removes the footgun: `client.actions.invoke()`
+folds both shapes into one result and never throws.
+
+```typescript
+const res = await client.actions.invoke(object, action, { recordId, params });
+if (!res.success) showToast(res.error);
+```
+
+---
+
 ## Error Response Structure
 
 Every error response follows the `EnhancedApiError` schema:
@@ -389,30 +433,49 @@ interface FieldError {
 ## Client-Side Error Handling
 
 <Callout type="warn">
-The `@objectstack/client` SDK's built-in fetch error handling attaches only
-`code`, `category`, `httpStatus`, `retryable`, and `details` to the thrown
-error — not `fieldErrors`, `retryAfter`, or `requestId` directly. If your
-server populates those on the response body, read them from
-`apiError.details` (e.g. `apiError.details?.fieldErrors`) until the client
-surfaces them at the top level.
+The `@objectstack/client` SDK's built-in fetch error handling attaches
+`code`, `category`, `httpStatus`, `retryable`, `details`, and — for validation
+failures — `fields`. It does **not** attach `retryAfter` or `requestId`
+directly; if your server populates those on the response body, read them from
+`apiError.details` until the client surfaces them at the top level.
+
+Two naming details matter here:
+
+- The per-field list is `apiError.fields`, matching the wire (`fields[]`), not
+  the spec contract's `fieldErrors`. Each entry is `{ field, code, message }`.
+  It is left **unset** when the server reported no per-field detail, so
+  `if (apiError.fields)` tests "this failure is field-anchored".
+- `apiError.code` is always the semantic code as a **string**. The numeric HTTP
+  status is on `apiError.httpStatus` and nowhere else. This holds for both wire
+  formats: the flat REST envelope carries the code at the top level, the runtime
+  dispatcher's wrapped envelope carries it in `error.details.code` (its
+  `error.code` is the HTTP status), and the client normalizes both before
+  throwing.
 </Callout>
 
 ### TypeScript Example
 
 ```typescript
-import type { EnhancedApiError } from '@objectstack/spec/api';
+import type { EnhancedApiError, FieldError } from '@objectstack/spec/api';
+
+// The spec type names the per-field list `fieldErrors`; what the client
+// actually attaches at runtime is `fields` (the wire name). Widen the cast
+// until the two names converge.
+type ThrownApiError = EnhancedApiError & { fields?: FieldError[] };
 
 async function handleApiCall() {
   try {
     const result = await client.data.create('task', { title: 'New Task' });
     return result;
   } catch (error) {
-    const apiError = error as EnhancedApiError;
+    const apiError = error as ThrownApiError;
 
     switch (apiError.category) {
       case 'validation':
-        // Show field-level errors to the user
-        apiError.fieldErrors?.forEach(fe => {
+        // Show field-level errors to the user. `fields` is what the client
+        // attaches (the wire name); the spec type calls the same idea
+        // `fieldErrors`.
+        apiError.fields?.forEach(fe => {
           showFieldError(fe.field, fe.message);
         });
         break;

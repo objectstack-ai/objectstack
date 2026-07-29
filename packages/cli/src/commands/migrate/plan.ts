@@ -12,12 +12,27 @@ import {
   createTimer,
   emitJson,
 } from '../../utils/format.js';
-import { bootSchemaStack, renderPlan, summarize } from '../../utils/schema-migrate.js';
+import {
+  bootSchemaStack,
+  renderPlan,
+  renderPendingSchemaWork,
+  summarize,
+  summarizePendingSchemaWork,
+} from '../../utils/schema-migrate.js';
+import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
+import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 
 /**
  * `os migrate plan` — dry-run diff of metadata vs the physical database,
  * categorised safe / needs-confirm / destructive (issue #2186). Never mutates
  * the schema.
+ *
+ * "Never mutates" is enforced rather than merely documented since #3917: the
+ * stack boots with schema DDL deferred and the artifact seed suppressed, so the
+ * boot-time create-table / add-column sync that used to run before this command
+ * printed a single line is now REPORTED as pending work instead of performed.
+ * A database another process is using is reported too — as a warning, not a
+ * refusal, since a plan writes nothing either way.
  */
 export default class MigratePlan extends Command {
   static override description =
@@ -46,9 +61,16 @@ export default class MigratePlan extends Command {
       printStep('Booting schema stack…');
     }
 
+    // Probed before boot so the answer is about somebody else's connections,
+    // not our own pool.
+    const occupancy = await probeMigrationTarget(flags['database-url']);
+    if (occupancy.status === 'busy' && !flags.json) {
+      printWarning(`${describeOccupancy(occupancy)} The plan below is still accurate — nothing is written — but "os migrate apply" will refuse until it is free (or you pass --force).`);
+    }
+
     let stack;
     try {
-      stack = await bootSchemaStack({ databaseUrl: flags['database-url'] });
+      stack = await bootSchemaStack({ databaseUrl: flags['database-url'], deferSchemaDdl: true });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
@@ -64,6 +86,7 @@ export default class MigratePlan extends Command {
       }
 
       const drift = await stack.driver.detectManagedDrift();
+      const pending = stack.pendingSchemaWork;
 
       if (flags.json) {
         await emitJson({
@@ -71,6 +94,10 @@ export default class MigratePlan extends Command {
           managedTables: stack.managedTableCount,
           total: drift.length,
           changes: drift,
+          pending,
+          ...(occupancy.status === 'busy'
+            ? { occupancy: { status: 'busy', signal: occupancy.signal, detail: occupancy.detail } }
+            : {}),
           duration: timer.elapsed(),
         });
         return;
@@ -80,13 +107,15 @@ export default class MigratePlan extends Command {
       printInfo(`Examined ${chalk.white(String(stack.managedTableCount))} managed table(s).`);
       console.log('');
 
-      if (drift.length === 0) {
+      if (drift.length === 0 && pending.length === 0) {
         printSuccess('Physical schema is in sync with metadata — nothing to migrate.');
         console.log('');
         return;
       }
 
+      renderPendingSchemaWork(pending);
       renderPlan(drift);
+      if (pending.length > 0) printInfo(summarizePendingSchemaWork(pending));
       printInfo(summarize(drift));
       console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') +
         chalk.dim(' (add --allow-destructive for drops / tightenings)'));

@@ -126,7 +126,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       criteria_json: {
         label: "Criteria",
-        help: "Which records to share. Leave empty to share every record of the object."
+        help: "Which records to share. Required — a rule must narrow the records it shares, so there is no \"share every record\" setting."
       },
       recipient_type: {
         label: "Recipient Type",

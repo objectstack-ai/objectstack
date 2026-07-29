@@ -10,6 +10,7 @@ import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IMetadataService, II18nService } from '@objectstack/spec/contracts';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
+import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
 import { countServerTiming } from '@objectstack/observability';
 
 /**
@@ -59,10 +60,24 @@ export class AppPlugin implements Plugin {
     private projectContext?: AppPluginProjectContext;
     /** When true, init/start become no-ops — env has no app payload. */
     private readonly empty: boolean = false;
+    /**
+     * Suppress the inline boot seed (#3917). One-shot schema commands
+     * (`os migrate plan` / `os migrate apply`) boot the full plugin set purely
+     * to read metadata, and a boot that writes demo rows into the operator's
+     * live database before they have confirmed anything is the same class of
+     * bug as boot-time DDL. The `seed-replayer` service is still registered —
+     * it only writes when something calls it.
+     */
+    private readonly skipSeedData: boolean;
 
-    constructor(bundle: any, projectContext?: AppPluginProjectContext) {
+    constructor(
+        bundle: any,
+        projectContext?: AppPluginProjectContext,
+        opts: { skipSeedData?: boolean } = {},
+    ) {
         this.bundle = bundle;
         this.projectContext = projectContext;
+        this.skipSeedData = opts.skipSeedData ?? false;
         // Support both direct manifest (legacy) and Stack Definition (nested manifest)
         const sys = bundle?.manifest || bundle;
         const appId = sys?.id || sys?.name;
@@ -637,10 +652,14 @@ export class AppPlugin implements Plugin {
                 for (const action of actions) {
                     const handler = actionBodyRunner(action);
                     if (!handler) continue;
+                    // Object-less actions register under the canonical
+                    // `'global'` key (#3913) — the literal every reader probes
+                    // (`actionHandlerObjectKeys`), since `executeAction` is an
+                    // exact-string Map lookup with no wildcard semantics.
                     const objectKey =
                         typeof action.object === 'string' && action.object.length > 0
                             ? action.object
-                            : 'global';
+                            : GLOBAL_ACTION_OBJECT_KEY;
                     try {
                         ql.registerAction(objectKey, action.name, handler, `app:${appId}`);
                         registered++;
@@ -871,7 +890,11 @@ export class AppPlugin implements Plugin {
              // legacy behaviour: seed immediately at boot so there's
              // always demo data without needing an org insert.
              const multiTenant = resolveMultiOrgEnabled();
-             if (multiTenant) {
+             if (this.skipSeedData) {
+                 // #3917: this boot exists to READ metadata (os migrate
+                 // plan/apply). It must not write to the target database.
+                 ctx.logger.info('[Seeder] skipSeedData — inline seed suppressed; no rows written by this boot');
+             } else if (multiTenant) {
                  ctx.logger.info('[Seeder] multi-tenant mode — skipping inline seed; per-org replay will run on sys_organization insert');
              } else {
              // Inline seed budget: large bundles (e.g. CRM Starter's 10
@@ -893,6 +916,11 @@ export class AppPlugin implements Plugin {
                       });
                       const result = await seedLoader.load(request);
                       const { totalInserted, totalUpdated, totalSkipped, totalErrored } = result.summary;
+                      // "Wrote the row, lost the link" (#3932): a reference field
+                      // dropped from a row that WAS written moves none of the row
+                      // counters, so it needs carrying separately or the banner
+                      // reads clean over a severed association.
+                      const totalRefsDropped = result.summary.totalReferencesDropped ?? 0;
                       // #3415/#3430: stash a per-source outcome on the kernel so
                       // the CLI boot banner can print a Seeds line. The logs below
                       // never reach `os dev` output — info is under the default
@@ -905,6 +933,7 @@ export class AppPlugin implements Plugin {
                           updated: totalUpdated,
                           skipped: totalSkipped,
                           rejected: totalErrored,
+                          droppedRefs: totalRefsDropped,
                       });
                       if (result.success) {
                           ctx.logger.info('[Seeder] Seed loading complete', {
@@ -918,13 +947,20 @@ export class AppPlugin implements Plugin {
                           // invisible (the summary only logged errors.length and
                           // omitted totalErrored). Report the count AND each
                           // actionable reason so broken seeds can't pass silently.
+                          // Dropped reference FIELDS are named separately — the
+                          // old line said "0 dropped record(s)" over a load that
+                          // had severed associations, which is true and useless.
+                          const lostLinks = totalRefsDropped > 0
+                              ? `, ${totalRefsDropped} dropped reference field(s) on written rows,`
+                              : '';
                           ctx.logger.warn(
-                              `[Seeder] Seed loading completed with ${totalErrored} dropped record(s) and ${result.errors.length} error(s) for ${appId}`,
+                              `[Seeder] Seed loading completed with ${totalErrored} dropped record(s)${lostLinks} and ${result.errors.length} error(s) for ${appId}`,
                               {
                                   inserted: totalInserted,
                                   updated: totalUpdated,
                                   skipped: totalSkipped,
                                   errored: totalErrored,
+                                  referencesDropped: totalRefsDropped,
                               },
                           );
                           for (const e of result.errors.slice(0, 20)) {

@@ -1232,6 +1232,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Columnas",
         helpText: "Columnas que mostrar en el informe"
       },
+      order: {
+        label: "Orden",
+        helpText: "Claves de ordenación, la más significativa primero (una dimensión de rows/columns o una medida de values). Las dimensiones de tiempo son cronológicas de forma predeterminada."
+      },
       drilldown: {
         label: "Drilldown",
         helpText: "Click an aggregated row/cell to open the underlying records"

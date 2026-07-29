@@ -704,6 +704,10 @@ export const PipelineCoverageReport = defineReport({
   columns: ['close_date'],       // across axis (ADR-0021 D2) — matrix pivots rows × columns
   values: ['amount_sum'],        // measures placed in the cells
   runtimeFilter: { stage: { $ne: 'closed_lost' } },
+  // Optional ordering, most significant key first. A selected DATE dimension is
+  // already chronological by default — declare `order` only to change that, or
+  // to sort by a measure / a non-date dimension.
+  order: [{ by: 'amount_sum', direction: 'desc' }],
   // drilldown defaults true — click a cell to open the underlying records; set false to disable.
   chart: { type: 'bar', xAxis: 'forecast_category', yAxis: 'amount_sum' },
 });
@@ -719,6 +723,13 @@ export const PipelineCoverageReport = defineReport({
 > put both axes in `rows`. Multi-level grouping on either axis = multiple
 > dimension names in that array. `drilldown` (default `true`) makes cells
 > click-through to the underlying records.
+> **`order`** sorts the result server-side — a list of `{ by, direction }`, most
+> significant key first. `by` must be a `rows`/`columns` dimension or a `values`
+> measure the report actually selects (anything else is an authoring error). A
+> selected date dimension already defaults to ASCENDING, so a month-bucketed
+> matrix reads left-to-right in time with no `order` at all; list the `columns`
+> key first when the across-axis header sequence is what matters. A `joined`
+> report orders per block (`blocks[].order`), never on the container.
 
 ---
 

@@ -318,10 +318,67 @@ audit gives divergent sub-statuses; otherwise the top-level entry covers the who
 } }
 ```
 
+## Empty-state semantics — the sibling gate (#3896)
+
+This ledger asks **"does the property do anything?"** A second, smaller gate asks
+the question it does not: **"what does its EMPTY value mean?"**
+
+`sys_sharing_rule.criteria_json` was live by any standard — parsed, stored, read
+by an evaluator. It was also optional, and its absence evaluated to
+`find(object, { filter: {} })`: every record of the object, granted to the
+recipient. The field description said so out loud — *"leave empty to share every
+record"* — and that sentence sat in the spec being read as the contract, because
+for an agent-authored platform **a field description is not documentation about
+the contract, it is the contract**.
+
+Three properties, same syntactic shape (an optional list or predicate that
+"restricts" something), opposite meanings when empty:
+
+| Property | Empty means |
+|---|---|
+| `object.apiMethods` | `undefined` = unrestricted, **`[]` = deny-all** |
+| `plugin-runtime.allowedSources` | was *"empty = all allowed"* — corrected |
+| sharing `condition` | nothing is shared (#3929) |
+
+Nothing marked which was which. A maintainer knows by memory; a model authoring
+metadata cannot, and guessing wrong is silent and permissive. So the gate scans
+the schema surface for statements declaring an empty state to be permissive, and
+requires each to be classified in `../scripts/liveness/empty-state-registry.mts`:
+
+| `semantics` | Meaning |
+|---|---|
+| `scope` | Selects a range of work (which objects to replicate, which events to replay). Empty = all is correct, often the safe direction. Not an access decision. |
+| `closed` | An access gate whose empty state DENIES — the required posture for new gates. Carries no permissive prose to scan, so it is exempt from the staleness check and exists as the catalogue answer. |
+| `open` | An access gate default-OPEN on purpose. Legitimate — an object with no API whitelist is exposed, because exposure is the CRUD default — but mandatory rationale, since it is the shape that produced #3896. |
+| `output` | Not authorable: a computed projection (an explain trace, a server-resolved effective set). Its empty-state prose describes a result, not a policy. |
+
+`closed` and `open` must cite where the posture is enforced; the path resolves
+like `evidence` above, so a pointer that rots is reported rather than trusted.
+
+**The lesson `apiMethods` already encodes**, and the one worth copying: the empty
+ARRAY is closed, only ABSENCE is open. Collapsing the two produces a *vacuous
+allow-list* — where the one value an author reaches by mistake is also the widest
+grant. Better still is the shape `storage.zod.ts` uses: an explicit
+`mode: 'whitelist'` discriminator plus `.min(1)`, which makes an empty whitelist
+unrepresentable.
+
+```bash
+pnpm --filter @objectstack/spec check:empty-state              # run the gate
+tsx packages/spec/scripts/liveness/check-empty-state.mts --dump  # inventory (seeding aid)
+```
+
+Detection matches the **statement**, not field names. Names would be a guess, and
+this README is blunt about where a guessy check ends up: a permanently-noisy
+check is a check nobody reads. A statement that resolves to no property is
+narrative — a file header explaining a past bug — and is reported as a
+non-failing note.
+
 ## Files & usage
 
 - `<type>.json` — the ledger for a governed metadata type.
 - `../scripts/liveness/check-liveness.mts` — the gate (tsx; imports the registry).
+- `../scripts/liveness/check-empty-state.mts` — the empty-state gate (above);
+  `empty-state-registry.mts` is its source of truth.
 
 ```bash
 pnpm --filter @objectstack/spec check:liveness               # run the gate

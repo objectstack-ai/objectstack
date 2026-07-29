@@ -256,6 +256,15 @@ const memberships = defineSeed(ProjectMembership, {
 // Relational/computed fields (lookup/master_detail/tree/record-map, formula/
 // summary/autonumber) resolve or generate at runtime. `f_master_detail` is the
 // owning Project; `f_lookup` the Account — referenced by their seed externalId.
+//
+// `f_lookups` is the MULTI-VALUE reference case (framework#3911): a
+// `multiple: true` lookup stores an array of ids, so the seed value is an
+// ARRAY of natural keys and each element resolves independently. It is also
+// the regression guard for that resolution — before the fix the array was
+// rejected as a non-string reference and the field vanished from the row,
+// leaving the specimen silently missing one relational type.
+// The multi-value USER field (`f_users`) stays unseeded on purpose: sys_user
+// rows come from sign-up, not seeds — see the note on the object.
 const fieldZoo = defineSeed(FieldZoo, {
   mode: 'upsert',
   externalId: 'name',
@@ -272,7 +281,7 @@ const fieldZoo = defineSeed(FieldZoo, {
       f_date: '2026-06-17', f_datetime: '2026-06-17T14:30:00Z', f_time: '14:30',
       f_boolean: true, f_toggle: true,
       f_select: 'high', f_multiselect: ['red', 'green'], f_radio: 'yes', f_checkboxes: ['email', 'push'], f_tags: ['alpha', 'beta'],
-      f_lookup: 'Northwind', f_master_detail: 'Website Relaunch',
+      f_lookup: 'Northwind', f_lookups: ['Northwind', 'Contoso'], f_master_detail: 'Website Relaunch',
       f_location: { lat: 47.6062, lng: -122.3321 }, f_address: { street: '1 Main St', city: 'Seattle', state: 'WA', postal_code: '98101', country: 'US' },
       f_code: '{\n  "ok": true\n}', f_json: { nested: { k: 'v' }, list: [1, 2, 3] }, f_color: '#2563EB',
       f_rating: 4, f_slider: 60, f_progress: 80,

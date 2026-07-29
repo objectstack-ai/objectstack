@@ -94,8 +94,9 @@ export async function handleSecurityRequest(
     } catch (err: any) {
         // The service throws typed errors carrying their HTTP status:
         // PermissionDeniedError → 403, SuggestionNotFoundError → 404,
-        // SuggestionStateError → 409.
-        const status = typeof err?.statusCode === 'number' ? err.statusCode : 500;
-        return { handled: true, response: deps.error(err?.message ?? 'Security operation failed', status) };
+        // SuggestionStateError → 409. Read via `errorFromThrown` so `status`
+        // counts too, not just `statusCode` — the rest of the codebase's domain
+        // errors use the former (#3867).
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
     }
 }

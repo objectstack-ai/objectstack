@@ -12,7 +12,8 @@
  *
  *  - `POST /actions/:object/:action`              — record-scoped action
  *  - `POST /actions/:object/:action/:recordId`    — record-scoped action with id in URL
- *  - `POST /actions/global/:action`               — wildcard ("*") action
+ *  - `POST /actions/global/:action`               — object-less ("global") action
+ *  - `POST /actions//:action`                     — object-less action, empty segment
  *
  * The route dispatches on the declared action TYPE (#3915), the same way the
  * MCP `run_action` bridge does — `script` through the handler registry,
@@ -20,9 +21,35 @@
  * a spec-faithful REST/SDK caller could not invoke a `type: 'flow'` action at
  * all: it fell through to the registry and came back as
  * `Action '' on object '*' not found`.
+ *
+ * #3913 closed two holes:
+ *  - object-less actions register under `'global'` (AppPlugin +
+ *    ObjectQLPlugin) but the handler fallback probed `'*'`, which nothing
+ *    registers — so a global action was reachable only by spelling `global`
+ *    into the URL, and `POST /actions//:action` never resolved at all;
+ *  - an action that no key carried came back as HTTP 200
+ *    `{success: true, data: {success: false, error: "… not found"}}`, so a
+ *    caller that did not hand-inspect the INNER envelope read it as a success.
+ *    Nothing DISPATCHED there, so it is a 404 now — joining the pre-dispatch
+ *    answers this route already gives a status (403 denied, 400 wrong type,
+ *    503 unavailable). A handler that RAN and rejected still reports in the
+ *    payload, unchanged: that is a business outcome, not a transport error.
+ *
+ * Its follow-up separated a third case out of that payload: an UNEXPECTED
+ * FAULT. A `TypeError` in a handler or a driver blowing up is not an outcome
+ * the action chose to report, and serving it as 200 hid every handler crash
+ * from gateway error rates, retry policy, APM and alerting. Those are 500 now,
+ * told apart by the error's NAME — a plain `Error` (or a sandbox/validation
+ * marker) is a deliberate rejection and keeps the payload; a `TypeError` /
+ * `SqliteError` / driver class is a fault.
+ *
+ * So the route answers on two axes:
+ *   did a handler run?   no  → status (404 / 403 / 400 / 503)
+ *   did it reject or crash?  reject → 200 + payload;  crash → 500
  */
 
 import * as actionExec from '../action-execution.js';
+import { validationFailureDetails } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -43,13 +70,16 @@ export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
  *
  *  - `POST /actions/:object/:action`              — record-scoped action
  *  - `POST /actions/:object/:action/:recordId`    — record-scoped action with id in URL
- *  - `POST /actions/global/:action`               — wildcard ("*") action
+ *  - `POST /actions/global/:action`               — object-less ("global") action
+ *  - `POST /actions//:action`                     — object-less action, empty segment
  *
  * Body shape: `{ recordId?: string, params?: Record<string, unknown> }`.
  * The handler is invoked with an `ActionContext` of:
- *   `{ record, user, engine, params }`
+ *   `{ record, user, session, engine, api, params }`
  * where `engine` exposes the slimmed CRUD surface used by CRM handlers
- * (`insert`, `update`, `delete`, `find`).
+ * (`insert`, `update`, `delete`, `find`) and `api` is the ScopedContext a
+ * sandboxed body reaches through `ctx.api.object(...)`. Both are bound to the
+ * caller's ExecutionContext elevated with `isSystem` (#3914).
  *
  * Dispatch follows the DECLARED action type (#3915):
  *  - `script` (and any action with no resolvable declaration, which is
@@ -59,18 +89,28 @@ export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
  *  - `url` / `modal` / `form` / `api` → 400. They dispatch on `target` in the
  *    client (or at another endpoint entirely) and have no server dispatch
  *    here; saying so beats the registry's `not found`.
+ *
+ * A `flow` action is NOT trusted-elevated: the flow engine receives the
+ * caller's identity and honours `runAs` (ADR-0049). The `isSystem` elevation
+ * above is a script-BODY property only.
  */
 export async function handleActionsRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     if (method.toUpperCase() !== 'POST') {
         return { handled: true, response: deps.error('Method not allowed', 405) };
     }
     const parts = path.split('/').filter(Boolean);
-    if (parts.length < 2) {
+    if (parts.length < 1) {
         return { handled: true, response: deps.error('Path must be /actions/:object/:action', 400) };
     }
-    const objectName = parts[0];
-    const actionName = parts[1];
-    const recordIdFromPath = parts[2];
+    // A single segment is an OBJECT-LESS action (#3913): `POST /actions//log_call`
+    // is what an SDK that has no object to name emits, and `filter(Boolean)`
+    // already ate the empty segment. Route it at the canonical `'global'` key
+    // rather than 400-ing — before this it was the one global-action shape that
+    // could never work, and `/actions/global/log_call` only worked by accident
+    // (the literal path segment happened to match the registration key).
+    const objectName = parts.length > 1 ? parts[0] : actionExec.GLOBAL_ACTION_OBJECT_KEY;
+    const actionName = parts.length > 1 ? parts[1] : parts[0];
+    const recordIdFromPath = parts.length > 1 ? parts[2] : undefined;
 
     // Resolve project scope so the right project kernel's ObjectQL is
     // used (single-environment default when unset), then let the host
@@ -146,13 +186,6 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         return { handled: true, response: deps.error(actionExec.flowActionUnavailableError(actionDef), 503) };
     }
 
-    // Resolve the handler — fall back to wildcard '*' if the object-specific key is missing.
-    // Since engine.executeAction throws when the key is unknown, we probe via the internal
-    // map by attempting the call inside a try/catch and rotating to '*'.
-    const tryExecute = async (obj: string) => {
-        return ql.executeAction(obj, actionName, actionContext);
-    };
-
     const reqBody = body && typeof body === 'object' ? body : {};
     const recordId = recordIdFromPath ?? reqBody.recordId;
     const reqParams = (reqBody.params && typeof reqBody.params === 'object') ? reqBody.params : {};
@@ -167,35 +200,13 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
 
     // Load the record (best-effort) so handlers can rely on `ctx.record`.
     let record: Record<string, unknown> = {};
-    if (recordId && objectName !== 'global') {
+    if (recordId && !actionExec.isObjectLessActionKey(objectName)) {
         try {
             const got = await actionExec.callData(deps, 'get', { object: objectName, id: recordId }, _context.dataDriver, _context.environmentId, _context.executionContext);
             if (got?.record) record = got.record;
         } catch { /* record may not exist for new-record actions; pass empty */ }
     }
     if (record && (record as any).id == null && recordId) (record as any).id = recordId;
-
-    // Slim engine facade matching the ActionContext.engine shape used by CRM
-    // handlers. ⚠️ TRUSTED — context-less, RLS/FLS-bypassing by design; see
-    // buildActionEngineFacade for the full security-model rationale (#2849).
-    const engineFacade = {
-        async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-            const res = await ql.insert(object, data);
-            const id = (res && (res as any).id) ?? (data as any).id;
-            return { id };
-        },
-        async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-            await ql.update(object, data, { where: { id } });
-        },
-        async delete(object: string, id: string): Promise<void> {
-            await ql.delete(object, { where: { id } });
-        },
-        async find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-            const opts = query && Object.keys(query).length ? { where: query } : undefined;
-            const rows = await ql.find(object, opts as any);
-            return Array.isArray(rows) ? rows : ((rows as any)?.value ?? []);
-        },
-    };
 
     // Resolve the caller identity from the request's ExecutionContext — the
     // single source `dispatch()` populates via `resolveExecutionContext`,
@@ -224,7 +235,18 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         record,
         user: userFromAuth,
         session: actionExec.buildActionSession(deps, ec),
-        engine: engineFacade,
+        // Slim engine facade matching the ActionContext.engine shape used by
+        // CRM handlers. ⚠️ TRUSTED — system-elevated, RLS/FLS-bypassing by
+        // design; see buildActionEngineFacade + buildActionExecutionContext
+        // for the full security-model rationale (#2849, #3914).
+        engine: actionExec.buildActionEngineFacade(deps, ql, ec),
+        // [#3914] `ctx.api` — the ScopedContext a body's `ctx.api.object(...)`
+        // resolves to. Absent here, the sandbox synthesized a context-less
+        // facade and every owner-scoped write died FORBIDDEN. `executionContext`
+        // is the same envelope, carried so the sandbox's own last-resort facade
+        // is elevated identically instead of falling back to no identity.
+        api: actionExec.buildActionApi(deps, ql, ec),
+        executionContext: actionExec.buildActionExecutionContext(ec),
         params: { ...reqParams, recordId, objectName },
     };
 
@@ -240,6 +262,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 objectName,
                 record,
                 params: reqParams,
+                recordId,
                 ec,
                 envId: _context?.environmentId,
             });
@@ -247,23 +270,39 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         }
 
         // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.
+        // [#3914] Wording tracks what the body ACTUALLY gets — a system-elevated
+        // context carrying the caller's identity, not a context-less engine.
         console.info(
             `[action-audit] REST action '${objectName}/${actionName}' — body executes TRUSTED ` +
-            `(context-less engine, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
+            `(system-elevated context, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
         );
 
         // ── script/body dispatch ──
-        // Try object-specific first; on "not found" error, fall back to wildcard.
+        // Probe the routed object first, then the object-less keys (#3913):
+        // the canonical `'global'` both writers register under, then the legacy
+        // `'*'`. `executeAction` is an exact-string Map lookup with no wildcard
+        // semantics, so every candidate key has to be tried for real; only its
+        // "not registered" miss rotates, a genuine handler error propagates.
+        let dispatched = false;
         let result: any;
-        try {
-            result = await tryExecute(objectName);
-        } catch (err: any) {
-            const msg = String(err?.message ?? err ?? '');
-            if (/not found/i.test(msg) && objectName !== '*') {
-                result = await tryExecute('*');
-            } else {
-                throw err;
+        for (const obj of actionExec.actionHandlerObjectKeys(objectName)) {
+            try {
+                result = await ql.executeAction(obj, actionName, actionContext);
+                dispatched = true;
+                break;
+            } catch (err: any) {
+                if (!actionExec.isActionNotRegisteredError(err)) throw err;
             }
+        }
+        if (!dispatched) {
+            // No key carried a handler. That is a routing miss, not a server
+            // fault — 404, and named after the ROUTED object rather than
+            // whichever probe happened to run last (the old fallback reported
+            // `on object '*'`, an object the caller never asked for).
+            return {
+                handled: true,
+                response: deps.error(`Action '${actionName}' on object '${objectName}' not found`, 404),
+            };
         }
         return { handled: true, response: deps.success({ success: true, data: result }) };
     } catch (err: any) {
@@ -275,6 +314,96 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         const inner: unknown = err?.innerMessage;
         const clientMsg = (typeof inner === 'string' && inner) ? inner : full;
         if (clientMsg !== full) console.error(`[action ${objectName}/${actionName}] ${full}`);
-        return { handled: true, response: deps.success({ success: false, error: clientMsg }) };
+        // [#3918 follow-up] Carry the structured payload when the failure was a
+        // record validation error. Until the sandbox learned to pass `code` /
+        // `fields` back OUT of the VM, this envelope was the message string and
+        // nothing else — so a form action could only ever raise a toast, never
+        // highlight the field the user actually got wrong, which is the symptom
+        // the original report was about.
+        //
+        // The HTTP status stays 200 and `success: false` remains the failure
+        // signal. `/actions` has always reported business failure in the payload
+        // (an action that "fails" is a normal outcome, not a transport error) and
+        // every existing caller branches on `data.success`; turning this into a
+        // 4xx would be a wire-contract break in exchange for a strictly additive
+        // fix.
+        //
+        // [#3913] That reasoning covers a handler that RAN and rejected — it
+        // does NOT cover a route that never dispatched at all. An unregistered
+        // action has no business outcome to report, so it exits above as a 404,
+        // alongside the pre-dispatch gates this route already answers with a
+        // status (403 denied, 400 wrong type, 503 unavailable). The line is
+        // "did a handler run": below it, the payload; above it, the status.
+        const code: unknown = err?.code;
+        const fields: unknown = err?.fields;
+
+        // An error that NAMES its own HTTP status is asking to be served with
+        // it — a plugin's `FORBIDDEN` (status 403), a domain error from the
+        // protocol layer. Honour that first: burying an explicit 403 in a 200
+        // payload discards the one thing the thrower was unambiguous about.
+        // Safe against #3937's cases by construction — a record
+        // `ValidationError` deliberately carries no `.status` (see
+        // `validation-failure.ts`), so it never reaches this branch.
+        if (typeof err?.status === 'number' || typeof err?.statusCode === 'number') {
+            return { handled: true, response: deps.errorFromThrown(err, 500) };
+        }
+
+        // [#3913 follow-up] …and it does not cover an UNEXPECTED FAULT either.
+        // "A failed action is a normal outcome" is a statement about the action
+        // REJECTING — a business rule saying no. A `TypeError` in a handler, a
+        // driver that blew up: those are not outcomes the action chose to
+        // report, they are the server failing to produce one. Reporting them as
+        // 200 makes them invisible to every layer that exists to catch server
+        // faults — gateway error rates, retry/circuit-breaker policy, APM
+        // auto-capture, alerting — so "customer action bodies are throwing" has
+        // no signal short of body-parsing at every hop.
+        //
+        // Told apart by the error's NAME, the same signal `@objectstack/rest`
+        // already uses on this exact distinction ("non-default names
+        // (`TypeError: …`) […] signal a genuine script bug rather than a
+        // deliberately thrown business rule"):
+        //
+        //   name === 'Error'        a deliberate `throw new Error(msg)` — the
+        //                           shape a registered handler uses to reject.
+        //   innerMessage present    the sandbox's mark for "user code threw
+        //                           this deliberately" (SandboxError).
+        //   code / fields present   a structured domain failure — the
+        //                           ValidationError shape #3937 carries out.
+        //   a ValidationError       matched by `validationFailureDetails`, the
+        //                           same predicate the dispatcher's error exits
+        //                           use, so one whose `fields` were stripped in
+        //                           transit is still recognised by NAME alone.
+        //   name absent             an unrecognisable throw; NOT confidently a
+        //                           fault, so it keeps the status quo.
+        //   any other name          TypeError / ReferenceError / SqliteError /
+        //                           a driver's own class ⇒ a fault.
+        //
+        // Deliberately the narrow direction: this only moves what it is sure
+        // about, and everything it is unsure about keeps the 200 it has today.
+        // `errorFromThrown` is the same exit every other domain catch has used
+        // since #3925, and an error carrying its own `.status` still wins there
+        // so a hand-thrown 4xx keeps it.
+        const name: unknown = err?.name;
+        const unexpectedFault =
+            typeof name === 'string'
+            && name !== 'Error'
+            && !(typeof inner === 'string' && inner)
+            && !(typeof code === 'string' && code)
+            && !Array.isArray(fields)
+            && !validationFailureDetails(err);
+        if (unexpectedFault) {
+            console.error(`[action ${objectName}/${actionName}] unexpected fault (${name}): ${full}`);
+            return { handled: true, response: deps.errorFromThrown(err, 500) };
+        }
+
+        return {
+            handled: true,
+            response: deps.success({
+                success: false,
+                error: clientMsg,
+                ...(typeof code === 'string' && code ? { code } : {}),
+                ...(Array.isArray(fields) ? { fields } : {}),
+            }),
+        };
     }
 }

@@ -76,6 +76,25 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
  * not permitted …" — trips the `'<obj>' … not` substring check and
  * returns a misleading 404.
  */
+/**
+ * Zod issues → the data surface's `fields[]` validation envelope
+ * (`{ field, code, message }`, docs/api/wire-format §7).
+ *
+ * A schema `.parse()` at a route ingress must report failures in the SAME shape
+ * a validator-thrown `VALIDATION_FAILED` does through {@link mapDataError}
+ * (#3918) — otherwise a client keying on `fields` has to learn a second shape
+ * per route, and `code: 'VALIDATION_FAILED'` stops meaning one thing on the
+ * wire.
+ */
+export function zodIssuesToFields(issues: unknown): Array<{ field: string; code: string; message: string }> {
+    if (!Array.isArray(issues)) return [];
+    return issues.map((i: any) => ({
+        field: Array.isArray(i?.path) ? i.path.join('.') : String(i?.path ?? ''),
+        code: String(i?.code ?? 'invalid'),
+        message: String(i?.message ?? 'Invalid value'),
+    }));
+}
+
 export function mapDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
     // Referential-integrity restrict on delete → 409 with the dependent count.
     // Surfaced FIRST so the structured fields survive the generic catch-alls.
@@ -1221,6 +1240,39 @@ export class RestServer {
             return true;
         }
         return false;
+    }
+
+    /**
+     * [#3939] Enforce the deployment's batch-size cap on a bulk write route.
+     * Returns `true` when a response was sent (the caller must return).
+     *
+     * The cap was declared in three places in `batch.zod.ts` (`.max(200)` on
+     * `BatchUpdateRequestSchema` / `UpdateManyRequestSchema` /
+     * `DeleteManyRequestSchema`, plus "max 200" in the docs) and enforced in
+     * exactly one route — the cross-object `/batch`, which checked the
+     * CONFIGURED `maxBatchSize` rather than the hardcoded 200. Every per-object
+     * bulk route accepted an unbounded list.
+     *
+     * That went from nuisance to real with #3897: `deleteMany` now deletes per
+     * id by primary key (so `deleteBehavior` cascades run and each row gets its
+     * own result), which turns a 10k-id body into 10k sequential engine
+     * round-trips inside one request instead of one statement.
+     *
+     * The cap is deployment policy — `RestServerConfig.batch.maxBatchSize`
+     * (1..1000, default 200) — so it lives here and the schemas carry shape
+     * only. One place decides it, and it is the place that knows the
+     * deployment's configured value.
+     */
+    private enforceBatchSize(res: any, count: number, max: number, object?: string): boolean {
+        if (count <= max) return false;
+        res.status(400).json({
+            error: `Batch too large: ${count} records (max ${max})`,
+            code: 'BATCH_TOO_LARGE',
+            count,
+            max,
+            ...(object ? { object } : {}),
+        });
+        return true;
     }
 
     /**
@@ -5778,12 +5830,20 @@ export class RestServer {
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
                     const body = req.body ?? {};
+                    // Field-by-field pluck (not a schema parse): the authoring
+                    // spec shape — CEL `condition` + `sharedWith{type,value}` —
+                    // is not the runtime shape this endpoint takes, so unknown
+                    // keys are dropped rather than rejected. [#3896] That made
+                    // a typo (`criterias`) indistinguishable from "no criteria",
+                    // which used to mean "share every record". `defineRule` now
+                    // refuses a match-all criteria, so the typo surfaces as a
+                    // 400 naming the field instead of a silent 201.
                     const input = {
                         name: body.name,
                         label: body.label,
                         description: body.description,
                         object: body.object ?? body.object_name,
-                        criteria: body.criteria,
+                        criteria: body.criteria ?? body.criteria_json,
                         recipientType: body.recipientType ?? body.recipient_type,
                         recipientId: body.recipientId ?? body.recipient_id,
                         accessLevel: body.accessLevel ?? body.access_level,
@@ -6569,6 +6629,10 @@ export class RestServer {
         const isScoped = basePath.includes('/environments/:environmentId');
 
         const operations = batch.operations;
+        // [#3939] One cap, read once, applied by every bulk route below via
+        // {@link enforceBatchSize} — see that method for why it lives here and
+        // not in the Zod schemas.
+        const maxBatch = batch.maxBatchSize ?? 200;
 
         // POST /batch — cross-object transactional batch (issue #1604 / ADR-0034).
         // Runs heterogeneous create/update/delete across objects in ONE engine
@@ -6608,9 +6672,11 @@ export class RestServer {
                         res.status(400).json({ error: 'Cross-object batch is always atomic; use POST /data/:object/batch for non-atomic per-object batches', code: 'BATCH_NOT_ATOMIC' });
                         return;
                     }
-                    const max = batch.maxBatchSize ?? 200;
                     if (ops.length === 0) { res.json({ results: [] }); return; }
-                    if (ops.length > max) { res.status(400).json({ error: `Batch too large (max ${max})` }); return; }
+                    // [#3939] Same check, same envelope as every other bulk route
+                    // now — this one used to be the only one that capped at all,
+                    // and it answered without a `code` for clients to key on.
+                    if (this.enforceBatchSize(res, ops.length, maxBatch)) return;
 
                     // update/delete need a target id — the schema can't express this
                     // conditionally, so surface it as a 400 up front.
@@ -6753,6 +6819,11 @@ export class RestServer {
                         // [#3391] bulk ∧ child(body.operation) — the object must grant
                         // the `bulk` primitive AND the batched write kind.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: req.body?.operation })) return;
+                        // [#3939] `BatchUpdateRequestSchema` declared `max(200)`,
+                        // but this route hands the body straight to the protocol
+                        // without validating it — so nothing enforced the bound.
+                        if (Array.isArray(req.body?.records)
+                            && this.enforceBatchSize(res, req.body.records.length, maxBatch, req.params?.object)) return;
                         const result = await p.batchData!({
                             object: req.params.object,
                             request: req.body,
@@ -6785,6 +6856,9 @@ export class RestServer {
                         if (this.enforceAuth(req, res, context)) return;
                         // [#3391] bulk ∧ create — createMany requires the `bulk` primitive.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'create' })) return;
+                        // [#3939] Body IS the records array on this route.
+                        if (Array.isArray(req.body)
+                            && this.enforceBatchSize(res, req.body.length, maxBatch, req.params?.object)) return;
                         const result = await p.createManyData!({
                             object: req.params.object,
                             records: req.body || [],
@@ -6817,15 +6891,41 @@ export class RestServer {
                         if (this.enforceAuth(req, res, context)) return;
                         // [#3391] bulk ∧ update — updateMany requires the `bulk` primitive.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'update' })) return;
-                        const result = await p.updateManyData!({
+                        // [#3933] Validate against the spec contract, and write the
+                        // PATH object last. The body used to be spread over
+                        // `object: req.params.object`, so `{"object":"other", …}`
+                        // moved the write to a different object than the one
+                        // `enforceApiAccess` had just cleared — that gate reads
+                        // `req.params.object`, so `enable.apiEnabled` / `apiMethods`
+                        // (ADR-0049) was enforced on A while B was written. Zod also
+                        // strips unknown keys, which keeps a body `context` from
+                        // becoming the execution context on a deployment where none
+                        // resolves (anonymous-reachable `requireAuth: false`).
+                        const { UpdateManyDataRequestSchema } = await import('@objectstack/spec/api');
+                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse({
+                            ...(req.body ?? {}),
                             object: req.params.object,
-                            ...req.body,
+                        });
+                        if (!parsedUpdate.success) {
+                            res.status(400).json({
+                                error: 'Invalid updateMany request',
+                                code: 'VALIDATION_FAILED',
+                                fields: zodIssuesToFields(parsedUpdate.error?.issues),
+                                object: req.params?.object,
+                            });
+                            return;
+                        }
+                        // [#3939] Cap AFTER the shape check, so a caller gets the
+                        // more specific answer first.
+                        if (this.enforceBatchSize(res, parsedUpdate.data.records.length, maxBatch, req.params?.object)) return;
+                        const result = await p.updateManyData!({
+                            ...parsedUpdate.data,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
                         res.json(result);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
+                        if (error?.code !== 'VALIDATION_FAILED') logError("[REST] Unhandled error:", error);
                         sendError(res, error, req.params?.object);
                     }
                 },
@@ -6849,15 +6949,48 @@ export class RestServer {
                         if (this.enforceAuth(req, res, context)) return;
                         // [#3391] bulk ∧ delete — deleteMany requires the `bulk` primitive.
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'delete' })) return;
-                        const result = await p.deleteManyData!({
+                        // [#3897] Validate against the spec contract instead of
+                        // splatting the raw body into the protocol request. Zod
+                        // object schemas STRIP unknown keys, which is what makes
+                        // this a security boundary and not just an error message:
+                        // `options` is narrowed to `BatchOptions`, so a body key
+                        // (`options.where`, `options.multi`) can no longer ride
+                        // into the engine's delete options, and a top-level
+                        // `context` can no longer forge the caller's principal on
+                        // a route reachable without auth. The protocol layer
+                        // refuses the same shapes independently (defence in
+                        // depth) — this stops them one hop earlier, with a 400
+                        // the caller can act on.
+                        // [#3933] The PATH object is written LAST for the same
+                        // reason: `enforceApiAccess` gates on `req.params.object`,
+                        // so a body `object` would move the delete to an object
+                        // whose exposure policy was never checked.
+                        const { DeleteManyDataRequestSchema } = await import('@objectstack/spec/api');
+                        const parsed = (DeleteManyDataRequestSchema as any).safeParse({
+                            ...(req.body ?? {}),
                             object: req.params.object,
-                            ...req.body,
+                        });
+                        if (!parsed.success) {
+                            res.status(400).json({
+                                error: 'Invalid deleteMany request',
+                                code: 'VALIDATION_FAILED',
+                                fields: zodIssuesToFields(parsed.error?.issues),
+                                object: req.params?.object,
+                            });
+                            return;
+                        }
+                        // [#3939] The cap that matters most: since #3897 this
+                        // route deletes per id, so the list length IS the engine
+                        // round-trip count.
+                        if (this.enforceBatchSize(res, parsed.data.ids.length, maxBatch, req.params?.object)) return;
+                        const result = await p.deleteManyData!({
+                            ...parsed.data,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
                         res.json(result);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
+                        if (error?.code !== 'VALIDATION_FAILED') logError("[REST] Unhandled error:", error);
                         sendError(res, error, req.params?.object);
                     }
                 },

@@ -312,6 +312,38 @@ async function* parseEventStream(res: Response): AsyncIterable<AiStreamChunk> {
   yield* emit(decoder.decode());
 }
 
+/** Best human-readable text for an action failure, whatever shape carried it. */
+function actionErrorMessage(e: any): string {
+  if (typeof e === 'string' && e) return e;
+  if (typeof e?.message === 'string' && e.message) return e.message;
+  return 'Action failed';
+}
+
+/**
+ * Fold a 2xx `POST /api/v1/actions/...` body into the `{ success, data?,
+ * error? }` shape `client.actions.invoke` has always returned.
+ *
+ * `payload` is what `unwrapResponse` produced — the INNER envelope. Two shapes
+ * arrive on a 2xx and a caller must not have to tell them apart:
+ *
+ *  - `{ success: true, data }` — the action ran and returned.
+ *  - `{ success: false, error, code?, fields? }` — the handler RAN and
+ *    rejected. That is a business outcome, so it rides the payload at HTTP
+ *    200 (#3937) and the inner envelope is authoritative.
+ *
+ * The non-2xx case never reaches here: those are DISPATCH failures (404 / 403
+ * / 400 / 503), `fetch` throws on them, and `invoke` catches — this surface
+ * does not throw either way.
+ */
+function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; error?: string } {
+  if (payload && typeof payload === 'object' && 'success' in payload) {
+    return payload.success === false
+      ? { success: false, error: actionErrorMessage(payload.error) }
+      : { success: true, data: payload.data as T };
+  }
+  return { success: true, data: payload as T };
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -2879,16 +2911,25 @@ export class ObjectStackClient {
    *
    * The dispatcher accepts the record id either in the URL or in the body;
    * this client always sends it in the body (`{ recordId, params }`), which
-   * both server shapes honor. The HTTP envelope is
-   * `{ success, data: { success, data | error } }` — the OUTER envelope is
-   * transport success; the INNER `success:false` + `error` is the action
-   * handler's own (business) failure, deliberately not thrown so callers can
-   * surface it as a toast rather than a crash.
+   * both server shapes honor.
+   *
+   * Result shape is `{ success, data | error }` and this surface does NOT
+   * throw — a failed business action is a toast, not a crash.
+   *
+   * Two server answers fold into that one result:
+   *  - a handler that RAN and rejected → HTTP 200 with the inner
+   *    `{success: false, error}` (unchanged — a business outcome is reported
+   *    in the payload, not as a transport error);
+   *  - a request that never DISPATCHED → a real status (404 unregistered, 403
+   *    denied, 400 wrong action type, 503 unavailable) with
+   *    `{success: false, error: {message, code}}`. `fetch` throws on those, so
+   *    `invoke` catches and reports instead of propagating — #3913, where an
+   *    unregistered action came back as a 200 and read as a success.
    */
   actions = {
       /**
        * Invoke a server-registered action on an object.
-       * Falls back to the server's wildcard ('*') handler when no
+       * Falls back to the server's object-less ('global') handler when no
        * object-specific handler is registered.
        */
       invoke: async <T = any>(
@@ -2896,20 +2937,32 @@ export class ObjectStackClient {
           actionName: string,
           opts?: { recordId?: string; params?: Record<string, unknown> },
       ): Promise<{ success: boolean; data?: T; error?: string }> => {
-          const res = await this.fetch(
-              `${this.baseUrl}/api/v1/actions/${encodeURIComponent(objectName)}/${encodeURIComponent(actionName)}`,
-              {
-                  method: 'POST',
-                  body: JSON.stringify({ recordId: opts?.recordId, params: opts?.params ?? {} }),
-              },
-          );
-          return this.unwrapResponse(res) as Promise<{ success: boolean; data?: T; error?: string }>;
+          try {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/actions/${encodeURIComponent(objectName)}/${encodeURIComponent(actionName)}`,
+                  {
+                      method: 'POST',
+                      body: JSON.stringify({ recordId: opts?.recordId, params: opts?.params ?? {} }),
+                  },
+              );
+              return normalizeActionResult<T>(await this.unwrapResponse<any>(res));
+          } catch (err: any) {
+              // [#3913] `fetch` throws on every non-2xx, and a DISPATCH
+              // failure is a non-2xx now (404 unregistered / 403 denied / 400
+              // wrong type / 503 unavailable) — but this surface's contract is
+              // to report, not throw, so it must not start propagating on the
+              // routes that just gained a status. `fetch` has already lifted
+              // the server's human-readable message onto `err.message` (with
+              // `err.code` / `err.httpStatus` kept for programmatic use), so
+              // the toast text is unchanged.
+              return { success: false, error: actionErrorMessage(err) };
+          }
       },
 
       /**
        * Invoke a global (object-less) action — the server's
-       * `POST /actions/global/:action` shape, dispatched to the wildcard
-       * handler registry.
+       * `POST /actions/global/:action` shape, dispatched to the `'global'`
+       * handler-registry key.
        */
       invokeGlobal: async <T = any>(
           actionName: string,
@@ -4378,20 +4431,55 @@ export class ObjectStackClient {
           ?? errorBody?.error?.message
           ?? (typeof errorBody?.error === 'string' ? errorBody.error : undefined)
           ?? res.statusText;
-        const errorCode = errorBody?.code || errorBody?.error?.code;
+        // Two server envelopes are in play, and they disagree about where the
+        // SEMANTIC code and the per-field list live:
+        //
+        //   @objectstack/rest, flat:
+        //     { error, code: 'VALIDATION_FAILED', fields: [...] }
+        //   runtime dispatcher, wrapped:
+        //     { success: false, error: { message, code: 400,
+        //         details: { code: 'VALIDATION_FAILED', fields: [...] } } }
+        //
+        // Note `error.code` in the WRAPPED form is the HTTP status, not a
+        // semantic code. Reading it straight into `err.code` handed callers the
+        // number 400 where the flat form handed them 'VALIDATION_FAILED', so the
+        // branch our own docs teach —
+        //   `if (err.code === 'VALIDATION_FAILED') err.fields.forEach(…)`
+        // — simply never matched on a dispatcher-served surface. #3918 put the
+        // field list on the wire for those routes; this is what lets a caller
+        // reach it without knowing which surface answered.
+        //
+        // So: `err.code` is always the semantic STRING (the numeric status is on
+        // `err.httpStatus`, where it always was), and `err.fields` is always the
+        // per-field list when the server sent one.
+        const asSemanticCode = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+        const errorCode =
+          asSemanticCode(errorBody?.code)
+          ?? asSemanticCode(errorBody?.error?.details?.code)
+          ?? asSemanticCode(errorBody?.error?.code);
+        const fieldErrors =
+          Array.isArray(errorBody?.fields) ? errorBody.fields
+          : Array.isArray(errorBody?.error?.details?.fields) ? errorBody.error.details.fields
+          : undefined;
         // `.message` is what UIs (e.g. the console's error toast) show to end
         // users verbatim, so keep it to the server's human-readable message —
         // no `[ObjectStack]` branding and no `CODE:` prefix. The code stays
         // available programmatically via `error.code`, and the full response
         // body was already logged above for debugging.
         const error = new Error(errorMessage) as any;
-        
+
         // Attach error details for programmatic access
         error.code = errorCode;
         error.category = errorBody?.category;
         error.httpStatus = res.status;
         error.retryable = errorBody?.retryable;
-        error.details = errorBody?.details || errorBody;
+        // Prefer the wrapped envelope's own `details` over the whole body. The
+        // flat envelope has no top-level `details`, so it keeps falling through
+        // to `errorBody` exactly as before — only the wrapped shape changes,
+        // and only from "the entire response" to the structured object it
+        // actually carries.
+        error.details = errorBody?.details ?? errorBody?.error?.details ?? errorBody;
+        if (fieldErrors) error.fields = fieldErrors;
         
         throw error;
     }

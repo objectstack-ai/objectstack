@@ -148,8 +148,8 @@ writable.
 | `response_code`   | number   | Last HTTP status code received.                                              |
 | `response_body`   | textarea | Truncated to the first 16 KB.                                                |
 | `error`           | textarea | Last transport-level error (DNS, connect, timeout).                         |
-| `created_at`      | datetime | Native TIMESTAMP column — written as a `Date`, not an epoch-ms number.       |
-| `updated_at`      | datetime | Native TIMESTAMP column — written as a `Date`, not an epoch-ms number.       |
+| `created_at`      | datetime | A `Field.datetime` UTC instant — not an epoch-ms number like the columns above. |
+| `updated_at`      | datetime | A `Field.datetime` UTC instant — not an epoch-ms number like the columns above. |
 
 > **Why store full payload?** Receivers may be down for hours; we must
 > retry the *exact* bytes we promised to send. Recomputing payload from

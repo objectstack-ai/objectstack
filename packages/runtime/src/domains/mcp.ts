@@ -122,7 +122,7 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
             ...(grantedScopes ? { toolOptions: { grantedScopes } } : {}),
         });
     } catch (err: any) {
-        return { handled: true, response: deps.error(err?.message ?? 'MCP request failed', 500) };
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
     }
 
     // Convert the transport's buffered Web Response into the dispatcher's

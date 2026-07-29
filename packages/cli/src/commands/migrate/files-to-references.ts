@@ -15,6 +15,8 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
+import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { loadConfig } from '../../utils/config.js';
 
 async function confirm(question: string): Promise<boolean> {
@@ -88,6 +90,7 @@ export default class MigrateFilesToReferences extends Command {
     '$ os migrate files-to-references --apply',
     '$ os migrate files-to-references --apply --yes --json',
     '$ os migrate files-to-references --object product --object article',
+    '$ os migrate files-to-references --apply --force',
   ];
 
   static override flags = {
@@ -101,6 +104,10 @@ export default class MigrateFilesToReferences extends Command {
       default: false,
     }),
     yes: Flags.boolean({ char: 'y', description: 'Skip the --apply confirmation prompt', default: false }),
+    force: Flags.boolean({
+      description: 'Apply even when another process is using the database (SQLite occupancy check)',
+      default: false,
+    }),
     object: Flags.string({
       description: 'Restrict to this object (repeatable; default: every object with a file field)',
       multiple: true,
@@ -123,6 +130,41 @@ export default class MigrateFilesToReferences extends Command {
 
     if (!flags.json) {
       printHeader('Migrate · files-to-references');
+    }
+
+    // Occupancy gate (#3917 follow-up) — this command rewrites ROWS, so a live
+    // writer on the same SQLite file is at least as dangerous here as it is for
+    // `os migrate apply`: both processes would be mutating the same records
+    // with no coordination. Probed before boot (afterwards our own pool is what
+    // the probe finds) and before the confirmation prompt, so an operator is
+    // never asked to confirm something we are about to refuse.
+    const occupancy = await probeMigrationTarget(flags['database-url']);
+    if (occupancy.status === 'busy' && apply && !flags.force) {
+      if (flags.json) {
+        await emitJson({
+          error: 'database_busy',
+          database: occupancy.filename,
+          signal: occupancy.signal,
+          detail: occupancy.detail,
+          hint: OCCUPANCY_HINT,
+        }, 0, { compact: true });
+        this.exit(1);
+        return;
+      }
+      printError(describeOccupancy(occupancy));
+      printWarning(OCCUPANCY_HINT);
+      this.exit(1);
+      return;
+    }
+    if (occupancy.status === 'busy' && !flags.json) {
+      // A dry run writes nothing, so it only ever warns — but it warns, because
+      // the numbers it reports are a moving target while another process writes.
+      printWarning(apply
+        ? `--force: ${describeOccupancy(occupancy)} Converting anyway — the live process may write records mid-scan.`
+        : `${describeOccupancy(occupancy)} The dry run below writes nothing, but its counts may shift while that process is running.`);
+    }
+    if (occupancy.status === 'unknown' && !flags.json) {
+      printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
     }
 
     // Confirmation gate — before boot, since an apply run starts writing as

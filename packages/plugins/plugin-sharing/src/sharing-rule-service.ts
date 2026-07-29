@@ -12,6 +12,7 @@ import type {
 import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
+import { parseCriteria, isMatchAllCriteria, MATCH_ALL_CRITERIA_MESSAGE } from './rule-criteria.js';
 import { TeamGraphService } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
@@ -22,22 +23,6 @@ function uid(prefix: string): string {
   const g: any = globalThis as any;
   if (g.crypto?.randomUUID) return `${prefix}_${g.crypto.randomUUID()}`;
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function parseCriteria(raw: unknown): unknown | undefined {
-  if (raw == null || raw === '') return undefined;
-  if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    if (!trimmed) return undefined;
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      // Treat unparsable strings as opaque — most likely a CEL source
-      // that v1's evaluator doesn't grok yet; rule will match nothing.
-      return undefined;
-    }
-  }
-  return raw;
 }
 
 function rowFromRule(row: any): SharingRuleRow {
@@ -95,6 +80,18 @@ export class SharingRuleService implements ISharingRuleService {
     if (!input.object) throw new Error('VALIDATION_FAILED: object is required');
     if (!input.recipientType) throw new Error('VALIDATION_FAILED: recipientType is required');
     if (!input.recipientId) throw new Error('VALIDATION_FAILED: recipientId is required');
+    // [#3896] `criteria` is as required as the fields above — and for a
+    // sharper reason. Omitting `recipientId` yields a rule that shares with
+    // nobody; omitting `criteria` used to yield one that shares EVERYTHING
+    // (stored as `criteria_json: null`, evaluated as the empty filter `{}`
+    // against SYSTEM_CTX). `SharingRuleSchema` has always forbidden that
+    // shape — "never seeded as a permissive match-all (ADR-0049)" — but this
+    // entry, which `POST {basePath}/sharing/rules` plucks its body into, never
+    // ran the schema, so a missing / null / misspelled (`criterias`) key
+    // sailed through with a 201 and no warning.
+    if (isMatchAllCriteria(input.criteria)) {
+      throw new Error(`VALIDATION_FAILED: ${MATCH_ALL_CRITERIA_MESSAGE}`);
+    }
 
     const orgId = (context as any)?.organizationId ?? (context as any)?.tenantId ?? null;
     const now = new Date().toISOString();
@@ -267,7 +264,26 @@ export class SharingRuleService implements ISharingRuleService {
 
   // ── internals ─────────────────────────────────────────────────────
 
+  /**
+   * [#3896] ADR-0049 backstop, evaluated on EVERY pass rather than only at
+   * authoring time: `defineRule` now rejects a match-all criteria, but rows
+   * predating that gate — or written straight to `sys_sharing_rule` through
+   * the data API (what the Setup UI's create action issues) — are already in
+   * the table. Such a rule matches NOTHING and says so in the log, so the
+   * next reconcile revokes whatever it had granted instead of re-granting the
+   * whole object. Under-sharing loudly beats over-sharing silently.
+   */
+  private isInertMatchAll(rule: SharingRuleRow): boolean {
+    if (!isMatchAllCriteria(rule.criteria)) return false;
+    this.logger?.warn?.(
+      '[sharing-rule] rule has no usable criteria — matching NO records instead of every record (ADR-0049)',
+      { rule: rule.name, object: rule.object_name },
+    );
+    return true;
+  }
+
   private async findMatchingRecords(rule: SharingRuleRow): Promise<string[]> {
+    if (this.isInertMatchAll(rule)) return [];
     const filter = (rule.criteria ?? {}) as any;
     try {
       const rows = await this.engine.find(rule.object_name, {
@@ -284,6 +300,7 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   private async recordMatches(rule: SharingRuleRow, recordId: string): Promise<boolean> {
+    if (this.isInertMatchAll(rule)) return false;
     const filter = { ...((rule.criteria ?? {}) as any), id: recordId };
     try {
       const rows = await this.engine.find(rule.object_name, {

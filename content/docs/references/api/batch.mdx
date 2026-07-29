@@ -30,8 +30,8 @@ Industry alignment: Salesforce Bulk API, Microsoft Dynamics Bulk Operations
 ## TypeScript Usage
 
 ```typescript
-import { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchDroppedFields, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRequest } from '@objectstack/spec/api';
-import type { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchDroppedFields, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRequest } from '@objectstack/spec/api';
+import { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchDroppedFields, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRecord, UpdateManyRequest } from '@objectstack/spec/api';
+import type { BatchConfig, BatchOperationResult, BatchOperationType, BatchOptions, BatchRecord, BatchUpdateRequest, BatchUpdateResponse, CrossObjectBatchDroppedFields, CrossObjectBatchOperation, CrossObjectBatchRequest, CrossObjectBatchResponse, DeleteManyRequest, UpdateManyRecord, UpdateManyRequest } from '@objectstack/spec/api';
 
 // Validate data
 const result = BatchConfig.parse(data);
@@ -114,7 +114,7 @@ const result = BatchConfig.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | ✅ | Type of batch operation |
-| **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to process (max 200 per batch) |
+| **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to process (server caps the count — see batch.maxBatchSize) |
 | **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Batch operation options |
 
 
@@ -198,8 +198,20 @@ A cross-object batch strip event: dropped fields plus the operation index
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **ids** | `string[]` | ✅ | Array of record IDs to delete (max 200) |
+| **ids** | `string[]` | ✅ | Array of record IDs to delete (server caps the count — see batch.maxBatchSize) |
 | **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Delete options |
+
+
+---
+
+## UpdateManyRecord
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Record ID |
+| **data** | `Record<string, any>` | ✅ | Fields to update |
 
 
 ---
@@ -210,7 +222,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to update (max 200 per batch) |
+| **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of records to update (server caps the count — see batch.maxBatchSize) |
 | **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly: boolean }` | optional | Update options |
 
 
