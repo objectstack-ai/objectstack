@@ -188,8 +188,17 @@ export async function resolveSqliteDriver(
     return { driver: wasmDriver, engine: 'sqlite-wasm', label: 'SqliteWasmDriver' };
   }
 
-  // 3. In-memory (mingo) — dev-only last resort. Not real SQL, not persistent.
+  // 3. In-memory (mingo) — dev-only last resort. Not real SQL.
+  //
+  // Durability mirrors the sqlite target this rung is standing in for: the
+  // caller asked for a FILE, so a dev's data still survives a restart; an
+  // ephemeral `:memory:` stays ephemeral. Stated explicitly because the driver
+  // no longer persists by default (#4065 / #815 requirement #1) — the step-down
+  // must not silently downgrade a file-backed dev database to a volatile one.
   const { InMemoryDriver } = await import('@objectstack/driver-memory');
   warn(NATIVE_SQLITE_MEMORY_FALLBACK_WARNING);
-  return { driver: new InMemoryDriver(), engine: 'memory', label: 'InMemoryDriver' };
+  const driver = new InMemoryDriver(
+    isEphemeralFilename(filename) ? { persistence: false } : { persistence: 'file' },
+  );
+  return { driver, engine: 'memory', label: 'InMemoryDriver' };
 }

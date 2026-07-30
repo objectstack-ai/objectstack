@@ -257,8 +257,18 @@ export function createDefaultDatasourceDriverFactory(
       }
 
       // memory
+      //
+      // Ephemeral unless the DEFINITION asks for durability. The driver's own
+      // default is `false` (#815 requirement #1, restored in #4065), and a
+      // datasource that wants its rows to survive a restart declares it —
+      // `config.persistence: 'file' | 'local' | 'auto'` — rather than inheriting
+      // a silent CWD write nobody requested. `persist` is accepted as the same
+      // spelling the sqlite-wasm branch above uses for its durability knob.
       const { InMemoryDriver } = await import('@objectstack/driver-memory');
-      return toHandle(new InMemoryDriver());
+      const memoryPersistence = cfg.persistence ?? persistOverride;
+      return toHandle(
+        new InMemoryDriver({ persistence: memoryPersistence ?? false } as never),
+      );
     },
   };
 }

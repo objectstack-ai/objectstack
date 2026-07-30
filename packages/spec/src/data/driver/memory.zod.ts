@@ -187,37 +187,40 @@ export const MemoryConfigSchema = lazySchema(() => z.object({
   strictMode: z.boolean().default(false).describe('Throw on missing records instead of returning null'),
 
   /**
-   * Persistence configuration.
-   * Defaults to `'auto'` — the memory store automatically detects the environment
-   * and saves/restores data using the best available strategy.
+   * Persistence configuration. **Defaults to `false` — pure in-memory.**
    *
-   * - `'auto'` (default): Auto-detect environment (browser → localStorage, Node.js → file)
+   * Durability is opt-in, per #815's requirement #1 ("默认情况下不启用持久化（纯内存，
+   * 行为不变）"). A driver named "in-memory" that silently wrote to the process CWD
+   * surprised every caller that never asked for it, and made fixed-id fixtures pass
+   * on the first run and fail on every rerun (#4065).
+   *
+   * - `false` (default): No persistence — pure in-memory, data lost on disconnect
+   * - `'auto'`: Auto-detect environment (browser → localStorage, Node.js → file)
    * - `'file'`: Persist to disk file (Node.js only, default path: `.objectstack/data/memory-driver.json`)
    * - `'local'`: Persist to localStorage (Browser only, default key: `objectstack:memory-db`)
    * - `{ type: 'auto', path?: string, key?: string }`: Auto-detect with overrides
    * - `{ type: 'file', path?: string }`: File-system with custom path
    * - `{ type: 'local', key?: string }`: localStorage with custom key
    * - `{ adapter: PersistenceAdapter }`: Custom persistence adapter
-   * - `false`: Disable persistence (pure in-memory, data lost on disconnect)
    *
    * **⚠️ Serverless / Edge environments (Vercel, AWS Lambda, Netlify, etc.):**
-   * Auto mode detects serverless runtimes and disables file persistence to prevent
-   * silent data loss. Set `persistence: false` to opt-in to pure in-memory mode,
-   * or supply a custom adapter (e.g. Upstash Redis, Vercel KV) for durable storage.
+   * `'auto'` detects serverless runtimes and disables file persistence to prevent
+   * silent data loss. Supply a custom adapter (e.g. Upstash Redis, Vercel KV) for
+   * durable storage there.
    *
    * @example
-   * // Auto-detect environment (default)
+   * // Pure memory — the default
    * new InMemoryDriver()
-   * // Node.js
+   * // Node.js, durable across restarts
    * new InMemoryDriver({ persistence: 'file' })
-   * // Browser
+   * // Browser, durable across reloads
    * new InMemoryDriver({ persistence: 'local' })
-   * // Pure memory (no persistence)
-   * new InMemoryDriver({ persistence: false })
+   * // Auto-detect the environment's best strategy
+   * new InMemoryDriver({ persistence: 'auto' })
    * // Custom adapter for serverless
    * new InMemoryDriver({ persistence: { adapter: upstashAdapter } })
    */
-  persistence: MemoryPersistenceConfigSchema.or(z.literal(false)).default('auto').describe('Persistence configuration (defaults to auto-detect)'),
+  persistence: MemoryPersistenceConfigSchema.or(z.literal(false)).default(false).describe('Persistence configuration (opt-in; defaults to pure in-memory)'),
 
   /**
    * Fields to index for faster lookups.

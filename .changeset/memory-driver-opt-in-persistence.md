@@ -1,0 +1,67 @@
+---
+"@objectstack/driver-memory": major
+"@objectstack/spec": major
+"@objectstack/service-datasource": patch
+"@objectstack/plugin-dev": patch
+---
+
+fix(driver-memory,spec): persistence is opt-in again — `new InMemoryDriver()` is pure in-memory (#4065)
+
+`InMemoryDriverConfig.persistence` defaulted to `'auto'`, and in Node.js `'auto'`
+means **file**. So a bare `new InMemoryDriver()` — the shape every caller in this
+repo used — silently wrote `.objectstack/data/memory-driver.json` into the process
+CWD and reloaded it on the next boot. The default is now `false`.
+
+**This restores the accepted design rather than replacing it.** #815, the issue
+that introduced the persistence capability, specified it as opt-in in requirement
+\#1 — "默认情况下不启用持久化（纯内存，行为不变）" — and listed
+`new InMemoryDriver()` under "纯内存" in its own config examples. The `'auto'`
+default was a drift from that spec.
+
+What let the drift survive is worth naming, because it is not "there was no
+test". `MemoryConfigSchema` *did* pin the default, and asserted `'auto'`; the
+driver honoured `'auto'`; so spec and implementation agreed, and the pair looked
+verified. What nothing checked was whether the value they agreed on was the one
+#815 accepted. The driver's own `persistence.test.ts` could not have caught it
+either — every case there passes `persistence` explicitly, so the omitted-value
+path was untested on the implementation side. Both sides are now covered: three
+behavioural tests in `persistence.test.ts` (no CWD write, no cross-instance row
+carry-over, opt-in still persists) and the flipped schema assertion.
+
+**The symptom this fixes.** `packages/runtime/src/datasource-autoconnect.test.ts`
+seeds two rows with fixed ids and asserts the exact set. Run 1 passed and wrote
+the rows to disk; run 2 loaded them back, appended two more, and failed with four
+rows; run N had 2N. CI never saw it — every job is a fresh clone, so every CI run
+is run 1 — but `pnpm test` twice in one working tree could only ever go green
+once. The persisted file's `created_at` values, one pair per run, were the proof.
+
+The blast radius was wider than that one suite: **every** bare
+`new InMemoryDriver()` inherited the default, including
+`createDefaultDatasourceDriverFactory`'s `memory` branch, so any test using a
+`memory` datasource wrote to its package directory. Unit tests should not have
+write side effects on the CWD at all.
+
+**Migrating.** Callers that want durability now ask for it:
+
+```ts
+new InMemoryDriver()                        // pure in-memory (new default)
+new InMemoryDriver({ persistence: 'file' })  // Node.js, durable across restarts
+new InMemoryDriver({ persistence: 'local' }) // browser, durable across reloads
+new InMemoryDriver({ persistence: 'auto' })  // previous default behaviour
+```
+
+The `'auto'` / `'file'` / `'local'` / custom-adapter paths are unchanged; only
+the value used when `persistence` is omitted moved. Two in-tree hosts that
+genuinely wanted durability now state it, rather than inheriting it:
+
+- **`resolveSqliteDriver`'s last-resort rung** (`service-datasource`) mirrors the
+  sqlite target it stands in for — `persistence: 'file'` when the caller asked
+  for a file database, `false` for `:memory:`. A dev whose native and wasm SQLite
+  both failed to load keeps the durability they would have had.
+- **`createDefaultDatasourceDriverFactory`'s `memory` branch** is ephemeral unless
+  the datasource *definition* declares `config.persistence`. Per Prime Directive
+  \#12 that is a contract-level knob on the definition, not a silent host default.
+
+`DevPlugin`'s driver is now explicitly `persistence: false`, matching the cache,
+queue, job, i18n, storage and search stubs it ships beside — it was the one piece
+of that stack that quietly outlived the process.

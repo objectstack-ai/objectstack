@@ -6,6 +6,26 @@ import * as path from 'node:path';
 const TEST_DATA_DIR = path.join('/tmp', 'objectstack-test-persistence');
 const TEST_FILE_PATH = path.join(TEST_DATA_DIR, 'test-db.json');
 
+/**
+ * Run `fn` with the process CWD moved to a scratch dir, then restore it.
+ *
+ * The shorthand forms (`persistence: 'file'` / `'auto'`) deliberately take the
+ * adapter's DEFAULT path, which is `.objectstack/data/memory-driver.json`
+ * *relative to the CWD* — so without this the suite wrote that file into
+ * `packages/plugins/driver-memory/` and the next run loaded it back. A unit
+ * test must not have write side effects on the package directory (#4065).
+ */
+async function inScratchCwd(fn: () => Promise<void>): Promise<void> {
+  const prev = process.cwd();
+  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  process.chdir(TEST_DATA_DIR);
+  try {
+    await fn();
+  } finally {
+    process.chdir(prev);
+  }
+}
+
 describe('InMemoryDriver Persistence', () => {
   beforeEach(() => {
     // Clean up test directory
@@ -52,11 +72,14 @@ describe('InMemoryDriver Persistence', () => {
     });
 
     it('should support shorthand "file" persistence string', async () => {
-      // Use shorthand — just verifies no error is thrown with 'file'
-      const driver = new InMemoryDriver({ persistence: 'file' });
-      await driver.connect();
-      await driver.create('items', { id: '1', name: 'Widget' });
-      await driver.disconnect();
+      // Use shorthand — just verifies no error is thrown with 'file'.
+      // Scratch CWD: the shorthand takes the adapter's default relative path.
+      await inScratchCwd(async () => {
+        const driver = new InMemoryDriver({ persistence: 'file' });
+        await driver.connect();
+        await driver.create('items', { id: '1', name: 'Widget' });
+        await driver.disconnect();
+      });
     });
 
     it('should persist updates and deletes', async () => {
@@ -157,11 +180,15 @@ describe('InMemoryDriver Persistence', () => {
 
   describe('Auto Persistence', () => {
     it('should auto-detect Node.js environment and use file persistence with shorthand', async () => {
-      // In Node.js, 'auto' should select file persistence
-      const driver = new InMemoryDriver({ persistence: 'auto' });
-      await driver.connect();
-      await driver.create('items', { id: '1', name: 'Widget' });
-      await driver.disconnect();
+      // In Node.js, 'auto' should select file persistence.
+      // Scratch CWD: the shorthand takes the adapter's default relative path.
+      await inScratchCwd(async () => {
+        const driver = new InMemoryDriver({ persistence: 'auto' });
+        await driver.connect();
+        await driver.create('items', { id: '1', name: 'Widget' });
+        await driver.disconnect();
+        expect(fs.existsSync(path.join('.objectstack', 'data', 'memory-driver.json'))).toBe(true);
+      });
     });
 
     it('should auto-detect Node.js environment and use file persistence with object config', async () => {
@@ -210,6 +237,53 @@ describe('InMemoryDriver Persistence', () => {
       const items = await driver2.find('items', { object: 'items' });
       expect(items).toHaveLength(3);
       await driver2.disconnect();
+    });
+  });
+
+  // The default is the whole bug in #4065, and nothing pinned it — every test
+  // in this file passes `persistence` explicitly, so the driver was free to
+  // drift from #815's requirement #1 ("默认情况下不启用持久化（纯内存，行为不变）")
+  // to a silent `'auto'` → file write without a single assertion turning red.
+  describe('Default persistence (opt-in)', () => {
+    it('writes nothing to the CWD when persistence is not configured', async () => {
+      await inScratchCwd(async () => {
+        const driver = new InMemoryDriver();
+        await driver.connect();
+        await driver.create('items', { id: 'a', name: 'Widget' });
+        await driver.disconnect();
+        // The path the file adapter defaults to, relative to the CWD.
+        expect(fs.existsSync(path.join('.objectstack', 'data', 'memory-driver.json'))).toBe(false);
+      });
+    });
+
+    it('does not carry rows across driver instances (the #4065 rerun shape)', async () => {
+      await inScratchCwd(async () => {
+        // Two instances seeded with the SAME fixed ids, exactly as a suite that
+        // runs twice in one working tree does. Under the old `'auto'` default
+        // the second instance loaded the first's rows and `find` returned four.
+        for (const _run of [1, 2]) {
+          const driver = new InMemoryDriver();
+          await driver.connect();
+          await driver.bulkCreate('ext_note', [
+            { id: 'n1', title: 'first' },
+            { id: 'n2', title: 'second' },
+          ]);
+          const rows = await driver.find('ext_note', { object: 'ext_note' });
+          expect(rows.map((r: any) => r.title).sort()).toEqual(['first', 'second']);
+          await driver.disconnect();
+        }
+      });
+    });
+
+    it('still persists when a host opts in explicitly', async () => {
+      const filePath = path.join(TEST_DATA_DIR, 'opt-in.json');
+      const driver = new InMemoryDriver({
+        persistence: { type: 'file', path: filePath, autoSaveInterval: 100 },
+      });
+      await driver.connect();
+      await driver.create('items', { id: 'a', name: 'Widget' });
+      await driver.disconnect();
+      expect(fs.existsSync(filePath)).toBe(true);
     });
   });
 
