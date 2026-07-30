@@ -73,7 +73,7 @@ Chart over an object’s aggregated data. Bind objectName + aggregate; the axes 
 | `aggregate` | `{ field?: string; function: 'count' \| 'sum' \| 'avg' \| 'min' \| 'max'; groupBy: string \| { field: string; dateGranularity?: 'day' \| 'week' \| 'month' \| 'quarter' \| 'year' } }` | binding |  | Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal "count" for a fieldless count). Bind xAxis.field / yAxis[].field / series[].name to those names. |
 | `data` | `any[]` | binding |  | Static/precomputed data to chart directly instead of binding via objectName + aggregate. |
 | `filter` | `FilterArray` | controlled |  | ObjectQL filter scoping the data; drive from React state. |
-| `type` | `'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'` | data | ✓ |  |
+| `type` | `'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'` | data | ✓ |  |
 | `title` | `string` | data |  | Chart title |
 | `subtitle` | `string` | data |  | Chart subtitle |
 | `description` | `string` | data |  | Accessibility description — announced to screen readers as the chart’s label |
