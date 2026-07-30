@@ -128,6 +128,8 @@ And it removes the RLS-policy key `priority` (#3896 security audit): promised "c
 
 The same close-out retires the four inert tool authoring keys (`category`, `permissions`, `active`, `builtIn`): none is part of AIToolDefinition and no execution path read them. Two were misleading in the dangerous direction — `permissions` promised an invocation gate nothing enforced, and `active: false` read as "withdrawn" while the tool kept reaching the LLM tool set. Lossless deletes; the strict ToolSchema rejects each with its prescription.
 
+ADR-0113 splits the `required` tri-binding: post-17, `required` is ONLY the write-time contract (insert must provide; update may not null out; legacy null rows rest), and the physical NOT NULL is the explicit `storage.notNull`. The `field-required-notnull-explicit` conversion preserves every pre-17 source verbatim-in-meaning by stamping `storage.notNull: true` onto each required field — under the old semantics that column WAS created NOT NULL, so the rewrite writes down what the text already meant. Migration-chain-only (retired from the load path): this is a default flip, not a rename, and a loader that auto-applied it would stamp the constraint onto 17-authored sources that deliberately omit it.
+
 On the wire contract it also retires the `/analytics/query` request ENVELOPE (#3878): `AnalyticsQueryRequestSchema` used to describe `{ cube, query: {...}, format }` — the dialect of the retired degraded analytics shim (#3891) that the real engine never understood (an envelope body inferred a column-less cube and died as an SQL syntax error). The canonical request body is now the BARE AnalyticsQuery — `cube` + `measures` at the top level — which is what every real caller already sends; the schema tombstones `query`/`format`, and the dispatcher entry validates bodies and answers 400 with the prescription. No stored metadata carries this shape (it was HTTP-only), so the change is two semantic TODOs for API callers rather than a stack conversion.
 
 ### Mechanical (applied for you)
@@ -144,6 +146,7 @@ On the wire contract it also retires the `/analytics/query` request ENVELOPE (#3
 | `flow-node-script-config-aliases` | `flow.node.script.config` | script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796) | live — protocol 17 loader accepts the old shape |
 | `permission-rls-priority-removed` | `permission.rowLevelSecurity.priority` | RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome) | retired — `migrate meta` only |
 | `tool-inert-authoring-keys-removed` | `tool.category / tool.permissions / tool.active / tool.builtIn` | tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing) | retired — `migrate meta` only |
+| `field-required-notnull-explicit` | `object.fields.*.required / object.fields.*.storage.notNull` | required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract) | retired — `migrate meta` only |
 
 ### Semantic (delegated to you, with acceptance criteria)
 

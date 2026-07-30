@@ -151,6 +151,46 @@ describe('evaluateAnalyticsQueryOverRows', () => {
     expect(matchesWhere({ a: 'Hello World' }, { a: { $contains: 'world' } })).toBe(true);
   });
 
+  it('a bare-day $lte covers the whole day on a timestamp value (#3777)', () => {
+    // Same translation the SQL paths apply — the preview must agree, or a
+    // drafted chart shows different numbers than the published one.
+    expect(matchesWhere({ at: '2026-07-28T21:40:00.000Z' }, { at: { $lte: '2026-07-28' } })).toBe(true);
+    expect(matchesWhere({ at: '2026-07-29T00:00:00.000Z' }, { at: { $lte: '2026-07-28' } })).toBe(false);
+    // A plain date value is unchanged (string ordering makes the two forms
+    // equivalent there).
+    expect(matchesWhere({ on: '2026-07-28' }, { on: { $lte: '2026-07-28' } })).toBe(true);
+    expect(matchesWhere({ on: '2026-07-29' }, { on: { $lte: '2026-07-28' } })).toBe(false);
+    // Full-ISO bounds keep instant semantics.
+    expect(
+      matchesWhere({ at: '2026-07-28T21:40:00.000Z' }, { at: { $lte: '2026-07-28T12:00:00.000Z' } }),
+    ).toBe(false);
+  });
+
+  it('a timeDimension dateRange keeps the final day of the window on timestamps (#3777)', () => {
+    const rows = [
+      { spent_at: '2026-05-31T09:15:00.000Z', amount: 70 },
+      { spent_at: '2026-05-31T00:00:00.000Z', amount: 5 },
+      { spent_at: '2026-06-01T00:00:00.000Z', amount: 900 },
+    ];
+    const r = evaluateAnalyticsQueryOverRows(
+      {
+        measures: ['total_amount'],
+        dimensions: ['spent_at'],
+        timeDimensions: [{ dimension: 'spent_at', granularity: 'month', dateRange: ['2026-05-01', '2026-05-31'] }],
+      },
+      {
+        name: 'expenses',
+        sql: 'expenses',
+        dimensions: { spent_at: { sql: 'spent_at', type: 'time' } },
+        measures: { total_amount: { sql: 'amount', type: 'sum' } },
+      } as unknown as Cube,
+      rows,
+    );
+    // Pre-fix the 09:15 row survived only via the `'~'`-suffix trick; the
+    // half-open bound keeps it AND excludes June 1st's midnight exactly.
+    expect(r.rows).toEqual([{ spent_at: '2026-05', total_amount: 75 }]);
+  });
+
   it('helpers: bucketDate resolves the calendar day in a reference timezone', () => {
     // 2024-03-01T03:00Z is still 2024-02-29 in America/New_York.
     const near = '2024-03-01T03:00:00.000Z';

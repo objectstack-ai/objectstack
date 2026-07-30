@@ -31,8 +31,6 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 const RULES = '/sharing/rules';
 const SYS = { isSystem: true } as const;
 const OBJECT = 'showcase_project';
-/** Package id of the sys_sharing_rule criteria guard (plugin-sharing). */
-const GUARD_PACKAGE = 'plugin-sharing:rule-criteria-guard';
 
 describe('#3896 — a sharing rule POSTed without criteria is rejected, never made match-all', () => {
   let stack: VerifyStack;
@@ -129,27 +127,27 @@ describe('#3896 — a sharing rule POSTed without criteria is rejected, never ma
   });
 
   it('a criteria-less rule already IN the table shares nothing and loses its grants', async () => {
-    // Reproduce a row from BEFORE the guard existed: drop the guard hooks,
-    // write the row, put them back. Nothing else can produce this shape now —
-    // which is the point of the previous test.
+    // Reproduce a row from BEFORE the gate existed. Since ADR-0113 P2 the
+    // engine path is DOUBLY closed — the hook guard and the declarative
+    // `required: true` (record validator) — so unbinding the hook is no longer
+    // enough to author this shape through the engine, which is exactly the
+    // defense-in-depth the flip bought. A true legacy row predates all of it:
+    // write it at the DRIVER seam, the same level a pre-gate deployment's
+    // storage actually holds it.
     const id = 'srule_3896_legacy';
-    ql.unregisterHooksByPackage(GUARD_PACKAGE);
-    try {
-      await ql.insert('sys_sharing_rule', {
-        id,
-        name: 'legacy_match_all_3896',
-        label: 'Legacy match-all',
-        object_name: OBJECT,
-        criteria_json: null,
-        recipient_type: 'position',
-        recipient_id: 'sales_rep',
-        access_level: 'read',
-        active: true,
-      }, { context: SYS });
-    } finally {
-      const { bindRuleCriteriaGuard } = await import('@objectstack/plugin-sharing');
-      bindRuleCriteriaGuard(ql);
-    }
+    const driver = (ql as any).getDriverForObject('sys_sharing_rule');
+    expect(driver, 'sys_sharing_rule driver must be resolvable').toBeTruthy();
+    await driver.create('sys_sharing_rule', {
+      id,
+      name: 'legacy_match_all_3896',
+      label: 'Legacy match-all',
+      object_name: OBJECT,
+      criteria_json: null,
+      recipient_type: 'position',
+      recipient_id: 'sales_rep',
+      access_level: 'read',
+      active: true,
+    });
 
     const res = await stack.apiAs(admin, 'POST', `${RULES}/${id}/evaluate`, {});
     expect(res.status).toBeLessThan(300);

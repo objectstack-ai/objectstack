@@ -129,6 +129,34 @@ describe('NativeSQLStrategy — datetime filter storage coercion', () => {
     ]);
   });
 
+  it('compiles a bare-day `lte` half-open — through the whole day (#3777)', async () => {
+    const strategy = new NativeSQLStrategy();
+    const ctx = ctxWith({ coerceTemporalFilterValue: sqliteHook });
+    const query: AnalyticsQuery = {
+      cube: 'compliance',
+      measures: ['total'],
+      where: { assessed: { $lte: '2025-06-18' } },
+    };
+    const { sql, params } = await strategy.generateSql(query, ctx);
+    // `<= 2025-06-18` means "including everything on June 18th": the bound is
+    // June 19th's midnight, compared with `<` — not midnight of the 18th.
+    expect(sql).toContain('assessed_at < $1');
+    expect(params).toEqual([Date.parse('2025-06-19T00:00:00.000Z')]);
+  });
+
+  it('a full-ISO `lte` keeps instant semantics (no widening)', async () => {
+    const strategy = new NativeSQLStrategy();
+    const ctx = ctxWith({ coerceTemporalFilterValue: sqliteHook });
+    const query: AnalyticsQuery = {
+      cube: 'compliance',
+      measures: ['total'],
+      where: { assessed: { $lte: '2025-06-18T12:00:00.000Z' } },
+    };
+    const { sql, params } = await strategy.generateSql(query, ctx);
+    expect(sql).toContain('assessed_at <= $1');
+    expect(params).toEqual([Date.parse('2025-06-18T12:00:00.000Z')]);
+  });
+
   it('coerces each element of an `in` set on a datetime column', async () => {
     const strategy = new NativeSQLStrategy();
     const ctx = ctxWith({ coerceTemporalFilterValue: sqliteHook });
@@ -145,7 +173,7 @@ describe('NativeSQLStrategy — datetime filter storage coercion', () => {
     ]);
   });
 
-  it('coerces a timeDimension dateRange (BETWEEN) on a datetime column', async () => {
+  it('coerces a timeDimension dateRange (half-open window) on a datetime column', async () => {
     const strategy = new NativeSQLStrategy();
     const ctx = ctxWith({ coerceTemporalFilterValue: sqliteHook });
     const query: AnalyticsQuery = {
@@ -154,10 +182,15 @@ describe('NativeSQLStrategy — datetime filter storage coercion', () => {
       timeDimensions: [{ dimension: 'assessed', dateRange: ['2025-06-18', '2025-07-01'] }],
     };
     const { sql, params } = await strategy.generateSql(query, ctx);
-    expect(sql).toContain('BETWEEN $1 AND $2');
+    // Half-open since #3777: the bare-day end "2025-07-01" means through the
+    // whole of July 1st, so the coerced upper bound is July 2nd's midnight,
+    // compared with `<` — not the BETWEEN whose inclusive midnight bound
+    // dropped the final day's rows.
+    expect(sql).toContain('>= $1 AND');
+    expect(sql).toContain('< $2');
     expect(params).toEqual([
       EPOCH_2025_06_18,
-      Date.parse('2025-07-01T00:00:00.000Z'),
+      Date.parse('2025-07-02T00:00:00.000Z'),
     ]);
   });
 

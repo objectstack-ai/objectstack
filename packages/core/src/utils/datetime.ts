@@ -103,6 +103,39 @@ export function zonedDateStartToUtcMs(ymd: string, tz?: string): number {
 }
 
 /**
+ * The calendar day after a bare `YYYY-MM-DD` string — the exclusive upper
+ * bound of that day, for compiling "through day X" into the half-open
+ * `[X, X+1)` a `datetime` column needs (#3777).
+ *
+ * A bare calendar day used as an upper bound (`$lte`, a `dateRange` end, a
+ * `{current_month_end}` token) always carries whole-day intent — the author
+ * means "including everything that happened on X", never "up to the stroke of
+ * midnight that begins X". On a `date` column `<= X` already says that; on a
+ * `datetime` column it silently drops every instant after 00:00. The correct
+ * translation is the half-open pair `>= start AND < nextUtcCalendarDay(end)`
+ * — the same shape the analytics drill ranges already emit — rather than an
+ * inclusive `23:59:59.999` constant, which re-opens the gap at whatever
+ * precision the dialect stores beyond milliseconds.
+ *
+ * `< nextUtcCalendarDay(X)` is also *equivalent* to `<= X` for a `date` column
+ * (plain `YYYY-MM-DD` text ordering), so emitters that cannot see the column
+ * type (raw-SQL strategies, the dataset preview evaluator) can apply it
+ * unconditionally to a bare-day bound and be right on both column types.
+ *
+ * Returns `null` for anything that is not a valid bare calendar day — full
+ * ISO timestamps keep instant semantics and must NOT be widened, and an
+ * impossible day (`2026-02-30`) is rejected the same way
+ * {@link bucketKeyToCalendarRange} rejects it, so a caller falls back to the
+ * untranslated comparand instead of inventing a bound.
+ */
+export function nextUtcCalendarDay(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const day = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  return bucketKeyToCalendarRange(day, 'day')?.end ?? null;
+}
+
+/**
  * Granularity of a canonical date-bucket key. Mirrors `@objectstack/spec`'s
  * `DateGranularity` enum but kept as a local literal union so this low-level
  * package needs no dependency on spec.

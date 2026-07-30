@@ -41,6 +41,7 @@ import {
   REFERENCE_VALUE_TYPES,
   isMultiValueField as specIsMultiValueField,
 } from '@objectstack/spec/data';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 
 /**
  * Field types whose stored value points at another record (id). The spec's
@@ -112,7 +113,13 @@ export interface CoerceContext {
 /** A per-field coercion failure, shaped like the engine's validation errors. */
 export interface FieldCoerceError {
   field: string;
-  code: string;
+  /**
+   * Which constraint the value violated — the spec's field-level catalog
+   * (ADR-0114). Was a bare `string`, so a typo here reached the wire and the
+   * "shaped like the engine's validation errors" claim above was a comment rather
+   * than a type.
+   */
+  code: FieldErrorCode;
   message: string;
 }
 

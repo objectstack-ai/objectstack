@@ -88,7 +88,10 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
 
       const org = drift.find((d) => d.table === 'mig_biz_unit' && d.column === 'organization_id');
       expect(org, 'expected drift on mig_biz_unit.organization_id').toBeDefined();
-      expect(org!.category).toBe('safe');
+      // ADR-0113: a column stricter than its declaration is needs_confirm —
+      // reported by plan, applied by an explicit `os migrate apply` (the human
+      // IS the confirmation), but never by dev auto-reconcile.
+      expect(org!.category).toBe('needs_confirm');
       expect(org!.op.type).toBe('relax_not_null');
 
       // #3728: the legacy platform-wide unique is PLANNED, not silently rewritten.

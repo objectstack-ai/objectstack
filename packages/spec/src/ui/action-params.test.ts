@@ -57,7 +57,9 @@ describe('validateActionParams (ADR-0104 D2)', () => {
   it('flags unknown params, but allows the dispatcher built-in keys', () => {
     const resolved: ResolvedActionParam[] = [{ name: 'title', type: 'text' }];
     const issues = validateActionParams(resolved, { title: 'x', bogus: 1, recordId: 'r1', objectName: 'o' });
-    expect(codes(issues)).toEqual(['unknown_param']);
+    // `unknown_param` folded into the catalog's `unknown_field` (ADR-0114 D2) —
+    // the `param` key beside it already says what was addressed.
+    expect(codes(issues)).toEqual(['unknown_field']);
     expect(issues[0].param).toBe('bogus');
     expect(ACTION_PARAM_BUILTIN_KEYS).toContain('recordId');
     expect(ACTION_PARAM_BUILTIN_KEYS).toContain('objectName');

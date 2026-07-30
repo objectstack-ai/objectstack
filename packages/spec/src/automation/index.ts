@@ -13,5 +13,6 @@ export * from './time-relative-trigger.zod';
 export * from './sync.zod';
 export * from './state-machine.zod';
 export * from './node-executor.zod';
+export * from './flow-node-expression-paths';
 export * from './bpmn-interop.zod';
 export * from './bpmn-mapping';

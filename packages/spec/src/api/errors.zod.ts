@@ -209,18 +209,79 @@ export const RetryStrategy = z.enum([
 export type RetryStrategy = z.infer<typeof RetryStrategy>;
 
 /**
+ * Which constraint a single value violated (ADR-0114 D2).
+ *
+ * A **closed** catalog, and deliberately lowercase `snake_case` where the
+ * top-level `StandardErrorCode` is SCREAMING (ADR-0114 D1): a top-level code
+ * names a condition the *request* hit, while these name the *constraint* — and
+ * constraints are already declared in the metadata's own vocabulary, so the code
+ * and the schema property are the same word on purpose:
+ *
+ *     { required: true }      → code 'required'
+ *     { max_length: 50 }      → code 'max_length'
+ *     { min_value: 0 }        → code 'min_value'
+ *
+ * Closed with no ledger tier, unlike the top-level catalog: a constraint *kind*
+ * is a property of the type system, so a service does not get to invent one — it
+ * adds a member here. That friction is the point.
+ *
+ * The `field` key of the surrounding record says what was addressed (a column, a
+ * dotted path, an action param), so there is no per-surface variant of a code:
+ * an unknown action param and an unknown column are both `unknown_field`.
+ */
+export const FieldErrorCode = z.enum([
+  // presence and shape
+  'required',                   // no value where one is mandatory
+  'invalid_type',               // a value of the wrong primitive type
+  'invalid_shape',              // an object/array whose structure does not fit
+  'unknown_field',              // a key the target does not declare
+  // per-type parse failures
+  'invalid_boolean',
+  'invalid_number',
+  'invalid_date',
+  'invalid_time',
+  'invalid_email',
+  'invalid_url',
+  'invalid_phone',
+  'invalid_json',
+  'invalid_format',             // a declared pattern/format the value does not match
+  // bounded ranges — the property names they mirror
+  'min_length',
+  'max_length',
+  'min_value',
+  'max_value',
+  'min_items',
+  'max_items',
+  // closed sets and references
+  'invalid_option',             // not a member of the field's declared options
+  'invalid_value',              // rejected for a reason no other member names
+  'reference_not_found',        // a lookup target that does not exist
+  'reference_ambiguous',        // a lookup that matched more than one record
+  // declarative rules layered above the field's own type
+  'rule_violation',             // a validation rule said no
+  'json_schema_violation',      // a declared JSON Schema said no
+  'invalid_initial_state',      // state machine: not a legal starting state
+  'invalid_transition',         // state machine: not a legal move from here
+]);
+
+export type FieldErrorCode = z.infer<typeof FieldErrorCode>;
+
+/**
  * Field Error Schema
  * Detailed error for a specific field
  */
 export const FieldErrorSchema = lazySchema(() => z.object({
   field: z.string().describe('Field path (supports dot notation)'),
-  // ⚠️ DELIBERATELY WIDE (ADR-0112 D6, #3977): field-level codes are a separate
-  // vocabulary from top-level `error.code` and were never `StandardErrorCode` in
-  // practice — the validators emit `required` / `max_length` / `invalid_email` /
-  // …, import coercion adds its own, and one route leaks raw Zod issue codes.
-  // Declaring the enum here was a lie the wire never honoured. #3977 owns the
-  // real field-level catalog; when it lands, this tightens to that enum.
-  code: z.string().describe('Error code for this field (field-level vocabulary — see #3977)'),
+  /**
+   * Which constraint the value violated — a `FieldErrorCode` (ADR-0114 D2).
+   *
+   * Closed on purpose. This was `z.string()` between ADR-0112 (which widened it,
+   * because declaring `StandardErrorCode` here was a lie the wire never
+   * honoured) and ADR-0114 (which gave the field level its own catalog). One
+   * route used to leak raw Zod issue codes through this position; they are now
+   * mapped at the boundary (`zodIssuesToFields`, ADR-0114 D3).
+   */
+  code: FieldErrorCode.describe('Which constraint the value violated (field-level catalog, ADR-0114)'),
   message: z.string().describe('Human-readable error message'),
   value: z.unknown().optional().describe('The invalid value that was provided'),
   constraint: z.unknown().optional().describe('The constraint that was violated (e.g., max length)'),
@@ -287,7 +348,21 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
   retryStrategy: RetryStrategy.optional().describe('Recommended retry strategy'),
   retryAfter: z.number().optional().describe('Seconds to wait before retrying'),
   details: z.unknown().optional().describe('Additional error context'),
-  fieldErrors: z.array(FieldErrorSchema).optional().describe('Field-specific validation errors'),
+  /**
+   * One entry per offending value.
+   *
+   * ⚠️ NAME MISMATCH, deliberately left standing (ADR-0114 D4). The wire carries
+   * `fields` — the validators, import coercion, `validation-failure.ts`,
+   * `@objectstack/client` and the console's extractor all say `fields`, and
+   * nothing has ever emitted `fieldErrors`. Renaming it here is the right end
+   * state, but it is an authorable-key retirement: ADR-0104's contract guard
+   * requires a `retiredKey()` tombstone, a D2 conversion so `os migrate meta` can
+   * rewrite consumers, and a major changeset carrying the FROM → TO mapping.
+   * That machinery is a change of its own, not a rider on this one — ADR-0114
+   * lands the ELEMENT schema (which is what makes a validation body assertable)
+   * and defers the rename with its cost written down.
+   */
+  fieldErrors: z.array(FieldErrorSchema).optional().describe('Field-specific validation errors (wire name is `fields` — see ADR-0114 D4)'),
   timestamp: z.string().datetime().optional().describe('When the error occurred'),
   requestId: z.string().optional().describe('Request ID for tracking'),
   traceId: z.string().optional().describe('Distributed trace ID'),

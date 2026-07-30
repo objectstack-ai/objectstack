@@ -175,12 +175,16 @@ describe('SqliteWasmDriver Schema Sync (SQLite)', () => {
     expect(columns).toHaveProperty('invoice_no');
   });
 
-  it('should create database constraints (unique, required)', async () => {
+  it('should create database constraints (unique, storage.notNull) — required alone stays nullable (ADR-0113)', async () => {
     const objects = [
       {
         name: 'constraint_test',
         fields: {
           unique_field: { type: 'string', unique: true } as any,
+          // ADR-0113: the physical constraint is the explicit storage opt-in;
+          // `required` alone is the engine-enforced write contract and the
+          // column deliberately stays nullable.
+          constrained_field: { type: 'string', required: true, storage: { notNull: true } } as any,
           required_field: { type: 'string', required: true } as any,
         },
       },
@@ -188,21 +192,28 @@ describe('SqliteWasmDriver Schema Sync (SQLite)', () => {
 
     await driver.initObjects(objects);
 
-    await driver.create('constraint_test', { unique_field: 'u1', required_field: 'r1' });
+    await driver.create('constraint_test', { unique_field: 'u1', constrained_field: 'c1', required_field: 'r1' });
 
     try {
-      await driver.create('constraint_test', { unique_field: 'u1', required_field: 'r2' });
+      await driver.create('constraint_test', { unique_field: 'u1', constrained_field: 'c2', required_field: 'r2' });
       expect.unreachable('Should throw error for unique violation');
     } catch (e: any) {
       expect(e.message).toMatch(/UNIQUE constraint failed|duplicate key value/);
     }
 
     try {
-      await driver.create('constraint_test', { unique_field: 'u2' });
+      await driver.create('constraint_test', { unique_field: 'u2', required_field: 'r3' });
       expect.unreachable('Should throw error for not null violation');
     } catch (e: any) {
       expect(e.message).toMatch(/NOT NULL constraint failed|null value in column/);
     }
+
+    // The write-contract-only field produced a nullable column: omitting it at
+    // the DRIVER seam succeeds — the record validator at the engine seam is
+    // what enforces it for real writes.
+    await expect(
+      driver.create('constraint_test', { unique_field: 'u3', constrained_field: 'c3' }),
+    ).resolves.toBeDefined();
   });
 
   it('should handle new field types (email, file, location)', async () => {

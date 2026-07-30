@@ -392,6 +392,16 @@ const step17: MigrationStep = {
     '`permissions` promised an invocation gate nothing enforced, and `active: false` ' +
     'read as "withdrawn" while the tool kept reaching the LLM tool set. Lossless ' +
     'deletes; the strict ToolSchema rejects each with its prescription.\n\n' +
+    'ADR-0113 splits the `required` tri-binding: post-17, `required` is ONLY the ' +
+    'write-time contract (insert must provide; update may not null out; legacy null ' +
+    'rows rest), and the physical NOT NULL is the explicit `storage.notNull`. The ' +
+    '`field-required-notnull-explicit` conversion preserves every pre-17 source ' +
+    'verbatim-in-meaning by stamping `storage.notNull: true` onto each required ' +
+    'field — under the old semantics that column WAS created NOT NULL, so the ' +
+    'rewrite writes down what the text already meant. Migration-chain-only ' +
+    '(retired from the load path): this is a default flip, not a rename, and a ' +
+    'loader that auto-applied it would stamp the constraint onto 17-authored ' +
+    'sources that deliberately omit it.\n\n' +
     'On the wire contract it also retires the `/analytics/query` request ENVELOPE ' +
     '(#3878): `AnalyticsQueryRequestSchema` used to describe `{ cube, query: {...}, ' +
     'format }` — the dialect of the retired degraded analytics shim (#3891) that the ' +
@@ -413,6 +423,7 @@ const step17: MigrationStep = {
     'flow-node-script-config-aliases',
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',
+    'field-required-notnull-explicit',
   ],
   semantic: [
     {

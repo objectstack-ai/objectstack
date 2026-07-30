@@ -5,6 +5,7 @@ import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import { normalizeAnalyticsFilters, coerceFilterValueForObjectQL } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { nextUtcCalendarDay } from '@objectstack/core';
 import {
   rebucketCrossObject,
   RECOMBINABLE_METHODS,
@@ -297,9 +298,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     }
     // Bounds bind as `$n` placeholders like every other comparand: this string
     // travels to the browser, and a window can carry tenant-derived dates.
+    // A bare-day upper bound renders half-open (`< day+1`) because that is
+    // what `execute()`'s driver actually runs for it on a datetime column
+    // (#3777) — rendering the BETWEEN would hand a debugger SQL that drops
+    // the final day's rows and cannot reproduce the result.
     for (const { field, bounds } of this.dateRangeBounds(cube, query)) {
-      params.push(bounds.$gte, bounds.$lte);
-      whereParts.push(`${field} BETWEEN $${params.length - 1} AND $${params.length}`);
+      const nextDay = nextUtcCalendarDay(bounds.$lte);
+      params.push(bounds.$gte, nextDay ?? bounds.$lte);
+      whereParts.push(
+        `(${field} >= $${params.length - 1} AND ${field} ${nextDay ? '<' : '<='} $${params.length})`,
+      );
     }
     // Read scope last, so it reads as the outermost constraint. Compiled by the
     // same fail-closed compiler `NativeSQLStrategy` uses — it throws rather than
@@ -749,9 +757,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * HERE on every driver — and "bucketed trend" is precisely the shape that also
    * carries a range ("last 12 months", "this quarter").
    *
-   * Bounds are inclusive on both ends — the same `$gte`/`$lte` pair
-   * `NativeSQLStrategy` binds as `BETWEEN` and the memory driver builds as a
-   * `$match`, so one dashboard reads the same on every driver.
+   * Bounds are inclusive on both ends — logically "from day X through day Y".
+   * The `$lte` end is left as the bare calendar day on purpose: the driver's
+   * filter compiler owns the calendar-day → instant translation, compiling a
+   * bare-day `$lte` on a `datetime` column into the half-open `< nextDay`
+   * (#3777) while a `date` column keeps the plain `<=`. `NativeSQLStrategy`
+   * performs the same half-open translation itself because it binds into raw
+   * SQL, so one dashboard reads the same on every driver.
    *
    * Comparands are coerced by the SAME helper the `where` path uses, so an
    * epoch-ms bound recovers as a number and an ISO string stays a string. No

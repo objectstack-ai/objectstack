@@ -136,13 +136,18 @@ export const SysSharingRule = ObjectSchema.create({
 
     criteria_json: Field.textarea({
       label: 'Criteria',
-      // [#3896] Mandatory in substance, `required: false` in metadata: the
-      // column is nullable in every already-deployed tenant (rows predating
-      // this gate), and flipping it to `required` would only translate into a
-      // destructive NOT NULL migration that those nulls block. The invariant
-      // is enforced where it can also explain itself — `bindRuleCriteriaGuard`
-      // fails the INSERT, and `defineRule` fails the API call.
-      required: false,
+      // [#3896 → ADR-0113] Mandatory in substance AND now in metadata. Under
+      // the old tri-binding this was un-declarable — `required: true` implied
+      // a NOT NULL migration that every deployed tenant's legacy null rows
+      // block. ADR-0113 split the knob: this is the WRITE contract only (an
+      // insert must provide it, an update may not null it out, rows predating
+      // the gate rest — an admin can still `active: false` an over-broad
+      // legacy rule). Deliberately NO `storage.notNull`: those legacy nulls
+      // are exactly the case the split exists for. The declaration is the
+      // first line; `bindRuleCriteriaGuard` still rejects the NON-null
+      // match-all shapes `required` cannot express, and `defineRule` guards
+      // the API path with the shape-naming message.
+      required: true,
       // Rendered as a visual criteria builder scoped to the selected object's
       // fields (dependsOn: object_name), storing the same JSON FilterCondition.
       // An "Edit as JSON" fallback keeps hand-authored / advanced filters

@@ -10,10 +10,12 @@
 import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, isGlobalUnique, isUniqueDeclared, type AutonumberToken } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import { resolveMultiOrgEnabled } from '@objectstack/types';
+import { nextUtcCalendarDay } from '@objectstack/core';
 import {
   buildIndexName,
   diffManagedIndexes,
@@ -4236,6 +4238,86 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * The exclusive upper-bound instant for a bare calendar-day comparand on a
+   * `datetime` column — next day's midnight UTC, in this dialect's storage
+   * form — or `null` when the calendar-day reading does not apply.
+   *
+   * This is the missing half of the calendar-day convention (#3777). A bare
+   * `YYYY-MM-DD` anchors to midnight UTC ({@link storageDatetimeValue}), which
+   * is exactly right for a LOWER bound (`>= {today}` means "from the moment
+   * the day starts") and exactly wrong for an UPPER bound: `<= {today}` from a
+   * dashboard's date-range filter means "including today", but midnight
+   * anchoring turns it into "up to the first instant of today", silently
+   * dropping every row created after 00:00 — with `created_at` (a system
+   * `Field.datetime`) as the filter's default field, the default dashboard
+   * configuration loses the current day.
+   *
+   * The translation is operator-sensitive, so it lives at the comparison
+   * emitters (which know their operator) rather than inside the operator-blind
+   * {@link coerceFilterValue}: an upper-bound `$lte`/`<=`/`between`-max with a
+   * bare-day comparand compiles to the half-open `< next-day-midnight` — the
+   * same `[gte, lt)` shape the analytics drill ranges emit — never to an
+   * inclusive `23:59:59.999`, which re-opens the gap at whatever precision the
+   * dialect stores beyond milliseconds.
+   *
+   * Deliberately narrow, mirroring the semantics table on #3777:
+   *   - `date` / `time` / non-temporal columns → null (a bare day on a `date`
+   *     column is already whole-day-correct under `<=`);
+   *   - full ISO timestamps and `Date` objects → null (an instant comparand
+   *     keeps instant semantics — only the day-granular STRING carries
+   *     calendar-day intent);
+   *   - `$gte` / `$gt` / `$lt` keep their midnight anchoring (correct today).
+   */
+  protected calendarDayExclusiveUpperBound(
+    table: string | null,
+    field: string,
+    value: unknown,
+  ): unknown | null {
+    if (this.temporalFieldKind(table, field) !== 'datetime') return null;
+    const next = nextUtcCalendarDay(value);
+    if (next == null) return null;
+    return this.storageDatetimeValue(`${next}T00:00:00.000Z`);
+  }
+
+  /**
+   * Rewrite one upper-bound comparison for calendar-day intent: `$lte`/`<=`
+   * with a bare `YYYY-MM-DD` on a `datetime` column becomes `$lt`/`<` against
+   * {@link calendarDayExclusiveUpperBound}. Returns `null` — "not applicable,
+   * compile as-is" — for every other operator/comparand/column combination.
+   */
+  protected calendarDayUpperBoundRewrite(
+    table: string | null,
+    field: string,
+    op: string,
+    value: unknown,
+  ): { op: string; value: unknown } | null {
+    if (op !== '$lte' && op !== '<=') return null;
+    const upper = this.calendarDayExclusiveUpperBound(table, field, value);
+    if (upper == null) return null;
+    return { op: op === '$lte' ? '$lt' : '<', value: upper };
+  }
+
+  /**
+   * The `between` companion of {@link calendarDayUpperBoundRewrite}: a
+   * `[min, max]` range whose max is a bare calendar day on a `datetime` column
+   * decomposes into the half-open pair `>= min AND < next-day(max)` — knex's
+   * `whereBetween` is inclusive on both ends, so it inherits the same
+   * midnight-anchored upper bound `$lte` had. Returns `null` when the range is
+   * malformed (caller keeps its descriptive error) or the rewrite does not
+   * apply.
+   */
+  protected calendarDayBetweenRewrite(
+    table: string | null,
+    field: string,
+    value: unknown,
+  ): { lower: unknown; upper: unknown } | null {
+    if (!Array.isArray(value) || value.length !== 2) return null;
+    const upper = this.calendarDayExclusiveUpperBound(table, field, value[1]);
+    if (upper == null) return null;
+    return { lower: this.coerceFilterValue(table, field, value[0]), upper };
+  }
+
+  /**
    * Might this SQLite `Field.datetime` column still hold values written BEFORE
    * the canonical-UTC-text convention (#3912) — an INTEGER/REAL epoch from a
    * bound JS `Date`, a zone-naive `CURRENT_TIMESTAMP` string, an offset-bearing
@@ -4577,6 +4659,15 @@ export class SqlDriver implements IDataDriver {
    * This is a thin, intentionally narrow wrapper over the same `coerceFilterValue`
    * the driver already uses, so there is exactly one source of truth for the
    * storage convention and the analytics path can never drift from CRUD.
+   *
+   * Deliberately operator-blind — it translates FORM, never bound semantics.
+   * A caller compiling an upper bound from a bare calendar day (`<= {today}`,
+   * a `dateRange` end) must apply `nextUtcCalendarDay` from `@objectstack/core`
+   * and emit `<` — the half-open translation the driver's own `find()` path
+   * performs via {@link calendarDayUpperBoundRewrite} (#3777). Folding that in
+   * here would silently widen every `<=`-bound value whether or not the caller
+   * flips its operator, which is exactly the ambiguity the emitter-side rule
+   * avoids.
    */
   public temporalFilterValue(objectName: string, field: string, value: any): any {
     return this.coerceFilterValue(objectName, field, value);
@@ -4641,9 +4732,23 @@ export class SqlDriver implements IDataDriver {
 
     for (const item of filters) {
       if (typeof item === 'string') {
-        if (item.toLowerCase() === 'or') nextJoin = 'or';
-        else if (item.toLowerCase() === 'and') nextJoin = 'and';
-        continue;
+        const lower = item.toLowerCase();
+        if (lower === 'or') { nextJoin = 'or'; continue; }
+        if (lower === 'and') { nextJoin = 'and'; continue; }
+        // Anything else is not a join keyword, and the only way a bare string
+        // reaches here is a comparison triple that `isFilterAST()` refused —
+        // its operator is outside `VALID_AST_OPERATORS`, so `parseFilterAST()`
+        // never converted it and the raw array arrived as `where`. Skipping it
+        // (the old behaviour) emitted NO predicate at all: the caller asked to
+        // filter and silently got every row. Fail loudly instead. #3948.
+        throw new Error(
+          `[sql-driver] Unrecognized filter operator "${item}" in a comparison triple. ` +
+            `A filter array is either a logical node (["and"|"or", …]) or nested ` +
+            `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
+            `reaches the driver when its operator is outside @objectstack/spec ` +
+            `VALID_AST_OPERATORS, which leaves the filter unparsed. ` +
+            `Filter was: ${JSON.stringify(filters)}`,
+        );
       }
 
       if (Array.isArray(item)) {
@@ -4653,11 +4758,30 @@ export class SqlDriver implements IDataDriver {
         if (isCriterion) {
           const localField = this.mapSortField(fieldRaw);
           const field = this.remoteColumn(table, fieldRaw, localField);
-          const coerced = this.coerceFilterValue(table, localField, value);
-          this.applyAstComparison(
-            builder, nextJoin, field, op, value, coerced,
-            this.filterColumnExpr(table, localField, field),
-          );
+          const opLower = String(op).toLowerCase();
+          const columnExpr = this.filterColumnExpr(table, localField, field);
+          // Calendar-day upper bounds (#3777) — same translation the
+          // Mongo-operator path applies, for the array (`[field, op, value]`)
+          // spelling of the identical comparison.
+          const dayRange = opLower === 'between'
+            ? this.calendarDayBetweenRewrite(table, localField, value) : null;
+          if (dayRange) {
+            (builder as any)[nextJoin === 'or' ? 'orWhere' : 'where']((qb: any) => {
+              if (columnExpr) {
+                this.applyNormalizedComparison(qb, 'and', columnExpr, '$gte', dayRange.lower);
+                this.applyNormalizedComparison(qb, 'and', columnExpr, '$lt', dayRange.upper);
+              } else {
+                qb.where(field, '>=', dayRange.lower).andWhere(field, '<', dayRange.upper);
+              }
+            });
+          } else {
+            const rewrite = this.calendarDayUpperBoundRewrite(table, localField, opLower, value);
+            const coerced = rewrite ? rewrite.value : this.coerceFilterValue(table, localField, value);
+            this.applyAstComparison(
+              builder, nextJoin, field, rewrite?.op ?? op, value, coerced,
+              columnExpr,
+            );
+          }
         } else {
           const method = nextJoin === 'or' ? 'orWhere' : 'where';
           (builder as any)[method]((qb: any) => {
@@ -4666,7 +4790,18 @@ export class SqlDriver implements IDataDriver {
         }
 
         nextJoin = 'and';
+        continue;
       }
+
+      // Neither a join keyword nor a condition. Previously fell out of both
+      // branches and was dropped, so a malformed element silently narrowed
+      // nothing. Same reasoning as above: an unapplied filter must not look
+      // like a satisfied one. #3948.
+      throw new Error(
+        `[sql-driver] Unrecognized filter element of type "${item === null ? 'null' : typeof item}" — ` +
+          `expected a logical keyword ("and"/"or") or a condition array. ` +
+          `Filter was: ${JSON.stringify(filters)}`,
+      );
     }
   }
 
@@ -4741,7 +4876,12 @@ export class SqlDriver implements IDataDriver {
     const where = join === 'or' ? 'orWhere' : 'where';
     const whereNull = join === 'or' ? 'orWhereNull' : 'whereNull';
     const whereNotNull = join === 'or' ? 'orWhereNotNull' : 'whereNotNull';
-    const opLower = String(op).toLowerCase();
+    // Fold every accepted spelling of one comparison onto a single infix form so
+    // the switch below has one case per comparison rather than one per spelling.
+    // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
+    // `after` for the same thing; growing a private alias list here is how this
+    // driver and driver-memory drifted apart. #3948.
+    const opLower = canonicalAstOperator(String(op));
 
     // Value comparisons on a mixed-storage column read it through the CASE; every
     // other operator (null predicates, the LIKE family, a malformed `between`)
@@ -4895,9 +5035,29 @@ export class SqlDriver implements IDataDriver {
         // Non-null only for a SQLite `Field.datetime`, whose two stored forms
         // (INTEGER epoch / ISO TEXT) must be unified before comparing (#3912).
         const columnExpr = this.filterColumnExpr(table, localField, field);
-        for (const [op, opValue] of Object.entries(value as Record<string, any>)) {
+        for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
-          const coerced = this.coerceFilterValue(table, localField, opValue);
+          // Calendar-day upper bounds first (#3777): `$lte` on a bare
+          // `YYYY-MM-DD` against a datetime column compiles half-open, and a
+          // `$between` whose max is a bare day decomposes into the same pair —
+          // grouped, so an `$or` branch stays one predicate.
+          if (rawOp === '$between') {
+            const dayRange = this.calendarDayBetweenRewrite(table, localField, opValue);
+            if (dayRange) {
+              (builder as any)[method]((qb: any) => {
+                if (columnExpr) {
+                  this.applyNormalizedComparison(qb, 'and', columnExpr, '$gte', dayRange.lower);
+                  this.applyNormalizedComparison(qb, 'and', columnExpr, '$lt', dayRange.upper);
+                } else {
+                  qb.where(field, '>=', dayRange.lower).andWhere(field, '<', dayRange.upper);
+                }
+              });
+              continue;
+            }
+          }
+          const rewrite = this.calendarDayUpperBoundRewrite(table, localField, rawOp, opValue);
+          const op = rewrite?.op ?? rawOp;
+          const coerced = rewrite ? rewrite.value : this.coerceFilterValue(table, localField, opValue);
           if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;
           switch (op) {
             case '$eq':
@@ -5109,6 +5269,18 @@ export class SqlDriver implements IDataDriver {
         if (this.isMysql) return this.knex.raw('(cast(utc_timestamp(3) as time(3)))');
         if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::time(3))");
       }
+      // `date` has the same two problems one type over (#4022): a bare
+      // CURRENT_TIMESTAMP default resolves the calendar day in the SERVER's
+      // timezone on Postgres (measured: a UTC-12 server records YESTERDAY),
+      // and MySQL 8.0 rejects it on a DATE column outright (MariaDB is merely
+      // permissive; the driver's UTC-pinned session masked the semantic half
+      // there). Same fix as `time`: an expression default reading the UTC
+      // clock, which is also what `formatInput`'s NOW() safety-net and the
+      // SQLite branch below store.
+      if (type === 'date') {
+        if (this.isMysql) return this.knex.raw('(cast(utc_timestamp() as date))');
+        if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::date)");
+      }
       return this.knex.fn.now();
     }
     switch (type) {
@@ -5263,7 +5435,15 @@ export class SqlDriver implements IDataDriver {
       // {@link syncDeclaredIndexes} — which runs after the table exists and can
       // therefore build composites. `createColumn` owns type/nullability/
       // defaults only.
-      if (field.required) col.notNullable();
+      //
+      // ADR-0113: the physical NOT NULL comes from the EXPLICIT storage
+      // constraint, not from `required` — `required` is the write-time
+      // contract enforced by the record validator at the engine seam, and
+      // binding the DDL to it made every post-deploy tightening a
+      // destructive migration. Sources authored before protocol 17 carry
+      // `storage.notNull` explicitly via the `field-required-notnull-explicit`
+      // conversion, so their columns come out exactly as they always did.
+      if ((field as { storage?: { notNull?: boolean } }).storage?.notNull) col.notNullable();
       // `defaultValue: 'NOW()'` is a framework convention for "use the
       // database clock at insert time". Translate it to the driver-native
       // canonical default (`nowColumnDefault`) so the column gets a real,

@@ -87,8 +87,11 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
       },
       withHook(),
     );
+    // Half-open since #3777: the bare-day end means "through that whole day",
+    // so it binds as `< 2025-07-02`, and BOTH comparisons read the normalised
+    // column.
     expect(sql).toContain(
-      'EPOCH_MS(assessed_at) BETWEEN $1 AND $2',
+      '(EPOCH_MS(assessed_at) >= $1 AND EPOCH_MS(assessed_at) < $2)',
     );
   });
 
@@ -135,7 +138,9 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
     };
     const { sql } = await gen(query, ctxWith({}));
     expect(sql).toContain('assessed_at >= $1');
-    expect(sql).toContain('assessed_at BETWEEN $2 AND $3');
+    // The window itself is half-open (#3777) even without the storage hook —
+    // bound semantics and storage-form normalisation are independent layers.
+    expect(sql).toContain('(assessed_at >= $2 AND assessed_at < $3)');
   });
 
   it('falls back to the bare column when the hook returns nothing usable', async () => {

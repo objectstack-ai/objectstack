@@ -103,8 +103,8 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     property: 'condition',
     semantics: 'closed',
     rationale:
-      "The #3896 outcome, recorded so the answer is findable: a sharing rule's criteria is REQUIRED, and a rule that reaches storage without one grants nothing. There is no 'share every record' rule — object-wide read is the object's organization-wide default (`sharingModel`); the match-all shape only ever existed as a failure mode. Carries no permissive statement to scan (that is what being closed means), so it is exempt from the staleness check and exists purely as the catalogue answer to 'what does an empty criteria do?'.",
-    evidence: 'packages/spec/src/security/sharing.zod.ts',
+      "The #3896 outcome, recorded so the answer is findable: a sharing rule's criteria is REQUIRED, and a rule that reaches storage without one grants nothing. There is no 'share every record' rule — object-wide read is the object's organization-wide default (`sharingModel`); the match-all shape only ever existed as a failure mode. Since ADR-0113 the requirement is DECLARATIVE too: `sys_sharing_rule.criteria_json` carries `required: true` (write contract — legacy null rows rest, no NOT NULL migration), with the hook guard narrowed to the non-null match-all shapes `required` cannot express. Carries no permissive statement to scan (that is what being closed means), so it is exempt from the staleness check and exists purely as the catalogue answer to 'what does an empty criteria do?'.",
+    evidence: 'packages/spec/src/security/sharing.zod.ts; packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts (criteria_json required: true, ADR-0113); packages/plugins/plugin-sharing/src/rule-hooks.ts (shape guard)',
   },
 
   {

@@ -26,7 +26,15 @@
     },
     "required": {
       "status": "live",
-      "evidence": "packages/objectql/src/validation/record-validator.ts"
+      "evidence": "packages/objectql/src/validation/record-validator.ts (insert presence + update null-out rejection); packages/objectql/src/validation/rule-validator.ts (non-regression pre-state check for the conditional variant)",
+      "verifiedAt": "2026-07-30",
+      "note": "ADR-0113: write-time contract ONLY — insert must provide, update may not null out, legacy null rows rest. The physical NOT NULL moved to storage.notNull; the DDL no longer reads this key (sql-driver createColumn, ADR-0113)."
+    },
+    "storage": {
+      "status": "live",
+      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts createColumn (notNullable from storage.notNull); packages/plugins/driver-sql/src/schema-drift.ts diffManagedTable (nullability drift compares against storage.notNull); proof: schema-drift.nullability.test.ts posture matrix",
+      "verifiedAt": "2026-07-30",
+      "note": "ADR-0113: the explicit physical constraint — owns the NOT NULL DDL and the destructive drift ceremony that required used to imply. Orthogonal to required (all four combinations legitimate). storage.notNull × requiredWhen rejected at the parse seam (FieldSchema.superRefine)."
     },
     "multiple": {
       "status": "live",
