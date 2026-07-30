@@ -820,9 +820,25 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       case 'lt': return { $lt: v0 };
       case 'lte': return { $lte: v0 };
       case 'contains': return { $regex: values[0] };
+      // `notContains` had no arm and fell to the `default` below, which returns
+      // a BARE VALUE — i.e. `{field: 'x'}`, an equality. "does not contain x"
+      // was compiled as "equals x". These three pass through as the canonical
+      // spec operators every driver implements directly, so an anchored match
+      // stays anchored rather than depending on regex dialect (#4128).
+      case 'notContains': return { $notContains: values[0] };
+      case 'startsWith': return { $startsWith: values[0] };
+      case 'endsWith': return { $endsWith: values[0] };
       case 'in': return { $in: all };
       case 'notIn': return { $nin: all };
-      default: return v0;
+      default:
+        // Was `return v0` — a silent reinterpretation of the operator as an
+        // equality, the write-side twin of the normalizer's dropped predicate
+        // (#4128). Every operator `normalizeAnalyticsFilters` can emit is
+        // handled above, so reaching here means the two drifted apart.
+        throw new Error(
+          `[analytics] ObjectQL strategy cannot express filter operator "${operator}". ` +
+          `Treating it as an equality would silently query something the author did not ask for.`,
+        );
     }
   }
 

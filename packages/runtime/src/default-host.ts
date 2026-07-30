@@ -92,6 +92,40 @@ export async function createDefaultHostConfig(
         );
     }
 
+    // A NAMED artifact that is not there is a broken instruction, and this is
+    // the boot with no `objectstack.config.ts` — the artifact IS the whole
+    // deployment, so there is nothing else to serve. Fail loudly.
+    //
+    // The distinction that matters is **named vs conventional**, not the errno.
+    // `<cwd>/dist/objectstack.json` missing means "not compiled yet", which is a
+    // healthy state a development platform must boot from (#4085) — and
+    // `resolveDefaultArtifactPath` already returns `undefined` for it, so it
+    // never reaches here. But `OS_ARTIFACT_PATH` / `{ artifactPath }` are
+    // returned WITHOUT an existence check (validated lazily by the loader), and
+    // since #4110 made an absent artifact non-fatal all the way down —
+    // `loadArtifactBundle` logs and returns null, `MetadataPlugin` starts
+    // empty — that laziness turned a typo'd path into a silent empty boot:
+    // `OS_ARTIFACT_PATH=/nope os serve` printed "booting from artifact", then
+    // "Server is ready", and named the missing path NOWHERE in its output
+    // (serve's boot-quiet window drops the loader's calm line). Checked here so
+    // the fix lands where the intent is known, leaving the loader's tolerance
+    // intact for the config-boot path that needs it.
+    const namedBy = standaloneOpts.artifactPath
+        ? '`artifactPath`'
+        : (process.env.OS_ARTIFACT_PATH ? 'OS_ARTIFACT_PATH' : null);
+    if (
+        namedBy
+        && resolvedArtifact
+        && !isHttpUrl(resolvedArtifact)
+        && !existsSync(resolvedArtifact)
+    ) {
+        throw new Error(
+            `[createDefaultHostConfig] The artifact named by ${namedBy} does not exist: `
+            + `"${resolvedArtifact}". Run 'os compile' to build it, correct the path, `
+            + `or unset ${namedBy} to boot from <cwd>/dist/objectstack.json.`,
+        );
+    }
+
     // Empty-boot path: synthesize a minimal artifact stub inside the
     // ObjectStack home directory so MetadataPlugin has a real file to
     // read (and to watch for marketplace installs that land later).

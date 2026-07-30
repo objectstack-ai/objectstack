@@ -1159,6 +1159,56 @@ const flowNodeScriptConfigAliases: MetadataConversion = {
 };
 
 /**
+ * App dead authoring keys removed (protocol 17, #4001 app step; 2026-06
+ * AppSchema liveness audit).
+ *
+ * Seven keys were authorable and never read by any consumer in framework or
+ * objectui: `version` (an app is versioned by its package's
+ * `manifest.version`), `aria` (no renderer read app-level ARIA), `objects` /
+ * `apis` (the spec's own "config file convenience" — objects register via
+ * `defineStack`, and the chatbot derives an app's object list from its nav
+ * items), `sharing` / `embed` (declared-but-unenforced security surface — the
+ * only live path is `FormView.sharing`; ADR-0049 class), and
+ * `mobileNavigation` (fully unimplemented — even `packages/mobile` ignored
+ * it). Pure lossless deletes: none ever had a runtime effect.
+ *
+ * `retiredFromLoadPath`: the schema tombstones each key (`retiredKey`, tsc
+ * `never` + a parse-time prescription), same posture as its step-17 siblings.
+ */
+const appDeadAuthoringKeysRemoved: MetadataConversion = {
+  id: 'app-dead-authoring-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation',
+  summary: "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' removed (2026-06 liveness audit — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented)",
+  apply(stack, emit) {
+    const RETIRED = ['version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation'];
+    return mapCollection(stack, 'apps', (app, path) => stripKeys(app, RETIRED, emit, path));
+  },
+  fixture: {
+    before: {
+      apps: [{
+        name: 'portal',
+        label: 'Portal',
+        version: '1.0.0',
+        sharing: { enabled: true },
+        embed: { enabled: true },
+        mobileNavigation: { mode: 'bottom_nav' },
+        navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
+      }],
+    },
+    after: {
+      apps: [{
+        name: 'portal',
+        label: 'Portal',
+        navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
+      }],
+    },
+    expectedNotices: 4,
+  },
+};
+
+/**
  * RLS-policy `priority` removed (protocol 17, #3896 security audit).
  *
  * A pure DELETE with no rename target, because the promised semantics never
@@ -1673,6 +1723,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeScriptConfigAliases,
     permissionRlsPriorityRemoved,
     toolInertAuthoringKeysRemoved,
+    appDeadAuthoringKeysRemoved,
     fieldRequiredNotNullExplicit,
     actionInertKeysRemoved,
     flowInertKeysRemoved,

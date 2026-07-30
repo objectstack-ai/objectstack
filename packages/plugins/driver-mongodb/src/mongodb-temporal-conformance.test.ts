@@ -11,12 +11,21 @@
  * was this driver's and was the worst of them: type-bracket comparison meant a
  * string bound matched no BSON `Date` row at all, so the default dashboard
  * window returned nothing.
+ *
+ * Rows are seeded in their tagged writer forms (ISO string vs JS `Date` — the
+ * D-E4 mixed-writer axis), the exact writer population #4047 hit. Cases
+ * carrying a token spelling also run through `resolveFilterTokens` at the
+ * pinned `TEMPORAL_NOW` — the D-A3 "token → row results" axis (#4081).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { TEMPORAL_CASES, TEMPORAL_ROWS } from '@objectstack/spec/data';
+import { TEMPORAL_CASES, TEMPORAL_NOW, TEMPORAL_ROWS } from '@objectstack/spec/data';
+import { resolveFilterTokens } from '@objectstack/core';
 import { MongoDBDriver } from './mongodb-driver.js';
+
+const resolveTokens = <T,>(filter: T): T =>
+  resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
 
 let sharedMongod: MongoMemoryServer | undefined;
 try {
@@ -42,7 +51,13 @@ describe.skipIf(!sharedMongod)('driver-mongodb — temporal conformance', () => 
       fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } },
     });
     for (const r of TEMPORAL_ROWS) {
-      await driver.create('conformance', { id: r.id, at: r.at, on: r.on, why: r.why });
+      await driver.create('conformance', {
+        id: r.id,
+        // The mixed-writer axis (D-E4): the exact population #4047 hit.
+        at: r.writerForm === 'native' ? new Date(r.at) : r.at,
+        on: r.on,
+        why: r.why,
+      });
     }
   }, 90_000);
 
@@ -57,5 +72,13 @@ describe.skipIf(!sharedMongod)('driver-mongodb — temporal conformance', () => 
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
+
+    if (c.tokenFilter) {
+      it(`${c.name} — via relative tokens`, async () => {
+        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) } as any);
+        const got = (rows as any[]).map((r) => r.id).sort();
+        expect(got, c.note).toEqual([...c.expected].sort());
+      });
+    }
   }
 });

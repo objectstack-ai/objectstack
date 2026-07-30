@@ -857,6 +857,25 @@ Two things, which is the argument for having built it:
    exists to provide. Fixed in the same change, sharing the `$lte` bound helper
    so the two cannot drift again.
 
+   **The same defect had a twin one layer over, found the same way when the
+   sixth consumer was added (#4081 follow-up).** `NativeSQLStrategy` — the
+   surface #3650 was actually about — was listed in the matrix's own backend
+   table but had no consumer, because every existing suite for it asserts the
+   emitted SQL string, and a *dropped* predicate is invisible to a string
+   assertion: the SQL stays valid, just wider. Executing the matrix against a
+   real engine showed `$between` returning the **entire table**. The cause was
+   one layer below the strategy, in the shared `filter-normalizer`: `$between`
+   was absent from `MONGO_TO_CUBE_OP`, and an unmapped operator is `continue`d,
+   so the predicate vanished from the WHERE clause. Both raw-SQL and ObjectQL
+   strategies read that normalizer, so both were affected. `$between` now
+   **lowers to its two bounds** (`gte` + `lte`) rather than gaining an operator
+   of its own: each strategy's upper-bound arm already carries the whole-day
+   calendar rule (`NativeSQLStrategy` compiles half-open directly, the ObjectQL
+   path inherits it from the driver), so a range's max gets that rule by
+   construction instead of via a second implementation. A malformed `$between`
+   now throws, the anti-silent-widening stance driver-memory took for the same
+   shape in #3948.
+
 2. **A measured, irreducible limit.** `$gt` with a bare-day comparand on a
    `datetime` column cannot agree across backends. A typed backend anchors the
    bound to midnight and excludes a value stored at exactly 00:00; a type-blind
@@ -876,7 +895,19 @@ Two things, which is the argument for having built it:
 
 - The matrix is the ratchet the previous four fixes lacked: a backend that
   drifts now fails a named case whose note says which incident it is repeating.
-- Coverage still open, and deliberately so: the **relative-token** axis
+- ~~Coverage still open, and deliberately so: the **relative-token** axis
   (`{today}`, `{30_days_ago}` resolved through `filter-tokens.ts` and run
   end-to-end per driver) is not yet in the table. The cases here take resolved
-  comparands, which is the layer where the four incidents actually happened.
+  comparands, which is the layer where the four incidents actually happened.~~
+  Closed in the #4081 follow-up: cases now carry a `tokenFilter` (and, for the
+  analytics window path, a `dateRange`) spelling — the same filter written in
+  `{today}` / `{90_days_ago}` / period tokens — which every consumer that can
+  reach `@objectstack/core` resolves against the pinned `TEMPORAL_NOW` and
+  must land on the same row ids as the literal spelling. `formula` alone skips
+  the token sweep (its dependencies deliberately stop at `spec`; tokens are
+  resolved before a filter reaches it). The same follow-up added the
+  `writerForm` seeding hint (D-E4's mixed-writer populations through each
+  driver's own `create()`), a pre-epoch row, the `date` equality/`$in` cells
+  (#1874's original shape), a `driver-sqlite-wasm` consumer pinning the
+  inheritance seam, and a legacy-storage sweep in the `driver-sql` consumer so
+  the un-backfilled read-repair path answers the same table.

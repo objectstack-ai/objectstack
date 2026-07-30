@@ -310,30 +310,24 @@ methods, so this entry describes a contract with no implementer on either side.
 `getLocales`, `getTranslations`, `getFieldLabels`
 
 **Service Name**: `i18n` · **Criticality**: `core`  
-**Implementations**: `@objectstack/service-i18n` (production — file-based) · Built-in in-memory fallback · Dev Plugin (in-memory stub)  
+**Implementations**: `@objectstack/service-i18n` (production — file-based) · In-memory fallback (`createMemoryI18n` from `@objectstack/core`)  
 **Route Mount**: `/api/v1/i18n`  
 **Contract**: `II18nService` in `@objectstack/spec/contracts`
 
 #### Service Registration
 
-The i18n service is a **core built-in service** with automatic in-memory fallback. If no plugin registers the service, the kernel automatically injects an in-memory implementation during startup:
-
 | Environment | Provider | Registration |
 |:------------|:---------|:-------------|
 | **Production** | `I18nServicePlugin` | File-based `FileI18nAdapter` loads JSON locale files from disk |
-| **Built-in Fallback** | Kernel | In-memory Map-backed stub, auto-injected when no plugin provides `i18n` |
-| **Development** | `DevPlugin` | In-memory Map-backed stub, supports `loadTranslations()` |
+| **In-memory fallback** | `@objectstack/core` (`createMemoryI18n`) | Registered by `AppPlugin` when the stack declares translation bundles and no i18n service is present; self-describes as `degraded` (ADR-0076 D12) |
+| **Development** | `DevPlugin` | Auto-wires `I18nServicePlugin` when the stack declares translations; otherwise the AppPlugin fallback above applies. DevPlugin registers no stub of its own (ADR-0115) |
 
 ```typescript
-// Production (overrides built-in fallback)
+// Production (real service)
 kernel.use(new I18nServicePlugin({ defaultLocale: 'en', localesDir: './i18n' }));
 
-// Development (automatic — DevPlugin registers i18n stub for all 16 core services)
+// Development (automatic — DevPlugin wires I18nServicePlugin when translations are declared)
 kernel.use(new DevPlugin());
-
-// No plugin required — kernel auto-injects in-memory fallback if none registered
-const kernel = new ObjectKernel();
-await kernel.bootstrap(); // i18n service available via built-in fallback
 ```
 
 #### Discovery & Handler Consistency

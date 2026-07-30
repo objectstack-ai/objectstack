@@ -109,7 +109,11 @@ export async function handleI18nRequest(
         // Fallback: derive field labels from the locale's translation bundle.
         // This is not really a fallback — `getFieldLabels` is optional on
         // `II18nService` and nothing implements it, so this is the path every
-        // provider takes. Shared with service-i18n's identical derivation so
+        // provider takes. [#4127] That first clause only became TRUE with this
+        // change: the method was probed here and in service-i18n while the
+        // contract never declared it. Declared now, so the probe reads an
+        // optional capability instead of a second, unwritten contract.
+        // Shared with service-i18n's identical derivation so
         // the next bundle-shape change cannot fix one copy and miss the other,
         // which is how this one went on scanning the retired flat
         // `o.<object>.fields.<field>` dialect after #3778 and returned `{}`

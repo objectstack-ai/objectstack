@@ -416,10 +416,31 @@ describe('HttpDispatcher', () => {
             expect(result.response?.status).toBe(404);
         });
 
-        it('should handle legacy trigger path POST /trigger/:name', async () => {
+        /**
+         * [#4127] This used to assert `trigger('flow_a', { data: 1 }, { request })`
+         * — a method the mock invented. Nothing in the repo implements `trigger`
+         * on the automation slot and `IAutomationService` never declared it, so
+         * the branch it pinned was dead on every deployment while the "fallback"
+         * to `execute` was the actual route. Same test shape that let #4087 sit
+         * green on a `/storage` handler calling `upload` with the wrong
+         * arguments: mock what the handler wants, and the handler always agrees.
+         *
+         * The route goes through the CONTRACT method now, with the body
+         * translated into an AutomationContext. Identity forwarding is covered
+         * in domain-handler-registry.test.ts, which can seed an
+         * executionContext without dispatch() overwriting it.
+         */
+        it('routes the legacy POST /trigger/:name through execute, never a non-contract trigger()', async () => {
             const result = await dispatcher.handleAutomation('trigger/flow_a', 'POST', { data: 1 }, { request: {} });
             expect(result.handled).toBe(true);
-            expect(mockAutomationService.trigger).toHaveBeenCalledWith('flow_a', { data: 1 }, { request: {} });
+            expect(mockAutomationService.trigger).not.toHaveBeenCalled();
+            expect(mockAutomationService.execute).toHaveBeenCalledTimes(1);
+            const [name, ctx] = mockAutomationService.execute.mock.calls[0];
+            expect(name).toBe('flow_a');
+            // A flat body survives as flow params rather than being handed to
+            // the engine as an AutomationContext it cannot read anything from.
+            expect(ctx.params).toEqual({ data: 1 });
+            expect(ctx.event).toBe('manual');
         });
 
         // ── GET /actions — action descriptor registry (ADR-0018) ──────────

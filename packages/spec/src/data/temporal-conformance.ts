@@ -65,9 +65,53 @@
  * shared: both readings include the midnight row, so they agree by luck of the
  * boundary being inclusive — which is worth pinning precisely because it is
  * luck. Tracked separately rather than papered over.
+ *
+ * # The relative-token axis (D-A3's "token → row results", #4081)
+ *
+ * The four incidents happened below token resolution, but the tokens are how
+ * authors actually WRITE these filters — `{today}`, `{90_days_ago}`,
+ * `{current_month_end}` — and nothing proved the resolved comparand reaches
+ * the same rows on every backend. So a case may carry
+ * {@link TemporalCase.tokenFilter} (and, for the analytics window path,
+ * {@link TemporalCase.dateRange}): the SAME filter spelled in tokens.
+ * Consumers that can reach `@objectstack/core` resolve it via
+ * `resolveFilterTokens` pinned to {@link TEMPORAL_NOW} and must land on the
+ * same {@link TemporalCase.expected} as the literal spelling — so a resolver
+ * drift and an evaluator drift are distinguishable at a glance. `formula`
+ * deliberately depends on nothing but `spec` and skips the token sweep: by the
+ * time a filter reaches it, tokens are already resolved.
+ *
+ * # The writer-form seeding hint (D-E4 `mixed-writer-form`)
+ *
+ * Storage form stays out of scope here (see "What belongs here"), but HOW a
+ * row is written is exactly how #4047 happened: the drivers' mixed columns
+ * were produced by two writer populations (REST/JSON ISO strings vs SDK
+ * `Date`s). {@link TemporalRow.writerForm} tags each row so a driver consumer
+ * can seed a genuinely mixed writer population through its own `create()` —
+ * the assertion stays "which rows match", the convergence itself remains each
+ * driver's own suite's claim.
  */
 
 import type { FilterCondition } from './filter.zod';
+
+/**
+ * The pinned reference instant for resolving {@link TemporalCase.tokenFilter}
+ * and {@link TemporalCase.dateRange}: consumers pass
+ * `{ now: new Date(TEMPORAL_NOW) }` (UTC, no timezone) to
+ * `resolveFilterTokens`. Mid-day, so no token resolution sits on a day
+ * boundary; `{today}` resolves to the fixture's boundary day `2026-07-28`,
+ * `{90_days_ago}` to `2026-04-29`, `{yesterday}` to `2026-07-27`.
+ */
+export const TEMPORAL_NOW = '2026-07-28T12:00:00.000Z';
+
+/**
+ * Which write-path shape a driver consumer should seed the row through, where
+ * the distinction exists (D-E4): `wire` = the ISO-8601 string a REST/JSON
+ * write delivers; `native` = a JS `Date`, what SDK callers and the drivers'
+ * own timestamp defaults produce. Both writer populations appear inside AND
+ * outside every window, so a backend that converges only one form fails.
+ */
+export type TemporalWriterForm = 'wire' | 'native';
 
 /**
  * A row in the temporal fixture.
@@ -83,6 +127,8 @@ export interface TemporalRow {
   at: string;
   /** `Field.date` — the calendar day of `at`, timezone-naive. */
   on: string;
+  /** Writer-population seeding hint for drivers — see {@link TemporalWriterForm}. */
+  writerForm: TemporalWriterForm;
   /** Why the row is in the fixture — surfaced when a case fails. */
   why: string;
 }
@@ -94,14 +140,15 @@ export interface TemporalRow {
  * strictly after it, and `d_next` on the next midnight — the exclusive edge.
  */
 export const TEMPORAL_ROWS: readonly TemporalRow[] = [
-  { id: 'a_old',   at: '2026-04-19T10:00:00.000Z', on: '2026-04-19', why: 'well before any window here' },
-  { id: 'b_prev',  at: '2026-07-27T14:00:00.000Z', on: '2026-07-27', why: 'the day before the boundary day' },
-  { id: 'c_open',  at: '2026-07-28T00:00:00.000Z', on: '2026-07-28', why: 'boundary day at exactly 00:00 — the only instant a midnight-anchored bound keeps' },
-  { id: 'd_mid',   at: '2026-07-28T09:15:00.000Z', on: '2026-07-28', why: 'boundary day, morning — dropped by the #3777 bug' },
-  { id: 'e_late',  at: '2026-07-28T21:40:00.000Z', on: '2026-07-28', why: 'boundary day, evening — dropped by the #3777 bug' },
-  { id: 'f_next',  at: '2026-07-29T00:00:00.000Z', on: '2026-07-29', why: 'next midnight — the exclusive edge a half-open bound must NOT keep' },
-  { id: 'g_eom',   at: '2026-07-31T23:59:59.999Z', on: '2026-07-31', why: 'last representable instant of a month — month rollover' },
-  { id: 'h_leap',  at: '2024-02-29T12:00:00.000Z', on: '2024-02-29', why: 'leap day — February rollover' },
+  { id: 'a_epoch', at: '1969-12-31T23:00:00.000Z', on: '1969-12-31', writerForm: 'wire',   why: 'pre-epoch instant (negative epoch ms) — any surface assuming a non-negative epoch, or reading one as a Julian day (#3773), breaks here first' },
+  { id: 'a_old',   at: '2026-04-19T10:00:00.000Z', on: '2026-04-19', writerForm: 'wire',   why: 'well before any window here' },
+  { id: 'b_prev',  at: '2026-07-27T14:00:00.000Z', on: '2026-07-27', writerForm: 'native', why: 'the day before the boundary day' },
+  { id: 'c_open',  at: '2026-07-28T00:00:00.000Z', on: '2026-07-28', writerForm: 'native', why: 'boundary day at exactly 00:00 — the only instant a midnight-anchored bound keeps' },
+  { id: 'd_mid',   at: '2026-07-28T09:15:00.000Z', on: '2026-07-28', writerForm: 'wire',   why: 'boundary day, morning — dropped by the #3777 bug' },
+  { id: 'e_late',  at: '2026-07-28T21:40:00.000Z', on: '2026-07-28', writerForm: 'wire',   why: 'boundary day, evening — dropped by the #3777 bug' },
+  { id: 'f_next',  at: '2026-07-29T00:00:00.000Z', on: '2026-07-29', writerForm: 'native', why: 'next midnight — the exclusive edge a half-open bound must NOT keep' },
+  { id: 'g_eom',   at: '2026-07-31T23:59:59.999Z', on: '2026-07-31', writerForm: 'wire',   why: 'last representable instant of a month — month rollover' },
+  { id: 'h_leap',  at: '2024-02-29T12:00:00.000Z', on: '2024-02-29', writerForm: 'native', why: 'leap day — February rollover' },
 ] as const;
 
 /** Which declared field type a case filters on. */
@@ -119,6 +166,17 @@ export interface TemporalCase {
   field: 'at' | 'on';
   kind: TemporalFieldKind;
   filter: FilterCondition;
+  /**
+   * The same filter spelled with relative-date tokens — see "The
+   * relative-token axis" in the module doc. Resolve against
+   * {@link TEMPORAL_NOW}; the resolved filter must reach {@link expected}.
+   */
+  tokenFilter?: FilterCondition;
+  /**
+   * The analytics `timeDimensions.dateRange` spelling of the same window
+   * (tokens allowed) for the dashboard-window path — the surface #3650 broke.
+   */
+  dateRange?: [string, string];
   /** Ids of matching rows, ascending. */
   expected: string[];
   /** Why the case is here — surfaced in failure output. */
@@ -137,6 +195,8 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'at',
     kind: 'datetime',
     filter: { at: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+    tokenFilter: { at: { $gte: '{90_days_ago}', $lte: '{today}' } },
+    dateRange: ['{90_days_ago}', '{today}'],
     expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
     note: '#3777: the default dashboard window. Pre-fix returned only b_prev + c_open — everything after 00:00 on the final day vanished.',
   },
@@ -145,6 +205,8 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'on',
     kind: 'date',
     filter: { on: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+    tokenFilter: { on: { $gte: '{90_days_ago}', $lte: '{today}' } },
+    dateRange: ['{90_days_ago}', '{today}'],
     expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
     note: 'A `date` column compares as calendar-day text, so `<= day` was always right there. The two rows must agree — that is the invariant.',
   },
@@ -153,7 +215,8 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'at',
     kind: 'datetime',
     filter: { at: { $lte: '2026-07-28' } },
-    expected: ['a_old', 'b_prev', 'c_open', 'd_mid', 'e_late', 'h_leap'],
+    tokenFilter: { at: { $lte: '{today}' } },
+    expected: ['a_epoch', 'a_old', 'b_prev', 'c_open', 'd_mid', 'e_late', 'h_leap'],
     note: 'f_next sits exactly on the exclusive edge and must stay out — a half-open bound, never an inclusive 23:59:59.999.',
   },
   {
@@ -161,6 +224,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'at',
     kind: 'datetime',
     filter: { at: { $between: ['2026-04-29', '2026-07-28'] } },
+    tokenFilter: { at: { $between: ['{90_days_ago}', '{today}'] } },
     expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
     note: 'knex whereBetween is inclusive on both ends, so it had the same midnight-anchored upper bound $lte had.',
   },
@@ -169,6 +233,8 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'at',
     kind: 'datetime',
     filter: { at: { $between: ['2026-07-28', '2026-07-28'] } },
+    tokenFilter: { at: { $between: ['{today}', '{today}'] } },
+    dateRange: ['{today}', '{today}'],
     expected: ['c_open', 'd_mid', 'e_late'],
     note: 'The "today" preset degenerates to a single day: the min stays midnight-anchored while the max spans the day.',
   },
@@ -179,6 +245,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'at',
     kind: 'datetime',
     filter: { at: { $gte: '2026-07-28' } },
+    tokenFilter: { at: { $gte: '{today}' } },
     expected: ['c_open', 'd_mid', 'e_late', 'f_next', 'g_eom'],
     note: 'A LOWER bound anchors to 00:00 — c_open is included precisely because the bound is inclusive of that instant.',
   },
@@ -187,7 +254,8 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'at',
     kind: 'datetime',
     filter: { at: { $lt: '2026-07-28' } },
-    expected: ['a_old', 'b_prev', 'h_leap'],
+    tokenFilter: { at: { $lt: '{today}' } },
+    expected: ['a_epoch', 'a_old', 'b_prev', 'h_leap'],
     note: 'Strict-less keeps its anchoring: c_open is AT midnight, so it is excluded.',
   },
   {
@@ -197,6 +265,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'on',
     kind: 'date',
     filter: { on: { $gt: '2026-07-28' } },
+    tokenFilter: { on: { $gt: '{today}' } },
     expected: ['f_next', 'g_eom'],
     note: 'The boundary day itself is out; the mirror-image of widening a lower bound.',
   },
@@ -207,7 +276,7 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'at',
     kind: 'datetime',
     filter: { at: { $lte: '2026-07-28T12:00:00.000Z' } },
-    expected: ['a_old', 'b_prev', 'c_open', 'd_mid', 'h_leap'],
+    expected: ['a_epoch', 'a_old', 'b_prev', 'c_open', 'd_mid', 'h_leap'],
     note: 'Only the day-granular STRING carries whole-day intent. e_late (21:40) is after noon and must stay out.',
   },
   {
@@ -225,6 +294,8 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     field: 'at',
     kind: 'datetime',
     filter: { at: { $gte: '2026-07-29', $lte: '2026-07-31' } },
+    tokenFilter: { at: { $gte: '{tomorrow}', $lte: '{current_month_end}' } },
+    dateRange: ['{tomorrow}', '{current_month_end}'],
     expected: ['f_next', 'g_eom'],
     note: 'g_eom is 23:59:59.999 on the 31st — kept only if the bound rolled to 2026-08-01.',
   },
@@ -243,5 +314,33 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     filter: { at: { $gte: '2024-02-01', $lte: '2024-02-28' } },
     expected: [],
     note: 'Guards the opposite error: rolling 02-28 to 03-01 (skipping the 29th) would wrongly include h_leap.',
+  },
+  {
+    name: 'datetime: a pre-epoch day is an ordinary calendar day',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '1969-12-31', $lte: '1969-12-31' } },
+    expected: ['a_epoch'],
+    note: 'Negative epoch ms. The #3773 family: any surface that assumes a datetime is a non-negative epoch, or reads one as a Julian day, breaks here first.',
+  },
+
+  // ── Equality on the `date` column — the ADR's original defect (#1874) ────
+  {
+    name: 'date: equality against a resolved day matches the whole day',
+    field: 'on',
+    kind: 'date',
+    filter: { on: '2026-07-28' },
+    tokenFilter: { on: '{today}' },
+    expected: ['c_open', 'd_mid', 'e_late'],
+    note: '#1874: `date == today` silently matched nothing while dates were stored as instants. Equality on a date column is plain calendar-day text equality — Phase 1\'s whole point.',
+  },
+  {
+    name: 'date: $in of two resolved days',
+    field: 'on',
+    kind: 'date',
+    filter: { on: { $in: ['2026-07-28', '2026-07-27'] } },
+    tokenFilter: { on: { $in: ['{today}', '{yesterday}'] } },
+    expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
+    note: 'The `expires_on: { $in: [daysFromNow(30)] }` template shape from the #1874 family — element-wise, order-independent.',
   },
 ] as const;
