@@ -84,6 +84,37 @@ function flattenCondition(cond: Record<string, unknown>, out: NormalizedAnalytic
       const opKeys = Object.keys(wrapper).filter(k => k.startsWith('$'));
       if (opKeys.length > 0) {
         for (const opKey of opKeys) {
+          // `$between [min, max]` LOWERS to its two bounds rather than getting a
+          // `between` operator of its own. Both strategies already carry the
+          // calendar-day whole-day rule on their upper bound — NativeSQLStrategy
+          // compiles a bare-day `lte` half-open (#3777), ObjectQLStrategy hands
+          // `$lte` to the driver, which does the same — so a range's max
+          // inherits that rule by construction instead of needing a second
+          // implementation to keep in step. (The preview evaluator's `$between`
+          // gap was closed the same way, sharing its `$lte` helper.)
+          //
+          // Before this, `$between` was simply absent from the operator map and
+          // fell to the `continue` below: the predicate VANISHED from the WHERE
+          // clause, so a dashboard widget carrying a range filter charted the
+          // entire dataset — #3650's symptom, on the surface #3650 was about.
+          // The temporal conformance matrix caught it as row results
+          // (`native-sql-temporal-conformance.test.ts`).
+          if (opKey === '$between') {
+            const v = wrapper[opKey];
+            if (!Array.isArray(v) || v.length !== 2) {
+              // Never drop it: an unbounded read is the failure mode this whole
+              // branch exists to prevent, and it is indistinguishable from a
+              // legitimately wide query. Same stance driver-memory took for the
+              // same shape (#3948).
+              throw new Error(
+                `[analytics] "$between" on "${key}" needs a two-element [min, max] array, got ` +
+                `${JSON.stringify(v)}. Dropping the predicate would silently widen the query to every row.`,
+              );
+            }
+            out.push({ member: key, operator: 'gte', values: [stringifyForCube(v[0])] });
+            out.push({ member: key, operator: 'lte', values: [stringifyForCube(v[1])] });
+            continue;
+          }
           const cubeOp = MONGO_TO_CUBE_OP[opKey];
           if (!cubeOp) continue;
           const v = wrapper[opKey];
