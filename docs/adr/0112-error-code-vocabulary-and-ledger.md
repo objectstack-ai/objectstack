@@ -67,6 +67,7 @@ A `code: 'x'` grep finds the easy half. Each of these forms was missed once and 
 | Indirect / computed | `const code = intent === 'runtime-only' ? 'not_creatable' : 'not_overridable'` | the literal never sits next to the word `code:` |
 | Regex assertion | `expect.stringMatching(/^(not_overridable\|not_creatable)$/)` | literal is inside a pattern |
 | `toBe` assertion | `expect(caught.code).toBe('invalid_metadata')` | test-side spelling of the same contract |
+| Literal-union **type** | `code?: 'forbidden' \| 'invalid_signal'` in a contract interface | it's a type, not a value — `tsc --noEmit` on the *declaring* package still passes, and only a **consumer's** `dts` build fails, so the error surfaces in a package you did not touch |
 | Doc comment / contract docstring | ``* refused with `{ code: 'forbidden' }` `` | teaches the old spelling to the next author (and to AI) |
 
 Also rebuild dependent packages before trusting a cross-package suite: a stale `dist/` makes the *old* code the one under test, which reads as "my rename broke it" (or, worse, as a false green).

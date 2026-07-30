@@ -180,7 +180,7 @@ export interface AutomationResult {
      * Both refuse before consuming the suspension: the run stays parked and the
      * legitimate continuation still lands.
      */
-    code?: 'forbidden' | 'invalid_signal';
+    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL';
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be
