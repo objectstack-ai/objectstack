@@ -24,6 +24,51 @@ indexes: [
 ]
 ```
 
+## Two ways to say "unique" — and they mean different things
+
+Uniqueness can be declared in two places, and the choice is not cosmetic:
+
+| Declaration | Materializes as | Scope |
+|:---|:---|:---|
+| Field-level `unique: true` | `(organization_id, field)` | Unique **within** an organization |
+| Field-level `unique: 'global'` | `(field)` | Platform-wide |
+| Declared index `{ fields: ['email'], unique: true }` | `(email)` — exactly the listed columns | Platform-wide |
+
+A field-level `unique: true` is **tenant-scoped**. It has no syntax for a
+composite, so the platform supplies the tenant column for you — which is what
+a multi-tenant application almost always wants: two organizations may each
+have a contact `john@acme.com`.
+
+A **declared index is taken verbatim**. No tenant column is injected, because
+many declared indexes are legitimately platform-wide (a DNS hostname, a
+reserved slug, an external provider id). To scope one per tenant, list the
+column yourself: `{ fields: ['organization_id', 'email'], unique: true }`.
+
+<Callout type="warn">
+**Do not declare both on the same column.** The stricter one wins physically,
+so the platform-wide index enforces uniqueness and the per-tenant constraint
+can never be reached — one of the two intents you wrote is silently discarded:
+
+```typescript
+// ⚠️ contradictory — the global index wins, the per-tenant scope is dead
+email: Field.email({ unique: true }),
+indexes: [{ fields: ['email'], unique: true }],
+```
+
+`os lint` / `os build` report this as `unique/double-declaration`. Pick one:
+set `unique: 'global'` on the field and drop the index for platform-wide
+uniqueness, or drop the index for per-tenant uniqueness (the field-level
+declaration already builds the composite).
+</Callout>
+
+<Callout type="warn">
+**Never put a platform-wide unique index on an `autonumber` field.** The
+autonumber sequence is per tenant — every organization counts from `1` — so a
+global unique index rejects the second organization's `CASE-00001` on insert.
+Use `{ fields: ['organization_id', 'case_number'], unique: true }` so the
+constraint matches the sequence that feeds it.
+</Callout>
+
 ### When to Add Indexes
 
 ✅ **Add indexes for:**
