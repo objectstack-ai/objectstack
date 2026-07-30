@@ -1,6 +1,6 @@
 {
   "type": "agent",
-  "_note": "AgentSchema. Seeded from docs/audits/2026-06-agentschema-property-liveness.md. agent-runtime.ts is the runtime consumer; AgentPreview is display-only. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary.",
+  "_note": "AgentSchema. Seeded from docs/audits/2026-06-agentschema-property-liveness.md. agent-runtime.ts is the runtime consumer; AgentPreview is display-only. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent. agent.knowledge (and AIKnowledgeSchema) removed; the topics→sources rename was absorbed into the removal pre-release.",
   "props": {
     "name": {
       "status": "live",
@@ -64,13 +64,6 @@
       "evidence": "packages/services/service-ai/src/routes/agent-access.ts:50",
       "note": "evaluateAgentAccess() — caller must hold ALL required permissions/roles; enforced at the chat route. #1884."
     },
-    "knowledge": {
-      "status": "dead",
-      "evidence": "agent.form.ts + objectui AgentPreview.tsx:69 (both authoring-side echo only); the RAG path never reads it",
-      "authorWarn": true,
-      "authorHint": "Declaring `knowledge.sources` does NOT scope retrieval — the `search_knowledge` tool takes `sourceIds` from the LLM's tool-call arguments (cloud service-ai/src/tools/knowledge-tools.ts:96), never from the agent record. Restrict retrieval at the knowledge-service / source level instead.",
-      "note": "CORRECTED 2026-07 (#1878 §3 recheck): was marked live on the evidence of the metadata-admin PREVIEW renderer — an echo of what the author typed, not runtime consumption. The `topics`→`sources` NAMING drift is genuinely fixed (#1891 alias fold); the block is nonetheless behaviourally inert. Wiring it would also close a scope gap (an agent can search sources it was never scoped to) — tracked separately."
-    },
     "lifecycle": {
       "status": "experimental",
       "evidence": "no runtime reader (StateMachine)",
@@ -90,6 +83,11 @@
       "status": "experimental",
       "evidence": "no runtime reader",
       "note": "aspirational."
+    },
+    "knowledge": {
+      "status": "dead",
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); restrict retrieval at the knowledge-service/source level; describe grounding in `instructions`. AIKnowledgeSchema removed; the topics→sources rename absorbed pre-release."
     }
   }
 }

@@ -17,7 +17,6 @@ const approvalFlow = {
   type: 'record_change',
   version: 1,
   status: 'active',
-  template: false,
   runAs: 'system',
 
   variables: [
@@ -74,7 +73,6 @@ const approvalFlow = {
 | `version` | `number` | optional | Version number (defaults to `1`) |
 | `status` | `enum` | optional | `'draft'`, `'active'`, `'obsolete'`, `'invalid'` (defaults to `'draft'`) |
 | `type` | `FlowType` | ✅ | Flow trigger type (see below) |
-| `template` | `boolean` | optional | Is this a reusable subflow template (defaults to `false`) |
 | `runAs` | `enum` | optional | `'system'` or `'user'` execution context (defaults to `'user'`) |
 | `variables` | `FlowVariable[]` | optional | Input/output variables |
 | `nodes` | `FlowNode[]` | ✅ | Flow nodes |
@@ -670,7 +668,6 @@ errorHandling: {
   strategy: 'retry',           // 'fail' | 'retry' | 'continue'
   maxRetries: 3,
   retryDelayMs: 5000,
-  fallbackNodeId: 'error_handler',
 }
 ```
 
@@ -679,7 +676,6 @@ errorHandling: {
 | `strategy` | `enum` | `'fail'` (stop), `'retry'` (retry), `'continue'` (skip) |
 | `maxRetries` | `number` | Maximum retry attempts (0-10) |
 | `retryDelayMs` | `number` | Delay between retries (ms) |
-| `fallbackNodeId` | `string` | Node to execute on failure |
 
 ## Discovery & Registration
 

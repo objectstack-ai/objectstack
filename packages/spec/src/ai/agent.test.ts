@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   AgentSchema,
   AIModelConfigSchema,
-  AIKnowledgeSchema,
   StructuredOutputFormatSchema,
   StructuredOutputConfigSchema,
   defineAgent,
@@ -96,61 +95,9 @@ describe('agent.tools retirement (ADR-0064 / #3820, tombstoned in #3894)', () =>
   });
 });
 
-describe('AIKnowledgeSchema', () => {
-  it('should accept knowledge config (canonical sources)', () => {
-    const knowledge = {
-      sources: ['product_docs', 'faq', 'troubleshooting'],
-      indexes: ['vector_store_main', 'vector_store_archive'],
-    };
+// AIKnowledgeSchema tests removed with the schema (#3896 close-out). The
+// retirement itself is pinned below in "retired `knowledge`".
 
-    expect(() => AIKnowledgeSchema.parse(knowledge)).not.toThrow();
-  });
-
-  it('rejects the removed `topics` alias instead of silently stripping it (#3855)', () => {
-    // #1891 folded `topics` into `sources` and dropped it; protocol 17 removes
-    // it from the spec. Tombstoned rather than deleted because
-    // `AIKnowledgeSchema` is not `.strict()` — a silent strip would leave the
-    // agent recruiting no RAG context at all, which is #1878's original bug.
-    expect(() => AIKnowledgeSchema.parse({
-      topics: ['product_docs', 'faq'],
-      indexes: ['vector_store_main'],
-    })).toThrow(/`knowledge.topics` was removed/);
-  });
-
-  it('carries the upgrade prescription in the rejection itself', () => {
-    let message = '';
-    try {
-      AIKnowledgeSchema.parse({ topics: ['legacy'], indexes: [] });
-    } catch (err) {
-      message = String(err);
-    }
-    expect(message).toContain('use `knowledge.sources`');
-    expect(message).toContain('os migrate meta');
-  });
-
-  it('rejects `topics` even when the canonical `sources` is also present', () => {
-    expect(() => AIKnowledgeSchema.parse({
-      sources: ['canonical'],
-      topics: ['legacy'],
-      indexes: [],
-    })).toThrow(/`knowledge.topics` was removed/);
-  });
-
-  it('accepts the canonical `sources` on its own', () => {
-    const parsed = AIKnowledgeSchema.parse({ sources: ['canonical'], indexes: [] });
-    expect(parsed.sources).toEqual(['canonical']);
-    expect('topics' in parsed).toBe(false);
-  });
-
-  it('should accept empty arrays', () => {
-    const knowledge = {
-      sources: [],
-      indexes: [],
-    };
-
-    expect(() => AIKnowledgeSchema.parse(knowledge)).not.toThrow();
-  });
-});
 
 describe('AgentSchema', () => {
   describe('Basic Properties', () => {
@@ -237,35 +184,28 @@ describe('AgentSchema', () => {
       expect(result).not.toHaveProperty('tools');
     });
 
-    it('should accept agent with knowledge base', () => {
-      const agent: Agent = {
+    // ── #3896 close-out — the retired `knowledge` block ──
+    // Declaring sources/indexes never scoped retrieval: `search_knowledge`
+    // takes `sourceIds` from the LLM's tool-call arguments, never the agent
+    // record. The rejection must carry the prescription.
+    it('REJECTS the retired `knowledge` block instead of silently stripping it', () => {
+      expect(() => AgentSchema.parse({
         name: 'knowledge_bot',
         label: 'Knowledge Bot',
-        role: 'Documentation Assistant',
-        instructions: 'Answer questions using the knowledge base.',
-        knowledge: {
-          sources: ['api_docs', 'user_guide', 'faq'],
-          indexes: ['main_index', 'legacy_index'],
-        },
-      };
-
-      expect(() => AgentSchema.parse(agent)).not.toThrow();
+        instructions: 'x',
+        knowledge: { sources: ['api_docs'], indexes: ['main_index'] },
+      })).toThrow(/knowledge/);
     });
 
-    it('should accept agent with both skills and knowledge', () => {
-      const agent: Agent = {
-        name: 'full_agent',
-        label: 'Complete Agent',
-        role: 'Full-Stack Assistant',
-        instructions: 'Comprehensive assistant with all capabilities.',
-        skills: ['record_management', 'reporting'],
-        knowledge: {
-          sources: ['everything'],
-          indexes: ['master_index'],
-        },
-      };
-
-      expect(() => AgentSchema.parse(agent)).not.toThrow();
+    it('the rejection names where retrieval scoping actually lives', () => {
+      let message = '';
+      try {
+        AgentSchema.parse({ name: 'a', label: 'A', instructions: 'x', knowledge: { sources: ['s'] } });
+      } catch (e) {
+        message = String((e as Error).message);
+      }
+      expect(message).toMatch(/knowledge-service|source level/);
+      expect(message).toMatch(/#3896/);
     });
 
     it('should accept agent with skills (Agent→Skill→Tool architecture)', () => {
@@ -386,10 +326,6 @@ Always be polite, empathetic, and solution-oriented.`,
           maxTokens: 2048,
         },
         skills: ['record_management', 'reporting'],
-        knowledge: {
-          sources: ['product_docs', 'faq', 'troubleshooting', 'api_reference'],
-          indexes: ['support_kb_v2'],
-        },
         access: ['support_team', 'customers'],
         active: true,
       };
@@ -419,10 +355,6 @@ Be persuasive but honest. Focus on value creation.`,
           temperature: 0.8,
         },
         skills: ['record_management', 'reporting'],
-        knowledge: {
-          sources: ['sales_playbooks', 'product_features', 'case_studies', 'competitor_analysis'],
-          indexes: ['sales_intelligence'],
-        },
         access: ['sales_team'],
         active: true,
       };
@@ -451,10 +383,6 @@ Be precise, data-driven, and clear in your explanations.`,
           maxTokens: 4096,
         },
         skills: ['record_management', 'reporting'],
-        knowledge: {
-          sources: ['sql_guides', 'metrics_definitions'],
-          indexes: ['analytics_kb'],
-        },
         access: ['analysts', 'executives'],
         active: true,
       };

@@ -1,6 +1,6 @@
 {
   "type": "dashboard",
-  "_note": "DashboardSchema (UI, ADR-0021 dataset-bound). Live path: objectui DashboardView → DashboardRenderer → DatasetWidget. Seeded from docs/audits/2026-06-dashboardschema-property-liveness.md and re-verified against objectui HEAD — several audit-era findings are superseded: the ADR-0021 widget migration shipped (Studio WidgetConfigPanel + DashboardRenderer on dataset/dimensions/values, framework#3251; DashboardWidgetSchema is now `.strict()`); `globalFilters`/`dateRange` are LIVE (dashboard-level filters, framework#2501); the `title`↔`label` drift is fixed (renderer falls back to `label`, objectui#2806); the undeclared widget props were reconciled (#1894). objectui paths cited as prose in `note` (not `evidence`). Framework provenance/lock fields auto-classify live (ADR-0010). Widget-level props are classified in the DashboardWidgetSchema subtree, not drilled here.",
+  "_note": "DashboardSchema (UI, ADR-0021 dataset-bound). Live path: objectui DashboardView → DashboardRenderer → DatasetWidget. Seeded from docs/audits/2026-06-dashboardschema-property-liveness.md and re-verified against objectui HEAD — several audit-era findings are superseded: the ADR-0021 widget migration shipped (Studio WidgetConfigPanel + DashboardRenderer on dataset/dimensions/values, framework#3251; DashboardWidgetSchema is now `.strict()`); `globalFilters`/`dateRange` are LIVE (dashboard-level filters, framework#2501); the `title`↔`label` drift is fixed (renderer falls back to `label`, objectui#2806); the undeclared widget props were reconciled (#1894). objectui paths cited as prose in `note` (not `evidence`). Framework provenance/lock fields auto-classify live (ADR-0010). Widget-level props are classified in the DashboardWidgetSchema subtree, not drilled here. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent.",
   "props": {
     "name": {
       "status": "live",
@@ -44,13 +44,13 @@
     },
     "aria": {
       "status": "dead",
-      "note": "ARIA attributes — authorable (dashboard.form.ts) but no DashboardRenderer path applies them."
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); no dashboard renderer applied it."
     },
     "performance": {
       "status": "dead",
-      "authorWarn": true,
-      "authorHint": "Dashboard performance tuning is not implemented — this config has no runtime consumer.",
-      "note": "Perf-optimization config — authorable but no renderer/runtime reads it (audit; re-verified — no consumer in plugin-dashboard)."
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); dashboard performance tuning was never implemented."
     }
   }
 }

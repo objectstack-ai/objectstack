@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   ResponsiveConfigSchema,
-  PerformanceConfigSchema,
   BreakpointName,
   type ResponsiveConfig,
   type PerformanceConfig,
@@ -88,59 +87,6 @@ describe('ResponsiveConfigSchema', () => {
   });
 });
 
-describe('PerformanceConfigSchema', () => {
-  it('should accept empty config', () => {
-    expect(() => PerformanceConfigSchema.parse({})).not.toThrow();
-  });
+// PerformanceConfigSchema tests removed with the schema (#3896 close-out):
+// every carrier of a `performance` block was authorable and inert.
 
-  it('should accept lazy load config', () => {
-    const config: PerformanceConfig = {
-      lazyLoad: true,
-    };
-
-    const result = PerformanceConfigSchema.parse(config);
-    expect(result.lazyLoad).toBe(true);
-  });
-
-  it('should accept virtual scroll config', () => {
-    const config: PerformanceConfig = {
-      virtualScroll: {
-        enabled: true,
-        itemHeight: 40,
-        overscan: 5,
-      },
-    };
-
-    const result = PerformanceConfigSchema.parse(config);
-    expect(result.virtualScroll?.enabled).toBe(true);
-    expect(result.virtualScroll?.itemHeight).toBe(40);
-    expect(result.virtualScroll?.overscan).toBe(5);
-  });
-
-  it('should accept cache strategy config', () => {
-    const strategies = ['none', 'cache-first', 'network-first', 'stale-while-revalidate'] as const;
-
-    strategies.forEach(strategy => {
-      expect(() => PerformanceConfigSchema.parse({ cacheStrategy: strategy })).not.toThrow();
-    });
-  });
-
-  it('should accept full performance config', () => {
-    const config: PerformanceConfig = {
-      lazyLoad: true,
-      virtualScroll: { enabled: true, itemHeight: 48, overscan: 3 },
-      cacheStrategy: 'stale-while-revalidate',
-      prefetch: true,
-      pageSize: 50,
-      debounceMs: 300,
-    };
-
-    expect(() => PerformanceConfigSchema.parse(config)).not.toThrow();
-  });
-
-  it('should reject invalid cache strategy', () => {
-    expect(() => PerformanceConfigSchema.parse({
-      cacheStrategy: 'invalid',
-    })).toThrow();
-  });
-});

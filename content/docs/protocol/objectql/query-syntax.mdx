@@ -30,10 +30,12 @@ import type { QueryAST } from '@objectstack/spec/data';
 
 const query: QueryAST = {
   object: 'contact',
-  fields: ['name', 'email', { field: 'account', fields: ['company_name'] }],
-  where: {
-    is_active: true,
-    'account.industry': 'tech',
+  fields: ['name', 'email', 'account'],
+  where: { is_active: true },
+  // Related records are loaded through `expand` — not through a JOIN and not
+  // through a dotted `account.industry` path (see §2 and §4).
+  expand: {
+    account: { object: 'account', fields: ['company_name'] },
   },
   orderBy: [{ field: 'created_at', order: 'desc' }],
   limit: 10,
@@ -41,7 +43,7 @@ const query: QueryAST = {
 ```
 
 **Runtime compilation:**
-- PostgreSQL / MySQL → Optimized SQL with JOINs (`@objectstack/driver-sql`)
+- PostgreSQL / MySQL → parameterised single-table SQL (`@objectstack/driver-sql`); related records are a second, batched `$in` read, not a JOIN
 - MongoDB → Native queries + aggregation pipeline (`@objectstack/driver-mongodb`)
 - SQLite → Portable SQL, in-process or in-browser via `@objectstack/driver-sqlite-wasm`
 - In-Memory → In-process evaluation, no external database (`@objectstack/driver-memory`)
@@ -70,13 +72,36 @@ interface QueryAST {
   cursor?: Record<string, unknown>;        // Keyset pagination cursor
   joins?: JoinNode[];                      // Explicit JOINs
   aggregations?: AggregationNode[];        // Aggregation functions
-  groupBy?: string[];                      // GROUP BY fields
+  groupBy?: GroupByNode[];                 // GROUP BY targets (string | object)
   having?: FilterCondition;                // HAVING clause
   windowFunctions?: WindowFunctionNode[];  // Window functions (OVER)
   distinct?: boolean;                      // SELECT DISTINCT
   expand?: Record<string, QueryAST>;       // Recursive relation loading
 }
 ```
+
+<Callout type="warn">
+**The protocol shape is wider than what the data engine executes.**
+
+`QuerySchema` validates the whole structure above, but `IDataEngine.find()` plus the
+shipped drivers run a subset. `SqlDriver.find()` builds only `where` / `orderBy` /
+`limit` / `offset` / `fields` (`packages/plugins/driver-sql/src/sql-driver.ts`), and
+`expand` is resolved afterwards by the engine as a batched `$in` read
+(`packages/objectql/src/engine.ts`). These members validate but are **not executed**
+on the `find()` path:
+
+| Member | Status |
+|:-------|:-------|
+| `joins` | No driver reads it — there is no `query.joins` / `ast.joins` consumer anywhere in `packages/` |
+| `having` | Never read: `engine.aggregate()` forwards only `object`/`where`/`groupBy`/`aggregations`, and the in-memory fallback has no HAVING stage |
+| `cursor` | Accepted by `EngineQueryOptions`, but no driver implements keyset pagination |
+| `distinct` | Not applied by `find()`; the SQL and in-memory drivers expose a separate `distinct(object, field, filters?)` method instead |
+| `windowFunctions` | Not applied by `find()`; `SqlDriver.findWithWindowFunctions()` is a separate method that is not on the `IDataDriver` contract |
+| Object `FieldNode`s (`{ field, fields }`) | The engine drops non-string entries from `fields` — use `expand` to project related records |
+| `search.fuzzy` / `boost` / `operator` / `minScore` / `language` / `highlight` | Parsed by the schema but ignored: only `query` and `fields` drive the expansion |
+
+`top` is the exception that *is* honored — the engine normalises it to `limit`.
+</Callout>
 
 ### Key Types
 
@@ -93,15 +118,22 @@ interface AggregationNode {
           | 'count_distinct' | 'array_agg' | 'string_agg';
   field?: string;        // optional for COUNT(*)
   alias: string;         // result column alias
-  distinct?: boolean;    // DISTINCT before aggregation
-  filter?: FilterCondition; // FILTER WHERE clause
+  distinct?: boolean;    // DISTINCT before aggregation — in-memory path only
+  filter?: FilterCondition; // FILTER WHERE clause — protocol only, never applied
 }
 
 // FieldNode — field selection
 type FieldNode = string | {
   field: string;
-  fields?: FieldNode[];  // nested select
+  fields?: FieldNode[];  // nested select — protocol only, dropped by the engine
   alias?: string;
+};
+
+// GroupByNode — GROUP BY target
+type GroupByNode = string | {
+  field: string;
+  dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year';
+  alias?: string;        // defaults to `field`
 };
 ```
 
@@ -202,7 +234,7 @@ const query: QueryAST = {
 | `$notContains` | String does not contain | `{ name: { $notContains: 'test' } }` |
 | `$startsWith` | String starts with | `{ email: { $startsWith: 'admin' } }` |
 | `$endsWith` | String ends with | `{ domain: { $endsWith: '.com' } }` |
-| `$between` | Range (inclusive) | `{ created_at: { $between: ['2024-01-01', '2024-12-31'] } }` |
+| `$between` | Range (inclusive) | `{ close_date: { $between: ['2024-01-01', '2024-12-31'] } }` |
 | `$null` | Null check | `{ manager_id: { $null: true } }` / `{ phone: { $null: false } }` |
 | `$exists` | Field exists (NoSQL) | `{ metadata: { $exists: true } }` |
 
@@ -279,7 +311,7 @@ const query: QueryAST = {
 const query: QueryAST = {
   object: 'opportunity',
   where: {
-    'account.industry': 'tech',           // AND (industry = tech)
+    type: 'new_business',                  // AND (type = new_business)
     $or: [                                 // AND (
       { amount: { $gt: 100000 } },         //   amount > 100000
       { is_strategic: true },              //   OR is_strategic = true
@@ -287,23 +319,48 @@ const query: QueryAST = {
   },
 };
 
-// SQL: WHERE account.industry = 'tech'
+// SQL: WHERE type = 'new_business'
 //      AND (amount > 100000 OR is_strategic = true)
 ```
 
-### Date Filters
+### Date, Datetime, and Time Filters
+
+Before a comparison is built, the driver puts the comparand into the **same canonical
+form the column is stored in** (`SqlDriver.coerceFilterValue`) — the identical function
+the write path uses, on every dialect, so the two sides of a comparison can never be
+decided by their shapes disagreeing:
+
+| Field type | Canonical form | Meaning |
+|:-----------|:---------------|:--------|
+| `date` | `YYYY-MM-DD` | Timezone-naive calendar day |
+| `datetime` | `YYYY-MM-DDTHH:MM:SS.sssZ` | A UTC instant |
+| `time` | `HH:MM:SS` — `.fff` only when the milliseconds are non-zero | Timezone-naive wall-clock time of day |
 
 {/* os:check */}
 ```typescript
-// Specific date
-where: { created_at: '2024-01-15' }
+import type { FilterCondition } from '@objectstack/spec/data';
 
-// Date range with $between
-where: { created_at: { $between: ['2024-01-01', '2024-12-31'] } }
+// `date` field — a bare calendar day matches that day
+const onDay: FilterCondition = { close_date: '2024-01-15' };
 
-// Comparison operators on dates
-where: { due_date: { $lt: '2024-06-01' } }
-where: { created_at: { $gte: '2024-01-01' } }
+// `date` range — $between is inclusive on both ends
+const inYear: FilterCondition = {
+  close_date: { $between: ['2024-01-01', '2024-12-31'] },
+};
+
+// `datetime` field — a bare `YYYY-MM-DD` is completed to midnight UTC
+// (`2024-01-15T00:00:00.000Z`), so this is an exact-instant match, not "that day"
+const atMidnight: FilterCondition = { created_at: '2024-01-15' };
+
+// A whole UTC day on a `datetime` needs a half-open range
+const duringDay: FilterCondition = {
+  created_at: { $gte: '2024-01-15', $lt: '2024-01-16' },
+};
+
+// `time` field — `'09:00'` is completed to `'09:00:00'`
+const businessHours: FilterCondition = {
+  start_time: { $gte: '09:00', $lte: '18:00' },
+};
 ```
 
 A bare `YYYY-MM-DD` bound is a **calendar day**. As a lower bound (`$gte`) it
@@ -327,20 +384,29 @@ where: { phone: { $null: false } }
 where: { metadata: { $exists: true } }
 ```
 
-### Nested Relation Filters
+### Filtering Across Relationships
 
-Filter through relationships without explicit joins:
+<Callout type="warn">
+**Relation traversal inside `where` is not supported.** Neither the nested form
+(`where: { account: { industry: 'tech' } }`) nor a dotted path
+(`where: { 'account.industry': 'tech' }`) is resolved. `SqlDriver.applyFilters()` only
+recognises a nested object as an operator map when its keys start with `$`; anything
+else is compiled as a comparison against a single column of the queried table, and a
+dotted key is emitted verbatim, so Knex renders it as `"account"."industry"` against a
+table that was never joined.
+</Callout>
+
+Filter on the local foreign key, or run two queries:
 
 ```typescript
-const query: QueryAST = {
-  object: 'opportunity',
-  where: {
-    account: {
-      industry: 'tech',
-      annual_revenue: { $gt: 1000000 },
-    },
-  },
-};
+const techAccounts = await engine.find('account', {
+  where: { industry: 'tech', annual_revenue: { $gt: 1000000 } },
+  fields: ['id'],
+});
+
+const opportunities = await engine.find('opportunity', {
+  where: { account_id: { $in: techAccounts.map((a) => a.id) } },
+});
 ```
 
 ---
@@ -374,22 +440,22 @@ const query: QueryAST = {
 // SQL: ORDER BY priority DESC, created_at ASC
 ```
 
-### Sort on Related Fields
+### Sorting on Related Fields
 
-```typescript
-const query: QueryAST = {
-  object: 'contact',
-  orderBy: [{ field: 'account.company_name', order: 'asc' }],
-};
-
-// SQL: ORDER BY account.company_name ASC
-```
+<Callout type="warn">
+`orderBy` only reaches columns of the queried table. A dotted path
+(`account.company_name`) is handed to Knex verbatim and renders as
+`"account"."company_name"`, which the database rejects as an unknown column;
+`SqlDriver.find()` then retries **without the sort**, so the rows come back unordered
+rather than sorted — and no error surfaces. Denormalise the value onto the queried
+object (for example with a formula or rollup field) when you need to sort by it.
+</Callout>
 
 ---
 
 ## 4. Relationships (Expand)
 
-The `expand` property enables **recursive loading of related records** through lookup and master_detail fields. Each key is a relationship field name; the value is a nested `QueryAST`.
+The `expand` property enables **recursive loading of related records** through `lookup`, `master_detail`, and `user` fields. Each key is a relationship field name; the value is a nested `QueryAST`.
 
 ### Basic Expand
 
@@ -452,9 +518,9 @@ The engine resolves `expand` via batch `$in` queries (driver-agnostic) with a de
 
 ### Filtered Expand
 
-Expansion follows **`lookup`** and **`master_detail`** fields — i.e. the foreign key
-lives on the object you are querying. The nested `QueryAST` can **filter** (`where`) and
-**select** (`fields`) the related records:
+Expansion follows **`lookup`**, **`master_detail`**, and **`user`** fields — i.e. the
+foreign key lives on the object you are querying. The nested `QueryAST` can **filter**
+(`where`) and **select** (`fields`) the related records:
 
 ```typescript
 const query: QueryAST = {
@@ -549,7 +615,14 @@ const query: QueryAST = {
 // { count: 100, total: 5000000, average: 50000, min_amount: 10000, max_amount: 500000 }
 ```
 
-**Supported functions:** `count`, `sum`, `avg`, `min`, `max`, `count_distinct`, `array_agg`, `string_agg`
+**Schema enum:** `count`, `sum`, `avg`, `min`, `max`, `count_distinct`, `array_agg`, `string_agg`.
+
+<Callout type="warn">
+Only `count`, `sum`, `avg`, `min`, and `max` are portable. `SqlDriver.mapAggregateFunc()`
+throws `Unsupported aggregate function: <name>` for `count_distinct`, `array_agg`, and
+`string_agg`; those three are implemented by the MongoDB driver and by the engine's
+in-memory aggregation fallback, but not by the SQL drivers.
+</Callout>
 
 ### Group By Multiple Fields
 
@@ -565,24 +638,45 @@ const query: QueryAST = {
 };
 ```
 
-### HAVING Clause
+### HAVING Clause (protocol only)
 
-Filter groups after aggregation using the `having` property:
+`QuerySchema` defines a `having` property, but **nothing executes it**:
+`engine.aggregate()` forwards only `object` / `where` / `groupBy` / `aggregations` to
+the driver, no driver reads `query.having`, and the in-memory aggregation fallback has
+no HAVING stage. Filter the aggregated rows in application code:
 
 ```typescript
-const query: QueryAST = {
-  object: 'opportunity',
+const rows = await engine.aggregate('opportunity', {
   groupBy: ['account_id'],
   aggregations: [
     { function: 'sum', field: 'amount', alias: 'total' },
   ],
-  having: {
-    total: { $gt: 1000000 },  // Only accounts with > $1M pipeline
-  },
-};
+});
 
-// SQL: HAVING SUM(amount) > 1000000
+// Only accounts with > $1M pipeline
+const bigAccounts = rows.filter((r) => r.total > 1_000_000);
 ```
+
+### Date Bucketing
+
+A `groupBy` entry may be an object carrying `dateGranularity`, which buckets a
+`date`/`datetime` column into uniform periods. The bucketed value is projected under
+the field name (or `alias`, on the in-memory path):
+
+```typescript
+const revenueByMonth = await engine.aggregate('order', {
+  where: { status: 'completed' },
+  groupBy: [{ field: 'created_at', dateGranularity: 'month' }],
+  aggregations: [
+    { function: 'sum', field: 'total_amount', alias: 'revenue' },
+  ],
+});
+```
+
+**Granularities:** `day`, `week`, `month`, `quarter`, `year`. The engine pushes the
+bucket down to the driver only when it advertises native support for that granularity
+(`supports.queryDateGranularity`); otherwise it falls back to in-memory bucketing over
+the driver's raw rows.
 
 ---
 
@@ -590,39 +684,60 @@ const query: QueryAST = {
 
 ### Distinct
 
-```typescript
-const query: QueryAST = {
-  object: 'account',
-  fields: ['industry'],
-  distinct: true,
-};
+The `distinct` flag on `QueryAST` is **not applied by `find()`**. Distinct values come
+from the driver's own `distinct()` method (implemented by the SQL and in-memory drivers;
+it is not part of the `IDataDriver` contract):
 
-// SQL: SELECT DISTINCT industry FROM account
+```typescript
+const industries = await driver.distinct('account', 'industry');
 ```
+
+`SqlDriver.distinct()` presents each value exactly the way `find()` presents that
+column — a `date` as `YYYY-MM-DD` and a `time` as `HH:MM:SS[.fff]` on every dialect, a
+`datetime` folded to canonical UTC ISO on SQLite (the one dialect where storage differs
+from presentation; Postgres and MySQL hand back their own native temporal value) — and
+then re-deduplicates the presented values, because SQL `DISTINCT` compares the *stored*
+form.
 
 ### Full-Text Search
 
-The `search` parameter configures full-text search:
+The `search` parameter does **not** reach a full-text index. The engine expands it into
+an `$or` of `$contains` predicates across the object's server-resolved searchable fields
+(ADR-0061) and deletes `search` from the AST before the driver sees it — every driver
+already runs `$or`/`$contains`, so no driver support is needed (`SqlDriver` reports
+`supports.fullTextSearch: false`).
 
 ```typescript
 const query: QueryAST = {
   object: 'article',
   search: {
     query: 'ObjectStack tutorial',
-    fields: ['title', 'content', 'tags'],
-    fuzzy: true,
-    boost: { title: 2.0 },
+    fields: ['title', 'content'],
   },
   limit: 10,
 };
-
-// The engine expands `search` into an `$or` of `$contains` across the object's
-// searchable fields (ADR-0061); every driver runs it as native $or/$contains.
 ```
 
-### Joins
+Field resolution is server-side and never client-trusted: `search.fields` is
+**intersected** with the object's declared `searchableFields` (or, absent those, an
+auto-default of the name field plus short-text/enum fields), so naming a field outside
+that set does not widen the search. Multiple whitespace-separated terms are AND-ed and
+fields are OR-ed. Case sensitivity is the **driver's**, not the expansion's: the
+expansion emits a plain `$contains`, which `SqlDriver` compiles to a parameterised
+`LIKE '%…%'` with no case folding — so the dialect's own `LIKE`/collation rules decide —
+while the in-memory driver matches with a case-insensitive regex. Only `select` /
+`status` option *labels* are matched case-insensitively by the expansion itself.
+`fuzzy`, `boost`, `operator`, `minScore`, `language`, and `highlight` are accepted by
+the schema but ignored by the expansion.
 
-For cross-object queries beyond `expand`, use explicit joins:
+### Joins (protocol only)
+
+`QuerySchema` defines a `joins` array, but **no driver reads it** — there is no
+`query.joins` consumer anywhere in `packages/`, so a query carrying `joins` silently
+runs as a single-table query. Use `expand` (§4) for relationship loading, or two
+queries joined in application code.
+
+For reference, the protocol shape is:
 
 ```typescript
 const query: QueryAST = {
@@ -637,19 +752,18 @@ const query: QueryAST = {
     },
   ],
 };
-
-// SQL: SELECT o.id, o.amount FROM orders o
-//      INNER JOIN customers c ON o.customer_id = c.id
 ```
 
 **Join types:** `inner`, `left`, `right`, `full`
 
 ### Window Functions
 
+`windowFunctions` on a `QueryAST` is ignored by `find()`. The SQL drivers implement
+window functions through a separate `findWithWindowFunctions()` method, which is not on
+the `IDataDriver` contract and is not surfaced by `IDataEngine`:
+
 ```typescript
-const query: QueryAST = {
-  object: 'order',
-  fields: ['id', 'customer_id', 'amount'],
+const ranked = await driver.findWithWindowFunctions('order', {
   windowFunctions: [
     {
       function: 'row_number',
@@ -660,11 +774,14 @@ const query: QueryAST = {
       },
     },
   ],
-};
+});
 
 // SQL: SELECT *, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY amount DESC) AS rank
 //      FROM orders
 ```
+
+That method always selects `*` plus the window columns — it does not honor a `fields`
+projection.
 
 ---
 
@@ -688,20 +805,30 @@ const page2 = await engine.find('customer', {
 
 **Drawback:** Slow for large offsets (database still scans all skipped rows).
 
-### Cursor-Based Pagination
+### Keyset Pagination
+
+<Callout type="warn">
+`cursor` is accepted by `QuerySchema` and `EngineQueryOptions`, but **no driver
+implements keyset pagination** — passing it has no effect. Express the keyset yourself
+as an ordinary `where` predicate on the sort key:
+</Callout>
 
 ```typescript
 // First page
-const result = await engine.find('customer', {
+const page = await engine.find('customer', {
   limit: 10,
-  orderBy: [{ field: 'id', order: 'asc' }],
+  orderBy: [{ field: 'created_at', order: 'asc' }],
 });
 
-// Next page (use cursor)
-const nextResult = await engine.find('customer', {
-  cursor: { id: result[result.length - 1].id },
+// Next page — seek past the last row instead of offsetting.
+// The comparand is canonicalised by the same function that wrote the column
+// (`coerceFilterValue` → `storageDatetimeValue`), so the range compare is an
+// ordinary indexable comparison on every dialect: canonical UTC ISO text on
+// SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL.
+const next = await engine.find('customer', {
+  where: { created_at: { $gt: page[page.length - 1].created_at } },
   limit: 10,
-  orderBy: [{ field: 'id', order: 'asc' }],
+  orderBy: [{ field: 'created_at', order: 'asc' }],
 });
 ```
 
@@ -740,7 +867,6 @@ const products = await engine.find('product', {
   search: {
     query: searchTerm,
     fields: ['name', 'description'],
-    fuzzy: true,
   },
   orderBy: [{ field: 'popularity_score', order: 'desc' }],
   limit: 20,
@@ -749,21 +875,29 @@ const products = await engine.find('product', {
 
 ### Analytics: Revenue by Month
 
+`month` is not a column — bucket the `created_at` instant with `dateGranularity`. Note
+that `engine.aggregate()` accepts only `where` / `groupBy` / `aggregations` (plus a
+`timezone` for bucketing): there is no `orderBy` or `limit` on this path, so sort the
+returned rows yourself.
+
 ```typescript
-const monthlyRevenue: QueryAST = {
-  object: 'order',
+const monthlyRevenue = await engine.aggregate('order', {
   where: {
     status: 'completed',
+    // `created_at` is a datetime — a bare date is read as midnight UTC
     created_at: { $gte: '2024-01-01' },
   },
-  groupBy: ['month'],
+  groupBy: [{ field: 'created_at', dateGranularity: 'month' }],
   aggregations: [
     { function: 'sum', field: 'total_amount', alias: 'revenue' },
     { function: 'count', alias: 'order_count' },
     { function: 'avg', field: 'total_amount', alias: 'avg_order' },
   ],
-  orderBy: [{ field: 'month', order: 'asc' }],
-};
+});
+
+const sorted = monthlyRevenue.sort((a, b) =>
+  String(a.created_at).localeCompare(String(b.created_at)),
+);
 ```
 
 ---
@@ -785,13 +919,19 @@ const rows = await engine.find('customer', {
 
 ### Security Violations
 
+Row-level scoping is applied by *narrowing* the query — the security middleware
+AND-merges its read filter into `where`, so an over-broad filter returns fewer rows
+rather than throwing. What throws is an operation the caller is not permitted to run at
+all, or a predicate that references a field the caller cannot read:
+
 ```typescript
 try {
-  await engine.find('account', {
-    where: { owner_id: { $ne: currentUser.id } },
-  });
+  await engine.find('account', { where: { owner_id: currentUser.id } });
 } catch (error) {
-  // PermissionDeniedError: [Security] Access denied to object 'account'
+  // PermissionDeniedError:
+  //   [Security] Access denied: operation 'find' on object 'account' ...
+  //   [Security] Access denied: query on 'account' references field(s) not
+  //              readable by the caller: ...
 }
 ```
 

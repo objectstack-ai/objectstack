@@ -57,7 +57,6 @@ describe('BatchOptionsSchema', () => {
     expect(options.atomic).toBe(true);
     expect(options.returnRecords).toBe(false);
     expect(options.continueOnError).toBe(false);
-    expect(options.validateOnly).toBe(false);
   });
 
   it('should accept custom options', () => {
@@ -65,13 +64,21 @@ describe('BatchOptionsSchema', () => {
       atomic: false,
       returnRecords: true,
       continueOnError: true,
-      validateOnly: true,
     });
 
     expect(options.atomic).toBe(false);
     expect(options.returnRecords).toBe(true);
     expect(options.continueOnError).toBe(true);
-    expect(options.validateOnly).toBe(true);
+  });
+
+  it('rejects the retired `validateOnly` key with its prescription (#3963 follow-up)', () => {
+    // Never implemented — a "dry-run" that silently persisted. Tombstoned so
+    // writing it is audible rather than silently stripped (ADR-0104 / PD #10).
+    const result = BatchOptionsSchema.safeParse({ validateOnly: true });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toMatch(/validateOnly.*removed|never implemented/i);
+    }
   });
 });
 

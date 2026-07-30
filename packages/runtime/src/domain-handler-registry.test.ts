@@ -357,6 +357,62 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
         expect(record?.secret).toBeUndefined();
     });
 
+    // ── #4038: one shape, no duplicate keys ──────────────────────────────
+    //
+    // Create and list used to answer `{ success: true, data: link, link }` /
+    // `{ …, data: links, links }` — the payload under BOTH the envelope's `data`
+    // and a legacy top-level key. That shim existed because the sharing plugin's
+    // routes (the other surface for these same paths) answered bare, so every
+    // consumer had to read `body.links ?? body.data`. #3983 moved that surface
+    // onto this shape and left the duplicate with no reader anywhere — framework,
+    // objectui, or cloud — so it is gone. These pin that: a body that grows a
+    // second spelling of its payload fails here.
+    const authed: any = { executionContext: { userId: 'u1' } };
+    const LINK = { id: 'l1', token: 't1', object_name: 'account', record_id: 'r1' };
+
+    it('POST /share-links answers 201 { success, data } — data IS the link, no top-level `link`', async () => {
+        const shareLinks = { createLink: vi.fn().mockResolvedValue(LINK) };
+        const result = await makeDispatcher({ shareLinks })
+            .handleShareLinks('', 'POST', { object: 'account', recordId: 'r1' }, {}, authed);
+        expect(result.response?.status).toBe(201);
+        expect(result.response?.body?.success).toBe(true);
+        expect(result.response?.body?.data).toMatchObject({ id: 'l1', token: 't1' });
+        expect(result.response?.body?.link).toBeUndefined();
+    });
+
+    it('GET /share-links answers { success, data } — data IS the array, no top-level `links`', async () => {
+        const shareLinks = { listLinks: vi.fn().mockResolvedValue([LINK]) };
+        const result = await makeDispatcher({ shareLinks }).handleShareLinks('', 'GET', undefined, {}, authed);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.success).toBe(true);
+        expect(Array.isArray(result.response?.body?.data)).toBe(true);
+        expect(result.response?.body?.data?.[0]).toMatchObject({ id: 'l1' });
+        expect(result.response?.body?.links).toBeUndefined();
+    });
+
+    it('every success body carries its payload under `data` and nowhere else', async () => {
+        // The general form of the two assertions above, over all four success
+        // routes: no key beside the envelope's own may hold the payload.
+        const ENVELOPE_KEYS = new Set(['success', 'data', 'meta']);
+        const shareLinks = {
+            createLink: vi.fn().mockResolvedValue(LINK),
+            listLinks: vi.fn().mockResolvedValue([LINK]),
+            revokeLink: vi.fn().mockResolvedValue(undefined),
+        };
+        const d = makeDispatcher({ shareLinks });
+        const bodies = [
+            (await d.handleShareLinks('', 'POST', { object: 'account', recordId: 'r1' }, {}, authed)).response?.body,
+            (await d.handleShareLinks('', 'GET', undefined, {}, authed)).response?.body,
+            (await d.handleShareLinks('/l1', 'DELETE', undefined, {}, authed)).response?.body,
+        ];
+        for (const body of bodies) {
+            expect(body?.success).toBe(true);
+            for (const key of Object.keys(body ?? {})) {
+                expect(ENVELOPE_KEYS.has(key), `body carries a non-envelope top-level key: ${key}`).toBe(true);
+            }
+        }
+    });
+
     it('unmatched sub-path returns the standard ROUTE_NOT_FOUND envelope', async () => {
         const shareLinks = { resolveToken: vi.fn(), createLink: vi.fn(), listLinks: vi.fn(), revokeLink: vi.fn() };
         const context: any = { executionContext: { userId: 'u1' } };

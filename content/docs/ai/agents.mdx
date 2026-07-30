@@ -258,13 +258,12 @@ Always be professional and data-driven.`,
 
   // Capability comes from skills — the only tool-bearing slot (ADR-0064).
   // Each skill names the platform tools and `action_<name>` tools it needs.
+  // (There is no agent-level `knowledge` block — it was removed in protocol
+  // 17 (#3896 close-out): declaring sources never scoped retrieval. Restrict
+  // access at the knowledge-service/source level; describe intended
+  // grounding in `instructions`.)
   skills: ['lead_qualification', 'opportunity_coaching', 'email_drafting'],
 
-  // RAG access: sources to recruit knowledge from + vector store indexes.
-  knowledge: {
-    sources: ['sales-playbook', 'leads', 'opportunities'],
-    indexes: ['sales_docs'],
-  },
 });
 ```
 
@@ -298,10 +297,6 @@ Always be empathetic and solution-focused.`,
   // Protocol). Neither needs a `defineTool` record.
   skills: ['case_triage', 'knowledge_search', 'response_drafting'],
 
-  knowledge: {
-    sources: ['support-kb', 'cases'],
-    indexes: ['support_docs'],
-  },
 });
 ```
 
@@ -371,10 +366,6 @@ Use the data tools to query records and aggregate metrics.`,
   // names directly — see "Natural Language Queries".
   skills: ['revenue_forecasting'],
 
-  knowledge: {
-    sources: ['opportunities', 'pipeline'],
-    indexes: ['sales_docs'],
-  },
 });
 ```
 

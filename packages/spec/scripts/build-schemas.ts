@@ -431,7 +431,11 @@ if (surfaceDoc) {
     .filter(([k, retired]) => retired && prev.get(k) === false)
     .map(([k]) => k);
   if (newlyRetired.length > 0) {
-    const surfaces = registeredRetirementSurfaces();
+    // A multi-key conversion names its keys as ' / '-separated clauses
+    // (`'flow.active / flow.template / …'` — the house style since the tool
+    // sweep), so split before matching: every clause must still END with the
+    // key, which keeps the check exactly as strict per key as before.
+    const surfaces = registeredRetirementSurfaces().flatMap((s) => s.split(' / '));
     const unregistered = newlyRetired.filter(
       (k) => !surfaces.some((s) => s.endsWith('.' + k.split(':')[1])),
     );

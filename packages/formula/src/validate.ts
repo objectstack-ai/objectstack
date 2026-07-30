@@ -216,6 +216,20 @@ function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined,
 }
 
 /** Cheap edit-distance suggestion for typo'd field names. */
+/**
+ * The closest candidate to `name`, or `undefined` when nothing is close enough
+ * to be worth suggesting.
+ *
+ * The public face of the same edit-distance heuristic this module already uses
+ * for unknown field refs and unknown roles, exported so other "did you mean?"
+ * diagnostics reuse one threshold instead of each inventing their own — an
+ * author (increasingly an agent) should not get a suggestion here and silence
+ * there for the same class of typo.
+ */
+export function nearestName(name: string, candidates: readonly string[]): string | undefined {
+  return nearest(name, candidates);
+}
+
 function nearest(name: string, candidates: readonly string[]): string | undefined {
   let best: string | undefined;
   let bestD = Infinity;

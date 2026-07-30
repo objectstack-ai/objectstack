@@ -1,6 +1,6 @@
 {
   "type": "action",
-  "_note": "ActionSchema. Seeded from docs/audits/2026-06-actionschema-property-liveness.md. Renderers live in objectui (evidence cited as prose, not framework paths); framework-side: service-ai action-tools, runtime body-runner/http-dispatcher. Containers (params/resultDialog/ai/aria) classified at top level — no divergent sub-statuses in the audit. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary.",
+  "_note": "ActionSchema. Seeded from docs/audits/2026-06-actionschema-property-liveness.md. Renderers live in objectui (evidence cited as prose, not framework paths); framework-side: service-ai action-tools, runtime body-runner/http-dispatcher. Containers (params/resultDialog/ai/aria) classified at top level — no divergent sub-statuses in the audit. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent.",
   "props": {
     "name": {
       "status": "live",
@@ -107,20 +107,6 @@
       "evidence": "objectui: components action-button/-group/-icon/-menu + app-shell DeclaredActionsBar + plugin-detail record-quick-actions — all six rendering surfaces gate the Button on the predicate",
       "note": "EVIDENCE CORRECTED 2026-07 (#1878 §3 recheck): previously cited the metadata-admin PREVIEW renderer, which only echoes the authored value. At that time the predicate was actually enforced on ONE of six surfaces (#1885 wired action:button alone) — the 'live' verdict was right for the wrong reason and hid a real silent no-op on the other five. objectui#2863 wired the rest; showcase specimen `showcase_archive_task` (#3643) dogfoods it."
     },
-    "shortcut": {
-      "status": "dead",
-      "evidence": "registered into ActionEngine.shortcuts[] (objectui packages/core/src/actions/ActionEngine.ts:150) but getShortcuts()/handleShortcut() have no non-test caller and no keydown listener feeds them",
-      "authorWarn": true,
-      "authorHint": "Not wired — nothing dispatches keydown events to actions. objectui's keyboard stack (useKeyboardShortcuts / KeyboardProtocol) is hand-registered and never touches ActionEngine; register the key there and have its handler invoke the action by name.",
-      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Also declared in action.form.ts:69, so pruning would need a form change + a 4-locale i18n regen."
-    },
-    "bulkEnabled": {
-      "status": "dead",
-      "evidence": "registered into ActionEngine (objectui ActionEngine.ts:151) but getBulkActions()/executeBulk() have no non-test caller; the multi-select toolbar is driven by the LIST VIEW's bulkActions/bulkActionDefs (plugin-grid ObjectGrid.tsx:1602-1612)",
-      "authorWarn": true,
-      "authorHint": "Not wired — the multi-select toolbar reads the list view's `bulkActions` / `bulkActionDefs`, not this flag. Declare the action on the view instead of setting bulkEnabled here.",
-      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Distinct from the live bulk fast-path (core/src/actions/bulkFastPath.ts executeBulkBatch), which never consults this flag. Also in action.form.ts:79."
-    },
     "ai": {
       "status": "live",
       "evidence": "packages/services/service-ai/src/tools/action-tools.ts",
@@ -167,6 +153,16 @@
     "aria": {
       "status": "live",
       "note": "PARTIAL — honored by a few objectui renderers, not the core action buttons/menus."
+    },
+    "shortcut": {
+      "status": "dead",
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); register keys in the Console keyboard stack and invoke the action by name."
+    },
+    "bulkEnabled": {
+      "status": "dead",
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); declare the action in the view's `bulkActions` instead."
     }
   }
 }

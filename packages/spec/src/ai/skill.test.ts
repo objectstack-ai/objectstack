@@ -59,7 +59,6 @@ describe('SkillSchema', () => {
       description: 'Handles order lifecycle operations',
       instructions: 'Use these tools to manage customer orders. Always verify order ownership first.',
       tools: ['create_order', 'update_order', 'cancel_order', 'query_orders'],
-      triggerPhrases: ['place an order', 'cancel my order', 'check order status'],
       triggerConditions: [
         { field: 'objectName', operator: 'eq' as const, value: 'order' },
         { field: 'userRole', operator: 'in' as const, value: ['sales', 'support'] },
@@ -70,7 +69,6 @@ describe('SkillSchema', () => {
     const result = SkillSchema.parse(skill);
     expect(result.name).toBe('order_management');
     expect(result.tools).toHaveLength(4);
-    expect(result.triggerPhrases).toHaveLength(3);
     expect(result.triggerConditions).toHaveLength(2);
   });
 
@@ -156,7 +154,6 @@ describe('defineSkill', () => {
       description: 'Handles support case lifecycle',
       instructions: 'Use these tools to create, update, and resolve support cases.',
       tools: ['create_case', 'update_case', 'resolve_case'],
-      triggerPhrases: ['create a case', 'open a ticket'],
     });
 
     expect(skill.name).toBe('case_management');
@@ -180,5 +177,18 @@ describe('defineSkill', () => {
       label: 'Test',
       tools: [],
     })).toThrow();
+  });
+});
+
+describe('#3896 close-out — retired `triggerPhrases`', () => {
+  it('REJECTS the retired key with the routing prescription', () => {
+    let message = '';
+    try {
+      SkillSchema.parse({ name: 'case_mgmt', label: 'Cases', triggerPhrases: ['open a ticket'] });
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    expect(message).toMatch(/triggerConditions/);
+    expect(message).toMatch(/#3896/);
   });
 });

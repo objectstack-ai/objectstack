@@ -19,6 +19,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * no longer constrains authored flows — plugins extend the vocabulary.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const FlowNodeAction = z.enum([
   'start',              // Trigger
   'end',                // Return/Stop
@@ -124,11 +125,14 @@ export const FlowNodeSchema = lazySchema(() => z.object({
     description: z.string().optional().describe('Parameter description'),
   })).optional().describe('Input parameter schema for this node'),
 
-  /** Node output schema declaration */
-  outputSchema: z.record(z.string(), z.object({
-    type: z.enum(['string', 'number', 'boolean', 'object', 'array']).describe('Output type'),
-    description: z.string().optional().describe('Output description'),
-  })).optional().describe('Output schema declaration for this node'),
+  // `outputSchema` REMOVED (#3896 audit close-out): declared, never validated —
+  // no engine path checked node outputs against it (ledger: dead).
+  outputSchema: retiredKey(
+    '`flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit ' +
+    'close-out) — it was never validated: the engine does not check node outputs against ' +
+    'it, so it documented a contract nothing enforced. Delete the key. Downstream nodes ' +
+    "read prior outputs via expressions ({{nodeId.field}}) regardless of any declaration.",
+  ),
 
   /**
    * Wait Event Configuration (for 'wait' nodes)
@@ -247,7 +251,13 @@ export const FlowSchema = lazySchema(() => z.object({
   /** Metadata & Versioning */
   version: z.number().int().default(1).describe('Version number'),
   status: z.enum(['draft', 'active', 'obsolete', 'invalid']).default('draft').describe('Deployment status'),
-  template: z.boolean().default(false).describe('Is logic template (Subflow)'),
+  // `template` REMOVED (#3896 audit close-out): no reader in designer or engine.
+  template: retiredKey(
+    '`flow.template` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    'no designer or engine path ever read it, so flagging a flow as a template/subflow did ' +
+    'nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the ' +
+    'flow by name.',
+  ),
 
   /** Trigger Type */
   type: z.enum(['autolaunched', 'record_change', 'schedule', 'screen', 'api']).describe('Flow type'),
@@ -259,8 +269,18 @@ export const FlowSchema = lazySchema(() => z.object({
   nodes: z.array(FlowNodeSchema).describe('Flow nodes'),
   edges: z.array(FlowEdgeSchema).describe('Flow connections'),
   
-  /** Execution Config */
-  active: z.boolean().default(false).describe('Is active (Deprecated: use status)'),
+  // `active` REMOVED (#3896 audit close-out) — the rls.enabled shape, in the
+  // over-permissive direction: the spec default was `false` while the engine
+  // treated an unset flow as ENABLED, and `active: false` never stopped a flow
+  // (`status` is the enforced lifecycle). An author who "disabled" a flow here
+  // left it firing.
+  active: retiredKey(
+    '`flow.active` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it ' +
+    'never had an effect: the engine arms flows from `status`, and `active: false` did NOT ' +
+    'stop a flow (worse, the default read as disabled while the engine treated unset as ' +
+    "enabled). Delete the key. Use `status: 'obsolete'` (or 'invalid') to unbind and " +
+    "disable a flow, `status: 'active'` to arm it.",
+  ),
   // ADR-0049 / #1888 — ENFORCED. The service-automation engine establishes the
   // declared identity for the run's data operations and restores the caller's
   // context afterward: `system` runs elevated (a full-access, RLS-bypassing
@@ -291,7 +311,16 @@ export const FlowSchema = lazySchema(() => z.object({
     backoffMultiplier: z.number().min(1).default(1).describe('Multiplier for exponential backoff between retries'),
     maxRetryDelayMs: z.number().int().min(0).default(30000).describe('Maximum delay between retries in milliseconds'),
     jitter: z.boolean().default(false).describe('Add random jitter to retry delay to avoid thundering herd'),
-    fallbackNodeId: z.string().optional().describe('Node ID to jump to on unrecoverable error'),
+    // `fallbackNodeId` REMOVED (#3896 audit close-out): the engine routes
+    // unrecoverable errors via per-node FAULT EDGES, never this — an author
+    // who configured a fallback here had none.
+    fallbackNodeId: retiredKey(
+      '`flow.errorHandling.fallbackNodeId` was removed in @objectstack/spec 17.0.0 (#3896 ' +
+      'audit close-out) — the engine routes unrecoverable node errors via per-node fault ' +
+      "edges (an edge with condition 'fault'), and never read this key: a fallback " +
+      'configured here silently did not exist. Delete the key and draw a fault edge from ' +
+      'the failing node to the handler node instead.',
+    ),
   }).optional().describe('Flow-level error handling configuration'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package

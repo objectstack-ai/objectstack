@@ -1,6 +1,6 @@
 {
   "type": "report",
-  "_note": "ReportSchema (analytics report, ADR-0021 single-form). Live path: objectui ReportRenderer → DatasetReportRenderer (dataset-bound). Seeded from docs/audits/2026-06-reportschema-property-liveness.md and re-verified against objectui HEAD — the audit's `chart` = DEAD finding is superseded: DatasetReportRenderer's DatasetReportChart now plots `chart.xAxis`/`yAxis` (dataset dimension/measure) via useDatasetRows (framework#1890/#3441), so `chart` is LIVE (only its `groupBy` sub-key stays experimental, per its own describe marker). objectui paths cited as prose in `note` (not `evidence`, which resolves framework file:line). Framework provenance/lock fields (protection/_lock*) auto-classify live (ADR-0010).",
+  "_note": "ReportSchema (analytics report, ADR-0021 single-form). Live path: objectui ReportRenderer → DatasetReportRenderer (dataset-bound). Seeded from docs/audits/2026-06-reportschema-property-liveness.md and re-verified against objectui HEAD — the audit's `chart` = DEAD finding is superseded: DatasetReportRenderer's DatasetReportChart now plots `chart.xAxis`/`yAxis` (dataset dimension/measure) via useDatasetRows (framework#1890/#3441), so `chart` is LIVE (only its `groupBy` sub-key stays experimental, per its own describe marker). objectui paths cited as prose in `note` (not `evidence`, which resolves framework file:line). Framework provenance/lock fields (protection/_lock*) auto-classify live (ADR-0010). 2026-07-30: the aria/performance entries were STALE — the keys had already been removed from the schema in the report-liveness close-out; deleted as ledger hygiene.",
   "props": {
     "name": {
       "status": "live",
@@ -55,16 +55,6 @@
     "blocks": {
       "status": "live",
       "note": "objectui: joined-report sub-reports, each dataset-bound (dataset/rows/columns/values/runtimeFilter/chart) — DatasetReportRenderer joined branch."
-    },
-    "aria": {
-      "status": "dead",
-      "note": "ARIA attributes — authorable (report.form.ts) but no report renderer applies them; the dataset renderer ignores `report.aria`."
-    },
-    "performance": {
-      "status": "dead",
-      "authorWarn": true,
-      "authorHint": "Report performance tuning is not implemented — this config has no runtime consumer.",
-      "note": "Perf-optimization config — authorable but no renderer/runtime reads it (audit L; re-verified — no consumer in plugin-report)."
     }
   }
 }

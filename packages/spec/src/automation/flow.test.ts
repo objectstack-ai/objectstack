@@ -147,7 +147,7 @@ describe('FlowNodeSchema', () => {
     }
   });
 
-  it('should accept node with inputSchema and outputSchema', () => {
+  it('should accept node with inputSchema (outputSchema retired, #3896)', () => {
     const result = FlowNodeSchema.safeParse({
       id: 'script_1',
       type: 'script',
@@ -156,14 +156,10 @@ describe('FlowNodeSchema', () => {
         name: { type: 'string', required: true, description: 'User name' },
         age: { type: 'number', required: false },
       },
-      outputSchema: {
-        greeting: { type: 'string', description: 'Generated greeting' },
-      },
     });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.inputSchema).toBeDefined();
-      expect(result.data.outputSchema).toBeDefined();
     }
   });
 });
@@ -231,7 +227,6 @@ describe('FlowSchema', () => {
       };
 
       const result = FlowSchema.parse(flow);
-      expect(result.active).toBe(false);
       expect(result.runAs).toBe('user');
     });
 
@@ -274,17 +269,17 @@ describe('FlowSchema', () => {
       });
     });
 
-    it('should default active to false', () => {
-      const flow = {
-        name: 'test_flow',
-        label: 'Test',
-        type: 'autolaunched' as const,
-        nodes: [],
-        edges: [],
-      };
-
-      const result = FlowSchema.parse(flow);
-      expect(result.active).toBe(false);
+    it('REJECTS the retired `active` with the status prescription (#3896)', () => {
+      let message = '';
+      try {
+        FlowSchema.parse({
+          name: 'test_flow', label: 'Test', type: 'autolaunched', nodes: [], edges: [], active: false,
+        });
+      } catch (e) {
+        message = String((e as Error).message);
+      }
+      expect(message).toMatch(/status/);
+      expect(message).toMatch(/#3896/);
     });
 
     it('should default runAs to user', () => {
@@ -411,7 +406,6 @@ describe('FlowSchema', () => {
           { id: 'e5', source: 'auto_approve', target: 'end' },
           { id: 'e6', source: 'send_approval_request', target: 'end' },
         ],
-        active: true,
         runAs: 'system',
       };
 
@@ -460,7 +454,6 @@ describe('FlowSchema', () => {
           { id: 'e2', source: 'create_contact', target: 'assign_output' },
           { id: 'e3', source: 'assign_output', target: 'end' },
         ],
-        active: true,
       };
 
       expect(() => FlowSchema.parse(screenFlow)).not.toThrow();
@@ -508,7 +501,6 @@ describe('FlowSchema', () => {
           { id: 'e4', source: 'delete_record', target: 'loop_records' },
           { id: 'e5', source: 'loop_records', target: 'end', label: 'Done' },
         ],
-        active: true,
         runAs: 'system',
       };
 
@@ -555,7 +547,6 @@ describe('FlowSchema', () => {
           { id: 'e2', source: 'call_external_api', target: 'process_response' },
           { id: 'e3', source: 'process_response', target: 'end' },
         ],
-        active: true,
       };
 
       expect(() => FlowSchema.parse(apiFlow)).not.toThrow();
@@ -604,8 +595,8 @@ describe('FlowSchema - errorHandling', () => {
     expect(result.errorHandling?.maxRetries).toBe(0);
   });
 
-  it('should accept continue strategy with fallback node', () => {
-    const result = FlowSchema.parse({
+  it('REJECTS the retired errorHandling.fallbackNodeId — faults route via fault edges (#3896)', () => {
+    expect(() => FlowSchema.parse({
       name: 'fallback_flow',
       label: 'Fallback',
       type: 'autolaunched',
@@ -614,13 +605,8 @@ describe('FlowSchema - errorHandling', () => {
         { id: 'fallback', type: 'end', label: 'Fallback' },
       ],
       edges: [],
-      errorHandling: {
-        strategy: 'continue',
-        fallbackNodeId: 'fallback',
-      },
-    });
-    expect(result.errorHandling?.strategy).toBe('continue');
-    expect(result.errorHandling?.fallbackNodeId).toBe('fallback');
+      errorHandling: { strategy: 'continue', fallbackNodeId: 'fallback' },
+    })).toThrow(/fault edge/);
   });
 
   it('should accept flow without errorHandling (optional)', () => {
@@ -711,7 +697,6 @@ describe('defineFlow', () => {
     });
     expect(result.version).toBe(1);
     expect(result.status).toBe('draft');
-    expect(result.active).toBe(false);
     expect(result.runAs).toBe('user');
   });
 
@@ -803,7 +788,6 @@ describe('BPMN — Parallel Gateway & Join Gateway', () => {
         { id: 'e6', source: 'join', target: 'final_approve' },
         { id: 'e7', source: 'final_approve', target: 'end' },
       ],
-      active: true,
       runAs: 'system',
     };
 

@@ -106,53 +106,12 @@ export const ResponsiveStylesSchema = lazySchema(() => z.object({
 
 export type ResponsiveStyles = z.infer<typeof ResponsiveStylesSchema>;
 
-/**
- * Performance Configuration Schema
- *
- * Defines performance optimization settings for UI components
- * such as lazy loading, virtual scrolling, and caching.
- *
- * @example
- * ```typescript
- * const perf: PerformanceConfig = {
- *   lazyLoad: true,
- *   virtualScroll: { enabled: true, itemHeight: 40, overscan: 5 },
- *   cacheStrategy: 'stale-while-revalidate',
- *   prefetch: true,
- * };
- * ```
+/*
+ * REMOVED — `PerformanceConfigSchema` / `PerformanceConfig` (#3896 audit
+ * close-out). It typed the `performance` keys on report (removed in the
+ * report-liveness close-out), list view and dashboard (removed in this
+ * sweep): every carrier was authorable and inert — no renderer or runtime
+ * ever read a performance block. An exported schema with no consumer is read
+ * as a capability by whoever finds it (#3950 precedent).
  */
-export const PerformanceConfigSchema = lazySchema(() => z.object({
-  /** Enable lazy loading for this component */
-  lazyLoad: z.boolean().optional()
-    .describe('Enable lazy loading (defer rendering until visible)'),
 
-  /** Virtual scrolling configuration for large datasets */
-  virtualScroll: z.object({
-    enabled: z.boolean().default(false).describe('Enable virtual scrolling'),
-    itemHeight: z.number().optional().describe('Fixed item height in pixels (for estimation)'),
-    overscan: z.number().optional().describe('Number of extra items to render outside viewport'),
-  }).optional().describe('Virtual scrolling configuration'),
-
-  /** Client-side caching strategy */
-  cacheStrategy: z.enum([
-    'none',
-    'cache-first',
-    'network-first',
-    'stale-while-revalidate',
-  ]).optional().describe('Client-side data caching strategy'),
-
-  /** Enable data prefetching */
-  prefetch: z.boolean().optional()
-    .describe('Prefetch data before component is visible'),
-
-  /** Maximum number of items to render before pagination */
-  pageSize: z.number().optional()
-    .describe('Number of items per page for pagination'),
-
-  /** Debounce interval for user interactions (ms) */
-  debounceMs: z.number().optional()
-    .describe('Debounce interval for user interactions in milliseconds'),
-}).describe('Performance optimization configuration'));
-
-export type PerformanceConfig = z.infer<typeof PerformanceConfigSchema>;

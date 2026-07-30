@@ -2,18 +2,70 @@
   "type": "hook",
   "_note": "HookSchema. Seeded from docs/audits/2026-06-hookschema-property-liveness.md — a model-healthy schema (near-total liveness). Consumers: objectql hook-binder/engine + runtime sandbox.",
   "props": {
-    "name": { "status": "live", "evidence": "packages/objectql/src/hook-binder.ts:182", "note": "registration key + log identity." },
-    "object": { "status": "live", "evidence": "packages/objectql/src/hook-binder.ts:171", "note": "single/array/'*' wildcard honored." },
-    "events": { "status": "live", "evidence": "packages/objectql/src/hook-binder.ts:171", "note": "per-event registration." },
-    "body": { "status": "live", "evidence": "packages/objectql/src/hook-wrappers.ts", "note": "body.{language,source,capabilities,timeoutMs} wired (L1/L2); body.memoryMb is advisory/soft under QuickJS." },
-    "handler": { "status": "live", "evidence": "packages/objectql/src/hook-binder.ts:237", "note": "deprecated but fully wired; body takes precedence." },
-    "priority": { "status": "live", "evidence": "packages/objectql/src/hook-binder.ts:177", "note": "genuinely orders hooks (lower first)." },
-    "async": { "status": "live", "evidence": "packages/objectql/src/hook-wrappers.ts", "note": "fire-and-forget, after* only." },
-    "condition": { "status": "live", "evidence": "packages/objectql/src/hook-wrappers.ts", "note": "CEL gate; falsy/error → skip." },
-    "retryPolicy": { "status": "live", "evidence": "packages/objectql/src/hook-wrappers.ts", "note": "{maxRetries,backoffMs} linear backoff." },
-    "timeout": { "status": "live", "evidence": "packages/objectql/src/hook-wrappers.ts", "note": "wall-clock abort, independent of body.timeoutMs." },
-    "onError": { "status": "live", "evidence": "packages/objectql/src/hook-wrappers.ts", "note": "'log' suppresses+continues; 'abort' rethrows." },
-    "label": { "status": "dead", "evidence": "pure docs, zero runtime readers (runtime uses only name)" },
-    "description": { "status": "dead", "evidence": "pure docs, zero runtime readers; redundant with label" }
+    "name": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-binder.ts:182",
+      "note": "registration key + log identity."
+    },
+    "object": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-binder.ts:171",
+      "note": "single/array/'*' wildcard honored."
+    },
+    "events": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-binder.ts:171",
+      "note": "per-event registration."
+    },
+    "body": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-wrappers.ts",
+      "note": "body.{language,source,capabilities,timeoutMs} wired (L1/L2); body.memoryMb is advisory/soft under QuickJS."
+    },
+    "handler": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-binder.ts:237",
+      "note": "deprecated but fully wired; body takes precedence."
+    },
+    "priority": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-binder.ts:177",
+      "note": "genuinely orders hooks (lower first)."
+    },
+    "async": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-wrappers.ts",
+      "note": "fire-and-forget, after* only."
+    },
+    "condition": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-wrappers.ts",
+      "note": "CEL gate; falsy/error → skip."
+    },
+    "retryPolicy": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-wrappers.ts",
+      "note": "{maxRetries,backoffMs} linear backoff."
+    },
+    "timeout": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-wrappers.ts",
+      "note": "wall-clock abort, independent of body.timeoutMs."
+    },
+    "onError": {
+      "status": "live",
+      "evidence": "packages/objectql/src/hook-wrappers.ts",
+      "note": "'log' suppresses+continues; 'abort' rethrows."
+    },
+    "label": {
+      "status": "dead",
+      "evidence": "pure docs, zero runtime readers (runtime uses only name)",
+      "note": "KEPT deliberately (2026-07-30 sweep): docs-shaped, not capability-shaped — an annotation field documents intent for the next reader even without a runtime consumer. Exempt from enforce-or-remove; do not re-litigate."
+    },
+    "description": {
+      "status": "dead",
+      "evidence": "pure docs, zero runtime readers; redundant with label",
+      "note": "KEPT deliberately (2026-07-30 sweep): docs-shaped, not capability-shaped — an annotation field documents intent for the next reader even without a runtime consumer. Exempt from enforce-or-remove; do not re-litigate."
+    }
   }
 }

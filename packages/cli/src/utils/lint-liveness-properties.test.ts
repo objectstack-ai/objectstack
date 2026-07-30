@@ -68,29 +68,21 @@ describe('lintLivenessProperties', () => {
   // block. These run against the REAL ledgers, so they double as contract
   // tests for those markings.
 
-  it('warns on flow.errorHandling.fallbackNodeId (engine uses fault edges)', () => {
-    const findings = lintLivenessProperties({
-      flows: [{ name: 'f1', errorHandling: { fallbackNodeId: 'n2' } }],
-    });
-    const f = findings.find((x) => x.message.includes('errorHandling.fallbackNodeId'));
-    expect(f).toBeDefined();
-    expect(f!.where).toBe("flow 'f1'");
-  });
-
-  it('fans out array containers: flow.nodes[].outputSchema warns once per flow', () => {
+  // flow.errorHandling.fallbackNodeId and nodes[].outputSchema left the warn
+  // list with the #3896 close-out sweep: the keys were REMOVED from the
+  // schema (retiredKey tombstones carry the prescription at parse), so the
+  // advisory warn's job is done by a hard error and the ledger entries this
+  // lint keyed on are gone. Same shape as tool.permissions below.
+  it('retired flow keys no longer warn — the strict parse owns them now', () => {
     const findings = lintLivenessProperties({
       flows: [{
         name: 'f1',
-        nodes: [
-          { id: 'n1' },
-          { id: 'n2', outputSchema: { type: 'object' } },
-          { id: 'n3', outputSchema: { type: 'object' } },
-        ],
+        errorHandling: { fallbackNodeId: 'n2' },
+        nodes: [{ id: 'n2', outputSchema: { type: 'object' } }],
       }],
     });
-    const hits = findings.filter((x) => x.message.includes('nodes.outputSchema'));
-    expect(hits.length).toBe(1); // one finding per (flow, path), not per node
-    expect(hits[0].where).toBe("flow 'f1'");
+    expect(findings.some((x) => x.message.includes('errorHandling.fallbackNodeId'))).toBe(false);
+    expect(findings.some((x) => x.message.includes('nodes.outputSchema'))).toBe(false);
   });
 
   it('warns on an experimental prop with no authorWarn of its own (agent.memory)', () => {
@@ -144,20 +136,16 @@ describe('lintLivenessProperties', () => {
 
   // ── view (#2998 Track B) ──────────────────────────────────────────────────
 
-  it('warns on dead list-level responsive config (view ledger, list.responsive)', () => {
-    const findings = lintLivenessProperties({
-      views: [{ object: 'task', list: { type: 'grid', responsive: { breakpoint: 'md' } } }],
-    });
-    const f = findings.find((x) => x.message.includes('list.responsive'));
-    expect(f).toBeDefined();
-    expect(f!.where).toBe("view 'task'"); // container binds via `object`, not `name`
-    expect(f!.hint.length).toBeGreaterThan(0);
-  });
-
-  it('warns on form.data and form.defaultSort but not on live form config', () => {
+  // list.responsive / form.defaultSort left the warn list with the #3896
+  // close-out sweep (keys REMOVED, strict parse owns them). form.data is the
+  // sweep's one CORRECTION: the removal attempt broke the build — defineForm
+  // writes data.provider='schema' on every metadata form — so its ledger
+  // entry flipped to live and it must not warn either.
+  it('retired/corrected view keys no longer warn', () => {
     const findings = lintLivenessProperties({
       views: [{
         object: 'task',
+        list: { type: 'grid', responsive: { breakpoint: 'md' } },
         form: {
           type: 'wizard',
           sections: [{ fields: ['title'] }],
@@ -167,9 +155,9 @@ describe('lintLivenessProperties', () => {
       }],
     });
     const msgs = paths(findings);
-    expect(msgs.some((m) => m.includes('form.data'))).toBe(true);
-    expect(msgs.some((m) => m.includes('form.defaultSort'))).toBe(true);
-    expect(msgs.some((m) => m.includes('form.sections') || m.includes('form.type'))).toBe(false);
+    expect(msgs.some((m) => m.includes('list.responsive'))).toBe(false);
+    expect(msgs.some((m) => m.includes('form.defaultSort'))).toBe(false);
+    expect(msgs.some((m) => m.includes('form.data'))).toBe(false);
   });
 
   it('stays silent on a clean grid view', () => {

@@ -1,6 +1,6 @@
 {
   "type": "flow",
-  "_note": "FlowSchema. Seeded from docs/audits/2026-06-flowschema-property-liveness.md. Consumers: service-automation engine + node executors. runAs is marker-driven experimental (spec). CORRECTED 2026-07: the previous note claimed 'status/active gate nothing' — that was true when the audit ran but became FALSE with commit 497bda853 (2026-07-05, 'honor flow status for enable/disable'). `status` now gates binding AND execution; `active` remains a deprecated no-op.",
+  "_note": "FlowSchema. Seeded from docs/audits/2026-06-flowschema-property-liveness.md. Consumers: service-automation engine + node executors. runAs is marker-driven experimental (spec). CORRECTED 2026-07: the previous note claimed 'status/active gate nothing' — that was true when the audit ran but became FALSE with commit 497bda853 (2026-07-05, 'honor flow status for enable/disable'). `status` now gates binding AND execution; `active` remains a deprecated no-op. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent.",
   "props": {
     "name": {
       "status": "live",
@@ -20,7 +20,8 @@
     },
     "description": {
       "status": "dead",
-      "evidence": "no reader either layer"
+      "evidence": "no reader either layer",
+      "note": "KEPT deliberately (2026-07-30 sweep): docs-shaped, not capability-shaped — an annotation field documents intent for the next reader (per ADR-0033, often a model) even without a runtime consumer. Exempt from enforce-or-remove; do not re-litigate."
     },
     "version": {
       "status": "live",
@@ -31,24 +32,11 @@
       "evidence": "packages/services/service-automation/src/engine.ts:1374-1382 (obsolete/invalid -> flowEnabled=false), :1387 (gates activateFlowTrigger), :1704 + :3097 (execute-time 'Flow is disabled' guard)",
       "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Verdict stands, evidence replaced: it is genuinely engine-consumed since 497bda853. The previously cited FlowPreview line number did not even contain a status read."
     },
-    "active": {
-      "status": "dead",
-      "evidence": "spec already marks it '(Deprecated: use status)'; the only reader anywhere is a display fallback in objectui FlowPreview.tsx:157 (`d.status ?? (d.active ? ...)`)",
-      "authorWarn": true,
-      "authorHint": "Deprecated no-op — writing `active: false` does NOT stop a flow. Use `status: 'obsolete'` (or 'invalid') to unbind and disable it, `status: 'active'` to arm it.",
-      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Sharper than a plain no-op: the spec default is `false` while the engine treats an unset flow as enabled, so the key reads as if it disabled the flow when it does nothing."
-    },
     "runAs": {
       "status": "live",
       "proof": "packages/qa/dogfood/test/flow-runas.dogfood.test.ts#flow-runas-identity",
       "evidence": "packages/services/service-automation/src/builtin/crud-nodes.ts: CRUD nodes pass the run identity to ObjectQL per flow.runAs; the engine sets context.runAs at run setup; resolveRunDataContext maps system->isSystem / user->trigger user (#1888)",
       "note": "ENFORCED 2026-06-24 (#1888, ADR-0049): was marker-driven experimental; the engine now switches the data-layer execution identity and restores the caller context. Proof-backed by the dogfood gate."
-    },
-    "template": {
-      "status": "dead",
-      "evidence": "no reader either layer",
-      "authorWarn": true,
-      "authorHint": "No reader in designer or engine — flagging a flow as a template/subflow does nothing. Invoke shared logic via a subflow node referencing the flow by name."
     },
     "type": {
       "status": "live",
@@ -102,12 +90,6 @@
           "evidence": "packages/services/service-automation/src/engine.ts",
           "note": "runtime-validated."
         },
-        "outputSchema": {
-          "status": "dead",
-          "evidence": "declared, never validated",
-          "authorWarn": true,
-          "authorHint": "Declared but never validated — node outputs are NOT checked against this schema at runtime. Do not rely on it for contract enforcement."
-        },
         "waitEventConfig": {
           "status": "live",
           "evidence": "packages/services/service-automation/src/engine.ts"
@@ -116,6 +98,11 @@
           "status": "live",
           "evidence": "objectui: packages/app-shell/src/views/metadata-admin/inspectors/flow-node-config.ts:480",
           "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+        },
+        "outputSchema": {
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); node outputs were never validated; downstream nodes read prior outputs via expressions regardless."
         }
       }
     },
@@ -147,11 +134,20 @@
         },
         "fallbackNodeId": {
           "status": "dead",
-          "evidence": "engine uses per-node fault edges, not this",
-          "authorWarn": true,
-          "authorHint": "The engine routes failures via per-node fault edges, not errorHandling.fallbackNodeId — wire a fault edge from the failing node instead."
+          "verifiedAt": "2026-07-30",
+          "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); faults route via per-node fault edges — draw a fault edge to the handler node."
         }
       }
+    },
+    "active": {
+      "status": "dead",
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); the real switch is `status` ('obsolete'/'invalid' disable, 'active' arms)."
+    },
+    "template": {
+      "status": "dead",
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); shared logic is invoked via a subflow NODE referencing the flow by name."
     }
   }
 }
