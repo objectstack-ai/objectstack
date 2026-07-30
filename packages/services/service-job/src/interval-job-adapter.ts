@@ -21,6 +21,25 @@ interface JobRecord {
 export interface IntervalJobAdapterOptions {
   /** Maximum number of execution records to retain per job (default: 100) */
   maxExecutions?: number;
+  /**
+   * Logger used to surface schedules this adapter cannot execute. A `cron`
+   * registration is stored but never fired here, and staying silent about it
+   * meant "background automation off" with zero diagnostics: every
+   * plugin that registered its jobs before the DbJobAdapter upgrade saw
+   * interval jobs run and cron jobs do nothing.
+   */
+  logger?: { warn(message: string, ...args: unknown[]): void };
+}
+
+/**
+ * A job registration as originally supplied to {@link IntervalJobAdapter.schedule},
+ * exposed so an upgraded adapter can re-schedule it (see JobServicePlugin).
+ */
+export interface JobRegistration {
+  name: string;
+  schedule: JobSchedule;
+  handler: JobHandler;
+  options?: JobScheduleOptions;
 }
 
 /**
@@ -35,9 +54,11 @@ export interface IntervalJobAdapterOptions {
 export class IntervalJobAdapter implements IJobService {
   private readonly jobs = new Map<string, JobRecord>();
   private readonly maxExecutions: number;
+  private readonly logger?: IntervalJobAdapterOptions['logger'];
 
   constructor(options: IntervalJobAdapterOptions = {}) {
     this.maxExecutions = options.maxExecutions ?? 100;
+    this.logger = options.logger;
   }
 
   async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
@@ -57,10 +78,30 @@ export class IntervalJobAdapter implements IJobService {
           await this.executeJob(record);
         }, delay);
       }
+    } else if (schedule.type === 'cron') {
+      // Stored but NOT executed — this adapter has no cron engine. Loud on
+      // purpose: registrations that land here before the DbJobAdapter upgrade
+      // are re-delivered by JobServicePlugin, but an adapter that KEEPS them
+      // (explicit `adapter: 'interval'`, or no ObjectQL engine) silently ran
+      // zero cron jobs.
+      this.logger?.warn(
+        `IntervalJobAdapter: cron schedule "${name}" registered but will not run — ` +
+        'this adapter has no cron engine. Use the db/cron adapter, or an interval schedule.',
+      );
     }
-    // 'cron' type: stored but not actively scheduled (needs cron library)
 
     this.jobs.set(name, record);
+  }
+
+  /**
+   * Snapshot of every registration as originally supplied, for handing over to
+   * a replacement adapter. Does not mutate this adapter's state — callers
+   * migrate with `getRegistrations()` then `destroy()`.
+   */
+  getRegistrations(): JobRegistration[] {
+    return [...this.jobs.values()].map(({ name, schedule, handler, options }) => ({
+      name, schedule, handler, options,
+    }));
   }
 
   async cancel(name: string): Promise<void> {
