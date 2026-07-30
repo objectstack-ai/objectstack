@@ -99,6 +99,16 @@ jobs:
       - name: Single authz resolver guard
         run: pnpm check:authz-resolver
 
+      # #4093 follow-up. Discovery tells a consumer an absent capability is
+      # absent AND what to install. The first half has been carefully honest
+      # since #2462/#4000; the second was invented from the slot name, so ten
+      # of fifteen entries named packages that do not exist — a dead end handed
+      # to whoever is trying to fix their stack. Asserts every package named in
+      # CORE_SERVICE_PROVIDER is a real workspace package, and that no core
+      # slot is missing an entry.
+      - name: Service-provider remedy guard
+        run: pnpm check:service-providers
+
       # #3843 response-envelope guard. The route ledgers audit which routes EXIST;
       # nothing audited what comes back, so six route modules emitted bodies
       # outside BaseResponseSchema while carrying green `sdk` rows. Counts the
