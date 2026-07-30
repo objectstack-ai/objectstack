@@ -856,7 +856,7 @@ export class HttpDispatcher {
         const [
             authSvc, searchSvc, realtimeSvc, filesSvc,
             analyticsSvc, workflowSvc, aiSvc, notificationSvc, i18nSvc,
-            uiSvc, automationSvc, cacheSvc, queueSvc, jobSvc,
+            uiSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
         ] = await Promise.all([
             this.resolveService(CoreServiceName.enum.auth),
             this.resolveService(CoreServiceName.enum.search),
@@ -872,6 +872,9 @@ export class HttpDispatcher {
             this.resolveService(CoreServiceName.enum.cache),
             this.resolveService(CoreServiceName.enum.queue),
             this.resolveService(CoreServiceName.enum.job),
+            // Not a CoreServiceName — plugin-mcp registers under the bare
+            // 'mcp' key, the same string handleMcpRequest resolves.
+            this.resolveService('mcp'),
         ]);
 
         const hasAuth         = !!authSvc;
@@ -887,6 +890,11 @@ export class HttpDispatcher {
         const hasCache        = !!cacheSvc;
         const hasQueue        = !!queueSvc;
         const hasJob          = !!jobSvc;
+        // Mirrors handleMcpRequest's OWN guard byte for byte (domains/mcp.ts):
+        // it 501s on `!mcp || typeof mcp.handleHttpRequest !== 'function'`, so
+        // advertising on mere service presence would still over-promise when a
+        // wrong-shaped service is registered. Same predicate ⇒ same answer.
+        const hasMcp          = typeof mcpSvc?.handleHttpRequest === 'function';
 
         // Routes are only exposed when a plugin provides the service
         const routes = {
@@ -908,21 +916,22 @@ export class HttpDispatcher {
                 notifications: hasNotification ? `${prefix}/notifications` : undefined,
                 ai:            hasAi ? `${prefix}/ai` : undefined,
                 i18n:          hasI18n ? `${prefix}/i18n` : undefined,
-                // MCP (Streamable HTTP) is a default-on core capability —
-                // advertised unless OS_MCP_SERVER_ENABLED=false opts the env
-                // out. The objectui Integrations page reads this.
+                // MCP (Streamable HTTP) is a default-on core capability — but
+                // "enabled" and "serveable" are two different facts and both
+                // must hold. The objectui Integrations page reads this.
                 //
-                // `declared === enforced` here is guaranteed by a LOCKSTEP, not
-                // by service-presence gating like the routes above (#3369 /
-                // #2698): `os serve` auto-loads plugin-mcp from the SAME
-                // `isMcpServerEnabled()` flag that gates this advertisement, so
-                // whenever `/mcp` is advertised the handler is mounted (a key /
-                // token yields 401, never a 404/501). Kept flag-based on purpose
-                // — `@objectstack/rest` advertises `mcp` from the identical
-                // single source (rest-server.ts), so the two discovery producers
-                // stay symmetric. The route-parity gate asserts the lockstep
-                // holds (advertised ⇒ reachable, never 501).
-                mcp:           isMcpServerEnabled() ? `${prefix}/mcp` : undefined,
+                // Service-presence gated like every other optional route above
+                // (#3369 / #2698), NOT flag-only (#4024). This used to trust a
+                // LOCKSTEP instead: `os serve` auto-loads plugin-mcp from the
+                // same `isMcpServerEnabled()` flag, so on that path advertised
+                // did imply mounted. But the lockstep is a property of the CLI,
+                // not of the dispatcher — an embedder that mounts the dispatcher
+                // (or `@objectstack/rest`) without plugin-mcp got `/mcp`
+                // advertised here and 501 from handleMcpRequest, which is
+                // exactly the `declared ≠ enforced` failure #3369 forbids.
+                // Gating on the handler's own predicate makes the invariant hold
+                // by construction on every host instead of by convention on one.
+                mcp:           isMcpServerEnabled() && hasMcp ? `${prefix}/mcp` : undefined,
         };
 
         // Build per-service status map

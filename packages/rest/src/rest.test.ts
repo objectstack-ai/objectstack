@@ -2423,12 +2423,33 @@ describe('mapDataError — schema/constraint envelopes', () => {
 // ---------------------------------------------------------------------------
 
 describe('discovery — routes.mcp (ADR-0036, #152)', () => {
-  function discoveryHandler() {
+  /**
+   * `serviceExists` omitted → the server cannot probe whether MCP is actually
+   * serveable, so it keeps the flag-only answer (fail-open, ADR-0057 D10).
+   * Pass one to exercise the service-aware gate added for #4024.
+   */
+  function discoveryHandler(serviceExists?: (name: string) => boolean) {
     const server = createMockServer();
     const protocol = createMockProtocol();
     // protocol discovery carries a `routes` object the server augments.
     (protocol.getDiscovery as any) = vi.fn().mockResolvedValue({ routes: { data: '', metadata: '' } });
-    const rest = new RestServer(server as any, protocol as any, ANON_API as any);
+    const rest = new RestServer(
+      server as any, protocol as any, ANON_API as any,
+      undefined, // kernelManager
+      undefined, // envRegistry
+      undefined, // defaultEnvironmentIdProvider
+      undefined, // authServiceProvider
+      undefined, // objectQLProvider
+      undefined, // emailServiceProvider
+      undefined, // sharingServiceProvider
+      undefined, // reportsServiceProvider
+      undefined, // approvalsServiceProvider
+      undefined, // sharingRulesServiceProvider
+      undefined, // i18nServiceProvider
+      undefined, // analyticsServiceProvider
+      undefined, // settingsServiceProvider
+      serviceExists,
+    );
     rest.registerRoutes();
     const entry = rest.getRouteManager().get('GET', '/api/v1/discovery');
     if (!entry) throw new Error('discovery route not registered');
@@ -2464,6 +2485,37 @@ describe('discovery — routes.mcp (ADR-0036, #152)', () => {
     process.env.OS_MCP_SERVER_ENABLED = 'false';
     const body = await invoke(discoveryHandler());
     expect(body.routes.mcp).toBeUndefined();
+  });
+
+  // ── #4024: enabled ≠ serveable ──────────────────────────────────────────
+  // The flag alone used to decide this. But @objectstack/rest has no
+  // @objectstack/mcp dependency, mounts no /mcp route and performs no
+  // auto-load — that lockstep belongs to `os serve`. So an embedder without
+  // plugin-mcp advertised /mcp here and got 501 from the runtime dispatcher,
+  // which is the `declared ≠ enforced` failure #3369 forbids.
+
+  it('omits routes.mcp when enabled but the mcp service is absent (#4024)', async () => {
+    delete process.env.OS_MCP_SERVER_ENABLED; // default-on
+    const body = await invoke(discoveryHandler((name) => name !== 'mcp'));
+    expect(
+      body.routes.mcp,
+      'enabled-but-unserveable must not be advertised — it would 501',
+    ).toBeUndefined();
+  });
+
+  it('advertises routes.mcp when enabled AND the mcp service is present (#4024)', async () => {
+    delete process.env.OS_MCP_SERVER_ENABLED;
+    const body = await invoke(discoveryHandler(() => true));
+    expect(body.routes.mcp).toBe('/api/v1/mcp');
+  });
+
+  it('keeps the flag-only answer when the host cannot be probed (fail-open, ADR-0057 D10)', async () => {
+    // No kernelManager and no serviceExistsProvider → "unknown", not "absent".
+    // Hiding a working endpoint here would be the opposite over-correction, and
+    // the dispatcher's own service-aware discovery stays authoritative.
+    delete process.env.OS_MCP_SERVER_ENABLED;
+    const body = await invoke(discoveryHandler());
+    expect(body.routes.mcp).toBe('/api/v1/mcp');
   });
 });
 

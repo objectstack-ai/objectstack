@@ -2128,6 +2128,41 @@ export class RestServer {
     }
     
     /**
+     * Is `/mcp` actually serveable — i.e. is the MCP service registered with
+     * the shape `handleMcpRequest` needs?
+     *
+     * `true`/`false` are answers; `null` means "could not probe". The route
+     * itself is served by the runtime dispatcher (`domains/mcp.ts`), which
+     * 501s on `!mcp || typeof mcp.handleHttpRequest !== 'function'` — so this
+     * probe exists to keep our `/discovery` from advertising a route that
+     * would 501 (#4024).
+     *
+     * Same two probe paths as {@link resolveRegisteredServices} (ADR-0057
+     * D10): the per-request kernel for multi-env hosts, else the single-env
+     * `serviceExistsProvider` — which `rest-api-plugin` always wires. Via the
+     * kernel we can check the SHAPE; the single-env provider answers existence
+     * only, which is the dominant case (the dispatcher's own service-aware
+     * discovery covers the wrong-shape case).
+     */
+    private async probeMcpServeable(req: any): Promise<boolean | null> {
+        try {
+            let environmentId: string | undefined = req?.params?.environmentId;
+            if ((!environmentId || environmentId === ':environmentId') && this.defaultEnvironmentIdProvider) {
+                try { environmentId = this.defaultEnvironmentIdProvider() || undefined; } catch { /* ignore */ }
+            }
+            if (environmentId && environmentId !== 'platform' && this.kernelManager) {
+                const kernel: any = await this.kernelManager.getOrCreate(environmentId);
+                if (kernel && typeof kernel.getServiceAsync === 'function') {
+                    const svc: any = await kernel.getServiceAsync('mcp').catch(() => undefined);
+                    return typeof svc?.handleHttpRequest === 'function';
+                }
+            }
+            if (this.serviceExistsProvider) return this.serviceExistsProvider('mcp') === true;
+        } catch { /* fall through to "cannot probe" */ }
+        return null;
+    }
+
+    /**
      * Register discovery endpoints
      */
     private registerDiscoveryEndpoints(basePath: string): void {
@@ -2166,8 +2201,22 @@ export class RestServer {
                         // project-scoped), so point at the unscoped base. This
                         // `/discovery` (served by @objectstack/rest) is separate
                         // from the dispatcher's getDiscoveryInfo — both must
-                        // advertise `mcp` (single source: isMcpServerEnabled).
-                        if (isMcpServerEnabled()) {
+                        // advertise `mcp` on the same terms.
+                        //
+                        // Enabled is NOT the same as serveable (#4024). The flag
+                        // alone used to gate this, on the reasoning that `os serve`
+                        // auto-loads plugin-mcp from the same flag. But that
+                        // lockstep belongs to the CLI: `@objectstack/rest` has no
+                        // `@objectstack/mcp` dependency, mounts no /mcp route and
+                        // performs no auto-load, so an embedder that skips
+                        // plugin-mcp had `mcp` advertised here while the route
+                        // 501'd — the `declared ≠ enforced` failure #3369 forbids.
+                        // A `null` probe means we genuinely cannot tell; keep the
+                        // old flag-only answer there rather than hiding a working
+                        // endpoint (fail-open, ADR-0057 D10) — the dispatcher's own
+                        // discovery is service-aware and stays authoritative.
+                        const mcpServeable = await this.probeMcpServeable(req);
+                        if (isMcpServerEnabled() && mcpServeable !== false) {
                             const unscopedBase = isScoped
                                 ? basePath.replace(/\/(environments|projects)\/:environmentId$/, '')
                                 : basePath;
