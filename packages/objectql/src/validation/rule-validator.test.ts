@@ -812,3 +812,111 @@ describe('conditional enforcement', () => {
     expect(() => evaluateValidationRules(broken, { account_type: 'enterprise', approver: null }, 'insert')).not.toThrow();
   });
 });
+
+/**
+ * #3957 — this evaluator's BUILT-IN messages had the same defect as the field
+ * validator's: hardcoded English with the API field name. An author-written
+ * `rule.message` is untouched (it is already in the author's language); only
+ * the platform's own sentences are localized.
+ */
+describe('evaluateValidationRules — built-in messages are localized (#3957)', () => {
+  const zh = { locale: 'zh-CN', objectName: 'mes_invoice' };
+
+  const failing = (
+    schema: any,
+    data: Record<string, unknown>,
+    mode: 'insert' | 'update',
+    opts: Record<string, unknown> = {},
+  ) => {
+    try {
+      evaluateValidationRules(schema, data, mode, opts);
+    } catch (e) {
+      return (e as ValidationError).fields;
+    }
+    throw new Error('expected a ValidationError');
+  };
+
+  it('localizes a `requiredWhen` violation and names the field by its label', () => {
+    const schema = {
+      fields: {
+        status: { type: 'select', label: '状态' },
+        amount: { type: 'currency', label: '金额', requiredWhen: 'record.status == "sent"' },
+      },
+    };
+    const [err] = failing(schema, { status: 'sent' }, 'insert', { messages: zh });
+    expect(err.message).toBe('金额不能为空');
+    expect(err).toMatchObject({ field: 'amount', code: 'required', label: '金额' });
+  });
+
+  it('localizes an option-visibility rejection', () => {
+    const schema = {
+      fields: {
+        tier: {
+          type: 'select',
+          label: '等级',
+          options: [
+            { value: 'basic' },
+            { value: 'vip', visibleWhen: 'record.approved == true' },
+          ],
+        },
+      },
+    };
+    const [err] = failing(schema, { tier: 'vip', approved: false }, 'insert', { messages: zh });
+    expect(err.message).toBe('等级:选项“vip”当前不可用');
+    expect(err.code).toBe('invalid_option');
+  });
+
+  it('localizes the state-machine fallbacks when a rule declares no message', () => {
+    const schema = {
+      fields: { status: { type: 'select', label: '状态' } },
+      validations: [{
+        type: 'state_machine',
+        name: 'lifecycle',
+        message: '',
+        field: 'status',
+        initialStates: ['draft'],
+        transitions: { draft: ['sent'], sent: ['paid'] },
+      }],
+    };
+    expect(failing(schema, { status: 'paid' }, 'insert', { messages: zh })[0].message)
+      .toBe('状态的初始状态无效:paid(允许:draft)');
+    // draft → paid is not in `transitions.draft` (only `sent` is).
+    expect(
+      failing(schema, { status: 'paid' }, 'update', { messages: zh, previous: { status: 'draft' } })[0].message,
+    ).toBe('状态不允许从 draft 变更为 paid');
+  });
+
+  /**
+   * An author who wrote their own message owns the wording — localizing over it
+   * would silently replace their (often already-translated) text.
+   */
+  it('never overrides an author-written rule message', () => {
+    const schema = {
+      fields: { status: { type: 'select', label: '状态' } },
+      validations: [{
+        type: 'state_machine',
+        name: 'lifecycle',
+        message: '已付款的发票不能退回草稿。',
+        field: 'status',
+        transitions: { paid: [] },
+      }],
+    };
+    const [err] = failing(schema, { status: 'draft' }, 'update', {
+      messages: zh,
+      previous: { status: 'paid' },
+    });
+    expect(err.message).toBe('已付款的发票不能退回草稿。');
+    // …but the field still carries its localized label for the UI.
+    expect(err.label).toBe('状态');
+  });
+
+  it('renders English against the declared label when no locale is supplied', () => {
+    const schema = {
+      fields: {
+        status: { type: 'select', label: 'Status' },
+        amount: { type: 'currency', label: 'Amount', requiredWhen: 'record.status == "sent"' },
+      },
+    };
+    expect(failing(schema, { status: 'sent' }, 'insert')[0].message).toBe('Amount is required');
+  });
+});

@@ -12,6 +12,8 @@
 // without any native driver dependency.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { Runtime } from './runtime.js';
 import { DriverPlugin } from './driver-plugin.js';
 import { AppPlugin } from './app-plugin.js';
@@ -71,7 +73,10 @@ async function boot(opts: { connectPolicy?: DatasourceConnectPolicy } = {}) {
 
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
-  await kernel.use(new DriverPlugin(new InMemoryDriver())); // default driver
+  // `persistence: false` keeps the acceptance hermetic. The driver's own default
+  // is `'auto'` — in Node a file adapter at `.objectstack/data/…` under the CWD,
+  // which both reloads and rewrites ambient state between runs (#4083).
+  await kernel.use(new DriverPlugin(new InMemoryDriver({ persistence: false }))); // default driver
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new AppPlugin(artifact()));
   await kernel.use(
@@ -129,6 +134,64 @@ describe('ADR-0062 declared-datasource auto-connect', () => {
     const rows = await engine.find('ext_note');
     expect(rows.map((r) => r.title).sort()).toEqual(['first', 'second']);
   });
+});
+
+// #4083 — the acceptance above passed on a clean checkout and failed on every
+// subsequent run, reading 2×N rows on the Nth: the auto-connected `memory`
+// datasource inherited `InMemoryDriver`'s `persistence: 'auto'` default, so it
+// flushed `ext_note` into `.objectstack/data/memory-driver.json` under the CWD
+// and the next boot's connect() loaded those rows back before this file seeded
+// its own. CI never caught it because CI always runs #1 on a fresh checkout.
+//
+// The intermittency ("passes once in four") came from WHEN the flush lands: the
+// file adapter writes on a 2s unref'd autosave timer, so a run short enough to
+// finish first left nothing behind. `flush()` below stands in for that timer, so
+// this pins the property that was actually broken — a federated in-memory pool
+// leaves nothing behind and does not outlive its kernel — without a timing race
+// and without depending on run-to-run state.
+describe('ADR-0062 D1 — the auto-connected in-memory pool leaves nothing behind (#4083)', () => {
+  const STATE_DIR = join(process.cwd(), '.objectstack');
+  const clearState = () => { try { rmSync(STATE_DIR, { recursive: true, force: true }); } catch { /* noop */ } };
+  // Clear on both sides: a leftover from elsewhere would make this pass for the
+  // wrong reason, and a failure that DID write must not leak into the next run
+  // (that leak is the bug under test).
+  beforeAll(clearState);
+  afterAll(clearState);
+
+  async function seedAndRead(kernel: Awaited<ReturnType<typeof boot>>) {
+    const engine = kernel.getService<{
+      getDriverByName(n: string): any;
+      find(object: string, query?: any): Promise<any[]>;
+    }>('data');
+    const driver = engine.getDriverByName('autoconn_ext');
+    await driver.bulkCreate('ext_note', [
+      { id: 'n1', title: 'first' },
+      { id: 'n2', title: 'second' },
+    ]);
+    const titles = (await engine.find('ext_note')).map((r) => r.title).sort();
+    // Whatever the autosave timer would have written, written now.
+    await driver.flush?.();
+    return titles;
+  }
+
+  it('writes no state file, and a second boot in the same process starts empty', async () => {
+    const first = await boot();
+    try {
+      expect(await seedAndRead(first)).toEqual(['first', 'second']);
+      // The seeded rows must not have reached the host filesystem at all.
+      expect(existsSync(STATE_DIR)).toBe(false);
+    } finally {
+      try { await (first as any)?.stop?.(); } catch { /* noop */ }
+    }
+
+    const second = await boot();
+    try {
+      // Was ['first','first','second','second'] — the first boot's rows, reloaded.
+      expect(await seedAndRead(second)).toEqual(['first', 'second']);
+    } finally {
+      try { await (second as any)?.stop?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
 });
 
 describe('ADR-0062 credentials fail-closed (D3)', () => {

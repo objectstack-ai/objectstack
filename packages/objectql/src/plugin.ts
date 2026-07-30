@@ -426,6 +426,23 @@ export class ObjectQLPlugin implements Plugin {
                 error: e.message,
             });
         }
+
+        // Bridge the i18n service so a rejected write reports in the caller's
+        // language (#3957): it supplies both the `validation.field.*` message
+        // overrides and the field's TRANSLATED label. Absent service is fine —
+        // the built-in catalog in `@objectstack/spec/system` still localizes the
+        // message against the field's declared label.
+        try {
+            const i18nService = ctx.getService('i18n');
+            if (i18nService && typeof (i18nService as any).t === 'function') {
+                ctx.logger.info('[ObjectQLPlugin] Bridging i18n service to ObjectQL for validation messages');
+                this.ql.setI18nService(i18nService as any);
+            }
+        } catch (e: any) {
+            ctx.logger.debug('[ObjectQLPlugin] No i18n service found — validation messages use the built-in catalog', {
+                error: e.message,
+            });
+        }
     }
 
     // Initialize drivers (calls driver.connect() which sets up persistence)

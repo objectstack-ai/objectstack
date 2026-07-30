@@ -13,6 +13,7 @@
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
+import { isServiceServeable } from '../service-serveable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -36,7 +37,13 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // AI service not registered
     }
 
-    if (!aiService) {
+    // [#4058] A slot filled by a self-declared non-handler (`handlerReady:
+    // false`, ADR-0076 D12) is no AI capability, so it takes the same exits an
+    // empty slot takes. This is also strictly better than what such an occupant
+    // used to get: being truthy, it fell through to the `!routes` 503 below —
+    // which both reads as a fault and loses the `/ai/agents` empty-list
+    // courtesy the console depends on.
+    if (!isServiceServeable(aiService)) {
         // The console polls `GET /ai/agents` on every navigation to decide
         // whether to show AI affordances. Reporting that as a 404 turns the
         // normal "no AI service configured" state (the open-source default —

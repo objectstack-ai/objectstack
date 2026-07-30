@@ -194,6 +194,62 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.routes.analytics).toBeUndefined();
   });
 
+  // #4058 — the same rule for every OTHER slot whose HTTP surface is a
+  // dispatcher domain, now that those domains gate on `handlerReady` too.
+  it('should not advertise routes for self-declared stubs in the other dispatcher-owned slots', async () => {
+    const mockServices = new Map<string, any>();
+    for (const name of ['automation', 'notification', 'ai', 'i18n', 'file-storage']) {
+      mockServices.set(name, { __serviceInfo: { status: 'stub', message: 'dev fake' } });
+    }
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
+    for (const name of ['automation', 'notification', 'ai', 'i18n', 'file-storage']) {
+      expect(discovery.services[name].enabled, `${name}.enabled`).toBe(true);
+      expect(discovery.services[name].status, `${name}.status`).toBe('stub');
+      expect(discovery.services[name].handlerReady, `${name}.handlerReady`).toBe(false);
+      expect(discovery.services[name].route, `${name}.route`).toBeUndefined();
+    }
+    for (const key of ['automation', 'notifications', 'ai', 'i18n', 'storage']) {
+      expect(discovery.routes[key], `routes.${key}`).toBeUndefined();
+    }
+  });
+
+  // The limit of that rule: `degraded` means "really serves, reduced
+  // capability", so the route stays advertised — plugin-dev's in-memory file
+  // store and i18n provider are exactly this, and the dispatcher keeps serving
+  // them.
+  it('should keep advertising routes for degraded implementations that really serve', async () => {
+    const mockServices = new Map<string, any>();
+    mockServices.set('file-storage', { __serviceInfo: { status: 'degraded', message: 'in-memory' } });
+    mockServices.set('i18n', { __serviceInfo: { status: 'degraded', message: 'in-memory' } });
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
+    expect(discovery.services['file-storage'].status).toBe('degraded');
+    expect(discovery.services['file-storage'].handlerReady).toBe(true);
+    expect(discovery.routes.storage).toBe('/api/v1/storage');
+    expect(discovery.routes.i18n).toBe('/api/v1/i18n');
+  });
+
+  // Not every SERVICE_CONFIG entry is dispatcher-owned: `search` (REST layer),
+  // `workflow`, `graphql` and the queue/job/cache families have their routes
+  // mounted by the plugin that registers the service, so `handlerReady` there
+  // says nothing about whether THAT route is mounted and the advertisement
+  // stays presence-gated. Suppressing it would be a guess, not honesty.
+  it('should leave non-dispatcher-owned routes presence-gated', async () => {
+    const mockServices = new Map<string, any>();
+    mockServices.set('search', { __serviceInfo: { status: 'stub', message: 'dev fake' } });
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
+    expect(discovery.services.search.status).toBe('stub');
+    expect(discovery.services.search.route).toBe('/api/v1/search');
+  });
+
   it('should map file-storage service to storage route', async () => {
     const mockServices = new Map<string, any>();
     mockServices.set('file-storage', {});

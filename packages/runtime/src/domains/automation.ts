@@ -10,6 +10,7 @@
  */
 
 import { CoreServiceName } from '@objectstack/spec/system';
+import { isServiceServeable } from '../service-serveable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -42,7 +43,13 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
  */
 export async function handleAutomationRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, context: HttpProtocolContext, query?: any): Promise<HttpDispatcherResult> {
     const automationService = await deps.getService(CoreServiceName.enum.automation);
-    if (!automationService) return { handled: false };
+    // [#4058] Empty slot — or a slot filled by a self-declared non-handler
+    // (`handlerReady: false`, ADR-0076 D12), which is the same amount of
+    // automation capability. This domain is the sharpest case for the rule: a
+    // stub whose `execute` returns `{ success: true }` without running anything
+    // answered 200, so a caller (or an agent) read "flow executed" off a flow
+    // that never ran. 404 handled by caller.
+    if (!isServiceServeable(automationService)) return { handled: false };
 
     const m = method.toUpperCase();
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);

@@ -8,11 +8,13 @@
  * ExecutionContext and the contract `where` filter). Route registration stays
  * dispatcher-owned so the URL contract is stable regardless of what occupies
  * the slot; an empty slot answers the `handled: false` 404 below — as does a
- * slot occupied by a self-declared stub (#4000, see {@link isAnalyticsServiceServeable}).
+ * slot occupied by a self-declared stub (#4000, see {@link isServiceServeable},
+ * the shared predicate every service domain reads since #4058).
  */
 
 import { CoreServiceName } from '@objectstack/spec/system';
-import { AnalyticsQueryRequestSchema, readServiceSelfInfo } from '@objectstack/spec/api';
+import { AnalyticsQueryRequestSchema } from '@objectstack/spec/api';
+import { isServiceServeable } from '../service-serveable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -71,28 +73,6 @@ function assertAnalyticsQueryBody(body: unknown): void {
     }
 }
 
-/**
- * [#4000] Is the thing occupying the `analytics` slot something we may call
- * like a real engine?
- *
- * ADR-0076 D12 gave services a way to self-declare that they are a stub or a
- * degraded fallback, and its third conclusion binds *consumers*: only
- * `handlerReady: true` counts as a real capability. Discovery honoured that
- * from day one; the dispatcher — a consumer too — gated on mere presence, so
- * anything registered in the slot got called and its fabricated rows went back
- * as a 200. That is precisely the shape #3891 retired one layer up, and
- * plugin-dev's analytics stub kept it alive in dev mode (retired with this
- * change; this predicate is what stops the next one).
- *
- * `handlerReady` (not `status`) is the right test: a `degraded` implementation
- * that genuinely serves requests defaults to `true` and keeps serving — only a
- * self-confessed non-handler is treated as an empty slot.
- */
-export function isAnalyticsServiceServeable(svc: unknown): boolean {
-    if (!svc) return false;
-    return readServiceSelfInfo(svc)?.handlerReady !== false;
-}
-
 export function createAnalyticsDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
         prefix: '/analytics',
@@ -113,7 +93,7 @@ export async function handleAnalyticsRequest(
     const analyticsService = await deps.getService(CoreServiceName.enum.analytics);
     // Empty slot — or a slot filled by a self-declared stub (#4000), which is
     // the same amount of analytics capability. 404 handled by caller.
-    if (!isAnalyticsServiceServeable(analyticsService)) return { handled: false };
+    if (!isServiceServeable(analyticsService)) return { handled: false };
 
     const m = method.toUpperCase();
     const subPath = path.replace(/^\/+/, '');
