@@ -144,8 +144,19 @@ export class AuthPlugin implements Plugin {
   providesServices = ['auth', 'tenancy'];
   type = 'standard';
   version = '1.0.0';
-  dependencies: string[] = ['com.objectstack.engine.objectql']; // manifest service required
-  
+  dependencies: string[] = ['com.objectstack.engine.objectql'];
+  /**
+   * What that dependency is FOR, stated so the kernel can check it (#4187).
+   * `init()` resolves both synchronously with no fallback: `data` builds the
+   * AuthManager config, `manifest` registers the auth objects. ObjectQL
+   * registers both unconditionally and the hard dependency above hoists it
+   * ahead, so this never changes whether the boot succeeds — it changes what
+   * a broken composition SAYS, and replaces the trailing `// manifest service
+   * required` comment with the machine-checked form of the same claim.
+   */
+  requiresServices = ['data', 'manifest'];
+
+
   private options: AuthPluginOptions;
   private authManager: AuthManager | null = null;
   /** ADR-0093 D4 — the tenancy service registered in init(); reused at kernel:ready. */
@@ -199,11 +210,19 @@ export class AuthPlugin implements Plugin {
       throw new Error('AuthPlugin: secret is required');
     }
 
-    // Get data engine service for database operations
+    // Get data engine service for database operations. This plugin declares a
+    // hard dependency on ObjectQL (which registers `data` unconditionally), so
+    // the service is always present here.
+    //
+    // There used to be an `if (!dataEngine) warn('…auth will use in-memory
+    // storage')` guard under this line. It could never fire and the fallback it
+    // named did not exist: `getService` THROWS for an unregistered service, it
+    // does not return undefined, and the hard dependency means a kernel without
+    // the engine fails earlier still with "Dependency … not found". A branch
+    // that advertises a tolerance the composition forbids is worse than no
+    // branch — it reads as a supported degraded mode (#4187). AuthManager keeps
+    // its own `dataEngine?` guards because it is usable outside this plugin.
     const dataEngine = ctx.getService<any>('data');
-    if (!dataEngine) {
-      ctx.logger.warn('No data engine service found - auth will use in-memory storage');
-    }
 
     const authConfig: AuthManagerOptions & AuthPluginOptions = {
       ...this.options,
