@@ -4,12 +4,15 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveLocalizationContext } from '@objectstack/core';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
-// `sys_notification` is contributed here but owned by platform-objects; it is
-// being reworked by ADR-0030 messaging (notification→event), so it stays put
-// until that migration lands. `sys_attachment` moved to @objectstack/service-
-// storage (ADR-0052 §3 ownership: a file↔record link belongs with storage, not
-// the compliance ledger).
-import { SysNotification } from '@objectstack/platform-objects/audit';
+// `sys_notification` was parked here "until that [ADR-0030] migration lands".
+// It has landed, so the contribution moved to @objectstack/service-messaging —
+// the service that writes the row on every `emit()` (#4154). This plugin never
+// wrote it directly (it routes through messaging's ingress, see
+// `getMessaging()` in audit-writers.ts), and it is an OPTIONAL pair in the CLI,
+// so registering another service's ingress object here made that service's
+// core path depend on this plugin being installed. `sys_attachment` moved to
+// @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
+// file↔record link belongs with storage, not the compliance ledger).
 import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
 
 /**
@@ -37,7 +40,7 @@ export class AuditPlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      objects: [SysAuditLog, SysActivity, SysComment, SysNotification],
+      objects: [SysAuditLog, SysActivity, SysComment],
       // ADR-0029 D7 — contribute the Audit Logs entry into the Setup app's
       // `group_diagnostics` slot. The plugin owns sys_audit_log (K2).
       navigationContributions: [
