@@ -53,57 +53,23 @@ export type WebSocketMessageType = z.infer<typeof WebSocketMessageType>;
 // Event Subscription
 // ==========================================
 
-/**
- * Event Filter Operator Enum
- * SQL-like filter operators for event filtering
- */
-export const FilterOperator = z.enum([
-  'eq',      // Equal
-  'ne',      // Not equal
-  'gt',      // Greater than
-  'gte',     // Greater than or equal
-  'lt',      // Less than
-  'lte',     // Less than or equal
-  'in',      // In array
-  'nin',     // Not in array
-  'contains', // String contains
-  'startsWith', // String starts with
-  'endsWith',   // String ends with
-  'exists',     // Field exists
-  'regex',      // Regex match
-]);
-
-export type FilterOperator = z.infer<typeof FilterOperator>;
-
-/**
- * Event Filter Condition
- * Defines a single filter condition for event filtering
- */
-export const EventFilterCondition = z.object({
-  field: z.string().describe('Field path to filter on (supports dot notation, e.g., "user.email")'),
-  operator: FilterOperator.describe('Comparison operator'),
-  value: z.unknown().optional().describe('Value to compare against (not needed for "exists" operator)'),
-});
-
-export type EventFilterCondition = z.infer<typeof EventFilterCondition>;
-
-/**
- * Event Filter Schema
- * Logical combination of filter conditions
- */
-export const EventFilterSchema: z.ZodType<{
-  conditions?: EventFilterCondition[];
-  and?: EventFilter[];
-  or?: EventFilter[];
-  not?: EventFilter;
-}> = lazySchema(() => z.object({
-  conditions: z.array(EventFilterCondition).optional().describe('Array of filter conditions'),
-  and: z.lazy(() => z.array(EventFilterSchema)).optional().describe('AND logical combination of filters'),
-  or: z.lazy(() => z.array(EventFilterSchema)).optional().describe('OR logical combination of filters'),
-  not: z.lazy(() => EventFilterSchema).optional().describe('NOT logical negation of filter'),
-}));
-
-export type EventFilter = z.infer<typeof EventFilterSchema>;
+// A `FilterOperator` enum (eq/ne/gt/gte/lt/lte/in/nin/contains/startsWith/
+// endsWith/exists/regex) and the `EventFilterCondition` + `EventFilterSchema`
+// pair it fed lived here, reached from `EventSubscriptionSchema.filters`.
+//
+// Nothing imported any of it — not this repo, not objectui, not cloud — and no
+// runtime ever evaluated an event filter: `matchesSubscription` matches on
+// object name and event type only (see `contracts/realtime-service.ts`), and the
+// subscription shape the transports actually carry is the separate, deliberately
+// unvalidated `filters: z.unknown()` on `SubscriptionEventSchema`
+// (`api/realtime.zod.ts`).
+//
+// So this was a *second* spelling of event filtering, disagreeing with both the
+// live one and with `VALID_AST_OPERATORS`, that advertised a capability no code
+// provided — a subscriber setting `filters` would have received every event.
+// Removed rather than wired up: the surface that matters is the realtime
+// contract, and it should grow one filter vocabulary, not inherit an orphan's.
+// objectui#2945.
 
 /**
  * Event Pattern Schema
@@ -127,7 +93,6 @@ export const EventSubscriptionSchema = lazySchema(() => z.object({
   subscriptionId: z.string().uuid().describe('Unique subscription identifier'),
   events: z.array(EventPatternSchema).describe('Event patterns to subscribe to (supports wildcards, e.g., "record.*", "user.created")'),
   objects: z.array(z.string()).optional().describe('Object names to filter events by (e.g., ["account", "contact"])'),
-  filters: EventFilterSchema.optional().describe('Advanced filter conditions for event payloads'),
   channels: z.array(z.string()).optional().describe('Channel names for scoped subscriptions'),
 }));
 

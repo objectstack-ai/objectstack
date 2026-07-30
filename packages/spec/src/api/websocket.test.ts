@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   WebSocketMessageType,
-  FilterOperator,
-  EventFilterCondition,
-  EventFilterSchema,
   EventSubscriptionSchema,
   UnsubscribeRequestSchema,
   WebSocketPresenceStatus,
@@ -50,115 +47,6 @@ describe('WebSocketMessageType', () => {
   });
 });
 
-describe('FilterOperator', () => {
-  it('should accept valid filter operators', () => {
-    const operators = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'nin', 'contains', 'startsWith', 'endsWith', 'exists', 'regex'];
-    
-    operators.forEach(op => {
-      expect(() => FilterOperator.parse(op)).not.toThrow();
-    });
-  });
-
-  it('should reject invalid operators', () => {
-    expect(() => FilterOperator.parse('like')).toThrow();
-    expect(() => FilterOperator.parse('between')).toThrow();
-  });
-});
-
-describe('EventFilterCondition', () => {
-  it('should accept valid filter condition', () => {
-    const condition = {
-      field: 'status',
-      operator: 'eq',
-      value: 'active',
-    };
-
-    expect(() => EventFilterCondition.parse(condition)).not.toThrow();
-  });
-
-  it('should accept filter with dot notation field path', () => {
-    const condition = {
-      field: 'user.email',
-      operator: 'contains',
-      value: '@example.com',
-    };
-
-    const parsed = EventFilterCondition.parse(condition);
-    expect(parsed.field).toBe('user.email');
-  });
-
-  it('should accept exists operator without value', () => {
-    const condition = {
-      field: 'optional_field',
-      operator: 'exists',
-    };
-
-    const parsed = EventFilterCondition.parse(condition);
-    expect(parsed.value).toBeUndefined();
-  });
-});
-
-describe('EventFilterSchema', () => {
-  it('should accept simple filter with conditions', () => {
-    const filter = {
-      conditions: [
-        { field: 'status', operator: 'eq', value: 'active' },
-        { field: 'amount', operator: 'gt', value: 1000 },
-      ],
-    };
-
-    expect(() => EventFilterSchema.parse(filter)).not.toThrow();
-  });
-
-  it('should accept AND logical combination', () => {
-    const filter = {
-      and: [
-        { conditions: [{ field: 'status', operator: 'eq', value: 'active' }] },
-        { conditions: [{ field: 'verified', operator: 'eq', value: true }] },
-      ],
-    };
-
-    expect(() => EventFilterSchema.parse(filter)).not.toThrow();
-  });
-
-  it('should accept OR logical combination', () => {
-    const filter = {
-      or: [
-        { conditions: [{ field: 'type', operator: 'eq', value: 'urgent' }] },
-        { conditions: [{ field: 'priority', operator: 'gte', value: 5 }] },
-      ],
-    };
-
-    expect(() => EventFilterSchema.parse(filter)).not.toThrow();
-  });
-
-  it('should accept NOT logical negation', () => {
-    const filter = {
-      not: {
-        conditions: [{ field: 'deleted', operator: 'eq', value: true }],
-      },
-    };
-
-    expect(() => EventFilterSchema.parse(filter)).not.toThrow();
-  });
-
-  it('should accept complex nested filters', () => {
-    const filter = {
-      and: [
-        { conditions: [{ field: 'status', operator: 'eq', value: 'active' }] },
-        {
-          or: [
-            { conditions: [{ field: 'type', operator: 'eq', value: 'premium' }] },
-            { conditions: [{ field: 'amount', operator: 'gte', value: 10000 }] },
-          ],
-        },
-      ],
-    };
-
-    expect(() => EventFilterSchema.parse(filter)).not.toThrow();
-  });
-});
-
 describe('EventSubscriptionSchema', () => {
   it('should accept valid minimal subscription', () => {
     const subscription: EventSubscription = {
@@ -187,20 +75,6 @@ describe('EventSubscriptionSchema', () => {
 
     const parsed = EventSubscriptionSchema.parse(subscription);
     expect(parsed.objects).toEqual(['account', 'contact']);
-  });
-
-  it('should accept subscription with advanced filters', () => {
-    const subscription = {
-      subscriptionId: '550e8400-e29b-41d4-a716-446655440000',
-      events: ['record.created'],
-      filters: {
-        conditions: [
-          { field: 'amount', operator: 'gt', value: 5000 },
-        ],
-      },
-    };
-
-    expect(() => EventSubscriptionSchema.parse(subscription)).not.toThrow();
   });
 
   it('should accept subscription with channels', () => {

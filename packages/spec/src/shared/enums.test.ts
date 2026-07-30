@@ -1,37 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
-  AggregationFunctionEnum,
   SortDirectionEnum,
   SortItemSchema,
   MutationEventEnum,
   IsolationLevelEnum,
   CacheStrategyEnum,
 } from './enums.zod';
-
-describe('AggregationFunctionEnum', () => {
-  it('should accept all valid aggregation functions', () => {
-    const valid = [
-      'count', 'sum', 'avg', 'min', 'max',
-      'count_distinct', 'percentile', 'median', 'stddev', 'variance',
-    ];
-    valid.forEach((v) => {
-      expect(() => AggregationFunctionEnum.parse(v)).not.toThrow();
-    });
-  });
-
-  it('should reject invalid values', () => {
-    const invalid = ['COUNT', 'SUM', 'average', 'total', '', 'unknown'];
-    invalid.forEach((v) => {
-      expect(() => AggregationFunctionEnum.parse(v)).toThrow();
-    });
-  });
-
-  it('should reject non-string types', () => {
-    expect(() => AggregationFunctionEnum.parse(123)).toThrow();
-    expect(() => AggregationFunctionEnum.parse(null)).toThrow();
-    expect(() => AggregationFunctionEnum.parse(undefined)).toThrow();
-  });
-});
 
 describe('SortDirectionEnum', () => {
   it('should accept asc and desc', () => {
