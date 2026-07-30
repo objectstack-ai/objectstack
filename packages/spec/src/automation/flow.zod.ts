@@ -159,14 +159,22 @@ export const FlowNodeSchema = lazySchema(() => z.object({
   /** Node Configuration Options (Specific to type) */
   config: z.record(z.string(), z.unknown()).optional().describe('Node configuration'),
   
-  /** 
+  /**
    * Connector Action Configuration
    * Used when type is 'connector_action'
+   *
+   * This block — not `config` — IS the `connector_action` contract: the
+   * executor reads nothing else (connector-nodes.ts, #4045). `input` is
+   * optional to match what the executor and the designer actually do: the
+   * executor dispatches with `input ?? {}`, and the Studio inspector's
+   * keyValue editor omits an empty map entirely — so a required `input`
+   * declared here turned a no-input action into a load failure nothing
+   * downstream asked for.
    */
   connectorConfig: z.object({
-    connectorId: z.string(),
-    actionId: z.string(),
-    input: z.record(z.string(), z.unknown()).describe('Mapped inputs for the action'),
+    connectorId: z.string().describe('Registered connector name'),
+    actionId: z.string().describe('Action key declared by the connector'),
+    input: z.record(z.string(), z.unknown()).optional().describe('Mapped inputs for the action'),
   }).optional(),
 
   /** UI Position (for the canvas) */

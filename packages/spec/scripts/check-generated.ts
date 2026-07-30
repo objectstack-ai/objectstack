@@ -62,6 +62,7 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
   { check: 'check:react-conformance', why: 'audits react blocks against their contract — no artifact' },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
+  { check: 'check:variant-docs', why: 'audits hand-written docs cover every declared union variant — the fix is a doc/ledger edit, not a gen: command' },
 ];
 
 /**

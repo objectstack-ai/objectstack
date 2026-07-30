@@ -2717,8 +2717,9 @@ export class AutomationEngine implements IAutomationService {
         for (const node of flow.nodes) {
             const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
             // No descriptor, or a deliberately schemaless type (`decision`,
-            // `script`, `wait`, `subflow` publish none — see config-schemas.test)
-            // ⇒ nothing is declared, so nothing can be undeclared.
+            // `script`, `wait`, `subflow`, `connector_action` publish none —
+            // see config-schemas.test) ⇒ nothing is declared, so nothing can
+            // be undeclared.
             if (!schema) continue;
             this.warnUndeclaredConfigKeys(flowName, node, schema, node.config, 'config');
         }
