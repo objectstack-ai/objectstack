@@ -3556,6 +3556,8 @@
     "CheckNamespaceInput (interface)",
     "CheckNamespaceResult (interface)",
     "ClusterCallContext (interface)",
+    "CoreServiceContract (type)",
+    "CoreServiceContracts (interface)",
     "CounterIncrOptions (interface)",
     "CreateExportJobInput (interface)",
     "CreateExportJobResult (interface)",

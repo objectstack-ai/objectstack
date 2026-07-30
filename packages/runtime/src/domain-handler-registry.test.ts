@@ -626,11 +626,16 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
 // ---------------------------------------------------------------------------
 
 describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
-    it('/auth delegates to the auth service handler when registered', async () => {
-        const handler = vi.fn().mockResolvedValue({ ok: true });
-        const result = await makeDispatcher({ auth: { handler } }).dispatch('POST', '/auth/sign-in/email', { email: 'x@y.z' }, {}, {} as any);
+    // [#4127] Third copy of the fabricated `handler` mock (with
+    // http-dispatcher.test.ts's two). Three tests across two files all agreed
+    // the auth domain calls `handler`; no auth service has one, and
+    // `IAuthService` declares `handleRequest`. That is how a dead branch stays
+    // green — every test was written from the handler, not from the contract.
+    it('/auth delegates to the auth service via the contract handleRequest when registered', async () => {
+        const handleRequest = vi.fn().mockResolvedValue({ ok: true });
+        const result = await makeDispatcher({ auth: { handleRequest } }).dispatch('POST', '/auth/sign-in/email', { email: 'x@y.z' }, {}, {} as any);
         expect(result.handled).toBe(true);
-        expect(handler).toHaveBeenCalledTimes(1);
+        expect(handleRequest).toHaveBeenCalledTimes(1);
     });
 
     it('/auth mock fallback serves sign-up when no auth service is registered', async () => {

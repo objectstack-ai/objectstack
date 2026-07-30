@@ -4,6 +4,21 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { ObjectKernel } from '@objectstack/core';
 import { ApiErrorSchema } from '@objectstack/spec/api';
 import type { ConnectorDescriptor } from '@objectstack/spec/integration';
+import type { IAuthService, IAutomationService } from '@objectstack/spec/contracts';
+
+/**
+ * [#4127] Mock-shape guard: every key must be a method the contract DECLARES.
+ *
+ * Signatures stay `unknown` on purpose — `vi.fn()` does not match a contract
+ * signature, and forcing it to would push these mocks straight back to `as any`,
+ * which is the state this is fixing. What it catches is the failure that keeps
+ * actually happening: a mock naming a method the contract does not have, so the
+ * handler and its test agree with each other and with no implementation.
+ * `upload(file, { request })` in #4087, `authService.handler` and
+ * `automation.trigger` here — each one sat green for months behind a mock
+ * written to the handler's wish rather than the declared surface.
+ */
+type ContractMock<T> = Partial<Record<keyof T, unknown>>;
 
 describe('HttpDispatcher', () => {
     let kernel: ObjectKernel;
@@ -162,7 +177,8 @@ describe('HttpDispatcher', () => {
         let mockAutomationService: any;
 
         beforeEach(() => {
-            mockAutomationService = {
+            // [#4127] Everything the CONTRACT declares, checked against it.
+            const contractMethods = {
                 listFlows: vi.fn().mockResolvedValue(['flow_a', 'flow_b']),
                 getFlow: vi.fn().mockResolvedValue({ name: 'flow_a', label: 'Flow A' }),
                 registerFlow: vi.fn(),
@@ -171,7 +187,6 @@ describe('HttpDispatcher', () => {
                 toggleFlow: vi.fn().mockResolvedValue(undefined),
                 listRuns: vi.fn().mockResolvedValue([{ id: 'run_1', status: 'completed' }]),
                 getRun: vi.fn().mockResolvedValue({ id: 'run_1', status: 'completed' }),
-                trigger: vi.fn().mockResolvedValue({ success: true }),
                 resume: vi.fn().mockResolvedValue({ success: true, output: {}, durationMs: 7 }),
                 // Sync per IAutomationService — `ScreenSpec | null`, not a promise.
                 getSuspendedScreen: vi.fn().mockReturnValue({ nodeId: 'collect', fields: [] }),
@@ -196,6 +211,17 @@ describe('HttpDispatcher', () => {
                     { name: 'flow_a', enabled: true, bound: true },
                     { name: 'flow_b', enabled: false, bound: false },
                 ]),
+            } satisfies ContractMock<IAutomationService>;
+
+            mockAutomationService = {
+                ...contractMethods,
+                // NEGATIVE CONTROL (#4143) — deliberately NOT on the contract.
+                // Nothing in the repo implements `trigger` on the automation
+                // slot; it exists here only so the legacy-route test below can
+                // assert it is never called. Kept outside the checked literal
+                // so it reads as the exception it is, instead of quietly
+                // re-opening the hole the check above closes.
+                trigger: vi.fn().mockResolvedValue({ success: true }),
             };
 
             // Set up kernel services to include automation
@@ -912,10 +938,19 @@ describe('HttpDispatcher', () => {
         });
 
         describe('handleAuth with async service', () => {
-            it('should resolve auth service from Promise', async () => {
+            // [#4127] This mocked `{ handler }` — a method `IAuthService` does
+            // not declare and `AuthManager` does not have — and asserted it was
+            // called, which is why the dead branch stayed green. Exactly the
+            // test-side hole that kept #4087 alive: the mock was written to the
+            // handler's fabricated shape instead of the declared contract. It
+            // pins `handleRequest` now, and `satisfies` makes a future drift
+            // back to an undeclared name a compile error rather than a passing
+            // test asserting a call nothing makes.
+            it('should resolve auth service from Promise and call the contract method', async () => {
                 const mockAuth = {
-                    handler: vi.fn().mockResolvedValue({ user: { id: '1' } }),
-                };
+                    handleRequest: vi.fn().mockResolvedValue({ user: { id: '1' } }),
+                    verify: vi.fn().mockResolvedValue({ success: true }),
+                } satisfies Pick<IAuthService, 'handleRequest' | 'verify'>;
                 (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
                     if (name === 'auth') return Promise.resolve(mockAuth);
                     return null;
@@ -923,10 +958,10 @@ describe('HttpDispatcher', () => {
 
                 const result = await dispatcher.handleAuth('', 'POST', {}, { request: {}, response: {} });
                 expect(result.handled).toBe(true);
-                expect(mockAuth.handler).toHaveBeenCalled();
+                expect(mockAuth.handleRequest).toHaveBeenCalled();
             });
 
-            it('should fallback to mock auth when async auth service has no handler', async () => {
+            it('should fallback to mock auth when async auth service has no handleRequest', async () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue({});
 
                 const result = await dispatcher.handleAuth('/login', 'POST', { email: 'test@example.com' }, { request: {} });
@@ -1136,9 +1171,15 @@ describe('HttpDispatcher', () => {
         });
 
         it('should prefer getServiceAsync over getService for auth', async () => {
+            // [#4127] Second copy of the same fabricated `handler` mock — this
+            // one asserted the resolution PATH (getServiceAsync over
+            // getService) while pinning a method no auth service has, so it
+            // proved the lookup worked and nothing about the call. The path
+            // assertion is the point of this test and is unchanged; the mock
+            // now names the contract method the handler actually invokes.
             const asyncAuth = {
-                handler: vi.fn().mockResolvedValue({ user: { id: '1' } }),
-            };
+                handleRequest: vi.fn().mockResolvedValue({ user: { id: '1' } }),
+            } satisfies ContractMock<IAuthService>;
             (kernel as any).getServiceAsync = vi.fn().mockResolvedValue(asyncAuth);
             (kernel as any).getService = vi.fn().mockImplementation(() => {
                 throw new Error("Service 'auth' is async - use await");
@@ -1146,7 +1187,7 @@ describe('HttpDispatcher', () => {
 
             const result = await dispatcher.handleAuth('', 'POST', {}, { request: {}, response: {} });
             expect(result.handled).toBe(true);
-            expect(asyncAuth.handler).toHaveBeenCalled();
+            expect(asyncAuth.handleRequest).toHaveBeenCalled();
             expect((kernel as any).getServiceAsync).toHaveBeenCalledWith('auth');
         });
 
