@@ -782,8 +782,36 @@ cover lives in `mongodb-datetime-storage.test.ts` (against a real MongoDB via
 `mongodb-memory-server`) and `memory-datetime-storage.test.ts`. Still open
 under D-A3: the relative-token × live-driver × timezone combinations.
 
-One evaluator remains unaligned on both the D-D and D-E rules:
+~~One evaluator remains unaligned on both the D-D and D-E rules:
 `@objectstack/formula`'s `matchesFilterCondition` (the RLS write-side `check`
 path), which cannot depend on `@objectstack/core` for the shared primitive.
 Deciding its home — a private copy, as `formula` already keeps for `today()`,
-or lowering the utility into `spec`/`types` — is the remaining piece.
+or lowering the utility into `spec`/`types` — is the remaining piece.~~
+Closed 2026-07-30 — see D-D2 below.
+
+### D-D2 — The primitive lives in `spec`, beside the vocabulary it interprets
+
+`nextUtcCalendarDay` moved from `@objectstack/core` to
+`@objectstack/spec/data` (`calendar-day.ts`), next to `date-macros.zod.ts`.
+The two are halves of one contract: the macros define which bare days an author
+can *name*, D-D defines what such a day *denotes* as a bound. That is protocol,
+not business logic — the same species as the pure helpers `spec/data` already
+owns (`parseDateMacroParam`, `canonicalAstOperator`, `parseAutonumberFormat`),
+so Prime Directive #2 is satisfied.
+
+Chosen over `@objectstack/types` because **it adds no dependency edge**: every
+consumer already depends on `spec`, whereas `core` does not depend on `types`
+and would have needed a new one. `core` re-exports the symbol, so the published
+`@objectstack/core` surface — which the drivers and analytics strategies import
+from — is unchanged.
+
+Rejected: a private copy in `formula` (the precedent it would cite, `formula`'s
+own `today()`, is debt rather than a pattern). Six backends now share one
+definition: the SQL compiler, the memory and mongo drivers, the analytics
+raw-SQL strategy, the dataset preview evaluator, and `matchesFilterCondition`.
+
+The write-side gap this closed was not cosmetic. A `check` policy of the shape
+`{ signed_on: { $lte: '{today}' } }` evaluated against a `datetime` post-image
+**denied every write made after 00:00** — the write-side twin of the read-side
+loss #3777 fixed, on the one surface where the failure direction is a rejected
+write rather than a missing row.
