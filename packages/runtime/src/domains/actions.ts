@@ -32,20 +32,20 @@
  *    caller that did not hand-inspect the INNER envelope read it as a success.
  *    Nothing DISPATCHED there, so it is a 404 now — joining the pre-dispatch
  *    answers this route already gives a status (403 denied, 400 wrong type,
- *    503 unavailable). A handler that RAN and rejected still reports in the
- *    payload, unchanged: that is a business outcome, not a transport error.
+ *    503 unavailable).
  *
- * Its follow-up separated a third case out of that payload: an UNEXPECTED
- * FAULT. A `TypeError` in a handler or a driver blowing up is not an outcome
- * the action chose to report, and serving it as 200 hid every handler crash
- * from gateway error rates, retry policy, APM and alerting. Those are 500 now,
- * told apart by the error's NAME — a plain `Error` (or a sandbox/validation
- * marker) is a deliberate rejection and keeps the payload; a `TypeError` /
- * `SqliteError` / driver class is a fault.
+ * #3962 finished the unification: FAILURES SPEAK HTTP, exactly as /data always
+ * has. The old 200-with-inner-`{success:false}` wire was never a designed
+ * contract — no ADR or doc specified it; it was the catch block reusing
+ * `deps.success()`, and /actions was the only route of 12 that double-wrapped.
+ * Success is now a SINGLE wrap (`data` = the handler's return value), a
+ * deliberate rejection (body `throw`, flow rejection, ValidationError) is a
+ * 400 carrying `code`/`fields` in `details`, and a crash (`TypeError`, driver
+ * class, sandbox timeout — told apart by the error's NAME, #3951) is a 500.
  *
- * So the route answers on two axes:
- *   did a handler run?   no  → status (404 / 403 / 400 / 503)
- *   did it reject or crash?  reject → 200 + payload;  crash → 500
+ *   did a handler run?       no → 404 / 403 / 400 / 503
+ *   did it reject or crash?  reject → 400;  crash → 500
+ *   did it return?           200, `data` = handler return value
  */
 
 import * as actionExec from '../action-execution.js';
@@ -142,7 +142,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // read it.
     let actionSchema: any;
     let actionDef: any;
-    try {
+    {
         // Standalone declarations (ObjectQL registry artifacts / Studio-
         // authored `action` rows) resolve here too, so a route whose action
         // never appears inside an object definition is gated and dispatched
@@ -155,12 +155,66 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         });
         actionSchema = declaration?.obj;
         actionDef = declaration?.action;
+
+        // [ADR-0110 D3] Resolution is a TRICHOTOMY, and only one branch may
+        // dispatch. This block used to be a `try { … } catch { /* no gate to
+        // enforce */ }`, which collapsed three states with opposite meanings
+        // into one fail-open path: a declaration that resolved, a metadata
+        // plane that could not answer, and an action that genuinely has no
+        // declaration all arrived as "ungated, run it".
+        //
+        // ── 2/3: the metadata plane could not answer ──
+        // An availability failure is not an authorization decision. Refusing
+        // is the same posture v17 already takes for a datasource that cannot
+        // connect (#3741) and a flow run with no trigger user (#3760): decline
+        // rather than degrade, because the alternative is that an outage
+        // quietly removes the gate an author declared.
+        if (declaration.degraded) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Cannot verify the declaration for action '${actionName}' on '${objectName}' — ` +
+                    `the metadata plane is unavailable (${declaration.reason ?? 'unknown failure'}). ` +
+                    `Refusing rather than running it ungated.`,
+                    503,
+                ),
+            };
+        }
+
+        // ── 3/3: genuinely undeclared ──
+        // A handler with no declaration is invisible to every governance
+        // surface — ADR-0066 D4 has no `requiredPermissions` to read, ADR-0104
+        // no param contract, ADR-0109 materialises no `action_<name>` tool —
+        // yet it executes TRUSTED. Refuse, and say what to add.
+        //
+        // There is no opt-out. An earlier draft shipped
+        // `OS_ALLOW_UNDECLARED_ACTIONS` as a migration valve slated for removal
+        // in 18; it was dropped before 17 went out. A flag that runs an
+        // ungoverned handler IS the fail-open this ruling exists to close, so
+        // keeping one would have preserved the hole in configurable form —
+        // and a reconciliation sweep found the platform, every package and
+        // every example carry zero undeclared handlers, so it would have
+        // shipped a documented way to reopen the gate for a population nobody
+        // has ever observed. The boot inventory (D5) names the offenders and
+        // the 404 below names the fix, which is the whole migration path.
+        if (!actionDef) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Action '${actionName}' on '${objectName}' has no declaration — ` +
+                    `add \`defineAction({ name: '${actionName}', … })\`, or register the handler under a ` +
+                    `declared action's \`target\`. Undeclared handlers cannot be permission-gated ` +
+                    `(ADR-0110 D3); startup logs every one of them under [action-governance].`,
+                    404,
+                ),
+            };
+        }
+
+        // ── 1/3: declared → gate against it ──
         const gateError = actionExec.actionPermissionError(deps, actionDef, _context?.executionContext, objectName);
         if (gateError) {
             return { handled: true, response: deps.error(gateError, 403) };
         }
-    } catch {
-        /* schema unresolved → no declared gate to enforce (handler-only action) */
     }
 
     // [#3915] Action-TYPE dispatch. Per spec every non-`script` type
@@ -266,7 +320,11 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 ec,
                 envId: _context?.environmentId,
             });
-            return { handled: true, response: deps.success({ success: true, data: result }) };
+            // [#3962] Single wrap: `data` is the handler's return value, exactly as
+        // every other domain serializes. The former inner `{success, data}`
+        // envelope existed only to carry a failure signal at HTTP 200; failures
+        // carry a status now, so the extra layer lost its job.
+        return { handled: true, response: deps.success(result) };
         }
 
         // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.
@@ -277,24 +335,24 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             `(system-elevated context, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
         );
 
-        // ── script/body dispatch ──
-        // Probe the routed object first, then the object-less keys (#3913):
-        // the canonical `'global'` both writers register under, then the legacy
-        // `'*'`. `executeAction` is an exact-string Map lookup with no wildcard
-        // semantics, so every candidate key has to be tried for real; only its
-        // "not registered" miss rotates, a genuine handler error propagates.
-        let dispatched = false;
-        let result: any;
-        for (const obj of actionExec.actionHandlerObjectKeys(objectName)) {
-            try {
-                result = await ql.executeAction(obj, actionName, actionContext);
-                dispatched = true;
-                break;
-            } catch (err: any) {
-                if (!actionExec.isActionNotRegisteredError(err)) throw err;
-            }
-        }
-        if (!dispatched) {
+        // ── script/body dispatch ── [ADR-0110 D2] "resolve, then address":
+        // the handler KEY is derived from the resolved declaration, not read
+        // off the URL. `app-plugin.ts` registers a body action under `name`
+        // while user code registers a target-bound one under `target`, so the
+        // URL segment matches the registration key only by luck — which is why
+        // the documented `/actions/todo_task/complete_task` curl used to 404
+        // for every target-bound action. The candidate keys rotate across the
+        // object-key rotation (#3913) inside the shared helper the MCP
+        // `run_action` bridge also calls, so both surfaces address handlers
+        // identically. The routed URL segment stays as the last candidate for
+        // an UNDECLARED action, which has no declaration to derive from.
+        const dispatch = await actionExec.executeRegisteredAction(
+            deps, ql, objectName,
+            actionExec.resolveActionHandlerKeys(actionDef, actionName),
+            actionContext,
+        );
+        const result = dispatch.result;
+        if (!dispatch.dispatched) {
             // No key carried a handler. That is a routing miss, not a server
             // fault — 404, and named after the ROUTED object rather than
             // whichever probe happened to run last (the old fallback reported
@@ -304,7 +362,11 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 response: deps.error(`Action '${actionName}' on object '${objectName}' not found`, 404),
             };
         }
-        return { handled: true, response: deps.success({ success: true, data: result }) };
+        // [#3962] Single wrap: `data` is the handler's return value, exactly as
+        // every other domain serializes. The former inner `{success, data}`
+        // envelope existed only to carry a failure signal at HTTP 200; failures
+        // carry a status now, so the extra layer lost its job.
+        return { handled: true, response: deps.success(result) };
     } catch (err: any) {
         const full = err?.message ?? String(err);
         // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` for
@@ -313,27 +375,12 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // leaking the debug prefix. Keep the full wrapper in the log for debugging.
         const inner: unknown = err?.innerMessage;
         const clientMsg = (typeof inner === 'string' && inner) ? inner : full;
-        if (clientMsg !== full) console.error(`[action ${objectName}/${actionName}] ${full}`);
-        // [#3918 follow-up] Carry the structured payload when the failure was a
-        // record validation error. Until the sandbox learned to pass `code` /
-        // `fields` back OUT of the VM, this envelope was the message string and
-        // nothing else — so a form action could only ever raise a toast, never
-        // highlight the field the user actually got wrong, which is the symptom
-        // the original report was about.
-        //
-        // The HTTP status stays 200 and `success: false` remains the failure
-        // signal. `/actions` has always reported business failure in the payload
-        // (an action that "fails" is a normal outcome, not a transport error) and
-        // every existing caller branches on `data.success`; turning this into a
-        // 4xx would be a wire-contract break in exchange for a strictly additive
-        // fix.
-        //
-        // [#3913] That reasoning covers a handler that RAN and rejected — it
-        // does NOT cover a route that never dispatched at all. An unregistered
-        // action has no business outcome to report, so it exits above as a 404,
-        // alongside the pre-dispatch gates this route already answers with a
-        // status (403 denied, 400 wrong type, 503 unavailable). The line is
-        // "did a handler run": below it, the payload; above it, the status.
+        if (clientMsg !== full) {
+            console.error(`[action ${objectName}/${actionName}] ${full}`);
+            // Every exit below reads `.message`; hand it the client-safe text so
+            // the debug wrapper stays in the log and off the wire.
+            try { err.message = clientMsg; } catch { /* frozen error */ }
+        }
         const code: unknown = err?.code;
         const fields: unknown = err?.fields;
 
@@ -373,13 +420,12 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         //                           same predicate the dispatcher's error exits
         //                           use, so one whose `fields` were stripped in
         //                           transit is still recognised by NAME alone.
-        //   name absent             an unrecognisable throw; NOT confidently a
-        //                           fault, so it keeps the status quo.
+        //   name absent             an unrecognisable throw; treated as a
+        //                           rejection (the caller-fault reading), not
+        //                           a server fault.
         //   any other name          TypeError / ReferenceError / SqliteError /
         //                           a driver's own class ⇒ a fault.
         //
-        // Deliberately the narrow direction: this only moves what it is sure
-        // about, and everything it is unsure about keeps the 200 it has today.
         // `errorFromThrown` is the same exit every other domain catch has used
         // since #3925, and an error carrying its own `.status` still wins there
         // so a hand-thrown 4xx keeps it.
@@ -396,14 +442,15 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             return { handled: true, response: deps.errorFromThrown(err, 500) };
         }
 
-        return {
-            handled: true,
-            response: deps.success({
-                success: false,
-                error: clientMsg,
-                ...(typeof code === 'string' && code ? { code } : {}),
-                ...(Array.isArray(fields) ? { fields } : {}),
-            }),
-        };
+        // [#3962] A deliberate REJECTION is a 400. The 200-with-inner-envelope
+        // wire this used to emit was never a designed contract — no ADR or doc
+        // specified it, it was the catch block reusing `deps.success()`, and
+        // /actions was the only route of 12 that double-wrapped. The platform
+        // decision in #3962 classifies it as a bug: failures speak HTTP, same
+        // as /data has always done. `errorFromThrown` carries the structured
+        // payload #3937 fought for — `VALIDATION_FAILED` + `fields[]` land in
+        // `details`, the exact shape @objectstack/client normalizes to
+        // `err.code` / `err.fields` (#3927).
+        return { handled: true, response: deps.errorFromThrown(err, 400) };
     }
 }

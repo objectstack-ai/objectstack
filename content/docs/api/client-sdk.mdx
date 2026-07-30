@@ -394,9 +394,9 @@ await client.automation.getScreen('convert_lead', runId);
 // (engine.registerAction). The result is `{ success, data | error }` — a
 // failure comes back as `success: false` + `error` instead of a thrown
 // exception, so it can be surfaced as a toast. This surface is the one place
-// a non-2xx does NOT throw: a handler that rejects answers 200 with the inner
-// envelope, a request that never dispatched answers 404 / 403 / 400 / 503,
-// and the SDK folds both into the same result.
+// a non-2xx does NOT throw: failures speak HTTP (400 rejection, 404 / 403 /
+// 503 dispatch failures, 500 crash) and the SDK folds them into the result;
+// on success, `data` is the handler's return value directly.
 const res = await client.actions.invoke('crm_lead', 'convert', {
   recordId,
   params: { create_opportunity: true },
@@ -511,7 +511,7 @@ All errors follow a standardized format:
 try {
   await client.data.create('todo_task', { subject: '' });
 } catch (error) {
-  console.error(error.code);       // 'validation_error'
+  console.error(error.code);       // 'VALIDATION_ERROR'
   console.error(error.category);   // 'validation'
   console.error(error.httpStatus); // 400
   console.error(error.retryable);  // false
@@ -522,9 +522,12 @@ try {
 `error.code` is always the **semantic** code as a string — the numeric HTTP
 status lives on `error.httpStatus` and nowhere else. This holds regardless of
 which server surface answered: the REST server replies with a flat
-`{ error, code, fields }` body while the runtime dispatcher replies with a
-wrapped `{ success, error: { message, code, details } }` body whose `error.code`
-is the HTTP status, and the client normalizes both before throwing.
+`{ error, code, fields }` body and the runtime dispatcher replies with a wrapped
+`{ success, error: { code, message, httpStatus, details } }` body, and the
+client normalizes both before throwing. (Dispatcher bodies from servers older
+than #3842 put the status in `error.code` and the semantic code in
+`error.details.code`; the client still reads those, so an SDK newer than the
+server it talks to behaves the same.)
 
 ### Per-field validation errors
 
@@ -551,15 +554,15 @@ field-anchored".
 
 | Code | HTTP | Category | Retryable | Description |
 |:-----|:-----|:---------|:----------|:------------|
-| `validation_error` | 400 | validation | No | Input validation failed |
-| `invalid_query` | 400 | validation | No | Malformed query expression |
-| `unauthenticated` | 401 | authentication | No | Authentication required |
-| `permission_denied` | 403 | authorization | No | Insufficient permissions |
-| `resource_not_found` | 404 | not_found | No | Resource does not exist |
-| `rate_limit_exceeded` | 429 | rate_limit | Yes | Too many requests |
-| `internal_error` | 500 | server | Yes | Unexpected server error |
-| `service_unavailable` | 503 | server | Yes | Service temporarily unavailable |
-| `not_implemented` | 501 | server | No | Service not installed (plugin missing) |
+| `VALIDATION_ERROR` | 400 | validation | No | Input validation failed |
+| `INVALID_QUERY` | 400 | validation | No | Malformed query expression |
+| `UNAUTHENTICATED` | 401 | authentication | No | Authentication required |
+| `PERMISSION_DENIED` | 403 | authorization | No | Insufficient permissions |
+| `RESOURCE_NOT_FOUND` | 404 | not_found | No | Resource does not exist |
+| `RATE_LIMIT_EXCEEDED` | 429 | rate_limit | Yes | Too many requests |
+| `INTERNAL_ERROR` | 500 | server | Yes | Unexpected server error |
+| `SERVICE_UNAVAILABLE` | 503 | server | Yes | Service temporarily unavailable |
+| `NOT_IMPLEMENTED` | 501 | server | No | Service not installed (plugin missing) |
 
 ---
 

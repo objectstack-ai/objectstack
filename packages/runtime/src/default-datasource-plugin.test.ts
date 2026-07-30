@@ -19,13 +19,18 @@ async function assemble(opts: {
   withAdminPlugin?: boolean;
   connectPolicy?: any;
   bundle?: any;
+  /** Host-injected driver factory (the cloud/EE seam) — see the last cases. */
+  factory?: any;
 } = {}) {
   const { ObjectQLPlugin } = await import('@objectstack/objectql');
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
   // Order matters for START: the default datasource must connect before
   // ObjectQLPlugin.start() runs boot schema-sync.
-  await kernel.use(new DefaultDatasourcePlugin({ driver: opts.driver ?? 'memory' }));
+  await kernel.use(new DefaultDatasourcePlugin(
+    { driver: opts.driver ?? 'memory' },
+    opts.factory ? { factory: opts.factory } : {},
+  ));
   await kernel.use(new ObjectQLPlugin());
   if (opts.bundle) await kernel.use(new AppPlugin(opts.bundle));
   if (opts.withAdminPlugin !== false) {
@@ -133,6 +138,60 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     } finally {
       try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
     }
+  }, BOOT_TIMEOUT);
+
+  it('adopts a HOST-BUILT driver instance through an injected factory — same path, host pooling (#3826 seam)', async () => {
+    // The cloud composition's shape: the host already holds a constructed
+    // (possibly pooled/shared) driver instance the open-core factory cannot
+    // rebuild. createPrebuiltDriverFactory wraps it; the plugin's connect
+    // orchestration must register THAT instance — never a rebuilt copy.
+    const { createPrebuiltDriverFactory } = await import('@objectstack/service-datasource');
+    const { InMemoryDriver } = await import('@objectstack/driver-memory');
+    const hostBuilt = new InMemoryDriver();
+    const kernel = await assemble({
+      driver: 'turso', // a kind the SHARED factory does not support — proves dispatch
+      factory: createPrebuiltDriverFactory(hostBuilt, { driverId: 'turso' }),
+      bundle: {
+        manifest: { id: 'com.test.adopted-ds', name: 'Adopted DS', version: '1.0.0' },
+        objects: [{ name: 'note', label: 'Note', fields: { title: { type: 'text' } } }],
+      },
+    });
+    try {
+      await kernel.bootstrap();
+      const engine = kernel.getService<any>('data');
+      const defaultName = engine.getDefaultDriverName();
+      expect(defaultName).toBeDefined();
+      // Identity, not equivalence: the engine's default driver IS the host's instance.
+      expect(engine.getDriverByName(defaultName)).toBe(hostBuilt);
+      await engine.insert('note', { title: 'through-the-adopted-default' });
+      const rows = await engine.find('note');
+      expect(rows.map((r: any) => r.title)).toContain('through-the-adopted-default');
+    } finally {
+      try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
+
+  it('an injected factory rides the SAME failure verdict — fail-fast, same escape hatch', async () => {
+    // The seam must never fork the verdict: an adopted instance that cannot
+    // connect takes the identical bootCritical fail-fast (and the identical
+    // OS_ALLOW_DRIVER_CONNECT_FAILURE override) as a factory-built default.
+    const { createPrebuiltDriverFactory } = await import('@objectstack/service-datasource');
+    const failing = {
+      name: 'turso',
+      async connect() { throw new Error('connect ECONNREFUSED 127.0.0.1:8080'); },
+      async disconnect() {},
+    };
+    const kernel = await assemble({
+      driver: 'turso',
+      factory: createPrebuiltDriverFactory(failing, { driverId: 'turso' }),
+    });
+    const err = await kernel.bootstrap().then(
+      () => { throw new Error('bootstrap() resolved but should have thrown'); },
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toMatch(/boot-critical/);
+    expect(err.message).toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE');
+    try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
   }, BOOT_TIMEOUT);
 
   it("rejects an app bundle that declares a datasource named 'default' (host-reserved name)", async () => {

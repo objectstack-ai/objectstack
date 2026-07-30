@@ -6,7 +6,6 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate, interpolateFilter, type VariableMap } from './template.js';
-import { readAliasedConfig } from './config-aliases.js';
 import { refuseNode } from '../guard-refusal.js';
 import { resolveRunDataContext } from '../runtime-identity.js';
 
@@ -161,12 +160,13 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
             }),
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
-                const objectName = String(readAliasedConfig(cfg, 'get_record', 'objectName', ['object'], ctx.logger) ?? '');
+                // `filters` → `filter` and `object` → `objectName` are handled at
+                // load by the ADR-0087 D2 conversion layer ('flow-node-crud-filter-alias',
+                // 'flow-node-crud-object-alias'), so the executor reads the canonical
+                // keys directly (PD #12 fallbacks retired).
+                const objectName = String(cfg.objectName ?? '');
                 if (!objectName) return refuseNode('get_record: objectName required');
 
-                // `filters` → `filter` is now handled at load by the ADR-0087 D2
-                // conversion layer ('flow-node-crud-filter-alias'), so the executor
-                // reads the canonical key directly (PD #12 fallback retired).
                 const filterResult = resolveNodeFilter(
                     cfg.filter, variables, context, 'get_record',
                     'would have read rows the filter was written to exclude',
@@ -222,7 +222,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
             }),
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
-                const objectName = String(readAliasedConfig(cfg, 'create_record', 'objectName', ['object'], ctx.logger) ?? '');
+                const objectName = String(cfg.objectName ?? '');
                 if (!objectName) return refuseNode('create_record: objectName required');
 
                 const fields = interpolate(cfg.fields ?? {}, variables, context) as Record<string, unknown>;
@@ -303,7 +303,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
             }),
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
-                const objectName = String(readAliasedConfig(cfg, 'update_record', 'objectName', ['object'], ctx.logger) ?? '');
+                const objectName = String(cfg.objectName ?? '');
                 if (!objectName) return refuseNode('update_record: objectName required');
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
@@ -376,7 +376,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
             }),
             async execute(node, variables, context) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
-                const objectName = String(readAliasedConfig(cfg, 'delete_record', 'objectName', ['object'], ctx.logger) ?? '');
+                const objectName = String(cfg.objectName ?? '');
                 if (!objectName) return refuseNode('delete_record: objectName required');
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.

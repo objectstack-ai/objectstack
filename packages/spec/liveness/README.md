@@ -337,13 +337,15 @@ Three properties, same syntactic shape (an optional list or predicate that
 | Property | Empty means |
 |---|---|
 | `object.apiMethods` | `undefined` = unrestricted, **`[]` = deny-all** |
-| `plugin-runtime.allowedSources` | was *"empty = all allowed"* — corrected |
+| `sys_user_permission_set.organization_id` | NULL = the grant applies in **every** org — and is what derives `platform_admin` |
+| `plugin-runtime.allowedSources` | was *"empty = all allowed"* — schema since removed (#3950) |
 | sharing `condition` | nothing is shared (#3929) |
 
 Nothing marked which was which. A maintainer knows by memory; a model authoring
 metadata cannot, and guessing wrong is silent and permissive. So the gate scans
-the schema surface for statements declaring an empty state to be permissive, and
-requires each to be classified in `../scripts/liveness/empty-state-registry.mts`:
+the authorable surface for statements declaring an empty state to be permissive,
+and requires each to be classified in
+`../scripts/liveness/empty-state-registry.mts`:
 
 | `semantics` | Meaning |
 |---|---|
@@ -372,6 +374,41 @@ this README is blunt about where a guessy check ends up: a permanently-noisy
 check is a check nobody reads. A statement that resolves to no property is
 narrative — a file header explaining a past bug — and is reported as a
 non-failing note.
+
+### What it scans, and why it is not just `packages/spec`
+
+Two surfaces:
+
+- `packages/spec/src/**/*.zod.ts` — the schema surface.
+- `**/*.object.ts` anywhere under `packages/` — platform-object definitions, in
+  plugins, `platform-objects`, `metadata-core`, and the `create-objectstack`
+  templates (a starter file is the highest-leverage thing a model copies from).
+
+**The second one is the point.** The sentence that shipped #3896 — *"leave empty
+to share every record"* — was the `description` of
+`sys_sharing_rule.criteria_json`, which lives in `plugin-sharing`. A gate scoped
+to `packages/spec` could not see the crime scene. Extending the scan immediately
+surfaced one unclassified access-control default-open that no sweep of the schema
+surface would ever have reached (`sys_user_permission_set.organization_id`).
+
+Two things the two surfaces do NOT share, both learned by getting them wrong:
+
+- **The property-search window.** A `.zod.ts` statement sits on or beside its
+  property; a platform-object field is a nested call whose `description:` can be
+  15+ lines below the name. The window is therefore per-surface — widening it
+  globally would let `.zod.ts` narrative be mis-attributed to a distant property,
+  turning a correct note into a wrong failure.
+- **How the owning property is found.** Not by a list of key names. Skipping
+  `description:` is not enough — the next key up from it is `required:`, equally
+  not the field. What separates a field from its own config is *nesting*, so the
+  resolver takes the nearest key at a **shallower indent**.
+
+Finally, a match whose permissive claim is **negated or explicitly disowned** is
+dropped, in both directions: `[]` = `deny-all` is the opposite of the hazard, and
+so is #3929's own comment saying *Deliberately NOT "leave empty to share
+everything"*. The escape is narrow on purpose — the negator has to be attached to
+the phrase, not merely nearby, because a false negative here is a missed
+over-share.
 
 ## Files & usage
 
@@ -430,8 +467,8 @@ EOF
 | flow | 26 | – | 5 | – | dead = description/template/nodes.outputSchema/errorHandling.fallbackNodeId (engine uses fault edges) + `active` CORRECTED to dead 2026-07 (deprecated no-op — `status` is what gates binding/execution since 497bda853; the file `_note` claiming otherwise is fixed) |
 | action | 34 | 0 | 2 | – | `type:'form'` CORRECTED to live (objectui ActionRunner.executeForm, #2377); dead `timeout` REMOVED (#2377); `disabled` live for real since objectui#2863 (six surfaces); `shortcut` + `bulkEnabled` CORRECTED to dead 2026-07 — registered into ActionEngine but their accessors have no non-test caller (#3686 sweep); `undoable` CORRECTED to live 2026-07 — understated, two objectui readers gate the toast's Undo and the record restore (#3714) |
 | hook | 11 | – | 2 | – | model-healthy; only label/description dead (benign) |
-| permission | 32 | – | 0 | – | CRUD/FLS/RLS live; dead `contextVariables` REMOVED (ADR-0105 D11 — RLS resolves only the `current_user.*` built-ins plus runtime-staged `rlsMembership` sets) |
-| position | 4 | – | – | – | (role's ADR-0090 successor) fully live |
+| permission | 29 | – | 4 | – | CRUD/FLS/RLS live; dead `contextVariables` REMOVED (ADR-0105 D11 — RLS resolves only the `current_user.*` built-ins plus runtime-staged `rlsMembership` sets). 2026-07-30 security-subset re-verification (all 33 entries `verifiedAt`-stamped): `rowLevelSecurity.enabled` was live-with-wrong-evidence and UNREAD — a disabled policy kept contributing its OR-branch grant; ENFORCED same day in rls-compiler (`getApplicablePolicies`), the `positions` ADR-0049 resolution repeated. `rowLevelSecurity.priority` CORRECTED to dead+authorWarn — semantically void under OR-combination (no conflict exists to order), a REMOVE candidate. `rls.label`/`description`/`tags` CORRECTED to dead (benign display, no consumer in either repo). `tabPermissions` was UNDERSTATED ("only hidden read" → the rank merge reads all four values; me-apps dogfood test exercises it). `allowExport` re-verified TRUE end-to-end (server-side 403 gate, not just the /me projection) |
+| position | 4 | – | – | – | (role's ADR-0090 successor) fully live; all 4 `verifiedAt`-stamped 2026-07-30 |
 | agent | 13 | 5 | 1 | – | dead `tenantId` + `planning.strategy`/`allowReplan` REMOVED (#2377) — only `planning.maxIterations` live; autonomy tier experimental; `knowledge` CORRECTED to dead 2026-07 — `search_knowledge` takes `sourceIds` from the LLM's tool-call args, never from the agent record (#1878 §3 recheck) |
 | tool | 5 | 1 | 4 | – | the whole authoring surface is inert: `permissions` (not permission-gated), plus `category`/`active`/`builtIn` CORRECTED to dead 2026-07 (#3686 sweep). `requiresConfirmation` REMOVED (#3715, ADR-0033 §2) — SAFETY-shaped and unenforced on every path, so it was false compliance, not merely dead; ToolSchema is now `.strict()` so the retired key REJECTS with the FROM → TO prescription instead of being silently stripped |
 | skill | 8 | – | 1 | – | `permissions` REMOVED 2026-07 (never gated anything — owner call was prune, #3704); `triggerPhrases` CORRECTED to dead — phrases are never matched against user messages; activation is `triggerConditions` + the agent's `skills[]` + explicit /skill-name pinning (#3686 sweep) |

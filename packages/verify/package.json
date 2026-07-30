@@ -21,7 +21,6 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
-    "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",

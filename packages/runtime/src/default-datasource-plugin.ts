@@ -5,6 +5,7 @@ import {
   DatasourceConnectionService,
   createDefaultDatasourceDriverFactory,
   type ConnectableDatasource,
+  type IDatasourceDriverFactory,
 } from '@objectstack/service-datasource';
 
 /**
@@ -52,10 +53,35 @@ import {
  * drivers — it is no longer how the standalone default boots.
  */
 export interface DefaultDatasourceDefinition {
-  /** Driver id the shared factory can build (`sqlite`, `sqlite-wasm`, `postgres`, `mongodb`, `memory`). */
+  /** Driver id the (injected or shared) factory can build (`sqlite`, `sqlite-wasm`, `postgres`, `mongodb`, `memory`). */
   driver: string;
   config?: Record<string, unknown>;
   label?: string;
+}
+
+export interface DefaultDatasourcePluginOptions {
+  /** Arms the shared factory's dev sqlite step-down (#2229) + loosen-only self-heal passthroughs. */
+  dev?: boolean;
+  /**
+   * Host-injected driver factory. Defaults to the shared open-core factory
+   * (`createDefaultDatasourceDriverFactory`). The seam exists for hosts whose
+   * `default` needs a driver the open-core factory cannot build — the cloud
+   * distribution's `turso`, or an already-pooled instance adopted via
+   * `createPrebuiltDriverFactory` — WITHOUT forking the connect + failure
+   * -verdict orchestration this plugin owns (the #3741 → #3758 drift). The
+   * factory only changes what `create()` returns; the policy-free init
+   * connect, `bootCritical` verdict, escape hatch, and start() replay are
+   * identical either way.
+   *
+   * Note the start() replay goes through the SHARED `'datasource-connection'`
+   * service, whose factory is the host's admin-plugin one — after a NORMAL
+   * boot that replay resolves `already-registered` before any factory is
+   * consulted, but a degraded boot's real retry (init failed under
+   * `OS_ALLOW_DRIVER_CONNECT_FAILURE`) retries with the shared factory. A
+   * host injecting a factory for a kind the shared one cannot build should
+   * expect that retry to report `skipped-unsupported` rather than reattempt.
+   */
+  factory?: IDatasourceDriverFactory;
 }
 
 export class DefaultDatasourcePlugin implements Plugin {
@@ -71,10 +97,12 @@ export class DefaultDatasourcePlugin implements Plugin {
 
   private readonly def: DefaultDatasourceDefinition;
   private readonly dev?: boolean;
+  private readonly factory?: IDatasourceDriverFactory;
 
-  constructor(def: DefaultDatasourceDefinition, opts: { dev?: boolean } = {}) {
+  constructor(def: DefaultDatasourceDefinition, opts: DefaultDatasourcePluginOptions = {}) {
     this.def = def;
     this.dev = opts.dev;
+    this.factory = opts.factory;
   }
 
   private record(): ConnectableDatasource {
@@ -90,7 +118,7 @@ export class DefaultDatasourcePlugin implements Plugin {
 
   init = async (ctx: PluginContext) => {
     const connection = new DatasourceConnectionService({
-      factory: () => createDefaultDatasourceDriverFactory({ dev: this.dev }),
+      factory: () => this.factory ?? createDefaultDatasourceDriverFactory({ dev: this.dev }),
       engine: () => {
         try {
           return ctx.getService('data');

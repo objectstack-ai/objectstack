@@ -1,33 +1,40 @@
 {
   "type": "permission",
-  "_note": "PermissionSetSchema (the `profile` alias and isProfile flag were removed by ADR-0090 D2). Seeded from docs/audits/2026-06-security-identity-property-liveness.md. CRUD/FLS/RLS enforced via plugin-security. allowTransfer/Restore/Purge are RBAC-mapped in the evaluator (#1883) — deny unless granted; the ObjectQL operations themselves are pending M2.",
+  "_note": "PermissionSetSchema (the `profile` alias and isProfile flag were removed by ADR-0090 D2). Seeded from docs/audits/2026-06-security-identity-property-liveness.md. CRUD/FLS/RLS enforced via plugin-security. allowTransfer/Restore/Purge are RBAC-mapped in the evaluator (#1883) — deny unless granted; the ObjectQL operations themselves are pending M2. 2026-07-30 security-subset re-verification (#3896 follow-up): every entry call-graph-closed by hand; TWO corrections — rowLevelSecurity.enabled was live-with-wrong-evidence and UNREAD anywhere (a disabled policy kept granting; enforced in rls-compiler the same day), rowLevelSecurity.priority is semantically void under OR-combination → dead+authorWarn. tabPermissions was UNDERSTATED (all four rank values read, not just 'hidden').",
   "props": {
     "name": {
       "status": "live",
+      "verifiedAt": "2026-07-30",
       "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts",
       "note": "registration/assignment key."
     },
     "label": {
       "status": "live",
+      "verifiedAt": "2026-07-30",
+      "evidence": "rendered as the record title of sys_permission_set in Setup's generic object views (objectui app-shell list/detail rendering via displayNameField)",
       "note": "display metadata."
     },
     "packageId": {
       "status": "live",
+      "verifiedAt": "2026-07-30",
       "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts (author-declared fallback for the registry `_packageId` provenance; persisted to sys_permission_set.package_id)",
       "note": "ADR-0086 D3 — owning package for a package-shipped set; proven by packages/qa/dogfood/test/showcase-permission-seeding.dogfood.test.ts."
     },
     "managedBy": {
       "status": "live",
+      "verifiedAt": "2026-07-30",
       "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts (persisted per record as sys_permission_set.managed_by; 'package' rows re-seeded, platform/user rows never clobbered)",
       "note": "ADR-0086 D3 — per-record provenance on the metadata-persistence axis (package | platform | user)."
     },
     "adminScope": {
       "status": "live",
+      "verifiedAt": "2026-07-30",
       "evidence": "packages/plugins/plugin-security/src/delegated-admin-gate.ts — non-tenant-admin writes to sys_user_position / sys_position_permission_set / sys_user_permission_set / sys_permission_set require a covering adminScope (BU-subtree boundary + assignable-set allowlist + strict-containment for scope grants).",
       "note": "ADR-0090 D12 — delegated administration; proven by packages/plugins/plugin-security/src/delegated-admin-gate.test.ts."
     },
     "isDefault": {
       "status": "live",
+      "verifiedAt": "2026-07-30",
       "evidence": "plugin-security: packages/plugins/plugin-security/src/security-plugin.ts (constructor) — when no explicit fallbackPermissionSet is configured, the SecurityPlugin resolves the fallback from the permission set marked isDefault:true (ADR-0056 D7).",
       "note": "LIVE — app-declared default profile; proven by packages/qa/dogfood/test/showcase-default-profile.dogfood.test.ts."
     },
@@ -35,59 +42,71 @@
       "children": {
         "allowCreate": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:8"
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION insert→allowCreate)"
         },
         "allowRead": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:8"
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION find/findOne/count/aggregate→allowRead)"
         },
         "allowEdit": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:8"
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION update→allowEdit)"
         },
         "allowDelete": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:8"
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION delete→allowDelete)"
         },
         "allowExport": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-hono-server/src/hono-plugin.ts (annotateEffectiveApiOperations: userExportAllowed = allowExport !== false) + packages/spec/src/data/api-derivation.ts (export derives from list ∧ userExportAllowed)",
-          "note": "#3544 — user-level export axis over read. Enforced end-to-end: the bit drives userExportAllowed, which removes `export` from the object's effective apiOperations on /me/permissions; the frontend hides Export and the REST export gate 405s. Optional/no-default = backward-compatible opt-out (unset inherits read); `false` denies export while keeping read."
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/rest/src/rest-server.ts (enforceExportPermission — caller-level 403 gate on the bulk-egress route, fail-closed when the security service cannot answer) + packages/plugins/plugin-security/src/security-plugin.ts (canExport → checkObjectPermission('export'), posture-unresolvable → deny) + packages/plugins/plugin-hono-server/src/hono-plugin.ts (annotateEffectiveApiOperations, the /me/permissions projection the frontend renders)",
+          "note": "#3544 — user-level export axis over read. Re-verified 2026-07-30: enforcement is SERVER-side, not only the projection — the export route calls enforceExportPermission (403), separate from the object-level 405; the annotate path is the display half. Optional/no-default = backward-compatible opt-out (unset inherits read); `false` denies export while keeping read."
         },
         "allowTransfer": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (OPERATION_TO_PERMISSION transfer→allowTransfer + modifyAllRecords bypass)",
-          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `transfer` ObjectQL operation is pending M2, so granting delivers nothing until it ships."
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION transfer→allowTransfer; DESTRUCTIVE_OPERATIONS fail-closed backstop) + modifyAllRecords bypass via MODIFY_ALL_WRITE_KEYS",
+          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `transfer` ObjectQL operation is pending M2, so granting delivers nothing until it ships. Re-verified 2026-07-30: M2 still unshipped (no transfer/restore/purge operations in packages/objectql), the gate mapping stands."
         },
         "allowRestore": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (OPERATION_TO_PERMISSION restore→allowRestore + modifyAllRecords bypass)",
-          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `restore` ObjectQL operation is pending M2."
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION restore→allowRestore; DESTRUCTIVE_OPERATIONS fail-closed backstop)",
+          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `restore` ObjectQL operation is pending M2. Re-verified 2026-07-30: M2 still unshipped."
         },
         "allowPurge": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (OPERATION_TO_PERMISSION purge→allowPurge + modifyAllRecords bypass)",
-          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `purge` ObjectQL operation is pending M2."
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION purge→allowPurge; DESTRUCTIVE_OPERATIONS fail-closed backstop)",
+          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `purge` ObjectQL operation is pending M2. Re-verified 2026-07-30: M2 still unshipped."
         },
         "viewAllRecords": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:64"
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (read bypass at the allowRead check; getEffectiveScope read→'org'; hasViewAllData)"
         },
         "modifyAllRecords": {
           "status": "live",
+          "verifiedAt": "2026-07-30",
           "proof": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts#owner-anchor-and-bulk-writes",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:60"
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (MODIFY_ALL_WRITE_KEYS bypass over edit/delete + destructive class; getEffectiveScope write→'org')"
         },
         "readScope": {
           "status": "live",
+          "verifiedAt": "2026-07-30",
           "proof": "packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts#showcase-scope-depth",
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (getEffectiveScope) + packages/plugins/plugin-sharing/src/sharing-service.ts (owner-match widened by readScope; hierarchy values delegated to IHierarchyScopeResolver)",
           "note": "ADR-0057 D1 — read access DEPTH (own/own_and_reports/unit/unit_and_below/org). own/org enforced in open edition; hierarchy values via the enterprise hierarchy-scope-resolver (fail-closed to owner-only when absent; defineStack requires 'hierarchy-security'). Proven: packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts."
         },
         "writeScope": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (getEffectiveScope) + packages/plugins/plugin-sharing/src/sharing-service.ts (canEdit owner-set widened by writeScope; hierarchy values delegated)",
-          "note": "ADR-0057 D1 — write access DEPTH (same enum as readScope)."
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:224 (getEffectiveScope write branch) + packages/plugins/plugin-sharing/src/sharing-service.ts:230 (canEdit owner-set widened by __writeScope; 'org' short-circuits to unrestricted)",
+          "note": "ADR-0057 D1 — write access DEPTH (same enum as readScope). Re-verified 2026-07-30: both cited reads confirmed. Sibling of proofed readScope with no dogfood proof of its own — a proof-binding candidate (ADR-0054)."
         }
       }
     },
@@ -95,75 +114,93 @@
       "children": {
         "readable": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts",
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:301",
           "note": "FLS read-mask."
         },
         "editable": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts",
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:302",
           "note": "FLS write-deny."
         }
       }
     },
     "systemPermissions": {
       "status": "live",
-      "evidence": "packages/plugins/plugin-hono-server/src/hono-plugin.ts",
+      "verifiedAt": "2026-07-30",
+      "evidence": "packages/plugins/plugin-hono-server/src/hono-plugin.ts:1222",
       "note": "PARTIAL — app-entry/nav visibility only, not a general capability gate."
     },
     "tabPermissions": {
       "status": "live",
-      "note": "PARTIAL — only 'hidden' is read."
+      "verifiedAt": "2026-07-30",
+      "evidence": "packages/plugins/plugin-hono-server/src/hono-plugin.ts:1200 (tabRank merges all four values — hidden/default_off/default_on/visible — across resolved sets, most-visible wins; app hidden ⇒ dropped from /me/apps) + packages/runtime/src/security/resolve-execution-context.ts:205 + packages/rest/src/rest-server.ts:1551 (projection)",
+      "note": "Re-verified 2026-07-30 — the previous note ('only hidden is read') UNDERSTATED it: the rank merge reads every value. Exercised by packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts (registered in proof-registry.mts, unbound there because the binding was recorded against the ungoverned `app` type — this governed entry could carry it instead)."
     },
     "rowLevelSecurity": {
       "children": {
         "name": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts"
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts:203 (skip-diagnostics name the operator sees)"
         },
         "label": {
-          "status": "live",
-          "note": "display."
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "CORRECTED 2026-07-30 (was live with no evidence): no consumer in either repo — objectui's PermissionAdvancedFacets edits policies and PermissionPreview counts them, and an authoring surface echoing input is not a runtime consumer (see README §preview-renderer). Benign display metadata — deliberately NOT authorWarn'd."
         },
         "description": {
-          "status": "live",
-          "note": "display."
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "CORRECTED 2026-07-30 (was live with no evidence): same closure as label. Benign — not authorWarn'd."
         },
         "object": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts"
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts:289 (applicability: exact object or '*')"
         },
         "operation": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts"
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts:304 (applicability: 'all' or the mapped RLS op)"
         },
         "using": {
           "status": "live",
+          "verifiedAt": "2026-07-30",
           "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts",
           "proof": "packages/qa/dogfood/test/rls-fixture.dogfood.test.ts#rls-by-id-write",
           "note": "compiled into find + analytics SQL. ADR-0054 high-risk class (RLS): the proof boots an owner-isolated fixture so a fresh member cannot read an admin-created row, then asserts the runner's verdict in both directions — `rls-consistent` when the owner predicate also gates the by-id write (#1994 pre-image check) and `rls-hole` when it doesn't. Guards read AND by-id-write enforcement, not just the read predicate."
         },
         "check": {
           "status": "live",
+          "verifiedAt": "2026-07-30",
           "proof": "packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts#showcase-d3-d4-capabilities",
           "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts"
         },
         "positions": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts",
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts:297 (applicability domain vs caller's held positions)",
           "note": "flat match — no subordinate rollup (ADR-0090 D3 rename)."
         },
         "enabled": {
           "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts"
+          "verifiedAt": "2026-07-30",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts (getApplicablePolicies: `enabled === false` excluded before object/positions/operation matching; absent = active per the schema default) — pinned by the enabled-gate cases in packages/plugins/plugin-security/src/security-plugin.test.ts",
+          "note": "ENFORCED 2026-07-30, by the security-subset re-verification this stamp records. Until then the entry claimed live citing rls-compiler.ts, and NOTHING read the property: policies OR-combine (any match allows access), so a policy an admin disabled kept CONTRIBUTING ITS GRANT — the schema's own describe ('Disabled policies are not evaluated') was false in the over-share direction, the #3896 shape. Same enforce-or-remove resolution as `positions` (ADR-0049)."
         },
         "priority": {
-          "status": "live",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts",
-          "note": "ordering."
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "authorWarn": true,
+          "authorHint": "priority has no effect and CANNOT have one: applicable policies OR-combine (most permissive wins, per the schema's own describe), so there is no conflict to order and no evaluation-order effect on the outcome. Remove it from the policy.",
+          "note": "CORRECTED 2026-07-30 (was live citing rls-compiler.ts, which never reads it — confirmed across the load site, the projection round-trip and the compiler). Not merely unimplemented: under OR-combination the promised 'conflict resolution' semantics cannot exist, so this is a REMOVE candidate (#3715/#3950 precedent, v17 window) rather than an implement candidate."
         },
         "tags": {
-          "status": "live",
-          "note": "organizational."
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "CORRECTED 2026-07-30 (was live with no evidence): no reader in either repo — governance/compliance reporting never consumes policy tags. Benign organizational metadata — not authorWarn'd."
         }
       }
     }

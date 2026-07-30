@@ -184,7 +184,10 @@ to set a new name or clear a unique field.
 
 ## Analytics
 
-Semantic BI queries using a cube-style API. Available when the analytics service is enabled.
+Semantic BI queries using a cube-style API. Provided by `@objectstack/service-analytics` —
+on deployments without it these endpoints answer `404 ROUTE_NOT_FOUND` and discovery
+reports `analytics: { enabled: false, status: "unavailable" }`. (The former kernel-level
+degraded fallback was retired — it served unscoped, unfiltered aggregates.)
 
 ### `POST /analytics/query`
 

@@ -3,20 +3,28 @@
 // framework#3826 — DRIFT GUARD for the two "a datasource would not connect"
 // implementations.
 //
-// ADR-0062 D1 asks for exactly one "definition → live driver" path. The
-// *construction* half converged (both build through the shared datasource driver
-// factory), but the *connect + failure verdict* half did not:
+// ADR-0062 D1 asks for exactly one "definition → live driver" path, and for
+// every OPEN-CORE boot that is now true: the `default` datasource is a declared
+// definition connected by `DefaultDatasourcePlugin` through
+// `DatasourceConnectionService.connect()` (#3869 standalone/artifact, #3886 the
+// CLI serve fallback) — `handleFailure` (#3758) is its one failure verdict.
+// But the ENGINE-side verdict — `ObjectQLEngine.init()` → `DriverConnectError`
+// (#3741) — is still live code, on purpose, for three callers:
 //
-//   - the `default` driver is registered as a `driver.*` kernel service and
-//     connected by `ObjectQLEngine.init()`     → DriverConnectError (#3741)
-//   - declared datasources are connected by
-//     `DatasourceConnectionService.connect()`  → handleFailure  (#3758)
+//   - the boot re-verification of the already-connected default (the #3741
+//     fail-fast role D1 deliberately keeps in `init()`),
+//   - drivers registered via the pre-built `DriverPlugin` escape hatch
+//     (the telemetry sibling, tests, dynamic/proxy drivers), and
+//   - the cloud repo's own compositions (`environment-kernel-factory`,
+//     control-plane preset), until they converge onto the shared path.
 //
-// They agree today only because two separate pieces of code were each written
-// correctly — and the last time they disagreed, the gap survived three months
-// and a second bug report (#3741 fixed one layer, #3758 was the other). Until
-// the paths are actually merged, this test is what notices a divergence:
-// it pins the operator-visible contract both of them owe.
+// So two verdict implementations still coexist, and they agree only because
+// each is written correctly — the last time they disagreed, the gap survived
+// three months and a second bug report (#3741 fixed one layer, #3758 was the
+// other). This test pins the operator-visible contract both of them owe:
+// fail-fast by default, one identically-parsed escape hatch, DEGRADED BOOT on
+// stderr. It outlives the cloud convergence: as long as `init()` can throw a
+// connect verdict at all, that verdict must match the service's.
 //
 // This lives in `runtime` because it is the only package that depends on both.
 

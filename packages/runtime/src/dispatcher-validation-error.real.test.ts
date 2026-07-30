@@ -109,7 +109,9 @@ describe('#3918 — both exits serve the real ValidationError as 400 + fields[]'
         const res = await publishDrafts(new ValidationError(FIELDS));
 
         expect(res.status).toBe(400);
-        expect(res.body.error.details).toEqual({ code: 'VALIDATION_FAILED', fields: FIELDS });
+        // [#3842] `VALIDATION_FAILED` moved from `details` into `error.code`.
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(res.body.error.details).toEqual({ fields: FIELDS });
         // The class builds its message from the human field messages — that is
         // what a toast shows, so it must survive intact rather than being
         // replaced by the 5xx sanitiser.
@@ -120,7 +122,8 @@ describe('#3918 — both exits serve the real ValidationError as 400 + fields[]'
         const res = await analyticsQuery(new ValidationError(FIELDS));
 
         expect(res.statusCode).toBe(400);
-        expect(res.body.error.details).toEqual({ code: 'VALIDATION_FAILED', fields: FIELDS });
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(res.body.error.details).toEqual({ fields: FIELDS });
         expect(res.body.error.message).toContain('name is required');
         // Not a server fault: the errorReporter side-channel stays clear.
         expect(res.__obsRecordedError).toBeUndefined();

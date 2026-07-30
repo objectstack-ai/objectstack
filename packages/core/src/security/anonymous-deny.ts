@@ -21,8 +21,8 @@ import { isAuthGateAllowlisted } from './auth-gate.js';
 
 /** HTTP status every seam returns for an anonymous-denied request. */
 export const ANONYMOUS_DENY_STATUS = 401 as const;
-/** Stable machine code (mirrors the REST `enforceAuth` seam). */
-export const ANONYMOUS_DENY_CODE = 'unauthenticated' as const;
+/** Stable machine code (mirrors the REST `enforceAuth` seam). ADR-0112: SCREAMING, a `StandardErrorCode` member. */
+export const ANONYMOUS_DENY_CODE = 'UNAUTHENTICATED' as const;
 /** Human-facing message. */
 export const ANONYMOUS_DENY_MESSAGE = 'Authentication is required to access this endpoint.';
 /** The single 401 body shape every seam returns: `{ error, message }`. */

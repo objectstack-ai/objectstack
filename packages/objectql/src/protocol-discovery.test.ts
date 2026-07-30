@@ -120,10 +120,10 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.services.workflow.message).toBe('partial impl');
   });
 
-  it('should report the analytics fallback honestly when it self-identifies', async () => {
+  it('should report a registered analytics service with its self-declared status', async () => {
     const mockServices = new Map<string, any>();
     mockServices.set('analytics', {
-      __serviceInfo: { status: 'degraded', handlerReady: true, message: 'fallback' },
+      __serviceInfo: { status: 'degraded', handlerReady: true, message: 'partial engine' },
     });
 
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
@@ -131,21 +131,48 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
 
     expect(discovery.services.analytics.enabled).toBe(true);
     expect(discovery.services.analytics.status).toBe('degraded');
-    expect(discovery.services.analytics.message).toBe('fallback');
+    expect(discovery.services.analytics.message).toBe('partial engine');
   });
 
   it('should always show core services as available', async () => {
     protocol = new ObjectStackProtocolImplementation(engine);
-    
+
     const discovery = await protocol.getDiscovery();
-    
+
     // Core services should always be available
     expect(discovery.services.metadata.enabled).toBe(true);
     expect(discovery.services.metadata.status).toBe('available');
     expect(discovery.services.data.enabled).toBe(true);
     expect(discovery.services.data.status).toBe('available');
+  });
+
+  // #3891 — the degraded ObjectQL fallback is retired. Analytics is an
+  // ordinary optional service now: absent ⇒ unavailable, and the route must
+  // NOT be advertised (an advertised route with no handler 404s — the exact
+  // discovery lie the fallback was invented to make true).
+  it('should report analytics unavailable with no advertised route when not registered', async () => {
+    protocol = new ObjectStackProtocolImplementation(engine);
+
+    const discovery = await protocol.getDiscovery();
+
+    expect(discovery.services.analytics.enabled).toBe(false);
+    expect(discovery.services.analytics.status).toBe('unavailable');
+    expect(discovery.services.analytics.message).toContain('service-analytics');
+    expect(discovery.services.analytics.route).toBeUndefined();
+    expect(discovery.routes.analytics).toBeUndefined();
+  });
+
+  it('should advertise analytics route and availability when the real engine registers', async () => {
+    const mockServices = new Map<string, any>();
+    mockServices.set('analytics', { /* real engine — no self-info means available */ });
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
     expect(discovery.services.analytics.enabled).toBe(true);
     expect(discovery.services.analytics.status).toBe('available');
+    expect(discovery.services.analytics.route).toBe('/api/v1/analytics');
+    expect(discovery.routes.analytics).toBe('/api/v1/analytics');
   });
 
   it('should map file-storage service to storage route', async () => {
@@ -166,7 +193,8 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     mockServices.set('auth', {});
     mockServices.set('automation', {});
     mockServices.set('ai', {});
-    
+    mockServices.set('analytics', {});
+
     protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
     
     const discovery = await protocol.getDiscovery();

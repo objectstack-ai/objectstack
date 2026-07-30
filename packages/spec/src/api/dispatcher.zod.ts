@@ -141,23 +141,28 @@ export type DispatcherConfigInput = z.input<typeof DispatcherConfigSchema>;
 // ============================================================================
 
 /**
- * Semantic HTTP error codes used by the Dispatcher.
- *
- * The dispatcher MUST distinguish between these four failure modes so that
+ * The four route-resolution failure modes the dispatcher MUST distinguish, so
  * clients (and developers) can understand *why* an API call failed:
  *
- * - `404` – Route Not Found: no route is registered for this path.
- * - `405` – Method Not Allowed: route exists but the HTTP method is not supported.
- * - `501` – Not Implemented: route is declared but the handler is a stub / not yet coded.
- * - `503` – Service Unavailable: service exists but is temporarily down or not loaded.
+ * - `ROUTE_NOT_FOUND` (404) – no route is registered for this path.
+ * - `METHOD_NOT_ALLOWED` (405) – route exists but the HTTP method is not supported.
+ * - `NOT_IMPLEMENTED` (501) – route is declared but the handler is a stub / not yet coded.
+ * - `SERVICE_UNAVAILABLE` (503) – service exists but is temporarily down or not loaded.
  *
- * Note: These are string representations of HTTP status codes for use in enum
- * matching. The `DispatcherErrorResponseSchema.error.code` field carries the
- * numeric HTTP status code for direct use in HTTP responses.
+ * [#3842] These members used to be the *strings* `'404' | '405' | '501' | '503'`,
+ * because `DispatcherErrorResponseSchema.error.code` carried the numeric HTTP
+ * status and this enum existed to match against it. `error.code` now carries the
+ * semantic string the base `ApiErrorSchema` has always declared (the number moved
+ * to `httpStatus`), so this enum holds the semantic spellings — the same four
+ * that used to sit in the now-removed `error.type`, moved verbatim. Match on the
+ * status via `httpStatus` or the response status, not via a code.
  */
-export const DispatcherErrorCode = z.enum(['404', '405', '501', '503']).describe(
-  '404 = route not found, 405 = method not allowed, 501 = not implemented (stub), 503 = service unavailable'
-);
+export const DispatcherErrorCode = z.enum([
+  'ROUTE_NOT_FOUND',
+  'METHOD_NOT_ALLOWED',
+  'NOT_IMPLEMENTED',
+  'SERVICE_UNAVAILABLE',
+]).describe('Route-resolution failure mode emitted in `error.code`');
 
 export type DispatcherErrorCode = z.infer<typeof DispatcherErrorCode>;
 
@@ -167,30 +172,36 @@ export type DispatcherErrorCode = z.infer<typeof DispatcherErrorCode>;
  * Standardised error envelope returned by the dispatcher when a request cannot
  * be fulfilled.  Adapters MUST use this shape (or a superset) for all non-2xx
  * responses so that clients can programmatically distinguish failure modes.
+ *
+ * [#3842] This is a superset of `ApiErrorSchema`, not a rival dialect. It used
+ * to declare `code` as the numeric HTTP status and put the machine-readable
+ * spelling in a sibling `type` — which is where the dispatcher's deviation from
+ * `ApiErrorSchema` was legitimised. `code` is now the semantic string both
+ * schemas agree on, `httpStatus` carries the number, and `type` is gone.
  */
 export const DispatcherErrorResponseSchema = z.object({
   /** Always `false` for error responses */
   success: z.literal(false),
   error: z.object({
-    /** HTTP status code */
-    code: z.number().int().describe('HTTP status code (404, 405, 501, 503, …)'),
+    /**
+     * Machine-readable error code for programmatic branching. Route-resolution
+     * failures use a {@link DispatcherErrorCode}; every other failure carries
+     * the producer's own code (or a `StandardErrorCode` derived from the status
+     * — see `standardErrorCodeForHttpStatus`), so this stays an open string.
+     */
+    code: z.string().describe('Machine-readable error code (e.g. ROUTE_NOT_FOUND, permission_denied)'),
     /** Human-readable error message */
     message: z.string().describe('Human-readable error message'),
-    /**
-     * Machine-readable error type for programmatic branching.
-     */
-    type: z.enum([
-      'ROUTE_NOT_FOUND',
-      'METHOD_NOT_ALLOWED',
-      'NOT_IMPLEMENTED',
-      'SERVICE_UNAVAILABLE',
-    ]).optional().describe('Machine-readable error type'),
+    /** HTTP status mirrored into the body (the response status is authoritative) */
+    httpStatus: z.number().int().optional().describe('HTTP status code (404, 405, 501, 503, …)'),
     /** Route that was requested */
     route: z.string().optional().describe('Requested route path'),
     /** Service that the route maps to (if known) */
     service: z.string().optional().describe('Target service name, if resolvable'),
     /** Guidance for the developer */
     hint: z.string().optional().describe('Actionable hint for the developer (e.g., "Install plugin-workflow")'),
+    /** Structured context — genuine context only, never a parked error code */
+    details: z.unknown().optional().describe('Additional error context'),
   }),
 });
 

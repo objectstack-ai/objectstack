@@ -36,14 +36,25 @@ export const StartTaskAction = defineAction({
   },
 });
 
-/** Defer Task */
+/**
+ * Defer Task — collect input, then run server-side.
+ *
+ * [ADR-0110] This is `type: 'script'` with `params`, NOT `type: 'modal'`. A
+ * `modal` action's `target` names a page to OPEN and has no server dispatch
+ * (`headlessActionTypeError` rejects it), so the old
+ * `type: 'modal', target: 'defer_task_modal'` pointed at a page that does not
+ * exist while `deferTask` sat registered under a key no declaration could
+ * address — business logic that had never once executed (#3959). `script` +
+ * `params` is the supported shape: the runner collects the same dialog, then
+ * the handler runs with those values.
+ */
 export const DeferTaskAction = defineAction({
   name: 'defer_task',
   label: 'Defer Task',
   objectName: 'todo_task',
   icon: 'clock',
-  type: 'modal',
-  target: 'defer_task_modal',
+  type: 'script',
+  target: 'deferTask',
   locations: ['record_header'],
   params: [
     {
@@ -63,14 +74,14 @@ export const DeferTaskAction = defineAction({
   refreshAfter: true,
 });
 
-/** Set Reminder */
+/** Set Reminder — collect input, then run server-side (see DeferTaskAction). */
 export const SetReminderAction = defineAction({
   name: 'set_reminder',
   label: 'Set Reminder',
   objectName: 'todo_task',
   icon: 'bell',
-  type: 'modal',
-  target: 'set_reminder_modal',
+  type: 'script',
+  target: 'setReminder',
   locations: ['record_header', 'list_item'],
   params: [
     {

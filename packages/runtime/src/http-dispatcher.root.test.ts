@@ -68,6 +68,7 @@ describe('HttpDispatcher Root Handling', () => {
         // The dispatcher now returns a typed 404 (ROUTE_NOT_FOUND) instead of { handled: false }
         expect(result.handled).toBe(true);
         expect(result.response?.status).toBe(404);
-        expect(result.response?.body?.error?.type).toBe('ROUTE_NOT_FOUND');
+        // [#3842] `ROUTE_NOT_FOUND` moved from `error.type` into `error.code`.
+        expect(result.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
     });
 });

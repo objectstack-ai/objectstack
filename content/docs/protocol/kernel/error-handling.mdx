@@ -45,7 +45,7 @@ API 4: HTTP 200 OK with { status: "error", ... }
   <Card
     icon={<Info />}
     title="Automated Monitoring"
-    description="Alert on specific error codes (e.g., rate_limit_exceeded spikes = upgrade prompts working)."
+    description="Alert on specific error codes (e.g., RATE_LIMIT_EXCEEDED spikes = upgrade prompts working)."
   />
   <Card
     icon={<AlertTriangle />}
@@ -101,7 +101,7 @@ ObjectStack uses standard HTTP status codes:
 
 ### Authentication & Authorization
 
-#### `unauthenticated`
+#### `UNAUTHENTICATED`
 **HTTP Status:** 401  
 **Meaning:** No authentication credentials provided or invalid credentials
 
@@ -110,7 +110,7 @@ ObjectStack uses standard HTTP status codes:
 {
   "success": false,
   "error": {
-    "code": "unauthenticated",
+    "code": "UNAUTHENTICATED",
     "message": "Authentication required",
     "details": {
       "hint": "Include 'Authorization: Bearer <token>' header"
@@ -124,7 +124,7 @@ ObjectStack uses standard HTTP status codes:
 - Refresh expired tokens
 - Re-authenticate user
 
-#### `invalid_token`
+#### `INVALID_TOKEN`
 **HTTP Status:** 401  
 **Meaning:** Token is malformed or invalid
 
@@ -133,7 +133,7 @@ ObjectStack uses standard HTTP status codes:
 {
   "success": false,
   "error": {
-    "code": "invalid_token",
+    "code": "INVALID_TOKEN",
     "message": "JWT token is invalid",
     "details": {
       "reason": "signature_verification_failed"
@@ -147,7 +147,7 @@ ObjectStack uses standard HTTP status codes:
 - Verify token is meant for this API (check `aud` claim)
 - Ensure server secret key is correct
 
-#### `expired_token`
+#### `EXPIRED_TOKEN`
 **HTTP Status:** 401  
 **Meaning:** JWT token has expired
 
@@ -156,7 +156,7 @@ ObjectStack uses standard HTTP status codes:
 {
   "success": false,
   "error": {
-    "code": "expired_token",
+    "code": "EXPIRED_TOKEN",
     "message": "JWT token expired",
     "details": {
       "expired_at": "2024-01-16T10:00:00Z",
@@ -171,7 +171,7 @@ ObjectStack uses standard HTTP status codes:
 - Re-authenticate user
 - Check token lifetime settings (typically 15-60 minutes)
 
-#### `permission_denied`
+#### `PERMISSION_DENIED`
 **HTTP Status:** 403  
 **Meaning:** Authenticated but insufficient permissions
 
@@ -180,7 +180,7 @@ ObjectStack uses standard HTTP status codes:
 {
   "success": false,
   "error": {
-    "code": "permission_denied",
+    "code": "PERMISSION_DENIED",
     "message": "Insufficient permissions to access this resource",
     "details": {
       "required_permission": "account:write",
@@ -197,7 +197,7 @@ ObjectStack uses standard HTTP status codes:
 
 ### Validation Errors
 
-#### `validation_error`
+#### `VALIDATION_ERROR`
 **HTTP Status:** 400  
 **Meaning:** Input validation failed (schema validation)
 
@@ -206,7 +206,7 @@ ObjectStack uses standard HTTP status codes:
 {
   "success": false,
   "error": {
-    "code": "validation_error",
+    "code": "VALIDATION_ERROR",
     "message": "Validation failed for 2 fields",
     "details": {
       "fields": [
@@ -236,14 +236,14 @@ ObjectStack uses standard HTTP status codes:
 
 **Client-side handling:**
 ```javascript
-if (error.code === 'validation_error') {
+if (error.code === 'VALIDATION_ERROR') {
   error.details.fields.forEach(({ field, message }) => {
     showFieldError(field, message);
   });
 }
 ```
 
-#### `missing_required_field`
+#### `MISSING_REQUIRED_FIELD`
 **HTTP Status:** 400  
 **Meaning:** Required field is missing
 
@@ -252,7 +252,7 @@ if (error.code === 'validation_error') {
 {
   "success": false,
   "error": {
-    "code": "missing_required_field",
+    "code": "MISSING_REQUIRED_FIELD",
     "message": "Missing required field: name",
     "details": {
       "field": "name",
@@ -262,7 +262,7 @@ if (error.code === 'validation_error') {
 }
 ```
 
-#### `invalid_field`
+#### `INVALID_FIELD`
 **HTTP Status:** 400  
 **Meaning:** Field value has wrong type
 
@@ -271,7 +271,7 @@ if (error.code === 'validation_error') {
 {
   "success": false,
   "error": {
-    "code": "invalid_field",
+    "code": "INVALID_FIELD",
     "message": "Field 'age' must be a number",
     "details": {
       "field": "age",
@@ -285,7 +285,7 @@ if (error.code === 'validation_error') {
 
 ### Resource Errors
 
-#### `resource_not_found`
+#### `RESOURCE_NOT_FOUND`
 **HTTP Status:** 404  
 **Meaning:** Requested resource doesn't exist
 
@@ -294,7 +294,7 @@ if (error.code === 'validation_error') {
 {
   "success": false,
   "error": {
-    "code": "resource_not_found",
+    "code": "RESOURCE_NOT_FOUND",
     "message": "Account with id 'acc_999' not found",
     "details": {
       "resource": "account",
@@ -309,7 +309,7 @@ if (error.code === 'validation_error') {
 - Check user has permission to see resource (row-level security)
 - Resource may have been deleted
 
-#### `duplicate_record`
+#### `DUPLICATE_RECORD`
 **HTTP Status:** 409  
 **Meaning:** Resource with unique constraint already exists
 
@@ -318,7 +318,7 @@ if (error.code === 'validation_error') {
 {
   "success": false,
   "error": {
-    "code": "duplicate_record",
+    "code": "DUPLICATE_RECORD",
     "message": "Account with email 'john@acme.com' already exists",
     "details": {
       "resource": "account",
@@ -335,7 +335,7 @@ if (error.code === 'validation_error') {
 - Update existing resource instead of creating new one
 - Use different value for unique field
 
-#### `delete_restricted`
+#### `DELETE_RESTRICTED`
 **HTTP Status:** 409  
 **Meaning:** Operation violates database constraint
 
@@ -344,7 +344,7 @@ if (error.code === 'validation_error') {
 {
   "success": false,
   "error": {
-    "code": "delete_restricted",
+    "code": "DELETE_RESTRICTED",
     "message": "Cannot delete account with active opportunities",
     "details": {
       "resource": "account",
@@ -364,7 +364,7 @@ if (error.code === 'validation_error') {
 
 ### Rate Limiting
 
-#### `rate_limit_exceeded`
+#### `RATE_LIMIT_EXCEEDED`
 **HTTP Status:** 429  
 **Meaning:** Too many requests, rate limit exceeded
 
@@ -373,7 +373,7 @@ if (error.code === 'validation_error') {
 {
   "success": false,
   "error": {
-    "code": "rate_limit_exceeded",
+    "code": "RATE_LIMIT_EXCEEDED",
     "message": "Rate limit exceeded",
     "details": {
       "limit": 1000,
@@ -418,7 +418,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 }
 ```
 
-#### `quota_exceeded`
+#### `QUOTA_EXCEEDED`
 **HTTP Status:** 429  
 **Meaning:** Monthly/daily quota exceeded
 
@@ -427,7 +427,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 {
   "success": false,
   "error": {
-    "code": "quota_exceeded",
+    "code": "QUOTA_EXCEEDED",
     "message": "Monthly API quota exceeded",
     "details": {
       "quota": 10000,
@@ -447,7 +447,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 
 ### Server Errors
 
-#### `internal_error`
+#### `INTERNAL_ERROR`
 **HTTP Status:** 500  
 **Meaning:** Internal server error
 
@@ -456,7 +456,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 {
   "success": false,
   "error": {
-    "code": "internal_error",
+    "code": "INTERNAL_ERROR",
     "message": "An internal error occurred",
     "details": {
       "requestId": "req_abc123",
@@ -473,7 +473,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 - Check server status page
 - Contact support with `requestId`
 
-#### `service_unavailable`
+#### `SERVICE_UNAVAILABLE`
 **HTTP Status:** 503  
 **Meaning:** Server temporarily unavailable
 
@@ -482,7 +482,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 {
   "success": false,
   "error": {
-    "code": "service_unavailable",
+    "code": "SERVICE_UNAVAILABLE",
     "message": "Service temporarily unavailable",
     "details": {
       "reason": "database_maintenance",
@@ -523,7 +523,7 @@ Content-Type: application/json
 {
   "success": false,
   "error": {
-    "code": "validation_error",
+    "code": "VALIDATION_ERROR",
     "message": "Validation failed for 3 fields",
     "details": {
       "fields": [
@@ -570,7 +570,7 @@ Content-Type: application/json
 {
   "success": false,
   "error": {
-    "code": "permission_denied",
+    "code": "PERMISSION_DENIED",
     "message": "Insufficient permissions to delete accounts",
     "details": {
       "resource": "account",
@@ -605,7 +605,7 @@ Content-Type: application/json
 {
   "success": false,
   "error": {
-    "code": "rate_limit_exceeded",
+    "code": "RATE_LIMIT_EXCEEDED",
     "message": "Rate limit exceeded: 1000 requests per minute",
     "details": {
       "limit": 1000,
@@ -633,7 +633,7 @@ if (error.message.includes('not found')) {
 
 **Good:**
 ```javascript
-if (error.code === 'resource_not_found') {
+if (error.code === 'RESOURCE_NOT_FOUND') {
   // Reliable - code never changes
 }
 ```
@@ -642,15 +642,15 @@ if (error.code === 'resource_not_found') {
 
 **Bad:**
 ```javascript
-alert(error.message);  // "validation_error: Field 'email' constraint 'format' failed"
+alert(error.message);  // "VALIDATION_ERROR: Field 'email' constraint 'format' failed"
 ```
 
 **Good:**
 ```javascript
 const userMessages = {
-  'validation_error': 'Please check your input and try again',
-  'unauthenticated': 'Please log in to continue',
-  'rate_limit_exceeded': 'Too many requests. Please wait a moment.',
+  'VALIDATION_ERROR': 'Please check your input and try again',
+  'UNAUTHENTICATED': 'Please log in to continue',
+  'RATE_LIMIT_EXCEEDED': 'Too many requests. Please wait a moment.',
 };
 
 showToast(userMessages[error.code] || 'An error occurred');
@@ -665,7 +665,7 @@ async function handleSubmit(data) {
     const response = await api.createAccount(data);
     return response.data;
   } catch (error) {
-    if (error.code === 'validation_error') {
+    if (error.code === 'VALIDATION_ERROR') {
       // Show errors next to fields
       error.details.fields.forEach(({ field, message }) => {
         setFieldError(field, message);
@@ -693,11 +693,11 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
       
       if (!response.ok) {
         // Check if error is retryable
-        if (data.error.code === 'rate_limit_exceeded') {
+        if (data.error.code === 'RATE_LIMIT_EXCEEDED') {
           const retryAfter = data.error.details.retry_after || 1;
           await sleep(retryAfter * 1000);
           continue;
-        } else if (data.error.code === 'internal_error') {
+        } else if (data.error.code === 'INTERNAL_ERROR') {
           // Exponential backoff
           await sleep(Math.pow(2, attempt) * 1000);
           continue;
@@ -812,10 +812,10 @@ Track error rates by code:
 // Metrics dashboard
 {
   "error_rates": {
-    "validation_error": 0.05,  // 5% of requests
-    "unauthenticated": 0.02,      // 2% of requests
-    "rate_limit_exceeded": 0.01,      // 1% of requests
-    "internal_error": 0.0001     // 0.01% of requests (🚨 alert if > 0.01%)
+    "VALIDATION_ERROR": 0.05,  // 5% of requests
+    "UNAUTHENTICATED": 0.02,      // 2% of requests
+    "RATE_LIMIT_EXCEEDED": 0.01,      // 1% of requests
+    "INTERNAL_ERROR": 0.0001     // 0.01% of requests (🚨 alert if > 0.01%)
   }
 }
 ```
@@ -823,14 +823,14 @@ Track error rates by code:
 ### Alert Conditions
 
 **Critical alerts:**
-- `internal_error` rate > 0.1%
-- `service_unavailable` > 0
+- `INTERNAL_ERROR` rate > 0.1%
+- `SERVICE_UNAVAILABLE` > 0
 - Database connection failures
 
 **Warning alerts:**
-- `rate_limit_exceeded` spike (may indicate DDoS or integration bug)
-- `unauthenticated` spike (credential leakage?)
-- `validation_error` spike on new form (bad client-side validation)
+- `RATE_LIMIT_EXCEEDED` spike (may indicate DDoS or integration bug)
+- `UNAUTHENTICATED` spike (credential leakage?)
+- `VALIDATION_ERROR` spike on new form (bad client-side validation)
 
 ### Error Budgets
 
@@ -856,7 +856,7 @@ error_budget:
 ```json
 {
   "error": {
-    "code": "unauthenticated",
+    "code": "UNAUTHENTICATED",
     "message": "Password incorrect for user john@acme.com",
     "details": {
       "attempted_password": "Password123!",  // 🚨 NEVER DO THIS
@@ -870,7 +870,7 @@ error_budget:
 ```json
 {
   "error": {
-    "code": "unauthenticated",
+    "code": "UNAUTHENTICATED",
     "message": "Invalid credentials",
     "details": null
   }
@@ -884,7 +884,7 @@ error_budget:
 // Attacker probes: DELETE /api/v1/data/account/acc_123
 {
   "error": {
-    "code": "permission_denied",
+    "code": "PERMISSION_DENIED",
     "message": "You don't have permission to delete this account"
   }
 }
@@ -893,10 +893,10 @@ error_budget:
 
 **Good:**
 ```json
-// Return resource_not_found for both "doesn't exist" and "exists but no permission"
+// Return RESOURCE_NOT_FOUND for both "doesn't exist" and "exists but no permission"
 {
   "error": {
-    "code": "resource_not_found",
+    "code": "RESOURCE_NOT_FOUND",
     "message": "Account not found"
   }
 }
@@ -910,7 +910,7 @@ Even error responses can be abused:
 // Attacker tries to enumerate user emails
 for (let i = 0; i < 1000000; i++) {
   await register({ email: `user${i}@example.com` });
-  // Response: "duplicate_record" or "validation_error"
+  // Response: "DUPLICATE_RECORD" or "VALIDATION_ERROR"
 }
 ```
 
@@ -918,7 +918,7 @@ for (let i = 0; i < 1000000; i++) {
 ```json
 {
   "error": {
-    "code": "rate_limit_exceeded",
+    "code": "RATE_LIMIT_EXCEEDED",
     "message": "Too many failed registration attempts"
   }
 }

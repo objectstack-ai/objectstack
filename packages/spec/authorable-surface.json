@@ -521,6 +521,7 @@
     "api/ApiError:category",
     "api/ApiError:code",
     "api/ApiError:details",
+    "api/ApiError:httpStatus",
     "api/ApiError:message",
     "api/ApiError:requestId",
     "api/ApiMapping:source",

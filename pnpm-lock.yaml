@@ -2322,9 +2322,6 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../core
-      '@objectstack/driver-sqlite-wasm':
-        specifier: workspace:*
-        version: link:../plugins/driver-sqlite-wasm
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql

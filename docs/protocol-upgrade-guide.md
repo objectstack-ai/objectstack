@@ -122,6 +122,8 @@ It also removes the sharing-rule access level `full` (#3865): declared as "Full 
 
 Finally it removes agent `tools` (#3894): the legacy inline `{type,name,description}[]` fallback, which the runtime resolved against the FULL tool registry with no surface check — the one seam that broke ADR-0064's "an agent reaches exactly its surface-compatible skills' tools, nothing falls through to the global registry". Unlike the renames above this has NO lossless target: each entry has to become a reference inside a skill, which is a human decision about which skill. The conversion therefore drops the dead key (the runtime stopped reading it in cloud#910, so it already contributes nothing) and emits a notice per agent so the author knows where capability must be re-declared; the schema tombstones the key with a fix-it error naming `skills`.
 
+Beyond those spec-surface removals, it graduates the seven flow-node config key aliases the executors still tolerated (#3796): the CRUD nodes' `object` (use `objectName`) — the last tenant of the `readAliasedConfig` executor shim, which is deleted with it — plus the six open-coded fallbacks that never went through that shim: notify `to`/`subject`/`body`/`url` (use `recipients`/`title`/`message`/`actionUrl`) and script `functionName`/`input` (use `function`/`inputs`). All are pure key renames with unchanged values and replay losslessly. Like the sharing-rule access level above they keep a load-path acceptance window: none carried a prior deprecation warning, and `FlowNodeSchema.config` is an unconstrained record, so no schema tombstone can reject them — the conversion layer is the only seam that can declare, convert, and retire them.
+
 ### Mechanical (applied for you)
 
 | Conversion | Surface | Change | Load window |
@@ -131,6 +133,9 @@ Finally it removes agent `tools` (#3894): the legacy inline `{type,name,descript
 | `agent-knowledge-topics-to-sources` | `agent.knowledge.topics` | agent knowledge key 'topics' → 'sources' (the deprecated RAG-source alias, #1891) | retired — `migrate meta` only |
 | `agent-tools-to-skills` | `agent.tools` | agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894) | retired — `migrate meta` only |
 | `sharing-rule-access-level-full-to-edit` | `sharingRule.accessLevel` | sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`) | live — protocol 17 loader accepts the old shape |
+| `flow-node-crud-object-alias` | `flow.node.config.objectName` | CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation) | live — protocol 17 loader accepts the old shape |
+| `flow-node-notify-config-aliases` | `flow.node.notify.config` | notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796) | live — protocol 17 loader accepts the old shape |
+| `flow-node-script-config-aliases` | `flow.node.script.config` | script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796) | live — protocol 17 loader accepts the old shape |
 
 ---
 

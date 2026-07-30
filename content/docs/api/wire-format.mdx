@@ -427,6 +427,44 @@ Read `body.error.code`, not `body.code`, on these routes. `ObjectStackClient`
 normalizes both — `error.code` and `error.message` are populated whichever
 envelope the server used — so SDK callers do not need to branch.
 
+### Dispatcher routes use it too
+
+Everything the runtime dispatcher serves — `/api/v1/meta/*`, `/actions/*`,
+`/packages/*`, `/automation/*`, `/analytics/*`, `/ready`, … — answers in the same
+declared envelope, plus `httpStatus`:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "PROJECT_MEMBERSHIP_REQUIRED",
+    "message": "Forbidden: user usr_01H… is not a member of project env_prod",
+    "httpStatus": 403,
+    "details": { "environmentId": "env_prod", "userId": "usr_01H…" }
+  }
+}
+```
+
+| Field | Meaning |
+|:---|:---|
+| `code` | The semantic code — the field to branch on. Never a number. |
+| `message` | Human-readable text, safe to show. 5xx messages are sanitised. |
+| `httpStatus` | The response status, mirrored. Redundant with the response line by design. |
+| `details` | Structured context only (`fields[]`, `issues[]`, ids). Never a parked code. |
+
+A route-resolution failure spells `code` from `DispatcherErrorCode`
+(`ROUTE_NOT_FOUND`, …) and adds `route` / `hint` / `service` as siblings. A
+branch with no code of its own gets a `StandardErrorCode` derived from the
+status.
+
+<Callout type="info">
+Before [#3842](https://github.com/objectstack-ai/objectstack/issues/3842) this
+envelope put the HTTP status in `error.code` and the real code in
+`error.details.code`, `error.details.type` or `error.type`. `ObjectStackClient`
+reads all of them, so an SDK newer than the server it talks to is unaffected;
+code reading these bodies directly should move to `error.code`.
+</Callout>
+
 ---
 
 ## 8. Batch Operations

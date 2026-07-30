@@ -60,14 +60,14 @@ const result = DispatcherConfig.parse(data);
 
 ## DispatcherErrorCode
 
-404 = route not found, 405 = method not allowed, 501 = not implemented (stub), 503 = service unavailable
+Route-resolution failure mode emitted in `error.code`
 
 ### Allowed Values
 
-* `404`
-* `405`
-* `501`
-* `503`
+* `ROUTE_NOT_FOUND`
+* `METHOD_NOT_ALLOWED`
+* `NOT_IMPLEMENTED`
+* `SERVICE_UNAVAILABLE`
 
 
 ---
@@ -79,7 +79,7 @@ const result = DispatcherConfig.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `'false'` | ✅ |  |
-| **error** | `{ code: integer; message: string; type?: Enum<'ROUTE_NOT_FOUND' \| 'METHOD_NOT_ALLOWED' \| 'NOT_IMPLEMENTED' \| 'SERVICE_UNAVAILABLE'>; route?: string; … }` | ✅ |  |
+| **error** | `{ code: string; message: string; httpStatus?: integer; route?: string; … }` | ✅ |  |
 
 
 ---

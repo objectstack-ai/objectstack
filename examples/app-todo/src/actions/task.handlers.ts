@@ -82,7 +82,7 @@ export async function deleteCompletedTasks(ctx: ActionContext): Promise<void> {
   }
 }
 
-/** Defer a task by updating its due date (modal form submission handler) */
+/** Defer a task by updating its due date (params collected by the action dialog) */
 export async function deferTask(ctx: ActionContext): Promise<void> {
   const { record, engine, params } = ctx;
   await engine.update('todo_task', record.id as string, {
@@ -92,7 +92,7 @@ export async function deferTask(ctx: ActionContext): Promise<void> {
   });
 }
 
-/** Set a reminder on a task (modal form submission handler) */
+/** Set a reminder on a task (params collected by the action dialog) */
 export async function setReminder(ctx: ActionContext): Promise<void> {
   const { record, engine, params } = ctx;
   await engine.update('todo_task', record.id as string, {

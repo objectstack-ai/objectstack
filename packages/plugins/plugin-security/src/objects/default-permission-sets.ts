@@ -121,6 +121,9 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       'manage_users',
       'manage_metadata',
       'manage_platform_settings',
+      // [ADR-0111 D9] Sharing administration — gates the sharing-rule surface
+      // and (in the DEPTH extension) non-owner share management.
+      'manage_sharing',
       'setup.access',
       'setup.write',
       'studio.access',

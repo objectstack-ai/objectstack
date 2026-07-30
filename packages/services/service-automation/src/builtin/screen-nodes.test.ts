@@ -107,7 +107,10 @@ describe('script node (#1870 — callable resolution)', () => {
         expect(result.success).toBe(false);
         expect(result.error).toMatch(/explode.*failed|failed.*boom|boom/i);
     });
-it('resolves config.functionName as an alias for function (#1870 DX)', async () => {
+it('canonicalizes a stored `functionName` key to `function` at load (#1870 DX, #3796)', async () => {
+        // `registerFlow` runs the ADR-0087 D2 conversion
+        // 'flow-node-script-config-aliases', so the deprecated alias keeps
+        // working for stored flows while the executor reads `function` only.
         let calledWith: any;
         engine.setFunctionResolver((name) =>
             name === 'helpdesk.aiTriageStub' ? ((c: any) => { calledWith = c.input; return { triaged: true }; }) : undefined);
@@ -118,7 +121,7 @@ it('resolves config.functionName as an alias for function (#1870 DX)', async () 
     });
 
     it('treats actionType invoke_function as a marker, not a function name', async () => {
-        // invoke_function alone (no function/functionName) must NOT try to resolve a
+        // invoke_function alone (no `function`) must NOT try to resolve a
         // function literally named 'invoke_function'; it fails with a clear message.
         engine.registerFlow('script_flow', scriptFlow({ actionType: 'invoke_function' }));
         const r = await engine.execute('script_flow', {} as any);

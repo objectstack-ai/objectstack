@@ -91,20 +91,60 @@ export type DriftOp =
     };
 
 /**
- * Physical schema work the *additive* boot sync is holding back (#3917).
+ * Physical work the boot sync is holding back (#3917).
  *
  * Distinct from {@link DriftOp}: drift is divergence between metadata and an
  * EXISTING column/index that only a deliberate reconcile may resolve, whereas
- * this is the create-table / add-column work `initObjects` performs on its own
- * — captured rather than executed while the driver runs with DDL deferred, so
- * `os migrate plan` can show it and `os migrate apply` can gate it behind the
- * confirmation prompt.
+ * this is the work `initObjects` performs on its own — captured rather than
+ * executed while the driver runs with DDL deferred, so `os migrate plan` can
+ * show it and `os migrate apply` can gate it behind the confirmation prompt.
+ *
+ * The plan's promise is that it shows what `apply` will do, so **anything added
+ * to `initObjects`' physical path has to be representable here** — otherwise an
+ * operator confirms a two-column plan and `apply` additionally rewrites a table.
+ * That is the gap #3954 closed for the datetime convergence; keep it closed.
  */
 export interface PendingSchemaWork {
   table: string;
-  kind: 'create_table' | 'add_columns';
-  /** Declared columns for a create; the missing ones for an add. */
+  kind: PendingSchemaWorkKind;
+  /**
+   * Declared columns for a create; the missing ones for an add; the columns
+   * being converged for the two datetime steps.
+   */
   columns: string[];
+  /**
+   * How much data the step touches, when that is knowable up front and worth
+   * knowing — absent for the additive kinds, which touch none.
+   *
+   * For `normalize_datetime_storage` it is the number of row-writes (summed
+   * across `columns`, since each is its own `UPDATE`). For
+   * `widen_datetime_columns` it is the table's row count, because MySQL's
+   * `ALTER … MODIFY` is a full rebuild holding a metadata lock — which is the
+   * number that decides "now" versus "in a maintenance window".
+   */
+  rows?: number;
+}
+
+/**
+ * What kind of physical work a {@link PendingSchemaWork} entry represents.
+ *
+ * The first two are purely additive and never touch existing rows. The datetime
+ * pair is NOT: `normalize_datetime_storage` rewrites rows in place (the SQLite
+ * canonical-UTC backfill) and `widen_datetime_columns` rebuilds a column (the
+ * MySQL `TIMESTAMP` → `DATETIME(3)` widening) — both from #3912/#3942. They are
+ * rendered under their own heading for that reason: the additive section tells
+ * the operator the work is never data-losing, and that claim must not silently
+ * come to cover a row rewrite.
+ */
+export type PendingSchemaWorkKind =
+  | 'create_table'
+  | 'add_columns'
+  | 'normalize_datetime_storage'
+  | 'widen_datetime_columns';
+
+/** True for the kinds that rewrite or rebuild existing data rather than adding to it. */
+export function isInPlaceSchemaWork(kind: PendingSchemaWorkKind): boolean {
+  return kind === 'normalize_datetime_storage' || kind === 'widen_datetime_columns';
 }
 
 /** Ops that act on an index rather than a column — reconciled without a table rebuild. */
