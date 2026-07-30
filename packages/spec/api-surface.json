@@ -2627,6 +2627,7 @@
     "HttpFindQueryParamsSchema (const)",
     "HttpMethod (type)",
     "HttpStatusCode (type)",
+    "HttpStatusErrorCodeMap (const)",
     "I18nProtocol (interface)",
     "IMPORT_JOB_MAX_ROWS (const)",
     "IdRequest (type)",
@@ -3081,7 +3082,8 @@
     "WorkflowTransitionResponseSchema (const)",
     "getAuthEndpointUrl (function)",
     "getDefaultRouteRegistrations (function)",
-    "readServiceSelfInfo (function)"
+    "readServiceSelfInfo (function)",
+    "standardErrorCodeForHttpStatus (function)"
   ],
   "./ui": [
     "ACTION_LOCATIONS (const)",
