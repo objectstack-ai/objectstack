@@ -202,6 +202,7 @@ describe('an unexpected FAULT is a 500', () => {
 
         expect(response.status).toBe(403);
         expect(response.body.error.message).toBe('Record is outside your sharing scope');
-        expect(response.body.error.details?.code).toBe('FORBIDDEN');
+        // [#3842] The thrower's own code reaches the declared field now.
+        expect(response.body.error.code).toBe('FORBIDDEN');
     });
 });

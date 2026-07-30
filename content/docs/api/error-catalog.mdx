@@ -5,7 +5,7 @@ description: Complete reference for all ObjectStack error codes with causes, fix
 
 # Error Code Catalog
 
-ObjectStack uses a structured error system with **9 error categories** and **51 standardized error codes**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+ObjectStack uses a structured error system with **9 error categories** and **53 standardized error codes**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/errors.zod.ts`  
@@ -14,6 +14,8 @@ ObjectStack uses a structured error system with **9 error categories** and **51 
 
 <Callout type="warn">
 **Spec vs. wire format:** The codes below are `StandardErrorCode` — the standardized, lowercase snake_case contract that plugin/hook authors should throw with (see [Server-Side Error Handling](/docs/api/error-handling-server)). The kernel REST server (`@objectstack/rest`) that serves `/api/v1/data/*` today emits a flatter envelope with SCREAMING_SNAKE_CASE codes instead — e.g. `VALIDATION_FAILED`, `PERMISSION_DENIED`, `RECORD_NOT_FOUND`, `CONCURRENT_UPDATE`, `ERR_DATASOURCE_UNAVAILABLE` — not the codes in this catalog. See the [API Overview](/docs/api#error-handling) for both wire formats in use and [Wire Format](/docs/api/wire-format#7-error-response-format) for JSON examples.
+
+Reconciling the two vocabularies is [#3841](https://github.com/objectstack-ai/objectstack/issues/3841), still open. In the meantime the runtime dispatcher emits whichever code its producer already used (`PERMISSION_DENIED`, `VALIDATION_FAILED`, `unauthenticated`, …) and falls back to a `StandardErrorCode` from this catalog when a branch has no code of its own — `HttpStatusErrorCodeMap` in `@objectstack/spec/api` is the single place that mapping is spelled.
 </Callout>
 
 ---
@@ -263,6 +265,25 @@ ObjectStack uses a structured error system with **9 error categories** and **51 
 
 ---
 
+## Request Errors (405/428)
+
+Added in #3842 so `standardErrorCodeForHttpStatus` can name every status the
+runtime actually returns. Without them a `405` would fall into the generic 4xx
+bucket and be reported as a validation failure.
+
+### `method_not_allowed`
+**Cause:** The route exists but does not serve this HTTP method.  
+**Fix:** Use the method named in the response's `Allow` header.  
+**Retry:** `no_retry`
+
+### `precondition_required`
+**Cause:** The request is missing a precondition the route requires — most often
+an environment scope (no `X-Environment-Id` header and no hostname mapping).  
+**Fix:** Send the missing header, or address the environment-scoped URL form.  
+**Retry:** `no_retry`
+
+---
+
 ## Rate Limit Errors (429)
 
 ### `rate_limit_exceeded`
@@ -447,10 +468,9 @@ Two naming details matter here:
   `if (apiError.fields)` tests "this failure is field-anchored".
 - `apiError.code` is always the semantic code as a **string**. The numeric HTTP
   status is on `apiError.httpStatus` and nowhere else. This holds for both wire
-  formats: the flat REST envelope carries the code at the top level, the runtime
-  dispatcher's wrapped envelope carries it in `error.details.code` (its
-  `error.code` is the HTTP status), and the client normalizes both before
-  throwing.
+  formats: the flat REST envelope carries the code at the top level and the
+  runtime dispatcher's wrapped envelope carries it in `error.code`, with the
+  status alongside it in `error.httpStatus`.
 </Callout>
 
 ### TypeScript Example

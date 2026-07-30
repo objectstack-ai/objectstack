@@ -91,16 +91,21 @@ describe('#3918 — HttpDispatcher.errorFromThrown maps VALIDATION_FAILED', () =
         const res = await publishPackage(makeValidationError());
 
         expect(res.status).toBe(400);
-        expect(res.body.error.code).toBe(400);
+        expect(res.body.error.httpStatus).toBe(400);
+    });
+
+    it('reports VALIDATION_FAILED in `error.code` (#3842)', async () => {
+        // Was `details.code`, because `error.code` held the status. The string
+        // is unchanged — this moved the field, not the vocabulary.
+        const res = await publishPackage(makeValidationError());
+
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
     });
 
     it('passes `fields[]` through in `details` so the UI can anchor each error', async () => {
         const res = await publishPackage(makeValidationError());
 
-        expect(res.body.error.details).toEqual({
-            code: 'VALIDATION_FAILED',
-            fields: FIELDS,
-        });
+        expect(res.body.error.details).toEqual({ fields: FIELDS });
     });
 
     it('keeps the human message intact (400 never reaches the 5xx sanitiser)', async () => {
@@ -123,14 +128,14 @@ describe('#3918 — HttpDispatcher.errorFromThrown maps VALIDATION_FAILED', () =
         expect(res.body.error.details.fields).toEqual(err.fields);
     });
 
-    it('pins `details.code` to VALIDATION_FAILED when matched by `name` alone', async () => {
+    it('pins `error.code` to VALIDATION_FAILED when matched by `name` alone', async () => {
         const err = new Error('name is required');
         err.name = 'ValidationError';
         (err as any).fields = [{ field: 'name', code: 'required', message: 'name is required' }];
         const res = await publishPackage(err);
 
         expect(res.status).toBe(400);
-        expect(res.body.error.details.code).toBe('VALIDATION_FAILED');
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
     });
 
     it('defaults `fields` to [] when the error carries none', async () => {
@@ -162,8 +167,10 @@ describe('#3918 — HttpDispatcher.errorFromThrown maps VALIDATION_FAILED', () =
         const res = await publishPackage(err);
 
         expect(res.status).toBe(500);
+        // [#3842] `STORAGE_FAILURE` is the error's own code and now reaches the
+        // declared field instead of `details`; `issues` stays context.
+        expect(res.body.error.code).toBe('STORAGE_FAILURE');
         expect(res.body.error.details).toEqual({
-            code: 'STORAGE_FAILURE',
             issues: [{ path: 'a', message: 'b', code: 'c' }],
         });
         expect(res.body.error.details.fields).toBeUndefined();
@@ -242,16 +249,22 @@ describe('#3918 — dispatcher-plugin errorResponseBase maps VALIDATION_FAILED',
 
         expect(res.statusCode).toBe(400);
         expect(res.body.success).toBe(false);
-        expect(res.body.error.code).toBe(400);
+        expect(res.body.error.httpStatus).toBe(400);
+    });
+
+    it('reports VALIDATION_FAILED in `error.code` — same as the returned exit (#3842)', async () => {
+        // This exit used to drop a thrown error's code entirely: `errorResponseBase`
+        // never read `err.code`, because the field it would have gone in held the
+        // status. The two exits of the same surface now agree.
+        const res = await postAnalyticsQuery(makeValidationError());
+
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
     });
 
     it('carries `fields[]` — the body used to be `{message, code}` only', async () => {
         const res = await postAnalyticsQuery(makeValidationError());
 
-        expect(res.body.error.details).toEqual({
-            code: 'VALIDATION_FAILED',
-            fields: FIELDS,
-        });
+        expect(res.body.error.details).toEqual({ fields: FIELDS });
     });
 
     it('keeps the human message — the 500 fallback used to replace it', async () => {
@@ -279,11 +292,18 @@ describe('#3918 — dispatcher-plugin errorResponseBase maps VALIDATION_FAILED',
         expect(res.body.error.details.fields).toEqual(FIELDS);
     });
 
-    it('leaves non-validation errors with the exact two-key body they had', async () => {
+    it('gives a codeless error the derived code and nothing else', async () => {
+        // Was `{ message, code: 500 }` exactly. A plain `Error` carries no
+        // semantic code, so #3842 derives one from the status; `details` stays
+        // absent rather than becoming an empty object.
         const res = await postAnalyticsQuery(new Error('analytics engine unavailable'));
 
         expect(res.statusCode).toBe(500);
-        expect(res.body.error).toEqual({ message: 'analytics engine unavailable', code: 500 });
+        expect(res.body.error).toEqual({
+            code: 'internal_error',
+            message: 'analytics engine unavailable',
+            httpStatus: 500,
+        });
     });
 });
 

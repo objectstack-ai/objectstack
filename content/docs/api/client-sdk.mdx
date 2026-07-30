@@ -522,9 +522,12 @@ try {
 `error.code` is always the **semantic** code as a string — the numeric HTTP
 status lives on `error.httpStatus` and nowhere else. This holds regardless of
 which server surface answered: the REST server replies with a flat
-`{ error, code, fields }` body while the runtime dispatcher replies with a
-wrapped `{ success, error: { message, code, details } }` body whose `error.code`
-is the HTTP status, and the client normalizes both before throwing.
+`{ error, code, fields }` body and the runtime dispatcher replies with a wrapped
+`{ success, error: { code, message, httpStatus, details } }` body, and the
+client normalizes both before throwing. (Dispatcher bodies from servers older
+than #3842 put the status in `error.code` and the semantic code in
+`error.details.code`; the client still reads those, so an SDK newer than the
+server it talks to behaves the same.)
 
 ### Per-field validation errors
 

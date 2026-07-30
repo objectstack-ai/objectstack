@@ -46,13 +46,9 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         if (method === 'GET' && subPath === '/ai/agents') {
             return { handled: true, response: { status: 200, body: { agents: [] } } };
         }
-        return {
-            handled: true,
-            response: {
-                status: 404,
-                body: { success: false, error: { message: 'AI service is not configured', code: 404 } },
-            },
-        };
+        // [#3842] Was a hand-rolled envelope with the status in `code`. It has
+        // no header or shape of its own, so it is simply the shared exit now.
+        return { handled: true, response: deps.error('AI service is not configured', 404) };
     }
 
     // The AI service exposes route definitions via buildAIRoutes.
@@ -81,13 +77,7 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
     }> | undefined;
 
     if (!routes) {
-        return {
-            handled: true,
-            response: {
-                status: 503,
-                body: { success: false, error: { message: 'AI service routes not yet initialized', code: 503 } },
-            },
-        };
+        return { handled: true, response: deps.error('AI service routes not yet initialized', 503) };
     }
 
     for (const route of routes) {

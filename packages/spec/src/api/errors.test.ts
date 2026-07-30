@@ -7,6 +7,8 @@ import {
   EnhancedApiErrorSchema,
   ErrorResponseSchema,
   ErrorHttpStatusMap,
+  HttpStatusErrorCodeMap,
+  standardErrorCodeForHttpStatus,
 } from './errors.zod';
 
 describe('ErrorCategory', () => {
@@ -220,5 +222,51 @@ describe('ErrorHttpStatusMap', () => {
     expect(ErrorHttpStatusMap['server']).toBe(500);
     expect(ErrorHttpStatusMap['external']).toBe(502);
     expect(ErrorHttpStatusMap['maintenance']).toBe(503);
+  });
+});
+
+describe('HttpStatusErrorCodeMap / standardErrorCodeForHttpStatus (#3842)', () => {
+  it('names each status the runtime actually returns', () => {
+    expect(standardErrorCodeForHttpStatus(400)).toBe('validation_error');
+    expect(standardErrorCodeForHttpStatus(401)).toBe('unauthenticated');
+    expect(standardErrorCodeForHttpStatus(403)).toBe('permission_denied');
+    expect(standardErrorCodeForHttpStatus(404)).toBe('resource_not_found');
+    expect(standardErrorCodeForHttpStatus(405)).toBe('method_not_allowed');
+    expect(standardErrorCodeForHttpStatus(409)).toBe('resource_conflict');
+    expect(standardErrorCodeForHttpStatus(428)).toBe('precondition_required');
+    expect(standardErrorCodeForHttpStatus(500)).toBe('internal_error');
+    expect(standardErrorCodeForHttpStatus(501)).toBe('not_implemented');
+    expect(standardErrorCodeForHttpStatus(503)).toBe('service_unavailable');
+  });
+
+  it('is total — an unmapped status still yields a code', () => {
+    // `ApiErrorSchema.code` is REQUIRED, so a producer that knows only the
+    // status must always be able to fill it. Falling back per class rather than
+    // to one catch-all keeps a 4xx from being reported as a server fault.
+    expect(standardErrorCodeForHttpStatus(415)).toBe('validation_error');
+    expect(standardErrorCodeForHttpStatus(507)).toBe('internal_error');
+  });
+
+  it('only ever yields catalogued codes', () => {
+    // The whole claim of the map: a derived code is a StandardErrorCode, not an
+    // invented string. Guards the map's values and both fallbacks in one pass.
+    const derived = [
+      ...Object.values(HttpStatusErrorCodeMap),
+      standardErrorCodeForHttpStatus(415),
+      standardErrorCodeForHttpStatus(507),
+    ];
+    for (const code of derived) {
+      expect(StandardErrorCode.safeParse(code).success).toBe(true);
+    }
+  });
+
+  it('mirrors ErrorHttpStatusMap where the two overlap', () => {
+    // The pair is only auditable if it round-trips: every category's status maps
+    // back to a code, and the obvious ones agree on meaning.
+    for (const status of Object.values(ErrorHttpStatusMap)) {
+      expect(StandardErrorCode.safeParse(standardErrorCodeForHttpStatus(status)).success).toBe(true);
+    }
+    expect(standardErrorCodeForHttpStatus(ErrorHttpStatusMap['authorization'])).toBe('permission_denied');
+    expect(standardErrorCodeForHttpStatus(ErrorHttpStatusMap['not_found'])).toBe('resource_not_found');
   });
 });

@@ -98,14 +98,24 @@ export interface DomainHandlerDeps {
     getRequestKernelService(name: string): Promise<any>;
     /** Standard success envelope. */
     success(data: any, meta?: any): { status: number; body: any };
-    /** Standard error envelope. */
-    error(message: string, code?: number, details?: any): { status: number; body: any };
+    /**
+     * Standard error envelope: `{ success: false, error: { code, message,
+     * httpStatus, details? } }`.
+     *
+     * The second argument is the HTTP STATUS (#3842 renamed it from `code`,
+     * which is what it was misleadingly called while it was also what landed in
+     * `error.code`). `error.code` is the semantic string: pass yours as
+     * `details.code` and it is promoted into the field, otherwise one is derived
+     * from the status. See `./error-envelope.ts`.
+     */
+    error(message: string, httpStatus?: number, details?: any): { status: number; body: any };
     /** Standard ROUTE_NOT_FOUND envelope (404 + discovery hint). */
     routeNotFound(route: string): { status: number; body: any };
     /**
      * Error envelope derived from a thrown value: honours `.status` /
-     * `.statusCode`, carries spec-validation `issues` and `.code` through as
-     * details (the ADR-0033 publish surface relies on field-anchored 422s).
+     * `.statusCode`, carries spec-validation `issues` through as details, and
+     * lifts the error's own `.code` into `error.code` (the ADR-0033 publish
+     * surface relies on field-anchored 422s).
      */
     errorFromThrown(e: any, fallbackStatus?: number): { status: number; body: any };
     /** Active organization id from the request session (undefined if anonymous / no auth). */

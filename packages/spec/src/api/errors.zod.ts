@@ -96,11 +96,15 @@ export const StandardErrorCode = z.enum([
   'duplicate_record',           // Record already exists
   'lock_conflict',              // Record is locked by another process
   
+  // Request Errors (405/428)
+  'method_not_allowed',         // Route exists but the HTTP method is not supported
+  'precondition_required',      // Request is missing a required precondition (e.g. environment scope)
+
   // Rate Limiting (429)
   'rate_limit_exceeded',        // Too many requests
   'quota_exceeded',             // API quota exceeded
   'concurrent_limit_exceeded',  // Too many concurrent requests
-  
+
   // Server Errors (500)
   'internal_error',             // Generic internal server error
   'database_error',             // Database operation failed
@@ -139,6 +143,58 @@ export const ErrorHttpStatusMap: Record<string, number> = {
   external: 502,
   maintenance: 503,
 };
+
+/**
+ * The mirror image of {@link ErrorHttpStatusMap}: the {@link StandardErrorCode}
+ * that names an HTTP status when the producer has no more specific code of its
+ * own. Declared next to the enum it draws from so the pair stays auditable —
+ * every value here MUST be a member of `StandardErrorCode`, which is what makes
+ * a derived code a catalogued one rather than an invented string.
+ *
+ * Why a *derived* code exists at all (#3842): `ApiErrorSchema.code` is a
+ * REQUIRED semantic string, so a producer that knows only "this failed with
+ * 503" still has to fill it. Before this map the runtime dispatcher filled it
+ * with the status *number* and parked any real code in `details`, which put a
+ * number in the field callers branch on and gave the same condition three
+ * different spellings (`details.code`, `details.type`, `error.type`).
+ *
+ * A specific code always wins — this is the floor, not the ceiling. `403 +
+ * PASSWORD_EXPIRED` stays `PASSWORD_EXPIRED`; only a bare `403` becomes
+ * `permission_denied`.
+ *
+ * Vocabulary note (#3841): the values are `StandardErrorCode`'s lowercase
+ * snake_case because that is the only error vocabulary the spec declares and
+ * `content/docs/api/error-catalog.mdx` documents. Much of the wire is
+ * SCREAMING_SNAKE and #3841 owns reconciling the two; this map is deliberately
+ * the ONE place a derived code is spelled, so that decision is a one-file sweep
+ * rather than a hunt through every producer.
+ */
+export const HttpStatusErrorCodeMap: Record<number, StandardErrorCode> = {
+  400: 'validation_error',
+  401: 'unauthenticated',
+  403: 'permission_denied',
+  404: 'resource_not_found',
+  405: 'method_not_allowed',
+  409: 'resource_conflict',
+  428: 'precondition_required',
+  429: 'rate_limit_exceeded',
+  500: 'internal_error',
+  501: 'not_implemented',
+  502: 'external_service_error',
+  503: 'service_unavailable',
+  504: 'timeout',
+};
+
+/**
+ * The {@link StandardErrorCode} for an HTTP status, falling back to the
+ * client-error / server-error bucket for a status {@link HttpStatusErrorCodeMap}
+ * does not name (e.g. `415` → `validation_error`, `507` → `internal_error`).
+ * Total by construction: a producer can always fill a required `code`.
+ */
+export function standardErrorCodeForHttpStatus(status: number): StandardErrorCode {
+  return HttpStatusErrorCodeMap[status]
+    ?? (status >= 500 ? 'internal_error' : 'validation_error');
+}
 
 /**
  * Retry Strategy Enum

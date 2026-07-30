@@ -2,8 +2,10 @@
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { DispatcherErrorCode } from '@objectstack/spec/api';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
+import { buildApiError } from './error-envelope.js';
 import {
     buildSecurityHeaders,
     type SecurityHeadersOptions,
@@ -340,12 +342,14 @@ function sendResultBase(
     applySecurityHeaders();
     res.json({
         success: false,
-        error: {
+        error: buildApiError({
+            code: DispatcherErrorCode.enum.ROUTE_NOT_FOUND,
             message: 'Not Found',
-            code: 404,
-            type: 'ROUTE_NOT_FOUND',
-            hint: 'No handler matched this request. Check the API discovery endpoint for available routes.',
-        },
+            httpStatus: 404,
+            extra: {
+                hint: 'No handler matched this request. Check the API discovery endpoint for available routes.',
+            },
+        }),
     });
 }
 
@@ -390,11 +394,11 @@ function sendResultBase(
  */
 function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, string>): void {
     const validation = validationFailureDetails(err);
-    const code =
+    const httpStatus =
         (typeof err?.status === 'number' ? err.status : undefined) ??
         (typeof err?.statusCode === 'number' ? err.statusCode : undefined) ??
         (validation ? VALIDATION_FAILED_STATUS : 500);
-    res.status(code);
+    res.status(httpStatus);
     if (securityHeaders) {
         for (const [k, v] of Object.entries(securityHeaders)) {
             res.header(k, v);
@@ -404,7 +408,7 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
     // wrapper can hand it to errorReporter on 5xx. Handlers catch the
     // error and call us here instead of re-throwing, so this is the
     // only place we still have it.
-    if (code >= 500) {
+    if (httpStatus >= 500) {
         try {
             (res as any).__obsRecordedError = err;
         } catch {
@@ -413,12 +417,23 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
     }
     const raw = err?.message;
     const message =
-        code >= 500 && looksLikeInternalErrorLeak(raw)
+        httpStatus >= 500 && looksLikeInternalErrorLeak(raw)
             ? INTERNAL_ERROR_MESSAGE
             : raw || 'Internal Server Error';
+    // [#3842] A thrown error's own `.code` finally has somewhere to go. This
+    // exit used to drop it outright — `HttpDispatcher.errorFromThrown` at least
+    // parked it in `details` — because `error.code` was occupied by the status.
+    // Both exits now put it in the declared field, so the same SDK method
+    // reports the same code whichever one answered. `validation` last, so
+    // `VALIDATION_FAILED` wins for an error matched by `name` alone, exactly as
+    // it does in `errorFromThrown`.
+    const details =
+        err?.code || validation
+            ? { ...(err?.code ? { code: err.code } : {}), ...(validation ?? {}) }
+            : undefined;
     res.json({
         success: false,
-        error: { message, code, ...(validation ? { details: validation } : {}) },
+        error: buildApiError({ message, httpStatus, details }),
     });
 }
 

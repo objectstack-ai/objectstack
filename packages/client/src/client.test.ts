@@ -1478,13 +1478,30 @@ describe('HTTP error shaping — envelope normalisation', () => {
     /** What @objectstack/rest's `mapDataError` puts on the wire. */
     const FLAT = { error: 'Validation failed', code: 'VALIDATION_FAILED', fields: FIELDS };
 
-    /** What the runtime dispatcher puts on the wire since #3918. */
-    const WRAPPED = {
+    /**
+     * What the runtime dispatcher put on the wire between #3918 and #3842: the
+     * HTTP status in `code`, the real code parked in `details`. Kept as a
+     * fixture because the SDK must keep reading it — a client build talks to
+     * whatever server version it is pointed at, so this is a live legacy-server
+     * shape, not a stale test.
+     */
+    const WRAPPED_LEGACY = {
         success: false,
         error: {
             message: 'Validation failed',
             code: 400,
             details: { code: 'VALIDATION_FAILED', fields: FIELDS },
+        },
+    };
+
+    /** What the runtime dispatcher puts on the wire since #3842. */
+    const WRAPPED = {
+        success: false,
+        error: {
+            code: 'VALIDATION_FAILED',
+            message: 'Validation failed',
+            httpStatus: 400,
+            details: { fields: FIELDS },
         },
     };
 
@@ -1505,6 +1522,31 @@ describe('HTTP error shaping — envelope normalisation', () => {
         expect(caught.code).not.toBe(400);
         // The status is still available — it just isn't `code`.
         expect(caught.httpStatus).toBe(400);
+    });
+
+    it('reads the pre-#3842 wrapped shape identically (older server, newer SDK)', async () => {
+        // #3842 cured this at the producer, but an SDK build talks to whatever
+        // server it is pointed at, so the `details.code` hop must keep working.
+        const { client } = createMockClient(WRAPPED_LEGACY, 400);
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.code).toBe('VALIDATION_FAILED');
+        expect(caught.fields).toEqual(FIELDS);
+        expect(caught.httpStatus).toBe(400);
+    });
+
+    it('reports the same code from all three envelopes for the same failure', async () => {
+        // The asymmetry #3636 → #3675 → #3689 → #3842 has been closing: which
+        // surface answered must stop being observable to the caller.
+        const codes = await Promise.all(
+            [FLAT, WRAPPED, WRAPPED_LEGACY].map((body) =>
+                createMockClient(body, 400).client.data
+                    .delete('pm_base', 'rec_1')
+                    .catch((e: any) => e.code),
+            ),
+        );
+
+        expect(codes).toEqual(['VALIDATION_FAILED', 'VALIDATION_FAILED', 'VALIDATION_FAILED']);
     });
 
     it('exposes `fields[]` at the same place for BOTH envelopes', async () => {
@@ -1551,7 +1593,9 @@ describe('HTTP error shaping — envelope normalisation', () => {
         const { client } = createMockClient(WRAPPED, 400);
         const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
 
-        expect(caught.details).toEqual({ code: 'VALIDATION_FAILED', fields: FIELDS });
+        // Post-#3842 the code is no longer duplicated in here — it is the
+        // `error.code` the caller branches on, and `details` is context only.
+        expect(caught.details).toEqual({ fields: FIELDS });
     });
 
     it('still honours a top-level `details` when the server sends one', async () => {

@@ -4437,17 +4437,25 @@ export class ObjectStackClient {
         //   @objectstack/rest, flat:
         //     { error, code: 'VALIDATION_FAILED', fields: [...] }
         //   runtime dispatcher, wrapped:
-        //     { success: false, error: { message, code: 400,
-        //         details: { code: 'VALIDATION_FAILED', fields: [...] } } }
+        //     { success: false, error: { code: 'VALIDATION_FAILED', message,
+        //         httpStatus: 400, details: { fields: [...] } } }
         //
-        // Note `error.code` in the WRAPPED form is the HTTP status, not a
-        // semantic code. Reading it straight into `err.code` handed callers the
-        // number 400 where the flat form handed them 'VALIDATION_FAILED', so the
-        // branch our own docs teach —
+        // `error.code` in the WRAPPED form used to be the HTTP STATUS, with the
+        // real code parked in `error.details.code`. Reading it straight into
+        // `err.code` handed callers the number 400 where the flat form handed
+        // them 'VALIDATION_FAILED', so the branch our own docs teach —
         //   `if (err.code === 'VALIDATION_FAILED') err.fields.forEach(…)`
-        // — simply never matched on a dispatcher-served surface. #3918 put the
-        // field list on the wire for those routes; this is what lets a caller
-        // reach it without knowing which surface answered.
+        // — simply never matched on a dispatcher-served surface. #3842 fixed
+        // that at the producer (Prime Directive #12): `error.code` is the
+        // semantic string on both surfaces now, and the number has its own
+        // `error.httpStatus`.
+        //
+        // The `details.code` hop stays in the chain regardless, and is NOT debt:
+        // an SDK build talks to whatever server version it is pointed at, so a
+        // client newer than its server must still find the code where that
+        // server put it. Same reasoning as the console's two-dialect read in
+        // objectui#2869. It is now a legacy-server fallback rather than the
+        // primary path, so the order below is unchanged but its meaning is.
         //
         // So: `err.code` is always the semantic STRING (the numeric status is on
         // `err.httpStatus`, where it always was), and `err.fields` is always the

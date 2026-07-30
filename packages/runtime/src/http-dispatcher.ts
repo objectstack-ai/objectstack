@@ -6,7 +6,8 @@ import {
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName } from '@objectstack/spec/system';
-import { readServiceSelfInfo } from '@objectstack/spec/api';
+import { readServiceSelfInfo, DispatcherErrorCode } from '@objectstack/spec/api';
+import { apiErrorResponse } from './error-envelope.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
 import * as actionExec from './action-execution.js';
@@ -465,33 +466,43 @@ export class HttpDispatcher {
      * Scoped to 5xx: a 4xx message is a deliberate business/validation answer
      * (`Path must be /actions/:object/:action`, a hook's own `throw`, a
      * `saveMetaItem` field error) and must reach the caller intact. `details`
-     * is left alone — it carries structured `code`/`issues` the UI maps to
-     * fields, never free-form driver prose.
+     * is left alone apart from the code promotion below — it carries structured
+     * `issues`/`fields` the UI maps to fields, never free-form driver prose.
      *
      * The unsanitised error is not lost: callers that THREW still hand the
      * original to `errorReporter` via `__obsRecordedError`, and every 5xx is
      * logged server-side.
+     *
+     * [#3842] The second parameter is the HTTP status and always was — it is now
+     * named for what it is, and lands in `error.httpStatus` instead of
+     * `error.code`, which goes back to being the semantic string
+     * `ApiErrorSchema` declares. Call sites are unchanged: a site that already
+     * expressed its real code as `details.code` gets it promoted into
+     * `error.code` by the shared builder, and a site that has none gets one
+     * derived from the status. See `./error-envelope.ts`.
      */
-    private error(message: string, code: number = 500, details?: any) {
+    private error(message: string, httpStatus: number = 500, details?: any) {
         const safe =
-            code >= 500 && looksLikeInternalErrorLeak(message)
+            httpStatus >= 500 && looksLikeInternalErrorLeak(message)
                 ? INTERNAL_ERROR_MESSAGE
                 : message;
-        return {
-            status: code,
-            body: { success: false, error: { message: safe, code, details } }
-        };
+        return apiErrorResponse({ message: safe, httpStatus, details });
     }
 
     /**
      * Build an error response from a THROWN service/protocol error, preserving
      * the error's own HTTP `status` and — critically — any structured `issues`
      * array (e.g. spec-validation `{ path, message, code }[]` from
-     * `protocol.saveMetaItem`). The plain `error(msg, code)` path collapses a
+     * `protocol.saveMetaItem`). The plain `error(msg, status)` path collapses a
      * validation failure to a single message, so the UI can only show a generic
-     * banner; carrying `issues` (and the semantic `code`) in `details` lets it
-     * map each error back to the offending field. Falls back to `fallbackStatus`
-     * and behaves exactly like `error()` for errors that carry neither.
+     * banner; carrying `issues` in `details` lets it map each error back to the
+     * offending field. Falls back to `fallbackStatus` and behaves exactly like
+     * `error()` for errors that carry neither.
+     *
+     * [#3842] The error's own `.code` still travels as `details.code` from here,
+     * which is the carrier `buildApiError` promotes into `error.code` — so it
+     * ends up in the declared field without this method needing to know how the
+     * envelope is assembled.
      *
      * [#3918] A record-level `ValidationError` is the third structured shape,
      * and it used to fall through BOTH branches: it carries no `.status` (so a
@@ -526,21 +537,24 @@ export class HttpDispatcher {
 
     /**
      * 404 Route Not Found — no route is registered for this path.
+     *
+     * [#3842] `ROUTE_NOT_FOUND` used to sit in `error.type` — a THIRD spelling,
+     * sibling to a numeric `error.code` — because `code` was taken by the status.
+     * It is now the `code`, spelled from the spec's own `DispatcherErrorCode` so
+     * the string has exactly one definition. `route` and `hint` stay siblings:
+     * `DispatcherErrorResponseSchema` declares them as part of this error, not as
+     * `details` context.
      */
     private routeNotFound(route: string) {
-        return {
-            status: 404,
-            body: {
-                success: false,
-                error: {
-                    code: 404,
-                    message: `Route Not Found: ${route}`,
-                    type: 'ROUTE_NOT_FOUND' as const,
-                    route,
-                    hint: 'No route is registered for this path. Check the API discovery endpoint for available routes.',
-                },
+        return apiErrorResponse({
+            code: DispatcherErrorCode.enum.ROUTE_NOT_FOUND,
+            message: `Route Not Found: ${route}`,
+            httpStatus: 404,
+            extra: {
+                route,
+                hint: 'No route is registered for this path. Check the API discovery endpoint for available routes.',
             },
-        };
+        });
     }
 
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
@@ -798,10 +812,15 @@ export class HttpDispatcher {
                 return null;
             }
 
+            // [#3842] `PROJECT_MEMBERSHIP_REQUIRED` was parked in `details.type`
+            // — the fourth site, and the only one to use that spelling — because
+            // `error.code` held the status. It travels as `details.code` now, the
+            // one carrier `buildApiError` promotes into `error.code`; the two
+            // genuine context fields stay in `details`.
             return this.error(
                 `Forbidden: user ${userId} is not a member of project ${environmentId}`,
                 403,
-                { environmentId, userId, type: 'PROJECT_MEMBERSHIP_REQUIRED' },
+                { code: 'PROJECT_MEMBERSHIP_REQUIRED', environmentId, userId },
             );
         } catch (err) {
             // Control-plane lookup failure — log and fail open rather than
