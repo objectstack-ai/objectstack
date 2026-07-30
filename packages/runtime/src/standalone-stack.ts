@@ -68,9 +68,15 @@ export const StandaloneStackConfigSchema = z.object({
      * Project root directory. When set (typically by the CLI after locating
      * `objectstack.config.ts`), the default sqlite database is placed under
      * `<projectRoot>/.objectstack/data/standalone.db` instead of the global
-     * `~/.objectstack/data/standalone.db`. This keeps per-project data
-     * scoped to the project folder so different examples / apps don't
+     * `~/.objectstack/data/standalone.db`, and the metadata FileSystemRepository
+     * roots at `<projectRoot>/.objectstack/metadata`. This keeps per-project
+     * data scoped to the project folder so different examples / apps don't
      * share a single database by accident.
+     *
+     * Both halves matter: until #4065 only the database honoured it while the
+     * metadata repository still used `process.cwd()`, so a boot whose
+     * projectRoot pointed elsewhere silently wrote `.objectstack/metadata/`
+     * into the current directory.
      *
      * Explicit `databaseUrl` / `OS_DATABASE_URL` / `OS_HOME` still take
      * precedence over this default.
@@ -341,6 +347,14 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             artifactWatch: process.env.NODE_ENV !== 'production',
             environmentId,
             artifactSource: { mode: 'local-file', path: artifactPath },
+            // `projectRoot` has to reach the metadata repository too. It already
+            // redirects the default sqlite database; without this line the
+            // FileSystemRepository still rooted at `process.cwd()`, so one
+            // "project root" meant two different directories and a boot pointed
+            // at some other project wrote `.objectstack/metadata/` into whatever
+            // directory the process happened to be standing in (#4065). Omitted
+            // when unset so the plugin keeps its own cwd default.
+            ...(cfg.projectRoot ? { rootDir: cfg.projectRoot } : {}),
         }),
         new ObjectQLPlugin({ environmentId }),
     ];

@@ -4,11 +4,13 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { ObjectQLPlugin } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { MessagingServicePlugin, MessagingService } from '@objectstack/service-messaging';
+import { SysNotification } from '@objectstack/platform-objects';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
+import { AppPlugin } from './app-plugin.js';
 
 /**
  * End-to-end regression for framework #3362 (`#3354 not effective on hono`).
@@ -67,13 +69,27 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logLevel: 'silent' });
-    // An in-memory driver backs persistence; ObjectQL (registered after the
+    // In-memory SQLite backs persistence; ObjectQL (registered after the
     // driver so it discovers it) provides `objectql` + `data` + `manifest`;
     // MessagingServicePlugin registers the `notification` service the dispatcher
     // resolves and owns the inbox tables. Inline delivery (reliableDelivery:false)
     // writes the inbox row synchronously so `emit()` is observable immediately.
-    await kernel.use(new DriverPlugin(new InMemoryDriver()));
+    await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
     await kernel.use(new ObjectQLPlugin());
+    // The L2 event object `sys_notification` is a PLATFORM object, declared in
+    // `@objectstack/platform-objects` — MessagingServicePlugin writes it but
+    // does not declare it, so this lean kernel (no platform-objects boot) has to
+    // register it or the engine has no schema to issue DDL from. Under the
+    // mingo driver this suite used before #4065 the omission was invisible: it
+    // auto-creates a table on first touch, so a missing declaration read as
+    // working. Registering the REAL object rather than a hand-copied stand-in
+    // keeps one schema (Prime Directive #12).
+    await kernel.use(
+      new AppPlugin({
+        manifest: { id: 'com.test.notifications-e2e', name: 'Notifications E2E', version: '1.0.0' },
+        objects: [SysNotification],
+      } as never),
+    );
     await kernel.use(new MessagingServicePlugin({ reliableDelivery: false }));
     await kernel.use(fakeAuthPlugin());
     // port 0 → OS-assigned free port; resolved via getPort() after listening.

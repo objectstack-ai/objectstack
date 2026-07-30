@@ -11,6 +11,10 @@ import { hasPlatformObjectPrefix } from './system/constants/platform-object-name
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
 import type { ConversionNotice } from './conversions/types.js';
+import {
+  lintUnknownAuthoringKeys,
+  formatUnknownAuthoringKey,
+} from './data/authoring-key-lint';
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
@@ -1090,6 +1094,28 @@ function warnConversionNotice(notice: ConversionNotice): void {
   );
 }
 
+const warnedUnknownAuthoringKeys = new Set<string>();
+
+/**
+ * Surface every authored key `ObjectSchema` / `FieldSchema` is about to discard
+ * (#3786).
+ *
+ * Same seam and same posture as {@link warnConversionNotice}: it runs pre-parse,
+ * because the parse is what eats the key, and it only WARNS — these two schemas
+ * are the most-authored surfaces in the protocol, so rejecting is a scheduled
+ * migration (#4001's strict tiers), not something to slip in behind a lint.
+ *
+ * Runs in both strict and non-strict mode: the key is dropped either way, so the
+ * author deserves to hear about it either way.
+ */
+function warnUnknownAuthoringKeys(raw: unknown): void {
+  for (const finding of lintUnknownAuthoringKeys(raw)) {
+    if (warnedUnknownAuthoringKeys.has(finding.path)) continue;
+    warnedUnknownAuthoringKeys.add(finding.path);
+    console.warn(`defineStack: ${formatUnknownAuthoringKey(finding)}`);
+  }
+}
+
 export function defineStack(
   config: ObjectStackDefinitionInput,
   options?: DefineStackOptions,
@@ -1105,6 +1131,10 @@ export function defineStack(
   const normalized = normalizeStackInput(config as Record<string, unknown>, {
     onConversionNotice: warnConversionNotice,
   });
+
+  // Pre-parse: the parse below is what strips an undeclared key, so this is the
+  // last point at which the author's own spelling still exists to report (#3786).
+  warnUnknownAuthoringKeys(normalized);
 
   if (!strict) {
     // Non-strict mode: skip validation (advanced use cases only).

@@ -1,0 +1,108 @@
+# Rerun safety, nightly.
+#
+# ## The blind spot this closes
+#
+# Every other job in this repo runs on a FRESH CLONE. That makes CI structurally
+# incapable of seeing a whole class of defect: a suite that pollutes its own
+# working tree and therefore passes exactly once. CI always runs pass #1, so it
+# is always green; only a human or an agent running the suite twice in one
+# checkout ever sees the failure.
+#
+# #4065 was exactly that. `InMemoryDriver` defaulted to `persistence: 'auto'`,
+# which on Node means a file adapter — so a suite seeding two rows with fixed
+# ids wrote them to `.objectstack/data/memory-driver.json`, and the next run
+# loaded them back and asserted four. Run N read 2N rows. It sat in the repo
+# green through every CI run it ever had, and surfaced only because someone ran
+# the full suite a second time in the same tree while doing unrelated work — at
+# which point it looked like their own change had broken something.
+#
+# This job runs the full suite TWICE in one checkout. The first pass is allowed
+# to fail loudly like any other; what this gate is really asserting is that the
+# SECOND pass agrees with the first.
+#
+# ## Why `--force`
+#
+# Turbo would replay cached results on the second pass and report green without
+# executing anything, which is precisely the wrong answer here. `--force`
+# bypasses the cache so the second pass genuinely re-runs.
+name: Rerun Safety
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *' # 04:00 UTC nightly — an hour before Spec Coverage
+
+permissions:
+  contents: read
+
+jobs:
+  rerun-safety:
+    name: Full suite twice in one working tree
+    runs-on: ubuntu-latest
+    # Two full passes of everything, dogfood included. Generous, but bounded —
+    # an unbounded job is what let a hung Test Core sit for GitHub's 6h default
+    # while the PR read as "still running" rather than broken.
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore-only: scheduled runs read main's store cache; the per-push
+      # workflows own saving it.
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      # Deliberately NOT `continue-on-error`. If pass 1 is red the suite is
+      # simply broken on main and that is worth failing on; this gate adds pass
+      # 2, it does not replace the ordinary signal.
+      - name: Test suite — pass 1
+        run: pnpm turbo run test --concurrency=4 --force
+
+      # Informational only. A stray `.objectstack/` is how the #4065 class shows
+      # up on disk, so printing what pass 1 left behind turns a pass-2 failure
+      # from "something is flaky" into a named file to go look at. Some entries
+      # here are legitimate (an example app's own project directory), which is
+      # why this reports rather than fails — pass 2 is the assertion.
+      - name: Report on-disk state left by pass 1
+        if: always()
+        run: |
+          echo "Directories named .objectstack under the checkout:"
+          find . -path ./node_modules -prune -o -type d -name '.objectstack' -print || true
+          echo
+          echo "Files inside them:"
+          find . -path ./node_modules -prune -o -type d -name '.objectstack' -exec find {} -type f \; || true
+
+      - name: Test suite — pass 2 (same working tree)
+        run: |
+          set -o pipefail
+          if ! pnpm turbo run test --concurrency=4 --force; then
+            echo "::error::The suite passes once and fails on a second run in the same"
+            echo "::error::working tree. Something under test writes state into the tree and"
+            echo "::error::reads it back on the next run. Ordinary CI cannot see this — every"
+            echo "::error::other job is a fresh clone, so every other job is always run #1."
+            echo "::error::See the on-disk state reported above, and #4065 for the pattern."
+            exit 1
+          fi

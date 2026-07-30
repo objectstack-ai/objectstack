@@ -35,8 +35,15 @@ import { readServiceSelfInfo } from '@objectstack/spec/api';
  * An empty slot and a slot filled by a self-declared stub are the same amount
  * of capability, so callers answer both the same way — whatever their empty-slot
  * exit already is (`handled: false` → 404, or an explicit 501).
+ *
+ * [#4127] A type guard, not a `boolean`. Every domain already calls this as its
+ * first act on a resolved slot, so once `getService` returns
+ * `Contract | undefined` this one predicate narrows away the `undefined` for the
+ * whole handler body — the null check and the capability check are the same
+ * check, and were always meant to be. Written as `svc is NonNullable<T>` so the
+ * caller keeps its own contract type instead of being widened to a shared one.
  */
-export function isServiceServeable(svc: unknown): boolean {
+export function isServiceServeable<T>(svc: T): svc is NonNullable<T> {
     if (!svc) return false;
     return readServiceSelfInfo(svc)?.handlerReady !== false;
 }

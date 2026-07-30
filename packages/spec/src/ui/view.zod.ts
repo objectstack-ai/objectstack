@@ -937,6 +937,19 @@ export const FormSectionSchema = lazySchema(() => z.object({
     z.literal(3),
     z.literal(4),
   ]).default(1).transform(val => (typeof val === 'string' ? parseInt(val) : val) as 1 | 2 | 3 | 4),
+  /**
+   * Which pane of a split form this section renders in (`type: 'split'` only —
+   * any other form type rejects the key at parse, see the FormViewSchema
+   * refinement). Placement is explicit and PER SECTION so it survives
+   * reordering: with the old first-vs-rest positional rule the assignment was
+   * invisible in the metadata, and an edit that reordered sections silently
+   * moved them across the divider. Defaults by position when omitted: the
+   * first section renders in `primary`, every other section in `secondary`
+   * (exactly the legacy rule, so keyless metadata keeps its layout).
+   */
+  pane: z.enum(['primary', 'secondary']).optional().describe(
+    "Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'.",
+  ),
   fields: z.array(z.union([
     z.string(), // Legacy: simple field name
     FormFieldSchema, // Enhanced: detailed field config
@@ -979,7 +992,7 @@ export const FormViewSchema = lazySchema(() => z.object({
     'simple',  // Single column or sections
     'tabbed',  // Tabs
     'wizard',  // Step by step
-    'split',   // Master-Detail split
+    'split',   // Side-by-side resizable panes; sections placed via `section.pane`
     'drawer',  // Side panel
     'modal'    // Dialog
   ]).default('simple'),
@@ -1115,6 +1128,27 @@ export const FormViewSchema = lazySchema(() => z.object({
     'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
     'renderer issues rather than per-view attribute overrides.',
   ),
+}).superRefine((view, ctx) => {
+  // `section.pane` is split-only vocabulary. On any other form type it would
+  // be a silent no-op — the worst failure mode for authored (and especially
+  // AI-authored) metadata, where "accepted but ignored" reads as working.
+  // Reject it loudly at parse instead. `.extend()` keeps this check (zod 4
+  // attaches refinements to the schema), so the flattened runtime-overlay
+  // variant in ViewMetadataSchema enforces it too.
+  if (view.type === 'split') return;
+  for (const [key, sections] of [['sections', view.sections], ['groups', view.groups]] as const) {
+    sections?.forEach((section, index) => {
+      if (section?.pane != null) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key, index, 'pane'],
+          message:
+            `\`pane\` places a section in a split pane and is only valid on \`type: 'split'\` ` +
+            `form views (this form is '${view.type}'). Remove the key or change the form type.`,
+        });
+      }
+    });
+  }
 }));
 
 /**

@@ -77,8 +77,10 @@ describe('createDefaultDatasourceDriverFactory — mysql construction', () => {
   });
 });
 
-// #4083 — the `memory` id built a bare `new InMemoryDriver()`, inheriting that
-// driver's own `persistence: 'auto'` default: in Node a file adapter at the
+// #4083 — the `memory` id built a bare `new InMemoryDriver()`, inheriting the
+// driver's THEN-default `persistence: 'auto'` (#4065 has since made that default
+// `false`, so this suite now pins the factory's own guarantee rather than a
+// correction to the driver's): in Node a file adapter at the
 // RELATIVE, process-global path `.objectstack/data/memory-driver.json`. So a
 // "memory" datasource flushed its store into the server's CWD at teardown and
 // reloaded it on the next boot, and every memory pool in the process aliased the

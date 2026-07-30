@@ -9,7 +9,13 @@ import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, findRegion
 import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import { applyConversionsToFlow } from '@objectstack/spec';
 import type { FlowRegionParsed } from '@objectstack/spec/automation';
-import type { Connector, ConnectorProviderFactory } from '@objectstack/spec/integration';
+import type {
+    Connector,
+    ConnectorProviderFactory,
+    ConnectorOrigin,
+    ConnectorState,
+    ConnectorDescriptor,
+} from '@objectstack/spec/integration';
 import { ConnectorSchema } from '@objectstack/spec/integration';
 // Static import (not a lazy `require`): the engine ships as ESM ("type":"module"),
 // where a CommonJS `require('@objectstack/formula')` resolves to tsup's throwing
@@ -210,25 +216,15 @@ export type ConnectorActionHandler = (
     ctx: ConnectorActionContext,
 ) => Promise<Record<string, unknown>>;
 
-/**
- * How a registered connector reached the engine (ADR-0097 §4). `plugin` — a
- * connector plugin called `registerConnector` directly (ADR-0018 §Addendum).
- * `declarative` — the automation service materialized a provider-bound
- * `connectors:` stack entry at boot. A name registered under one origin cannot
- * be re-registered under the other: that two-sources-of-truth collision is a
- * hard error, not a silent replace.
- */
-export type ConnectorOrigin = 'plugin' | 'declarative';
-
-/**
- * Whether a registered connector is dispatchable (#3017). `ready` — the normal
- * state: actions and handlers are live. `degraded` — a declarative instance
- * whose provider factory could not reach its upstream (e.g. an MCP server was
- * unreachable at boot): it is registered so `GET /connectors` shows it honestly
- * instead of it silently missing, but it exposes no actions and every dispatch
- * fails with a clear error until the materializer's retry succeeds.
- */
-export type ConnectorState = 'ready' | 'degraded';
+// `ConnectorOrigin` / `ConnectorState` / `ConnectorDescriptor` /
+// `ConnectorActionDescriptor` are declared in `@objectstack/spec/integration`
+// (imported above, re-exported from this package's index). [#4127] They used to
+// be declared HERE — which put the return type of `IAutomationService`'s
+// `getConnectorDescriptors` inside one implementation of that contract, so the
+// contract could not name the method and the dispatcher route serving it had to
+// duck-type it. Same reason the provider contract lives in the spec: a
+// connector plugin or a designer client speaks about registered connectors
+// without importing this engine.
 
 /**
  * A connector registered on the engine: its validated {@link Connector}
@@ -347,51 +343,6 @@ export type FlowRecordExpander = (
   expandFields: readonly string[],
   runContext: AutomationContext,
 ) => Promise<Record<string, unknown> | undefined> | Record<string, unknown> | undefined;
-
-/**
- * A designer-facing view of one connector action — identity + its JSON-Schema
- * input/output. The runtime handler is intentionally omitted; this is metadata.
- */
-export interface ConnectorActionDescriptor {
-    readonly key: string;
-    readonly label: string;
-    readonly description?: string;
-    readonly inputSchema?: Record<string, unknown>;
-    readonly outputSchema?: Record<string, unknown>;
-}
-
-/**
- * A designer-facing descriptor for a registered connector: its identity plus
- * the actions it exposes. Served by `GET /api/v1/automation/connectors` so the
- * flow designer can populate the `connector_action` node's connector → action
- * → input pickers (ADR-0018 §Addendum, ADR-0022). Mirrors `ActionDescriptor`'s
- * role for node types, but for the connector registry.
- */
-export interface ConnectorDescriptor {
-    readonly name: string;
-    readonly label: string;
-    readonly type: string;
-    readonly description?: string;
-    readonly icon?: string;
-    readonly actions: ConnectorActionDescriptor[];
-    /**
-     * How the connector reached the registry (ADR-0097 §4): `plugin` — registered
-     * by a connector plugin via `registerConnector`; `declarative` — materialized
-     * from a provider-bound `connectors:` stack entry at boot. Lets a designer
-     * distinguish a live declarative instance from a plugin connector (and both
-     * from an inert catalog descriptor, which never reaches this list).
-     */
-    readonly origin: ConnectorOrigin;
-    /**
-     * Dispatchability (#3017): `ready` — actions are live; `degraded` — the
-     * instance's upstream was unreachable when the provider factory ran, so it
-     * currently exposes no actions and cannot dispatch. The platform retries
-     * degraded instances automatically; `degradedReason` says what failed.
-     */
-    readonly state: ConnectorState;
-    /** Why the connector is degraded — present only when `state` is `degraded`. */
-    readonly degradedReason?: string;
-}
 
 // ─── Core Automation Engine ─────────────────────────────────────────
 

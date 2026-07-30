@@ -91,6 +91,19 @@ export { defineEmailTemplateDefinition } from './system/email-template.zod';
 export { defineReport } from './ui/report.zod';
 export { defineWebhook } from './automation/webhook.zod';
 export { defineObjectExtension } from './data/object.zod';
+// Pre-parse report of authored object/field keys the schemas would strip (#3786).
+// Exported from the ROOT, not only from `/data`: `defineStack` (this package) and
+// the CLI's `os validate` are the two callers, and both import from the root.
+export {
+  lintUnknownAuthoringKeys,
+  formatUnknownAuthoringKey,
+  FIELD_KEY_GUIDANCE,
+  OBJECT_KEY_GUIDANCE,
+} from './data/authoring-key-lint';
+export type {
+  UnknownAuthoringKeyFinding,
+  AuthoringKeySurface,
+} from './data/authoring-key-lint';
 export { defineCube } from './data/analytics.zod';
 export { defineMapping } from './data/mapping.zod';
 export { defineTheme } from './ui/theme.zod';
@@ -122,6 +135,9 @@ export {
   PLATFORM_CAPABILITY_TOKENS,
   isKnownPlatformCapability,
   PLATFORM_CAPABILITY_PROVIDERS,
+  // The foundational slate every server-side runtime mounts (cloud#925, #3786) —
+  // one declaration for `objectstack serve` and cloud's per-tenant runtime alike.
+  PLATFORM_ALWAYS_ON_CAPABILITIES,
   classifyRequiredCapability,
   type CapabilityEdition,
   type PlatformCapabilityProvider,

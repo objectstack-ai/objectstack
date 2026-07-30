@@ -15,16 +15,21 @@
  *   4. `atomic: false` is rejected with 400 BATCH_NOT_ATOMIC — the contract
  *      reason the SDK method exposes no `atomic` flag.
  *
- * NOTE on atomicity: the InMemoryDriver's `transaction()` is a passthrough
- * (no rollback), so all-or-nothing semantics are NOT asserted here — they are
+ * NOTE on atomicity: all-or-nothing semantics are NOT asserted here — they are
  * covered by objectql/src/engine-ambient-transaction.test.ts and
- * rest/src/rest-batch-endpoint.test.ts against transactional drivers.
+ * rest/src/rest-batch-endpoint.test.ts. This suite's four proofs are about the
+ * `$ref` wiring, the environment-scoped mirror and the error contract, not
+ * rollback. (It ran on the mingo driver until #4065, whose `transaction()` is a
+ * passthrough and could not have asserted rollback even if it wanted to; the
+ * in-memory SQLite it now runs on does have real transactions, but adding a
+ * rollback proof here would duplicate the two suites above rather than close a
+ * gap.)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/runtime';
 import { ObjectStackClient } from './index';
@@ -75,7 +80,7 @@ describe('data.batchTransaction (live Hono, #1604)', () => {
         await kernel.bootstrap();
 
         const ql = kernel.getService<ObjectQL>('objectql');
-        ql.registerDriver(new InMemoryDriver(), true);
+        ql.registerDriver(new SqliteWasmDriver({ filename: ':memory:' }) as never, true);
 
         ql.registerObject({
             name: 'project',
@@ -92,6 +97,12 @@ describe('data.batchTransaction (live Hono, #1604)', () => {
                 project: { type: 'lookup', reference_to: 'project', label: 'Project' },
             },
         });
+        // Objects registered AFTER bootstrap miss the boot-time schema sync, so
+        // nothing has issued their DDL. The mingo driver this suite used before
+        // #4065 created a table on first touch and hid that; on SQL the first
+        // write fails with `no such table`.
+        await ql.syncObjectSchema('project');
+        await ql.syncObjectSchema('task');
 
         const httpServer = kernel.getService<any>('http.server');
         baseUrl = `http://localhost:${httpServer.getPort()}`;

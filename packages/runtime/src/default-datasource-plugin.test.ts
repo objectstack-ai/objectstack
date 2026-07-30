@@ -146,8 +146,8 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     // rebuild. createPrebuiltDriverFactory wraps it; the plugin's connect
     // orchestration must register THAT instance — never a rebuilt copy.
     const { createPrebuiltDriverFactory } = await import('@objectstack/service-datasource');
-    const { InMemoryDriver } = await import('@objectstack/driver-memory');
-    const hostBuilt = new InMemoryDriver();
+    const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
+    const hostBuilt = new SqliteWasmDriver({ filename: ':memory:' });
     const kernel = await assemble({
       driver: 'turso', // a kind the SHARED factory does not support — proves dispatch
       factory: createPrebuiltDriverFactory(hostBuilt, { driverId: 'turso' }),
@@ -211,8 +211,8 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     // registry cache). An LRU eviction shutting the kernel down must not pull
     // the pool from under every other consumer.
     const { createPrebuiltDriverFactory } = await import('@objectstack/service-datasource');
-    const { InMemoryDriver } = await import('@objectstack/driver-memory');
-    const hostBuilt = new InMemoryDriver() as any;
+    const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
+    const hostBuilt = new SqliteWasmDriver({ filename: ':memory:' }) as any;
     let disconnects = 0;
     const orig = hostBuilt.disconnect?.bind(hostBuilt);
     hostBuilt.disconnect = async () => { disconnects += 1; return orig?.(); };

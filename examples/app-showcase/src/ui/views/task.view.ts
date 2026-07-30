@@ -305,11 +305,14 @@ export const TaskViews = defineView({
       ],
     },
 
-    // split ── master-detail split pane ──────────────────────────────────
+    // split ── side-by-side resizable panes; `pane` places each section ──
     split: {
       type: 'split',
       data,
-      sections: [{ label: 'Task', columns: 1, fields: ['title', 'status', 'assignee'] }],
+      sections: [
+        { name: 'split_task', label: 'Task', pane: 'primary', columns: 1, fields: ['title', 'status', 'assignee'] },
+        { name: 'split_schedule', label: 'Schedule', pane: 'secondary', columns: 1, fields: ['start_date', 'due_date', 'progress'] },
+      ],
     },
 
     // drawer ── side panel quick edit ────────────────────────────────────

@@ -17,6 +17,10 @@ export default defineConfig({
       '@objectstack/spec/api': path.resolve(__dirname, '../spec/src/api/index.ts'),
       '@objectstack/spec/contracts': path.resolve(__dirname, '../spec/src/contracts/index.ts'),
       '@objectstack/spec/data': path.resolve(__dirname, '../spec/src/data/index.ts'),
+      // Reached via `@objectstack/platform-objects` (sys-user.object.ts), which
+      // notifications.hono.integration.test.ts pulls in for the real
+      // `sys_notification` declaration.
+      '@objectstack/spec/identity': path.resolve(__dirname, '../spec/src/identity/index.ts'),
       '@objectstack/spec/kernel': path.resolve(__dirname, '../spec/src/kernel/index.ts'),
       '@objectstack/spec/shared': path.resolve(__dirname, '../spec/src/shared/index.ts'),
       '@objectstack/spec/system': path.resolve(__dirname, '../spec/src/system/index.ts'),

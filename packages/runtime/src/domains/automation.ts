@@ -192,11 +192,16 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // empty in baseline and populated by connector plugins (e.g.
     // @objectstack/connector-rest, @objectstack/connector-slack).
     if (parts[0] === 'connectors' && parts.length === 1 && m === 'GET') {
-        if (typeof automationService.getConnectorDescriptors === 'function') {
-            let connectors = automationService.getConnectorDescriptors() ?? [];
+        // [#4127] The method is declared on IAutomationService now, so the
+        // `?type=` filter reads `ConnectorDescriptor['type']` instead of
+        // re-typing each element as `any` — a filter on a field the contract
+        // did not know existed was a typo away from silently matching nothing.
+        const svc = automationService as Pick<IAutomationService, 'getConnectorDescriptors'>;
+        if (typeof svc.getConnectorDescriptors === 'function') {
+            let connectors = svc.getConnectorDescriptors() ?? [];
             // Optional filter mirrors the descriptor's connector type.
             if (query?.type) {
-                connectors = connectors.filter((c: any) => c?.type === query.type);
+                connectors = connectors.filter((c) => c?.type === query.type);
             }
             return { handled: true, response: deps.success({ connectors, total: connectors.length }) };
         }

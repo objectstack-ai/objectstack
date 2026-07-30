@@ -55,6 +55,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.1.1",
     "typescript": "^6.0.3",

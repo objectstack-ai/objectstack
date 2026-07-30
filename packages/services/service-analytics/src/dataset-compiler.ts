@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Cube, Metric, Dimension as CubeDimension, CubeJoin } from '@objectstack/spec/data';
+import { AggregationFunction } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
 
@@ -21,7 +22,20 @@ import type { FilterCondition } from '@objectstack/spec/data';
  */
 
 /** Operators v1 does NOT compile to the Cube SQL switch — surfaced as a clear error. */
-const UNSUPPORTED_AGGREGATES = new Set(['array_agg', 'string_agg']);
+export const UNSUPPORTED_AGGREGATES = new Set(['array_agg', 'string_agg']);
+
+/**
+ * What v1 *can* lower — derived from the spec's vocabulary rather than restated.
+ *
+ * The list used to be hand-written prose inside the error message below, which
+ * made it a third copy of one vocabulary (after `AggregationFunction` and the
+ * `native-sql-strategy` switch) with nothing keeping the three in step. An
+ * aggregate added to the spec would have passed this gate, been reported as
+ * supported by that message, and then hit the strategy's `default` — returning
+ * a row count in place of the requested number. objectui#2945.
+ */
+export const SUPPORTED_AGGREGATES: string[] = AggregationFunction.options
+  .filter((a: string) => !UNSUPPORTED_AGGREGATES.has(a));
 
 export interface DerivedMeasureSpec {
   name: string;
@@ -82,7 +96,7 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
   if (UNSUPPORTED_AGGREGATES.has(m.aggregate)) {
     throw new Error(
       `[dataset-compiler] measure "${m.name}" uses aggregate "${m.aggregate}" which is ` +
-      `not supported by the v1 dataset runtime (supported: count, sum, avg, min, max, count_distinct).`,
+      `not supported by the v1 dataset runtime (supported: ${SUPPORTED_AGGREGATES.join(', ')}).`,
     );
   }
   return m.aggregate as Metric['type'];

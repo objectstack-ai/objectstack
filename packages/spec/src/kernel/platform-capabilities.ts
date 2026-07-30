@@ -169,6 +169,48 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
   });
 
 /**
+ * The foundational capability slate: what every server-side runtime is expected
+ * to mount whether or not an app names it in `requires`.
+ *
+ * These are the services the platform assumes exist — background work, settings
+ * persistence, transactional mail, file uploads, notifications, analytics — so
+ * an app that never declares them still behaves the way its authors (and the
+ * Studio surfaces) expect.
+ *
+ * Published here rather than left on `Serve.ALWAYS_ON_CAPABILITIES` for the same
+ * reason {@link PLATFORM_CAPABILITY_PROVIDERS} was: **more than one runtime
+ * mounts this slate.** The CLI's `serve` builds one kernel per process; cloud's
+ * objectos-runtime builds one per tenant environment and carried its own copy,
+ * under a CLI comment that merely said such hosts "mirror this list". They had
+ * already diverged — the hosted slate was missing `sms`, `messaging` and
+ * `analytics` — so an app that worked under `objectstack serve` could lose
+ * dataset previews and `notify` deliveries once hosted, silently, with no error
+ * anywhere (cloud#925, framework#3786). A second list nobody checks is how that
+ * happens; one exported list is how it stops.
+ *
+ * This is the FLOOR, not the ceiling: a host may mount more (cloud adds
+ * `observability`), and `objectstack serve --preset minimal` opts out entirely.
+ */
+export const PLATFORM_ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze([
+  // The first six are the pinned foundational prefix — grow the slate AFTER them.
+  'queue', 'job', 'cache', 'settings', 'email', 'storage',
+  'sms',
+  'sharing',
+  // `messaging` is foundational post-ADR-0030: notifications flow through a
+  // single ingress (`NotificationService.emit`) — collaboration `@mention` /
+  // assignment (plugin-audit) and the `notify` flow node both deliver through
+  // the messaging pipeline, and the Console bell reads its materialization
+  // (`sys_inbox_message`). Without it those notifications silently no-op.
+  'messaging',
+  // `analytics` is foundational post-ADR-0021: the AnalyticsService backs the
+  // dataset/cube query endpoints (`/api/v1/analytics/*`). It must exist even
+  // when an app declares no `analyticsCubes`, because a `dataset` can be
+  // authored/previewed inline (Studio) and compiled on the fly. Without it the
+  // dataset preview + dashboard/report analytics widgets silently no-op.
+  'analytics',
+]);
+
+/**
  * Outcome of classifying one `requires` token against the installed providers:
  *   - `ok`          — provider resolvable (installed); nothing to do.
  *   - `installable` — absent, but an installable version exists in this edition

@@ -17,7 +17,13 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { TEMPORAL_CASES, TEMPORAL_NOW, TEMPORAL_ROWS } from '@objectstack/spec/data';
+import {
+  TEMPORAL_CASES,
+  TEMPORAL_NOW,
+  TEMPORAL_ROWS,
+  TEMPORAL_TIME_CASES,
+  TEMPORAL_TIME_ROWS,
+} from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
 import { InMemoryDriver } from './memory-driver.js';
 
@@ -61,5 +67,35 @@ describe('driver-memory — temporal conformance', () => {
         expect(got, c.note).toEqual([...c.expected].sort());
       });
     }
+  }
+});
+
+describe('driver-memory — Field.time conformance', () => {
+  let driver: InMemoryDriver;
+
+  beforeAll(async () => {
+    driver = new InMemoryDriver({});
+    await driver.connect();
+    await driver.syncSchema('time_conformance', {
+      name: 'time_conformance',
+      fields: { at: { type: 'time' }, why: { type: 'string' } },
+    });
+    for (const r of TEMPORAL_TIME_ROWS) {
+      await driver.create('time_conformance', {
+        id: r.id,
+        // The mixed-writer axis (D-E4) for wall clocks: a `Date` write and a
+        // canonical-text write of the SAME wall clock must converge.
+        at: r.writerForm === 'native' ? new Date(`1970-01-01T${r.at}Z`) : r.at,
+        why: r.why,
+      });
+    }
+  });
+
+  for (const c of TEMPORAL_TIME_CASES) {
+    it(c.name, async () => {
+      const rows = await driver.find('time_conformance', { where: c.filter } as any);
+      const got = (rows as any[]).map((r) => r.id).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
+    });
   }
 });

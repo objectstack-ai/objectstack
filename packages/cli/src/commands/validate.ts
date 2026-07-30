@@ -6,7 +6,13 @@ import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
-import { ObjectStackDefinitionSchema, normalizeStackInput, type ConversionNotice } from '@objectstack/spec';
+import {
+  ObjectStackDefinitionSchema,
+  normalizeStackInput,
+  lintUnknownAuthoringKeys,
+  formatUnknownAuthoringKey,
+  type ConversionNotice,
+} from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { validateStackExpressions } from '@objectstack/lint';
 import { validateListViewMode } from '@objectstack/lint';
@@ -85,6 +91,14 @@ export default class Validate extends Command {
       const normalized = normalizeStackInput(config as Record<string, unknown>, {
         onConversionNotice: (n) => conversionNotices.push(n),
       });
+      // [#3786] Keys `ObjectSchema` / `FieldSchema` do not declare, and so drop
+      // silently. PRE-parse for the same reason the visibility rule below is:
+      // the parse is what strips them, so `result.data` no longer carries the
+      // key the author actually wrote. Computed here rather than down in the
+      // warnings section so the `--json` path reports it too — the
+      // "computed, then discarded" shape this file already had to fix once.
+      const unknownKeyWarnings = lintUnknownAuthoringKeys(normalized as Record<string, unknown>)
+        .map(formatUnknownAuthoringKey);
       const result = ObjectStackDefinitionSchema.safeParse(normalized);
 
       if (!result.success) {
@@ -732,7 +746,7 @@ export default class Validate extends Command {
           // the suite's warnings, though the failure path (above) and the console
           // both did. Same shape of bug as the dropped errors — computed, then
           // discarded — so it is fixed rather than reproduced under a new name.
-          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...refWarnings, ...readonlyWriteWarnings, ...authoringLintWarnings, ...securityAdvisories, ...capProviderWarnings],
+          warnings: [...exprWarnings, ...widgetWarnings, ...actionRefWarnings, ...styleWarnings, ...jsxWarnings, ...capWarnings, ...flowReadinessWarnings, ...refWarnings, ...readonlyWriteWarnings, ...authoringLintWarnings, ...unknownKeyWarnings, ...securityAdvisories, ...capProviderWarnings],
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),
@@ -757,6 +771,10 @@ export default class Validate extends Command {
       for (const f of visibilityFindings) {
         warnings.push(`${f.where}: ${f.message} — ${f.hint}`);
       }
+
+      // [#3786] Undeclared object/field keys — computed pre-parse above,
+      // alongside `normalized`, for the same reason.
+      warnings.push(...unknownKeyWarnings);
 
       // ADR-0087 D2 conversion notices: the source used a deprecated shape that
       // was auto-converted at load. No action is required to keep loading, but

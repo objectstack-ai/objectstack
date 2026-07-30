@@ -51,10 +51,29 @@ export function createAuthDomain(deps: DomainHandlerDeps): DomainRoute {
  * path: sub-path after /auth/
  */
 export async function handleAuthRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-    // 1. Try generic Auth Service
+    // 1. Try generic Auth Service.
+    //
+    // [#4127] This probed `authService.handler(request, response)` — a method
+    // no implementation has, taking two arguments the contract's does not.
+    // `IAuthService` declares `handleRequest(request): Promise<Response>` and
+    // `AuthManager` implements exactly that, so the probe was false on every
+    // deployment: #4087's shape, found by the compiler the moment `getService`
+    // started returning `IAuthService` instead of `any`. It survived the manual
+    // sweep in #4127, which never listed `/auth` in either its gap list or its
+    // "clean" list, and it was pinned GREEN by a test mocking `{ handler }` —
+    // the fabricated shape, not the declared one (the same test-side hole that
+    // kept #4087 green, catalogued in #4127's last section).
+    //
+    // Reading the contract also makes the branch reachable for the first time.
+    // The Hono adapter calls `handleRequest` itself and only falls through to
+    // this dispatcher when no usable auth service answered, so nothing was
+    // silently served by the mock below in that deployment — but a host that
+    // reaches `handleAuth` directly WITH an auth service registered used to get
+    // `mockAuthFallback`'s `mock_<uuid>` session instead of real authentication.
+    // It now gets the auth service.
     const authService = await deps.getService(CoreServiceName.enum.auth);
-    if (authService && typeof authService.handler === 'function') {
-        const response = await authService.handler(context.request, context.response);
+    if (authService && typeof authService.handleRequest === 'function') {
+        const response = await authService.handleRequest(context.request as Request);
         return { handled: true, result: response };
     }
 

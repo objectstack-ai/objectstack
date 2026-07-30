@@ -34,6 +34,8 @@
  */
 
 import type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatcher.js';
+import type { CoreServiceName } from '@objectstack/spec/system';
+import type { CoreServiceContract } from '@objectstack/spec/contracts';
 
 /**
  * The normalized request slice a domain handler receives. `path` is the
@@ -78,8 +80,25 @@ export interface DomainRoute {
 export interface DomainHandlerDeps {
     /** Environment-scoped service resolution (per-request kernel aware). */
     resolveService(name: string, environmentId?: string): any;
-    /** Unscoped service lookup on the current kernel (may return a Promise). */
-    getService(name: string): any;
+    /**
+     * Unscoped service lookup on the current kernel, typed by the slot.
+     *
+     * [#4127] Returned `any`, which is why nothing could tell a domain calling
+     * a method its contract declares from one calling a method nobody declared:
+     * both typecheck against `any`. #4087 rode that for months (a `/storage`
+     * handler passing two arguments no implementation takes), and the four gaps
+     * in #4127 were found by sweeping the domains by hand — not repeatable.
+     *
+     * {@link CoreServiceContract} resolves the slot to its contract, so the
+     * compiler asks the question on every call. A slot with no contract written
+     * yet resolves to `unknown`, so it must be cast deliberately and the gap
+     * stays visible.
+     *
+     * `undefined` when the slot is empty — the caller MUST narrow before use
+     * (`isServiceServeable` does it and also rejects a self-declared
+     * non-handler, ADR-0076 D12).
+     */
+    getService<K extends CoreServiceName>(name: K): Promise<CoreServiceContract<K> | undefined>;
     /**
      * Environment-scoped ObjectQL lookup with a registry-shape check
      * (resolves the `objectql` service and returns it only when it exposes
