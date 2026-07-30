@@ -18,6 +18,7 @@
 
 import type { Filter } from 'mongodb';
 import { nextUtcCalendarDay } from '@objectstack/core';
+import { coerceTemporalValue, type TemporalFieldKindResolver } from './mongodb-temporal.js';
 
 /**
  * Translate an ObjectStack `where` clause into a MongoDB filter document.
@@ -26,24 +27,36 @@ import { nextUtcCalendarDay } from '@objectstack/core';
  * 1. A FilterCondition object (MongoDB-style with `$` operators)
  * 2. A legacy array-style filter `[[field, op, value], 'or', [field, op, value]]`
  * 3. A plain key-value object for implicit equality
+ *
+ * `temporalKind` resolves the declared temporal type of a field so comparands
+ * land in the column's storage form (#4047) — a `Field.datetime` comparand
+ * becomes a BSON `Date`, because MongoDB compares across BSON types by type
+ * bracket and a string comparand matches no Date row at all. Omitting it keeps
+ * the pure shape translation, which is what the standalone export is for.
  */
-export function translateFilter(where: unknown): Filter<any> {
+export function translateFilter(
+  where: unknown,
+  temporalKind?: TemporalFieldKindResolver,
+): Filter<any> {
   if (!where) return {};
 
   // Legacy array-style filters
   if (Array.isArray(where)) {
-    return translateArrayFilter(where);
+    return translateArrayFilter(where, temporalKind);
   }
 
   if (typeof where !== 'object') return {};
 
-  return translateCondition(where as Record<string, unknown>);
+  return translateCondition(where as Record<string, unknown>, temporalKind);
 }
 
 /**
  * Translate a FilterCondition object to a MongoDB filter.
  */
-function translateCondition(condition: Record<string, unknown>): Filter<any> {
+function translateCondition(
+  condition: Record<string, unknown>,
+  temporalKind?: TemporalFieldKindResolver,
+): Filter<any> {
   const mongoFilter: Record<string, unknown> = {};
   const andClauses: Filter<any>[] = [];
 
@@ -52,7 +65,7 @@ function translateCondition(condition: Record<string, unknown>): Filter<any> {
       case '$and':
         if (Array.isArray(value)) {
           andClauses.push({
-            $and: value.map((sub) => translateCondition(sub as Record<string, unknown>)),
+            $and: value.map((sub) => translateCondition(sub as Record<string, unknown>, temporalKind)),
           });
         }
         break;
@@ -60,14 +73,14 @@ function translateCondition(condition: Record<string, unknown>): Filter<any> {
       case '$or':
         if (Array.isArray(value)) {
           andClauses.push({
-            $or: value.map((sub) => translateCondition(sub as Record<string, unknown>)),
+            $or: value.map((sub) => translateCondition(sub as Record<string, unknown>, temporalKind)),
           });
         }
         break;
 
       case '$not':
         if (value && typeof value === 'object') {
-          const inner = translateCondition(value as Record<string, unknown>);
+          const inner = translateCondition(value as Record<string, unknown>, temporalKind);
           // MongoDB $not applies per-field; for top-level negation use $nor
           andClauses.push({ $nor: [inner] });
         }
@@ -77,19 +90,19 @@ function translateCondition(condition: Record<string, unknown>): Filter<any> {
         // Skip query-level keys that are not filter conditions
         if (['limit', 'offset', 'fields', 'orderBy'].includes(key)) continue;
 
-        if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
           // Check if this is an operator object (has $ keys)
           const objValue = value as Record<string, unknown>;
           const hasOps = Object.keys(objValue).some((k) => k.startsWith('$'));
           if (hasOps) {
-            mongoFilter[key] = translateFieldOperators(objValue);
+            mongoFilter[key] = translateFieldOperators(objValue, temporalKind?.(key));
           } else {
             // Nested object — treat as exact match
             mongoFilter[key] = value;
           }
         } else {
           // Implicit equality
-          mongoFilter[key] = value;
+          mongoFilter[key] = coerceTemporalValue(value, temporalKind?.(key));
         }
     }
   }
@@ -109,9 +122,20 @@ function translateCondition(condition: Record<string, unknown>): Filter<any> {
 
 /**
  * Translate ObjectStack field-level operators into MongoDB operators.
+ *
+ * `kind` is the declared temporal type of the field these operators apply to,
+ * so each comparand lands in the field's storage form (#4047). Order matters
+ * and is load-bearing: the calendar-day upper-bound rewrite (#3777/#4042) runs
+ * on the STRING first — it is a calendar operation — and only the resulting
+ * bound is converted to the storage form. Converting first would leave
+ * `nextUtcCalendarDay` a `Date` it correctly refuses to widen.
  */
-function translateFieldOperators(ops: Record<string, unknown>): Record<string, unknown> {
+function translateFieldOperators(
+  ops: Record<string, unknown>,
+  kind?: 'datetime' | 'date',
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
+  const store = (v: unknown) => coerceTemporalValue(v, kind);
 
   for (const [op, value] of Object.entries(ops)) {
     switch (op) {
@@ -123,6 +147,11 @@ function translateFieldOperators(ops: Record<string, unknown>): Record<string, u
       case '$lt':
       case '$in':
       case '$nin':
+        result[op] = store(value);
+        break;
+
+      // Value-independent — a presence predicate takes a boolean, not a
+      // comparand, so it is never coerced.
       case '$exists':
         result[op] = value;
         break;
@@ -130,14 +159,11 @@ function translateFieldOperators(ops: Record<string, unknown>): Record<string, u
       case '$lte': {
         // A bare-day upper bound means "through that whole day" (#4042; the
         // driver-sql twin is #3777): `<= '2026-07-28'` compiles half-open
-        // (`< '2026-07-29'`) so string-stored timestamps on the final day stay
-        // in; order-equivalent to `<=` for plain `YYYY-MM-DD` date values.
-        // (A BSON-Date-stored field never matched a string bound at all —
-        // MongoDB type bracketing — which is a storage-form problem this
-        // translation layer cannot fix; tracked separately from #4042.)
+        // (`< '2026-07-29'`) so instants on the final day stay in;
+        // order-equivalent to `<=` for plain `YYYY-MM-DD` date values.
         const nextDay = nextUtcCalendarDay(value);
-        if (nextDay != null) result.$lt = nextDay;
-        else result.$lte = value;
+        if (nextDay != null) result.$lt = store(nextDay);
+        else result.$lte = store(value);
         break;
       }
 
@@ -165,10 +191,10 @@ function translateFieldOperators(ops: Record<string, unknown>): Record<string, u
       // inheriting `$lte`'s whole-day rule — #4042)
       case '$between':
         if (Array.isArray(value) && value.length === 2) {
-          result.$gte = value[0];
+          result.$gte = store(value[0]);
           const betweenNextDay = nextUtcCalendarDay(value[1]);
-          if (betweenNextDay != null) result.$lt = betweenNextDay;
-          else result.$lte = value[1];
+          if (betweenNextDay != null) result.$lt = store(betweenNextDay);
+          else result.$lte = store(value[1]);
         }
         break;
 
@@ -199,7 +225,10 @@ function translateFieldOperators(ops: Record<string, unknown>): Record<string, u
  * Array format: `[[field, op, value], 'or', [field, op, value], ...]`
  * Nested arrays are treated as grouped conditions.
  */
-function translateArrayFilter(filters: unknown[]): Filter<any> {
+function translateArrayFilter(
+  filters: unknown[],
+  temporalKind?: TemporalFieldKindResolver,
+): Filter<any> {
   if (filters.length === 0) return {};
 
   // Check if this is a single comparison tuple: [field, op, value]
@@ -216,7 +245,7 @@ function translateArrayFilter(filters: unknown[]): Filter<any> {
     const isOperator = ['=', '!=', '<>', '>', '>=', '<', '<=', 'in', 'nin', 'eq', 'ne',
       'gt', 'gte', 'lt', 'lte', 'contains', 'like'].includes(possibleOp) || possibleOp.startsWith('$');
     if (isOperator) {
-      return translateComparison(filters[0], possibleOp, filters[2]);
+      return translateComparison(filters[0], possibleOp, filters[2], temporalKind);
     }
   }
 
@@ -241,8 +270,8 @@ function translateArrayFilter(filters: unknown[]): Filter<any> {
         !Array.isArray(item[2]);
 
       const translated = isTuple
-        ? translateComparison(item[0], item[1], item[2])
-        : translateArrayFilter(item);
+        ? translateComparison(item[0], item[1], item[2], temporalKind)
+        : translateArrayFilter(item, temporalKind);
 
       groups.push({ logic: nextLogic, filter: translated });
       nextLogic = 'and';
@@ -280,36 +309,47 @@ function translateArrayFilter(filters: unknown[]): Filter<any> {
 /**
  * Translate a single comparison `[field, operator, value]` tuple.
  */
-function translateComparison(field: string, op: string, value: unknown): Filter<any> {
+function translateComparison(
+  field: string,
+  op: string,
+  value: unknown,
+  temporalKind?: TemporalFieldKindResolver,
+): Filter<any> {
   const mappedField = mapFieldName(field);
+  // Resolve against the MAPPED name: `createdAt` is an alias of the declared
+  // `created_at`, and the field kinds are indexed under declared names.
+  const store = (v: unknown) => coerceTemporalValue(v, temporalKind?.(mappedField));
 
   switch (op) {
     case '=':
     case 'eq':
-      return { [mappedField]: value };
+      return { [mappedField]: store(value) };
     case '!=':
     case '<>':
     case 'ne':
-      return { [mappedField]: { $ne: value } };
+      return { [mappedField]: { $ne: store(value) } };
     case '>':
     case 'gt':
-      return { [mappedField]: { $gt: value } };
+      return { [mappedField]: { $gt: store(value) } };
     case '>=':
     case 'gte':
-      return { [mappedField]: { $gte: value } };
+      return { [mappedField]: { $gte: store(value) } };
     case '<':
     case 'lt':
-      return { [mappedField]: { $lt: value } };
+      return { [mappedField]: { $lt: store(value) } };
     case '<=':
     case 'lte': {
       // Bare-day upper bound → half-open, `$lte`'s whole-day rule (#4042).
+      // Calendar first, storage form second — see translateFieldOperators.
       const nextDay = nextUtcCalendarDay(value);
-      return { [mappedField]: nextDay != null ? { $lt: nextDay } : { $lte: value } };
+      return {
+        [mappedField]: nextDay != null ? { $lt: store(nextDay) } : { $lte: store(value) },
+      };
     }
     case 'in':
-      return { [mappedField]: { $in: value as unknown[] } };
+      return { [mappedField]: { $in: store(value) as unknown[] } };
     case 'nin':
-      return { [mappedField]: { $nin: value as unknown[] } };
+      return { [mappedField]: { $nin: store(value) as unknown[] } };
     case 'contains':
     case 'like':
       return { [mappedField]: { $regex: escapeRegex(String(value)), $options: 'i' } };
