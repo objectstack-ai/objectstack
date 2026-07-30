@@ -66,17 +66,19 @@ export const actionForm = defineForm({
         { field: 'component', helpText: 'How to render (button, icon, menu item)' },
         { field: 'visible', widget: 'textarea', helpText: 'CEL expression: show only when condition is true' },
         { field: 'disabled', widget: 'textarea', helpText: 'CEL expression: disable when condition is true' },
-        { field: 'shortcut', helpText: 'Keyboard shortcut (e.g., "Ctrl+S", "Cmd+Enter")' },
+        // `shortcut` input removed with the key (#3896 close-out) — a form
+        // input for an unenforced capability is the UI half of false compliance.
       ],
     },
     {
       label: 'Advanced',
-      description: 'Bulk operations, AI exposure, and API request shape.',
+      description: 'AI exposure and API request shape.',
       collapsible: true,
       collapsed: true,
       columns: 2,
       fields: [
-        { field: 'bulkEnabled', colSpan: 1, helpText: 'Allow applying to multiple selected records' },
+        // `bulkEnabled` input removed with the key (#3896 close-out): the
+        // multi-select toolbar reads the list view's bulkActions, never this.
         { field: 'ai', colSpan: 2, helpText: 'AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents.' },
         { field: 'recordIdParam', visibleWhen: "data.type == 'api'", colSpan: 1, helpText: 'Body parameter name for record ID' },
         { field: 'recordIdField', visibleWhen: "data.type == 'api' && data.recordIdParam", colSpan: 1, helpText: 'Field to use as record ID (default: "id")' },

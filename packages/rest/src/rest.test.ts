@@ -311,7 +311,8 @@ describe('RestServer', () => {
   describe('registerRoutes', () => {
     it('should register discovery, metadata, UI, CRUD, and batch routes by default', () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const routes = rest.getRoutes();
       expect(routes.length).toBeGreaterThan(0);
@@ -331,7 +332,8 @@ describe('RestServer', () => {
       const rest = new RestServer(server as any, protocol as any, {
         api: { apiPath: '/custom/path' },
       } as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const paths = rest.getRoutes().map((r) => r.path);
       expect(paths.some((p) => p.startsWith('/custom/path'))).toBe(true);
@@ -341,7 +343,8 @@ describe('RestServer', () => {
       const rest = new RestServer(server as any, protocol as any, {
         api: { enableCrud: false },
       } as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const tags = rest.getRoutes().flatMap((r) => r.metadata?.tags ?? []);
       expect(tags).not.toContain('crud');
@@ -351,7 +354,8 @@ describe('RestServer', () => {
       const rest = new RestServer(server as any, protocol as any, {
         api: { enableMetadata: false },
       } as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const routes = rest.getRoutes();
       // Only the PUT /meta/:type/:name is always registered, but enableMetadata=false
@@ -363,7 +367,8 @@ describe('RestServer', () => {
       const rest = new RestServer(server as any, protocol as any, {
         api: { enableDiscovery: false },
       } as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const routes = rest.getRoutes();
       // Neither basePath nor basePath/discovery should be registered
@@ -377,7 +382,8 @@ describe('RestServer', () => {
       const rest = new RestServer(server as any, protocol as any, {
         api: { enableBatch: false },
       } as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const tags = rest.getRoutes().flatMap((r) => r.metadata?.tags ?? []);
       expect(tags).not.toContain('batch');
@@ -390,7 +396,8 @@ describe('RestServer', () => {
       protocol.deleteManyData = vi.fn().mockResolvedValue([]);
 
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const batchRoutes = rest.getRoutes().filter((r) =>
         r.metadata?.tags?.includes('batch'),
@@ -400,7 +407,8 @@ describe('RestServer', () => {
 
     it('should register UI view endpoint when enableUi is true', () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const uiRoutes = rest.getRoutes().filter((r) =>
         r.metadata?.tags?.includes('ui'),
@@ -410,7 +418,8 @@ describe('RestServer', () => {
 
     it('should not register i18n endpoints (i18n routes are self-registered by service-i18n)', () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const i18nRoutes = rest.getRoutes().filter((r) =>
         r.metadata?.tags?.includes('i18n'),
@@ -446,7 +455,8 @@ describe('RestServer', () => {
 
     it('should pass expand and select query params to protocol.getData', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const getByIdRoute = getRoute(rest, ':object/:id');
       expect(getByIdRoute).toBeDefined();
@@ -481,7 +491,8 @@ describe('RestServer', () => {
 
     it('should omit expand/select when not present in query', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const getByIdRoute = getRoute(rest, ':object/:id');
 
@@ -504,7 +515,8 @@ describe('RestServer', () => {
 
       // Should NOT have expand or select keys in the call
       const callArg = protocol.getData.mock.calls[protocol.getData.mock.calls.length - 1][0];
-      expect(callArg).toEqual({ object: 'contact', id: 'c_1' });
+      // expand/select absent; the resolved caller context IS forwarded (#3963).
+      expect(callArg).toEqual({ object: 'contact', id: 'c_1', context: { userId: 'test-user' } });
     });
   });
 
@@ -518,13 +530,15 @@ describe('RestServer', () => {
 
     it('registers the clone route alongside CRUD', () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       expect(cloneRoute(rest)).toBeDefined();
     });
 
     it('forwards object/id and nested overrides to protocol.cloneData and responds 201', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = cloneRoute(rest);
 
       const req = { params: { object: 'account', id: 'a1' }, body: { overrides: { name: 'Copy' } } };
@@ -539,7 +553,8 @@ describe('RestServer', () => {
 
     it('treats a bare body (no `overrides` key) as the override map', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = cloneRoute(rest);
 
       const req = { params: { object: 'account', id: 'a1' }, body: { name: 'Bare' } };
@@ -553,7 +568,8 @@ describe('RestServer', () => {
 
     it('maps a CLONE_DISABLED protocol error to 403', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = cloneRoute(rest);
 
       protocol.cloneData.mockRejectedValueOnce(
@@ -570,7 +586,8 @@ describe('RestServer', () => {
     it('returns 501 when the protocol does not implement cloneData', async () => {
       const noClone = { ...protocol, cloneData: undefined };
       const rest = new RestServer(server as any, noClone as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = cloneRoute(rest);
 
       const req = { params: { object: 'account', id: 'a1' }, body: {} };
@@ -596,7 +613,8 @@ describe('RestServer', () => {
 
     it('GET /meta/:type forwards previewDrafts to protocol.getMetaItems', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
       expect(route).toBeDefined();
 
@@ -611,7 +629,8 @@ describe('RestServer', () => {
 
     it('GET /meta/:type omits previewDrafts without the flag', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
 
       await route!.handler(
@@ -627,7 +646,8 @@ describe('RestServer', () => {
       // keyed on the published checksum).
       protocol.getMetaItemCached = vi.fn();
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type/:name');
       expect(route).toBeDefined();
 
@@ -649,7 +669,8 @@ describe('RestServer', () => {
       // silently lost.
       protocol.getMetaItemCached = vi.fn();
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type/:name');
       expect(route).toBeDefined();
 
@@ -691,7 +712,7 @@ describe('RestServer', () => {
     it('tree: anonymous caller is 401ed off a non-public book', async () => {
       protocol.getMetaItems = metaByType();
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/book/:name/tree');
       const res = mockRes();
       await route!.handler({ params: { name: 'org_book' }, query: {}, headers: {} }, res);
@@ -701,7 +722,7 @@ describe('RestServer', () => {
     it('tree: anonymous caller gets a public book, with non-public docs filtered OUT of the tree', async () => {
       protocol.getMetaItems = metaByType();
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/book/:name/tree');
       const res = mockRes();
       await route!.handler({ params: { name: 'pub_book' }, query: {}, headers: {} }, res);
@@ -719,7 +740,7 @@ describe('RestServer', () => {
       protocol.getMetaItems = metaByType();
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       (rest as any).resolveExecCtx = vi.fn().mockResolvedValue({ userId: 'u1' });
-      rest.registerRoutes();
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/book/:name/tree');
       const res = mockRes();
       await route!.handler({ params: { name: 'gated_book' }, query: {}, headers: {} }, res);
@@ -733,7 +754,7 @@ describe('RestServer', () => {
       (rest as any).securityServiceProvider = async () => ({
         resolvePermissionSetNames: async () => ['member_default', 'crm_admin'],
       });
-      rest.registerRoutes();
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/book/:name/tree');
       const res = mockRes();
       await route!.handler({ params: { name: 'gated_book' }, query: {}, headers: {} }, res);
@@ -747,7 +768,7 @@ describe('RestServer', () => {
     it('list: anonymous /meta/book returns only public books', async () => {
       protocol.getMetaItems = metaByType();
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
       const res = mockRes();
       await route!.handler({ params: { type: 'book' }, query: {}, headers: {} }, res);
@@ -758,7 +779,7 @@ describe('RestServer', () => {
     it('list: anonymous /meta/doc returns only docs whose effective audience is public', async () => {
       protocol.getMetaItems = metaByType();
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
       const res = mockRes();
       await route!.handler({ params: { type: 'doc' }, query: {}, headers: {} }, res);
@@ -773,7 +794,7 @@ describe('RestServer', () => {
       (rest as any).securityServiceProvider = async () => ({
         resolvePermissionSetNames: async () => ['member_default'],
       });
-      rest.registerRoutes();
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type');
       const res = mockRes();
       await route!.handler({ params: { type: 'doc' }, query: {}, headers: {} }, res);
@@ -786,7 +807,7 @@ describe('RestServer', () => {
       protocol.getMetaItem = vi.fn().mockImplementation(async ({ name }: any) =>
         DOCS.find((d) => d.name === name));
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type/:name');
       const resDenied = mockRes();
       await route!.handler({ params: { type: 'doc', name: 'org_intro' }, query: {}, headers: {} }, resDenied);
@@ -803,7 +824,7 @@ describe('RestServer', () => {
       protocol.getMetaItem = vi.fn().mockResolvedValue(BOOKS[2]);
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       (rest as any).resolveExecCtx = vi.fn().mockResolvedValue({ userId: 'u1' });
-      rest.registerRoutes();
+  rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type/:name');
       const res = mockRes();
       await route!.handler({ params: { type: 'book', name: 'gated_book' }, query: {}, headers: {} }, res);
@@ -839,7 +860,8 @@ describe('RestServer', () => {
         notModified: false,
       });
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getMetaItemRoute(rest);
       expect(route).toBeDefined();
 
@@ -866,7 +888,8 @@ describe('RestServer', () => {
         notModified: false,
       });
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getMetaItemRoute(rest);
 
       const res = mockRes();
@@ -890,7 +913,9 @@ describe('RestServer', () => {
 
     it('should pass query params including expand to protocol.findData', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const listRoute = getListRoute(rest);
       expect(listRoute).toBeDefined();
@@ -915,12 +940,14 @@ describe('RestServer', () => {
       expect(protocol.findData).toHaveBeenCalledWith({
         object: 'order_item',
         query: { expand: 'order,product', top: '10' },
+        context: { userId: 'test-user' },
       });
     });
 
     it('should pass populate query param to protocol.findData', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
       const listRoute = getListRoute(rest);
 
@@ -944,6 +971,7 @@ describe('RestServer', () => {
       expect(protocol.findData).toHaveBeenCalledWith({
         object: 'task',
         query: { populate: 'assignee,project' },
+        context: { userId: 'test-user' },
       });
     });
   });
@@ -975,7 +1003,8 @@ describe('RestServer', () => {
 
     it('streams CSV with header row and quotes risky cells', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
       expect(route).toBeDefined();
 
@@ -1007,7 +1036,8 @@ describe('RestServer', () => {
 
     it('streams JSON array when format=json', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
 
       protocol.findData.mockResolvedValueOnce({
@@ -1028,7 +1058,8 @@ describe('RestServer', () => {
 
     it('rejects invalid JSON in filter query', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
 
       const { res } = makeRes();
@@ -1041,7 +1072,8 @@ describe('RestServer', () => {
 
     it('honours the hard 50k row cap', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
 
       // Always return full chunks so the loop is bounded only by `limit`.
@@ -1111,7 +1143,8 @@ describe('RestServer', () => {
     it('formats values readably in CSV using field metadata', async () => {
       const p = protocolWithSchema([RAW_TASK_ROW]);
       const rest = new RestServer(server as any, p as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
 
       const { res, chunks, headers } = makeRes();
@@ -1128,7 +1161,8 @@ describe('RestServer', () => {
     it('omits the header row when header=false', async () => {
       const p = protocolWithSchema([RAW_TASK_ROW]);
       const rest = new RestServer(server as any, p as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
 
       const { res, chunks } = makeRes();
@@ -1142,7 +1176,8 @@ describe('RestServer', () => {
     it('injects $expand for reference fields into the findData query', async () => {
       const p = protocolWithSchema([RAW_TASK_ROW]);
       const rest = new RestServer(server as any, p as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
 
       const { res } = makeRes();
@@ -1156,7 +1191,8 @@ describe('RestServer', () => {
     it('formats values readably in JSON, leaving unknown keys untouched', async () => {
       const p = protocolWithSchema([{ ...RAW_TASK_ROW, extra: 'keep' }]);
       const rest = new RestServer(server as any, p as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
 
       const { res, chunks, headers } = makeRes();
@@ -1172,7 +1208,8 @@ describe('RestServer', () => {
     it('streams a valid xlsx workbook with formatted cells', async () => {
       const p = protocolWithSchema([RAW_TASK_ROW]);
       const rest = new RestServer(server as any, p as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
 
       const { res, getBuffer, headers } = makeBinRes();
@@ -1203,7 +1240,8 @@ describe('RestServer', () => {
     // id) and 404s with RECORD_NOT_FOUND instead of streaming the export.
     it('registers GET /export ahead of the greedy GET /:object/:id matcher', () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const routes = rest.getRoutes();
 
       const exportIdx = routes.findIndex(
@@ -1259,7 +1297,8 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         async () => i18n as any,
       );
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getExportRoute(rest);
 
       // locale=zh → Chinese header; `id` has no override so it keeps its label.
@@ -1296,7 +1335,8 @@ describe('RestServer', () => {
 
     it('returns 501 when no email service provider is wired', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getEmailRoute(rest);
       expect(route).toBeDefined();
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
@@ -1313,7 +1353,8 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         provider as any,
       );
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getEmailRoute(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
       await route!.handler({
@@ -1333,7 +1374,8 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         provider as any,
       );
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const route = getEmailRoute(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
       await route!.handler({ body: { to: 'a@b.com', subject: '', text: 'x' } } as any, res as any);
@@ -1360,7 +1402,8 @@ describe('RestServer', () => {
 
     it('returns 501 when no sharing service provider is wired', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const { list, grant, revoke } = getShareRoutes(rest);
       expect(list && grant && revoke).toBeDefined();
       for (const route of [list, grant, revoke]) {
@@ -1378,7 +1421,8 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         undefined, provider as any,
       );
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const { list } = getShareRoutes(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
       await list!.handler({ params: { object: 'account', id: 'a1' } } as any, res as any);
@@ -1394,7 +1438,8 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         undefined, provider as any,
       );
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const { grant: route } = getShareRoutes(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
       await route!.handler({
@@ -1416,7 +1461,8 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         undefined, provider as any,
       );
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const { grant: route } = getShareRoutes(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
       await route!.handler({ params: { object: 'account', id: 'a1' }, body: {} } as any, res as any);
@@ -1432,7 +1478,8 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         undefined, provider as any,
       );
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       const { revoke: route } = getShareRoutes(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis(), end: vi.fn() };
       await route!.handler({ params: { object: 'account', id: 'a1', shareId: 'shr_X' } } as any, res as any);
@@ -1471,7 +1518,8 @@ describe('RestServer', () => {
         undefined, undefined, undefined, undefined, undefined,
         undefined, undefined, provider,
       );
-      rest.registerRoutes();
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
       return rest;
     }
 
@@ -1690,7 +1738,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
     expect(route).toBeDefined();
@@ -1719,7 +1768,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
     await route.handler(
@@ -1741,7 +1791,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
     await route.handler(
@@ -1766,7 +1817,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     err.status = 409;
     protocol.saveMetaItem = vi.fn().mockRejectedValue(err);
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
     const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
@@ -1788,7 +1840,8 @@ describe('RestServer project-scoped routing', () => {
     const server = createMockServer();
     const protocol = createMockProtocol();
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
     const paths = rest.getRoutes().map(r => r.path);
     expect(paths).toContain('/api/v1/data/:object');
@@ -1805,7 +1858,8 @@ describe('RestServer project-scoped routing', () => {
     const rest = new RestServer(server as any, protocol as any, {
       api: { requireAuth: false, enableProjectScoping: true, projectResolution: 'auto' } as any,
     } as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
     const paths = rest.getRoutes().map(r => r.path);
     expect(paths).toContain('/api/v1/data/:object');
@@ -1820,7 +1874,8 @@ describe('RestServer project-scoped routing', () => {
     const rest = new RestServer(server as any, protocol as any, {
       api: { requireAuth: false, enableProjectScoping: true, projectResolution: 'required' } as any,
     } as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
     const paths = rest.getRoutes().map(r => r.path);
     expect(paths).toContain('/api/v1/environments/:environmentId/data/:object');
@@ -1833,7 +1888,8 @@ describe('RestServer project-scoped routing', () => {
     const rest = new RestServer(server as any, protocol as any, {
       api: { requireAuth: false, enableProjectScoping: true, projectResolution: 'required' } as any,
     } as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
     const listRoute = rest
       .getRoutes()
@@ -1857,7 +1913,8 @@ describe('RestServer project-scoped routing', () => {
     const rest = new RestServer(server as any, protocol as any, {
       api: { requireAuth: false, enableProjectScoping: true, projectResolution: 'auto' } as any,
     } as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
 
     const unscoped = rest
       .getRoutes()
@@ -2433,6 +2490,8 @@ describe('discovery — routes.mcp (ADR-0036, #152)', () => {
     const protocol = createMockProtocol();
     // protocol discovery carries a `routes` object the server augments.
     (protocol.getDiscovery as any) = vi.fn().mockResolvedValue({ routes: { data: '', metadata: '' } });
+    // Discovery is a control-plane route (auth-gate allowlisted), so no
+    // authenticated context is needed here.
     const rest = new RestServer(
       server as any, protocol as any, ANON_API as any,
       undefined, // kernelManager
@@ -2549,7 +2608,8 @@ describe('discovery — capabilities.transactionalBatch (#3298)', () => {
       protocol as any,
       { api: opts.api ?? { requireAuth: false } } as any,
     );
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
     const entry = rest.getRouteManager().get('GET', '/api/v1/discovery');
     if (!entry) throw new Error('discovery route not registered');
     return entry.handler as (req: any, res: any) => Promise<void>;
@@ -2915,7 +2975,8 @@ describe('RestServer — object API exposure (apiEnabled / apiMethods)', () => {
         : [{ name: 'widget', enable }],
     );
     const rest = new RestServer(server as any, protocol as any, { api: { requireAuth: false } } as any);
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
     return { rest, protocol };
   }
   async function invoke(rest: any, method: string, path: string, params: any, body?: any) {

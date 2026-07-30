@@ -47,7 +47,7 @@ describe('HttpDispatcher', () => {
 
     describe('handleMetadata', () => {
         it('should handle PUT /metadata/:type/:name by calling protocol.saveMetaItem', async () => {
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const body = { label: 'New Label' };
             const path = '/objects/my_obj';
 
@@ -68,7 +68,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should handle PUT with compound name (3+ path segments)', async () => {
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const body = { density: 'compact' };
             // /metadata/lead/views/all_leads → type='lead', name='views/all_leads'
             const path = '/lead/views/all_leads';
@@ -96,7 +96,7 @@ describe('HttpDispatcher', () => {
                 return null;
             };
 
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const body = { label: 'Fallback' };
             const path = '/objects/my_obj';
 
@@ -110,7 +110,7 @@ describe('HttpDispatcher', () => {
         it('should return error if save fails', async () => {
             mockProtocol.saveMetaItem.mockRejectedValue(new Error('Save failed'));
 
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const body = {};
             const path = '/objects/bad_obj';
 
@@ -134,7 +134,7 @@ describe('HttpDispatcher', () => {
             ];
             mockProtocol.saveMetaItem.mockRejectedValue(err);
 
-            const result = await dispatcher.handleMetadata('/objects/bad', { request: {} }, 'PUT', {});
+            const result = await dispatcher.handleMetadata('/objects/bad', { request: {}, executionContext: { userId: 'u1' } } as any, 'PUT', {});
 
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(422); // NOT the old hardcoded 400
@@ -149,7 +149,7 @@ describe('HttpDispatcher', () => {
         it('should handle READ operations via ObjectQL registry', async () => {
              mockObjectQL.registry.getObject.mockReturnValue({ name: 'my_obj', fields: {} });
              
-             const context = { request: {} };
+             const context = { request: {}, executionContext: { userId: 'u1' } };
              const result = await dispatcher.handleMetadata('/objects/my_obj', context, 'GET');
              
              expect(result.handled).toBe(true);
@@ -989,7 +989,7 @@ describe('HttpDispatcher', () => {
                     return null;
                 });
 
-                const result = await dispatcher.handleMetadata('/objects/my_obj', { request: {} }, 'PUT', { label: 'Test' });
+                const result = await dispatcher.handleMetadata('/objects/my_obj', { request: {}, executionContext: { userId: 'u1' } } as any, 'PUT', { label: 'Test' });
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(200);
                 expect(asyncProtocol.saveMetaItem).toHaveBeenCalled();
@@ -1002,7 +1002,7 @@ describe('HttpDispatcher', () => {
                 });
                 mockObjectQL.registry.getObject.mockReturnValue({ name: 'my_obj', fields: {} });
 
-                const result = await dispatcher.handleMetadata('/objects/my_obj', { request: {} }, 'GET');
+                const result = await dispatcher.handleMetadata('/objects/my_obj', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET');
                 expect(result.handled).toBe(true);
                 expect(mockObjectQL.registry.getObject).toHaveBeenCalledWith('my_obj');
             });
@@ -1107,7 +1107,7 @@ describe('HttpDispatcher', () => {
             // Remove context.getService to ensure getServiceAsync is used
             (kernel as any).context = {};
 
-            const result = await dispatcher.handleMetadata('/objects/my_obj', { request: {} }, 'PUT', { label: 'Test' });
+            const result = await dispatcher.handleMetadata('/objects/my_obj', { request: {}, executionContext: { userId: 'u1' } } as any, 'PUT', { label: 'Test' });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(asyncProtocol.saveMetaItem).toHaveBeenCalled();
@@ -1807,7 +1807,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handleMetadata('_drafts', { request: {} }, 'GET', undefined, {
+            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {
                 packageId: 'app.edu',
                 type: 'object',
             });
@@ -1826,7 +1826,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handleMetadata('_drafts', { request: {} }, 'GET', undefined, {});
+            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {});
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(501);
         });
@@ -1839,7 +1839,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            await dispatcher.handleMetadata('_drafts', { request: {} }, 'GET', undefined, {});
+            await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {});
             expect(listDrafts).toHaveBeenCalledTimes(1);
             expect(getMetaItems).not.toHaveBeenCalled();
         });
@@ -1859,7 +1859,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handleMetadata('/object/account/published', { request: {} }, 'GET');
+            const result = await dispatcher.handleMetadata('/object/account/published', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET');
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data).toEqual({ name: 'account', label: 'Account' });
@@ -1875,7 +1875,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handleMetadata('/object/nonexistent/published', { request: {} }, 'GET');
+            const result = await dispatcher.handleMetadata('/object/nonexistent/published', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET');
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(404);
         });
@@ -1897,7 +1897,7 @@ describe('HttpDispatcher', () => {
                 }
             };
 
-            const result = await dispatcher.handleMetadata('/object/account/published', { request: {} }, 'GET');
+            const result = await dispatcher.handleMetadata('/object/account/published', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET');
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(metaSvc.getPublished).toHaveBeenCalledWith('object', 'account');
@@ -2453,7 +2453,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('GET /meta should return default types with minimal kernel', async () => {
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const result = await minimalDispatcher.handleMetadata('', context, 'GET');
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
@@ -2461,7 +2461,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('GET /meta/types should return default types with minimal kernel', async () => {
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const result = await minimalDispatcher.handleMetadata('/types', context, 'GET');
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
@@ -2478,7 +2478,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const result = await minimalDispatcher.handleMetadata('/objects', context, 'GET');
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
@@ -2496,7 +2496,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const result = await minimalDispatcher.handleMetadata('/objects/account', context, 'GET');
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
@@ -2504,14 +2504,14 @@ describe('HttpDispatcher', () => {
         });
 
         it('GET /meta/:type/:name/published should return 404 when metadata service is unavailable', async () => {
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const result = await minimalDispatcher.handleMetadata('/object/my_obj/published', context, 'GET');
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(404);
         });
 
         it('PUT /meta/:type/:name should return 501 when protocol is unavailable', async () => {
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const body = { label: 'Test' };
             const result = await minimalDispatcher.handleMetadata('/objects/my_obj', context, 'PUT', body);
             expect(result.handled).toBe(true);
@@ -2527,7 +2527,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const context = { request: {} };
+            const context = { request: {}, executionContext: { userId: 'u1' } };
             const result = await minimalDispatcher.handleMetadata('/types', context, 'GET');
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);

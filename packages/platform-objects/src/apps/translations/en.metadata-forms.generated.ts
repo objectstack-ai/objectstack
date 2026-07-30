@@ -936,14 +936,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       globalFilters: {
         label: "Global Filters",
         helpText: "Filters applied to all widgets"
-      },
-      aria: {
-        label: "Aria",
-        helpText: "Accessibility labels"
-      },
-      performance: {
-        label: "Performance",
-        helpText: "Caching and optimization config"
       }
     }
   },
@@ -1151,14 +1143,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Disabled",
         helpText: "CEL expression: disable when condition is true"
       },
-      shortcut: {
-        label: "Shortcut",
-        helpText: "Keyboard shortcut (e.g., \"Ctrl+S\", \"Cmd+Enter\")"
-      },
-      bulkEnabled: {
-        label: "Bulk Enabled",
-        helpText: "Allow applying to multiple selected records"
-      },
       ai: {
         label: "Ai",
         helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
@@ -1346,10 +1330,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       type: {
         label: "Type",
         helpText: "How the flow starts (autolaunched, record_change, schedule, screen, api)"
-      },
-      template: {
-        label: "Template",
-        helpText: "Is this a reusable subflow (can be called from other flows)"
       },
       description: {
         label: "Description",
@@ -1622,10 +1602,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Skills",
         helpText: "Skill names (Agent→Skill→Tool architecture)"
       },
-      knowledge: {
-        label: "Knowledge",
-        helpText: "RAG knowledge access configuration"
-      },
       access: {
         label: "Access",
         helpText: "User IDs or role names who can chat with this agent"
@@ -1719,10 +1695,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       tools: {
         label: "Tools",
         helpText: "Tool names (supports wildcard: action_*)"
-      },
-      triggerPhrases: {
-        label: "Trigger Phrases",
-        helpText: "Natural language phrases that activate this skill"
       },
       triggerConditions: {
         label: "Trigger Conditions",

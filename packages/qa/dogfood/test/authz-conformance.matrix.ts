@@ -77,15 +77,15 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'anonymous-deny', summary: 'secure-by-default anonymous posture (capability)', state: 'enforced',
     enforcement: 'rest/rest-server.ts enforceAuth (requireAuth)', proof: 'showcase-anonymous-deny.dogfood.test.ts' },
   // ── #2567 — the anonymous-deny posture is UNIFORM across HTTP surfaces, not
-  // just REST `/data`. Each sibling surface that reaches ObjectQL now consults
-  // the same `requireAuth` gate; these rows pin every entry point so a new
-  // ungated surface (or a silent regression) fails CI, not review.
+  // just REST `/data`. Each sibling surface that reaches ObjectQL consults the
+  // same unconditional anonymous-deny (#2567); these rows pin every entry point
+  // so a new ungated surface (or a silent regression) fails CI, not review.
   { id: 'anonymous-deny-meta', summary: 'anonymous-deny on the metadata endpoints (#2567 surface 1)', state: 'enforced',
     enforcement: 'rest/rest-server.ts registerMetadataEndpoints guarded registrar (enforceAuth → shouldDenyAnonymous) — every /meta route inherits the gate; runtime/http-dispatcher.ts handleMetadata mirrors it for the dispatcher metadata catch-all',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     covers: ['meta:rest-server.ts:registerMetadataEndpoints', 'meta:http-dispatcher.ts:handleMetadata'] },
   { id: 'anonymous-deny-hono-data', summary: 'anonymous-deny on the raw-hono standard /data routes (#2567 surface 3)', state: 'enforced',
-    enforcement: 'plugin-hono-server/hono-plugin.ts denyAnonymous gate (shouldDenyAnonymous) on the standard /data routes (requireAuth ?? true, mirroring rest-server.ts)',
+    enforcement: 'plugin-hono-server/hono-plugin.ts denyAnonymous gate (shouldDenyAnonymous) on the standard /data routes — unconditional anonymous-deny, mirroring rest-server.ts',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     covers: ['data:hono-plugin.ts:POST /data/:object', 'data:hono-plugin.ts:GET /data/:object/:id', 'data:hono-plugin.ts:GET /data/:object'],
     note: 'These routes delegate straight to ObjectQL and were only shadowed when the REST plugin registered the same paths FIRST — so the posture depended on plugin registration order (a load-order change silently reopened it, no test failing). Gating each route makes the deny decision a property of this entry point too. Handler-level proof in plugin-hono-server/hono-anonymous-deny.test.ts.' },
@@ -180,10 +180,10 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     note: 'REMOVED from spec (system/masking.zod.ts deleted). FLS (plugin-security field-masker) is the enforced field-visibility path; a masking/deny layer would be redesigned with the ADR-0066 ⑦/⑧ muting work anyway, so the dead config was pure drift risk.' },
   { id: 'rls-config-global', summary: 'global RLSConfig / RLSAuditEvent', state: 'removed',
     note: 'REMOVED from spec (rls.zod.ts — RLSConfigSchema/RLSAuditEventSchema/RLSAuditConfigSchema deleted). The enforced RLS path (plugin-security computeRlsFilter) never read them; per-policy RowLevelSecurityPolicySchema is the live surface and is unchanged.' },
-  { id: 'requireAuth-default-flip', summary: 'global requireAuth default is secure-by-default (deny anonymous)', state: 'enforced',
-    enforcement: 'spec/api/rest-server.zod.ts requireAuth default(true) + rest/rest-server.ts normalizeConfig ?? true; explicit requireAuth:false opt-out warns at boot (rest-api-plugin)',
+  { id: 'requireAuth-removed', summary: 'anonymous access to object data is denied unconditionally (no opt-out)', state: 'enforced',
+    enforcement: 'core/security/anonymous-deny.ts shouldDenyAnonymous — no `requireAuth` input; every seam denies an anonymous, non-system caller outside the control-plane allowlist. spec tombstones `api.requireAuth` (retiredKey).',
     proof: 'showcase-anonymous-deny.dogfood.test.ts',
-    note: 'ADR-0056 D2 flip LANDED. The verify harness boots on the platform default (no override), so anonymous-deny AND public-form survival (showcase-public-form.dogfood.test.ts — the publicFormGrant pre-req that unblocked the flip) are proven on the default posture. Share-links read as SYSTEM after token validation. CLI carve-out: auth-less stacks get an explicit fail-open (warned).' },
+    note: 'ADR-0056 D2 → #3963: the `requireAuth: false` opt-out is RETIRED, not merely defaulted-on. Legitimate session-less surfaces survive by DECLARATION, not by posture: public-form submission (publicFormGrant), share-links (token → SYSTEM read), and public-book reads (audience:public, §6.7). A stack that mounts no auth now FAILS AT BOOT (cli/serve.ts, plugin-dev) instead of getting an explicit fail-open.' },
 
   // ── Removed — by ADR-0049 (roadmap M2) ─────────────────────────────────
   { id: 'allow-transfer-restore-purge', summary: 'transfer/restore/purge ops (RBAC gate pre-mapped)', state: 'removed',

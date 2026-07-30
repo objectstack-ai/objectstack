@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { FieldSchema } from '../data/field.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
-import { PerformanceConfigSchema } from './responsive.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Widget Lifecycle Hooks Schema
@@ -371,7 +371,14 @@ export const WidgetManifestSchema = lazySchema(() => z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 
   /** Performance optimization settings */
-  performance: PerformanceConfigSchema.optional().describe('Performance optimization settings'),
+  // `performance` REMOVED (#3896 audit close-out): call-graph closed across
+  // both repos — zero readers (objectui's virtual scrolling reads the LIVE
+  // top-level `virtualScroll` key, never performance.virtualScroll).
+  performance: retiredKey(
+    '`widget.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    'no renderer or runtime ever read it. Delete the key. Virtual scrolling is the live ' +
+    'top-level `virtualScroll` on list-shaped views.',
+  ),
 }));
 
 export type WidgetManifest = z.infer<typeof WidgetManifestSchema>;

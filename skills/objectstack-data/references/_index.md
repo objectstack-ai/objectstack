@@ -30,7 +30,6 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 - `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Action Parameter Schema
 - `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — I18n Object Schema
-- `node_modules/@objectstack/spec/src/ui/responsive.zod.ts` — Breakpoint Name Enum
 - `node_modules/@objectstack/spec/src/ui/sharing.zod.ts` — Sharing & Embedding Protocol
 - `node_modules/@objectstack/spec/src/ui/view.zod.ts` — HTTP Method Enum & HTTP Request Schema
 

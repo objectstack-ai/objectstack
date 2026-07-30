@@ -31,10 +31,9 @@ interface ErrorResponse {
     retryable?: boolean; // Whether the request can be retried
     retryStrategy?: string;
     retryAfter?: number; // Seconds to wait before retrying (rate limits)
-    // ⚠️ Declared as `fieldErrors`; every producer emits `fields`. Read `fields`.
-    // (ADR-0114 D4 — the rename needs a tombstone + migration, so it lands on
-    // its own.)
-    fieldErrors?: Array<{
+    // One entry per offending value. Named `fields` on the wire AND in the spec
+    // contract since ADR-0114 D4; the old `fieldErrors` is tombstoned.
+    fields?: Array<{
       field: string;     // Field path (supports dot notation)
       // Which CONSTRAINT the value violated — a lowercase `FieldErrorCode`
       // (`required`, `max_length`, `invalid_email`, …), NOT a top-level code.
@@ -73,7 +72,7 @@ class ObjectStackError extends Error {
   code: string;
   status: number;
   retryAfter?: number;
-  fieldErrors: ErrorResponse['error']['fieldErrors'];
+  fields: ErrorResponse['error']['fields'];
   details: ErrorResponse['error']['details'];
   requestId?: string;
 
@@ -83,7 +82,7 @@ class ObjectStackError extends Error {
     this.code = response.error.code;
     this.status = response.error.httpStatus ?? 0;
     this.retryAfter = response.error.retryAfter;
-    this.fieldErrors = response.error.fieldErrors;
+    this.fields = response.error.fields;
     this.details = response.error.details;
     this.requestId = response.error.requestId ?? response.meta?.requestId;
   }
@@ -111,7 +110,7 @@ class ObjectStackError extends Error {
   /** Extract field-level errors as a map of field path → message */
   get fieldErrorMap(): Record<string, string> {
     const errors: Record<string, string> = {};
-    for (const detail of this.fieldErrors ?? []) {
+    for (const detail of this.fields ?? []) {
       if (detail.field) {
         errors[detail.field] = detail.message;
       }

@@ -18,25 +18,13 @@ export const AIModelConfigSchema = lazySchema(() => z.object({
   topP: z.number().optional(),
 }));
 
-/**
- * AI Knowledge Base
- * RAG configuration.
+/*
+ * REMOVED — `AIKnowledgeSchema` / `AIKnowledge` (#3896 audit close-out). It
+ * typed `agent.knowledge`, tombstoned below: the RAG path never read the
+ * agent record, so the whole block was a grounding claim nothing enforced.
+ * The protocol-17 `agent-knowledge-topics-to-sources` conversion remains in
+ * the chain (it rewrites historical SOURCES and imports nothing from here).
  */
-export const AIKnowledgeSchema = lazySchema(() => z.object({
-  sources: z.array(z.string()).optional().describe('Knowledge sources/tags to recruit RAG context from. Canonical key consumed by the agent renderer (objectui AgentPreview KnowledgeSummary).'),
-  /**
-   * [REMOVED in protocol 17 — #3855] The deprecated alias of `sources`.
-   * Tombstoned rather than deleted: `AIKnowledgeSchema` is not `.strict()`, so a
-   * plain deletion would silently strip the key and the agent would quietly
-   * recruit no RAG context (#1878's original failure, restored).
-   */
-  topics: retiredKey(
-    "`knowledge.topics` was removed in @objectstack/spec 17 (#3855) — use `knowledge.sources`. " +
-    'Rename the key; the value (a list of source tags) is unchanged. ' +
-    "Run `os migrate meta --from 16` to rewrite it automatically.",
-  ),
-  indexes: z.array(z.string()).describe('Vector Store Indexes'),
-}));
 
 /**
  * Structured Output Format
@@ -167,7 +155,19 @@ export const AgentSchema = lazySchema(() => z.object({
   ),
 
   /** Knowledge */
-  knowledge: AIKnowledgeSchema.optional().describe('RAG access'),
+  // `knowledge` REMOVED (#3896 audit close-out) — a GROUNDING claim nothing
+  // enforced: the RAG path never reads the agent record; `search_knowledge`
+  // takes `sourceIds` from the LLM's own tool-call arguments (cloud
+  // knowledge-tools.ts:96). An author who "scoped" retrieval here scoped
+  // nothing — the dangerous direction, same shape as tool.permissions.
+  knowledge: retiredKey(
+    '`agent.knowledge` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    'declaring knowledge sources/indexes on an agent never scoped retrieval: the ' +
+    "`search_knowledge` tool takes `sourceIds` from the LLM's tool-call arguments, not from " +
+    'the agent record. Delete the block. Restrict retrieval at the knowledge-service / ' +
+    'source level (per-source permissions), and describe intended grounding in ' +
+    '`instructions` so the model asks for the right sources.',
+  ),
 
   /** Interface */
   active: z.boolean().default(true),

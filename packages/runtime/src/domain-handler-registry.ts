@@ -143,8 +143,6 @@ export interface DomainHandlerDeps {
     resolveProjectKernelObjectQL(context: HttpProtocolContext): Promise<any | null>;
     /** True when a host KernelResolver is registered (multi-tenant deployment). */
     isMultiTenantHost(): boolean;
-    /** The deployment's `requireAuth` posture (lazily read — construction-order safe). */
-    isAuthRequired(): boolean;
     /**
      * The AI route table the AI plugin caches on the request kernel
      * (`__aiRoutes`); undefined until the plugin initializes it.

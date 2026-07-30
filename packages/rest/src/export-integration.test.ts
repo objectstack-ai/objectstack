@@ -188,6 +188,7 @@ async function boot() {
 
   const protocol = new ObjectStackProtocolImplementation(engine as any);
   const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
   const route = rest.getRoutes().find(
     (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',
@@ -436,7 +437,8 @@ describe('export route — FLS column projection via getReadableFields (#3547)',
       undefined, // serviceExistsProvider
       securityServiceProvider,
     );
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
     const route = rest.getRoutes().find(
       (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',
     );

@@ -295,8 +295,11 @@ describe('RestApiPlugin kernel-resolver adapter (D11④)', () => {
       setHeader: vi.fn(),
       headersSent: false,
     };
+    // No resolver, no crash — and the shared anonymous-deny gate applies even in
+    // single-environment OSS mode: an anonymous data read is 401, never served
+    // (#3963). The control protocol is only reached once a caller authenticates.
     await listRoute![1]({ params: { object: 'account' }, query: {}, headers: {} }, res);
-    // Served by the boot-time control protocol — no resolver, no crash.
-    expect(services.protocol.findData).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(services.protocol.findData).not.toHaveBeenCalled();
   });
 });

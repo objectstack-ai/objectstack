@@ -41,6 +41,7 @@ function setup() {
     deleteManyData,
   };
   const rest = new RestServer(createMockServer() as any, protocol, { api: { requireAuth: false } } as any);
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
   return { rest, deleteManyData };
 }
@@ -85,14 +86,15 @@ describe('POST /data/:object/deleteMany — ingress validation (#3897)', () => {
     expect(req.multi).toBeUndefined();
   });
 
-  it('strips a body-supplied context so the principal cannot be forged', async () => {
+  it('never forwards a body-supplied context — the caller cannot forge the principal', async () => {
     const { rest, deleteManyData } = setup();
-    // This route is reachable with `requireAuth: false`, so no execution
-    // context is resolved — a body `context` would previously have been the
-    // only one the protocol saw.
+    // An authenticated caller (the harness resolves `test-user`) puts a forged
+    // principal in the body; the protocol must see the RESOLVED context, never
+    // the body's.
     await post(rest, { ids: ['a'], context: { userId: 'root', roles: ['admin'] } });
 
-    expect(deleteManyData.mock.calls[0][0].context).toBeUndefined();
+    const forwarded = deleteManyData.mock.calls[0][0].context;
+    expect(forwarded?.userId).toBe('test-user');
   });
 
   it('keeps the legitimate BatchOptions keys', async () => {

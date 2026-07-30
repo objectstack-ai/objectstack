@@ -860,7 +860,6 @@ type NormalizedRestServerConfig = {
         enableSearch?: boolean;
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
-        requireAuth: boolean;
         documentation: RestApiConfig['documentation'];
         responseFormat: RestApiConfig['responseFormat'];
     };
@@ -1223,8 +1222,9 @@ export class RestServer {
     }
 
     /**
-     * Reject anonymous requests with HTTP 401 when `api.requireAuth` is set.
-     * Returns `true` if the response was sent and the caller should stop
+     * Reject anonymous requests with HTTP 401 — unconditionally (#3963: the
+     * `api.requireAuth` opt-out is retired). Returns `true` if the response was
+     * sent and the caller should stop
      * processing. Returns `false` to continue.
      *
      * The check is intentionally narrow: only `context?.userId` counts as
@@ -1233,7 +1233,7 @@ export class RestServer {
      */
     private enforceAuth(req: any, res: any, context: any): boolean {
         // ADR-0069 — authentication-policy gate (password expiry, enforced MFA).
-        // Independent of `requireAuth`: a gated session (carrying `authGate`) is
+        // Independent of the anonymous-deny: a gated session (carrying `authGate`) is
         // blocked from protected resources, while the core allow-list keeps auth
         // + remediation reachable. Runs before the anonymous check.
         const gate = context?.authGate;
@@ -1247,7 +1247,6 @@ export class RestServer {
         // exactly as before (the allowlist is reserved for a future umbrella
         // seam). `isSystem` is never set on inbound HTTP, so it cannot bypass.
         if (shouldDenyAnonymous({
-            requireAuth: this.config.api.requireAuth,
             userId: context?.userId,
             isSystem: context?.isSystem,
             method: req?.method,
@@ -2059,7 +2058,6 @@ export class RestServer {
                 enableSearch: (api as any).enableSearch ?? true,
                 enableProjectScoping: api.enableProjectScoping ?? false,
                 projectResolution: api.projectResolution ?? 'auto',
-                requireAuth: (api as any).requireAuth ?? true, // secure-by-default (ADR-0056 D2; mirrors RestApiConfigSchema)
                 documentation: api.documentation,
                 responseFormat: api.responseFormat,
             },
@@ -2547,23 +2545,22 @@ export class RestServer {
     }
     
     /**
-     * Register the metadata routes behind the SAME `requireAuth` gate the
+     * Register the metadata routes behind the SAME anonymous-deny gate the
      * `/data` routes use.
      *
      * `registerMetadataEndpoints` builds ~17 `/meta/*` routes but — unlike the
      * `/data` handlers — never calls {@link enforceAuth}: its handlers assumed
-     * the `requireAuth` gate rejected anonymous callers "upstream", yet nothing
-     * upstream covers `/meta`, so on a `requireAuth` deployment an anonymous
-     * caller could read object / field schemas. On a tenant-less runtime host
-     * those are SYSTEM-object schemas and the host is publicly reachable — a
-     * real leak.
+     * the anonymous-deny rejected anonymous callers "upstream", yet nothing
+     * upstream covers `/meta`, so an anonymous caller could read object / field
+     * schemas. On a tenant-less runtime host those are SYSTEM-object schemas and
+     * the host is publicly reachable — a real leak.
      *
      * Rather than add the gate to every handler (and have the next new route
      * forget it — the exact failure mode that caused this), wrap the route
      * registrar for the duration of registration so every meta route, present
-     * and future, inherits it. The check is a no-op when `requireAuth` is off
-     * (demo / single-tenant), so the previously-public metadata surface there
-     * is unchanged; an authenticated user passes exactly as on `/data`.
+     * and future, inherits it. An authenticated user passes exactly as on
+     * `/data`; the one exception is the declaration-derived public-book read
+     * (#3963), handled just below.
      */
     private registerMetadataEndpoints(basePath: string): void {
         const realRouteManager = this.routeManager;
@@ -2582,7 +2579,7 @@ export class RestServer {
                         const context = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                         // [#3963] `audience: 'public'` is a DECLARED capability, so it
                         // must not depend on a deployment flipping its whole data plane
-                        // open (`requireAuth: false`). An anonymous read of the
+                        // open. An anonymous read of the
                         // book/doc surface skips the anonymous-deny and is authorized
                         // instead by the ADR-0046 §6.7 audience gate inside the handler
                         // — the same declaration-derived shape ADR-0056 Option A chose
@@ -2759,7 +2756,7 @@ export class RestServer {
                         // privileged apps (Studio, Setup, etc.) and gated nav
                         // items are stripped before reaching the client. We
                         // intentionally leave anonymous responses untouched —
-                        // the existing `requireAuth` gate (when enabled) blocks
+                        // the anonymous-deny gate blocks
                         // them upstream; when disabled, the demo / public
                         // surface keeps its prior behaviour.
                         //
@@ -5094,14 +5091,14 @@ export class RestServer {
      *   GET  {basePath}/forms/:slug          → resolved form spec
      *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required)
      *
-     * Both routes bypass `enforceAuth` even when `requireAuth=true` on the
+     * Both routes bypass `enforceAuth` even though anonymous-deny is on for the
      * deployment (e.g. ObjectOS multi-tenant). Security is delegated to the
      * `guest_portal` permission set carried on the execution context — the
      * SecurityPlugin enforces INSERT-only access to the target object. If
      * the deployment hasn't registered a `guest_portal` profile, the
      * security middleware falls open with `permissions: []` (no userId),
      * matching the existing anonymous-access semantics; deployers must
-     * keep `requireAuth=true` deployments paired with a `guest_portal`
+     * keep secure-by-default deployments paired with a `guest_portal`
      * profile (the CRM example does this) to enforce the INSERT-only
      * contract.
      *
@@ -5373,7 +5370,7 @@ export class RestServer {
                     // form — a narrow create grant scoped to exactly this form's target
                     // object. The SecurityPlugin honors `publicFormGrant` (create + the
                     // immediate read-back, that object ONLY), so public forms work under
-                    // secure-by-default (requireAuth) WITHOUT a deployment-configured
+                    // secure-by-default (anonymous-deny) WITHOUT a deployment-configured
                     // `guest_portal`. `guest_portal` + `anonymous` are kept for back-compat
                     // with object hooks (guest detection via falsy `ctx.user?.id`).
                     const context: any = {
@@ -5731,8 +5728,8 @@ export class RestServer {
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (!context?.userId) {
-                    // Even on requireAuth=false deployments the explain surface
-                    // stays authenticated-only — it is an admin diagnosis tool.
+                    // The explain surface stays authenticated-only — it is an
+                    // admin diagnosis tool. (Anonymous is already 401ed above.)
                     return res.status(401).json({
                         code: 'UNAUTHORIZED',
                         message: 'The access-explanation endpoint requires an authenticated caller.',
@@ -7128,7 +7125,7 @@ export class RestServer {
                         // (ADR-0049) was enforced on A while B was written. Zod also
                         // strips unknown keys, which keeps a body `context` from
                         // becoming the execution context on a deployment where none
-                        // resolves (anonymous-reachable `requireAuth: false`).
+                        // resolves (e.g. an anonymous public-book read, #3963).
                         const { UpdateManyDataRequestSchema } = await import('@objectstack/spec/api');
                         const updateManyInput = { ...(req.body ?? {}), object: req.params.object };
                         const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse(updateManyInput);

@@ -587,7 +587,6 @@ export const NotifyOwnerSubflow = defineFlow({
   label: 'Notify Owner (reusable subflow)',
   description: 'Reusable subflow: notifies a record owner. Invoked by other flows via a subflow node.',
   type: 'autolaunched',
-  template: true,
   variables: [
     { name: 'ownerId', type: 'text', isInput: true },
     { name: 'message', type: 'text', isInput: true },
@@ -672,7 +671,6 @@ export const ClosureSignoffSubflow = defineFlow({
   label: 'Closure Sign-off (approval subflow)',
   description: 'Reusable subflow: requests a manager sign-off and outputs the decision. Demonstrates approval inside a subflow (nested durable pause).',
   type: 'autolaunched',
-  template: true,
   variables: [
     { name: 'reason', type: 'text', isInput: true },
     { name: 'decision', type: 'text', isOutput: true },
@@ -1183,7 +1181,6 @@ export const OneTaskSignoffSubflow = defineFlow({
   label: 'One Task Sign-off (per-item subflow)',
   description: 'Reusable subflow: requests sign-off on a single task. Invoked per item by the batch sign-off map.',
   type: 'autolaunched',
-  template: true,
   variables: [{ name: 'decision', type: 'text', isOutput: true }],
   nodes: [
     { id: 'start', type: 'start', label: 'Start' },
@@ -1357,13 +1354,16 @@ export const InquiryPurgeFlow = defineFlow({
       id: 'purge_check',
       type: 'get_record',
       label: 'Find closed inquiries',
-      // records mode + outputVariable: the result lands in the variable
-      // context, where the out-edge CEL below reads it (the engine routes on
-      // EDGE conditions — same contract as BudgetApprovalFlow's gate).
+      // `limit > 1` is what makes this a LIST read (`find`, not `findOne`) — the
+      // executor has no `mode` key, so a `mode: 'records'` used to sit here doing
+      // nothing while the comment credited it for the behaviour `limit` actually
+      // produced (found by the #4045 unknown-config-key check). `outputVariable`
+      // then lands the array in the variable context, where the out-edge CEL below
+      // reads it — the engine routes on EDGE conditions, same contract as
+      // BudgetApprovalFlow's gate.
       config: {
         objectName: 'showcase_inquiry',
         filter: { status: 'closed' },
-        mode: 'records',
         limit: 200,
         outputVariable: 'closedInquiries',
       },

@@ -26,6 +26,7 @@ import { z } from 'zod';
  * High-level categorization of errors
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const ErrorCategory = z.enum([
   'validation',      // Input validation errors (400)
   'authentication',  // Authentication failures (401)
@@ -302,7 +303,7 @@ export type FieldError = z.infer<typeof FieldErrorSchema>;
  *   "retryable": false,
  *   "retryStrategy": "no_retry",
  *   "details": {
- *     "fieldErrors": [
+ *     "fields": [
  *       {
  *         "field": "email",
  *         "code": "invalid_format",
@@ -351,18 +352,26 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
   /**
    * One entry per offending value.
    *
-   * ⚠️ NAME MISMATCH, deliberately left standing (ADR-0114 D4). The wire carries
-   * `fields` — the validators, import coercion, `validation-failure.ts`,
-   * `@objectstack/client` and the console's extractor all say `fields`, and
-   * nothing has ever emitted `fieldErrors`. Renaming it here is the right end
-   * state, but it is an authorable-key retirement: ADR-0104's contract guard
-   * requires a `retiredKey()` tombstone, a D2 conversion so `os migrate meta` can
-   * rewrite consumers, and a major changeset carrying the FROM → TO mapping.
-   * That machinery is a change of its own, not a rider on this one — ADR-0114
-   * lands the ELEMENT schema (which is what makes a validation body assertable)
-   * and defers the rename with its cost written down.
+   * Named `fields` because that is what the wire has always carried — the
+   * validators, import coercion, `validation-failure.ts`, `@objectstack/client`
+   * and the console's field-error extractor all say `fields`. This property was
+   * declared as `fieldErrors` and emitted by nothing, which is ADR-0078's
+   * silently-inert declaration sitting on the error envelope; the rename points
+   * the declaration at reality rather than the reverse (ADR-0114 D4).
    */
-  fieldErrors: z.array(FieldErrorSchema).optional().describe('Field-specific validation errors (wire name is `fields` — see ADR-0114 D4)'),
+  fields: z.array(FieldErrorSchema).optional().describe('One entry per offending value'),
+  /**
+   * Tombstoned, not deleted (ADR-0104): `EnhancedApiErrorSchema` is not
+   * `.strict()`, so a plain deletion would let anyone still writing `fieldErrors`
+   * parse clean and lose the array — the silent-strip shape ADR-0114 D4 refused
+   * to ship. `retiredKey()` turns that into a rejection carrying the fix.
+   */
+  fieldErrors: retiredKey(
+    '`EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 ' +
+    '(ADR-0114 D4, #3977) — the array is unchanged, only the property name. Every ' +
+    'producer already emitted `fields`; `fieldErrors` was declared and never emitted, ' +
+    'so a reader keying on it was reading a field no server sent.',
+  ),
   timestamp: z.string().datetime().optional().describe('When the error occurred'),
   requestId: z.string().optional().describe('Request ID for tracking'),
   traceId: z.string().optional().describe('Distributed trace ID'),

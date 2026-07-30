@@ -8,12 +8,13 @@ import { DateGranularity } from '../data/query.zod';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
-import { ResponsiveConfigSchema, PerformanceConfigSchema } from './responsive.zod';
+import { ResponsiveConfigSchema } from './responsive.zod';
 
 /**
  * Color variant for dashboard widgets (e.g., KPI cards).
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const WidgetColorVariantSchema = lazySchema(() => z.enum([
   'default',
   'blue',
@@ -451,11 +452,19 @@ export const DashboardSchema = lazySchema(() => z.object({
   /** Global Filters */
   globalFilters: z.array(GlobalFilterSchema).optional().describe('Global filters that apply to all widgets in the dashboard'),
 
-  /** ARIA accessibility attributes */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-
-  /** Performance optimization settings */
-  performance: PerformanceConfigSchema.optional().describe('Performance optimization settings'),
+  // `aria` / `performance` REMOVED (#3896 audit close-out): authorable and
+  // inert — no DashboardRenderer path applied either (ledger: dead; the
+  // report twins were removed in the report-liveness close-out).
+  aria: retiredKey(
+    '`dashboard.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no ' +
+    'dashboard renderer ever applied it, so declared ARIA attributes silently did not reach ' +
+    'the DOM. Delete the key.',
+  ),
+  performance: retiredKey(
+    '`dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit ' +
+    'close-out) — no renderer or runtime read it; dashboard performance tuning was never ' +
+    'implemented. Delete the key.',
+  ),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here; the loader translates it

@@ -85,6 +85,7 @@ function buildServer(opts: { ql?: any; objects?: any[]; readonlyFields?: string[
     undefined, undefined, undefined, undefined, // kernelManager, envRegistry, defaultEnvIdProvider, authServiceProvider
     objectQLProvider,                           // objectQLProvider (positional arg #8)
   );
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
   const route = rest.getRoutes().find(
     (r) => r.method === 'POST' && (r.metadata?.summary ?? '').startsWith('Cross-object'),

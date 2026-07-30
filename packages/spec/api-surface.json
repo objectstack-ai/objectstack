@@ -1837,7 +1837,6 @@
     "validateObjectNamespacePrefix (function)"
   ],
   "./ai": [
-    "AIKnowledgeSchema (const)",
     "AIModelConfigSchema (const)",
     "AIUsageRecord (type)",
     "AIUsageRecordSchema (const)",
@@ -3348,8 +3347,6 @@
     "PageVariableSchema (const)",
     "PaginationConfig (type)",
     "PaginationConfigSchema (const)",
-    "PerformanceConfig (type)",
-    "PerformanceConfigSchema (const)",
     "PersistStorage (type)",
     "PersistStorageSchema (const)",
     "PinchGestureConfig (type)",

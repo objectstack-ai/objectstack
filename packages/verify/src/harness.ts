@@ -262,10 +262,10 @@ export async function bootStack(
   await kernel.use(new SharingServicePlugin());
 
   // REST + dispatcher route surfaces (mount onto the http-server service).
-  // No `requireAuth` override: the harness deliberately boots on the platform
-  // DEFAULT (secure-by-default deny, ADR-0056 D2) so every dogfood proof —
-  // anonymous-deny, public-form survival, share-links — exercises the posture
-  // a fresh production deployment actually gets.
+  // Anonymous access to object data is denied unconditionally (#3963 retired the
+  // `requireAuth` opt-out), so every dogfood proof — anonymous-deny, public-form
+  // survival, share-links, public-book reads — exercises the one posture a
+  // production deployment actually gets.
   await kernel.use(createRestApiPlugin({}));
   await kernel.use(createDispatcherPlugin({}));
 

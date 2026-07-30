@@ -34,9 +34,15 @@ function makeDispatcher(saveError: unknown) {
     const protocol = {
         saveMetaItem: async () => { throw saveError; },
     };
+    // An auth service that resolves an authenticated caller — otherwise the
+    // dispatch would 401 at the anonymous-deny gate (#3963) before reaching the
+    // error path this test covers.
+    const auth = { api: { getSession: async () => ({ user: { id: 'u1' } }) } };
+    const svc = (name: string) =>
+        name === 'protocol' ? protocol : name === 'auth' ? auth : undefined;
     const kernel: any = {
-        getService: (name: string) => (name === 'protocol' ? protocol : undefined),
-        getServiceAsync: async (name: string) => (name === 'protocol' ? protocol : undefined),
+        getService: svc,
+        getServiceAsync: async (name: string) => svc(name),
     };
     return new HttpDispatcher(kernel);
 }
@@ -48,7 +54,7 @@ async function putMeta(saveError: unknown) {
         '/meta/object/widget',
         { name: 'widget' },
         {},
-        {} as any,
+        { executionContext: { userId: 'u1' } } as any,
     );
 }
 

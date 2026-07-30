@@ -411,11 +411,22 @@ const step17: MigrationStep = {
     'real caller already sends; the schema tombstones `query`/`format`, and the ' +
     'dispatcher entry validates bodies and answers 400 with the prescription. No ' +
     'stored metadata carries this shape (it was HTTP-only), so the change is two ' +
-    'semantic TODOs for API callers rather than a stack conversion.',
+    'semantic TODOs for API callers rather than a stack conversion.\n\n' +
+    'The close-out sweep finishes the enforce-or-remove worklist across the ' +
+    'remaining types: action `shortcut`/`bulkEnabled` (no keydown path; the ' +
+    "multi-select toolbar reads the view's bulkActions), flow `active`/`template`/" +
+    'node `outputSchema`/errorHandling `fallbackNodeId` (`active: false` never ' +
+    'stopped a flow — `status` is the enforced lifecycle; faults route via ' +
+    'per-node fault edges), the inert view keys (list `responsive`/`performance`, ' +
+    'form `data`/`defaultSort`/`aria` — list aria/data stay live), dashboard and ' +
+    'widget `aria`/`performance`, `agent.knowledge` (declaring sources never ' +
+    'scoped retrieval — absorbs the former topics→sources rename), and ' +
+    "`skill.triggerPhrases` (phrases were never matched; routing is " +
+    'triggerConditions + the agent allowlist). All pure lossless deletes, each ' +
+    'tombstoned at its schema with the prescription.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
-    'agent-knowledge-topics-to-sources',
     'agent-tools-to-skills',
     'sharing-rule-access-level-full-to-edit',
     'flow-node-crud-object-alias',
@@ -424,6 +435,12 @@ const step17: MigrationStep = {
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',
     'field-required-notnull-explicit',
+    'action-inert-keys-removed',
+    'flow-inert-keys-removed',
+    'view-inert-keys-removed',
+    'dashboard-inert-keys-removed',
+    'agent-knowledge-removed',
+    'skill-trigger-phrases-removed',
   ],
   semantic: [
     {
@@ -438,6 +455,23 @@ const step17: MigrationStep = {
       acceptanceCriteria:
         'Every /analytics/query and /analytics/sql call sends the bare AnalyticsQuery shape and ' +
         'succeeds; no request answers 400 VALIDATION_FAILED with the envelope prescription.',
+    },
+    {
+      id: 'enhanced-api-error-field-errors-renamed',
+      surface: 'api.enhancedApiError.fieldErrors',
+      replacement: 'fields',
+      reason:
+        'The wire has always carried `fields` — the validators, import coercion, ' +
+        'validation-failure.ts, @objectstack/client and the console\'s field-error extractor ' +
+        'all say `fields`, and nothing ever emitted `fieldErrors`, so a reader keying on it ' +
+        'was reading a field no server sent (ADR-0078\'s silently-inert declaration, on the ' +
+        'error envelope). This is a RESPONSE surface: no stack, example or template carries ' +
+        'the key, so there is no source for the chain to rewrite — the schema tombstones it ' +
+        'via retiredKey() and consumers move their read themselves. ADR-0114 D4, #3977.',
+      acceptanceCriteria:
+        'No consumer reads `error.fieldErrors`; per-field validation detail is read from ' +
+        '`error.fields`, and constructing an EnhancedApiError with `fieldErrors` fails to parse ' +
+        'with the rename prescription instead of silently losing the array.',
     },
     {
       id: 'analytics-query-request-format-retired',
@@ -455,6 +489,44 @@ const step17: MigrationStep = {
 };
 
 /** All migration steps, keyed by the major they migrate into. */
+const step18: MigrationStep = {
+  toMajor: 18,
+  rationale:
+    'Protocol 18 retires `api.requireAuth` (#3963): the deployment-wide opt-out that let a '
+    + 'stack serve its ENTIRE data plane anonymously with one boolean. Auth is a kernel '
+    + 'concern, not a deployment posture — anonymous access to object data is now denied '
+    + 'unconditionally on every HTTP surface. Every surface that legitimately serves a '
+    + 'session-less caller derives its own narrow authorization from a DECLARATION instead: '
+    + 'the control-plane allowlist, `publicFormGrant` (public form views), share-link tokens '
+    + "(read as SYSTEM), and `book.audience: 'public'` (ADR-0046 §6.7). The key is dropped "
+    + 'with a notice rather than mapped — there is no replacement value, only a different '
+    + 'way to publish (by declaration). A stack that mounts no auth at all now fails at boot '
+    + 'when it would serve a data API, instead of receiving an implicit fail-open.\n\n'
+    + 'The same major retires `BatchOptions.validateOnly` (#4052): a batch "dry-run" flag that '
+    + 'was declared but never implemented — every batch surface (`updateManyData` / '
+    + '`deleteManyData` / `batchData`) persisted regardless, so a caller sending it to PREVIEW a '
+    + 'mutation got it executed. That is the dangerous direction of declared ≠ enforced: a flag '
+    + 'lying about a data-safety guarantee. No dry-run exists today; the schema tombstones the '
+    + 'key with the prescription. It is HTTP-only (never stored in stack metadata), so the '
+    + 'change is one semantic TODO for API callers rather than a stack conversion.',
+  conversionIds: ['stack-api-require-auth-removed'],
+  semantic: [
+    {
+      id: 'batch-options-validate-only-retired',
+      surface: 'api.batchOptions.validateOnly',
+      replacement: '(removed — no dry-run today; open an issue to design a no-commit batch preview)',
+      reason:
+        'The `validateOnly` key promised a dry-run ("validate records without persisting") but no '
+        + 'batch surface ever read it — updateManyData / deleteManyData / batchData persist '
+        + 'regardless. There is no behaviour to preserve and nothing stored to rewrite (it only '
+        + 'ever appeared in an HTTP request body). Callers must stop sending it.',
+      acceptanceCriteria:
+        'No /batch, /updateMany or /deleteMany call sends `options.validateOnly`; a request that '
+        + 'includes it answers 400 VALIDATION_FAILED with the retirement prescription.',
+    },
+  ],
+};
+
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   11: step11,
   12: step12,
@@ -463,6 +535,7 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   15: step15,
   16: step16,
   17: step17,
+  18: step18,
 };
 
 /** The majors that have a step, ascending. */

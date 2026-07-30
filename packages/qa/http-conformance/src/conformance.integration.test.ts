@@ -46,6 +46,14 @@ const ADAPTERS: AdapterCase[] = [
 async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean } = {}) {
     const kernel = new LiteKernel();
     kernel.use(new ObjectQLPlugin());
+    // [#3963] Anonymous-deny is unconditional now; conformance focuses on
+    // transport parity, so authenticate every request with a stub session.
+    kernel.use({
+        metadata: { name: 'test-auth', version: '1.0.0' },
+        init: (c: any) => c.registerService('auth', {
+            api: { getSession: async () => ({ user: { id: 'test-user' } }) },
+        }),
+    } as any);
     if (opts.withAnalytics !== false) {
         kernel.use({
             name: 'com.test.analytics-stub',
@@ -60,16 +68,8 @@ async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean 
         } as any);
     }
     kernel.use(makePlugin());
-    kernel.use(createRestApiPlugin({
-        api: {
-            api: {
-                // Conformance focuses on transport parity; the anonymous-deny
-                // posture is exercised separately with requireAuth on.
-                requireAuth: false,
-            } as any,
-        },
-    }));
-    kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false, requireAuth: false }));
+    kernel.use(createRestApiPlugin({}));
+    kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false }));
 
     await kernel.bootstrap();
 

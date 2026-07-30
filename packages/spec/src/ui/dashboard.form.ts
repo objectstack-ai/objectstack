@@ -50,8 +50,8 @@ export const dashboardForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'aria', type: 'composite', helpText: 'Accessibility labels' },
-        { field: 'performance', type: 'composite', helpText: 'Caching and optimization config' },
+        // `aria` / `performance` inputs removed with the keys (#3896 close-out):
+        // no dashboard renderer ever applied either.
       ],
     },
   ],

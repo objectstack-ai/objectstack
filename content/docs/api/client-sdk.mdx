@@ -225,7 +225,6 @@ const batchResult = await client.data.batch('account', {
     atomic: true,
     returnRecords: true,
     continueOnError: false,
-    validateOnly: false,
   },
 });
 
@@ -499,7 +498,6 @@ The `find` method accepts an options object with **canonical** (recommended) fie
 | `atomic` | `boolean` | `true` | Rollback entire batch on any failure |
 | `returnRecords` | `boolean` | `false` | Include full records in response |
 | `continueOnError` | `boolean` | `false` | Continue after errors (when atomic=false) |
-| `validateOnly` | `boolean` | `false` | Dry-run mode — validate without persisting |
 
 ---
 

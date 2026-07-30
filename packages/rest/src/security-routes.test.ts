@@ -86,14 +86,17 @@ describe('GET/POST /security/explain (ADR-0090 D6)', () => {
     expect(explain).toHaveBeenCalledWith({ object: 'task', operation: 'read' }, CALLER);
   });
 
-  it('stays authenticated-only even on requireAuth=false deployments', async () => {
+  it('is authenticated-only — an anonymous caller is 401ed before explain runs', async () => {
     const explain = vi.fn();
     const { post } = buildServer(async () => ({ explain }), { callerCtx: undefined });
     const res = mockRes();
     await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'read' } } as any, res);
 
+    // The shared anonymous-deny gate (#3963) catches this first now, so the code
+    // is the uniform UNAUTHENTICATED rather than the route's own UNAUTHORIZED —
+    // both 401, and explain never runs either way.
     expect(res.statusCode).toBe(401);
-    expect(res.body.code).toBe('UNAUTHORIZED');
+    expect(res.body.error).toBe('UNAUTHENTICATED');
     expect(explain).not.toHaveBeenCalled();
   });
 

@@ -936,14 +936,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       globalFilters: {
         label: "全局筛选",
         helpText: "应用到所有组件的筛选条件"
-      },
-      aria: {
-        label: "无障碍",
-        helpText: "无障碍标签"
-      },
-      performance: {
-        label: "性能",
-        helpText: "懒加载、虚拟滚动、缓存等"
       }
     }
   },
@@ -1151,14 +1143,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "禁用",
         helpText: "CEL 表达式：满足条件时禁用"
       },
-      shortcut: {
-        label: "快捷键",
-        helpText: "键盘快捷键（如 \"Ctrl+S\"、\"Cmd+Enter\"）"
-      },
-      bulkEnabled: {
-        label: "批量启用",
-        helpText: "允许对多条选中记录执行"
-      },
       ai: {
         label: "Ai",
         helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
@@ -1346,10 +1330,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       type: {
         label: "类型",
         helpText: "流程如何启动（autolaunched / record_change / schedule / screen / api）"
-      },
-      template: {
-        label: "模板",
-        helpText: "是否为可复用子流程（可被其他流程调用）"
       },
       description: {
         label: "描述",
@@ -1622,10 +1602,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "技能",
         helpText: "技能名称（Agent→Skill→Tool 架构）"
       },
-      knowledge: {
-        label: "知识",
-        helpText: "RAG 知识访问配置"
-      },
       access: {
         label: "访问",
         helpText: "可以与此代理对话的用户 ID 或角色名"
@@ -1719,10 +1695,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       tools: {
         label: "工具",
         helpText: "工具名（支持通配符：action_*）"
-      },
-      triggerPhrases: {
-        label: "触发短语",
-        helpText: "激活此技能的自然语言短语"
       },
       triggerConditions: {
         label: "触发条件",

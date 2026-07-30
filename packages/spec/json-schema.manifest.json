@@ -1,7 +1,6 @@
 {
   "description": "Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. Auto-appended when new schemas are added (commit the change). A listed schema that a build no longer emits fails gen:schema — remove a key ONLY for a deliberate retirement. See #2978.",
   "schemas": [
-    "ai/AIKnowledge",
     "ai/AIModelConfig",
     "ai/AIUsageRecord",
     "ai/Agent",
@@ -1709,7 +1708,6 @@
     "ui/PageType",
     "ui/PageVariable",
     "ui/PaginationConfig",
-    "ui/PerformanceConfig",
     "ui/PersistStorage",
     "ui/PinchGestureConfig",
     "ui/PluralRule",

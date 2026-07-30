@@ -771,7 +771,7 @@ export class SecurityPlugin implements Plugin {
       // form's declared target (set by the rest-server form-submit route). It
       // authorizes ONLY create + the immediate read-back on THAT object — never
       // anything else, and never the anonymous fall-open. This lets public forms
-      // work under secure-by-default (requireAuth) WITHOUT a deployment-configured
+      // work under secure-by-default (anonymous-deny) WITHOUT a deployment-configured
       // `guest_portal`, scoped to exactly the declared object (the field
       // allow-list is enforced at the route; the context is request-scoped).
       const formGrant = opCtx.context?.publicFormGrant;

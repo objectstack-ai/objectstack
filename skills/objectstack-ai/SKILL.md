@@ -169,7 +169,7 @@ To grant data exploration to your own (platform-internal) agent, add
 | `tools` | Direct tool references — legacy fallback |
 | `surface` | `'ask' \| 'build'` — the product surface this agent is (default `'ask'`) |
 | `model` | LLM model configuration — `provider`, `model`, `temperature`, `maxTokens`, `topP` |
-| `knowledge` | RAG access — `sources` + `indexes`. The `topics` alias was REMOVED in protocol 17; emitting it is a parse error |
+| ~~`knowledge`~~ | REMOVED in protocol 17 (#3896 close-out) — declaring sources/indexes on an agent never scoped retrieval (`search_knowledge` takes `sourceIds` from the LLM's tool-call arguments). Restrict at the knowledge-service/source level; describe intended grounding in `instructions` |
 | `guardrails` | `maxTokensPerInvocation`, `maxExecutionTimeSec`, `blockedTopics` |
 | `structuredOutput` | Output format (JSON schema, regex, etc.) |
 | `planning` | Autonomous reasoning — `maxIterations` (default 10) |
@@ -268,12 +268,6 @@ export default defineSkill({
     'create_support_case',
     'update_support_case',
     'escalate_case',
-  ],
-  triggerPhrases: [
-    'I need help with a case',
-    'Create a support ticket',
-    'What is the status of my case',
-    'Escalate this issue',
   ],
   triggerConditions: [
     { field: 'objectName', operator: 'eq', value: 'support_case' },

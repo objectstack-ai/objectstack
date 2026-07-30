@@ -17,7 +17,18 @@ import { ConnectorSchema } from '@objectstack/spec/integration';
 // silently returned `false`, so EVERY start-node / edge condition (record-change
 // `previous.*`, `budget > 100000`, …) skipped its flow. A static import binds the
 // engine at module load in both ESM and CJS builds.
-import { ExpressionEngine, validateExpression } from '@objectstack/formula';
+import { ExpressionEngine, validateExpression, nearestName } from '@objectstack/formula';
+
+/**
+ * The slice of a descriptor's JSON-Schema `configSchema` that the undeclared-key
+ * walk reads (#4045). Structural only — no validation semantics.
+ */
+interface ConfigSchemaNode {
+    type?: string;
+    properties?: Record<string, ConfigSchemaNode>;
+    items?: ConfigSchemaNode;
+    additionalProperties?: unknown;
+}
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
 import { isGuardRefusal } from './guard-refusal.js';
 
@@ -1473,6 +1484,12 @@ export class AutomationEngine implements IAutomationService {
         // executeNode() already throws NO_EXECUTOR at run time for unknown types.
         this.validateNodeTypes(name, parsed);
 
+        // #4045 — warn on config keys the node's descriptor does not declare
+        // (a `visibleIf` typo is silently accepted today). Warn-only: see
+        // validateNodeConfigKeys for why hard-failing would gamble on the nine
+        // builtins whose read-vs-declared drift has not been audited.
+        this.validateNodeConfigKeys(name, parsed);
+
         // ADR-0032 §Decision 1a — parse-validate every predicate at registration,
         // so a malformed condition (e.g. the #1491 `{record.x}` template-brace-in-
         // CEL mistake) is a LOUD registration error with the offending source,
@@ -2713,6 +2730,107 @@ export class AutomationEngine implements IAutomationService {
                 `Flow '${flowName}' references node type(s) with no registered executor or descriptor: ` +
                 `${unknown.join(', ')}. They will fail at execution time unless a plugin registers them. ` +
                 `Registered types: ${[...known].join(', ') || '(none)'}`,
+            );
+        }
+    }
+
+    /**
+     * Warn about node `config` keys the node type's descriptor does not declare
+     * (#4045 — the warn half of the unknown-key ladder).
+     *
+     * `FlowNodeSchema.config` is `z.record(z.unknown())`, so a misspelled or
+     * invented config key is accepted in total silence today: `visibleIf` instead
+     * of `visibleWhen` registers cleanly and then does nothing, which is exactly
+     * the failure shape that made #3528 take three passes to diagnose. The key is
+     * never read, so there is no runtime error to trace back — the only symptom
+     * is a feature that quietly does not happen.
+     *
+     * **Warn, never reject.** An undeclared key falls into three populations and
+     * this seam cannot yet tell them apart: an author typo (which we want to
+     * reject), a key the executor genuinely reads that its hand-written
+     * `configSchema` never declared (`notify.source` was exactly this until
+     * #4045 — rejecting those breaks working apps), and dead config nobody reads
+     * (harmless). Only 4 of the 13 schema-carrying builtins have been audited for
+     * the second population, so hard-failing here would gamble on the 9 that have
+     * not. The warning is what measures that distribution; tightening to an error
+     * is a later, per-key decision once the data exists, and belongs with a
+     * tombstone that carries the prescription (the `UNKNOWN_KEY_GUIDANCE` pattern
+     * in `object.zod.ts`).
+     *
+     * Soft-fail matches {@link validateNodeTypes} directly above — same function,
+     * same `logger.warn` channel, same reasoning about not breaking flows over a
+     * diagnostic. Nothing about the published `configSchema` changes, so no
+     * consumer (designer form generation included) sees a different shape.
+     */
+    private validateNodeConfigKeys(flowName: string, flow: FlowParsed): void {
+        for (const node of flow.nodes) {
+            const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
+            // No descriptor, or a deliberately schemaless type (`decision`,
+            // `script`, `wait`, `subflow` publish none — see config-schemas.test)
+            // ⇒ nothing is declared, so nothing can be undeclared.
+            if (!schema) continue;
+            this.warnUndeclaredConfigKeys(flowName, node, schema, node.config, 'config');
+        }
+    }
+
+    /**
+     * Walk `value` against `schema` in lockstep, warning on keys the schema does
+     * not declare.
+     *
+     * Descends **only where the schema declares structure** — an object with fixed
+     * `properties`, or an array whose `items` do. It deliberately stops at a
+     * keyValue map (`additionalProperties: true` with no `properties`): those keys
+     * are author *data* (`filter: { status: 'stale' }`), not config keys, and
+     * flagging them would make the check useless noise.
+     *
+     * Descending matters rather than being thoroughness for its own sake: the
+     * #3528 typo class lives *inside* the `screen` field repeater, not at the top
+     * level. `visibleWhen` is a property of `fields[].items`, so a top-level-only
+     * comparison would miss `visibleIf` — the exact mistake this check exists to
+     * catch — while still reporting the rarer top-level ones. A test pins it.
+     */
+    private warnUndeclaredConfigKeys(
+        flowName: string,
+        node: FlowNodeParsed,
+        schema: ConfigSchemaNode,
+        value: unknown,
+        path: string,
+    ): void {
+        if (schema.type === 'array' && schema.items) {
+            if (!Array.isArray(value)) return;
+            value.forEach((element, index) => {
+                this.warnUndeclaredConfigKeys(flowName, node, schema.items!, element, `${path}[${index}]`);
+            });
+            return;
+        }
+
+        // A free-form map declares no properties — its keys are author data.
+        if (!schema.properties || schema.additionalProperties === true) return;
+        if (value == null || typeof value !== 'object' || Array.isArray(value)) return;
+
+        const declared = Object.keys(schema.properties);
+        for (const key of Object.keys(value as Record<string, unknown>)) {
+            const child = schema.properties[key];
+            if (child) {
+                this.warnUndeclaredConfigKeys(flowName, node, child, (value as Record<string, unknown>)[key], `${path}.${key}`);
+                continue;
+            }
+            // The declared set is printed ALWAYS, not only as a fallback when the
+            // edit-distance heuristic misses. It misses more than you would
+            // expect: `visibleIf` → `visibleWhen` is distance 4 against a
+            // threshold of 3, so the very typo this check exists to catch gets no
+            // suggestion. Loosening `nearestName` is the wrong fix — it is shared
+            // with the unknown-field and unknown-role diagnostics, where a looser
+            // threshold means confidently wrong suggestions over hundreds of
+            // candidates. A config object declares at most a dozen keys, so simply
+            // listing them is both cheap and complete, and the suggestion becomes
+            // a bonus for the cases it does catch.
+            const suggestion = nearestName(key, declared);
+            this.logger.warn(
+                `[flow '${flowName}'] node '${node.id}' (${node.type}): unknown config key \`${key}\` at ${path}.${key}` +
+                (suggestion ? ` — did you mean \`${suggestion}\`?` : '') +
+                ` It is not declared by this node type's configSchema, so nothing reads it.` +
+                ` Declared here: ${declared.join(', ')}.`,
             );
         }
     }
