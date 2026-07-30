@@ -16,6 +16,7 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
+import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
 import {
   printHeader,
@@ -1014,9 +1015,7 @@ export default class Serve extends Command {
       // To avoid double-registration when the host already wraps itself with
       // an AppPlugin (e.g. apps/objectos's dev-workspace stack), we skip if
       // any plugin in `plugins[]` is already an AppPlugin instance.
-      const hasAppPluginAlready = plugins.some(
-        (p: any) => p && (p.type === 'app' || p.constructor?.name === 'AppPlugin' || (p.name && typeof p.name === 'string' && p.name.startsWith('plugin.app.')))
-      );
+      const hasAppPluginAlready = plugins.some(isAppPluginLike);
       const configHasMetadata = !!(
         config.objects || config.manifest || config.apps || config.flows || config.apis
       );
@@ -1027,6 +1026,30 @@ export default class Serve extends Command {
             trackPlugin('App');
         } catch (e: any) {
             // silent
+        }
+      } else if (hasAppPluginAlready) {
+        // #4095 — skipping the wrap above also discards the authored module's
+        // CODE. On the config-boot path the bundle already in `plugins[]` came
+        // from `createStandaloneStack()` reading `dist/objectstack.json`, and a
+        // JSON artifact cannot carry a function: the app booted with every
+        // `script` action DECLARED and no handler registered, so each one 404'd
+        // at dispatch. Move the executable members onto that bundle (the
+        // bundle's own value always wins, so a host that wrapped itself on
+        // purpose is untouched) and say so out loud when they have nowhere to go
+        // — that silent drop is what hid this.
+        // Success is silent: on the config-boot path this is now the normal
+        // route by which handlers reach the engine, and the observable proof is
+        // that the actions dispatch.
+        const graft = graftAuthoredRuntimeMembers(plugins, config);
+        if (graft.orphaned.length > 0) {
+          console.warn(chalk.yellow(
+            `  ⚠ ${relativeConfig} exports ${graft.orphaned.join(' / ')} but no app bundle claimed `
+            + `${graft.orphaned.length === 1 ? 'it' : 'them'}`
+            + `${graft.reason === 'ambiguous-app-plugin'
+              ? ' — several apps are registered and the config declares no manifest.id to match'
+              : ' — no registered app bundle has a matching manifest.id'}`
+            + '. Action handlers registered there will NOT be reachable (they 404 at dispatch).',
+          ));
         }
       }
 
