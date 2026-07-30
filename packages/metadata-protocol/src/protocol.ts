@@ -800,6 +800,26 @@ const ODATA_SPELLING: Readonly<Record<string, string>> = {
     filter: '$filter', select: '$select', expand: '$expand',
 };
 
+/**
+ * [#4181] A filter the normalizer cannot turn into a usable `FilterCondition`.
+ *
+ * Mirrors the envelope the `GET /data/:object/export` route has always emitted
+ * for the same input (`400 INVALID_REQUEST`), so the two routes of one endpoint
+ * family stop disagreeing about what a malformed filter means. `INVALID_REQUEST`
+ * is already registered to `@objectstack/metadata-protocol` in the ADR-0112
+ * error-code ledger — no new code.
+ */
+function malformedFilterError(param: string, detail: string): Error {
+    const err: any = new Error(
+        `Query parameter '${param}' ${detail}. It was not applied, and an unapplied `
+        + 'filter would have returned the unfiltered result set.',
+    );
+    err.status = 400;
+    err.code = 'INVALID_REQUEST';
+    err.param = param;
+    return err;
+}
+
 /** Fold a parameter name to its near-miss lookup key. */
 function nearMissKey(name: string): string {
     return name.toLowerCase().replace(/[_-]/g, '');
@@ -3087,23 +3107,85 @@ export class ObjectStackProtocolImplementation implements
         }
         delete options.sort;
 
-        // Filter/filters/$filter → where: normalize all filter aliases
+        // Filter/filters/$filter → where: normalize all filter aliases.
+        //
+        // [#4181] These four names are FOUR SPELLINGS OF ONE SLOT (`filters` is
+        // documented as a deprecated alias of `filter`), so `??` picking the
+        // first non-null silently discarded the others: a body carrying both
+        // `where` and a different `filter` ran the `filter` and dropped the
+        // `where` with no signal. Two different values for one slot cannot be
+        // reconciled — merging them would invent an intent the caller never
+        // expressed, and picking one is the silent drop itself — so an
+        // ambiguous request is refused. Redundant identical spellings are
+        // harmless and pass.
+        const filterAliases = (['filter', 'filters', '$filter', 'where'] as const)
+            .filter((k) => options[k] !== undefined)
+            .map((k) => ({ key: k, value: options[k] }));
+        if (filterAliases.length > 1) {
+            const distinct = new Set(filterAliases.map((a) => JSON.stringify(a.value)));
+            if (distinct.size > 1) {
+                const err: any = new Error(
+                    `Conflicting filter parameters: ${filterAliases.map((a) => `'${a.key}'`).join(', ')} `
+                    + 'are aliases for the same filter and were given different values. Send exactly one.',
+                );
+                err.status = 400;
+                err.code = 'INVALID_REQUEST';
+                throw err;
+            }
+        }
+
         const filterValue = options.filter ?? options.filters ?? options.$filter ?? options.where;
+        const filterKey = filterAliases[0]?.key ?? 'filter';
         delete options.filter;
         delete options.filters;
         delete options.$filter;
 
         if (filterValue !== undefined) {
             let parsedFilter = filterValue;
-            // JSON string → object
-            if (typeof parsedFilter === 'string') {
-                try { parsedFilter = JSON.parse(parsedFilter); } catch { /* keep as-is */ }
+            // A blank `?filter=` is ABSENT, not malformed — the same `length > 0`
+            // guard the export route applies before parsing. Deleting `where`
+            // here (rather than leaving `''` on it) is what lets every consumer
+            // below test presence with a plain falsy check.
+            if (typeof parsedFilter === 'string' && parsedFilter.trim() === '') {
+                delete options.where;
+            } else {
+                // [#4181] JSON string → object. Parse failure is a REJECTION, not
+                // a fallback. The `catch { /* keep as-is */ }` this replaces left
+                // the raw string on `where`, a shape no driver consumes — so the
+                // filter was dropped whole and `?filter={status:done` (one missing
+                // quote) answered 200 with the UNFILTERED page. Worst member of
+                // the #3948 family: #4134 zeroed, #4164 dropped one predicate,
+                // this returned everything.
+                //
+                // The sibling `GET /data/:object/export` route has rejected this
+                // exact input since it was written (`400 INVALID_REQUEST`,
+                // "filter must be JSON"); the list path was the outlier. The
+                // guard lives HERE, in the shared normalizer, so `GET
+                // /data/:object`, `POST /data/:object/query` and the runtime
+                // dispatcher all inherit one answer instead of three.
+                if (typeof parsedFilter === 'string') {
+                    try {
+                        parsedFilter = JSON.parse(parsedFilter);
+                    } catch {
+                        throw malformedFilterError(filterKey, 'must be valid JSON');
+                    }
+                }
+                // Filter AST array → FilterCondition object
+                if (isFilterAST(parsedFilter)) {
+                    parsedFilter = parseFilterAST(parsedFilter);
+                }
+                // Parsed-but-unusable is the same failure one step later:
+                // `?filter=5` / `?filter="open"` / `?filter=null` all yield a
+                // non-object `where` that no driver reads. Rejecting here is what
+                // lets the #4164 merge below trust `where` to be an object.
+                if (parsedFilter === null || typeof parsedFilter !== 'object') {
+                    throw malformedFilterError(
+                        filterKey,
+                        `must be a filter object or condition array, received ${parsedFilter === null ? 'null' : typeof parsedFilter}`,
+                    );
+                }
+                options.where = parsedFilter;
             }
-            // Filter AST array → FilterCondition object
-            if (isFilterAST(parsedFilter)) {
-                parsedFilter = parseFilterAST(parsedFilter);
-            }
-            options.where = parsedFilter;
         }
 
         // Populate/expand/$expand → expand (Record<string, QueryAST>)
@@ -3201,14 +3283,14 @@ export class ObjectStackProtocolImplementation implements
         // stray top-level AST junk, and count() below reads the same
         // `options.where`, so pagination totals see the merged predicate too.
         //
-        // Deliberately NOT merged: a non-object truthy `where` — the parse
-        // tolerance above keeps an unparseable `filter` JSON string as-is
-        // (#4181), and folding real predicates into that garbage would neither
-        // apply them nor surface the actual bug. That path keeps its pre-#4164
-        // shape until the tolerance itself is fixed at the source.
+        // #4164 shipped with a `typeof explicitWhere === 'object'` guard here,
+        // because the parse tolerance above could leave a raw unparseable string
+        // on `where` and folding real predicates into that garbage would neither
+        // apply them nor surface the bug. #4181 fixed that at the source — a
+        // filter now either parses to an object or 400s — so `where` is an
+        // object or absent by construction and the guard is gone with it.
         const explicitWhere = options.where;
-        const whereIsMergeable = !explicitWhere || typeof explicitWhere === 'object';
-        if (leftoverParams.length > 0 && whereIsMergeable) {
+        if (leftoverParams.length > 0) {
             const implicitFilters: Record<string, unknown> = {};
             for (const key of leftoverParams) {
                 implicitFilters[key] = options[key];
