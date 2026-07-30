@@ -391,6 +391,16 @@ const step17: MigrationStep = {
     'parses the CONVERTED flow — so a source carrying only `config: { duration }` ' +
     'is stamped with `eventType: \'timer\'`, the exact default the executor applied ' +
     'to that shape. Behaviour-preserving in both directions.\n\n' +
+    '`connector_action` gets the same lift for the opposite reason (#4045). Its ' +
+    'contract also lives in a declared sibling block (`connectorConfig`), and the ' +
+    'executor never read `config` at all — but the node\'s descriptor published a ' +
+    '`configSchema` declaring `connectorId`/`actionId`/`input` as `config` keys, and ' +
+    'the Studio inspector derives its form from a published schema, so schema-driven ' +
+    'authoring wrote the trio to the wrong place and produced nodes that refused to ' +
+    'dispatch. The conversion lifts the trio onto the declared block (declared keys ' +
+    'win; a lift that cannot complete the required connectorId+actionId pair leaves ' +
+    'the node untouched rather than turning a step-time refusal into a load ' +
+    'failure), and the descriptor stops publishing the mis-rooted schema.\n\n' +
     'And it removes the RLS-policy key `priority` (#3896 security audit): promised ' +
     '"conflict resolution" that cannot exist, because applicable policies OR-combine ' +
     '(most permissive wins) — there is never a conflict to order, and nothing ever ' +
@@ -451,6 +461,7 @@ const step17: MigrationStep = {
     'flow-node-crud-object-alias',
     'flow-node-notify-config-aliases',
     'flow-node-wait-event-config-lift',
+    'flow-node-connector-config-lift',
     'flow-node-script-config-aliases',
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',

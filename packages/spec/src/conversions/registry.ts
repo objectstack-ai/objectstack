@@ -1233,6 +1233,167 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
   },
 };
 
+/** The `config` keys a mis-taught `connector_action` node carries, in declared-block order. */
+const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
+
+/**
+ * Lift `connector_action`'s loose `config.*` keys onto the declared
+ * `connectorConfig` sibling (#4045).
+ *
+ * Like `wait`, `connector_action`'s contract does not live in `config` at all —
+ * it is `FlowNodeSchema.connectorConfig` (`flow.zod.ts`), and the executor reads
+ * nothing else. Unlike `wait`, the executor never carried a loose-config
+ * fallback; the wrong spelling was taught by the node's own **descriptor**,
+ * whose `configSchema` declared `connectorId`/`actionId`/`input` as `config`
+ * keys — and the Studio inspector derives its property form from a published
+ * `configSchema` (rooting every field at `config.<key>`), so an author who
+ * configured a connector node against a live backend produced exactly this
+ * shape, and a node that then refused to dispatch. The descriptor stops
+ * publishing that schema in the same change (see connector-nodes.ts); this
+ * conversion is what makes the flows it mis-taught start working.
+ *
+ * Precedence matches every other lift here: a key already on the declared
+ * block WINS and its loose counterpart is left shadowed in place.
+ *
+ * One completeness guard is load-bearing, mirroring `wait`'s `eventType`
+ * default: the loader parses the CONVERTED flow, and `connectorConfig` requires
+ * `connectorId` + `actionId` once the block exists. Unlike `eventType` there is
+ * no defensible default for either, so when lifting cannot complete that pair
+ * the node is left **untouched** — it keeps failing at run time with the same
+ * clear refusal it produces today, rather than going from "registers, fails
+ * the step" to "fails to load".
+ */
+function liftConnectorConfigShape(stack: Dict, emit: Emit): Dict {
+  return mapFlowNodes(stack, (node, path) => {
+    if (node.type !== 'connector_action') return node;
+    const config = node.config;
+    if (!isDict(config)) return node;
+
+    const cc: Dict = isDict(node.connectorConfig) ? { ...node.connectorConfig } : {};
+    const nextConfig: Dict = { ...config };
+    const lifts: Array<(typeof CONNECTOR_CONFIG_LIFTS)[number]> = [];
+    for (const key of CONNECTOR_CONFIG_LIFTS) {
+      if (nextConfig[key] == null) continue;
+      if (cc[key] != null) continue; // declared block wins; the loose key stays shadowed
+      cc[key] = nextConfig[key];
+      delete nextConfig[key];
+      lifts.push(key);
+    }
+    if (lifts.length === 0) return node;
+    // Completeness guard — never materialize a block the loader would reject.
+    if (cc.connectorId == null || cc.actionId == null) return node;
+
+    for (const key of lifts) {
+      emit({ from: `config.${key}`, to: `connectorConfig.${key}`, path: `${path}.connectorConfig.${key}` });
+    }
+    return { ...node, config: nextConfig, connectorConfig: cc };
+  });
+}
+
+/**
+ * Connector flow-node loose `config` keys → the declared `connectorConfig`
+ * sibling (protocol 17, #4045). See {@link liftConnectorConfigShape} for the
+ * precedence rules and the completeness guard. **Live window**; retires at 18.
+ */
+const flowNodeConnectorConfigLift: MetadataConversion = {
+  id: 'flow-node-connector-config-lift',
+  toMajor: 17,
+  surface: 'flow.node.connector_action.connectorConfig',
+  summary:
+    "connector_action flow-node loose config keys 'connectorId' / 'actionId' / 'input' → " +
+    'the declared `connectorConfig` block (#4045)',
+  apply(stack, emit) {
+    return liftConnectorConfigShape(stack, emit);
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'task_completed_slack',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            // The shape the descriptor's configSchema (via the schema-driven
+            // Studio form) mis-taught: the whole trio under `config`.
+            {
+              id: 'n2',
+              type: 'connector_action',
+              config: {
+                connectorId: 'slack',
+                actionId: 'chat.postMessage',
+                input: { channel: 'C0WINS000', text: 'Task done: {record.title}' },
+              },
+            },
+            // A declared block WINS: `config.connectorId` stays shadowed in
+            // place, and since nothing else lifts, the node is untouched.
+            {
+              id: 'n3',
+              type: 'connector_action',
+              connectorConfig: { connectorId: 'rest', actionId: 'get', input: {} },
+              config: { connectorId: 'ignored' },
+            },
+            // Completeness guard: no actionId anywhere, so lifting would
+            // create a block the loader rejects — left untouched instead
+            // (same run-time refusal as today).
+            {
+              id: 'n4',
+              type: 'connector_action',
+              config: { connectorId: 'slack' },
+            },
+            // A partial lift may complete an existing block: only `input`
+            // lifts into the already-complete pair.
+            {
+              id: 'n5',
+              type: 'connector_action',
+              connectorConfig: { connectorId: 'rest', actionId: 'get' },
+              config: { input: { path: '/api/v1/health' } },
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'task_completed_slack',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            {
+              id: 'n2',
+              type: 'connector_action',
+              config: {},
+              connectorConfig: {
+                connectorId: 'slack',
+                actionId: 'chat.postMessage',
+                input: { channel: 'C0WINS000', text: 'Task done: {record.title}' },
+              },
+            },
+            {
+              id: 'n3',
+              type: 'connector_action',
+              connectorConfig: { connectorId: 'rest', actionId: 'get', input: {} },
+              config: { connectorId: 'ignored' },
+            },
+            {
+              id: 'n4',
+              type: 'connector_action',
+              config: { connectorId: 'slack' },
+            },
+            {
+              id: 'n5',
+              type: 'connector_action',
+              connectorConfig: { connectorId: 'rest', actionId: 'get', input: { path: '/api/v1/health' } },
+              config: {},
+            },
+          ],
+        },
+      ],
+    },
+    // n2: the full trio lifts. n3: shadowed → no lift, no notice. n4: guard —
+    // nothing materializes. n5: the single unshadowed `input`.
+    expectedNotices: 4,
+  },
+};
+
 /**
  * Script flow-node config key aliases → canonical (protocol 17, #3796).
  *
@@ -1867,6 +2028,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeCrudObjectAlias,
     flowNodeNotifyConfigAliases,
     flowNodeWaitEventConfigLift,
+    flowNodeConnectorConfigLift,
     flowNodeScriptConfigAliases,
     permissionRlsPriorityRemoved,
     toolInertAuthoringKeysRemoved,

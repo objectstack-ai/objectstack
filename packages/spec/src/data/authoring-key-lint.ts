@@ -135,6 +135,59 @@ export const OBJECT_KEY_GUIDANCE: Readonly<
   tableName: { why: 'removed — the table name always equals the object `name`.' },
 });
 
+/**
+ * Semantic near-misses on the stack's own TOP-LEVEL keys
+ * (`ObjectStackDefinitionSchema`).
+ *
+ * Same silent-drop mechanism as the two tables above, one level up. The walker
+ * covers every metadata COLLECTION; this covers the envelope those collections
+ * sit in, which is where the silence is easiest to miss — an undeclared
+ * top-level key reads as configuration that took effect.
+ *
+ * `storage` is the worked example (#4167): `os serve` honoured it only on the
+ * one boot path that skips `defineStack`, so the same key configured a backend
+ * in one place and vanished in every other. A stack asking for S3 could
+ * silently get local disk.
+ */
+export const STACK_KEY_GUIDANCE: Readonly<
+  Record<string, { to?: string; why?: string }>
+> = Object.freeze({
+  storage: {
+    why: 'the file-storage backend is a deployment concern, not an application declaration. '
+      + 'Configure it with the OS_STORAGE_* environment variables, or per-deployment in Setup → Settings → Storage '
+      + '(which also holds credentials — a stack definition would commit them to git and to any published artifact).',
+  },
+});
+
+/**
+ * Authored TOP-LEVEL members the **runtime executes off the bundle**, which the
+ * stack schema therefore does not — and cannot — declare.
+ *
+ * `onEnable` is a function. It cannot survive `ObjectStackDefinitionSchema`
+ * (which does not declare it) and it cannot survive `dist/objectstack.json`
+ * (JSON has no functions), yet it is not lost: `AppPlugin` reads it straight
+ * off the authored bundle and calls it at `start()`, and on the artifact-boot
+ * path the CLI grafts it back (#4095). It is the documented place to register
+ * action handlers, and `examples/app-todo` and `examples/app-showcase` both
+ * ship it.
+ *
+ * So the lint must stay SILENT here. "Not declared" and "dropped at load" are
+ * different claims, and this is the one surface where they come apart — telling
+ * an author their working `onEnable` is being discarded would be a confident
+ * lie about the pattern we ship in our own examples.
+ *
+ * `functions` is listed for the same reason (a name → handler map the runtime
+ * resolves string-named hooks against); the schema happens to declare it too,
+ * so it self-excludes. `onDisable` is deliberately ABSENT: it is declared in
+ * the protocol but no kernel, runtime or service ever calls it, so a value
+ * written there really does go nowhere and the lint should say so.
+ *
+ * Single source of truth — the CLI's `GRAFTABLE_RUNTIME_MEMBERS` is derived
+ * from this, so the list that decides what gets grafted and the list that
+ * decides what the lint stays quiet about cannot drift apart.
+ */
+export const STACK_RUNTIME_MEMBERS = Object.freeze(['onEnable', 'functions'] as const);
+
 /** A plain object — the only shape an authored metadata item can take. */
 export function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);

@@ -617,7 +617,9 @@ function isExpectedDataStatus(status: number): boolean {
  * not a server fault worth an "[REST] Unhandled error" line per request.
  */
 function isExpectedQueryRejection(body: Record<string, unknown> | undefined): boolean {
-    return body?.code === 'UNSUPPORTED_QUERY_PARAM' || body?.code === 'INVALID_FIELD';
+    return body?.code === 'UNSUPPORTED_QUERY_PARAM'
+        || body?.code === 'INVALID_FIELD'
+        || body?.code === 'INVALID_REQUEST';
 }
 
 /**
@@ -4731,7 +4733,7 @@ export class RestServer {
                     if (typeof q.filter === 'string' && q.filter.length > 0) {
                         try { filter = JSON.parse(q.filter); }
                         catch {
-                            res.status(400).json({ code: 'INVALID_REQUEST', error: 'filter must be JSON' });
+                            res.status(400).json({ code: 'INVALID_FILTER', error: 'filter must be JSON' });
                             return;
                         }
                     } else if (q.filter && typeof q.filter === 'object') {
@@ -4742,7 +4744,18 @@ export class RestServer {
                     if (typeof q.orderby === 'string' && q.orderby.length > 0) {
                         // Accept "field:dir,field2:dir" shorthand or a JSON object.
                         if (q.orderby.startsWith('{') || q.orderby.startsWith('[')) {
-                            try { orderby = JSON.parse(q.orderby); } catch { /* leave undefined */ }
+                            // [#4181] Same rule as `filter` two blocks up: a sort
+                            // the server cannot parse is refused, not dropped.
+                            // Lower stakes than a dropped filter (the row SET is
+                            // unchanged, only its order), but a caller taking
+                            // "latest N" via orderby+top silently got an
+                            // arbitrary N.
+                            try {
+                                orderby = JSON.parse(q.orderby);
+                            } catch {
+                                res.status(400).json({ code: 'INVALID_REQUEST', error: 'orderby must be JSON' });
+                                return;
+                            }
                         } else {
                             const obj: Record<string, 'asc' | 'desc'> = {};
                             for (const part of q.orderby.split(',')) {

@@ -11,12 +11,16 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 
 import {
   lintUnknownAuthoringKeys,
+  lintUnknownStackKeys,
   listLintableAuthoringCollections,
 } from './metadata-authoring-lint';
+import { STACK_KEY_GUIDANCE, STACK_RUNTIME_MEMBERS } from '../data/authoring-key-lint';
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
+import { ObjectStackDefinitionSchema } from '../stack.zod';
 import { getMetadataTypeSchema } from './metadata-type-schemas';
 
 const lintables = listLintableAuthoringCollections();
@@ -137,5 +141,110 @@ describe('the #4148 behaviours survive the generalization', () => {
       pages: [{ name: 'p', _lock: true }],
     });
     expect(findings).toEqual([]);
+  });
+});
+
+describe('top-level stack keys (#4167)', () => {
+  const lint = (raw: unknown) => lintUnknownStackKeys(raw, ObjectStackDefinitionSchema);
+
+  it('covers ground the collection walker cannot reach', () => {
+    // The complementarity proof, and the reason this is a second pass rather
+    // than a tidier fold into the walker: the walker iterates COLLECTIONS, so a
+    // stack whose only mistake is at the envelope level — no objects, no pages,
+    // nothing to iterate — walks clean and reports nothing.
+    const raw = { storage: { adapter: 's3', s3: { bucket: 'app-files' } } };
+    expect(lintUnknownAuthoringKeys(raw)).toEqual([]);
+    expect(lint(raw)).toHaveLength(1);
+  });
+
+  it('reports the worked example with its guidance and no suggestion', () => {
+    // `storage` is 5 edits from `sharingRules`; "did you mean sharingRules?"
+    // would be confident nonsense pointed at a real key. A `why` must win.
+    const [finding, ...rest] = lint({ storage: { adapter: 's3' } });
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({ path: 'stack.storage', surface: 'stack', key: 'storage' });
+    expect(finding.suggestion).toBeUndefined();
+    // The prescription has to name where the setting DOES live, or the author
+    // learns only that they were wrong — the #4167 complaint in miniature.
+    expect(finding.guidance).toContain('OS_STORAGE_');
+  });
+
+  it('falls back to edit distance for a near-miss on a declared key', () => {
+    const [finding] = lint({ datasource: [{ name: 'db' }] });
+    expect(finding).toMatchObject({ path: 'stack.datasource', suggestion: 'datasources' });
+  });
+
+  it('is silent on a clean stack, and on the packaging channel', () => {
+    expect(lint({ objects: [], pages: [], manifest: { name: 'app' }, _packageId: 'p' })).toEqual([]);
+  });
+
+  it('stays silent on the runtime members the schema cannot declare', () => {
+    // The regression that shipped in review: `onEnable` is a function, so the
+    // schema does not declare it — but `AppPlugin` calls it off the authored
+    // bundle, and `examples/app-todo` and `examples/app-showcase` both ship it.
+    // The first version of this lint told both of them their working handler
+    // registration was "dropped at load".
+    expect(lint({ onEnable: () => {}, functions: { doThing: () => {} } })).toEqual([]);
+  });
+
+  it('still reports `onDisable`, which really does go nowhere', () => {
+    // The distinction the exclusion list has to preserve: `onDisable` is
+    // declared in the protocol but no kernel, runtime or service calls it, so
+    // a value written there IS lost and the author should hear about it.
+    const [finding, ...rest] = lint({ onDisable: () => {} });
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({ path: 'stack.onDisable', key: 'onDisable' });
+  });
+
+  it('agrees with the injected schema posture instead of asserting its own', () => {
+    // Guarding the day `ObjectStackDefinitionSchema` graduates to `.strict()`
+    // (ADR-0049 / #4001): the parse becomes loud, and this lint must go quiet
+    // rather than become a second, possibly disagreeing voice.
+    const declared = { objects: z.array(z.unknown()).optional() };
+    expect(lintUnknownStackKeys({ storage: {} }, z.strictObject(declared))).toEqual([]);
+    expect(lintUnknownStackKeys({ storage: {} }, z.looseObject(declared))).toEqual([]);
+    expect(lintUnknownStackKeys({ storage: {} }, z.object(declared))).toHaveLength(1);
+  });
+
+  it('survives malformed input rather than throwing', () => {
+    for (const junk of [undefined, null, 42, 'x', [], {}]) {
+      expect(() => lint(junk)).not.toThrow();
+      expect(lint(junk)).toEqual([]);
+    }
+    expect(lintUnknownStackKeys({ storage: {} }, z.string())).toEqual([]);
+    expect(lintUnknownStackKeys({ storage: {} }, undefined)).toEqual([]);
+  });
+});
+
+describe('STACK_KEY_GUIDANCE does not rot', () => {
+  const declared = new Set(Object.keys(ObjectStackDefinitionSchema.shape));
+
+  it('names no key the stack schema declares itself', () => {
+    // If a "not a stack key" key were ever added to the schema, the entry would
+    // be actively wrong — telling an author to delete something that now works.
+    for (const key of Object.keys(STACK_KEY_GUIDANCE)) {
+      expect(declared, `STACK_KEY_GUIDANCE has an entry for the LIVE key '${key}'`).not.toContain(key);
+    }
+  });
+
+  it('no runtime member is silently excluded for a key the schema declares', () => {
+    // `functions` legitimately appears in both lists. But if a member ever
+    // exists ONLY here while the schema also declares it and the runtime has
+    // stopped reading it, the exclusion is dead weight hiding a real finding.
+    // Pin the one that carries the exclusion's whole weight instead of trusting
+    // the list's shape: `onEnable` must be excluded AND undeclared.
+    expect(STACK_RUNTIME_MEMBERS).toContain('onEnable');
+    expect(declared, 'onEnable became a declared key — the exclusion is now dead').not.toContain('onEnable');
+    expect(STACK_RUNTIME_MEMBERS, 'onDisable is honoured nowhere; excluding it would hide a real drop')
+      .not.toContain('onDisable');
+  });
+
+  it('every entry carries a rename target that exists, or a reason', () => {
+    expect(Object.keys(STACK_KEY_GUIDANCE).length).toBeGreaterThan(0);
+    for (const [key, hint] of Object.entries(STACK_KEY_GUIDANCE)) {
+      expect(hint.to ?? hint.why, `STACK_KEY_GUIDANCE.${key} needs a 'to' or a 'why'`).toBeTruthy();
+      if (hint.to) expect(declared, `STACK_KEY_GUIDANCE.${key} → '${hint.to}'`).toContain(hint.to);
+      if (hint.why) expect(hint.why.length, `STACK_KEY_GUIDANCE.${key} reason too short`).toBeGreaterThan(30);
+    }
   });
 });

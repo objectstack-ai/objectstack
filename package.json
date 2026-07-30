@@ -34,6 +34,7 @@
     "check:role-word": "node scripts/check-role-word.mjs",
     "check:org-identifier": "node scripts/check-org-identifier.mjs",
     "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs",
+    "check:service-providers": "node scripts/check-service-providers.mjs",
     "check:route-envelope": "node scripts/check-route-envelope.mjs --self-test && node scripts/check-route-envelope.mjs",
     "check:error-code-casing": "node scripts/check-error-code-casing.mjs --self-test && node scripts/check-error-code-casing.mjs",
     "check:wildcard-fallthrough": "node scripts/check-wildcard-fallthrough.mjs --self-test && node scripts/check-wildcard-fallthrough.mjs",

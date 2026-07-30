@@ -19,7 +19,7 @@ Query records with filtering, sorting, selection, and pagination.
 |:----------|:---------|:------------|
 | `object` | path | Object name |
 | `select` | query | Comma-separated field names |
-| `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. |
+| `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. Malformed JSON is rejected with `400 INVALID_FILTER` — never ignored. |
 | `sort` | query | Sort expression (e.g. `name asc` or `-created_at`) |
 | `top` | query | Max records to return. No default — omitting it returns all matching records. |
 | `skip` | query | Offset |
@@ -59,6 +59,24 @@ are not accepted spellings.
 Reserved names cannot double as implicit filters. An object with a field
 literally called `count`, `cursor`, `distinct`, `object`, `search` or `top`
 filters it through the explicit form (`?filter={"count":3}`).
+
+#### A filter either applies or fails — it is never ignored
+
+`filter`, `filters`, `$filter` and `where` are four spellings of one slot. A
+value the server cannot turn into a filter is rejected with
+`400 INVALID_FILTER` rather than dropped, because a dropped filter would
+return the **unfiltered** result set — a response indistinguishable from a
+successful query:
+
+| Request | Result |
+|:---|:---|
+| `?filter={"status":"done"}` | filter applies |
+| `?filter={status:done` (invalid JSON) | `400` — `filter must be valid JSON` |
+| `?filter=5`, `?filter="done"`, `?filter=null` | `400` — parses, but is not a filter |
+| `?filter=` (blank) | treated as absent — no filter, no error |
+| `where` and `filter` sent with **different** values | `400` — aliases for one slot; send exactly one |
+
+The same rule applies to `orderby` on `GET /data/:object/export`.
 
 **Response**:
 ```json

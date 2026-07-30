@@ -123,6 +123,84 @@ describe('connector_action (baseline node)', () => {
         expect(result.error).toContain('ghost.noop');
     });
 
+    // #4045 — this proves the CONVERSION, not executor tolerance. The executor
+    // reads only the declared `connectorConfig` block; the config-authored trio
+    // reaches it because `registerFlow` applies
+    // `flow-node-connector-config-lift`, which lifts it. This is the exact
+    // shape the descriptor's former configSchema mis-taught the schema-driven
+    // Studio form to write.
+    it('accepts the mis-taught config.{connectorId,actionId,input} shape via the lift', async () => {
+        let received: Record<string, unknown> | undefined;
+        engine.registerConnector(fakeConnector(), {
+            async echo(input) {
+                received = input;
+                return { echoed: input.message };
+            },
+        });
+
+        engine.registerFlow('lifted_flow', {
+            name: 'lifted_flow',
+            label: 'Lifted Flow',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'call',
+                    type: 'connector_action',
+                    label: 'Config-authored',
+                    config: { connectorId: 'fake', actionId: 'echo', input: { message: 'hi' } },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'call' },
+                { id: 'e2', source: 'call', target: 'end' },
+            ],
+        });
+
+        const result = await engine.execute('lifted_flow');
+        expect(result.success).toBe(true);
+        expect(received).toEqual({ message: 'hi' });
+    });
+
+    // #4045 — `input` is optional in the spec block because the executor
+    // dispatches with `input ?? {}` and the designer's keyValue editor omits an
+    // empty map entirely. Under the old required `input`, this exact designer
+    // output failed FlowSchema.parse at registerFlow.
+    it('registers and dispatches a connectorConfig with no input (empty map)', async () => {
+        let received: Record<string, unknown> | undefined;
+        engine.registerConnector(fakeConnector(), {
+            async echo(input) {
+                received = input;
+                return { ok: true };
+            },
+        });
+
+        engine.registerFlow('no_input_flow', {
+            name: 'no_input_flow',
+            label: 'No Input Flow',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'call',
+                    type: 'connector_action',
+                    label: 'No Input',
+                    connectorConfig: { connectorId: 'fake', actionId: 'echo' },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'call' },
+                { id: 'e2', source: 'call', target: 'end' },
+            ],
+        });
+
+        const result = await engine.execute('no_input_flow');
+        expect(result.success).toBe(true);
+        expect(received).toEqual({});
+    });
+
     it('fails the step when connectorConfig is missing required fields', async () => {
         engine.registerFlow('bad_config', {
             name: 'bad_config',

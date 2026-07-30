@@ -5,7 +5,7 @@ import {
 } from '@objectstack/core';
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
-import { CoreServiceName } from '@objectstack/spec/system';
+import { CoreServiceName, serviceUnavailableMessage } from '@objectstack/spec/system';
 import { readServiceSelfInfo, DispatcherErrorCode } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -995,9 +995,16 @@ export class HttpDispatcher {
             }
             return { enabled: true, status: 'available' as const, handlerReady: true, route, provider };
         };
+        // [#4093 follow-up] The remedy comes from the shared provider table
+        // (`CORE_SERVICE_PROVIDER`), not from the slot name. `Install a ${name}
+        // plugin to enable` named a package that does not exist for `ai`,
+        // `search` and `workflow` — nothing implements those slots — and got
+        // the name wrong wherever the package is not called after its slot
+        // (`notification` is filled by service-messaging). A fix a consumer
+        // cannot carry out is worse than no fix named.
         const svcUnavailable = (name: string) => ({
             enabled: false, status: 'unavailable' as const, handlerReady: false,
-            message: `Install a ${name} plugin to enable`,
+            message: serviceUnavailableMessage(name),
         });
 
         // Self-description of the registered realtime service, if any (D12).
@@ -1124,7 +1131,7 @@ export class HttpDispatcher {
                                     ? svcAvailable(routes.ui, 'metadata-protocol', protocolSvc)
                                     : {
                                         enabled: false, status: 'unavailable' as const, handlerReady: false,
-                                        message: 'Served by the protocol service — register MetadataPlugin (@objectstack/metadata-protocol) to enable',
+                                        message: serviceUnavailableMessage('ui'),
                                     },
                 workflow:       hasWorkflow ? svcAvailable(routes.workflow, undefined, workflowSvc) : svcUnavailable('workflow'),
                 // Honest entry (ADR-0076 D12, #2462): the registered realtime

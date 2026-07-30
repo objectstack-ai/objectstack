@@ -13,8 +13,10 @@
  * Deliberately schemaless (stay on the hardcoded designer form; a node with no
  * configSchema has NO online/offline divergence): `decision` (virtual Target
  * column derived from edges), `wait` (top-level `waitEventConfig` block),
- * `script` (actionType-conditional form) and `subflow` (top-level `timeoutMs`)
- * — a partial schema would drop those editors.
+ * `script` (actionType-conditional form), `subflow` (top-level `timeoutMs`)
+ * and `connector_action` (top-level `connectorConfig` block, #4045) — a
+ * partial schema would drop those editors, and a schema rooted at `config`
+ * would actively re-route sibling-block authoring to keys nothing reads.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -26,6 +28,7 @@ import { registerScreenNodes } from './screen-nodes.js';
 import { registerLoopNode } from './loop-node.js';
 import { registerParallelNode } from './parallel-node.js';
 import { registerTryCatchNode } from './try-catch-node.js';
+import { registerConnectorNodes } from './connector-nodes.js';
 
 function silentLogger() {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } } as any;
@@ -197,12 +200,23 @@ describe('builtin node configSchemas — designer parity (#3304)', () => {
     });
   });
 
-  it('decision / script stay deliberately schemaless (no partial forms)', () => {
+  it('decision / script / connector_action stay deliberately schemaless (no partial forms)', () => {
     // A node with no configSchema renders identically online and offline (the
     // hardcoded fallback), so there is no divergence — and publishing a partial
     // schema would DROP editors the adapter cannot express (decision's virtual
     // Target column; script's actionType-conditional fields).
     expect(engine.getActionDescriptor('decision')?.configSchema).toBeUndefined();
     expect(engine.getActionDescriptor('script')?.configSchema).toBeUndefined();
+
+    // connector_action is the load-bearing member of this class (#4045): its
+    // contract is the top-level `connectorConfig` block, and the schema it
+    // used to publish declared that trio as `config` keys — which the
+    // schema-driven online form then wrote to `config.*`, replacing the
+    // hand-written connectorConfig form and producing nodes the executor
+    // refuses. Schemaless keeps the designer on the correct sibling-block
+    // form. Guarded here so the schema cannot quietly come back.
+    const engine3 = new AutomationEngine(silentLogger());
+    registerConnectorNodes(engine3, ctx());
+    expect(engine3.getActionDescriptor('connector_action')?.configSchema).toBeUndefined();
   });
 });

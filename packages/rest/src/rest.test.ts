@@ -1056,7 +1056,13 @@ describe('RestServer', () => {
       expect(text).toBe('[{"id":"a"},{"id":"b"}]');
     });
 
-    it('rejects invalid JSON in filter query', async () => {
+    // [#4181] Was `INVALID_REQUEST`. The list path now rejects the same input
+    // with the purpose-built `INVALID_FILTER` (the standard-catalog code #4121
+    // introduced for malformed filter arrays), so export moves onto it too —
+    // otherwise a client handling "my filter was refused" needs two codes
+    // depending on which URL it called. Deliberate wire change; the status and
+    // the message are unchanged.
+    it('rejects invalid JSON in filter query with the shared malformed-filter code', async () => {
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
@@ -1067,7 +1073,28 @@ describe('RestServer', () => {
         params: { object: 'account' },
         query: { filter: '{not json' },
       } as any, res);
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'INVALID_REQUEST' }));
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'INVALID_FILTER', error: 'filter must be JSON' }),
+      );
+    });
+
+    // [#4181] The sibling guard one block down: an unparseable `orderby` used to
+    // fall through to `undefined` and export UNSORTED. Keeps `INVALID_REQUEST` —
+    // a sort is not a filter, and the row set was never wrong.
+    it('rejects invalid JSON in orderby query instead of exporting unsorted', async () => {
+      const rest = new RestServer(server as any, protocol as any, ANON_API as any);
+      (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+      rest.registerRoutes();
+      const route = getExportRoute(rest);
+
+      const { res } = makeRes();
+      await route!.handler({
+        params: { object: 'account' },
+        query: { orderby: '{not json' },
+      } as any, res);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'INVALID_REQUEST', error: 'orderby must be JSON' }),
+      );
     });
 
     it('honours the hard 50k row cap', async () => {
