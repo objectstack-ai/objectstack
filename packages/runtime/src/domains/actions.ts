@@ -32,20 +32,20 @@
  *    caller that did not hand-inspect the INNER envelope read it as a success.
  *    Nothing DISPATCHED there, so it is a 404 now — joining the pre-dispatch
  *    answers this route already gives a status (403 denied, 400 wrong type,
- *    503 unavailable). A handler that RAN and rejected still reports in the
- *    payload, unchanged: that is a business outcome, not a transport error.
+ *    503 unavailable).
  *
- * Its follow-up separated a third case out of that payload: an UNEXPECTED
- * FAULT. A `TypeError` in a handler or a driver blowing up is not an outcome
- * the action chose to report, and serving it as 200 hid every handler crash
- * from gateway error rates, retry policy, APM and alerting. Those are 500 now,
- * told apart by the error's NAME — a plain `Error` (or a sandbox/validation
- * marker) is a deliberate rejection and keeps the payload; a `TypeError` /
- * `SqliteError` / driver class is a fault.
+ * #3962 finished the unification: FAILURES SPEAK HTTP, exactly as /data always
+ * has. The old 200-with-inner-`{success:false}` wire was never a designed
+ * contract — no ADR or doc specified it; it was the catch block reusing
+ * `deps.success()`, and /actions was the only route of 12 that double-wrapped.
+ * Success is now a SINGLE wrap (`data` = the handler's return value), a
+ * deliberate rejection (body `throw`, flow rejection, ValidationError) is a
+ * 400 carrying `code`/`fields` in `details`, and a crash (`TypeError`, driver
+ * class, sandbox timeout — told apart by the error's NAME, #3951) is a 500.
  *
- * So the route answers on two axes:
- *   did a handler run?   no  → status (404 / 403 / 400 / 503)
- *   did it reject or crash?  reject → 200 + payload;  crash → 500
+ *   did a handler run?       no → 404 / 403 / 400 / 503
+ *   did it reject or crash?  reject → 400;  crash → 500
+ *   did it return?           200, `data` = handler return value
  */
 
 import * as actionExec from '../action-execution.js';
@@ -266,7 +266,11 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 ec,
                 envId: _context?.environmentId,
             });
-            return { handled: true, response: deps.success({ success: true, data: result }) };
+            // [#3962] Single wrap: `data` is the handler's return value, exactly as
+        // every other domain serializes. The former inner `{success, data}`
+        // envelope existed only to carry a failure signal at HTTP 200; failures
+        // carry a status now, so the extra layer lost its job.
+        return { handled: true, response: deps.success(result) };
         }
 
         // [#2849] Same trusted-mode elevation as the MCP path — keep it audible.
@@ -304,7 +308,11 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 response: deps.error(`Action '${actionName}' on object '${objectName}' not found`, 404),
             };
         }
-        return { handled: true, response: deps.success({ success: true, data: result }) };
+        // [#3962] Single wrap: `data` is the handler's return value, exactly as
+        // every other domain serializes. The former inner `{success, data}`
+        // envelope existed only to carry a failure signal at HTTP 200; failures
+        // carry a status now, so the extra layer lost its job.
+        return { handled: true, response: deps.success(result) };
     } catch (err: any) {
         const full = err?.message ?? String(err);
         // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` for
@@ -313,27 +321,12 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // leaking the debug prefix. Keep the full wrapper in the log for debugging.
         const inner: unknown = err?.innerMessage;
         const clientMsg = (typeof inner === 'string' && inner) ? inner : full;
-        if (clientMsg !== full) console.error(`[action ${objectName}/${actionName}] ${full}`);
-        // [#3918 follow-up] Carry the structured payload when the failure was a
-        // record validation error. Until the sandbox learned to pass `code` /
-        // `fields` back OUT of the VM, this envelope was the message string and
-        // nothing else — so a form action could only ever raise a toast, never
-        // highlight the field the user actually got wrong, which is the symptom
-        // the original report was about.
-        //
-        // The HTTP status stays 200 and `success: false` remains the failure
-        // signal. `/actions` has always reported business failure in the payload
-        // (an action that "fails" is a normal outcome, not a transport error) and
-        // every existing caller branches on `data.success`; turning this into a
-        // 4xx would be a wire-contract break in exchange for a strictly additive
-        // fix.
-        //
-        // [#3913] That reasoning covers a handler that RAN and rejected — it
-        // does NOT cover a route that never dispatched at all. An unregistered
-        // action has no business outcome to report, so it exits above as a 404,
-        // alongside the pre-dispatch gates this route already answers with a
-        // status (403 denied, 400 wrong type, 503 unavailable). The line is
-        // "did a handler run": below it, the payload; above it, the status.
+        if (clientMsg !== full) {
+            console.error(`[action ${objectName}/${actionName}] ${full}`);
+            // Every exit below reads `.message`; hand it the client-safe text so
+            // the debug wrapper stays in the log and off the wire.
+            try { err.message = clientMsg; } catch { /* frozen error */ }
+        }
         const code: unknown = err?.code;
         const fields: unknown = err?.fields;
 
@@ -373,13 +366,12 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         //                           same predicate the dispatcher's error exits
         //                           use, so one whose `fields` were stripped in
         //                           transit is still recognised by NAME alone.
-        //   name absent             an unrecognisable throw; NOT confidently a
-        //                           fault, so it keeps the status quo.
+        //   name absent             an unrecognisable throw; treated as a
+        //                           rejection (the caller-fault reading), not
+        //                           a server fault.
         //   any other name          TypeError / ReferenceError / SqliteError /
         //                           a driver's own class ⇒ a fault.
         //
-        // Deliberately the narrow direction: this only moves what it is sure
-        // about, and everything it is unsure about keeps the 200 it has today.
         // `errorFromThrown` is the same exit every other domain catch has used
         // since #3925, and an error carrying its own `.status` still wins there
         // so a hand-thrown 4xx keeps it.
@@ -396,14 +388,15 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             return { handled: true, response: deps.errorFromThrown(err, 500) };
         }
 
-        return {
-            handled: true,
-            response: deps.success({
-                success: false,
-                error: clientMsg,
-                ...(typeof code === 'string' && code ? { code } : {}),
-                ...(Array.isArray(fields) ? { fields } : {}),
-            }),
-        };
+        // [#3962] A deliberate REJECTION is a 400. The 200-with-inner-envelope
+        // wire this used to emit was never a designed contract — no ADR or doc
+        // specified it, it was the catch block reusing `deps.success()`, and
+        // /actions was the only route of 12 that double-wrapped. The platform
+        // decision in #3962 classifies it as a bug: failures speak HTTP, same
+        // as /data has always done. `errorFromThrown` carries the structured
+        // payload #3937 fought for — `VALIDATION_FAILED` + `fields[]` land in
+        // `details`, the exact shape @objectstack/client normalizes to
+        // `err.code` / `err.fields` (#3927).
+        return { handled: true, response: deps.errorFromThrown(err, 400) };
     }
 }

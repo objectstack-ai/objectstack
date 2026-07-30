@@ -229,22 +229,19 @@ curl -b cookies.txt -X POST \
   https://your-app.example.com/api/v1/actions/todo_task/complete_task \
   -H "Content-Type: application/json" \
   -d '{ "recordId": "rec_123", "params": {} }'
-# → 200 { "success": true, "data": { "success": true, "data": ... } }
+# → 200 { "success": true, "data": <your handler's return value> }
 ```
 
-Failures split three ways:
+Failures speak HTTP — the status code is the signal (#3962):
 
-- **It ran and rejected** — HTTP **200**, `data: { "success": false, "error",
-  "code"?, "fields"? }`. An action that says no is a normal business outcome,
-  not a transport error, so it rides the payload. Always branch on
-  `data.success`.
-- **It never dispatched** — a real status: **404** no such action, **403**
-  denied, **400** wrong action type or a param-contract violation, **503**
-  unavailable — with `{ "success": false, "error": { "message", "code" } }`.
-- **It crashed** — **500**. A `TypeError` in your handler, a driver error or a
-  sandbox timeout is not an outcome your action chose to report, so it is a
-  server fault and shows up as one in logs, alerting and gateway error rates.
-  A deliberate `throw new Error('…')` is a rejection, not a crash.
+- **400** — the action ran and **rejected** (a business rule said no, or
+  validation failed — then with `error.details.fields[]` to anchor the input).
+- **404 / 403 / 503** — it never dispatched: no such action, denied, service
+  unavailable. A `url`/`modal`/`form`/`api` type with no server dispatch is
+  also a 400.
+- **500** — it **crashed**: a `TypeError` in your handler, a driver error, a
+  sandbox timeout. A deliberate `throw new Error('…')` is a 400 rejection,
+  not a crash.
 
 Full table in the [error catalog](/docs/api/error-catalog). The
 [client SDK](/docs/api/client-sdk) folds all of it into one

@@ -16,8 +16,11 @@
  * The discriminator is the error's NAME, the same signal `@objectstack/rest`
  * already uses on this distinction ("non-default names (`TypeError: …`) […]
  * signal a genuine script bug rather than a deliberately thrown business
- * rule"). This file pins BOTH sides, because the whole risk of the change is
- * over-reach: everything #3937 put in the payload must stay there.
+ * rule"). Since #3962 both sides are HTTP statuses — a rejection is a 400
+ * carrying `code`/`fields` in `details`, a crash is a 500 — and this file pins
+ * the LINE between them, because the risk is misclassification in either
+ * direction: a business rejection served as a 500 gets its message eaten by
+ * the leak sanitiser; a crash served as a 400 hides from alerting.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -66,15 +69,15 @@ async function invoke(thrown: unknown) {
     return res.response;
 }
 
-describe('a deliberate REJECTION keeps the payload at HTTP 200', () => {
+describe('a deliberate REJECTION is a 400 (#3962)', () => {
     it('a plain `throw new Error(msg)` from a registered handler', async () => {
         // The shape user code registered via `engine.registerAction` uses to
         // reject. `name === 'Error'` is what marks it deliberate — this is the
         // case a naive "no sandbox marker ⇒ fault" rule would have broken.
         const response = await invoke(new Error('Lead is already converted'));
 
-        expect(response.status).toBe(200);
-        expect(response.body.data).toEqual({ success: false, error: 'Lead is already converted' });
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toBe('Lead is already converted');
     });
 
     it('a sandboxed body that threw on purpose (SandboxError.innerMessage)', async () => {
@@ -82,8 +85,9 @@ describe('a deliberate REJECTION keeps the payload at HTTP 200', () => {
             new SandboxError("action 'submit_signoff' threw: Contact has no phone", 'Contact has no phone'),
         );
 
-        expect(response.status).toBe(200);
-        expect(response.body.data).toEqual({ success: false, error: 'Contact has no phone' });
+        expect(response.status).toBe(400);
+        // The sandbox debug wrapper stays in the server log, not on the wire.
+        expect(response.body.error.message).toBe('Contact has no phone');
     });
 
     it('a record validation failure, code + fields intact (#3937)', async () => {
@@ -96,8 +100,8 @@ describe('a deliberate REJECTION keeps the payload at HTTP 200', () => {
             ),
         );
 
-        expect(response.status).toBe(200);
-        expect(response.body.data).toMatchObject({ success: false, code: 'VALIDATION_FAILED', fields });
+        expect(response.status).toBe(400);
+        expect(response.body.error.details).toMatchObject({ code: 'VALIDATION_FAILED', fields });
     });
 
     it('a bare ValidationError whose fields were stripped in transit', async () => {
@@ -108,8 +112,8 @@ describe('a deliberate REJECTION keeps the payload at HTTP 200', () => {
         err.name = 'ValidationError';
         const response = await invoke(err);
 
-        expect(response.status).toBe(200);
-        expect(response.body.data.success).toBe(false);
+        expect(response.status).toBe(400);
+        expect(response.body.error.details?.code).toBe('VALIDATION_FAILED');
     });
 
     it('a flow that ran and rejected', async () => {
@@ -117,18 +121,17 @@ describe('a deliberate REJECTION keeps the payload at HTTP 200', () => {
         // deliberate side with no special-casing.
         const response = await invoke(new Error("Flow 'convert_wizard' failed: lead already converted"));
 
-        expect(response.status).toBe(200);
-        expect(response.body.data.success).toBe(false);
-        expect(response.body.data.error).toMatch(/lead already converted/);
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toMatch(/lead already converted/);
     });
 
-    it('an unrecognisable throw — no name at all — keeps the status quo', async () => {
-        // The change only moves what it is SURE about. A thrown string or a
-        // bare object is not confidently a fault, so it keeps its 200.
+    it('an unrecognisable throw — no name at all — reads as a rejection, not a crash', async () => {
+        // A thrown string or a bare object is not confidently a server fault,
+        // so it takes the rejection exit (400), not the 500.
         const response = await invoke('something odd');
 
-        expect(response.status).toBe(200);
-        expect(response.body.data.success).toBe(false);
+        expect(response.status).toBe(400);
+        expect(response.body.success).toBe(false);
     });
 });
 

@@ -323,20 +323,28 @@ function actionErrorMessage(e: any): string {
  * Fold a 2xx `POST /api/v1/actions/...` body into the `{ success, data?,
  * error? }` shape `client.actions.invoke` has always returned.
  *
- * `payload` is what `unwrapResponse` produced — the INNER envelope. Two shapes
- * arrive on a 2xx and a caller must not have to tell them apart:
+ * `payload` is what `unwrapResponse` produced. On a #3962 server a 2xx means
+ * the action ran and returned, and `payload` IS the handler's return value —
+ * every failure (rejection 400, dispatch 404/403/503, crash 500) arrives as a
+ * non-2xx, `fetch` throws on it, and `invoke` catches. This surface does not
+ * throw either way.
  *
- *  - `{ success: true, data }` — the action ran and returned.
- *  - `{ success: false, error, code?, fields? }` — the handler RAN and
- *    rejected. That is a business outcome, so it rides the payload at HTTP
- *    200 (#3937) and the inner envelope is authoritative.
- *
- * The non-2xx case never reaches here: those are DISPATCH failures (404 / 403
- * / 400 / 503), `fetch` throws on them, and `invoke` catches — this surface
- * does not throw either way.
+ * Servers older than #3962 answered a 2xx with the legacy INNER envelope —
+ * `{success: true, data}` on success, `{success: false, error, code?,
+ * fields?}` when the handler rejected. A current SDK still has to talk to
+ * them, so that shape is detected NARROWLY (a `boolean` `success` and no keys
+ * beyond the envelope's own) and unwrapped; anything else passes through as
+ * the handler's data. The residual ambiguity — a handler whose own return
+ * value is exactly envelope-shaped — is unavoidable while both servers exist
+ * and resolves once the fleet is on #3962.
  */
 function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; error?: string } {
-  if (payload && typeof payload === 'object' && 'success' in payload) {
+  const ENVELOPE_KEYS = new Set(['success', 'data', 'error', 'code', 'fields']);
+  const legacy =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+    && typeof payload.success === 'boolean'
+    && Object.keys(payload).every((k) => ENVELOPE_KEYS.has(k));
+  if (legacy) {
     return payload.success === false
       ? { success: false, error: actionErrorMessage(payload.error) }
       : { success: true, data: payload.data as T };
@@ -2916,15 +2924,12 @@ export class ObjectStackClient {
    * Result shape is `{ success, data | error }` and this surface does NOT
    * throw — a failed business action is a toast, not a crash.
    *
-   * Two server answers fold into that one result:
-   *  - a handler that RAN and rejected → HTTP 200 with the inner
-   *    `{success: false, error}` (unchanged — a business outcome is reported
-   *    in the payload, not as a transport error);
-   *  - a request that never DISPATCHED → a real status (404 unregistered, 403
-   *    denied, 400 wrong action type, 503 unavailable) with
-   *    `{success: false, error: {message, code}}`. `fetch` throws on those, so
-   *    `invoke` catches and reports instead of propagating — #3913, where an
-   *    unregistered action came back as a 200 and read as a success.
+   * Since #3962 every failure speaks HTTP: 400 rejection (with `code` /
+   * `fields` in `error.details`), 404 unregistered, 403 denied, 503
+   * unavailable, 500 crash. `fetch` throws on any non-2xx, so `invoke`
+   * catches and folds it into this result instead of propagating. On success,
+   * `data` is the handler's return value directly (single wrap); the legacy
+   * double-wrapped 200s of pre-#3962 servers are still recognised and folded.
    */
   actions = {
       /**

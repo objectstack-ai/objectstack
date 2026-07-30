@@ -429,11 +429,14 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         params: seedFlowActionParams(deps, action, { objectName, record, params, recordId }),
     });
     if (result && typeof result === 'object' && 'success' in result && result.success === false) {
-        // The flow RAN and rejected — a business outcome, so the REST route
-        // reports it in the payload (`{success: false, error}`, HTTP 200), the
-        // same as a script body that throws. Only a route that never dispatched
-        // gets a status (#3913).
-        throw new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
+        // The flow RAN and rejected — a deliberate business rejection, served
+        // as a 400 (#3962). Tagging the status/code here (rather than relying
+        // on the route's name heuristic) keeps the semantic `FLOW_FAILED` on
+        // the wire for callers that branch on `err.code`.
+        const err: any = new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
+        err.status = 400;
+        err.code = 'FLOW_FAILED';
+        throw err;
     }
     return result ?? null;
 }

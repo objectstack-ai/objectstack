@@ -28,7 +28,7 @@ describe('client.actions', () => {
     it('invoke POSTs to /api/v1/actions/:object/:action with recordId + params in the body', async () => {
         const { client, fetchMock } = createMockClient({
             success: true,
-            data: { success: true, data: { converted: true } },
+            data: { converted: true },  // #3962: single wrap — data IS the handler value
         });
 
         const result = await client.actions.invoke('crm_lead', 'convert', {
@@ -71,11 +71,10 @@ describe('client.actions', () => {
         expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ params: { dryRun: true } });
     });
 
-    it('surfaces the handler business failure without throwing (inner success:false)', async () => {
-        // A handler that RAN and rejected is a business outcome, reported in
-        // the payload at HTTP 200 — unchanged by #3913, which only moved the
-        // DISPATCH failures to a status. The inner envelope is authoritative
-        // on a 2xx.
+    it('still folds a PRE-#3962 server\'s 200-wrapped failure (legacy inner envelope)', async () => {
+        // Servers older than #3962 reported a rejection as HTTP 200 with the
+        // inner `{success:false, error}`. A current SDK still talks to them,
+        // so the narrowly-detected legacy shape stays authoritative on a 2xx.
         const { client } = createMockClient({
             success: true,
             data: { success: false, error: 'Lead is already converted' },
@@ -86,12 +85,9 @@ describe('client.actions', () => {
     });
 
     it('reports a dispatch failure (404) as the same non-throwing envelope (#3913)', async () => {
-        // An unregistered action never dispatched, so the server answers a real
-        // status with `{success:false, error:{message,code}}`. `client.fetch`
-        // throws on any non-2xx, but this surface's contract is to REPORT, not
-        // throw — callers toast `result.error` rather than wrapping every call
-        // in a try/catch, and that must not change just because these routes
-        // gained a status.
+        // `client.fetch` throws on any non-2xx, but this surface's contract is
+        // to REPORT, not throw — callers toast `result.error` rather than
+        // wrapping every call in a try/catch.
         const { client } = createMockClient(
             { success: false, error: { message: "Action 'log_call' on object 'global' not found", code: 404 } },
             404,
@@ -101,6 +97,35 @@ describe('client.actions', () => {
         // The message, not `[object Object]` — the error body's `error` is an
         // object on this shape.
         expect(result.error).toBe("Action 'log_call' on object 'global' not found");
+    });
+
+    it('reports a business rejection (400) with the message, non-throwing (#3962)', async () => {
+        const { client } = createMockClient(
+            {
+                success: false,
+                error: {
+                    message: 'ValidationError: issued_on is required',
+                    code: 400,
+                    details: { code: 'VALIDATION_FAILED', fields: [{ field: 'issued_on' }] },
+                },
+            },
+            400,
+        );
+        const result = await client.actions.invoke('crm_invoice', 'submit_signoff', { recordId: 'inv_1' });
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('ValidationError: issued_on is required');
+    });
+
+    it('passes a handler value that merely CONTAINS success-ish keys through untouched (#3962)', async () => {
+        // Single wrap means data is handler-owned. Only the exact legacy
+        // envelope shape (boolean `success`, no foreign keys) is unwrapped.
+        const { client } = createMockClient({
+            success: true,
+            data: { success: true, rows: 3, data: { id: 'x' }, extra: 'mine' },
+        });
+        const result = await client.actions.invoke('crm_lead', 'sync');
+        expect(result.success).toBe(true);
+        expect(result.data).toEqual({ success: true, rows: 3, data: { id: 'x' }, extra: 'mine' });
     });
 
     it('reports a 403 denial the same way', async () => {

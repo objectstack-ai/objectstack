@@ -394,9 +394,9 @@ await client.automation.getScreen('convert_lead', runId);
 // (engine.registerAction). The result is `{ success, data | error }` — a
 // failure comes back as `success: false` + `error` instead of a thrown
 // exception, so it can be surfaced as a toast. This surface is the one place
-// a non-2xx does NOT throw: a handler that rejects answers 200 with the inner
-// envelope, a request that never dispatched answers 404 / 403 / 400 / 503,
-// and the SDK folds both into the same result.
+// a non-2xx does NOT throw: failures speak HTTP (400 rejection, 404 / 403 /
+// 503 dispatch failures, 500 crash) and the SDK folds them into the result;
+// on success, `data` is the handler's return value directly.
 const res = await client.actions.invoke('crm_lead', 'convert', {
   recordId,
   params: { create_opportunity: true },
