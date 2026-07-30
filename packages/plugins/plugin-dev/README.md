@@ -1,17 +1,12 @@
 # @objectstack/plugin-dev
 
-> Development Mode Plugin for ObjectStack — auto-enables **all 17+ kernel services** for a full-featured API development environment.
+> Development Assembly Plugin for ObjectStack — wires the **real** platform stack for zero-config local development.
 
 ## Overview
 
 Instead of manually wiring up ObjectQL, drivers, auth, HTTP server, REST endpoints, dispatcher, security, and metadata for local development, use `DevPlugin` to get a fully functional stack in one line.
 
-The dev environment simulates **all kernel services** so you can:
-- CRUD business objects via REST API
-- Read, modify, and save views/apps/dashboards via metadata API (`PUT /api/v1/meta/:type/:name`)
-- Use GraphQL, analytics, storage, and automation endpoints
-- Authenticate with dev credentials (no real auth provider needed)
-- Test UI permissions, workflows, and notifications with dev stubs
+Everything it wires is a **real implementation** — there are no simulated services. A capability whose package is not installed is simply absent, exactly as in production: its routes answer 404/501 and discovery reports it `unavailable` (ADR-0115). That keeps "the capability is present" meaning the same thing in dev and production.
 
 ## Usage
 
@@ -53,16 +48,14 @@ plugins: [
     port: 4000,
     seedAdminUser: true,
     services: {
-      auth: false,        // Skip auth for quick prototyping
-      dispatcher: false,  // Skip extended API routes
+      dispatcher: false,     // Skip extended API routes
+      'file-storage': false, // Skip the storage service
     },
   }),
 ]
 ```
 
-## What it auto-configures
-
-### Real plugin implementations
+## What it assembles (all real implementations)
 
 | Service | Package | Description |
 |---------|---------|-------------|
@@ -73,15 +66,22 @@ plugins: [
 | Security | `@objectstack/plugin-security` | RBAC, RLS, field-level masking |
 | Hono Server | `@objectstack/plugin-hono-server` | HTTP server on configured port |
 | REST API | `@objectstack/rest` | Auto-generated CRUD + metadata endpoints |
-| Dispatcher | `@objectstack/runtime` | Auth routes, GraphQL, analytics, packages, storage |
+| Dispatcher | `@objectstack/runtime` | Auth routes, GraphQL, packages, storage bridges |
+| Storage | `@objectstack/service-storage` | `file-storage` service (local-disk adapter, files under `./storage`) |
+| Realtime | `@objectstack/service-realtime` | `realtime` service (in-memory adapter) |
+| I18n | `@objectstack/service-i18n` | Auto-registered when the stack declares translations |
 
-### Dev stubs (in-memory / no-op)
+Every part is loaded via dynamic import and skipped with a log line when its package is not installed, and each can be disabled via `options.services`.
 
-Any core kernel service not provided by a real plugin is automatically registered as a dev stub. This ensures the **full kernel service map** is populated and features like UI permissions, automation, etc. don't crash:
+## Empty slots stay empty
 
-`cache`, `queue`, `job`, `file-storage`, `search`, `automation`, `graphql`, `analytics`, `realtime`, `notification`, `ai`, `i18n`, `ui`, `workflow`, `security.permissions`, `security.rls`, `security.fieldMasker`
+This plugin registers **no service implementations of its own**. The earlier design filled every unoccupied kernel-service slot with a dev stub — fabricated answers such as allow-all permission checks and "sent" notifications that were never delivered. That design is retired (ADR-0115): a slot no real plugin fills stays empty, and consumers handle absence exactly as they already must in production.
 
-All services are **optional** — if a peer package isn't installed, it is silently skipped and a stub takes its place.
+To use a capability locally, install its real service — e.g. `@objectstack/service-analytics` for `/analytics` (it runs an InMemory strategy), `@objectstack/service-cache` / `service-queue` / `service-job` for cache/queue/job.
+
+## Production guard
+
+`init()` throws when `NODE_ENV === 'production'`: the assembly is built around a well-known default auth secret and a seeded dev admin. If you really mean it, set `OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION=1`.
 
 ## API Endpoints (when all services enabled)
 
@@ -108,7 +108,7 @@ All services are **optional** — if a peer package isn't installed, it is silen
 | `authSecret` | `string` | dev default | JWT secret for auth sessions |
 | `authBaseUrl` | `string` | `http://localhost:{port}` | Auth callback URL |
 | `verbose` | `boolean` | `true` | Enable verbose logging |
-| `services` | `Record<string, boolean>` | all `true` | Enable/disable individual services |
+| `services` | `Record<string, boolean>` | all `true` | Enable/disable individual parts of the assembly |
 | `extraPlugins` | `Plugin[]` | `[]` | Additional plugins to load |
 | `stack` | `object` | — | Stack definition to load as project metadata |
 

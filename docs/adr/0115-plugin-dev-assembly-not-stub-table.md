@@ -108,6 +108,14 @@ Sequenced to avoid editing `dev-plugin.ts` under an in-flight PR. Ratified by th
 
 End state, mechanically checkable: `DEV_STUB_FACTORIES`, `DEV_STUB_SELF_INFO`, `SHAPELESS_STUB_SELF_INFO`, `NO_DEV_STUB_SERVICES`, and the fill loop no longer exist in `dev-plugin.ts`; `grep -r "createMemoryMetadata\|registerInMemory" packages/plugins/plugin-dev` is empty. The two-PR split is the ratified shape; the tier boundaries remain the decision.
 
+### Update (2026-07-30, post-#4086 reconciliation): executed as ONE PR
+
+Three facts changed between ratification and execution, all shrinking the work:
+
+1. **#4086's merged form deleted nothing.** It gated the six dispatcher domains on `handlerReady` and explicitly deferred "should the fabricators keep occupying slots" to this ADR's Tier A. So `ai` / `automation` / `notification` join Tier A's deletion list here — the Context table's "retired" row described their HTTP surface (gated to empty-slot answers since #4086), not their registration.
+2. **#4089 closed at the source.** #4082 had already given core's five fallbacks their `__serviceInfo` self-descriptions, so Tier B's core half was done before PR-2 existed; what remained of Tier B was only plugin-dev's `metadata` copy and the four wrappers.
+3. **With the core half gone, the PR-1/PR-2 boundary lost its reason** (Tier B no longer reached into core), and the maintainer directed completing all remaining work at once. The implementation therefore landed as one PR: Tiers A+B+C, the D6 guard, the D4 assembly auto-wire, and the D7 docs convergence — the full end state above, under a single FROM → TO changeset narrative.
+
 ## Consequences
 
 - **+** "The capability is present" has one meaning across dev and production; the D12 producer inventory for plugin-dev closes completely instead of shrinking by one per issue.
