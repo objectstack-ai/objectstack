@@ -145,7 +145,7 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     expect(await res.json()).toEqual({
       success: false,
       error: {
-        code: 'datasource_admin_unavailable',
+        code: 'SERVICE_UNAVAILABLE',
         message: 'The datasource-admin service is not available.',
       },
     });
@@ -167,7 +167,7 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     // asymmetry that made `body.error.message` read `undefined` here.
     expect(await res.json()).toEqual({
       success: false,
-      error: { code: 'datasource_admin_error', message: 'duplicate name' },
+      error: { code: 'DATASOURCE_ADMIN_ERROR', message: 'duplicate name' },
     });
   });
 });

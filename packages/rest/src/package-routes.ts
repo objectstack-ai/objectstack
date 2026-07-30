@@ -61,13 +61,16 @@ export interface PackageRoutesOptions {
  * Two of them carried no error at all, only a bare `{ success: false }`, so a
  * caller was told it failed and never told why.
  *
- * Because there were no codes here to preserve, these had to be MINTED — unlike
- * `admin-routes.ts` / `external-datasource-routes.ts`, whose existing codes are
- * carried over untouched so #3841 can pick a vocabulary for the whole repo at
- * once. The dialect chosen is the SCREAMING_SNAKE that the two already-converted
- * siblings (`storage-routes.ts`, `settings-routes.ts`) emit, on the grounds that
- * it adds no new information to #3841's decision; expect that sweep to re-spell
- * them along with everything else.
+ * Because there were no codes here to preserve, these had to be MINTED. They
+ * follow ADR-0112 (#3841, settled while this was in review): SCREAMING_SNAKE, and
+ * registered in `ERROR_CODE_LEDGER` under `@objectstack/rest` — an unregistered
+ * code fails `ApiErrorSchema` parse, which fails the conformance suite.
+ *
+ * Generic conditions reuse the STANDARD catalog rather than becoming registered
+ * synonyms of it: a missing request field is `MISSING_REQUIRED_FIELD`, an absent
+ * package is `RESOURCE_NOT_FOUND`, an unexpected throw is `INTERNAL_ERROR`. Only
+ * the package-specific outcomes are registered — `PACKAGE_MANIFEST_INVALID`,
+ * `PACKAGE_PUBLISH_FAILED`, `PACKAGE_DELETE_PARTIAL`, `PACKAGE_DELETE_FAILED`.
  */
 function sendError(res: any, status: number, code: string, message: string, details?: unknown) {
   res.status(status).json({
@@ -104,12 +107,12 @@ export function registerPackageRoutes(
       const { manifest, metadata } = req.body || {};
 
       if (!manifest || !metadata) {
-        sendError(res, 400, 'PUBLISH_FIELDS_MISSING', 'Missing required fields: manifest, metadata');
+        sendError(res, 400, 'MISSING_REQUIRED_FIELD', 'Missing required fields: manifest, metadata');
         return;
       }
 
       if (!manifest.id || !manifest.version) {
-        sendError(res, 400, 'PUBLISH_MANIFEST_INVALID', 'Invalid manifest: id and version are required');
+        sendError(res, 400, 'PACKAGE_MANIFEST_INVALID', 'Invalid manifest: id and version are required');
         return;
       }
 
@@ -126,9 +129,9 @@ export function registerPackageRoutes(
         return;
       }
 
-      sendError(res, 400, 'PUBLISH_FAILED', result.error ?? `Failed to publish ${manifest.id}.`);
+      sendError(res, 400, 'PACKAGE_PUBLISH_FAILED', result.error ?? `Failed to publish ${manifest.id}.`);
     } catch (error) {
-      sendError(res, 500, 'INTERNAL', (error as Error).message);
+      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
   });
 
@@ -181,7 +184,7 @@ export function registerPackageRoutes(
       const packages = Array.from(packagesMap.values());
       sendOk(res, { packages, total: packages.length });
     } catch (error) {
-      sendError(res, 500, 'INTERNAL', (error as Error).message);
+      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
   });
 
@@ -214,9 +217,9 @@ export function registerPackageRoutes(
         }
       }
 
-      sendError(res, 404, 'PACKAGE_NOT_FOUND', `Package "${packageId}" was not found.`);
+      sendError(res, 404, 'RESOURCE_NOT_FOUND', `Package "${packageId}" was not found.`);
     } catch (error) {
-      sendError(res, 500, 'INTERNAL', (error as Error).message);
+      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
   });
 
@@ -276,7 +279,7 @@ export function registerPackageRoutes(
         `Failed to delete ${packageId}${version ? `@${version}` : ''}.`,
       );
     } catch (error) {
-      sendError(res, 500, 'INTERNAL', (error as Error).message);
+      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
   });
 }

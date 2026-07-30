@@ -7,7 +7,7 @@
  * merely a missing `success` flag, but the pre-#3675 `{ error: '<string>' }`,
  * with the message a SIBLING of `error` rather than a field of it —
  *
- *     res.status(400).json({ error: 'datasource_admin_error', message });
+ *     res.status(400).json({ error: 'DATASOURCE_ADMIN_ERROR', message });
  *
  * so a caller reading `body.error.message` got `undefined` here and the real
  * message from the dispatcher. That is the identical asymmetry #3675 opened on,
@@ -162,37 +162,37 @@ describe('datasource-admin envelope (#3843) — error bodies', () => {
     {
       name: 'the datasource-admin service is not wired',
       status: 503,
-      code: 'datasource_admin_unavailable',
+      code: 'SERVICE_UNAVAILABLE',
       run: () => drive(mount(undefined), '/api/v1/datasources'),
     },
     {
       name: 'a lifecycle failure carries the service message',
       status: 400,
-      code: 'datasource_admin_error',
+      code: 'DATASOURCE_ADMIN_ERROR',
       run: () => drive(mount({ createDatasource: async () => { throw new Error('duplicate name'); } }), '/api/v1/datasources', { method: 'POST', body: JSON.stringify({ name: 'pg' }) }),
     },
     {
       name: 'a missing required body field',
       status: 400,
-      code: 'datasource_admin_error',
+      code: 'DATASOURCE_ADMIN_ERROR',
       run: () => drive(mount({ generateObjectDraft: async () => ({}) }), '/api/v1/datasources/ext/object-draft', { method: 'POST', body: '{}' }),
     },
     {
       name: 'reading a datasource that does not exist',
       status: 404,
-      code: 'not_found',
+      code: 'RESOURCE_NOT_FOUND',
       run: () => drive(mount({ getDatasource: async () => undefined }), '/api/v1/datasources/nope'),
     },
     {
       name: 'a remote-table introspection failure',
       status: 400,
-      code: 'datasource_admin_error',
+      code: 'DATASOURCE_ADMIN_ERROR',
       run: () => drive(mount({ listRemoteTables: async () => { throw new Error('no such schema'); } }), '/api/v1/datasources/ext/remote-tables'),
     },
     {
       name: 'a removal failure',
       status: 400,
-      code: 'datasource_admin_error',
+      code: 'DATASOURCE_ADMIN_ERROR',
       run: () => drive(mount({ removeDatasource: async () => { throw new Error('not runtime-origin'); } }), '/api/v1/datasources/pg', { method: 'DELETE' }),
     },
   ];

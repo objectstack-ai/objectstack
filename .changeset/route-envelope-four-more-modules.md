@@ -54,16 +54,28 @@ answered a bare `{ success: false }` and a bare
 `PACKAGE_DELETE_PARTIAL`, with the per-item `failed` / `cleanups` arrays under
 `error.details`.
 
-**Codes: carried over, not renamed.** `admin-routes.ts` and
-`external-datasource-routes.ts` keep their existing lowercase snake codes
-(`datasource_admin_unavailable`, `external_service_unavailable`, `not_found`, …)
-even though they sit beside SCREAMING_SNAKE in the already-converted siblings.
-Which vocabulary wins is #3841's call — a decision about ~240 codes repo-wide —
-and re-spelling nine of them here would pick that dialect by accident. Only
-`package-routes.ts` needed *minted* codes, because its `error` strings were human
-messages with no code to carry; those follow the SCREAMING_SNAKE the two
-converted siblings emit and #3841 will re-spell them with everything else. This
-is the envelope only, the same split #3687 / #3837 made deliberately.
+**Codes follow ADR-0112.** #3841 settled the vocabulary while this was in review:
+`error.code` is SCREAMING_SNAKE and `ApiErrorSchema.code` is now the closed
+`ErrorCode` union, so an unregistered code fails schema parse. Generic conditions
+reuse the STANDARD catalog rather than becoming registered synonyms of it, per the
+ledger's own guidance:
+
+```
+datasource_admin_unavailable  → SERVICE_UNAVAILABLE      (standard)
+external_service_unavailable  → SERVICE_UNAVAILABLE      (standard)
+not_found / PACKAGE_NOT_FOUND → RESOURCE_NOT_FOUND       (standard)
+PUBLISH_FIELDS_MISSING        → MISSING_REQUIRED_FIELD   (standard)
+INTERNAL                      → INTERNAL_ERROR           (standard)
+datasource_admin_error        → DATASOURCE_ADMIN_ERROR   (registered)
+external_import_error         → EXTERNAL_IMPORT_ERROR    (registered)
+PUBLISH_MANIFEST_INVALID      → PACKAGE_MANIFEST_INVALID (registered)
+PUBLISH_FAILED                → PACKAGE_PUBLISH_FAILED   (registered)
+PACKAGE_DELETE_PARTIAL / PACKAGE_DELETE_FAILED / SETTINGS_ACTION_FAILED (registered)
+```
+
+Which service is unavailable is carried by `message`. The seven registered codes are
+added to `ERROR_CODE_LEDGER` under their owning packages — including a new
+`@objectstack/service-datasource` entry.
 
 **`POST /external/validate` keeps its `ok`.** Unlike the `{ ok: true, key }`
 #3689 retired from storage — a private second word for `success` — this `ok` is a

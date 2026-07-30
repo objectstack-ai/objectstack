@@ -202,19 +202,19 @@ describe('packages envelope (#3843) — error bodies', () => {
     {
       name: 'publish without manifest/metadata',
       status: 400,
-      code: 'PUBLISH_FIELDS_MISSING',
+      code: 'MISSING_REQUIRED_FIELD',
       run: () => drive(mount({}), 'POST', `${PKGS}/publish`, { body: {} }),
     },
     {
       name: 'publish with a manifest missing id/version',
       status: 400,
-      code: 'PUBLISH_MANIFEST_INVALID',
+      code: 'PACKAGE_MANIFEST_INVALID',
       run: () => drive(mount({}), 'POST', `${PKGS}/publish`, { body: { manifest: {}, metadata: {} } }),
     },
     {
       name: 'a publish the service refuses',
       status: 400,
-      code: 'PUBLISH_FAILED',
+      code: 'PACKAGE_PUBLISH_FAILED',
       run: () => drive(
         mount({ publish: async () => ({ success: false, error: 'version already published' }) }),
         'POST',
@@ -225,7 +225,7 @@ describe('packages envelope (#3843) — error bodies', () => {
     {
       name: 'reading a package that does not exist',
       status: 404,
-      code: 'PACKAGE_NOT_FOUND',
+      code: 'RESOURCE_NOT_FOUND',
       run: () => drive(
         mount({ get: async () => undefined }),
         'GET',
@@ -272,7 +272,7 @@ describe('packages envelope (#3843) — error bodies', () => {
       // unreachable that way (pinned below). `GET /:id` has no inner catch.
       name: 'an unexpected throw from the package service',
       status: 500,
-      code: 'INTERNAL',
+      code: 'INTERNAL_ERROR',
       run: () => drive(
         mount({ get: async () => { throw new Error('db down'); } }),
         'GET',

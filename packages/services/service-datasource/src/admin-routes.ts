@@ -9,7 +9,7 @@ import { DRIVER_CATALOG } from './driver-catalog.js';
  *
  * Mounted under `/api/v1/datasources` and served by the `datasource-admin`
  * service. Every route degrades gracefully
- * (`503 datasource_admin_unavailable`) when the service is not wired in, and
+ * (`503 SERVICE_UNAVAILABLE`) when the service is not wired in, and
  * lifecycle/validation failures surface as `400` with the service's message.
  *
  *   GET    /datasources              → listDatasources (provenance + health)
@@ -66,13 +66,21 @@ export function registerDatasourceAdminRoutes(
    * difference; that shim is the consumer-side symptom Prime Directive #12 says
    * to cure at the producer.
    *
-   * The `code` strings are carried over UNCHANGED (`datasource_admin_error`,
-   * `not_found`, …) even though they are lowercase snake while
-   * `storage-routes.ts` and `settings-routes.ts` emit SCREAMING_SNAKE. Which
-   * vocabulary wins is #3841's call, and it is a decision about ~240 codes
-   * repo-wide, not about these four; re-spelling them here would pick that
-   * dialect by accident and make #3841's sweep harder to verify. This change is
-   * the envelope only — the same split #3687 / #3837 made deliberately.
+   * The codes follow ADR-0112, which #3841 settled while this was in review:
+   * `error.code` is SCREAMING_SNAKE and `ApiErrorSchema.code` is now the closed
+   * `ErrorCode` union, so an unregistered code fails schema parse. The old
+   * lowercase trio was re-spelled accordingly, and the generic conditions went to
+   * the STANDARD catalog rather than becoming registered synonyms of it:
+   *
+   *   datasource_admin_unavailable → SERVICE_UNAVAILABLE   (standard)
+   *   not_found                    → RESOURCE_NOT_FOUND    (standard)
+   *   datasource_admin_error       → DATASOURCE_ADMIN_ERROR (registered — a
+   *                                  lifecycle/validation refusal specific to
+   *                                  this service, so not a standard synonym)
+   *
+   * Which service is unavailable is carried by `message`; the ledger explicitly
+   * asks generic conditions to reuse the catalog instead of registering a
+   * per-service 503.
    */
   const sendError = (res: any, status: number, code: string, message: string) =>
     res.status(status).json({ success: false, error: { code, message } });
@@ -90,10 +98,10 @@ export function registerDatasourceAdminRoutes(
     res.status(status).json({ success: true, data });
 
   const unavailable = (res: any) =>
-    sendError(res, 503, 'datasource_admin_unavailable', 'The datasource-admin service is not available.');
+    sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The datasource-admin service is not available.');
 
   const badRequest = (res: any, err: unknown) =>
-    sendError(res, 400, 'datasource_admin_error', err instanceof Error ? err.message : String(err));
+    sendError(res, 400, 'DATASOURCE_ADMIN_ERROR', err instanceof Error ? err.message : String(err));
 
   /** Split an inline `{ secret, ...draft }` body into (draft, secret). */
   const splitSecret = (body: any): { draft: any; secret: any } => {
@@ -151,7 +159,7 @@ export function registerDatasourceAdminRoutes(
     if (!svc?.getDatasource) return unavailable(res);
     try {
       const datasource = await svc.getDatasource(req.params.name);
-      if (!datasource) return sendError(res, 404, 'not_found', `Datasource "${req.params.name}" does not exist.`);
+      if (!datasource) return sendError(res, 404, 'RESOURCE_NOT_FOUND', `Datasource "${req.params.name}" does not exist.`);
       sendOk(res, { datasource });
     } catch (err) {
       badRequest(res, err);

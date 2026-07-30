@@ -58,6 +58,7 @@ export const ERROR_CODE_LEDGER = {
     'ERR_DATASOURCE_UNAVAILABLE',
     'EXPLAIN_FAILED',
     'EXPORT_NOT_PERMITTED',
+    'EXTERNAL_IMPORT_ERROR',         // federated import refused (read-only store, missing remote table)
     'FORBIDDEN',
     'FORM_NOT_FOUND',
     'FORM_RESOLVE_FAILED',
@@ -77,6 +78,10 @@ export const ERROR_CODE_LEDGER = {
     'NO_MATCH',                   // import upsert found no record for the match key
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    'PACKAGE_DELETE_FAILED',
+    'PACKAGE_DELETE_PARTIAL',        // uninstall left per-item failures behind; see error.details
+    'PACKAGE_MANIFEST_INVALID',
+    'PACKAGE_PUBLISH_FAILED',
     'PAYLOAD_TOO_LARGE',
     'PROJECT_NOT_FOUND',
     'PROJECT_PROVISIONING',       // project exists but is still provisioning
@@ -211,6 +216,7 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/service-settings': [
     'INTERNAL',
+    'SETTINGS_ACTION_FAILED',        // a declared action ran and reported ok:false
     'SETTINGS_FORBIDDEN',
     'SETTINGS_LOCKED',
     'SETTINGS_UNKNOWN_KEY',
@@ -228,6 +234,9 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/service-analytics': [
     'CUBE_NOT_FOUND',
     'RAW_SQL_UNSUPPORTED',
+  ],
+  '@objectstack/service-datasource': [
+    'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service
   ],
   '@objectstack/plugin-audit': [
     'FEEDS_DISABLED',

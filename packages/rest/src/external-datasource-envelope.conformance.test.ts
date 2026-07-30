@@ -8,7 +8,7 @@
  * arms, no `success` flag on any body, and — on `POST /validate` — its own
  * private success word:
  *
- *     res.status(503).json({ error: 'external_service_unavailable' });
+ *     res.status(503).json({ error: 'SERVICE_UNAVAILABLE' });
  *     res.json({ ok: results.every((r: any) => r.ok), results });
  *
  * The `ok` is the interesting one, because it is NOT the `ok` #3689 retired from
@@ -181,13 +181,13 @@ describe('external-datasource envelope (#3843) — error bodies', () => {
     {
       name: 'federation is not wired into the host',
       status: 503,
-      code: 'external_service_unavailable',
+      code: 'SERVICE_UNAVAILABLE',
       run: () => drive(mount(undefined), 'GET', `${EXT}/tables`),
     },
     {
       name: 'an import the service refuses',
       status: 400,
-      code: 'external_import_error',
+      code: 'EXTERNAL_IMPORT_ERROR',
       run: () => drive(
         mount({ importObject: async () => { throw new Error('metadata store is read-only'); } }),
         'POST',
@@ -239,7 +239,7 @@ describe('external-datasource envelope (#3843) — error bodies', () => {
       const { status, body } = await drive(routes, method, path, req);
       expect(status, `${method} ${path}`).toBe(503);
       expect(body.success, `${method} ${path}`).toBe(false);
-      expect(body.error.code, `${method} ${path}`).toBe('external_service_unavailable');
+      expect(body.error.code, `${method} ${path}`).toBe('SERVICE_UNAVAILABLE');
     }
   });
 });

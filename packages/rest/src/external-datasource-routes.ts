@@ -8,7 +8,7 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
  *
  * Mounted under `/api/v1/datasources/:name/external/*` and served by the
  * `external-datasource` service. Every route degrades gracefully
- * (`503 external_service_unavailable`) when federation is not wired into the
+ * (`503 SERVICE_UNAVAILABLE`) when federation is not wired into the
  * host, so the routes are safe to register unconditionally.
  *
  *   GET  /datasources/:name/external/tables             → listRemoteTables
@@ -47,9 +47,14 @@ export function registerExternalDatasourceRoutes(
    *
    * Before #3843 this module emitted the pre-#3675 `{ error: '<string>' }`,
    * with the message a SIBLING of `error` on the import path — so a caller
-   * reading `body.error.message` got `undefined`. The `code` strings are carried
-   * over unchanged; picking a vocabulary is #3841's call (see the same note on
-   * `admin-routes.ts`).
+   * reading `body.error.message` got `undefined`.
+   *
+   * Codes follow ADR-0112 (#3841, settled while this was in review):
+   * `external_service_unavailable` → the standard `SERVICE_UNAVAILABLE`, since the
+   * ledger asks generic conditions to reuse the catalog rather than register a
+   * per-service synonym; `external_import_error` → `EXTERNAL_IMPORT_ERROR`,
+   * registered under this package because a refused federated import is specific
+   * to it.
    */
   const sendError = (res: any, status: number, code: string, message: string) =>
     res.status(status).json({ success: false, error: { code, message } });
@@ -68,7 +73,7 @@ export function registerExternalDatasourceRoutes(
     res.status(status).json({ success: true, data });
 
   const unavailable = (res: any) =>
-    sendError(res, 503, 'external_service_unavailable', 'The external-datasource service is not available.');
+    sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The external-datasource service is not available.');
 
   // List remote tables (optionally filtered by ?schema=).
   server.get(`${ext}/tables`, async (req: any, res: any) => {
@@ -109,7 +114,7 @@ export function registerExternalDatasourceRoutes(
       sendError(
         res,
         400,
-        'external_import_error',
+        'EXTERNAL_IMPORT_ERROR',
         err instanceof Error ? err.message : String(err),
       );
     }

@@ -93,7 +93,7 @@ export function registerSettingsRoutes(
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });
       } else {
-        sendError(res, 500, 'INTERNAL', err?.message ?? 'Failed to list manifests');
+        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to list manifests');
       }
     }
   }) satisfies RouteHandler);
@@ -110,7 +110,7 @@ export function registerSettingsRoutes(
       } else if (err instanceof UnknownNamespaceError) {
         sendError(res, 404, 'UNKNOWN_NAMESPACE', err.message);
       } else {
-        sendError(res, 500, 'INTERNAL', err?.message ?? 'Failed to read namespace');
+        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to read namespace');
       }
     }
   }) satisfies RouteHandler);
@@ -161,7 +161,7 @@ export function registerSettingsRoutes(
           fields: err.fields,
         });
       } else {
-        sendError(res, 500, 'INTERNAL', err?.message ?? 'Failed to write namespace');
+        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to write namespace');
       }
     }
   }) satisfies RouteHandler);
@@ -194,7 +194,7 @@ export function registerSettingsRoutes(
       } else if (err instanceof UnknownNamespaceError) {
         sendError(res, 404, 'UNKNOWN_NAMESPACE', err.message);
       } else {
-        sendError(res, 500, 'INTERNAL', err?.message ?? 'Action failed');
+        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Action failed');
       }
     }
   }) satisfies RouteHandler);
