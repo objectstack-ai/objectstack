@@ -52,7 +52,20 @@ export interface HonoPluginOptions {
      */
     restConfig?: RestServerConfig;
     /**
-     * Whether to register standard ObjectStack CRUD endpoints
+     * Whether to register the standalone CRUD + discovery convenience surface:
+     * raw `POST/GET /api/v1/data/:object` (create + read only) and
+     * `GET /api/v1/discovery` / `/.well-known/objectstack`.
+     *
+     * Every one of these is DUPLICATE supply. `@objectstack/rest` serves full
+     * `/data` CRUD and, registering first, is what actually answers; the
+     * dispatcher and REST own discovery and this surface cedes it to them when
+     * either is present (#4018). The flag exists for a bare host that mounts
+     * neither.
+     *
+     * It does NOT gate the current-user endpoints (`/auth/me/permissions`,
+     * `/auth/me/localization`, `/me/apps`) — this plugin is their only provider
+     * anywhere, so they register unconditionally (#4073).
+     *
      * @default true
      */
     registerStandardEndpoints?: boolean;
@@ -414,10 +427,12 @@ export class HonoServerPlugin implements Plugin {
     type = 'server';
     version = '0.9.0';
 
-    // Constants
-    private static readonly DEFAULT_ENDPOINT_PRIORITY = 100;
-    private static readonly CORE_ENDPOINT_PRIORITY = 950;
-    private static readonly DISCOVERY_ENDPOINT_PRIORITY = 900;
+    // No endpoint-priority constants: three of them (DEFAULT/CORE/DISCOVERY)
+    // sat here unreferenced by anything in the repo, and `DISCOVERY_ENDPOINT_
+    // PRIORITY = 900` in particular implied a priority mechanism that does not
+    // exist — route precedence here is Hono's first-registration-wins, which is
+    // exactly what the #4018 cede and the `kernel:ready` ordering above turn on.
+    // Removed (#4073) so the file stops advertising a dead concept.
 
     private options: HonoPluginOptions;
     private server: HonoHttpServer;
@@ -756,8 +771,21 @@ export class HonoServerPlugin implements Plugin {
             });
         }
 
-        // Register standard endpoints during kernel:ready so they're
-        // wired up alongside other plugins' route registrations.
+        // Register endpoints during kernel:ready so they're wired up alongside
+        // other plugins' route registrations.
+        //
+        // The current-user endpoints go first and are NOT gated (#4073): this
+        // plugin is their only provider on any host, so they must not depend on
+        // a flag whose stated job is the optional CRUD/discovery convenience
+        // surface. Registering them ahead of that block also keeps their
+        // position in the `kernel:ready` order exactly where it was, which
+        // matters: plugin-auth mounts a TERMINAL `rawApp.all('/api/v1/auth/*')`
+        // from its own `kernel:ready` hook, and `/auth/me/*` only wins the match
+        // by being registered first.
+        ctx.hook('kernel:ready', async () => {
+            this.registerCurrentUserEndpoints(ctx);
+        });
+
         if (this.options.registerStandardEndpoints) {
             ctx.hook('kernel:ready', async () => {
                 this.registerDiscoveryAndCrudEndpoints(ctx);
@@ -938,6 +966,87 @@ export class HonoServerPlugin implements Plugin {
         // Basic CRUD data endpoints — delegate to ObjectQL service directly
         const getObjectQL = () => ctx.getService<IDataEngine>('objectql');
 
+        // Session → ExecutionContext. Shared with the always-registered
+        // current-user endpoints below, which resolve the same principal.
+        const resolveCtx = this.makeExecutionContextResolver(ctx);
+
+        // Create
+        rawApp.post(`${prefix}/data/:object`, async (c: any) => {
+            const ql = getObjectQL();
+            if (!ql) return c.json({ error: 'Data service not available' }, 503);
+            const object = c.req.param('object');
+            const data = await c.req.json().catch(() => ({}));
+            const execCtx = await resolveCtx(c);
+            const denied = denyAnonymous(c, execCtx);
+            if (denied) return denied;
+            try {
+                const res = await ql.insert(object, data, { context: execCtx } as any);
+                const record = { ...data, ...res };
+                return c.json({ object, id: record.id, record });
+            } catch (err: any) {
+                if (err?.code === 'PERMISSION_DENIED' || err?.name === 'PermissionDeniedError') {
+                    return c.json({ error: err.message ?? 'Forbidden' }, 403);
+                }
+                throw err;
+            }
+        });
+
+        // Get by ID
+        rawApp.get(`${prefix}/data/:object/:id`, async (c: any) => {
+            const ql = getObjectQL();
+            if (!ql) return c.json({ error: 'Data service not available' }, 503);
+            const object = c.req.param('object');
+            const id = c.req.param('id');
+            const execCtx = await resolveCtx(c);
+            const denied = denyAnonymous(c, execCtx);
+            if (denied) return denied;
+            try {
+                let all = await ql.find(object, { context: execCtx } as any);
+                if (!all) all = [];
+                const match = all.find((i: any) => i.id === id);
+                return match ? c.json({ object, id, record: match }) : c.json({ error: 'Not found' }, 404);
+            } catch (err: any) {
+                if (err?.code === 'PERMISSION_DENIED' || err?.name === 'PermissionDeniedError') {
+                    return c.json({ error: err.message ?? 'Forbidden' }, 403);
+                }
+                throw err;
+            }
+        });
+
+        // Find / List
+        rawApp.get(`${prefix}/data/:object`, async (c: any) => {
+            const ql = getObjectQL();
+            if (!ql) return c.json({ error: 'Data service not available' }, 503);
+            const object = c.req.param('object');
+            const execCtx = await resolveCtx(c);
+            const denied = denyAnonymous(c, execCtx);
+            if (denied) return denied;
+            try {
+                let all = await ql.find(object, { context: execCtx } as any);
+                if (!Array.isArray(all) && all && (all as any).value) all = (all as any).value;
+                if (!all) all = [];
+                return c.json({ object, records: all, total: all.length });
+            } catch (err: any) {
+                if (err?.code === 'PERMISSION_DENIED' || err?.name === 'PermissionDeniedError') {
+                    return c.json({ error: err.message ?? 'Forbidden' }, 403);
+                }
+                throw err;
+            }
+        });
+
+        ctx.logger.debug('Registered standard CRUD data endpoints', { prefix });
+    }
+
+    /**
+     * Build the session → `ExecutionContext` resolver both route groups need.
+     *
+     * Extracted from `registerDiscoveryAndCrudEndpoints` when the current-user
+     * endpoints stopped being gated on `registerStandardEndpoints` (#4073): they
+     * resolve the same principal the `/data` routes do, and one resolver is the
+     * only way the two groups can agree on who the caller is.
+     */
+    private makeExecutionContextResolver(ctx: PluginContext) {
+        const getObjectQL = () => ctx.getService<IDataEngine>('objectql');
         // Helper: resolve ExecutionContext from request headers (cookie session
         // or API key). Mirrors the runtime's resolveExecutionContext but
         // self-contained to avoid a cross-package dep. We DO query the
@@ -1116,70 +1225,36 @@ export class HonoServerPlugin implements Plugin {
                 return undefined;
             }
         };
+        return resolveCtx;
+    }
 
-        // Create
-        rawApp.post(`${prefix}/data/:object`, async (c: any) => {
-            const ql = getObjectQL();
-            if (!ql) return c.json({ error: 'Data service not available' }, 503);
-            const object = c.req.param('object');
-            const data = await c.req.json().catch(() => ({}));
-            const execCtx = await resolveCtx(c);
-            const denied = denyAnonymous(c, execCtx);
-            if (denied) return denied;
-            try {
-                const res = await ql.insert(object, data, { context: execCtx } as any);
-                const record = { ...data, ...res };
-                return c.json({ object, id: record.id, record });
-            } catch (err: any) {
-                if (err?.code === 'PERMISSION_DENIED' || err?.name === 'PermissionDeniedError') {
-                    return c.json({ error: err.message ?? 'Forbidden' }, 403);
-                }
-                throw err;
-            }
-        });
-
-        // Get by ID
-        rawApp.get(`${prefix}/data/:object/:id`, async (c: any) => {
-            const ql = getObjectQL();
-            if (!ql) return c.json({ error: 'Data service not available' }, 503);
-            const object = c.req.param('object');
-            const id = c.req.param('id');
-            const execCtx = await resolveCtx(c);
-            const denied = denyAnonymous(c, execCtx);
-            if (denied) return denied;
-            try {
-                let all = await ql.find(object, { context: execCtx } as any);
-                if (!all) all = [];
-                const match = all.find((i: any) => i.id === id);
-                return match ? c.json({ object, id, record: match }) : c.json({ error: 'Not found' }, 404);
-            } catch (err: any) {
-                if (err?.code === 'PERMISSION_DENIED' || err?.name === 'PermissionDeniedError') {
-                    return c.json({ error: err.message ?? 'Forbidden' }, 403);
-                }
-                throw err;
-            }
-        });
-
-        // Find / List
-        rawApp.get(`${prefix}/data/:object`, async (c: any) => {
-            const ql = getObjectQL();
-            if (!ql) return c.json({ error: 'Data service not available' }, 503);
-            const object = c.req.param('object');
-            const execCtx = await resolveCtx(c);
-            const denied = denyAnonymous(c, execCtx);
-            if (denied) return denied;
-            try {
-                let all = await ql.find(object, { context: execCtx } as any);
-                if (!Array.isArray(all) && all && (all as any).value) all = (all as any).value;
-                if (!all) all = [];
-                return c.json({ object, records: all, total: all.length });
-            } catch (err: any) {
-                if (err?.code === 'PERMISSION_DENIED' || err?.name === 'PermissionDeniedError') {
-                    return c.json({ error: err.message ?? 'Forbidden' }, 403);
-                }
-                throw err;
-            }
-        });
+    /**
+     * Current-user endpoints — `/auth/me/permissions`, `/auth/me/localization`
+     * and `/me/apps`. Registered UNCONDITIONALLY, unlike the CRUD + discovery
+     * block above (#4073).
+     *
+     * They used to ride on `registerStandardEndpoints`, which conflated two
+     * unrelated things. That flag covers DUPLICATE supply — raw `/data` CRUD
+     * that `@objectstack/rest` also serves (and, being registered first, really
+     * serves), plus a discovery that the dispatcher/REST own (#4018). These
+     * three are the opposite: nothing else in the platform mounts them.
+     * `packages/rest` and `packages/runtime` register no `/me/*` route at all,
+     * the console reads `/auth/me/permissions` for its whole permission layer
+     * and `/auth/me/localization` for regional defaults, and
+     * `core/security/auth-gate.ts` allow-lists `/me/apps` + `/me/localization`
+     * as endpoints a gated user MUST still reach to bootstrap the remediation
+     * UI. `os serve` gets them only because `registerStandardEndpoints`
+     * defaults to true (`cli/src/commands/serve.ts` passes just `{ port }`), so
+     * turning that flag off — or retiring the convenience surface it names —
+     * would have taken the console down with it.
+     *
+     * Splitting them out is what makes that flag mean what it says, and is the
+     * precondition for retiring the duplicate half.
+     */
+    private registerCurrentUserEndpoints(ctx: PluginContext) {
+        const rawApp = this.server.getRawApp();
+        const prefix = '/api/v1';
+        const resolveCtx = this.makeExecutionContextResolver(ctx);
 
         // Effective permissions for the current user — single aggregation
         // endpoint that resolves session → roles → permission sets → merged
@@ -1518,8 +1593,7 @@ export class HonoServerPlugin implements Plugin {
                 return c.json({ apps: [] });
             }
         });
-
-        ctx.logger.debug('Registered standard CRUD data endpoints', { prefix });
+        ctx.logger.debug('Registered current-user endpoints', { prefix });
     }
 
     /**
