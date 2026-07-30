@@ -278,11 +278,41 @@ const SeparatorNavItemSchema = lazySchema(() => z.object({
   order: z.number().optional().describe('Sort order within the same level (lower = first)'),
 }));
 
+/** Separator branch — internal, mirrors {@link SeparatorNavItemSchema}. */
+type SeparatorNavItem = z.infer<typeof SeparatorNavItemSchema>;
+
+/**
+ * Recursive union of every navigation item type — the TYPE half of
+ * {@link NavigationItemSchema}, and the annotation that breaks its circular
+ * inference.
+ *
+ * Spelled out here rather than derived with `z.infer<typeof NavigationItemSchema>`
+ * because that inference is exactly what the recursion cannot compute: the
+ * schema needs an annotation, and the `z.ZodType<any>` this used to carry made
+ * `NavigationItem` resolve to `any` for every consumer (#4171). `any` is
+ * mutually assignable with everything, so a consumer deleting its own
+ * `NavigationItem` in favour of this import — what #4115 asks for — silently
+ * traded a precise type for one that constrains nothing.
+ *
+ * Only the recursive `children` knot is tied by hand; each branch still derives
+ * from its own schema, so a key added to `ObjectNavItemSchema` lands here too.
+ */
+export type NavigationItem =
+  | (ObjectNavItem & { children?: NavigationItem[] })
+  | DashboardNavItem
+  | PageNavItem
+  | UrlNavItem
+  | ReportNavItem
+  | ActionNavItem
+  | ComponentNavItem
+  | SeparatorNavItem
+  | GroupNavItem;
+
 /**
  * Recursive Union of all navigation item types.
  * Allows constructing an unlimited-depth navigation tree.
  */
-export const NavigationItemSchema: z.ZodType<any> = z.lazy(() =>
+export const NavigationItemSchema: z.ZodType<NavigationItem> = z.lazy(() =>
   z.union([
     ObjectNavItemSchema.extend({
       children: z.array(NavigationItemSchema).optional().describe('Child navigation items (e.g. specific views)'),
@@ -777,7 +807,8 @@ export function defineApp(config: z.input<typeof AppSchema>): App {
 export type App = z.infer<typeof AppSchema>;
 export type AppInput = z.input<typeof AppSchema>;
 export type AppBranding = z.infer<typeof AppBrandingSchema>;
-export type NavigationItem = z.infer<typeof NavigationItemSchema>;
+// `NavigationItem` is declared next to NavigationItemSchema — it IS that
+// schema's annotation, so it cannot be inferred back out of it (#4171).
 export type NavigationArea = z.infer<typeof NavigationAreaSchema>;
 
 // Discriminated Item Types (Helper exports)

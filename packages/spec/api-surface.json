@@ -348,6 +348,7 @@
     "FieldInput (type)",
     "FieldMapping (type)",
     "FieldMappingSchema (const)",
+    "FieldNode (type)",
     "FieldNodeSchema (const)",
     "FieldOperators (type)",
     "FieldOperatorsSchema (const)",

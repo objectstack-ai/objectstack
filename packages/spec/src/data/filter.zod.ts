@@ -314,7 +314,25 @@ export type QueryFilter = z.infer<typeof QueryFilterSchema>;
  * 
  * This simplifies adapter implementation by providing a consistent structure.
  */
-export const NormalizedFilterSchema: z.ZodType<any> = z.lazy(() => 
+export type NormalizedFilter = {
+  /** All conditions must hold. Each entry is a field condition or a nested group. */
+  $and?: Array<Record<string, FieldOperators> | NormalizedFilter>;
+  /** At least one condition must hold. */
+  $or?: Array<Record<string, FieldOperators> | NormalizedFilter>;
+  /** Negated condition. */
+  $not?: Record<string, FieldOperators> | NormalizedFilter;
+};
+
+/**
+ * Zod schema for the normalized filter AST.
+ *
+ * Every key is recursive, so there is no non-recursive half to infer from and
+ * {@link NormalizedFilter} is written out above instead — it is this schema's
+ * annotation. Annotating with `z.ZodType<any>` (as this did before #4171) made
+ * the exported `NormalizedFilter` resolve to `any`, so the adapters that walk
+ * this AST were writing against a type that constrained nothing.
+ */
+export const NormalizedFilterSchema: z.ZodType<NormalizedFilter> = z.lazy(() =>
   z.object({
     $and: z.array(
       z.union([
@@ -338,8 +356,6 @@ export const NormalizedFilterSchema: z.ZodType<any> = z.lazy(() =>
     ]).optional(),
   })
 );
-
-export type NormalizedFilter = z.infer<typeof NormalizedFilterSchema>;
 
 // ============================================================================
 // AST Array Format Detection & Validation

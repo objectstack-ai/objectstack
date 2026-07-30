@@ -54,6 +54,13 @@ export const ACCOUNT_APP: App = {
   // No `requiredPermissions`: any authenticated user must be able to
   // manage their own linked accounts / personal OAuth apps. RLS on each
   // object scopes rows to the caller.
+  //
+  // Group open-state is `expanded` — the spec key. These entries said
+  // `defaultOpen`, objectui's legacy alias, which the spec has never declared
+  // and `.strict()` would reject; it worked only because objectui's
+  // NavigationRenderer still falls back to it, and because `NavigationItem`
+  // resolved to `any` so nothing checked the key here (#4171). Per Prime
+  // Directive #12 the producer is the place to fix that, not the renderer.
   navigation: [
     // Profile is the canonical landing — a hand-written React settings card
     // (Vercel/Linear style) registered in the Console SPA as
@@ -80,7 +87,7 @@ export const ACCOUNT_APP: App = {
       type: 'group',
       label: 'Inbox',
       icon: 'inbox',
-      defaultOpen: true,
+      expanded: true,
       children: [
         {
           // ADR-0030: the user-facing inbox is the materialization
@@ -126,7 +133,7 @@ export const ACCOUNT_APP: App = {
       type: 'group',
       label: 'Security',
       icon: 'shield',
-      defaultOpen: true,
+      expanded: true,
       children: [
         {
           id: 'nav_account_linked',
@@ -154,7 +161,7 @@ export const ACCOUNT_APP: App = {
       type: 'group',
       label: 'Developer',
       icon: 'code',
-      defaultOpen: false,
+      expanded: false,
       children: [
         {
           id: 'nav_account_api_keys',

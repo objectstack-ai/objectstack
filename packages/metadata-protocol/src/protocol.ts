@@ -2841,7 +2841,14 @@ export class ObjectStackProtocolImplementation implements
                     readonly: fields[f]?.readonly,
                     type: fields[f]?.type,
                     // Default to 2 columns for most, 1 for textareas
-                    colSpan: (fields[f]?.type === 'textarea' || fields[f]?.type === 'html') ? 2 : 1
+                    colSpan: (fields[f]?.type === 'textarea' || fields[f]?.type === 'html') ? 2 : 1,
+                    // `FormField.span` defaults to 'auto'; this view is hand-built
+                    // rather than run through `FormFieldSchema.parse()`, so the
+                    // default is spelled out to make the returned object a real
+                    // parsed `View` (the same reason the section below states its
+                    // own `collapsible` / `collapsed` / `columns` defaults). Was
+                    // unnoticed while `FormField` resolved to `any` (#4171).
+                    span: 'auto' as const
                 }));
 
              return {

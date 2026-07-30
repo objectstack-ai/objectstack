@@ -265,9 +265,17 @@ was removed at all: the snapshot is simply newer than your build. Rebuild before
 believe it, and before you file a bug about `main` being red. (Two phantom "breaking
 removals" this way while writing this section.)
 
-`check:liveness`, `check:empty-state`, `check:skill-examples` and
-`check:react-conformance` are pure checks with no generator — a failure there is a real
-finding to fix, not an artifact to regenerate.
+`check:liveness`, `check:empty-state`, `check:skill-examples`,
+`check:react-conformance` and `check:exported-any` are pure checks with no generator — a
+failure there is a real finding to fix, not an artifact to regenerate.
+
+`check:exported-any` also reads the built `dist/*.d.ts`, so the stale-`dist` caveat above
+applies to it too. It asks the other half of the `api-surface.json` question: that
+snapshot records an export *exists*, never what it *resolves to*, which is how four
+exported types sat at `any` for a whole major with every gate green (#4171). A recursive
+Zod schema needs an annotation to break its circular inference, and `z.ZodType<any>`
+compiles, validates correctly, and silently throws the type away — annotate with the
+type instead (`QueryAST` in `src/data/query.zod.ts` is the pattern).
 
 ---
 
