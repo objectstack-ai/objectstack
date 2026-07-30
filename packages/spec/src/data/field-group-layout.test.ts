@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { deriveFieldGroupLayout, FIELD_GROUP_SYSTEM_FIELDS } from './field-group-layout';
+import { deriveFieldGroupLayout, FIELD_GROUP_SYSTEM_FIELDS, AUDIT_PROVENANCE_FIELDS } from './field-group-layout';
 
 describe('deriveFieldGroupLayout (ADR-0085 §5)', () => {
   const groupedDef = {
@@ -113,5 +113,28 @@ describe('deriveFieldGroupLayout (ADR-0085 §5)', () => {
       fields: { amount: { group: 'billing' } },
     })!;
     expect(sections[0].label).toBe('billing');
+  });
+});
+
+/**
+ * The audit-provenance tuple (#3786) — the canonical four-name declaration the
+ * registry's injection table, the rule-validator's preserveAudit allowlist and
+ * objectui's AUDIT_FIELD_BY_ROLE all key off. Pinned exactly: this is a wire
+ * contract (stored column names), so any edit must be loud.
+ */
+describe('AUDIT_PROVENANCE_FIELDS', () => {
+  it('is exactly the four provenance columns, in injection order', () => {
+    expect([...AUDIT_PROVENANCE_FIELDS]).toEqual([
+      'created_at', 'created_by', 'updated_at', 'updated_by',
+    ]);
+    expect(Object.isFrozen(AUDIT_PROVENANCE_FIELDS)).toBe(true);
+  });
+
+  it('is a subset of FIELD_GROUP_SYSTEM_FIELDS', () => {
+    // Structural today (the superset spreads the tuple), but asserted anyway so
+    // a future refactor cannot quietly decouple them.
+    for (const f of AUDIT_PROVENANCE_FIELDS) {
+      expect(FIELD_GROUP_SYSTEM_FIELDS.has(f), f).toBe(true);
+    }
   });
 });

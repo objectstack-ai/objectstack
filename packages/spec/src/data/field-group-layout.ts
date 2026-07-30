@@ -49,13 +49,37 @@ export interface FieldGroupSection {
 }
 
 /**
+ * The audit-provenance family: the four columns `applySystemFields`
+ * (`@objectstack/objectql` registry) auto-injects on every audit-tracked
+ * business object, in injection order.
+ *
+ * THE canonical declaration (#3786). Before it existed this four-name list was
+ * hand-copied at least four times across two repos — the registry's injection
+ * if-chain, the rule-validator's `preserveAudit` allowlist, and two objectui
+ * render surfaces — each under a comment asking to be kept in sync with one of
+ * the others. The registry's injection table and the rule-validator now derive
+ * from this tuple (with `satisfies` making an undeclared member a compile
+ * error); objectui's `AUDIT_FIELD_BY_ROLE` pins itself to the superset below
+ * by subset assertion.
+ */
+export const AUDIT_PROVENANCE_FIELDS = Object.freeze([
+  'created_at', 'created_by', 'updated_at', 'updated_by',
+] as const);
+
+/** One audit-provenance column name. */
+export type AuditProvenanceField = (typeof AUDIT_PROVENANCE_FIELDS)[number];
+
+/**
  * Audit/system fields excluded from the derived UNGROUPED bucket (they carry
  * no business meaning in a default layout). A field an author explicitly
  * assigns to a group is kept. Exported so renderers filtering flat layouts
  * agree with the derivation.
+ *
+ * The audit prefix derives from {@link AUDIT_PROVENANCE_FIELDS} — one
+ * declaration even inside this file.
  */
 export const FIELD_GROUP_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
-  'created_at', 'created_by', 'updated_at', 'updated_by',
+  ...AUDIT_PROVENANCE_FIELDS,
   'organization_id', 'tenant_id', 'is_deleted', 'deleted_at',
 ]);
 

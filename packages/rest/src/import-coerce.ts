@@ -38,8 +38,10 @@ import {
   NUMERIC_VALUE_TYPES as NUMBER_TYPES,
   BOOLEAN_VALUE_TYPES as BOOL_TYPES,
   FILE_REFERENCE_TYPES as FILE_TYPES,
-  REFERENCE_VALUE_TYPES,
   isMultiValueField as specIsMultiValueField,
+  IMPORT_BOOLEAN_TRUE_TOKENS,
+  IMPORT_BOOLEAN_FALSE_TOKENS,
+  IMPORT_REFERENCE_TYPES,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import {
@@ -52,7 +54,10 @@ import {
  * reference class (ADR-0104 D1) plus `reference` — a legacy external-object
  * alias that is not an authorable `FieldType` and so stays a local extra.
  */
-const REFERENCE_TYPES = new Set([...REFERENCE_VALUE_TYPES, 'reference']);
+// The spec now publishes the completed set (reference value types plus the
+// legacy 'reference' spelling), so the `+ 'reference'` literal is retired on
+// both ends (#4173).
+const REFERENCE_TYPES = IMPORT_REFERENCE_TYPES;
 
 /**
  * Whether a field's stored value is an array. Delegates to the spec's
@@ -177,8 +182,12 @@ function isBlank(value: unknown, nullValues?: string[]): boolean {
 
 // ── boolean ────────────────────────────────────────────────────────
 
-const BOOL_TRUE = new Set(['true', 't', 'yes', 'y', '1', 'on', '是', '对', '✓', '√']);
-const BOOL_FALSE = new Set(['false', 'f', 'no', 'n', '0', 'off', '否', '错', '✗', '×']);
+// DERIVED from the spec's import-coercion vocabulary (#4173): objectui's
+// Import Wizard preview re-checks these same tables client-side, so both ends
+// reading one export is what keeps a cell flagged red here exactly when the
+// server rejects it. The literals used to live in this file alone.
+const BOOL_TRUE = IMPORT_BOOLEAN_TRUE_TOKENS;
+const BOOL_FALSE = IMPORT_BOOLEAN_FALSE_TOKENS;
 
 /** Parse a spreadsheet cell into a boolean, or `undefined` if unrecognised. */
 export function parseBooleanCell(raw: unknown): boolean | undefined {

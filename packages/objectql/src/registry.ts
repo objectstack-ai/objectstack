@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, isTenancyDisabled, LEGACY_API_METHODS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, isTenancyDisabled, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
 import { resolveMultiOrgEnabled, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { provisionSearchCompanion } from './search-companion.js';
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema } from '@objectstack/spec/kernel';
@@ -233,6 +233,53 @@ export interface SchemaRegistryOptions {
  *     ADD ownership — the failure mode we are eliminating — silently breaks
  *     every owner-keyed feature.
  */
+/**
+ * Column definitions for the audit-provenance family, keyed by the spec's
+ * {@link AUDIT_PROVENANCE_FIELDS} tuple — the canonical declaration of WHICH
+ * columns exist (#3786). This table owns only WHAT each column looks like.
+ *
+ * The `satisfies` clause is the sync mechanism: a name added to the spec tuple
+ * without a definition here — or a definition for a name the spec dropped — is
+ * a compile error, not a silently diverging copy. Same discipline as the
+ * spec's `APPROVER_VALUE_BINDINGS`.
+ */
+const AUDIT_FIELD_DEFS = {
+  created_at: {
+    type: 'datetime',
+    label: 'Created At',
+    required: false,
+    readonly: true,
+    system: true,
+    description: 'Timestamp when the record was created (auto-populated by the driver).',
+  },
+  created_by: {
+    type: 'lookup',
+    reference: 'sys_user',
+    label: 'Created By',
+    required: false,
+    readonly: true,
+    system: true,
+    description: 'User who created the record (populated when an authenticated session is present).',
+  },
+  updated_at: {
+    type: 'datetime',
+    label: 'Last Modified At',
+    required: false,
+    readonly: true,
+    system: true,
+    description: 'Timestamp of the most recent modification (auto-populated by the driver).',
+  },
+  updated_by: {
+    type: 'lookup',
+    reference: 'sys_user',
+    label: 'Last Modified By',
+    required: false,
+    readonly: true,
+    system: true,
+    description: 'User who last modified the record (populated when an authenticated session is present).',
+  },
+} satisfies Record<AuditProvenanceField, Record<string, unknown>>;
+
 export function applySystemFields(
   schema: ServiceObject,
   opts: { multiTenant: boolean }
@@ -314,47 +361,8 @@ export function applySystemFields(
   }
 
   if (wantAudit) {
-    if (!schema.fields?.created_at) {
-      additions.created_at = {
-        type: 'datetime',
-        label: 'Created At',
-        required: false,
-        readonly: true,
-        system: true,
-        description: 'Timestamp when the record was created (auto-populated by the driver).',
-      };
-    }
-    if (!schema.fields?.created_by) {
-      additions.created_by = {
-        type: 'lookup',
-        reference: 'sys_user',
-        label: 'Created By',
-        required: false,
-        readonly: true,
-        system: true,
-        description: 'User who created the record (populated when an authenticated session is present).',
-      };
-    }
-    if (!schema.fields?.updated_at) {
-      additions.updated_at = {
-        type: 'datetime',
-        label: 'Last Modified At',
-        required: false,
-        readonly: true,
-        system: true,
-        description: 'Timestamp of the most recent modification (auto-populated by the driver).',
-      };
-    }
-    if (!schema.fields?.updated_by) {
-      additions.updated_by = {
-        type: 'lookup',
-        reference: 'sys_user',
-        label: 'Last Modified By',
-        required: false,
-        readonly: true,
-        system: true,
-        description: 'User who last modified the record (populated when an authenticated session is present).',
-      };
+    for (const name of AUDIT_PROVENANCE_FIELDS) {
+      if (!schema.fields?.[name]) additions[name] = AUDIT_FIELD_DEFS[name];
     }
   }
 

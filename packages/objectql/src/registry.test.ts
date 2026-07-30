@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SchemaRegistry, applySystemFields, reconcileManagedApiMethods, warnStrippedLegacyApiMethods, computeFQN, parseFQN } from './registry';
+import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 
 describe('SchemaRegistry', () => {
     let registry: SchemaRegistry;
@@ -588,6 +589,26 @@ describe('applySystemFields', () => {
         // audit fields are tenant-independent — still injected
         expect(out.fields.created_at).toBeDefined();
         expect(out.fields.updated_at).toBeDefined();
+    });
+
+    it('injects exactly the spec AUDIT_PROVENANCE_FIELDS, byte-identical to the pre-#3786 defs', () => {
+        // The injection table is keyed by the spec tuple with a `satisfies`
+        // exhaustiveness clause, so which columns exist cannot drift from the
+        // spec. This pins the OTHER half — that the refactor from four
+        // if-blocks to the table changed nothing about what gets injected.
+        const out = applySystemFields(baseLead, { multiTenant: false });
+        for (const name of AUDIT_PROVENANCE_FIELDS) {
+            expect(out.fields[name], name).toBeDefined();
+            expect(out.fields[name].system, `${name}.system`).toBe(true);
+            expect(out.fields[name].readonly, `${name}.readonly`).toBe(true);
+            expect(out.fields[name].required, `${name}.required`).toBe(false);
+        }
+        expect(out.fields.created_at.type).toBe('datetime');
+        expect(out.fields.updated_at.type).toBe('datetime');
+        expect(out.fields.created_by).toMatchObject({ type: 'lookup', reference: 'sys_user', label: 'Created By' });
+        expect(out.fields.updated_by).toMatchObject({ type: 'lookup', reference: 'sys_user', label: 'Last Modified By' });
+        expect(out.fields.created_at.label).toBe('Created At');
+        expect(out.fields.updated_at.label).toBe('Last Modified At');
     });
 
     it('does NOT overwrite an author-declared organization_id', () => {
