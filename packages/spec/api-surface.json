@@ -3088,6 +3088,7 @@
     "WorkflowTransitionRequestSchema (const)",
     "WorkflowTransitionResponse (type)",
     "WorkflowTransitionResponseSchema (const)",
+    "envelopeViolations (function)",
     "getAuthEndpointUrl (function)",
     "getDefaultRouteRegistrations (function)",
     "readServiceSelfInfo (function)",
