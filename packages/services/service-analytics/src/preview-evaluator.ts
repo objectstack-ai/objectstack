@@ -17,7 +17,7 @@
 // Anything beyond (joins via `include`, raw SQL) falls back to the caller's
 // normal execution path — the preview simply doesn't claim it.
 
-import { calendarPartsInTzOrUtc } from '@objectstack/core';
+import { calendarPartsInTzOrUtc, nextUtcCalendarDay } from '@objectstack/core';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
 
@@ -37,7 +37,17 @@ function matchOp(value: unknown, op: string, expected: unknown): boolean {
     case '$gt': return value != null && compare(value, expected) > 0;
     case '$gte': return value != null && compare(value, expected) >= 0;
     case '$lt': return value != null && compare(value, expected) < 0;
-    case '$lte': return value != null && compare(value, expected) <= 0;
+    case '$lte': {
+      if (value == null) return false;
+      // A bare-day upper bound means "through that whole day" (#3777): the SQL
+      // paths compile it half-open (`< day+1`), and the preview must agree or
+      // a drafted chart shows different numbers than the published one. String
+      // ordering makes `< nextDay` equivalent to `<= day` for plain date
+      // values, so no type lookup is needed here either.
+      const nextDay = nextUtcCalendarDay(expected);
+      if (nextDay != null) return compare(value, nextDay) < 0;
+      return compare(value, expected) <= 0;
+    }
     case '$in': return Array.isArray(expected) && expected.some((e) => value === e || String(value) === String(e));
     case '$nin': return Array.isArray(expected) && !expected.some((e) => value === e || String(value) === String(e));
     case '$contains': return String(value ?? '').toLowerCase().includes(String(expected ?? '').toLowerCase());
@@ -133,7 +143,12 @@ export function evaluateAnalyticsQueryOverRows(
     const [start, end] = Array.isArray(td.dateRange) ? td.dateRange : [td.dateRange, td.dateRange];
     filtered = filtered.filter((r) => {
       const v = String(r[field] ?? '');
-      return v >= String(start) && v <= `${end}~`; // '~' > any date char: inclusive end-day
+      // Bare-day end → half-open `< day+1`, the same translation the SQL
+      // paths apply (#3777); a full-timestamp end keeps the historical
+      // `'~'`-suffix trick (inclusive of that instant's own sub-values).
+      const nextDay = nextUtcCalendarDay(end);
+      const inUpper = nextDay != null ? v < nextDay : v <= `${end}~`;
+      return v >= String(start) && inUpper;
     });
   }
 
