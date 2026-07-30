@@ -59,7 +59,8 @@ export const pageForm = defineForm({
           // Explicit sub-fields so `source` can use the `ref:component` picker —
           // a variable's `source` names the component (by `id`) that writes it,
           // so it's chosen from the page's real canvas components, not typed by
-          // hand. Keep in sync with PageVariableSchema.
+          // hand. Reconciled against PageVariableSchema by
+          // metadata-form-zod-reconciliation.test.ts (#3786).
           fields: [
             { field: 'name', required: true, helpText: 'Variable name — exposed to expressions as `page.<name>`' },
             { field: 'type', helpText: 'Value type' },
@@ -103,7 +104,9 @@ export const pageForm = defineForm({
           // None maps to ABSENCE of userFilters — the protocol stores
           // "no filter bar" as omission, not a literal element: 'none'.
           // (`element: 'toggle'` stays valid but deprecated — not offered.)
-          // Keep this list in sync with InterfacePageConfigSchema.
+          // Reconciled against InterfacePageConfigSchema by
+          // metadata-form-zod-reconciliation.test.ts (#3786), which is what
+          // caught `sort` missing here while the schema declared it.
           fields: [
             // ── Data ── the page defines its own data surface directly.
             { field: 'source', widget: 'ref:object', helpText: 'Object this page reads from' },
@@ -111,6 +114,7 @@ export const pageForm = defineForm({
             // 'source'` tells the picker which object's fields to offer.
             { field: 'columns', widget: 'field-multi', dependsOn: 'source', helpText: 'Columns to show — defined directly on the page (blank = all object fields)' },
             { field: 'filterBy', widget: 'filter-builder', dependsOn: 'source', helpText: 'Always-on base filter for the page — same visual builder as the list toolbar.' },
+            { field: 'sort', type: 'repeater', dependsOn: 'source', helpText: 'Default sort order for the page, defined directly on the page.' },
             { field: 'levels', helpText: 'Hierarchy levels to display (tree-like sources)' },
             // ── Appearance ──
             { field: 'appearance', type: 'composite', disclosure: 'popover', helpText: 'Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility' },

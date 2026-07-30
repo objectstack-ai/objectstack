@@ -2354,6 +2354,67 @@ describe('HttpDispatcher', () => {
             expect(info.services.workflow.status).toBe('available');
             expect(info.services.workflow.handlerReady).toBe(true);
         });
+
+        // ── The `metadata` slot: computed, not hardcoded (#4089) ──────────────
+        //
+        // This entry used to be a fixed `degraded` + "In-memory registry; DB
+        // persistence pending" whatever filled the slot, so it was wrong for
+        // every stack with a persisted registry — and it was the exact reverse
+        // of metadata-protocol's hardcoded `available`, which was wrong for
+        // every stack running the kernel's in-memory fallback.
+
+        it('reports the kernel in-memory metadata fallback as degraded, with the fallback\'s own message', async () => {
+            const { createMemoryMetadata } = await import('@objectstack/core');
+            const fallback = createMemoryMetadata();
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) =>
+                name === 'metadata' ? fallback : null,
+            );
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.services.metadata.enabled).toBe(true);
+            expect(info.services.metadata.status).toBe('degraded');
+            expect(info.services.metadata.message).toContain('no persistence');
+            // `handlerReady` is about the route, not the service: `/meta` is
+            // served by the protocol on every host, so a degraded service in
+            // this slot does not unmount it.
+            expect(info.services.metadata.handlerReady).toBe(true);
+            expect(info.routes.metadata).toBe('/api/v1/meta');
+        });
+
+        it('reports an unmarked metadata service as available, with no stale "persistence pending" message', async () => {
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) =>
+                name === 'metadata' ? { register: vi.fn(), get: vi.fn(), list: vi.fn() } : null,
+            );
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.services.metadata.status).toBe('available');
+            expect(info.services.metadata.message).toBeUndefined();
+            expect(info.services.metadata.handlerReady).toBe(true);
+        });
+
+        it('answers the metadata slot identically to the metadata-protocol builder', async () => {
+            const [{ createMemoryMetadata }, { ObjectStackProtocolImplementation }] = await Promise.all([
+                import('@objectstack/core'),
+                import('@objectstack/metadata-protocol'),
+            ]);
+            // One service instance, both builders — the two used to give this
+            // very object opposite verdicts (`degraded` here, `available` there).
+            const fallback = createMemoryMetadata();
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) =>
+                name === 'metadata' ? fallback : null,
+            );
+
+            const fromDispatcher = (await dispatcher.getDiscoveryInfo('/api/v1')).services.metadata;
+            const fromProtocol = (await new ObjectStackProtocolImplementation(
+                mockObjectQL as any,
+                () => new Map<string, any>([['metadata', fallback]]),
+            ).getDiscovery()).services.metadata;
+
+            expect(fromDispatcher.status).toBe(fromProtocol.status);
+            expect(fromDispatcher.handlerReady).toBe(fromProtocol.handlerReady);
+            expect(fromDispatcher.message).toBe(fromProtocol.message);
+            expect(fromDispatcher.route).toBe(fromProtocol.route);
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════

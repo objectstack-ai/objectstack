@@ -1463,9 +1463,34 @@ export class ObjectStackProtocolImplementation implements
         // registry via SERVICE_CONFIG below — absent means `unavailable`, and
         // no route is advertised (the pre-#2462 hardcode here is exactly what
         // the fallback was invented to make true).
+        //
+        // [#4089] The `metadata` slot is reported from whatever fills it, not
+        // hardcoded `available`. The kernel auto-registers `createMemoryMetadata`
+        // when no MetadataPlugin is present, and plugin-dev registers its own
+        // in-memory registry; both self-describe as `degraded` (D12), and
+        // hardcoding `available` here overstated them as exactly equivalent to a
+        // sys_metadata-backed registry. Absent or unmarked ⇒ `available`, which
+        // is what the real MetadataPlugin (carrying no marker) reports.
+        //
+        // This is also where the two builders stopped disagreeing: the runtime
+        // dispatcher hardcoded the opposite verdict for the same slot
+        // (`degraded` + "DB persistence pending"), so one host called a persisted
+        // registry degraded while the other called an in-memory one available.
+        // Both now compute it, and `handlerReady: true` is stated on both sides:
+        // `/api/v1/meta` is served by the protocol, not by this service, so it is
+        // mounted whichever implementation occupies the slot.
+        const metadataSelf = readServiceSelfInfo(registeredServices.get('metadata'));
+
         const services: Record<string, ServiceInfo> = {
             // --- Kernel-provided (objectql is an example kernel implementation) ---
-            metadata:  { enabled: true, status: 'available' as const, route: '/api/v1/meta', provider: 'objectql' },
+            metadata:  {
+                enabled: true,
+                status: metadataSelf?.status ?? ('available' as const),
+                handlerReady: true,
+                route: '/api/v1/meta',
+                provider: 'objectql',
+                ...(metadataSelf?.message ? { message: metadataSelf.message } : {}),
+            },
             data:      { enabled: true, status: 'available' as const, route: '/api/v1/data', provider: 'objectql' },
         };
 

@@ -844,6 +844,7 @@ export class HttpDispatcher {
             authSvc, searchSvc, realtimeSvc, filesSvc,
             analyticsSvc, workflowSvc, aiSvc, notificationSvc, i18nSvc,
             uiSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
+            metadataSvc,
         ] = await Promise.all([
             this.resolveService(CoreServiceName.enum.auth),
             this.resolveService(CoreServiceName.enum.search),
@@ -862,6 +863,9 @@ export class HttpDispatcher {
             // Not a CoreServiceName — plugin-mcp registers under the bare
             // 'mcp' key, the same string handleMcpRequest resolves.
             this.resolveService('mcp'),
+            // [#4089] Resolved for its self-description alone: the `metadata`
+            // slot is reported from what actually fills it, not hardcoded.
+            this.resolveService(CoreServiceName.enum.metadata),
         ]);
 
         const hasAuth         = !!authSvc;
@@ -983,6 +987,9 @@ export class HttpDispatcher {
         // Self-description of the registered realtime service, if any (D12).
         const realtimeSelf = realtimeSvc ? readServiceSelfInfo(realtimeSvc) : undefined;
 
+        // Self-description of whatever fills the `metadata` slot (D12, #4089).
+        const metadataSelf = metadataSvc ? readServiceSelfInfo(metadataSvc) : undefined;
+
         // Derive locale info from actual i18n service when available
         let locale = { default: 'en', supported: ['en'], timezone: 'UTC' };
         if (hasI18n && i18nSvc) {
@@ -1017,8 +1024,34 @@ export class HttpDispatcher {
                 i18n: hasI18n,
             },
             services: {
-                // Kernel-provided (always available via protocol implementation)
-                metadata:       { enabled: true, status: 'degraded' as const, handlerReady: true, route: routes.metadata, provider: 'kernel', message: 'In-memory registry; DB persistence pending' },
+                // Kernel-provided (always served by the protocol implementation)
+                // — but the verdict is NOT hardcoded (#4089). Three different
+                // implementations fill this slot: MetadataPlugin's
+                // sys_metadata-backed manager, the kernel's in-memory fallback
+                // (`createMemoryMetadata`) and plugin-dev's dev registry. Only
+                // the implementation knows which it is, so read its D12
+                // self-description and report that.
+                //
+                // The hardcode this replaces (`degraded` + "In-memory registry;
+                // DB persistence pending") was the mirror image of
+                // metadata-protocol's hardcoded `available`: the two builders
+                // gave the same slot opposite answers, and each was wrong for
+                // half the stacks — this one understated a persisted registry,
+                // that one overstated the in-memory fallback.
+                //
+                // `handlerReady` stays unconditionally true and is not taken
+                // from the self-description: it answers "is /meta mounted?",
+                // and `handleMetadata` serves that route from the protocol on
+                // every host — a degraded service in this slot does not unmount
+                // it. (Contrast `realtime` below, where no surface exists at all.)
+                metadata:       {
+                                    enabled: true,
+                                    status: metadataSelf?.status ?? ('available' as const),
+                                    handlerReady: true,
+                                    route: routes.metadata,
+                                    provider: 'kernel',
+                                    ...(metadataSelf?.message ? { message: metadataSelf.message } : {}),
+                                },
                 data:           svcAvailable(routes.data, 'kernel'),
                 // Plugin-provided — only available when a plugin registers the service
                 auth:           hasAuth ? svcAvailable(routes.auth, undefined, authSvc) : svcUnavailable('auth'),
