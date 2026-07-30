@@ -75,7 +75,8 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
 - **The dead-metadata sweep continues.** GraphQL, `PortalSchema`, `AuditConfig`,
   the capabilities-descriptor cluster, `FeatureFlagSchema`, `SkillSchema.permissions`,
   `tool.requiresConfirmation`, `agent.tools[]`, `object.enable.trash`/`mru`,
-  report `aria`/`performance`, `DEFAULT_DISPATCHER_ROUTES` and the last three
+  report `aria`/`performance`, `DEFAULT_DISPATCHER_ROUTES`, the four inert tool
+  authoring keys (`category`/`permissions`/`active`/`builtIn`) and the last three
   deprecated authorable aliases are removed — each one had been parsed and
   ignored.
 
@@ -644,6 +645,7 @@ import or the authored key.
 | `DataQualityRulesSchema` / `ComputedFieldCacheSchema` | orphaned value schemas (#3726, #3733) |
 | `DynamicLoadingConfig` / `PluginDiscoveryConfig` / `PluginDiscoverySource` | promised plugin sandboxing / integrity verification / source allow-listing / load approval; none of it was ever wired (#3950) |
 | `RowLevelSecurityPolicy.priority` | conflict-resolution semantics that cannot exist under OR-combination (#3990) |
+| `tool.category` / `.permissions` / `.active` / `.builtIn` (+ `ToolCategorySchema`) | authorable and inert — `permissions` gated nothing, `active: false` withdrew nothing; strict-rejected with prescriptions (#3896 close-out) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
 | `ChartInteraction.zoom` / `.clickAction` | never implemented (#3752) |
@@ -1012,6 +1014,10 @@ objectui commits on top of the pin 16.1.0 shipped.
 - **RLS policies:** delete `priority` (`os migrate meta` does it; outcomes are
   unchanged). Re-check any policy you set `enabled: false` on — disabling now
   actually withdraws its grant, which until v17 it silently did not.
+- **Tools:** delete `category` / `permissions` / `active` / `builtIn` from tool
+  metadata (`os migrate meta` does it; none ever had an effect). To gate a tool,
+  gate the underlying action (`action.requiredPermissions`); to withdraw one,
+  remove it from the skills/agents that reference it.
 - **Membership:** move business capability off `sys_member.role` and onto
   positions (`sys_user_position`).
 - **SDK callers:** remove calls to `client.permissions.*`, `client.realtime.*`,

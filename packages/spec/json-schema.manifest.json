@@ -63,7 +63,6 @@
     "ai/TokenUsageStats",
     "ai/Tool",
     "ai/ToolCall",
-    "ai/ToolCategory",
     "ai/TransformPipelineStep",
     "ai/VectorStore",
     "ai/VectorStoreProvider",

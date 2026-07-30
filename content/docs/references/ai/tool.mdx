@@ -5,9 +5,13 @@ description: Tool protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Tool Category
+Retired `ToolSchema` keys — the rejection carries the upgrade prescription,
 
-Classifies the tool by its operational domain.
+because the parse error is the one channel every consumer bumping
+
+`@objectstack/spec` is guaranteed to hit (pattern of `object.zod.ts`'s
+
+`UNKNOWN_KEY_GUIDANCE`, ADR-0049 enforce-or-remove).
 
 <Callout type="info">
 **Source:** `packages/spec/src/ai/tool.zod.ts`
@@ -16,8 +20,8 @@ Classifies the tool by its operational domain.
 ## TypeScript Usage
 
 ```typescript
-import { Tool, ToolCategory } from '@objectstack/spec/ai';
-import type { Tool, ToolCategory } from '@objectstack/spec/ai';
+import { Tool } from '@objectstack/spec/ai';
+import type { Tool } from '@objectstack/spec/ai';
 
 // Validate data
 const result = Tool.parse(data);
@@ -36,13 +40,9 @@ AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Auth
 | **name** | `string` | ✅ | Tool unique identifier (snake_case) |
 | **label** | `string` | ✅ | Tool display name |
 | **description** | `string` | ✅ | Tool description for LLM function calling |
-| **category** | `Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>` | optional | Tool category for grouping and filtering |
 | **parameters** | `Record<string, any>` | ✅ | JSON Schema for tool parameters |
 | **outputSchema** | `Record<string, any>` | optional | [EXPERIMENTAL — not enforced] JSON Schema for tool output. Keys are folded into the tool description only; outputs are not validated (liveness #1878/#1893). |
 | **objectName** | `string` | optional | Target object name (snake_case) |
-| **permissions** | `string[]` | optional | Required permission-set capabilities |
-| **active** | `boolean` | ✅ | Whether the tool is enabled |
-| **builtIn** | `boolean` | ✅ | Platform built-in tool flag |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this tool. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -51,23 +51,6 @@ AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Auth
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-
-
----
-
-## ToolCategory
-
-Tool operational category
-
-### Allowed Values
-
-* `data`
-* `action`
-* `flow`
-* `integration`
-* `vector_search`
-* `analytics`
-* `utility`
 
 
 ---

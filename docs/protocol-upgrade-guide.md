@@ -126,6 +126,8 @@ Beyond those spec-surface removals, it graduates the seven flow-node config key 
 
 And it removes the RLS-policy key `priority` (#3896 security audit): promised "conflict resolution" that cannot exist, because applicable policies OR-combine (most permissive wins) — there is never a conflict to order, and nothing ever read the key (call graph closed across the collection site, the projection round-trip and the compiler). A pure lossless delete: outcomes are identical with or without it; the schema tombstones the key with the same prescription.
 
+The same close-out retires the four inert tool authoring keys (`category`, `permissions`, `active`, `builtIn`): none is part of AIToolDefinition and no execution path read them. Two were misleading in the dangerous direction — `permissions` promised an invocation gate nothing enforced, and `active: false` read as "withdrawn" while the tool kept reaching the LLM tool set. Lossless deletes; the strict ToolSchema rejects each with its prescription.
+
 ### Mechanical (applied for you)
 
 | Conversion | Surface | Change | Load window |
@@ -139,6 +141,7 @@ And it removes the RLS-policy key `priority` (#3896 security audit): promised "c
 | `flow-node-notify-config-aliases` | `flow.node.notify.config` | notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796) | live — protocol 17 loader accepts the old shape |
 | `flow-node-script-config-aliases` | `flow.node.script.config` | script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796) | live — protocol 17 loader accepts the old shape |
 | `permission-rls-priority-removed` | `permission.rowLevelSecurity.priority` | RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome) | retired — `migrate meta` only |
+| `tool-inert-authoring-keys-removed` | `tool.category / tool.permissions / tool.active / tool.builtIn` | tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing) | retired — `migrate meta` only |
 
 ---
 

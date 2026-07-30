@@ -1,6 +1,6 @@
 {
   "type": "tool",
-  "_note": "ToolSchema. Seeded from docs/audits/2026-06-toolschema-property-liveness.md. Tool metadata is WRITE-ONLY (projected one-way for Studio; runtime uses a separate AIToolDefinition). LIVE props are live via that same-named surface, not metadata read-back. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary.",
+  "_note": "ToolSchema. Seeded from docs/audits/2026-06-toolschema-property-liveness.md. Tool metadata is WRITE-ONLY (projected one-way for Studio; runtime uses a separate AIToolDefinition). LIVE props are live via that same-named surface, not metadata read-back. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary. 2026-07-30 (#3896 close-out): the four inert authoring keys (category/permissions/active/builtIn) were REMOVED from ToolSchema — permissions promised an invocation gate nothing enforced, active:false withdrew nothing; strict-rejected with prescriptions (TOOL_RETIRED_KEY_GUIDANCE) and stripped by the tool-inert-authoring-keys-removed conversion. Entries deleted per the requiresConfirmation precedent (#3715).",
   "props": {
     "name": {
       "status": "live",
@@ -30,33 +30,6 @@
       "status": "experimental",
       "evidence": "packages/services/service-ai/src/tools/action-tools.ts:437",
       "note": "keys folded into description only; no validation exists."
-    },
-    "category": {
-      "status": "dead",
-      "evidence": "only reader is a serializer pass-through in cloud service-ai/src/routes/tool-routes.ts:48 (GET /api/v1/ai/tools); no client consumes it, nothing groups/filters/routes by it",
-      "authorWarn": true,
-      "authorHint": "Display-only — no runtime groups, filters or routes tools by category.",
-      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed."
-    },
-    "permissions": {
-      "status": "dead",
-      "evidence": "tool.form.ts only; not on AIToolDefinition, no consumer",
-      "authorWarn": true,
-      "authorHint": "Not part of AIToolDefinition and no consumer — tool invocation is NOT permission-gated by this list. Gate the underlying action via requiredPermissions / permission sets (ADR-0066)."
-    },
-    "active": {
-      "status": "dead",
-      "evidence": "AIToolDefinition (packages/spec/src/contracts/ai-service.ts:157-191) has no `active` field; ToolRegistry.getAll() returns everything (cloud tool-registry.ts:159-161) and selection is by name only — contrast agent.active (agent-runtime.ts:212,501,510) and skill.active (skill-registry.ts:93,110), which ARE enforced",
-      "authorWarn": true,
-      "authorHint": "`active: false` does NOT withdraw the tool — it still reaches the LLM tool set and POST /ai/tools/:name/execute still runs it (unlike agent.active / skill.active, which are enforced). To withdraw a tool, drop it from the skill/agent that references it.",
-      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Also never set by any registration path."
-    },
-    "builtIn": {
-      "status": "dead",
-      "evidence": "not part of AIToolDefinition; whole-repo search across all three repos finds only a test assertion and the objectui preview pill — nothing branches on it",
-      "authorWarn": true,
-      "authorHint": "A display/authoring hint only — no runtime branches on it; it never affects registration, selection or execution.",
-      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed."
     }
   }
 }

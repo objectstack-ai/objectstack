@@ -121,6 +121,12 @@
         "to": "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
         "conversionId": "permission-rls-priority-removed",
         "toMajor": 17
+      },
+      {
+        "surface": "tool.category / tool.permissions / tool.active / tool.builtIn",
+        "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+        "conversionId": "tool-inert-authoring-keys-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -442,6 +448,12 @@
           "surface": "permission.rowLevelSecurity.priority",
           "to": "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
           "conversionId": "permission-rls-priority-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "tool.category / tool.permissions / tool.active / tool.builtIn",
+          "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+          "conversionId": "tool-inert-authoring-keys-removed",
           "toMajor": 17
         }
       ],

@@ -1180,6 +1180,66 @@ const permissionRlsPriorityRemoved: MetadataConversion = {
 };
 
 /**
+ * Tool inert authoring keys removed (protocol 17, #3896 audit close-out).
+ *
+ * `category`, `permissions`, `active` and `builtIn` were authorable and inert —
+ * none is part of `AIToolDefinition` and no execution path read them. Two were
+ * misleading in the dangerous direction: `permissions` promised a capability
+ * gate on invocation that nothing enforced (a tool "requiring" capabilities ran
+ * for everyone), and `active: false` read as "withdrawn" while the tool kept
+ * reaching the LLM tool set and `POST /ai/tools/:name/execute` kept running it.
+ * A pure lossless delete: dropping the keys changes no runtime behaviour,
+ * because they never had any.
+ *
+ * `retiredFromLoadPath`: ToolSchema is `.strict()` and rejects each key with
+ * its prescription (`TOOL_RETIRED_KEY_GUIDANCE`), the #3715 pattern.
+ */
+const toolInertAuthoringKeysRemoved: MetadataConversion = {
+  id: 'tool-inert-authoring-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'tool.category / tool.permissions / tool.active / tool.builtIn',
+  summary: "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+  apply(stack, emit) {
+    const RETIRED = ['category', 'permissions', 'active', 'builtIn'] as const;
+    return mapCollection(stack, 'tools', (tool, path) => {
+      let touched = false;
+      const next: Record<string, unknown> = { ...tool };
+      for (const key of RETIRED) {
+        if (!(key in next)) continue;
+        delete next[key];
+        emit({ from: key, to: '(removed)', path: `${path}.${key}` });
+        touched = true;
+      }
+      return touched ? next : tool;
+    });
+  },
+  fixture: {
+    before: {
+      tools: [{
+        name: 'create_case',
+        label: 'Create Case',
+        description: 'Creates a support case',
+        parameters: { type: 'object' },
+        category: 'action',
+        permissions: ['case.create'],
+        active: true,
+        builtIn: false,
+      }],
+    },
+    after: {
+      tools: [{
+        name: 'create_case',
+        label: 'Create Case',
+        description: 'Creates a support case',
+        parameters: { type: 'object' },
+      }],
+    },
+    expectedNotices: 4,
+  },
+};
+
+/**
  * All conversions, keyed by the protocol major that introduced the canonical
  * shape. Newest majors last; ordering within a major is application order.
  */
@@ -1198,6 +1258,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeNotifyConfigAliases,
     flowNodeScriptConfigAliases,
     permissionRlsPriorityRemoved,
+    toolInertAuthoringKeysRemoved,
   ],
 };
 
