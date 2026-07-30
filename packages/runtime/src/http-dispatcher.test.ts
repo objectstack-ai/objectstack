@@ -2523,7 +2523,14 @@ describe('HttpDispatcher', () => {
             const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, { request: {} });
             expect(agents.handled).toBe(true);
             expect(agents.response?.status).toBe(200);
-            expect(agents.response?.body).toEqual({ agents: [] });
+            // #4053 enveloped this body while #4058 was in flight. The courtesy
+            // this test pins is unchanged — an empty list rather than a fault —
+            // it just travels under `data` now. `AiAgentsResponseSchema`'s
+            // `{ agents }` is RELOCATED, not flattened to the bare array, so
+            // `client.ai.agents.list()` still reads `.agents` off what
+            // `unwrapResponse` returns.
+            expect(agents.response?.body).toEqual({ success: true, data: { agents: [] }, meta: undefined });
+            expect(agents.response?.body?.agents).toBeUndefined();
         });
 
         // Discovery must say exactly what the domains do — one predicate feeds
