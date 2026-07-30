@@ -121,6 +121,67 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
   }, BOOT_TIMEOUT);
 });
 
+// #3955 — the standalone boot must share the serve/dev boot's locale-gated
+// pinyin decision. `os migrate plan`/`apply` boot through this factory with the
+// compiled artifact as the ONLY config in sight; before the stamp below, that
+// boot resolved `resolveSearchPinyinEnabled()` env-first-only → off, computed a
+// schema view WITHOUT the `__search` companion columns the dev runtime
+// provisions, and reported every live companion column of a dev-created
+// database as a destructive orphan (`drop_column`).
+describe('createStandaloneStack — stamps the locale-derived pinyin decision from the artifact (#3955)', () => {
+  const originalEnv = process.env.OS_SEARCH_PINYIN_ENABLED;
+  let dir: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'os-standalone-pinyin-'));
+  });
+  afterAll(() => {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* noop */ }
+    if (originalEnv === undefined) delete process.env.OS_SEARCH_PINYIN_ENABLED;
+    else process.env.OS_SEARCH_PINYIN_ENABLED = originalEnv;
+  });
+
+  function writeArtifact(name: string, i18n?: unknown): string {
+    const p = join(dir, name);
+    writeFileSync(p, JSON.stringify({ ...ARTIFACT, ...(i18n ? { i18n } : {}) }), 'utf-8');
+    return p;
+  }
+
+  it('a zh-* locale in the artifact stamps OS_SEARCH_PINYIN_ENABLED before plugins boot, and i18n is surfaced', async () => {
+    delete process.env.OS_SEARCH_PINYIN_ENABLED;
+    const i18n = { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' };
+    const result = await createStandaloneStack({
+      artifactPath: writeArtifact('zh.objectstack.json', i18n),
+      databaseUrl: 'memory://standalone-pinyin-zh',
+    });
+    // The stamp is what each engine's SchemaRegistry (constructed later, at
+    // kernel start, without config access) reads to decide whether to
+    // provision the `__search` companion column.
+    expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBe('true');
+    // And the config-shaped result carries i18n like requires/objects/manifest,
+    // so the CLI artifact-serve merge sees the same stack config keys.
+    expect(result.i18n).toEqual(i18n);
+  }, BOOT_TIMEOUT);
+
+  it('a non-Chinese artifact leaves the env untouched (companion stays off)', async () => {
+    delete process.env.OS_SEARCH_PINYIN_ENABLED;
+    await createStandaloneStack({
+      artifactPath: writeArtifact('en.objectstack.json', { defaultLocale: 'en', supportedLocales: ['en'] }),
+      databaseUrl: 'memory://standalone-pinyin-en',
+    });
+    expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBeUndefined();
+  }, BOOT_TIMEOUT);
+
+  it('an explicit OS_SEARCH_PINYIN_ENABLED=false survives a zh-* artifact (operator override wins)', async () => {
+    process.env.OS_SEARCH_PINYIN_ENABLED = 'false';
+    await createStandaloneStack({
+      artifactPath: writeArtifact('zh-override.objectstack.json', { supportedLocales: ['zh-CN'] }),
+      databaseUrl: 'memory://standalone-pinyin-override',
+    });
+    expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBe('false');
+  }, BOOT_TIMEOUT);
+});
+
 // ADR-0062 D1 (#3826) — the standalone `default` datasource is a DECLARATION.
 // The stack no longer constructs a driver: it translates the database URL into
 // a `{ driver, config }` definition carried by `DefaultDatasourcePlugin`, which

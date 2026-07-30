@@ -9,7 +9,7 @@ import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from '../utils/storage-driver.js';
-import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, resolveSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
@@ -726,22 +726,16 @@ export default class Serve extends Command {
       }
       // Pinyin search recall (#2486): locale-gated platform capability. When
       // `OS_SEARCH_PINYIN_ENABLED` is unset, the default derives from the
-      // stack's configured locales (any `zh-*` → on). This is the ONE place
-      // that sees the stack config, so the resolved decision is stamped back
-      // into the env var — every later consumer (each engine's SchemaRegistry
-      // provisioning the `__search` companion column, the plugin's own gate)
-      // reads the same answer via the no-arg `resolveSearchPinyinEnabled()`.
-      {
-        const i18nCfg = (config as any).i18n ?? {};
-        const configuredLocales = [
-          i18nCfg.defaultLocale,
-          i18nCfg.fallbackLocale,
-          ...(Array.isArray(i18nCfg.supportedLocales) ? i18nCfg.supportedLocales : []),
-        ].filter((l: unknown): l is string => typeof l === 'string');
-        if (resolveSearchPinyinEnabled({ locales: configuredLocales })) {
-          process.env.OS_SEARCH_PINYIN_ENABLED = 'true';
-          if (!requires.includes('pinyin-search')) requires.push('pinyin-search');
-        }
+      // stack's configured locales (any `zh-*` → on), and the resolved
+      // decision is stamped back into the env var — every later consumer
+      // (each engine's SchemaRegistry provisioning the `__search` companion
+      // column, the plugin's own gate) reads the same answer via the no-arg
+      // `resolveSearchPinyinEnabled()`. The shared `stampSearchPinyinEnabled`
+      // helper is also what `createStandaloneStack` stamps from the compiled
+      // artifact, so serve/dev and `os migrate plan`/`apply` cannot compute
+      // different schema views of the same source tree (#3955).
+      if (stampSearchPinyinEnabled((config as any).i18n)) {
+        if (!requires.includes('pinyin-search')) requires.push('pinyin-search');
       }
       // Default capability slate — every preset except `minimal` gets the
       // foundational services (queue + job + cache + settings + email +
