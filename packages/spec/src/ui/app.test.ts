@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AppSchema,
   AppBrandingSchema,
+  NavigationContributionSchema,
   NavigationItemSchema,
   NavigationAreaSchema,
   ObjectNavItemSchema,
@@ -1054,5 +1055,190 @@ describe('retired dead keys carry prescriptions (#4001)', () => {
       name: 'clean_app', label: 'Clean',
       navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
     })).not.toThrow();
+  });
+});
+
+// #4001 (app step, PR B) — the app shell is `.strict()`, and the nav-item
+// union is DISCRIMINATED on `type` so strict stays readable: one unknown key
+// yields one issue against the branch the author actually wrote, at an exact
+// path, instead of an `invalid_union` wall naming all nine branches.
+describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
+  const unknownKeyIssue = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
+    const result = schema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i: { code: string }) => i.code === 'unrecognized_keys');
+  };
+  const navItem = (extra: Record<string, unknown>) => ({
+    name: 'app_x', label: 'X',
+    navigation: [{ id: 'nav_a', label: 'A', type: 'object', objectName: 'account', ...extra }],
+  });
+
+  describe('AppSchema', () => {
+    it('rejects an undeclared key instead of silently dropping it', () => {
+      expect(unknownKeyIssue(AppSchema, { name: 'app_a', label: 'A', notAKey: 1 })!.message)
+        .toContain('`notAKey`');
+    });
+
+    it('points sidebar vocabulary at `navigation`', () => {
+      for (const key of ['menu', 'sidebar', 'tabs', 'items']) {
+        expect(unknownKeyIssue(AppSchema, { name: 'app_a', label: 'A', [key]: [] })!.message)
+          .toContain(`\`${key}\` → \`navigation\``);
+      }
+    });
+
+    it('explains where pages/views/flows really live', () => {
+      expect(unknownKeyIssue(AppSchema, { name: 'app_a', label: 'A', pages: [] })!.message)
+        .toContain("type: 'page'");
+      expect(unknownKeyIssue(AppSchema, { name: 'app_a', label: 'A', views: [] })!.message)
+        .toContain('listViews');
+      expect(unknownKeyIssue(AppSchema, { name: 'app_a', label: 'A', flows: [] })!.message)
+        .toContain('defineStack');
+    });
+
+    it('keeps the PR A tombstone prescriptions rather than a bare strict error', () => {
+      const result = AppSchema.safeParse({ name: 'app_a', label: 'A', sharing: { enabled: true } });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('FormView.sharing');
+    });
+
+    it('accepts every key the schema declares (guards APP_KEYS drift)', () => {
+      const probes: Record<string, unknown> = {
+        description: 'd', icon: 'briefcase', branding: { primaryColor: '#fff' },
+        active: false, isDefault: true, hidden: true,
+        navigation: [{ id: 'nav_a', label: 'A', type: 'object', objectName: 'account' }],
+        areas: [{ id: 'area_a', label: 'A', navigation: [] }],
+        contextSelectors: [{ id: 'pkg', label: 'Package', optionsSource: { endpoint: '/api/v1/packages' } }],
+        homePageId: 'nav_a', requiredPermissions: ['app.access.x'],
+        defaultAgent: 'ask', protection: { lock: 'none' },
+      };
+      for (const [key, value] of Object.entries(probes)) {
+        const result = AppSchema.safeParse({ name: 'app_a', label: 'A', [key]: value });
+        const unknown = result.success
+          ? undefined
+          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(unknown, `\`${key}\` should be a declared App key`).toBeUndefined();
+      }
+    });
+  });
+
+  describe('navigation items (discriminated union)', () => {
+    it('reports ONE issue against the matched branch, not a union wall', () => {
+      const result = AppSchema.safeParse(navItem({ viewname: 'all' }));
+      expect(result.success).toBe(false);
+      const unrecognized = result.error!.issues.filter((i) => i.code === 'unrecognized_keys');
+      expect(unrecognized).toHaveLength(1);
+      expect(result.error!.issues.some((i) => i.code === 'invalid_union')).toBe(false);
+      expect(unrecognized[0].message).toContain('`viewname` → `viewName`');
+    });
+
+    it('points `visibleWhen` at `visible` so a nav gate cannot fail open', () => {
+      // ADR-0089 made visibleWhen canonical on view/page; borrowing it here
+      // used to STRIP the gate and render the entry unconditionally.
+      expect(unknownKeyIssue(AppSchema, navItem({ visibleWhen: 'x == 1' }))!.message)
+        .toContain('`visibleWhen` → `visible`');
+    });
+
+    it('points a wrong-variant payload at the type that owns it', () => {
+      const result = AppSchema.safeParse({
+        name: 'app_a', label: 'A',
+        navigation: [{ id: 'nav_u', label: 'U', type: 'url', url: 'https://x', pageName: 'p' }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.find((i) => i.code === 'unrecognized_keys')!.message)
+        .toContain("type: 'page'");
+    });
+
+    it('gives a precise path for an unknown key nested in children', () => {
+      const result = AppSchema.safeParse({
+        name: 'app_a', label: 'A',
+        navigation: [{
+          id: 'grp', label: 'G', type: 'group',
+          children: [{ id: 'nav_a', label: 'A', type: 'object', objectName: 'account', bogus: 1 }],
+        }],
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(issue!.path).toEqual(['navigation', 0, 'children', 0]);
+    });
+
+    it('reports a mistyped `type` as a discriminator error, not an unknown key', () => {
+      const result = AppSchema.safeParse({
+        name: 'app_a', label: 'A',
+        navigation: [{ id: 'nav_a', label: 'A', type: 'objct', objectName: 'account' }],
+      });
+      expect(result.success).toBe(false);
+      const message = result.error!.issues.map((i) => i.message).join('\n');
+      expect(message).toContain('Invalid discriminator value');
+    });
+
+    it('keeps the objectNavTargetExclusivity refinement working inside the union', () => {
+      const result = AppSchema.safeParse({
+        name: 'app_a', label: 'A',
+        navigation: [{
+          id: 'nav_a', label: 'A', type: 'object', objectName: 'account',
+          filters: { owner_id: '{current_user_id}' }, viewName: 'all',
+        }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('pick ONE landing');
+    });
+
+    it('leaves page/component/action params OPEN (the target owns that contract)', () => {
+      expect(() => AppSchema.parse({
+        name: 'app_a', label: 'A',
+        navigation: [
+          { id: 'nav_p', label: 'P', type: 'page', pageName: 'p', params: { anything: 1, nested: { x: 2 } } },
+          { id: 'nav_c', label: 'C', type: 'component', componentRef: 'metadata:resource', params: { type: 'object' } },
+          { id: 'nav_x', label: 'X', type: 'action', actionDef: { actionName: 'go', params: { free: 'form' } } },
+        ],
+      })).not.toThrow();
+    });
+
+    it('rejects unknown keys inside actionDef', () => {
+      const result = AppSchema.safeParse({
+        name: 'app_a', label: 'A',
+        navigation: [{ id: 'nav_x', label: 'X', type: 'action', actionDef: { actionName: 'go', args: {} } }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.find((i) => i.code === 'unrecognized_keys')!.message)
+        .toContain('`args` → `params`');
+    });
+
+    it('accepts every variant with its full declared payload', () => {
+      expect(() => AppSchema.parse({
+        name: 'app_a', label: 'A',
+        navigation: [
+          { id: 'n1', label: 'O', type: 'object', objectName: 'account', viewName: 'all', icon: 'x', order: 1, badge: '3', badgeVariant: 'default', visible: 'true', requiredPermissions: ['p'], requiresObject: 'account', requiresService: 'ai' },
+          { id: 'n2', label: 'D', type: 'dashboard', dashboardName: 'd' },
+          { id: 'n3', label: 'P', type: 'page', pageName: 'p' },
+          { id: 'n4', label: 'U', type: 'url', url: 'https://x', target: '_blank' },
+          { id: 'n5', label: 'R', type: 'report', reportName: 'r' },
+          { id: 'n6', label: 'A', type: 'action', actionDef: { actionName: 'go' } },
+          { id: 'n7', label: 'C', type: 'component', componentRef: 'metadata:directory' },
+          { type: 'separator', id: 'sep_1', order: 5 },
+          { id: 'n8', label: 'G', type: 'group', expanded: true, children: [{ id: 'n9', label: 'X', type: 'url', url: 'https://y' }] },
+        ],
+      })).not.toThrow();
+    });
+  });
+
+  describe('app sub-schemas', () => {
+    it('rejects unknown keys on branding, areas, and context selectors', () => {
+      expect(unknownKeyIssue(AppSchema, { name: 'app_a', label: 'A', branding: { primary: '#fff' } })!.message)
+        .toContain('`primary` → `primaryColor`');
+      expect(unknownKeyIssue(AppSchema, {
+        name: 'app_a', label: 'A', areas: [{ id: 'ar', label: 'A', navigation: [], items: [] }],
+      })!.message).toContain('`items` → `navigation`');
+      expect(unknownKeyIssue(AppSchema, {
+        name: 'app_a', label: 'A',
+        contextSelectors: [{ id: 'pkg', label: 'P', optionsSource: { endpoint: '/x', url: '/y' } }],
+      })!.message).toContain('`url` → `endpoint`');
+    });
+
+    it('rejects unknown keys on a navigation contribution', () => {
+      expect(unknownKeyIssue(NavigationContributionSchema, {
+        app: 'setup', items: [], targetGroup: 'g',
+      })!.message).toContain('`targetGroup` → `group`');
+    });
   });
 });

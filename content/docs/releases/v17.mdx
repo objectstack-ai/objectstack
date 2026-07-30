@@ -307,7 +307,7 @@ model), while `url` platform-wide means an HTTP endpoint to call (`http` node,
 webhooks). The singular `input` on `map` / `subflow` / `connector_action` is
 those nodes' own canonical key and is untouched.
 
-### Flow, permission, RLS, sharing, position and approval schemas reject unknown keys (#4001)
+### Authorable schemas reject unknown keys (#4001)
 
 Zod's default is `.strip`: a key a schema does not declare is silently
 discarded and the instance keeps parsing. On an authorable surface that is the
@@ -341,6 +341,15 @@ schema to the two highest-risk authorable surfaces, per the triage in
   a deliberately flat position (ADR-0090 D3). Position also gains the
   `protection` block and ADR-0010 runtime envelope every sibling registered
   type already declared.
+- **The app shell** — `AppSchema`, its branding / area / context-selector /
+  contribution blocks, and the whole navigation tree. The nav-item union is
+  now DISCRIMINATED on `type`, so one unknown key yields one precise issue
+  against the branch you wrote (at an exact path through nested `children`)
+  rather than a nine-branch `invalid_union` wall. Per-target payloads
+  (`params` on page / component / action items) stay open. The gate's first
+  catch here was in the platform's own Account app: three navigation groups
+  declared `defaultOpen` — never a schema key — and so shipped collapsed
+  while their author believed they opened by default (`expanded` is the key).
 - **Approval nodes** — all four authoring schemas (node config, approver,
   escalation, decision-output). Process-era keys carry the ADR-0019 re-home
   map (`steps` → successive approval nodes, `entryCriteria` → the entering

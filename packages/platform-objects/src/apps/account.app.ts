@@ -80,7 +80,7 @@ export const ACCOUNT_APP: App = {
       type: 'group',
       label: 'Inbox',
       icon: 'inbox',
-      defaultOpen: true,
+      expanded: true,
       children: [
         {
           // ADR-0030: the user-facing inbox is the materialization
@@ -126,7 +126,7 @@ export const ACCOUNT_APP: App = {
       type: 'group',
       label: 'Security',
       icon: 'shield',
-      defaultOpen: true,
+      expanded: true,
       children: [
         {
           id: 'nav_account_linked',
@@ -154,7 +154,7 @@ export const ACCOUNT_APP: App = {
       type: 'group',
       label: 'Developer',
       icon: 'code',
-      defaultOpen: false,
+      expanded: false,
       children: [
         {
           id: 'nav_account_api_keys',
