@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { DevPlugin } from './dev-plugin';
 
 // #3060: init()'s graceful-degradation path dynamically imports ~10 real
@@ -114,7 +115,10 @@ describe('DevPlugin', () => {
 
     // ── Verify ICacheService contract ──
     const cache = registeredServices.get('cache');
-    expect(cache._dev).toBe(true);
+    // [#4058] The wrapped kernel fallback keeps its OWN self-description —
+    // plugin-dev never overwrites one, and `createMemoryCache` knows better
+    // than this plugin what it is (a real cache, process-local).
+    expect(readServiceSelfInfo(cache)?.status).toBe('degraded');
     await cache.set('k1', 'v1');
     expect(await cache.get('k1')).toBe('v1');
     expect(await cache.has('k1')).toBe(true);
@@ -212,6 +216,77 @@ describe('DevPlugin', () => {
     // Security sub-services are registered by either the real SecurityPlugin
     // or dev stubs (when security is disabled, they're skipped entirely).
     // The stubs follow the same contracts as the real implementations.
+  });
+
+  // [#4058] The classification is the deliverable, so it is pinned here rather
+  // than left to a code review of the table. Every dev implementation must say
+  // what it IS: `degraded` when it really does the work with reduced capability,
+  // `stub` when the answer is fabricated. One blanket `_dev: true` used to
+  // declare all of them equally fake, which is why the two could not be told
+  // apart — and why a consumer had no way to distinguish "search works here"
+  // from "this AI reply is invented".
+  it('every dev implementation self-describes honestly (degraded vs stub)', async () => {
+    const registeredServices = new Map<string, any>();
+    const ctx: any = {
+      logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      getService: vi.fn().mockImplementation((name: string) => {
+        if (registeredServices.has(name)) return registeredServices.get(name);
+        throw new Error('not found');
+      }),
+      getServices: vi.fn().mockReturnValue(new Map()),
+      registerService: vi.fn().mockImplementation((name: string, svc: any) => {
+        registeredServices.set(name, svc);
+      }),
+      hook: vi.fn(),
+      trigger: vi.fn(),
+      getKernel: vi.fn(),
+    };
+
+    // Only the plugin-loading toggles are turned off — `auth` and `security`
+    // stay ON so their stub slots are exercised too (the real plugins behind
+    // them are mocked away as missing at the top of this file, so init falls
+    // through to the stubs exactly as a dev boot without them would).
+    await new DevPlugin({
+      seedAdminUser: false,
+      services: {
+        objectql: false, driver: false, setup: false,
+        server: false, rest: false, dispatcher: false,
+      },
+    }).init(ctx);
+
+    // Really do the work, just less of it — their answers are true answers.
+    const DEGRADED = ['cache', 'queue', 'job', 'file-storage', 'search', 'realtime', 'i18n', 'workflow', 'metadata'];
+    // Fabricate the answer — must never be mistaken for a capability.
+    const STUB = ['automation', 'notification', 'ai', 'data', 'auth',
+                  'security.permissions', 'security.rls', 'security.fieldMasker'];
+
+    for (const name of DEGRADED) {
+      const info = readServiceSelfInfo(registeredServices.get(name));
+      expect(info?.status, `${name} must be degraded`).toBe('degraded');
+      expect(info?.message, `${name} must explain what is missing`).toBeTruthy();
+    }
+    for (const name of STUB) {
+      const info = readServiceSelfInfo(registeredServices.get(name));
+      expect(info?.status, `${name} must be stub`).toBe('stub');
+      // A fabricated answer is never served by a ready handler.
+      expect(info?.handlerReady, `${name} handlerReady`).toBe(false);
+      expect(info?.message, `${name} must say what it fakes`).toBeTruthy();
+    }
+
+    // No HTTP/WS surface is mounted for these, so no handler can be ready —
+    // independent of the implementation being real (ADR-0076 D12, realtime).
+    for (const name of ['cache', 'queue', 'job', 'realtime']) {
+      expect(readServiceSelfInfo(registeredServices.get(name))?.handlerReady, `${name} handlerReady`).toBe(false);
+    }
+
+    // `ui` has no factory at all — the shapeless placeholder must still be
+    // honest about being nothing.
+    const ui = readServiceSelfInfo(registeredServices.get('ui'));
+    expect(ui?.status).toBe('stub');
+    expect(ui?.handlerReady).toBe(false);
+
+    // The retired analytics slot stays empty (#4000).
+    expect(registeredServices.has('analytics')).toBe(false);
   });
 
   it('should skip disabled services', async () => {

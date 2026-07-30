@@ -4,10 +4,25 @@ import { createMemoryQueue } from './memory-queue';
 import { createMemoryJob } from './memory-job';
 import { createMemoryI18n, resolveLocale } from './memory-i18n';
 import { CORE_FALLBACK_FACTORIES } from './index';
+import { readServiceSelfInfo } from '@objectstack/spec/api';
 
 describe('CORE_FALLBACK_FACTORIES', () => {
     it('should have exactly 5 entries: metadata, cache, queue, job, i18n', () => {
         expect(Object.keys(CORE_FALLBACK_FACTORIES)).toEqual(['metadata', 'cache', 'queue', 'job', 'i18n']);
+    });
+
+    // [#4058] Every kernel fallback must be readable through the ONE standard
+    // descriptor. They used to carry `_fallback: true`, which `readServiceSelfInfo`
+    // does not recognize — so each of them was reported as a fully available
+    // service by both discovery builders.
+    it('every fallback self-describes via the standard D12 descriptor', () => {
+        for (const [name, factory] of Object.entries(CORE_FALLBACK_FACTORIES)) {
+            const info = readServiceSelfInfo(factory());
+            expect(info, `${name} must carry __serviceInfo`).toBeDefined();
+            // These are real implementations with reduced capability — never fakes.
+            expect(info?.status, `${name} status`).toBe('degraded');
+            expect(info?.message, `${name} message`).toBeTruthy();
+        }
     });
 
     it('should map to factory functions', () => {
@@ -18,9 +33,14 @@ describe('CORE_FALLBACK_FACTORIES', () => {
 });
 
 describe('createMemoryCache', () => {
-    it('should return an object with _fallback: true', () => {
+    // [#4058] Self-describes with the STANDARD D12 descriptor. The old
+    // `_fallback: true` marker was read by nothing, so discovery reported
+    // this as fully `available` — the honesty gap D12 exists to close.
+    it('self-describes as a degraded implementation, not a stub', () => {
         const cache = createMemoryCache();
-        expect(cache._fallback).toBe(true);
+        expect(readServiceSelfInfo(cache)?.status).toBe('degraded');
+        expect(readServiceSelfInfo(cache)?.handlerReady).toBe(false); // no HTTP surface for cache
+        expect(readServiceSelfInfo(cache)?.message).toBeTruthy();
         expect(cache._serviceName).toBe('cache');
     });
 
@@ -80,9 +100,14 @@ describe('createMemoryCache', () => {
 });
 
 describe('createMemoryQueue', () => {
-    it('should return an object with _fallback: true', () => {
+    // [#4058] Self-describes with the STANDARD D12 descriptor. The old
+    // `_fallback: true` marker was read by nothing, so discovery reported
+    // this as fully `available` — the honesty gap D12 exists to close.
+    it('self-describes as a degraded implementation, not a stub', () => {
         const queue = createMemoryQueue();
-        expect(queue._fallback).toBe(true);
+        expect(readServiceSelfInfo(queue)?.status).toBe('degraded');
+        expect(readServiceSelfInfo(queue)?.handlerReady).toBe(false); // no HTTP surface for queue
+        expect(readServiceSelfInfo(queue)?.message).toBeTruthy();
         expect(queue._serviceName).toBe('queue');
     });
 
@@ -121,9 +146,14 @@ describe('createMemoryQueue', () => {
 });
 
 describe('createMemoryJob', () => {
-    it('should return an object with _fallback: true', () => {
+    // [#4058] Self-describes with the STANDARD D12 descriptor. The old
+    // `_fallback: true` marker was read by nothing, so discovery reported
+    // this as fully `available` — the honesty gap D12 exists to close.
+    it('self-describes as a degraded implementation, not a stub', () => {
         const job = createMemoryJob();
-        expect(job._fallback).toBe(true);
+        expect(readServiceSelfInfo(job)?.status).toBe('degraded');
+        expect(readServiceSelfInfo(job)?.handlerReady).toBe(false); // no HTTP surface for job
+        expect(readServiceSelfInfo(job)?.message).toBeTruthy();
         expect(job._serviceName).toBe('job');
     });
 
@@ -159,9 +189,14 @@ describe('createMemoryJob', () => {
 });
 
 describe('createMemoryI18n', () => {
-    it('should return an object with _fallback: true', () => {
+    // [#4058] Self-describes with the STANDARD D12 descriptor. The old
+    // `_fallback: true` marker was read by nothing, so discovery reported
+    // this as fully `available` — the honesty gap D12 exists to close.
+    it('self-describes as a degraded implementation, not a stub', () => {
         const i18n = createMemoryI18n();
-        expect(i18n._fallback).toBe(true);
+        expect(readServiceSelfInfo(i18n)?.status).toBe('degraded');
+        expect(readServiceSelfInfo(i18n)?.handlerReady).toBe(true); // the dispatcher's /i18n domain serves it
+        expect(readServiceSelfInfo(i18n)?.message).toBeTruthy();
         expect(i18n._serviceName).toBe('i18n');
     });
 
