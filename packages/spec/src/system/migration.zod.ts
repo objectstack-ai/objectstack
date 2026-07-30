@@ -137,6 +137,28 @@ export const DATA_MIGRATION_FLAG_OBJECT = 'sys_migration';
  */
 export const FILE_REFERENCES_MIGRATION_ID = 'adr-0104-file-references';
 
+/**
+ * Well-known migration id: ADR-0104 D1 non-media value shapes — every stored
+ * reference (`lookup` / `master_detail` / `user` / `tree`) and structured-JSON
+ * (`location` / `address` / `composite` / `repeater` / `record` / `vector`)
+ * value scanned against `valueSchemaFor(field, 'stored')` with zero
+ * violations. Gates strict enforcement of those classes on this deployment
+ * (#3438).
+ *
+ * Deliberately SEPARATE from {@link FILE_REFERENCES_MIGRATION_ID}, which
+ * asserts a different fact. That flag says this deployment's file-field values
+ * were migrated and their ownership reconciled; it says nothing about whether a
+ * `lookup` id or a `location` payload is well formed. Gating these classes on
+ * it would be borrowing evidence for a fact it does not cover — the same error
+ * one layer down as an authority answering a question nobody asked (see the
+ * ADR's 2026-07-27 amendment).
+ *
+ * Unlike the file migration this one has no backfill: a malformed `location` is
+ * an application-data fix only its author can make, so the run reports and
+ * prescribes, and `--apply`'s only write is the flag row itself.
+ */
+export const VALUE_SHAPES_MIGRATION_ID = 'adr-0104-value-shapes';
+
 export const DataMigrationFlagSchema = lazySchema(() => z.object({
   id: z.string().describe('Migration id (e.g. adr-0104-file-references) — one row per data migration'),
   last_run_at: z.string().datetime().describe('When this migration last completed a gated (apply-mode) run on this deployment'),

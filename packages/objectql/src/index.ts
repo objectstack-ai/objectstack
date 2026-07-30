@@ -75,6 +75,23 @@ export type { WrapDeclarativeOptions } from './hook-wrappers.js';
 // Export Validation
 export { ValidationError, validateRecord } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
+// [ADR-0104 D1 / #3438] The value-shape scan behind `os migrate value-shapes`.
+// Read-only by design: it produces the evidence and the CALLER records the
+// flag. The engine deliberately does not depend on `@objectstack/platform-objects`
+// (readers of a flag use the spec contract; only writers take that dependency),
+// so the composition lives with the command, not here.
+export {
+    scanValueShapes,
+    valueShapeScanPassed,
+    formatValueShapeScanReport,
+} from './validation/scan-value-shapes.js';
+export type {
+    ValueShapeFinding,
+    ValueShapeScanReport,
+    ValueShapeScanEngine,
+    ValueShapeScanOptions,
+    ValueShapeScanLogger,
+} from './validation/scan-value-shapes.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';
 export type { EvaluateRulesOptions } from './validation/rule-validator.js';
 export {

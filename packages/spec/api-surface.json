@@ -1316,6 +1316,7 @@
     "UserActivityStatus (type)",
     "VALIDATION_MESSAGE_FALLBACK_LOCALE (const)",
     "VALIDATION_MESSAGE_KEY_PREFIX (const)",
+    "VALUE_SHAPES_MIGRATION_ID (const)",
     "ValidationMessageTranslator (type)",
     "VectorClock (type)",
     "VectorClockSchema (const)",
