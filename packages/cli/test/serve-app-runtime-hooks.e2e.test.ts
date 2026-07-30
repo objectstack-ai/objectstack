@@ -11,30 +11,25 @@
  * the module's `onEnable` — was skipped. A JSON artifact cannot hold a function,
  * so the app booted with all of its metadata and none of its code.
  *
- * Only a test that drives the real command can catch that: the loss happens in
- * the join between the artifact-derived stack and the loaded module, and neither
- * half is wrong on its own. So this boots a real stack through `bin/run-dev.js`
- * and reads its stdout.
+ * Only a test that drives the real command can catch it: the loss happens in the
+ * join between the artifact-derived stack and the loaded module, and neither half
+ * is wrong on its own.
  *
  * The oracle is the ADR-0110 D5 inventory (visible on the CLI since #4012): a
  * `script` action whose handler is registered in `onEnable` reconciles as BOUND
- * when the hook ran, and is reported under `[action-governance]` when it did
- * not. Confirmed to fail against the pre-fix command, naming
- * `hookfix_task:do_thing`.
+ * when the hook ran, and is reported under `[action-governance]` when it did not.
+ * Confirmed to fail against the pre-fix command, naming `hookfix_task:do_thing`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { runServe, randomPort, CLI, TSX } from './helpers/serve-process.js';
 
 const execFileP = promisify(execFile);
-const HERE = resolve(fileURLToPath(import.meta.url), '..');
-const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
  * An app whose action is only executable if its module-level `onEnable` runs:
@@ -72,76 +67,17 @@ export default {
 };
 `;
 
-interface ServeRun {
-  stdout: string;
-  stderr: string;
-}
-
-/** Boot `os serve` in `cwd`, collect output until the banner, then stop it. */
-function runServe(
-  cwd: string,
-  args: string[],
-  opts: { waitFor: RegExp; timeoutMs?: number },
-): Promise<ServeRun> {
-  return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', ...args], {
-      cwd,
-      env: {
-        ...process.env,
-        NO_COLOR: '1',
-        OS_DATABASE_URL: ':memory:',
-        OS_LOG_LEVEL: '',
-        OS_DISABLE_CONSOLE: '1',
-      },
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-
-    const finish = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        /* already gone */
-      }
-      if (err) rejectRun(err);
-      else resolveRun({ stdout, stderr });
-    };
-
-    const timer = setTimeout(
-      () =>
-        finish(
-          new Error(
-            `serve did not reach ${opts.waitFor} in time.\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`,
-          ),
-        ),
-      opts.timeoutMs ?? 180_000,
-    );
-
-    child.stdout.on('data', (d) => {
-      stdout += String(d);
-      if (opts.waitFor.test(stdout)) finish();
-    });
-    child.stderr.on('data', (d) => {
-      stderr += String(d);
-    });
-    child.on('error', (err) => finish(err));
-    child.on('exit', () => finish());
-  });
-}
-
 let dir: string;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-runtime-hooks-e2e-'));
   writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');
-  // The artifact is what makes this test meaningful — it is the metadata-only
-  // stack `createStandaloneStack()` boots from, and the reason the module's code
-  // needed re-attaching. (It is also currently required to boot at all: #4085.)
+  // The artifact is REQUIRED by this test, and for a positive reason rather than
+  // as a workaround: it is what makes `createStandaloneStack()` contribute an
+  // artifact-derived `AppPlugin`, which is the bundle whose missing code this
+  // regression is about. Without it serve wraps the config directly (#4085/#4110
+  // made that path boot), `onEnable` runs for the trivial reason, and the test
+  // would pass while exercising nothing.
   await execFileP(TSX, [CLI, 'compile'], {
     cwd: dir,
     maxBuffer: 16 * 1024 * 1024,
@@ -155,8 +91,7 @@ afterAll(() => {
 
 describe('os serve — an app booted from its artifact keeps its module code (#4095)', () => {
   it('runs onEnable, so the declared script action has a handler', async () => {
-    const port = String(40000 + Math.floor(Math.random() * 20000));
-    const { stdout, stderr } = await runServe(dir, ['--port', port], {
+    const { stdout, stderr } = await runServe(dir, ['--port', randomPort()], {
       waitFor: /Press Ctrl\+C to stop/,
     });
 
