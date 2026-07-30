@@ -14,6 +14,7 @@ export type {
 export type {
   DatasourceConnectionSpec,
   DatasourceDriverHandle,
+  DatasourceDriverOwnership,
   IDatasourceDriverFactory,
 } from './datasource-driver-factory.js';
 

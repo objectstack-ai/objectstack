@@ -38,6 +38,7 @@ export type {
   IDatasourceAdminService,
   DatasourceConnectionSpec,
   DatasourceDriverHandle,
+  DatasourceDriverOwnership,
   IDatasourceDriverFactory,
   // Connect policy (ADR-0062 D5 / epic #2163 seam).
   DatasourceConnectPolicy,

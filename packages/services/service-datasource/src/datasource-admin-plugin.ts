@@ -434,6 +434,16 @@ export class DatasourceAdminServicePlugin implements Plugin {
   }
 
   async destroy(): Promise<void> {
+    // Kernel teardown (ADR-0062 D5, #3993): close exactly the pools the shared
+    // connection service opened — `'connected'` states only. `already-registered`
+    // drivers belong to someone else, and host-owned adopted instances are never
+    // closed (both filters live in the service). Until this hook, a declared or
+    // runtime-created datasource's pool was simply abandoned on graceful shutdown.
+    try {
+      await this.connection?.disconnectAll();
+    } catch {
+      // Best-effort: teardown must never mask the shutdown path.
+    }
     this.service = undefined;
   }
 

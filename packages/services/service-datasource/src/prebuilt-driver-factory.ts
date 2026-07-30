@@ -101,7 +101,9 @@ export function createPrebuiltDriverFactory(
       // Mirrors the shared factory's `toHandle`: expose the driver's own
       // lifecycle on the handle (async-normalized to the contract), and the
       // instance itself as the `driver` escape hatch the connection service
-      // registers into the engine.
+      // registers into the engine. `ownership: 'host'` is the teardown half
+      // of adoption (ADR-0062 D5, #3993): the instance's lifecycle outlives
+      // this kernel, so kernel teardown must never disconnect it.
       const health =
         typeof driver.checkHealth === 'function'
           ? async () => Boolean(await driver.checkHealth!())
@@ -109,6 +111,7 @@ export function createPrebuiltDriverFactory(
       return {
         connect: typeof driver.connect === 'function' ? async () => { await driver.connect!(); } : undefined,
         disconnect: typeof driver.disconnect === 'function' ? async () => { await driver.disconnect!(); } : undefined,
+        ownership: 'host',
         checkHealth: health,
         ping: health,
         driver,
