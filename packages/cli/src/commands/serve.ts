@@ -7,6 +7,7 @@ import net from 'net';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
+import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from '../utils/storage-driver.js';
 import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, resolveSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
@@ -655,7 +656,10 @@ export default class Serve extends Command {
           // can later install marketplace apps at runtime.
           const { createDefaultHostConfig } = await import('@objectstack/runtime');
           const bootResult = await createDefaultHostConfig({ requireArtifact: !useEmptyBoot, dev: isDev });
-          config = { ...originalConfig, ...bootResult } as any;
+          // [#4002] `api` merges per key — see mergeBootConfig. A shallow spread
+          // let the boot builder's two scoping keys wipe the author's whole `api`
+          // block, silently dropping `requireAuth` / `enforceProjectMembership`.
+          config = mergeBootConfig(originalConfig as any, bootResult as any) as any;
         } else if (resolvedMode === 'standalone') {
           const { createStandaloneStack } = await import('@objectstack/runtime');
           // Anchor the default sqlite database under the project folder
@@ -669,7 +673,8 @@ export default class Serve extends Command {
             dev: isDev,
           };
           const bootResult = await createStandaloneStack(standaloneInput);
-          config = { ...originalConfig, ...bootResult } as any;
+          // [#4002] Per-key `api` merge — see mergeBootConfig.
+          config = mergeBootConfig(originalConfig as any, bootResult as any) as any;
         } else {
           throw new Error(
             `Boot mode '${resolvedMode}' is not available in the open-core CLI.\n`
