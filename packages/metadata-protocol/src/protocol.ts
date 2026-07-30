@@ -5325,7 +5325,7 @@ export class ObjectStackProtocolImplementation implements
         } catch (e: any) {
             // The batch rolled back — NOTHING landed (ADR-0067 D2). Report the
             // causal item with its real error; every other draft is marked
-            // batch_aborted so the caller sees the all-or-nothing semantics
+            // BATCH_ABORTED so the caller sees the all-or-nothing semantics
             // instead of inferring them from publishedCount 0.
             const causal = e?.__batchItem as { type: string; name: string } | undefined;
             const failedOut = ordered.map((d) =>
@@ -5342,7 +5342,7 @@ export class ObjectStackProtocolImplementation implements
                         type: d.type, name: d.name,
                         error: `not published — the batch is all-or-nothing (ADR-0067 D2) and `
                             + `${causal ? `${causal.type}/${causal.name}` : 'another item'} failed; the transaction rolled back`,
-                        code: 'batch_aborted',
+                        code: 'BATCH_ABORTED',
                     });
             return {
                 success: false,

@@ -196,6 +196,7 @@ export const ERROR_CODE_LEDGER = {
     'WRONG_PASSWORD',
   ],
   '@objectstack/metadata-protocol': [
+    'BATCH_ABORTED',              // sibling item in an all-or-nothing publish; it never ran
     'CLONE_DISABLED',
     'COMMIT_NOT_FOUND',
     'CONCURRENT_UPDATE',

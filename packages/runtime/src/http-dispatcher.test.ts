@@ -337,7 +337,7 @@ describe('HttpDispatcher', () => {
         // flow failed", which is the opposite of what happened.
         it('should answer 403 when the engine refuses the resume as service-gated', async () => {
             mockAutomationService.resume.mockResolvedValue({
-                success: false, code: 'forbidden',
+                success: false, code: 'PERMISSION_DENIED',
                 error: "Run 'run_1' is paused at an 'approval' node, which only its owning service may resume",
             });
             const result = await dispatcher.handleAutomation(
@@ -366,7 +366,7 @@ describe('HttpDispatcher', () => {
         // let `output` reopen the hole `inputs` had just closed.)
         it('should answer 400 when the engine rejects the signal as engine-internal', async () => {
             mockAutomationService.resume.mockResolvedValue({
-                success: false, code: 'invalid_signal',
+                success: false, code: 'INVALID_SIGNAL',
                 error: "Resume signal may not set engine-internal variables (signoffs.$mapItemDone) — " +
                     "names starting with '$' (or containing '.$') are reserved by the flow engine",
             });

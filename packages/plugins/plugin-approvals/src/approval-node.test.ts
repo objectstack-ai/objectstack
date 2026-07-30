@@ -178,7 +178,7 @@ describe('Approval node bridge (ADR-0019)', () => {
       branchLabel: 'approve', output: { decision: 'approve' },
     });
 
-    expect(refused).toMatchObject({ success: false, code: 'forbidden' });
+    expect(refused).toMatchObject({ success: false, code: 'PERMISSION_DENIED' });
     // The approve branch did NOT run…
     expect(marks).toHaveLength(0);
     // …the request is still pending, with no decision recorded…
