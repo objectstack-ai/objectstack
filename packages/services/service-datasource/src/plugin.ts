@@ -44,6 +44,11 @@ export interface ExternalDatasourceServicePluginOptions {
  */
 export class ExternalDatasourceServicePlugin implements Plugin {
   name = 'com.objectstack.service-external-datasource';
+  /**
+   * Services init() registers on every path (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one before it inits.
+   */
+  providesServices = ['external-datasource'];
   version = '1.0.0';
   type = 'standard' as const;
   dependencies: string[] = [];

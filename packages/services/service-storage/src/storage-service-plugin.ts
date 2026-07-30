@@ -115,6 +115,11 @@ export interface StorageServicePluginOptions {
  */
 export class StorageServicePlugin implements Plugin {
   name = 'com.objectstack.service.storage';
+  /**
+   * Services init() registers on every path (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one before it inits.
+   */
+  providesServices = ['file-storage'];
   version = '1.0.0';
   type = 'standard';
 

@@ -45,6 +45,11 @@ export interface RealtimeServicePluginOptions {
  */
 export class RealtimeServicePlugin implements Plugin {
   name = 'com.objectstack.service.realtime';
+  /**
+   * Services init() registers on every path (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one before it inits.
+   */
+  providesServices = ['realtime'];
   version = '1.0.0';
   type = 'standard';
   dependencies = ['com.objectstack.engine.objectql'];
