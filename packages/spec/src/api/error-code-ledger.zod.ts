@@ -240,6 +240,10 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/service-messaging': [
     'DELIVERY_NOT_ELIGIBLE',         // delivery row is in a non-terminal state
   ],
+  '@objectstack/trigger-api': [
+    'ENQUEUE_FAILED',                // queue accepted the call but publish threw
+    'INVALID_SIGNATURE',             // hook secret did not verify the request body
+  ],
   '@objectstack/cloud-connection': [
     'CLOUD_FETCH_FAILED',            // fetching the manifest/bundle from cloud failed
     'CLOUD_UNCONFIGURED',            // no cloud endpoint configured on this runtime
