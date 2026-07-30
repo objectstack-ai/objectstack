@@ -5,18 +5,39 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
 import { DRIVER_CATALOG } from './driver-catalog.js';
 
 /**
+ * The services these routes dispatch to.
+ *
+ * Two, not one — which is the whole reason the 503 below is parameterised. The
+ * module is *named* after `datasource-admin` and most of it is served by that
+ * service, but the three schema-introspection routes are served by
+ * `external-datasource`.
+ */
+type ServiceName = 'datasource-admin' | 'external-datasource';
+
+/**
  * Datasource lifecycle REST routes (ADR-0015 Addendum §3.5).
  *
- * Mounted under `/api/v1/datasources` and served by the `datasource-admin`
- * service. Every route degrades gracefully
- * (`503 SERVICE_UNAVAILABLE`) when the service is not wired in, and
- * lifecycle/validation failures surface as `400` with the service's message.
+ * Mounted under `/api/v1/datasources`. Every route degrades gracefully
+ * (`503 SERVICE_UNAVAILABLE`) when the service *it* needs is not wired in —
+ * naming that service rather than the one this module is named after (#4225) —
+ * and lifecycle/validation failures surface as `400` with the service's message.
+ *
+ * Served by `datasource-admin`:
  *
  *   GET    /datasources              → listDatasources (provenance + health)
+ *   GET    /datasources/:name        → getDatasource (credential-stripped)
  *   POST   /datasources/test         → testConnection (no persistence)
  *   POST   /datasources              → createDatasource (origin: 'runtime')
  *   PATCH  /datasources/:name        → updateDatasource (runtime only)
  *   DELETE /datasources/:name        → removeDatasource (runtime only)
+ *
+ * Served by `external-datasource`:
+ *
+ *   GET    /datasources/:name/remote-tables → listRemoteTables
+ *   POST   /datasources/:name/test          → testConnection (a SAVED datasource)
+ *   POST   /datasources/:name/object-draft  → generateObjectDraft
+ *
+ * `GET /datasources/drivers` is static metadata and needs neither service.
  *
  * Request bodies carry the connection draft inline with an optional cleartext
  * `secret` field; the route splits `secret` out so it never reaches the draft
@@ -32,22 +53,6 @@ export function registerDatasourceAdminRoutes(
   basePath = '/api/v1',
 ): void {
   const root = `${basePath}/datasources`;
-
-  const adminService = (): any => {
-    try {
-      return ctx.getService<any>('datasource-admin');
-    } catch {
-      return undefined;
-    }
-  };
-
-  const externalService = (): any => {
-    try {
-      return ctx.getService<any>('external-datasource');
-    } catch {
-      return undefined;
-    }
-  };
 
   /**
    * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
@@ -80,7 +85,8 @@ export function registerDatasourceAdminRoutes(
    *
    * Which service is unavailable is carried by `message`; the ledger explicitly
    * asks generic conditions to reuse the catalog instead of registering a
-   * per-service 503.
+   * per-service 503. That puts the whole burden of naming the service on one
+   * string — see `resolve` below for how it is kept honest.
    */
   const sendError = (res: any, status: number, code: string, message: string) =>
     res.status(status).json({ success: false, error: { code, message } });
@@ -97,8 +103,38 @@ export function registerDatasourceAdminRoutes(
   const sendOk = (res: any, data: unknown, status = 200) =>
     res.status(status).json({ success: true, data });
 
-  const unavailable = (res: any) =>
-    sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The datasource-admin service is not available.');
+  /**
+   * Resolve the service a route dispatches to — or answer
+   * `503 SERVICE_UNAVAILABLE` naming THAT service and return `undefined`, which
+   * the caller returns on.
+   *
+   * The name that performs the lookup is the same one that writes the message,
+   * so the two cannot disagree. They did until #4225: a single `unavailable`
+   * helper hard-coded `datasource-admin` while three routes — `GET
+   * /:name/remote-tables`, `POST /:name/test`, `POST /:name/object-draft` —
+   * resolve `external-datasource`. An operator whose federation service was
+   * unwired got told to go look at `datasource-admin`, which was running fine.
+   * Passing the name to the helper instead would have fixed those three; taking
+   * it from the lookup is what stops a tenth route reintroducing the mismatch.
+   *
+   * `method` is the one call the route goes on to make. It is checked here
+   * because "the service is registered" and "this route can use it" are not the
+   * same fact — a host may wire a partial implementation — and this preserves
+   * the per-route capability check the call sites did before.
+   */
+  const resolve = (res: any, service: ServiceName, method: string): any => {
+    let svc: any;
+    try {
+      svc = ctx.getService<any>(service);
+    } catch {
+      svc = undefined;
+    }
+    if (!svc?.[method]) {
+      sendError(res, 503, 'SERVICE_UNAVAILABLE', `The ${service} service is not available.`);
+      return undefined;
+    }
+    return svc;
+  };
 
   const badRequest = (res: any, err: unknown) =>
     sendError(res, 400, 'DATASOURCE_ADMIN_ERROR', err instanceof Error ? err.message : String(err));
@@ -118,8 +154,8 @@ export function registerDatasourceAdminRoutes(
 
   // List all datasources with provenance + health.
   server.get(root, async (_req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.listDatasources) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'listDatasources');
+    if (!svc) return;
     const datasources = await svc.listDatasources();
     sendOk(res, { datasources });
   });
@@ -137,8 +173,8 @@ export function registerDatasourceAdminRoutes(
   // definition draft for one table (introspect + type-map, no persistence —
   // the caller creates the object through the normal metadata channel).
   server.get(`${root}/:name/remote-tables`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.listRemoteTables) return unavailable(res);
+    const svc = resolve(res, 'external-datasource', 'listRemoteTables');
+    if (!svc) return;
     try {
       const tables = await svc.listRemoteTables(req.params.name);
       sendOk(res, { tables });
@@ -155,8 +191,8 @@ export function registerDatasourceAdminRoutes(
   // `config` is non-sensitive, plus a `hasSecret` flag). Registered after the
   // static `/drivers` route so that literal segment is never captured as a name.
   server.get(`${root}/:name`, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.getDatasource) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'getDatasource');
+    if (!svc) return;
     try {
       const datasource = await svc.getDatasource(req.params.name);
       if (!datasource) return sendError(res, 404, 'RESOURCE_NOT_FOUND', `Datasource "${req.params.name}" does not exist.`);
@@ -167,8 +203,8 @@ export function registerDatasourceAdminRoutes(
   });
 
   server.post(`${root}/:name/test`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.testConnection) return unavailable(res);
+    const svc = resolve(res, 'external-datasource', 'testConnection');
+    if (!svc) return;
     try {
       const result = await svc.testConnection(req.params.name);
       sendOk(res, result);
@@ -178,8 +214,8 @@ export function registerDatasourceAdminRoutes(
   });
 
   server.post(`${root}/:name/object-draft`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.generateObjectDraft) return unavailable(res);
+    const svc = resolve(res, 'external-datasource', 'generateObjectDraft');
+    if (!svc) return;
     const { table, ...opts } = (req.body as Record<string, unknown>) ?? {};
     if (!table) return badRequest(res, new Error('Body field "table" is required.'));
     try {
@@ -193,8 +229,8 @@ export function registerDatasourceAdminRoutes(
   // Probe a connection without persisting anything. Registered before the
   // `:name` routes so the literal `test` segment is never captured as a name.
   server.post(`${root}/test`, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.testConnection) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'testConnection');
+    if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
     try {
       const result = await svc.testConnection(draft, secret);
@@ -206,8 +242,8 @@ export function registerDatasourceAdminRoutes(
 
   // Create a runtime datasource.
   server.post(root, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.createDatasource) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'createDatasource');
+    if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
     try {
       const datasource = await svc.createDatasource(draft, secret);
@@ -219,8 +255,8 @@ export function registerDatasourceAdminRoutes(
 
   // Patch a runtime datasource.
   server.patch(`${root}/:name`, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.updateDatasource) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'updateDatasource');
+    if (!svc) return;
     const { draft, secret } = splitSecret(req.body);
     try {
       const datasource = await svc.updateDatasource(req.params.name, draft, secret);
@@ -232,8 +268,8 @@ export function registerDatasourceAdminRoutes(
 
   // Remove a runtime datasource.
   server.delete(`${root}/:name`, async (req: any, res: any) => {
-    const svc = adminService();
-    if (!svc?.removeDatasource) return unavailable(res);
+    const svc = resolve(res, 'datasource-admin', 'removeDatasource');
+    if (!svc) return;
     try {
       await svc.removeDatasource(req.params.name);
       res.status(204).end();
