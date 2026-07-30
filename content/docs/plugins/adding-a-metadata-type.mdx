@@ -70,8 +70,8 @@ use, not pinned at process start.
 platform. A third-party package contributes its own types instead through
 the **`additionalTypes`** array on `MetadataPluginConfig`, and registers the
 matching Zod schema with `registerMetadataTypeSchema(type, schema)` from its
-`onInstall` hook so the `/api/v1/meta/types/:type` endpoint emits a real JSON
-Schema. The registry entry shape is the same in both cases.
+plugin's `init(ctx)` so `GET /api/v1/meta` emits a real JSON Schema. The
+registry entry shape is the same in both cases.
 
 ## 2. Define the Zod schema
 
@@ -112,12 +112,25 @@ editor consumes from the registered Zod schema.
   ```
 
 - **Plugin-contributed types:** call `registerMetadataTypeSchema` from your
-  plugin's `onInstall` hook (see *Plugin lifecycle*, below):
+  plugin's `init(ctx)` — the kernel's plugin contract is `init` / `start` /
+  `destroy`:
 
   ```ts
   import { registerMetadataTypeSchema } from '@objectstack/spec/kernel';
-  registerMetadataTypeSchema('my_widget', MyWidgetSchema);
+
+  export class MyWidgetPlugin implements Plugin {
+    name = 'plugin.my-widget';
+    async init(_ctx: PluginContext) {
+      registerMetadataTypeSchema('my_widget', MyWidgetSchema);
+    }
+  }
   ```
+
+  `getMetaTypes()` reads this registry on every request, so a type registered
+  during `init` is served from the first call onward. Registering the schema
+  does not by itself put the type in the listing — `getMetaTypes()` enumerates
+  types from the engine registry and the metadata service and then decorates
+  each with its schema, so declare the type (via `additionalTypes`) as well.
 
 The Metadata Admin **SchemaForm** consumes the JSON Schema derived from this
 Zod schema and produces:
@@ -221,7 +234,7 @@ If you omit them, the directory falls back to the registry `label`.
 
 - [ ] Registry entry added (`type`, `label`, `domain`, required `filePatterns`, flags) — for plugins, via `additionalTypes` on `MetadataPluginConfig`
 - [ ] Zod schema authored under `packages/spec/src/<domain>/<name>.zod.ts`
-- [ ] Zod schema wired up: built-in → `BUILTIN_METADATA_TYPE_SCHEMAS`; plugin → `registerMetadataTypeSchema()` in `onInstall`
+- [ ] Zod schema wired up: built-in → `BUILTIN_METADATA_TYPE_SCHEMAS`; plugin → `registerMetadataTypeSchema()` in the plugin's `init()`
 - [ ] (Optional) Custom editor registered in `builtinComponents.tsx`
 - [ ] (Optional) i18n labels added to `metadata-admin/i18n.ts`
 - [ ] `pnpm test` passes (framework) and `pnpm --filter @object-ui/app-shell build` passes (objectui)

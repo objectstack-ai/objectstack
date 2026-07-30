@@ -18,6 +18,8 @@
     "webhook",
     "---Approvals & Jobs---",
     "approval",
-    "job"
+    "job",
+    "---More---",
+    "io-node-config"
   ]
 }

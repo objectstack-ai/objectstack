@@ -239,6 +239,38 @@ describe('#4134 — unknown list query params (real ObjectQL engine)', () => {
         expect(r.total).toBe(0);
     });
 
+    // ─────────────────────────────────────────────────────────────
+    // #4181 — an unappliable filter must not answer like a satisfied one
+    // ─────────────────────────────────────────────────────────────
+
+    it('an unparseable filter 400s instead of returning the UNFILTERED page (#4181)', async () => {
+        // The exact repro: one missing quote. Pre-#4181 this returned
+        // `total: 10` — identical to the no-filter baseline, so a caller whose
+        // filter never ran could not tell from the response.
+        const baseline: any = await protocol.findData({ object: 'showcase_task' });
+        expect(baseline.total).toBe(10);
+
+        await expect(
+            protocol.findData({ object: 'showcase_task', query: { filter: '{status:done' } }),
+        ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    });
+
+    it('the same garbage filter cannot hide behind pagination either', async () => {
+        // Pre-#4181: `total: 10` + 2 records — a perfectly normal-looking page
+        // of an unfiltered set.
+        await expect(
+            protocol.findData({ object: 'showcase_task', query: { filter: '{status:done', top: 2 } }),
+        ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    });
+
+    it('a VALID filter still applies — the guard rejects only what it cannot run', async () => {
+        const r: any = await protocol.findData({
+            object: 'showcase_task',
+            query: { filter: '{"status":"done"}' },
+        });
+        expect(r.total).toBe(2);
+    });
+
     it('pagination totals are computed over the MERGED predicate', async () => {
         // 8 open rows share created_at; page of 3 → total must be 8 (the
         // merged match count), not 10 (unfiltered) nor 3 (page-local).

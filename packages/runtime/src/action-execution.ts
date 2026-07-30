@@ -17,6 +17,7 @@
 
 import { validateActionParams, type ResolvedActionParam } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { checkApiExposure } from './api-exposure.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -44,9 +45,20 @@ export function isSystemObjectName(name: string): boolean {
     return /^sys_/i.test(name);
 }
 
-/** Strict action-param enforcement opt-in (ADR-0104 D2 warn-first rollout). */
-function actionParamsStrict(): boolean {
-    return typeof process !== 'undefined' && process.env?.OS_ACTION_PARAMS_STRICT_ENABLED === '1';
+/**
+ * Escape hatch: accept param bags that violate the declared contract, the way
+ * the pre-17 dispatcher did (ADR-0104 D2, 2026-07-30 addendum).
+ *
+ * Enforcement is the default. This exists for the operator whose integration
+ * hits an unforeseen rejection and needs it dispatching again before they can
+ * reach the caller's code — the violation still logs, so setting this makes the
+ * drift tolerated, not invisible.
+ *
+ * Spelled `OS_ALLOW_*` per Prime Directive #9 and ADR-0110 D6: an opt-OUT of a
+ * check that ships on, never an opt-IN to a check that ships off.
+ */
+function laxActionParams(): boolean {
+    return typeof process !== 'undefined' && process.env?.OS_ALLOW_LAX_ACTION_PARAMS === '1';
 }
 
 
@@ -57,8 +69,18 @@ function warnActionParamsOnce(key: string, message: string): void {
     console.warn(message);
 }
 
-/** The dispatcher facilities the action subsystem may touch. */
+/**
+ * The dispatcher facilities the action subsystem may touch.
+ *
+ * [#4127 batch 4] `resolveService` is split the same way as the one on
+ * `DomainHandlerDeps`. This is a NARROWER re-declaration of the same facility
+ * and it kept returning `any` after the main one stopped — the third copy of
+ * the pattern, alongside `ResolveOptions` in security/resolve-execution-context.
+ * A lookup facade has to be typed everywhere it is re-declared, or the copy
+ * that still says `any` becomes the way around all the others.
+ */
 export interface ActionExecutionDeps {
+    resolveService<K extends keyof ServiceSlotContracts>(name: K, environmentId?: string): Promise<ServiceSlotContract<K> | undefined>;
     resolveService(name: string, environmentId?: string): any;
     getObjectQL(environmentId?: string): Promise<any>;
 }
@@ -329,7 +351,11 @@ export function headlessActionTypeError(deps: ActionExecutionDeps, action: any, 
  */
 export async function resolveAutomationService(deps: ActionExecutionDeps, envId?: string): Promise<any | null> {
     try {
-        const svc: any = await deps.resolveService('automation', envId);
+        // [#4127 batch 4] Was `: any`, which voided the gate here. `execute` is
+        // declared on IAutomationService, so this needed no contract work — only
+        // for someone to notice, and three grep sweeps over `domains/*.ts` never
+        // reached this file. The lint rule did.
+        const svc = await deps.resolveService('automation', envId);
         return svc && typeof svc.execute === 'function' ? svc : null;
     } catch {
         return null; // no automation service on this kernel
@@ -561,14 +587,21 @@ export function resolveDeclaredActionParams(deps: ActionExecutionDeps, action: a
 
 /**
  * Enforce an action's declared param contract against the request bag
- * BEFORE the handler runs (ADR-0104 D2). Returns a `400`-worthy error
- * message when the contract is violated AND strict mode is on
- * (`OS_ACTION_PARAMS_STRICT_ENABLED=1`); otherwise returns `null`, logging
- * a one-time warning per (object/action) so the drift is visible without
- * breaking callers whose params were silently wrong before (warn-first, R3).
+ * BEFORE the handler runs (ADR-0104 D2). Returns a `400`-worthy error message
+ * when the contract is violated, `null` when the bag conforms.
  *
- * Actions that declare no `params` keep today's pass-through — there is
- * nothing to validate against, so existing param-less actions are untouched.
+ * **Strict by default since 17.0** (#3438). R3 asked for a warn-then-error
+ * window; the ADR's 2026-07-30 addendum declined it on the merits rather than
+ * postponing the flip by a major. What a violation strands here is a CALLER,
+ * not data: the rejection is a 400 naming the offending param and the declared
+ * list, delivered to the developer or agent who can fix it in one edit, and
+ * undoable with `OS_ALLOW_LAX_ACTION_PARAMS`. Deferring that to 18.0 would have
+ * charged every deployment a second upgrade ceremony to defer a break that
+ * costs one edited call. (D1's half went the opposite way for the opposite
+ * reason — it strands stored rows, which nobody can edit their way out of.)
+ *
+ * Actions that declare no `params` keep the pass-through — there is nothing to
+ * validate against, so existing param-less actions are untouched.
  */
 export function enforceActionParams(deps: ActionExecutionDeps, 
     action: any,
@@ -581,14 +614,14 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     const issues = validateActionParams(resolved, bag);
     if (issues.length === 0) return null;
     const summary = issues.map((i) => i.message).join('; ');
-    if (actionParamsStrict()) {
+    if (!laxActionParams()) {
         return `Invalid action params: ${summary}`;
     }
     const key = `${where.objectName ?? 'global'}/${where.actionName ?? action?.name ?? 'action'}`;
     warnActionParamsOnce(
         key,
-        `[action-params] ${key}: ${summary} — accepted for now (ADR-0104 D2 warn-first; ` +
-        `set OS_ACTION_PARAMS_STRICT_ENABLED=1 to reject with 400)`,
+        `[action-params] ${key}: ${summary} — accepted because ` +
+        `OS_ALLOW_LAX_ACTION_PARAMS=1 (ADR-0104 D2; unset it to reject with 400)`,
     );
     return null;
 }
@@ -773,8 +806,9 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 
     // [ADR-0104 D2] Declared param contract — same enforcement as the REST
     // route. AI/MCP is the caller most likely to send a plausible-but-wrong
-    // bag, so the check belongs here too. Warn-first unless
-    // OS_ACTION_PARAMS_STRICT_ENABLED=1 (then throws → surfaced as an error).
+    // bag, and a rejection is corrective feedback the agent consumes in-loop,
+    // which a server-side warning never was. Strict by default (#3438);
+    // OS_ALLOW_LAX_ACTION_PARAMS=1 restores the pass-through.
     const paramError = enforceActionParams(deps, action, obj, params, { objectName, actionName: name });
     if (paramError) throw new Error(paramError);
 
@@ -810,6 +844,9 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
 
     // ── script/body dispatch via the engine's executeAction ──
+    // [#4127] `executeAction` is
+    // ObjectQL's own surface, outside IDataEngine; `getObjectQL` exists to reach
+    // exactly that. Closing this needs ObjectQL's contract written, not a cast.
     const ql: any = await deps.getObjectQL(envId);
     if (!ql || typeof ql.executeAction !== 'function') {
         throw new Error('Data engine not available for action dispatch');
@@ -1060,7 +1097,16 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     let degraded = false;
     let reason: string | undefined;
     try {
-        const meta: any = await deps.resolveService('metadata', envId);
+        // [#4127 FINDING, batch 5]
+        // `metadata` IS contracted, so this `any` is not legitimate — but
+        // `loadDiagnosed` is not on IMetadataService, though MetadataManager
+        // implements it. Same shape as every gap this line of work has found:
+        // call site and implementation agree, the contract is what nobody wrote.
+        // Recorded rather than fixed here — adding it changes a public contract
+        // and belongs in the batch that adds the four undeclared auth members.
+        // [#4127 batch 4] `loadDiagnosed` is on IMetadataService now, so this
+        // reads the contract instead of guessing at it.
+        const meta = await deps.resolveService('metadata', envId);
         if (meta && typeof meta.loadDiagnosed === 'function') {
             const diag: any = await meta.loadDiagnosed('action', actionName);
             if (diag?.data && ownsRoute(diag.data)) return { action: diag.data, obj };

@@ -216,6 +216,47 @@ need no changes, other than gaining enforcement of the `requiredPermissions`
 they already declared. Callers that hard-coded a `target` in an action URL
 switch to the action's `name`.
 
+### An action's declared params are enforced at dispatch (ADR-0104 D2, #3438)
+
+An action's `params[]` (`required`, `options`, `multiple`, `reference`) was a
+complete contract that informed **only the client dialog**. The server passed
+`reqBody.params` to the handler unvalidated on both the REST and MCP paths, so
+a wrong bag could return a success envelope while the handler quietly ignored
+it — the #3405 shape, one layer out. It is now checked before the handler runs;
+a violation is `400 VALIDATION_FAILED` (REST) or a thrown error (MCP).
+
+| Violation | Example |
+|---|---|
+| missing `required` param | declared `p_text` absent from the bag |
+| value outside `options` | `p_priority: 'NOT_AN_OPTION'` |
+| `multiple` shape | a bare string where an array is declared |
+| `reference` shape | a non-id where `reference: 'sys_user'` is declared |
+| undeclared key | `bogus: 123` |
+
+```diff
+- OS_ACTION_PARAMS_STRICT_ENABLED=1   # removed — enforcement is the default
++ OS_ALLOW_LAX_ACTION_PARAMS=1        # escape hatch: warn and pass, as before
+```
+
+**Only already-wrong calls break**, and each rejection names the offending param
+and the declared list, so the fix is one edit at the call site. Actions
+declaring no `params` are untouched — there is nothing to validate against —
+and the dispatcher's own `recordId` / `objectName` are allowlisted, so keys
+dispatch merges in are never unknown-key errors. If an integration you cannot
+reach in time is affected, `OS_ALLOW_LAX_ACTION_PARAMS=1` restores the old
+pass-through in one restart; the violation still logs once per action, so the
+drift stays visible rather than becoming invisible again.
+
+The RC line carried this warn-first behind an `OS_ACTION_PARAMS_STRICT_ENABLED`
+opt-in. **That variable does not exist in 17.0.** The window was closed on
+purpose rather than deferred to 18.0: what a violation strands is a *caller*,
+not data — no stored row becomes unwritable, the party who sees the error is
+the party who can fix it, and the hatch makes it reversible. Deferring would
+have charged every deployment a second upgrade ceremony to postpone a break
+that costs one edited call. The value-shape half of the same ADR went the other
+way for the opposite reason: it rejects on the basis of data already at rest,
+so it stays gated per deployment (see *Files become platform records* below).
+
 ### A flow run with no trigger user may not touch data (#3760)
 
 An effective `runAs: 'user'` run that resolved **no trigger user** used to
@@ -925,10 +966,10 @@ For media fields specifically:
   toward an explicit `url` field, so "managed file" and "external link" stop
   being the same declaration).
 
-**Value-shape checking is warn-first.** A not-yet-backfilled row still writes and
-the author gets a warning naming the field. Hard rejection arrives only when a
-deployment opts into `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` — which it should do
-*after* running the backfill and confirming reconciliation:
+**Value-shape checking follows your own migration, not the version number.** A
+not-yet-backfilled row still writes, and the author gets a warning naming the
+field. Media fields start *rejecting* malformed values only once **this
+deployment** has run the migration and passed its self-check:
 
 ```bash
 os migrate files-to-references           # dry run: reports, writes nothing
@@ -938,9 +979,9 @@ os migrate files-to-references --apply   # converts, verifies, records the flag
 The run backfills legacy file-field values (inline metadata blobs, own-resolver
 URLs, `data:` URIs) into owned `sys_file` references and reconciles the ownership
 ledger against what records actually hold. The **deployment-level flag it
-records** — never the platform version — is what authorises irreversible
-behaviour, and media value shapes enforce only once *this* deployment has
-verified its own migration.
+records** — never the platform version — is what authorises both strict media
+value shapes and irreversible file collection. Upgrading changes neither;
+running the migration does.
 
 **Released-file collection is live behind that same flag** (#3459). On a
 verified deployment, a field file whose one owning record lets go — the field
@@ -951,6 +992,16 @@ rows, ownership columns, and a fresh read of the flag itself) before
 reclaiming the row and its bytes. A deployment that never migrates keeps every
 released file forever: upgrading is not consent — passing your own
 migration's self-check is.
+
+Two knobs sit either side of that flag on the value-shape half.
+`OS_ALLOW_LAX_MEDIA_VALUES=1` returns a verified deployment to warnings, for an
+operator who hits an unforeseen rejection and needs writes flowing while they
+diagnose. `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` goes the other way and opts
+*every* value class into strict immediately — including the reference
+(`lookup`/`user`/…) and structured-JSON (`location`/`address`/…) types, whose
+own per-deployment gate is still being built (#3438). Those stay warn-only by
+default until it lands, because unlike media they have no migration standing
+behind them yet.
 
 ### Approvals: dynamic approver routing (#3447)
 
@@ -1237,9 +1288,17 @@ objectui commits on top of the pin 16.1.0 shipped.
 - **Auth:** plan for the better-auth 1.7 account-identity backfill — check the
   boot log for federated accounts whose IdP is no longer registered, and stamp or
   remove those rows.
+- **Actions:** check any programmatic caller that posts `params` — a bag the
+  server used to accept silently now 400s if it misses a `required` param,
+  breaks `options`/`multiple`/`reference`, or carries an undeclared key. The
+  error names the param and the declared list. `OS_ALLOW_LAX_ACTION_PARAMS=1`
+  buys time for an integration you cannot reach today.
 - **Files:** run `os migrate files-to-references` (dry run first, then
-  `--apply`), reconcile, and only then set
-  `OS_DATA_VALUE_SHAPE_STRICT_ENABLED`.
+  `--apply`) and reconcile — passing its self-check is what turns on strict
+  media value shapes *and* released-file collection for this deployment, so
+  read the report before you `--apply`. Do **not** reach for
+  `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` to get there: it opts every value class
+  in at once, including ones with no migration behind them.
 - **Datasources:** verify every declared datasource connects in every
   environment — a bound datasource that cannot connect now fails the boot
   instead of failing every later query.

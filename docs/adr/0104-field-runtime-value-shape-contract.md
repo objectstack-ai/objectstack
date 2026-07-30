@@ -414,7 +414,10 @@ rejects a targetless inline lookup param) — a build failure the AI must fix, n
 a runtime warning it never sees. The runtime **warn-first** posture (D1's
 `OS_DATA_VALUE_SHAPE_STRICT_ENABLED`, D2's `OS_ACTION_PARAMS_STRICT_ENABLED`)
 exists only to protect **already-deployed data** from stranding — it is not the
-authoring gate.
+authoring gate. *(D2's variable no longer exists: the 2026-07-30 addendum flips
+that half strict-by-default in 17.0, leaving only the `OS_ALLOW_LAX_ACTION_PARAMS`
+opt-out. The sentence's own logic is why — action params strand no deployed
+data, so the posture it justifies never applied to them.)*
 
 Therefore the target end-state is **two enforcement points, each with one job**:
 

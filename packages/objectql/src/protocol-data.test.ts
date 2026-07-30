@@ -737,9 +737,20 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                 }
             }
             expect(suggested.size).toBeGreaterThan(0);
+            // Probe each suggestion with a value of the RIGHT SHAPE for that
+            // parameter. A one-size probe would conflate "the endpoint rejects
+            // this parameter name" (what this test guards) with "the endpoint
+            // rejects this value" — e.g. `filter: 'title'` is a legitimate 400
+            // under #4181 because a bare word is not a filter.
+            const probe = (spelling: string): unknown => {
+                const bare = spelling.replace(/^\$/, '').toLowerCase();
+                if (bare === 'top' || bare === 'skip') return 1;
+                if (bare === 'filter' || bare === 'filters') return { status: 'open' };
+                return 'title';
+            };
             for (const spelling of suggested) {
                 await expect(
-                    protocol.findData({ object: 'showcase_task', query: { [spelling]: spelling === 'top' || spelling === '$top' || spelling === 'skip' || spelling === '$skip' ? 1 : 'title' } }),
+                    protocol.findData({ object: 'showcase_task', query: { [spelling]: probe(spelling) } }),
                     `suggested '${spelling}' must be accepted`,
                 ).resolves.toBeDefined();
             }
@@ -839,20 +850,18 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             });
         });
 
-        it('leaves a non-object where (unparseable filter JSON) untouched — pinned until #4181', async () => {
-            // `?filter={oops` — the parse tolerance keeps the raw string and it
-            // becomes `where`. Folding real predicates into that garbage would
-            // neither apply them nor surface the tolerance bug itself (#4181),
-            // so this path keeps its pre-#4164 shape: string where forwarded,
-            // implicit key left as a stray option.
+        it('an unparseable filter is now rejected, not carried past the merge (#4181)', async () => {
+            // The #4164 pin test lived here expecting `where === '{oops'` and a
+            // stray `owner_id` option. #4181 is the source fix it named: the
+            // filter never reaches the merge because it never parses.
             const { protocol, engine } = makeProtocol();
-            await protocol.findData({
-                object: 'showcase_task',
-                query: { filter: '{oops', owner_id: 'usr_1' },
-            });
-            const opts = engine.find.mock.calls[0][1];
-            expect(opts.where).toBe('{oops');
-            expect(opts.owner_id).toBe('usr_1');
+            await expect(
+                protocol.findData({
+                    object: 'showcase_task',
+                    query: { filter: '{oops', owner_id: 'usr_1' },
+                }),
+            ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+            expect(engine.find).not.toHaveBeenCalled();
         });
 
         it('rejects even when an explicit filter rode along — the 400 must not depend on it', async () => {
@@ -942,6 +951,152 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             const protocol = new ObjectStackProtocolImplementation(engine);
             await protocol.findData({ object: 'showcase_task', query: { zzzz: '1' } });
             expect(engine.find.mock.calls[0][1].where).toEqual({ zzzz: '1' });
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // #4181 — a filter that cannot be applied must FAIL, never be forwarded
+    //
+    // `?filter={status:done` (one missing quote) used to fall through
+    // `catch { /* keep as-is */ }`, leaving the raw string on `where` — a shape
+    // no driver consumes — so the filter was dropped WHOLE and the response was
+    // the unfiltered page. Worst member of the #3948 family by direction:
+    // #4134 zeroed, #4164 dropped one predicate, this returned everything.
+    // The sibling `/export` route had rejected the same input all along.
+    // ═══════════════════════════════════════════════════════════════
+
+    describe('malformed filters are rejected, not silently unapplied (#4181)', () => {
+        function makeProtocol() {
+            const engine: any = {
+                find: vi.fn().mockResolvedValue([]),
+                findOne: vi.fn().mockResolvedValue(null),
+                count: vi.fn().mockResolvedValue(0),
+                registry: {
+                    getObject: vi.fn((name: string) => ({
+                        name,
+                        fields: { title: { type: 'text' }, status: { type: 'text' } },
+                    })),
+                },
+            };
+            return { protocol: new ObjectStackProtocolImplementation(engine), engine };
+        }
+
+        it.each(['filter', 'filters', '$filter'])(
+            'rejects unparseable JSON on ?%s with 400 INVALID_FILTER, before the engine',
+            async (alias) => {
+                const { protocol, engine } = makeProtocol();
+                await expect(
+                    protocol.findData({ object: 'showcase_task', query: { [alias]: '{status:done' } }),
+                ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER', param: alias });
+                expect(engine.find).not.toHaveBeenCalled();
+            },
+        );
+
+        it('says the filter was NOT applied — the failure mode is what makes it urgent', async () => {
+            const { protocol } = makeProtocol();
+            await expect(
+                protocol.findData({ object: 'showcase_task', query: { filter: '{oops' } }),
+            ).rejects.toThrow(/must be valid JSON.*not applied.*unfiltered result set/s);
+        });
+
+        it.each([
+            ['a number', '5'],
+            ['a quoted string', '"open"'],
+            ['null', 'null'],
+            ['a boolean', 'true'],
+        ])('rejects a filter that parses to %s — usable JSON is not a usable filter', async (_label, raw) => {
+            const { protocol, engine } = makeProtocol();
+            await expect(
+                protocol.findData({ object: 'showcase_task', query: { filter: raw } }),
+            ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+            expect(engine.find).not.toHaveBeenCalled();
+        });
+
+        it('still accepts every legitimate filter shape', async () => {
+            const { protocol, engine } = makeProtocol();
+            // JSON string, live object, and the FilterAST tuple array.
+            await protocol.findData({ object: 'showcase_task', query: { filter: '{"status":"done"}' } });
+            await protocol.findData({ object: 'showcase_task', query: { filter: { status: 'done' } } });
+            await protocol.findData({ object: 'showcase_task', query: { filter: [['status', '=', 'done']] } });
+            expect(engine.find).toHaveBeenCalledTimes(3);
+            for (const call of engine.find.mock.calls) expect(call[1].where).toBeTruthy();
+        });
+
+        it('treats a blank ?filter= as ABSENT, not malformed', async () => {
+            // The same `length > 0` guard the export route applies. A blank
+            // filter must not 400, and must not leave `''` on `where` either.
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({ object: 'showcase_task', query: { filter: '   ' } });
+            expect(engine.find).toHaveBeenCalledOnce();
+            expect(engine.find.mock.calls[0][1].where).toBeUndefined();
+        });
+
+        // ── the alias chain silently picking a winner ──────────────────
+
+        it('refuses conflicting values across filter aliases instead of dropping all but one', async () => {
+            // `??` used to run the `filter` and discard the `where` with no
+            // signal. They are spellings of ONE slot, so two different values
+            // cannot be reconciled — merging would invent an intent.
+            const { protocol, engine } = makeProtocol();
+            await expect(
+                protocol.findData({
+                    object: 'showcase_task',
+                    query: { where: { status: 'done' }, filter: { status: 'open' } },
+                }),
+            ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+            expect(engine.find).not.toHaveBeenCalled();
+        });
+
+        it('names every conflicting alias and prescribes the fix', async () => {
+            const { protocol } = makeProtocol();
+            await expect(
+                protocol.findData({
+                    object: 'showcase_task',
+                    query: { filter: { a: 1 }, filters: { b: 2 } },
+                }),
+            ).rejects.toThrow(/'filter'.*'filters'.*Send exactly one/s);
+        });
+
+        it('lets redundant IDENTICAL spellings through — only a conflict is ambiguous', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { filter: { status: 'done' }, filters: { status: 'done' } },
+            });
+            expect(engine.find.mock.calls[0][1].where).toEqual({ status: 'done' });
+        });
+
+        it('an unrunnable filter has ONE wire code however it was reached (#4121 + #4181)', async () => {
+            // #4121 rejects malformed filter ARRAYS; #4181 rejects the non-array
+            // ways a filter fails to become one. They landed independently on
+            // the same code path — a caller asking "did my filter run?" must not
+            // have to know which branch caught it.
+            const { protocol } = makeProtocol();
+            const codes = new Set<string>();
+            for (const bad of [
+                '{oops',                 // #4181 — unparseable JSON
+                '5',                     // #4181 — parses, not a filter
+                [['status', '!!', 'x']], // #4121 — array, unknown operator
+                ['and'],                 // #4121 — lone join keyword
+            ]) {
+                const err: any = await protocol
+                    .findData({ object: 'showcase_task', query: { filter: bad } })
+                    .then(() => undefined, (e: any) => e);
+                expect(err, `'${JSON.stringify(bad)}' must be rejected`).toBeDefined();
+                codes.add(`${err.status}/${err.code}`);
+            }
+            expect([...codes]).toEqual(['400/INVALID_FILTER']);
+        });
+
+        it('one alias alone is never a conflict', async () => {
+            const { protocol, engine } = makeProtocol();
+            for (const alias of ['filter', 'filters', '$filter', 'where']) {
+                await protocol.findData({ object: 'showcase_task', query: { [alias]: { status: 'done' } } });
+            }
+            expect(engine.find).toHaveBeenCalledTimes(4);
+            for (const call of engine.find.mock.calls) {
+                expect(call[1].where).toEqual({ status: 'done' });
+            }
         });
     });
 });

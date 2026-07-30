@@ -7,11 +7,15 @@
  *
  *   1. Runtime validators (`MetadataManager.validate`) — already wired
  *      through the domain-specific overlay validator in `objectql/protocol`.
- *   2. The `/api/v1/meta/types/:type` endpoint, which converts each
- *      registered schema to JSON Schema (`z.toJSONSchema()`) and exposes
- *      it as `MetadataTypeInfo.schema`. Studio's metadata-admin engine
- *      renders the result with its generic `SchemaForm`, so adding a new
- *      writable metadata type now requires **zero** Studio-side code.
+ *   2. `GET /api/v1/meta` (and the richer server-only `GET /meta/types`),
+ *      which converts each registered schema to JSON Schema
+ *      (`z.toJSONSchema()`) and exposes it as `MetadataTypeInfo.schema`.
+ *      Studio's metadata-admin engine renders the result with its generic
+ *      `SchemaForm`, so adding a new writable metadata type now requires
+ *      **zero** Studio-side code. Both are served from
+ *      `ObjectStackProtocolImplementation.getMetaTypes()`, which reads this
+ *      registry at REQUEST time — a type registered after boot is picked up
+ *      on the next call.
  *
  * The map intentionally only contains types that meaningfully round-trip
  * through the runtime metadata API. (The former code-only placeholder kinds
@@ -130,9 +134,25 @@ export function getMetadataTypeSchema(type: string): z.ZodType | undefined {
  * Register (or replace) the canonical Zod schema for a metadata type.
  *
  * Plugins that introduce custom metadata types — declared through
- * `additionalTypes` on `MetadataPluginConfig` — should call this from
- * their `onInstall` hook so the engine's `/meta/types/:type` endpoint
- * starts emitting a real JSON Schema for them. Idempotent.
+ * `additionalTypes` on `MetadataPluginConfig` — should call this from their
+ * plugin's **`init(ctx)`**, so `GET /api/v1/meta` starts emitting a real JSON
+ * Schema for them. Idempotent.
+ *
+ * This used to say "from their `onInstall` hook", pointing at a hook that does
+ * not run (#4212). The kernel's `Plugin` contract is `init` / `start` /
+ * `destroy` (`packages/core/src/types.ts`); the `onInstall` / `onEnable` /
+ * `onDisable` / `onUninstall` / `onUpgrade` family declared on
+ * `PluginLifecycleSchema` has no invocation site anywhere in the runtime, so a
+ * plugin that followed the old advice registered nothing and got no error.
+ * `init` is what the one real caller of the sibling
+ * {@link registerMetadataTypeActions} uses — see
+ * `DatasourceAdminServicePlugin.init`.
+ *
+ * NOTE — registering a schema alone does not make a type appear in the
+ * listing. `getMetaTypes()` enumerates types from the engine registry and the
+ * metadata service, then decorates each with its schema; a type present here
+ * but in neither of those is not reached. Register the type as well as its
+ * schema.
  */
 export function registerMetadataTypeSchema(type: string, schema: z.ZodType): void {
   EXTRA_METADATA_TYPE_SCHEMAS.set(type, schema);
@@ -154,18 +174,21 @@ export function listMetadataTypeSchemaTypes(): string[] {
  * keyed by metadata type. Mirrors `EXTRA_METADATA_TYPE_SCHEMAS` above.
  *
  * The merged view (built-in declarative actions from
- * `DEFAULT_METADATA_TYPE_REGISTRY` + these registered ones) is what the
- * `/api/v1/meta/types/:type` endpoint emits, so the Studio metadata-admin
- * engine renders one button mechanism — the same `ActionSchema` business
- * objects already use — for every metadata type.
+ * `DEFAULT_METADATA_TYPE_REGISTRY` + these registered ones) is what
+ * `GET /api/v1/meta` emits, so the Studio metadata-admin engine renders one
+ * button mechanism — the same `ActionSchema` business objects already use —
+ * for every metadata type.
  */
 const EXTRA_METADATA_TYPE_ACTIONS = new Map<string, Action[]>();
 
 /**
  * Register (or extend) the type-level actions for a metadata type.
  *
- * Plugins call this from `onInstall` to layer actions onto any type —
- * built-in or custom — without forking the registry. Actions merge by
+ * Plugins call this from their `init(ctx)` to layer actions onto any type —
+ * built-in or custom — without forking the registry. `DatasourceAdminServicePlugin`
+ * is the worked example: it registers the datasource "Test connection" button
+ * as the first statement of `init`, co-located with the route that serves it.
+ * (This said `onInstall` until #4212 — a hook nothing calls.) Actions merge by
  * `name`: a later registration with the same `name` replaces the earlier
  * one; new names append. Idempotent for identical input.
  *

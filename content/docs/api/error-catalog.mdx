@@ -122,8 +122,15 @@ substitute. See the [Data API](/docs/api/data-api).
 **Retry:** `no_retry`
 
 ### `INVALID_FILTER`
-**Cause:** A filter operator or field in the `where` clause is invalid.  
-**Fix:** Use valid filter operators (`$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$contains`, etc.).  
+**Cause:** The server could not turn the request's filter into something it can
+run. Covers an invalid operator or field in the `where` clause, a `$filter`
+array that is not a filter AST (a bad operator, a lone `["and"]`), a `filter`
+query parameter that is not valid JSON, and JSON that parses to something that
+is not a filter (`5`, `"done"`, `null`).  
+**Fix:** Use valid filter operators (`$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$contains`, etc.) and a filter shape the [Data API](/docs/api/data-api) accepts — an object, or an array of `[field, operator, value]` conditions. The `error` message names the offending element.  
+**Why it is an error and not an empty result:** a filter the server cannot run
+is never silently skipped, because skipping it would return the **unfiltered**
+result set — a response indistinguishable from a successful query.  
 **Retry:** `no_retry`
 
 ### `INVALID_SORT`
