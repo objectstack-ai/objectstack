@@ -55,7 +55,7 @@ import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { BaseResponseSchema } from '@objectstack/spec/api';
+import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import {
   PresignedUrlResponseSchema,
   FileUploadResponseSchema,
@@ -276,9 +276,13 @@ describe('storage success envelope (#3689)', () => {
       const { status, body } = await c.run();
       expect(status).toBe(200);
 
-      // The shared envelope, imported — not a restatement of it.
+      // The shared envelope skeleton, imported. Note what it does NOT prove: it
+      // declares no `data` and strips unknown keys, so it passes `{ success: true }`
+      // and passes a payload duplicated into a stray top-level key (#4049).
       const base = BaseResponseSchema.safeParse(body);
       expect(base.success, `body is not a BaseResponse: ${JSON.stringify(body)}`).toBe(true);
+      // …so this is the assertion that actually says "the declared envelope".
+      expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
       expect(body.success).toBe(true);
       expect(body.error).toBeUndefined();
 

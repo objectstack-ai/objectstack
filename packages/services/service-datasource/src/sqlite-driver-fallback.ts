@@ -188,17 +188,19 @@ export async function resolveSqliteDriver(
     return { driver: wasmDriver, engine: 'sqlite-wasm', label: 'SqliteWasmDriver' };
   }
 
-  // 3. In-memory (mingo) — dev-only last resort. Not real SQL.
-  //
-  // Durability mirrors the sqlite target this rung is standing in for: the
-  // caller asked for a FILE, so a dev's data still survives a restart; an
-  // ephemeral `:memory:` stays ephemeral. Stated explicitly because the driver
-  // no longer persists by default (#4065 / #815 requirement #1) — the step-down
-  // must not silently downgrade a file-backed dev database to a volatile one.
+  // 3. In-memory (mingo) — dev-only last resort. Not real SQL, not persistent.
+  // `persistence: false` says the second half out loud. It used to be the only
+  // thing making it true: the driver defaulted to `'auto'`, which in Node
+  // flushed the whole store to `.objectstack/data/memory-driver.json` in the CWD
+  // and reloaded it next boot — a shared file every memory pool in the process
+  // aliased (#4083). #4065 made `false` the driver's own default, so this is now
+  // a restatement rather than a correction; it stays because a rung that MUST
+  // NOT persist should not be one edit away from persisting again.
   const { InMemoryDriver } = await import('@objectstack/driver-memory');
   warn(NATIVE_SQLITE_MEMORY_FALLBACK_WARNING);
-  const driver = new InMemoryDriver(
-    isEphemeralFilename(filename) ? { persistence: false } : { persistence: 'file' },
-  );
-  return { driver, engine: 'memory', label: 'InMemoryDriver' };
+  return {
+    driver: new InMemoryDriver({ persistence: false }),
+    engine: 'memory',
+    label: 'InMemoryDriver',
+  };
 }

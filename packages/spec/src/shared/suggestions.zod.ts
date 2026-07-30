@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import type { z } from 'zod';
 import { FieldType } from '../data/field.zod';
 
 /**
@@ -181,4 +182,87 @@ export function formatSuggestion(suggestions: string[]): string {
   if (suggestions.length === 0) return '';
   if (suggestions.length === 1) return `Did you mean '${suggestions[0]}'?`;
   return `Did you mean one of: ${suggestions.map((s) => `'${s}'`).join(', ')}?`;
+}
+
+/** `reference_to` / `referenceTo` / `Reference-To` all collapse onto one probe. */
+const aliasProbe = (key: string): string => key.toLowerCase().replace(/[_\-\s]/g, '');
+
+/** Options for {@link strictUnknownKeyError}. */
+export interface StrictUnknownKeyErrorOptions {
+  /** Prose name of the authoring surface the key was written on (e.g. `'this permission set'`). */
+  surface: string;
+  /** The schema's declared keys — candidates for the edit-distance fallback. */
+  knownKeys: readonly string[];
+  /**
+   * Semantic near-misses: a different *word* for the same intent, usually
+   * borrowed from a neighbouring schema or product where that word is correct.
+   * Edit distance cannot reach these, so they are named explicitly; plain
+   * case/underscore slips are left to {@link findClosestMatches}. Map keys are
+   * matched case-insensitively with `_` / `-` / space separators removed.
+   */
+  aliases?: Readonly<Record<string, string>>;
+  /**
+   * Exact-key prescriptions, appended verbatim as bullet lines: tombstones for
+   * retired keys (the rejection must carry the upgrade — see the Post-Task
+   * Checklist in AGENTS.md), or wrong-layer pointers for keys that belong to a
+   * different surface. An entry here suppresses the rename suggestion for that
+   * key. Matched case-sensitively (exact authored spelling).
+   */
+  guidance?: Readonly<Record<string, string>>;
+  /** One sentence of history: why this key would previously have failed silently. */
+  history: string;
+}
+
+/**
+ * Build the custom zod `error` map for a `.strict()` authorable schema — the
+ * shared factory behind the unknown-key strictness ratchet (#4001, ADR-0078).
+ *
+ * Zod's default is `.strip`: a key the schema does not declare is **silently
+ * discarded** and the instance goes on parsing. On an authorable surface that
+ * is the worst failure mode — the author (human or AI) gets a success and
+ * ships metadata that quietly ignores their config (#3405 action-param
+ * `reference`, #1535 object-level `workflows`). `.strict()` makes the drop
+ * loud; this factory makes it *fixable*: the error names the offending key(s)
+ * and, when one is a recognisable spelling of a declared key, points at the
+ * canonical one — alias table first (semantic near-misses), then a
+ * length-relative edit-distance fallback (matching `suggestKey` in
+ * `data/object.zod.ts`: a flat distance of 3 is noise on a short key).
+ *
+ * Wire it as the object's `error` alongside `.strict()`:
+ *
+ * ```ts
+ * z.object({ ... }, { error: strictUnknownKeyError({ ... }) }).strict()
+ * ```
+ *
+ * First consumers: `ui/action.zod.ts` (#3746, the template this generalizes),
+ * `security/permission.zod.ts`, `automation/flow.zod.ts`.
+ */
+export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.core.$ZodErrorMap {
+  const { surface, knownKeys, guidance = {}, history } = options;
+  const aliases: Record<string, string> = {};
+  for (const [key, canonical] of Object.entries(options.aliases ?? {})) {
+    aliases[aliasProbe(key)] = canonical;
+  }
+  return (issue) => {
+    if (issue.code !== 'unrecognized_keys') return undefined;
+    const keys = (issue as { keys?: readonly string[] }).keys ?? [];
+    const renames: string[] = [];
+    const prescriptions: string[] = [];
+    for (const key of keys) {
+      const prescription = guidance[key];
+      if (prescription) {
+        prescriptions.push(prescription);
+        continue;
+      }
+      const maxDistance = Math.max(2, Math.floor(key.length / 3));
+      const canonical =
+        aliases[aliasProbe(key)] ?? findClosestMatches(key, knownKeys, maxDistance, 1)[0];
+      if (canonical && canonical !== key) renames.push(`\`${key}\` → \`${canonical}\``);
+    }
+    let message =
+      `Unrecognized key(s) on ${surface}: ${keys.map((k) => `\`${k}\``).join(', ')}. ${history}`;
+    if (renames.length) message += ` Did you mean ${renames.join(', ')}?`;
+    if (prescriptions.length) message += `\n${prescriptions.map((p) => `  • ${p}`).join('\n')}`;
+    return message;
+  };
 }

@@ -6,6 +6,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { DateGranularity } from '../data/query.zod';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
+import { ActionType } from './action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ResponsiveConfigSchema } from './responsive.zod';
@@ -28,14 +29,20 @@ export const WidgetColorVariantSchema = lazySchema(() => z.enum([
 
 /**
  * Action type for widget action buttons.
+ *
+ * `ActionType` itself, not a hand-kept subset of it. The two lists had drifted
+ * apart by one member — `form` — and the disagreement was backwards: a
+ * dashboard header or widget action button dispatches through the same
+ * `ActionRunner` that implements `form` (objectui's `DashboardRenderer` routes
+ * everything except a raw `url` into it, deliberately, so a `flow` header
+ * action works — objectstack#3528). So the narrower enum rejected at validation
+ * exactly what the shared dispatcher then executes at runtime.
+ *
+ * Derived rather than restated: a type added to `ActionType` is dispatchable
+ * from a widget the moment the runner implements it, with no second list to
+ * remember.
  */
-export const WidgetActionTypeSchema = lazySchema(() => z.enum([
-  'script',
-  'url',
-  'modal',
-  'flow',
-  'api',
-]).describe('Widget action type'));
+export const WidgetActionTypeSchema = lazySchema(() => ActionType.describe('Widget action type'));
 
 /**
  * Dashboard Header Action Schema

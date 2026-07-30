@@ -8,6 +8,7 @@ import { recordSeedOutcome } from './seed-summary.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IMetadataService, II18nService } from '@objectstack/spec/contracts';
+import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
 import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
@@ -931,10 +932,13 @@ export class AppPlugin implements Plugin {
                       const totalRefsDropped = result.summary.totalReferencesDropped ?? 0;
                       // #3415/#3430: stash a per-source outcome on the kernel so
                       // the CLI boot banner can print a Seeds line. The logs below
-                      // never reach `os dev` output — info is under the default
-                      // warn level, and the serve boot-quiet window swallows stdout
-                      // — so without this a fixture can lose most of its rows with
-                      // no signal at all. One labelled entry per config app.
+                      // are `info`, which sits under the default `warn` level, so
+                      // they never reach `os dev` output — without this a fixture
+                      // can lose most of its rows with no signal at all. (The
+                      // serve boot-quiet window used to swallow them on top of
+                      // that, at every level; framework#4012 fixed that half, but
+                      // the level gate below is what still hides these.) One
+                      // labelled entry per config app.
                       recordSeedOutcome(ctx, {
                           source: String(appId),
                           inserted: totalInserted,
@@ -1266,9 +1270,12 @@ export class AppPlugin implements Plugin {
             }
         }
 
-        // Emit diagnostic when the active i18n service is a fallback/stub
-        const svcAny = i18nService as unknown as Record<string, unknown>;
-        if (svcAny._fallback || svcAny._dev) {
+        // Emit diagnostic when the active i18n service is a fallback/stub.
+        // [#4058] Reads the standard D12 self-description instead of duck-typing
+        // the two ad-hoc markers this branch knew about (`_fallback` / `_dev`).
+        // `_fallback` was recognized by nothing else — which is exactly how the
+        // kernel fallbacks carrying it ended up reported as fully `available`.
+        if (readServiceSelfInfo(i18nService)) {
             ctx.logger.info(
                 `[i18n] Loaded ${loadedLocales} locale(s) into in-memory i18n fallback for "${appId}". ` +
                 'For production, consider registering I18nServicePlugin from @objectstack/service-i18n.'

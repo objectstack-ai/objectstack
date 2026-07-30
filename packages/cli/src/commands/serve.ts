@@ -15,6 +15,7 @@ import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
+import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
 import {
   printHeader,
@@ -24,6 +25,7 @@ import {
   printStep,
   printInfo,
   printServerReady,
+  printBootDiagnostics,
   type AutomationReadySummary,
   type SeedSourceSummary,
 } from '../utils/format.js';
@@ -176,7 +178,7 @@ export default class Serve extends Command {
       options: ['minimal', 'default', 'full'],
     }),
     'log-level': Flags.string({
-      description: 'Kernel logger level. Defaults to $OS_LOG_LEVEL / $LOG_LEVEL, else `warn` so flow/hook execution failures surface (ADR-0032). Use `silent` to fully quiet the runtime.',
+      description: 'Kernel logger level. Defaults to $OS_LOG_LEVEL / $LOG_LEVEL, else `warn` so flow/hook execution failures surface (ADR-0032). Boot-phase warnings are replayed under the startup banner; `debug`/`info` stream the whole boot live instead. Use `silent` to fully quiet the runtime.',
       options: [...LOG_LEVELS],
     }),
     verbose: Flags.boolean({ char: 'v', description: 'Verbose output — shortcut for --log-level debug.' }),
@@ -554,11 +556,35 @@ export default class Serve extends Command {
     let resolvedDriverLabel: string | undefined;
     let resolvedDatabaseUrl: string | undefined;
 
+    // Resolve the kernel logger level up front. It decides more than the
+    // logger's own threshold: it decides whether the boot-quiet window below
+    // runs at all, so it has to be known BEFORE the window opens rather than
+    // at the `new Runtime(...)` call further down.
+    const bootLogLevel = resolveLogLevel({
+      verbose: flags.verbose,
+      flag: flags['log-level'],
+      envLevel: readLogLevelEnv(),
+    });
+    // `--verbose` / `--log-level debug|info` asks to watch the boot happen.
+    // Blanking stdout through it would be the flag defeating itself, so at
+    // those levels the window never opens and boot output streams live — the
+    // banner just prints at the end of it (#4012).
+    const verboseBoot = isVerboseBootLevel(bootLogLevel);
+
     // Save original console/stdout methods — we'll suppress noise during boot
     const originalConsoleLog = console.log;
     const originalConsoleDebug = console.debug;
     const origStdoutWrite = process.stdout.write.bind(process.stdout);
     let bootQuiet = false;
+    // Everything the quiet window intercepts lands here instead of being
+    // dropped on the floor, so boot-phase `logger.warn` survives to be
+    // replayed under the banner (#4012).
+    const bootLogs = new BootLogCapture();
+    /** Diagnostics to replay, or `undefined` when the boot had nothing to say. */
+    const collectBootDiagnostics = () => {
+      const lines = bootLogs.diagnostics();
+      return lines.length > 0 ? { lines, dropped: bootLogs.droppedCount } : undefined;
+    };
 
     const restoreOutput = () => {
       bootQuiet = false;
@@ -568,19 +594,34 @@ export default class Serve extends Command {
     };
 
     try {
-      // ── Suppress ALL runtime noise during boot ────────────────────
+      // ── Hold back runtime noise during boot ───────────────────────
       // Multiple sources write to stdout during startup:
       //   • Pino-pretty (direct process.stdout.write)
       //   • ObjectLogger browser fallback (console.log)
       //   • SchemaRegistry (console.log)
-      // We capture stdout entirely, then restore after runtime.start().
-      bootQuiet = true;
-      process.stdout.write = (chunk: any, ...rest: any[]) => {
-        if (bootQuiet) return true;  // swallow
-        return (origStdoutWrite as any)(chunk, ...rest);
-      };
-      console.log = (...args: any[]) => { if (!bootQuiet) originalConsoleLog(...args); };
-      console.debug = (...args: any[]) => { if (!bootQuiet) originalConsoleDebug(...args); };
+      // We intercept stdout entirely, then restore after runtime.start().
+      //
+      // Intercepted is not discarded (#4012): `ObjectLogger` routes `warn` to
+      // stdout — only `error`/`fatal` go to stderr — so dropping these bytes
+      // dropped every boot-phase warning a plugin logged, on both `os serve`
+      // and `os dev` (which inherits this child's stdio), at every log level.
+      // The chatter still never reaches the banner; the kernel-logger records
+      // among it are buffered and replayed once the banner has printed.
+      bootQuiet = !verboseBoot;
+      if (!verboseBoot) {
+        process.stdout.write = (chunk: any, ...rest: any[]) => {
+          if (bootQuiet) {
+            bootLogs.write(chunk, typeof rest[0] === 'string' ? rest[0] : undefined);
+            // Honor the write callback so a caller awaiting drain still resumes.
+            const cb = rest.find((a) => typeof a === 'function');
+            if (cb) cb();
+            return true;
+          }
+          return (origStdoutWrite as any)(chunk, ...rest);
+        };
+        console.log = (...args: any[]) => { if (!bootQuiet) originalConsoleLog(...args); };
+        console.debug = (...args: any[]) => { if (!bootQuiet) originalConsoleDebug(...args); };
+      }
 
       // Load configuration
       // --prebuilt: load as native ESM (no esbuild, no bundle-require) —
@@ -784,18 +825,13 @@ export default class Serve extends Command {
       // Import ObjectStack runtime
       const { Runtime } = await import('@objectstack/runtime');
 
-      // Resolve the kernel logger level. Honors --verbose / --log-level and
+      // The kernel logger level. Honors --verbose / --log-level and
       // $OS_LOG_LEVEL / $LOG_LEVEL, defaulting to `warn` so flow/hook
       // execution failures surface even when the CLI manages its own output
       // (ADR-0032 "fail loudly"; see #1533). `--log-level silent` restores the
-      // old fully-quiet behavior.
-      const loggerConfig = {
-        level: resolveLogLevel({
-          verbose: flags.verbose,
-          flag: flags['log-level'],
-          envLevel: readLogLevelEnv(),
-        }),
-      };
+      // fully-quiet behavior. Resolved above the boot-quiet window, which
+      // keys off it too (#4012).
+      const loggerConfig = { level: bootLogLevel };
 
       // Cluster wiring: env-driven driver selection (mirrors OS_DATABASE_URL).
       // The remote driver self-registers on import; import it dynamically so it
@@ -984,13 +1020,37 @@ export default class Serve extends Command {
       const configHasMetadata = !!(
         config.objects || config.manifest || config.apps || config.flows || config.apis
       );
+      // ORDERING (#4085): the wrap is APPENDED to `plugins` rather than
+      // registered here, because plugin registration order IS the kernel's
+      // init/start order (`resolveDependencies` preserves insertion order for
+      // plugins that declare no `dependencies`, and AppPlugin declares none).
+      // AppPlugin.init() registers its manifest through the `manifest` service
+      // and AppPlugin.start() seeds through the default datasource — both owned
+      // by plugins that live in `plugins[]` (ObjectQLPlugin /
+      // DefaultDatasourcePlugin, contributed by `createStandaloneStack`) and
+      // registered by the loop far below. Registering the wrap HERE put it
+      // ahead of them, so config-boot died in Phase 1 with
+      // "Service 'manifest' is async - use await" whenever no compiled
+      // `dist/objectstack.json` existed — the artifact path never hit it only
+      // because `createStandaloneStack` appends ITS AppPlugin after the engine
+      // (which also made the crash look artifact-related rather than
+      // order-related). Appending puts the config-derived app in exactly that
+      // same slot, so both boot paths share one plugin order.
       if (!hasAppPluginAlready && configHasMetadata) {
         try {
             const { AppPlugin } = await import('@objectstack/runtime');
-            await kernel.use(new AppPlugin(config));
-            trackPlugin('App');
+            plugins = [...plugins, new AppPlugin(config)];
         } catch (e: any) {
-            // silent
+            // Non-fatal — the platform still boots, just without this app's
+            // metadata. But it must SAY so: this catch was silent, and the two
+            // things it swallows (a malformed envelope AppPlugin rejects by
+            // construction, an unresolvable @objectstack/runtime) both leave a
+            // server answering with zero objects and no stated reason — the
+            // same class of invisible boot failure as #4085 itself.
+            console.warn(chalk.yellow(
+              `  ⚠ Skipped registering the app defined in this config: ${e?.message ?? e}\n`
+              + '    Its objects/flows will NOT be served. Fix the config (or pin an AppPlugin in `plugins`).',
+            ));
         }
       }
 
@@ -2391,6 +2451,11 @@ export default class Serve extends Command {
       // never accept a request — shutdown immediately so the deploy
       // pipeline can move on.
       if (process.env.OS_MIGRATE_AND_EXIT === '1') {
+        // This path exits before the banner, so it has to replay the boot
+        // diagnostics itself — a deploy pipeline is precisely where a
+        // degraded-boot warning must not vanish (#4012).
+        const migrateDiagnostics = collectBootDiagnostics();
+        if (migrateDiagnostics) printBootDiagnostics(migrateDiagnostics);
         console.log(chalk.green(`✓ Migration complete (${loadedPlugins.length} plugins started against ${resolvedDatabaseUrl ? redactConnectionUrl(resolvedDatabaseUrl) : 'configured DB'})`));
         try {
           await kernel.shutdown();
@@ -2430,21 +2495,22 @@ export default class Serve extends Command {
       } catch { /* auth service not present — nothing to show */ }
 
       // ── Automation wiring summary (2026-07-17 third-party eval) ─────
-      // Flow registration + trigger binding happen entirely inside the
-      // boot-quiet stdout window above, so the engine's own info/warn logs
-      // never reach the terminal. Collect the live binding state here (after
-      // restore) and surface it in the banner: declared-but-engine-missing,
-      // unbound triggered flows, and bound-but-dead (unknown object) flows.
+      // A flow that silently failed to arm logs nothing at all, so no amount of
+      // log plumbing answers "did my flows arm?" — the binding STATE has to be
+      // read off the live engine. Collect it here (after restore) and surface it
+      // in the banner: declared-but-engine-missing, unbound triggered flows, and
+      // bound-but-dead (unknown object) flows.
       const automationSummary = collectAutomationSummary(
         kernel,
         Array.isArray((config as any)?.flows) ? (config as any).flows.length : 0,
       );
 
       // ── Seed outcome summary (#3415/#3430) ─────────────────────────
-      // Seeds run inside the boot-quiet window too, and SeedLoader's own
-      // logs sit under the default warn level — a fixture could lose 90%
-      // of its rows, or a marketplace package rehydrate onto a fresh DB
-      // with zero rows, all with zero terminal signal. AppPlugin and the
+      // SeedLoader's own result logs are `info`, under the default warn
+      // level — a fixture could lose 90% of its rows, or a marketplace
+      // package rehydrate onto a fresh DB with zero rows, all with zero
+      // terminal signal. (The boot-quiet window hid them at every level on
+      // top of that until #4012.) AppPlugin and the
       // marketplace rehydrate/heal path stash a per-source entry on the
       // kernel; print them here, loudly when rows dropped or an install
       // came up empty.
@@ -2469,6 +2535,11 @@ export default class Serve extends Command {
         seededAdmin,
         automation: automationSummary,
         seeds: seedSummary,
+        // #4012 — every boot-phase `logger.warn` the quiet window intercepted,
+        // replayed here. Without this the window is a drain: the ADR-0110 D5
+        // `[action-governance]` inventory, degraded-boot notices and flow
+        // binding failures all reached stdout and none reached a terminal.
+        bootDiagnostics: collectBootDiagnostics(),
         // #3167 — surface the default-on MCP endpoint in the dev loop, where an
         // AI client can connect to operate the running app. Same decision point
         // that auto-loads the plugin + gates the route, so the banner never
@@ -2512,6 +2583,10 @@ export default class Serve extends Command {
       restoreOutput();
       console.log('');
       printError(error.message || String(error));
+      // A boot that died is when its warnings matter most, and the banner that
+      // would normally carry them never printed (#4012).
+      const diagnostics = collectBootDiagnostics();
+      if (diagnostics) printBootDiagnostics(diagnostics);
       if (process.env.DEBUG) console.error(chalk.dim(error.stack));
       this.exit(1);
     }
@@ -2574,8 +2649,8 @@ export function describeRegisteredDriver(kernel: any): { label: string; url: str
 
 /**
  * Collect the automation wiring facts for the startup banner (2026-07-17
- * third-party eval: flow registration/binding logs fall inside the boot-quiet
- * stdout window, so the banner is the one channel a developer reliably sees).
+ * third-party eval: a flow that failed to arm emits no log line to find, so the
+ * banner reads the binding state off the engine instead).
  *
  * Every probe is feature-detected so an older `@objectstack/service-automation`
  * (without `getTriggerBindingAudit` / extended runtime states) degrades to the

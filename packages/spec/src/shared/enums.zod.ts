@@ -6,13 +6,16 @@ import { z } from 'zod';
 // Shared Enumerations
 // ============================================================================
 
-/** Aggregation functions used across query, data-engine, analytics, field */
 import { lazySchema } from './lazy-schema';
-export const AggregationFunctionEnum = z.enum([
-  'count', 'sum', 'avg', 'min', 'max',
-  'count_distinct', 'percentile', 'median', 'stddev', 'variance',
-]).describe('Standard aggregation functions');
-export type AggregationFunction = z.infer<typeof AggregationFunctionEnum>;
+
+// `AggregationFunctionEnum` lived here, claiming in its own doc comment to be
+// "used across query, data-engine, analytics, field". It was used by nothing —
+// no importer in this repo, objectui, or cloud — while `AggregationFunction`
+// (`data/query.zod.ts`) is the vocabulary the query engine, dataset compiler and
+// native-SQL strategy all gate on. The two even disagreed: this one had
+// percentile/median/stddev/variance, that one has array_agg/string_agg. Removed
+// rather than reconciled, because a second name for one concept is how the
+// vocabularies drifted apart in the first place. objectui#2945.
 
 /** Sort direction used across query, data-engine, analytics */
 export const SortDirectionEnum = z.enum(['asc', 'desc'])

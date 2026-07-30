@@ -61,19 +61,24 @@ describe('PositionSchema', () => {
       expect(() => PositionSchema.parse(position)).not.toThrow();
     });
 
-    it('should accept position with parent', () => {
-      const position: Position = {
+    it('rejects the retired `parent` hierarchy key (positions are flat, ADR-0090 D3)', () => {
+      // Pre-ADR-0090 this test asserted `parent` parsed — which only "worked"
+      // because zod's default `.strip` silently ate the key; no position tree
+      // ever existed. Since #4001 the fiction is a loud error instead.
+      const result = PositionSchema.safeParse({
         name: 'vp_sales',
         label: 'VP of Sales',
         parent: 'ceo',
-      };
-
-      expect(() => PositionSchema.parse(position)).not.toThrow();
+      });
+      expect(result.success).toBe(false);
+      expect(
+        result.error!.issues.find((i) => i.code === 'unrecognized_keys')!.message,
+      ).toContain('business-unit');
     });
   });
 
   describe('Real-World Position Examples', () => {
-    it('should accept complete sales organization hierarchy', () => {
+    it('should accept a complete sales organization (flat — ADR-0090 D3)', () => {
       const positions: Position[] = [
         {
           name: 'ceo',
@@ -83,31 +88,26 @@ describe('PositionSchema', () => {
         {
           name: 'vp_sales',
           label: 'VP of Sales',
-          parent: 'ceo',
           description: 'Leads entire sales organization',
         },
         {
           name: 'regional_sales_director',
           label: 'Regional Sales Director',
-          parent: 'vp_sales',
           description: 'Manages sales for a specific region',
         },
         {
           name: 'sales_manager',
           label: 'Sales Manager',
-          parent: 'regional_sales_director',
           description: 'Manages a team of sales representatives',
         },
         {
           name: 'senior_sales_rep',
           label: 'Senior Sales Representative',
-          parent: 'sales_manager',
           description: 'Senior member of sales team',
         },
         {
           name: 'sales_rep',
           label: 'Sales Representative',
-          parent: 'sales_manager',
           description: 'Individual contributor in sales',
         },
       ];
@@ -117,7 +117,7 @@ describe('PositionSchema', () => {
       });
     });
 
-    it('should accept service organization hierarchy', () => {
+    it('should accept a service organization (flat)', () => {
       const positions: Position[] = [
         {
           name: 'vp_customer_success',
@@ -126,17 +126,14 @@ describe('PositionSchema', () => {
         {
           name: 'support_manager',
           label: 'Support Manager',
-          parent: 'vp_customer_success',
         },
         {
           name: 'senior_support_agent',
           label: 'Senior Support Agent',
-          parent: 'support_manager',
         },
         {
           name: 'support_agent',
           label: 'Support Agent',
-          parent: 'support_manager',
         },
       ];
 
@@ -145,7 +142,7 @@ describe('PositionSchema', () => {
       });
     });
 
-    it('should accept product organization hierarchy', () => {
+    it('should accept a product organization (flat)', () => {
       const positions: Position[] = [
         {
           name: 'cto',
@@ -154,28 +151,23 @@ describe('PositionSchema', () => {
         {
           name: 'vp_engineering',
           label: 'VP of Engineering',
-          parent: 'cto',
         },
         {
           name: 'engineering_manager',
           label: 'Engineering Manager',
-          parent: 'vp_engineering',
           description: 'Manages engineering team',
         },
         {
           name: 'tech_lead',
           label: 'Technical Lead',
-          parent: 'engineering_manager',
         },
         {
           name: 'senior_engineer',
           label: 'Senior Software Engineer',
-          parent: 'engineering_manager',
         },
         {
           name: 'engineer',
           label: 'Software Engineer',
-          parent: 'engineering_manager',
         },
       ];
 
@@ -184,7 +176,7 @@ describe('PositionSchema', () => {
       });
     });
 
-    it('should accept matrix organization with multiple reporting lines', () => {
+    it('should accept a matrix organization (reporting lines live on sys_user.manager_id, not positions)', () => {
       const positions: Position[] = [
         {
           name: 'ceo',
@@ -193,27 +185,22 @@ describe('PositionSchema', () => {
         {
           name: 'regional_vp_americas',
           label: 'Regional VP - Americas',
-          parent: 'ceo',
         },
         {
           name: 'regional_vp_emea',
           label: 'Regional VP - EMEA',
-          parent: 'ceo',
         },
         {
           name: 'regional_vp_apac',
           label: 'Regional VP - APAC',
-          parent: 'ceo',
         },
         {
           name: 'country_manager_us',
           label: 'Country Manager - US',
-          parent: 'regional_vp_americas',
         },
         {
           name: 'country_manager_uk',
           label: 'Country Manager - UK',
-          parent: 'regional_vp_emea',
         },
       ];
 
@@ -231,7 +218,6 @@ describe('PositionSchema', () => {
         {
           name: 'team_member',
           label: 'Team Member',
-          parent: 'founder',
         },
       ];
 
@@ -239,5 +225,53 @@ describe('PositionSchema', () => {
         expect(() => PositionSchema.parse(position)).not.toThrow();
       });
     });
+  });
+});
+
+// #4001 step 2 — PositionSchema joins the strict ratchet, and gains the
+// ADR-0010 protection envelope the #4071 ledger flagged as the known sibling
+// gap (applyProtection stamps EVERY registered metadata type; position could
+// not represent the stamp).
+describe('unknown keys are rejected, not stripped (#4001)', () => {
+  const unknownKeyIssue = (value: unknown) => {
+    const result = PositionSchema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+  };
+
+  it('rejects an undeclared key instead of silently dropping it', () => {
+    expect(unknownKeyIssue({ name: 'p', label: 'P', notAKey: 1 })!.message)
+      .toContain('`notAKey`');
+  });
+
+  it('points permissionSets/users/parent at the runtime binding or flatness rule', () => {
+    expect(unknownKeyIssue({ name: 'p', label: 'P', permissionSets: [] })!.message)
+      .toContain('sys_position_permission_set');
+    expect(unknownKeyIssue({ name: 'p', label: 'P', users: [] })!.message)
+      .toContain('sys_user_position');
+    expect(unknownKeyIssue({ name: 'p', label: 'P', parent: 'boss' })!.message)
+      .toContain('FLAT');
+  });
+
+  it('round-trips the ADR-0010 runtime protection envelope', () => {
+    const parsed = PositionSchema.parse({
+      name: 'auditor', label: 'Auditor',
+      _packageId: 'com.showcase', _provenance: 'package', _lock: 'full',
+    });
+    expect(parsed._packageId).toBe('com.showcase');
+    expect(parsed._lock).toBe('full');
+  });
+
+  it('accepts every key the schema declares (guards POSITION_KEYS drift)', () => {
+    const probes: Record<string, unknown> = {
+      description: 'd', delegatable: true, protection: { lock: 'none' },
+    };
+    for (const [key, value] of Object.entries(probes)) {
+      const result = PositionSchema.safeParse({ name: 'p', label: 'P', [key]: value });
+      const unknown = result.success
+        ? undefined
+        : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(unknown, `\`${key}\` should be a declared Position key`).toBeUndefined();
+    }
   });
 });

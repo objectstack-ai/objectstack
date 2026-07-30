@@ -23,10 +23,7 @@ been absorbing:
   *after* `kernel.bootstrap()` — which misses the boot-time schema sync — looked
   fine. On SQL the first write fails with `no such table`, which the REST error
   mapper turns into a **404 `OBJECT_NOT_FOUND`**: a routing-shaped symptom for a
-  DDL-shaped cause. Four suites needed an explicit `syncObjectSchema` (or, for
-  the `schemaMode: 'external'` datasource in `datasource-autoconnect`, an
-  `initObjects` standing in for the DDL that already ran on the remote side —
-  the step a real external datasource genuinely requires).
+  DDL-shaped cause. Four suites needed an explicit `syncObjectSchema`.
 - **A missing object declaration read as working.** `notifications.hono.integration`
   writes `sys_notification`, which `MessagingServicePlugin` does not declare —
   it is a platform object, and that lean kernel never booted `platform-objects`.
@@ -41,6 +38,13 @@ is the entire point of that gate), and the suites whose subject IS the memory
 driver or its wiring — `standalone-stack` (`memory://` scheme),
 `sqlite-driver-fallback` (the dev step-down), the CLI's driver-label tests, and
 driver-memory's own suite.
+
+`datasource-autoconnect` is in that second group as of #4083, which landed a
+regression test there for exactly the memory-pool property this PR originally
+proposed to migrate away from. Moving that file to SQLite would have left the
+new test passing vacuously — a wasm-SQLite pool never writes `.objectstack/` at
+all — so it stays on the memory driver and keeps guarding what it was written
+to guard.
 
 No new coverage is claimed here: each suite asserts exactly what it asserted
 before, against a more faithful store.

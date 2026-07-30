@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { envelopeViolations } from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { DomainHandlerRegistry } from './domain-handler-registry.js';
 import type { DomainHandler } from './domain-handler-registry.js';
@@ -244,7 +245,7 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PR-3 — keys / storage / ui extraction
+// PR-3 — keys / storage / ui extraction (storage since retired, #4087)
 // ---------------------------------------------------------------------------
 
 describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
@@ -283,18 +284,34 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
         expect(result.response?.body?.data?.key).toBeTruthy();
     });
 
-    it('/storage responds 501 when file-storage is not configured (extracted body keeps in-handler semantics)', async () => {
-        const result = await makeDispatcher().dispatch('POST', '/storage/upload', { blob: 1 }, {}, {} as any);
-        expect(result.handled).toBe(true);
-        expect(result.response?.status).toBe(501);
-    });
+    /**
+     * [#4087] `/storage` is no longer a dispatcher domain. The registry must
+     * not claim the prefix in either direction — with the `file-storage` slot
+     * empty AND with it filled, since the retired bridge's whole reason for
+     * existing was "a service is registered, so route to it". It called that
+     * service off-contract (`upload(key, data, options?)` invoked as
+     * `upload(file, { request })`), and `@objectstack/service-storage` — which
+     * mounts the real protocol on the http-server — never went through here.
+     */
+    it('/storage is not claimed by the registry, filled slot or not', async () => {
+        // No domain matches, so dispatch's terminal exit answers — the same
+        // ROUTE_NOT_FOUND every unregistered path gets, not a 501/500 from a
+        // half-present bridge.
+        const empty = await makeDispatcher().dispatch('POST', '/storage/upload', { blob: 1 }, {}, {} as any);
+        expect(empty.response?.status).toBe(404);
+        expect(empty.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
 
-    it('/storage/upload uploads through the file-storage service', async () => {
-        const upload = vi.fn().mockResolvedValue({ id: 'f1' });
-        const result = await makeDispatcher({ 'file-storage': { upload, download: vi.fn() } })
+        const upload = vi.fn();
+        const download = vi.fn();
+        const filled = await makeDispatcher({ 'file-storage': { upload, download } })
             .dispatch('POST', '/storage/upload', { some: 'file' }, {}, {} as any);
-        expect(result.response?.status).toBe(200);
-        expect(upload).toHaveBeenCalledTimes(1);
+        expect(filled.response?.status).toBe(404);
+        expect(upload).not.toHaveBeenCalled();
+
+        const get = await makeDispatcher({ 'file-storage': { upload, download } })
+            .dispatch('GET', '/storage/file/abc', undefined, {}, {} as any);
+        expect(get.response?.status).toBe(404);
+        expect(download).not.toHaveBeenCalled();
     });
 
     it('/ui/view/:object serves the protocol getUiView result; 503 without a protocol service', async () => {
@@ -391,9 +408,15 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
     });
 
     it('every success body carries its payload under `data` and nowhere else', async () => {
-        // The general form of the two assertions above, over all four success
-        // routes: no key beside the envelope's own may hold the payload.
-        const ENVELOPE_KEYS = new Set(['success', 'data', 'meta']);
+        // The general form of the two assertions above, over all the success
+        // routes — and `envelopeViolations` (#4090) is now where that general form
+        // lives. This test hand-rolled it first, for #4038; extracting it into the
+        // spec meant the same rule stopped having two definitions that could drift
+        // apart, which is the failure this whole line has been closing.
+        //
+        // The shared one is also stricter than what stood here: the local set
+        // allowed any body whose keys were `success`/`data`/`meta`, so it passed a
+        // success body with no `data` at all and one carrying an `error`.
         const shareLinks = {
             createLink: vi.fn().mockResolvedValue(LINK),
             listLinks: vi.fn().mockResolvedValue([LINK]),
@@ -407,9 +430,7 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
         ];
         for (const body of bodies) {
             expect(body?.success).toBe(true);
-            for (const key of Object.keys(body ?? {})) {
-                expect(ENVELOPE_KEYS.has(key), `body carries a non-envelope top-level key: ${key}`).toBe(true);
-            }
+            expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
         }
     });
 

@@ -73,11 +73,34 @@ const users = await db.find('user', { where: { active: true } });
 check the registry map with `ctx.getServices()`:
 
 ```typescript
-if (ctx.getServices().has('analytics')) {
-  const analytics = ctx.getService<IAnalytics>('analytics');
-  analytics.track('page_view', { url: '/dashboard' });
+if (ctx.getServices().has('search')) {
+  const search = ctx.getService<ISearchService>('search');
+  await search.index('account', record.id, record);
 }
 ```
+
+**Presence is not capability.** A registered service may be a stub or a degraded
+fallback — dev-mode fakes and the kernel's own in-memory fallbacks both occupy
+real slots. They say so with the `__serviceInfo` descriptor (ADR-0076 D12), and
+consumers are expected to read it rather than trust mere registration:
+
+```typescript
+import { readServiceSelfInfo } from '@objectstack/spec/api';
+
+const ai = ctx.getServices().get('ai');
+const self = readServiceSelfInfo(ai);   // undefined ⇒ a real implementation
+
+if (ai && self?.status !== 'stub') {
+  // Safe: a real implementation, or a `degraded` one that genuinely works.
+} else if (self) {
+  ctx.logger.info(`ai is a stub — ${self.message}`);
+}
+```
+
+`status: 'degraded'` means real work with reduced capability (the in-memory
+cache, the in-memory search index); `status: 'stub'` means the answer is
+fabricated and must not be used for real work. `handlerReady: false`
+additionally means no HTTP handler serves it.
 
 ## Standard Services
 

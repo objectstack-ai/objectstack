@@ -80,8 +80,12 @@ export interface ResolveOptions {
  *
  * Order: exact → case-insensitive → base-language → variant-expansion.
  * Returns the matched bundle key, or `undefined` when nothing matches.
+ *
+ * Exported so sibling locale-keyed constant tables in this package — the
+ * built-in validation message catalog (`validation-message.ts`) — match locales
+ * by the same rules instead of accreting a third copy of this ladder.
  */
-function resolveBundleLocale(
+export function resolveBundleLocale(
   bundle: Record<string, unknown>,
   requested: string,
 ): string | undefined {
@@ -800,6 +804,40 @@ export interface ResolvedFieldLabel {
   help?: string;
   /** Option value → translated option label, when the bundle carries them. */
   options?: Record<string, string>;
+}
+
+/**
+ * The caller's preferred locale from an `Accept-Language` header value — the
+ * highest-priority tag, with its quality weight stripped
+ * (`zh-CN,zh;q=0.9,en;q=0.8` → `zh-CN`). Returns `undefined` for an absent or
+ * empty header.
+ *
+ * One implementation because two transports need the same answer: REST reads it
+ * for metadata translation AND for the execution context's locale, while the
+ * runtime dispatcher reads it for the latter (#3957). A message rendered from a
+ * different locale than the labels around it is the inconsistency that issue is
+ * about, so the two must not drift.
+ */
+export function preferredLocaleFromHeader(
+  header: string | null | undefined,
+): string | undefined {
+  if (typeof header !== 'string' || header.length === 0) return undefined;
+  const top = header.split(',')[0]?.split(';')[0]?.trim();
+  // `*` is "any language" — no preference expressed.
+  return top && top !== '*' ? top : undefined;
+}
+
+/**
+ * Dot-notation i18n key for a field's translated label —
+ * `objects.<object>.fields.<field>.label`.
+ *
+ * The same location {@link resolveObjectFieldLabels} reads out of a bundle
+ * object, spelled for consumers that hold an `II18nService` (which takes a key)
+ * rather than a `TranslationBundle`. Used by the write-path validator to name
+ * the offending field in the caller's language (#3957).
+ */
+export function objectFieldLabelKey(objectName: string, fieldName: string): string {
+  return `objects.${objectName}.fields.${fieldName}.label`;
 }
 
 export function resolveObjectFieldLabels(

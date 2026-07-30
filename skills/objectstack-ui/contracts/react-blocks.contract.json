@@ -322,7 +322,7 @@
         },
         {
           "name": "type",
-          "type": "'bar' | 'horizontal-bar' | 'column' | 'line' | 'area' | 'pie' | 'donut' | 'funnel' | 'scatter' | 'treemap' | 'sankey' | 'gauge' | 'solid-gauge' | 'metric' | 'kpi' | 'bullet' | 'radar' | 'table' | 'pivot'",
+          "type": "'bar' | 'horizontal-bar' | 'column' | 'line' | 'area' | 'pie' | 'donut' | 'funnel' | 'scatter' | 'treemap' | 'sankey' | 'combo' | 'gauge' | 'solid-gauge' | 'metric' | 'kpi' | 'bullet' | 'radar' | 'table' | 'pivot'",
           "kind": "data",
           "required": true,
           "description": ""

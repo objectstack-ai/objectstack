@@ -108,3 +108,55 @@ describe('matchesFilterCondition — FAIL CLOSED', () => {
     expect(m(rec, 'nope' as never)).toBe(false);
   });
 });
+
+describe('matchesFilterCondition — calendar-day upper bounds (ADR-0053 D-D, #3777)', () => {
+  // A `check` policy of this shape on a datetime post-image used to DENY every
+  // write made after 00:00 of the bound day — the write-side twin of the
+  // read-side data loss #3777 fixed. The four other filter backends already
+  // share this rule; this evaluator was the last one that disagreed.
+  const at = (created_at: string) => ({ created_at });
+
+  it('a bare-day $lte admits the whole day', () => {
+    expect(m(at('2026-07-28T00:00:00.000Z'), { created_at: { $lte: '2026-07-28' } })).toBe(true);
+    expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lte: '2026-07-28' } })).toBe(true);
+    expect(m(at('2026-07-28T23:59:59.999Z'), { created_at: { $lte: '2026-07-28' } })).toBe(true);
+  });
+
+  it('…and stops at the next day', () => {
+    expect(m(at('2026-07-29T00:00:00.000Z'), { created_at: { $lte: '2026-07-28' } })).toBe(false);
+  });
+
+  it('a plain calendar-day value is unchanged (string ordering is equivalent)', () => {
+    expect(m({ signed_on: '2026-07-28' }, { signed_on: { $lte: '2026-07-28' } })).toBe(true);
+    expect(m({ signed_on: '2026-07-29' }, { signed_on: { $lte: '2026-07-28' } })).toBe(false);
+  });
+
+  it('a full-ISO bound keeps exact-instant semantics — never widened', () => {
+    expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lte: '2026-07-28T12:00:00.000Z' } })).toBe(true);
+    expect(m(at('2026-07-28T21:40:00.000Z'), { created_at: { $lte: '2026-07-28T12:00:00.000Z' } })).toBe(false);
+  });
+
+  it('$gte / $gt / $lt keep their midnight anchoring', () => {
+    expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $gte: '2026-07-28' } })).toBe(true);
+    expect(m(at('2026-07-27T23:59:59.999Z'), { created_at: { $gte: '2026-07-28' } })).toBe(false);
+    expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lt: '2026-07-28' } })).toBe(false);
+  });
+
+  it('$between inherits the rule on its max, and still bounds the min', () => {
+    expect(m(at('2026-07-28T21:40:00.000Z'), { created_at: { $between: ['2026-04-29', '2026-07-28'] } })).toBe(true);
+    expect(m(at('2026-07-29T00:00:00.000Z'), { created_at: { $between: ['2026-04-29', '2026-07-28'] } })).toBe(false);
+    expect(m(at('2026-04-28T23:00:00.000Z'), { created_at: { $between: ['2026-04-29', '2026-07-28'] } })).toBe(false);
+  });
+
+  it('an impossible day is not rolled over — the bound stays as written', () => {
+    // `2026-02-30` is rejected by the primitive, so the comparison falls back
+    // to the literal `<=` rather than silently querying March 2nd.
+    expect(m({ signed_on: '2026-02-30' }, { signed_on: { $lte: '2026-02-30' } })).toBe(true);
+    expect(m({ signed_on: '2026-03-01' }, { signed_on: { $lte: '2026-02-30' } })).toBe(false);
+  });
+
+  it('stays fail-closed on a null bound', () => {
+    expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lte: null } as never })).toBe(false);
+    expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $between: ['2026-04-29', null] } as never })).toBe(false);
+  });
+});

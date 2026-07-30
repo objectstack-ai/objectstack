@@ -13,6 +13,7 @@ import type { FieldErrorCode } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
@@ -1670,6 +1671,15 @@ export class RestServer {
                 }
             } catch { /* gate is best-effort — never break context resolution */ }
 
+            // [#3957] The request's OWN locale wins over the workspace default.
+            // Metadata (labels, option text) is already translated per
+            // `Accept-Language` / `?locale` — so if the write path read only the
+            // workspace `localization.locale`, one screen could show a Chinese
+            // field label next to an English rejection message for that same
+            // field. `localization.locale` stays the fallback for a caller that
+            // expresses no preference (a server-to-server client, a job).
+            const effectiveLocale = this.extractLocale(req) ?? localization.locale;
+
             const execCtx = {
                 userId: authz.userId,
                 tenantId: authz.tenantId,
@@ -1690,7 +1700,7 @@ export class RestServer {
                 accessible_org_ids: authz.accessible_org_ids,
                 ...(authGate ? { authGate } : {}),
                 ...(localization.timezone ? { timezone: localization.timezone } : {}),
-                ...(localization.locale ? { locale: localization.locale } : {}),
+                ...(effectiveLocale ? { locale: effectiveLocale } : {}),
                 ...(localization.currency ? { currency: localization.currency } : {}),
                 // Internal: resolved kernel so the nav-serving path can probe
                 // requiresService capability gates (ADR-0057 D10). NOT an
@@ -1876,10 +1886,10 @@ export class RestServer {
                 ? headers.get('accept-language') ?? undefined
                 : headers['accept-language'] ?? headers['Accept-Language'];
         }
-        if (typeof header === 'string' && header.length > 0) {
-            const top = header.split(',')[0]?.split(';')[0]?.trim();
-            if (top) return top;
-        }
+        // Shared parse — the runtime dispatcher resolves the same header the
+        // same way, so a message and the labels around it can't disagree (#3957).
+        const preferred = preferredLocaleFromHeader(header);
+        if (preferred) return preferred;
         const queryLocale = req?.query?.locale;
         if (typeof queryLocale === 'string' && queryLocale.length > 0) return queryLocale;
         if (i18n && typeof i18n.getDefaultLocale === 'function') {
@@ -1887,6 +1897,21 @@ export class RestServer {
             if (typeof def === 'string' && def.length > 0) return def;
         }
         return undefined;
+    }
+
+    /**
+     * An `II18nService.t`-compatible lookup for the request's environment, or
+     * `undefined` when no i18n service is registered. Handed to the import
+     * runner so its own messages resolve a deployment's `validation.field.*`
+     * overrides — the engine gets the same hook via `ObjectQLPlugin` (#3957).
+     */
+    private async resolveMessageTranslator(
+        environmentId: string | undefined,
+        req: any,
+    ): Promise<((key: string, locale: string, params?: Record<string, unknown>) => string) | undefined> {
+        const i18n = await this.resolveI18nService(environmentId, req);
+        if (!i18n || typeof i18n.t !== 'function') return undefined;
+        return (key, locale, params) => i18n.t(key, locale, params);
     }
 
     /**
@@ -4164,6 +4189,9 @@ export class RestServer {
                     // runner (also used by the async import-job worker).
                     const summary = await runImport({
                         p, objectName, environmentId, context, ...prep.prepared,
+                        // #3957 — lets the row report resolve a deployment's
+                        // `validation.field.*` message overrides.
+                        translate: await this.resolveMessageTranslator(environmentId, req),
                     });
 
                     res.json({
@@ -4270,6 +4298,11 @@ export class RestServer {
                         ...(createdBy ? { created_by: createdBy } : {}),
                     };
 
+                    // Resolved NOW, while the request is still alive: the worker
+                    // below runs after the 201 response, when `req` (and its
+                    // headers) are no longer safe to read (#3957).
+                    const messageTranslator = await this.resolveMessageTranslator(environmentId, req);
+
                     try {
                         // [ADR-0103] sys_import_job rows are engine-owned — the import
                         // worker owns their lifecycle, and the object is locked to
@@ -4310,6 +4343,7 @@ export class RestServer {
                         try {
                             const summary = await runImport({
                                 p, objectName, environmentId, context, ...prepared,
+                                translate: messageTranslator,
                                 captureUndo,
                                 progressEvery: 200,
                                 onProgress: (pr) => patch({

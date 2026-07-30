@@ -5,8 +5,10 @@ import { printServerReady, type ServerReadyOptions, type SeedSourceSummary } fro
 
 /**
  * #3415/#3430 — the boot banner is the ONE place a developer reliably sees seed
- * outcomes (SeedLoader's own logs are level-filtered and swallowed by the serve
- * boot-quiet window). Assert the Seeds line prints per source, screams on
+ * outcomes: SeedLoader's own result logs are `info`, under the default `warn`
+ * level. (They were additionally swallowed by the serve boot-quiet window at
+ * every level until framework#4012; the level gate is what still hides them.)
+ * Assert the Seeds line prints per source, screams on
  * rejections AND empty marketplace installs, marks fresh-DB heals, and stays
  * silent when nothing was seeded.
  */

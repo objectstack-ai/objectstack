@@ -8,17 +8,12 @@
 // This boots the host-config shape (instantiated plugins, no MetadataPlugin —
 // the same shape `examples/app-showcase` runs under `os dev`) with the REAL
 // driver factory (`createDefaultDatasourceDriverFactory`) building an in-memory
-// SQLite database, so the full AppPlugin → `datasource-connection` → engine path
-// runs without any native driver dependency.
-//
-// The engine is the pure-JS WASM SQLite driver at `:memory:` — the same choice
-// `@objectstack/verify`'s `bootStack` makes for the dogfood gate, and for the
-// same two reasons: no native build (so it is CI-safe on any runner) and REAL
-// SQL semantics, so a federated read proved here behaves the way it will
-// against the Postgres/MySQL an external datasource actually points at. This
-// suite used `driver: 'memory'` until #4065; mingo is neither of those things.
+// driver, so the full AppPlugin → `datasource-connection` → engine path runs
+// without any native driver dependency.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { Runtime } from './runtime.js';
 import { DriverPlugin } from './driver-plugin.js';
 import { AppPlugin } from './app-plugin.js';
@@ -46,11 +41,11 @@ function artifact() {
     datasources: [
       {
         name: 'autoconn_ext',
-        label: 'External (in-memory SQLite)',
-        driver: 'sqlite-wasm',
+        label: 'External (in-memory)',
+        driver: 'memory',
         schemaMode: 'external',
         origin: 'code',
-        config: { filename: ':memory:' },
+        config: {},
         external: { allowWrites: false, validation: { onMismatch: 'warn', checkOnBoot: false } },
         active: true,
       },
@@ -59,10 +54,10 @@ function artifact() {
       {
         name: 'decorative',
         label: 'Decorative (unrouted)',
-        driver: 'sqlite-wasm',
+        driver: 'memory',
         schemaMode: 'managed',
         origin: 'code',
-        config: { filename: ':memory:' },
+        config: {},
         active: true,
       },
     ],
@@ -71,14 +66,17 @@ function artifact() {
 
 async function boot(opts: { connectPolicy?: DatasourceConnectPolicy } = {}) {
   const { ObjectQLPlugin } = await import('@objectstack/objectql');
-  const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
+  const { InMemoryDriver } = await import('@objectstack/driver-memory');
   const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
     '@objectstack/service-datasource'
   );
 
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
-  await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' }))); // default driver
+  // `persistence: false` keeps the acceptance hermetic. The driver's own default
+  // is `'auto'` — in Node a file adapter at `.objectstack/data/…` under the CWD,
+  // which both reloads and rewrites ambient state between runs (#4083).
+  await kernel.use(new DriverPlugin(new InMemoryDriver({ persistence: false }))); // default driver
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new AppPlugin(artifact()));
   await kernel.use(
@@ -129,14 +127,6 @@ describe('ADR-0062 declared-datasource auto-connect', () => {
     // Seed the live external driver directly (bypassing the read-only write gate,
     // exactly as a real remote DB would already hold the rows).
     const driver = engine.getDriverByName('autoconn_ext');
-    // `schemaMode: 'external'` means ObjectStack does NOT own this table — the
-    // remote database does — so nothing in the boot path creates it. Materialize
-    // it here, standing in for the DDL that already ran on the other side. The
-    // memory driver this suite used before #4065 auto-created a table on first
-    // touch, which quietly hid the step a real external datasource requires.
-    await driver.initObjects([
-      { name: 'ext_note', fields: { id: { type: 'text' }, title: { type: 'text' } } },
-    ]);
     await driver.bulkCreate('ext_note', [
       { id: 'n1', title: 'first' },
       { id: 'n2', title: 'second' },
@@ -144,6 +134,65 @@ describe('ADR-0062 declared-datasource auto-connect', () => {
     const rows = await engine.find('ext_note');
     expect(rows.map((r) => r.title).sort()).toEqual(['first', 'second']);
   });
+});
+
+// #4083 — the acceptance above passed on a clean checkout and failed on every
+// subsequent run, reading 2×N rows on the Nth: the auto-connected `memory`
+// datasource inherited `InMemoryDriver`'s then-default `persistence: 'auto'`
+// (#4065 has since made that default `false`), so it
+// flushed `ext_note` into `.objectstack/data/memory-driver.json` under the CWD
+// and the next boot's connect() loaded those rows back before this file seeded
+// its own. CI never caught it because CI always runs #1 on a fresh checkout.
+//
+// The intermittency ("passes once in four") came from WHEN the flush lands: the
+// file adapter writes on a 2s unref'd autosave timer, so a run short enough to
+// finish first left nothing behind. `flush()` below stands in for that timer, so
+// this pins the property that was actually broken — a federated in-memory pool
+// leaves nothing behind and does not outlive its kernel — without a timing race
+// and without depending on run-to-run state.
+describe('ADR-0062 D1 — the auto-connected in-memory pool leaves nothing behind (#4083)', () => {
+  const STATE_DIR = join(process.cwd(), '.objectstack');
+  const clearState = () => { try { rmSync(STATE_DIR, { recursive: true, force: true }); } catch { /* noop */ } };
+  // Clear on both sides: a leftover from elsewhere would make this pass for the
+  // wrong reason, and a failure that DID write must not leak into the next run
+  // (that leak is the bug under test).
+  beforeAll(clearState);
+  afterAll(clearState);
+
+  async function seedAndRead(kernel: Awaited<ReturnType<typeof boot>>) {
+    const engine = kernel.getService<{
+      getDriverByName(n: string): any;
+      find(object: string, query?: any): Promise<any[]>;
+    }>('data');
+    const driver = engine.getDriverByName('autoconn_ext');
+    await driver.bulkCreate('ext_note', [
+      { id: 'n1', title: 'first' },
+      { id: 'n2', title: 'second' },
+    ]);
+    const titles = (await engine.find('ext_note')).map((r) => r.title).sort();
+    // Whatever the autosave timer would have written, written now.
+    await driver.flush?.();
+    return titles;
+  }
+
+  it('writes no state file, and a second boot in the same process starts empty', async () => {
+    const first = await boot();
+    try {
+      expect(await seedAndRead(first)).toEqual(['first', 'second']);
+      // The seeded rows must not have reached the host filesystem at all.
+      expect(existsSync(STATE_DIR)).toBe(false);
+    } finally {
+      try { await (first as any)?.stop?.(); } catch { /* noop */ }
+    }
+
+    const second = await boot();
+    try {
+      // Was ['first','first','second','second'] — the first boot's rows, reloaded.
+      expect(await seedAndRead(second)).toEqual(['first', 'second']);
+    } finally {
+      try { await (second as any)?.stop?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
 });
 
 describe('ADR-0062 credentials fail-closed (D3)', () => {
@@ -157,10 +206,10 @@ describe('ADR-0062 credentials fail-closed (D3)', () => {
       datasources: [
         {
           name: 'needs_secret',
-          driver: 'sqlite-wasm',
+          driver: 'memory',
           schemaMode: 'external',
           origin: 'code',
-          config: { filename: ':memory:' },
+          config: {},
           external: {
             allowWrites: false,
             credentialsRef: 'sys_secret:does-not-exist',
@@ -174,13 +223,13 @@ describe('ADR-0062 credentials fail-closed (D3)', () => {
 
   it('bricks boot with a clear message when a required credential cannot be resolved', async () => {
     const { ObjectQLPlugin } = await import('@objectstack/objectql');
-    const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
+    const { InMemoryDriver } = await import('@objectstack/driver-memory');
     const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
       '@objectstack/service-datasource'
     );
     const runtime = new Runtime({ cluster: false });
     const kernel = runtime.getKernel();
-    await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
+    await kernel.use(new DriverPlugin(new InMemoryDriver()));
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AppPlugin(credArtifact()));
     await kernel.use(
@@ -226,13 +275,13 @@ describe('ADR-0062 D5 — an explicitly-bound datasource that cannot connect bri
 
   async function bootBound() {
     const { ObjectQLPlugin } = await import('@objectstack/objectql');
-    const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
+    const { InMemoryDriver } = await import('@objectstack/driver-memory');
     const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
       '@objectstack/service-datasource'
     );
     const runtime = new Runtime({ cluster: false });
     const kernel = runtime.getKernel();
-    await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
+    await kernel.use(new DriverPlugin(new InMemoryDriver()));
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AppPlugin(boundArtifact()));
     await kernel.use(

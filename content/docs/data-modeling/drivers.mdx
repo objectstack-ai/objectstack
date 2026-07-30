@@ -353,17 +353,25 @@ equivalent age-based reap.
 ## Memory Driver
 
 The in-memory driver keeps records in plain in-process objects (queried via
-[`mingo`](https://github.com/kofrasa/mingo)). By default data is lost when the
-process exits. It is the **last-resort fallback** in dev mode: `objectstack dev`
-prefers native SQLite (`better-sqlite3`), falls back to the pure-JS WASM SQLite
-driver if the native binary is unavailable, and only drops to the in-memory
-driver if WASM also fails to load. Set `OS_DATABASE_DRIVER=memory` to select it
-explicitly.
+[`mingo`](https://github.com/kofrasa/mingo)). Data is lost when the process
+exits unless persistence is explicitly requested.
+It is the **last-resort fallback** in dev mode: `objectstack dev` prefers native
+SQLite (`better-sqlite3`), falls back to the pure-JS WASM SQLite driver if the
+native binary is unavailable, and only drops to the in-memory driver if WASM also
+fails to load. Set `OS_DATABASE_DRIVER=memory` to select it explicitly.
+
+**Both ways of building the driver are ephemeral by default** (#4083, #4065):
+
+| How it is built | Persistence |
+| :--- | :--- |
+| A **declared datasource** — `{ driver: 'memory' }` in a stack/app config | **Ephemeral.** Nothing is written to disk unless the declaration sets `config.persistence` — and when it does, the destination is scoped per datasource, so two memory datasources never share one file. |
+| `new InMemoryDriver()` **constructed directly** | **Ephemeral.** Pass `persistence` to opt in (see below). Note the scoping above is the *factory's* job: two directly-constructed `'auto'` drivers in one process still share the single default path. |
 
 ```typescript
 import { InMemoryDriver } from '@objectstack/driver-memory';
 
-new InMemoryDriver();
+new InMemoryDriver();                         // pure memory — the default
+new InMemoryDriver({ persistence: 'file' });  // opt in to durability
 ```
 
 ### Persistence is opt-in
@@ -397,6 +405,10 @@ when you want no native build. Both give the SQL semantics production runs on;
 mingo does not enforce primary keys, uniqueness, `NOT NULL` or column types, so a
 green run against the memory driver is weaker evidence than it looks. The
 framework's own dogfood gate boots on WASM SQLite at `:memory:` for this reason.
+
+The memory driver remains fine where you want no setup at all and the assertions
+do not depend on storage semantics — it is ephemeral by default, so one run
+cannot see what an earlier run left behind.
 </Callout>
 
 ## Local Environment Runtime

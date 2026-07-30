@@ -6,12 +6,22 @@
  * Implements the IQueueService contract with synchronous in-process delivery.
  * Used by ObjectKernel as an automatic fallback when no real queue plugin
  * (e.g. BullMQ / RabbitMQ) is registered.
+ *
+ * [#4058] `degraded`, not `stub` (ADR-0076 D12): messages really reach real
+ * subscribers — synchronously, in-process, with no durability or retry.
+ * `getQueueSize()` answering 0 follows from that rather than faking it: nothing
+ * is ever buffered. `handlerReady: false` — no HTTP surface exists for `queue`.
  */
 export function createMemoryQueue() {
   const handlers = new Map<string, Function[]>();
   let msgId = 0;
   return {
-    _fallback: true, _serviceName: 'queue',
+    __serviceInfo: {
+      status: 'degraded' as const,
+      handlerReady: false,
+      message: 'Synchronous in-process delivery — no durability, retry, or cross-instance fan-out. Register a queue plugin (e.g. BullMQ) for a real one.',
+    },
+    _serviceName: 'queue',
     async publish<T = unknown>(queue: string, data: T): Promise<string> {
       const id = `fallback-msg-${++msgId}`;
       const fns = handlers.get(queue) ?? [];

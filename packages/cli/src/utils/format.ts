@@ -294,23 +294,36 @@ export interface ServerReadyOptions {
    */
   seededAdmin?: { email: string; password: string };
   /**
-   * Automation wiring summary (2026-07-17 third-party eval). The boot-quiet
-   * stdout window swallows every info/warn the automation engine logs while
-   * binding flows to triggers, so the banner is the ONE reliable place a
-   * developer can see whether their record-change / schedule flows actually
-   * armed. Collected from the live engine after runtime.start().
+   * Automation wiring summary (2026-07-17 third-party eval). The engine's own
+   * `info` narration while binding flows to triggers sits under the default
+   * `warn` level and never prints, and a flow that armed logs nothing either
+   * way — so a log line is the wrong instrument here regardless. This reports
+   * live binding STATE, read off the engine after runtime.start(), which is
+   * what "did my flows actually arm?" actually asks. (Boot-phase warnings the
+   * engine does emit now reach the terminal too — see {@link BootDiagnostics},
+   * #4012 — but absence of a warning was never evidence of a bound flow.)
    */
   automation?: AutomationReadySummary;
   /**
-   * Per-source seed outcomes for this boot (#3415/#3430). Seeds run inside the
-   * boot-quiet stdout window and SeedLoader's own logs sit under the default
-   * warn level, so without this line a fixture can silently lose most of its
-   * rows (the showcase shipped 1 of 5 projects for weeks) and a marketplace
+   * Per-source seed outcomes for this boot (#3415/#3430). SeedLoader's own
+   * logs sit under the default warn level (and the boot-quiet window hid them
+   * at every level until #4012), so without this line a fixture can silently
+   * lose most of its rows (the showcase shipped 1 of 5 projects for weeks) and a marketplace
    * package can rehydrate onto a fresh DB with zero rows. Each config app and
    * each rehydrated/healed marketplace package contributes one entry;
    * rejections and empty installs are loud, a clean seed prints one dim line.
    */
   seeds?: SeedSourceSummary[];
+  /**
+   * Boot-phase kernel-logger diagnostics replayed from the boot-quiet stdout
+   * window (#4012). `ObjectLogger` writes `warn` to stdout, so that window
+   * used to discard every warning a plugin emitted while booting — the
+   * ADR-0110 D5 `[action-governance]` inventory, degraded-boot notices, flow
+   * binding failures — even though the CLI defaults the kernel to `warn`
+   * expressly so they surface (ADR-0032). `serve` now buffers them and hands
+   * them here, so they land under the banner instead of nowhere.
+   */
+  bootDiagnostics?: BootDiagnostics;
   /**
    * Whether the MCP server surface (`/api/v1/mcp`) is on (#3167). Default-on
    * core capability, but nothing in the dev loop surfaces it — an AI client
@@ -405,9 +418,48 @@ export function printServerReady(opts: ServerReadyOptions) {
   }
   if (opts.automation) printAutomationSummary(opts.automation);
   if (opts.seeds) printSeedSummary(opts.seeds);
+  if (opts.bootDiagnostics) printBootDiagnostics(opts.bootDiagnostics);
   console.log('');
   console.log(chalk.dim('  Press Ctrl+C to stop'));
   console.log('');
+}
+
+/** Boot-phase logger records held back by the boot-quiet window (#4012). */
+export interface BootDiagnostics {
+  /** Retained records, in emission order, exactly as the logger rendered them. */
+  lines: string[];
+  /** Records dropped because the capture buffer filled. */
+  dropped?: number;
+}
+
+/**
+ * Replay what the boot-quiet stdout window held back (#4012).
+ *
+ * `serve` blanks stdout while the kernel boots so the banner is readable, and
+ * `ObjectLogger` sends `warn` to stdout — so for as long as that window simply
+ * discarded its bytes, no plugin's boot-phase warning could reach a terminal on
+ * either `os dev` or `os serve`, at any `--log-level`. Data-phase logging was
+ * unaffected, which is why the hole stayed invisible: the stream looked alive.
+ *
+ * Quiet when a boot had nothing to say. Printed from the banner on a healthy
+ * boot and directly from serve's error path on a failed one — a boot that dies
+ * is exactly when its warnings matter most.
+ */
+export function printBootDiagnostics(diagnostics: BootDiagnostics) {
+  const { lines, dropped = 0 } = diagnostics;
+  if (lines.length === 0) return;
+
+  console.log('');
+  console.log(
+    chalk.yellow(
+      `  ⚠ Boot diagnostics — ${lines.length} warning${lines.length === 1 ? '' : 's'} logged during startup:`,
+    ),
+  );
+  for (const line of lines) console.log(chalk.dim(`    ${line}`));
+  if (dropped > 0) {
+    console.log(chalk.dim(`    …and ${dropped} more (capture buffer full)`));
+  }
+  console.log(chalk.dim('    run with --log-level debug to watch the boot stream live'));
 }
 
 /**

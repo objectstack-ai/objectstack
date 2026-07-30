@@ -21,7 +21,15 @@ export function createMemoryMetadata() {
   }
 
   return {
-    _fallback: true, _serviceName: 'metadata',
+    // [#4058] `degraded` (ADR-0076 D12): the registry is real — everything
+    // registered is listable and readable back — it simply never reaches disk
+    // or a database. `handlerReady` keeps the `degraded` default (true): the
+    // dispatcher's `/meta` domain serves this implementation.
+    __serviceInfo: {
+      status: 'degraded' as const,
+      message: 'In-memory metadata registry — real reads and writes, no persistence (lost on restart). Register MetadataPlugin for a persisted registry.',
+    },
+    _serviceName: 'metadata',
     async register(type: string, name: string, data: any): Promise<void> {
       getTypeMap(type).set(name, data);
     },

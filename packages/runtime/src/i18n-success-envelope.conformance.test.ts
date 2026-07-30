@@ -41,7 +41,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HttpDispatcher } from './http-dispatcher.js';
-import { BaseResponseSchema } from '@objectstack/spec/api';
+import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import {
   GetLocalesResponseSchema,
   GetTranslationsResponseSchema,
@@ -86,6 +86,9 @@ describe('/i18n success-envelope conformance (dispatcher domain)', () => {
   function expectEnvelope(body: unknown) {
     const parsed = BaseResponseSchema.safeParse(body);
     expect(parsed.success, `body is not a BaseResponse: ${JSON.stringify(body)}`).toBe(true);
+    // The declared envelope in full — `safeParse` alone passes a body with no
+    // `data`, or a payload duplicated into a stray top-level key (#4049).
+    expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
     expect((body as { success?: boolean }).success).toBe(true);
   }
 

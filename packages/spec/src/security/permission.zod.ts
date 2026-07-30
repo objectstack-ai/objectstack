@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { RowLevelSecurityPolicySchema } from './rls.zod';
 import { ApiOperationSchema } from '../data/object.zod';
+import { ProtectionSchema } from '../shared/protection.zod';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /**
  * Entity (Object) Level Permissions
@@ -15,12 +17,81 @@ import { ApiOperationSchema } from '../data/object.zod';
  * - Purge (Hard delete / Compliance)
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
 /**
  * [ADR-0057 D1] Object access DEPTH — the Dataverse "access level" axis,
  * layered on top of OWD. Widens the owner-match for owner-scoped objects.
  */
 export const ObjectAccessScopeSchema = z.enum(['own', 'own_and_reports', 'unit', 'unit_and_below', 'org']);
 export type ObjectAccessScope = z.infer<typeof ObjectAccessScopeSchema>;
+
+/*
+ * ── Unknown-key strictness (#4001, ADR-0078) ────────────────────────────────
+ *
+ * Every AUTHORING schema in this module is `.strict()`: a key it does not
+ * declare is a loud, fixable parse error, not a silent strip. A permission
+ * set is the worst possible place for zod's default `.strip` — a mis-spelled
+ * or wrong-layer key here means the author believes a grant or restriction is
+ * in place that the runtime never saw (the ADR-0049 asymmetry, at the
+ * capability container itself). The RESPONSE-side extension
+ * (`EffectiveObjectPermissionSchema`) deliberately stays tolerant — see below.
+ *
+ * Key lists are kept beside the schemas rather than derived from `.shape`
+ * (the bodies are allocated lazily; `permission.test.ts` drift-guards every
+ * entry), and each error map names the canonical key when the authored one is
+ * a recognisable spelling of it.
+ */
+
+/** Keys {@link ObjectPermissionSchema} declares (drift-guarded by permission.test.ts). */
+const OBJECT_PERMISSION_KEYS = [
+  'allowCreate', 'allowRead', 'allowEdit', 'allowDelete', 'allowExport',
+  'allowTransfer', 'allowRestore', 'allowPurge',
+  'viewAllRecords', 'modifyAllRecords', 'readScope', 'writeScope',
+] as const;
+
+/**
+ * Semantic near-misses for object-permission bits — mostly the bare CRUD verbs
+ * (Salesforce object-permission vocabulary) an author reaches for before
+ * learning the `allow*` prefix. Edit distance cannot bridge `read` →
+ * `allowRead`, so they are named explicitly.
+ */
+const OBJECT_PERMISSION_KEY_ALIASES: Readonly<Record<string, string>> = {
+  read: 'allowRead',
+  create: 'allowCreate',
+  edit: 'allowEdit',
+  update: 'allowEdit',
+  write: 'allowEdit',
+  delete: 'allowDelete',
+  remove: 'allowDelete',
+  export: 'allowExport',
+  transfer: 'allowTransfer',
+  restore: 'allowRestore',
+  purge: 'allowPurge',
+  canread: 'allowRead',
+  cancreate: 'allowCreate',
+  canedit: 'allowEdit',
+  candelete: 'allowDelete',
+  viewall: 'viewAllRecords',
+  viewalldata: 'viewAllRecords',
+  modifyall: 'modifyAllRecords',
+  modifyalldata: 'modifyAllRecords',
+};
+
+const objectPermissionUnknownKeyError = strictUnknownKeyError({
+  surface: 'this object permission',
+  knownKeys: OBJECT_PERMISSION_KEYS,
+  aliases: OBJECT_PERMISSION_KEY_ALIASES,
+  guidance: {
+    apiOperations:
+      '`apiOperations` is the server-resolved effective operation set (#3391) — it exists ' +
+      'only on the RESPONSE surface (`/me/permissions`) and is never authored. Grant ' +
+      'capability with the `allow*` bits here; tighten an object\'s exposure with ' +
+      '`apiMethods` on the object schema.',
+  },
+  history:
+    'Until #4001 these were dropped silently — the permission set still parsed, so the ' +
+    'author believed a grant or restriction was in place that the runtime never saw.',
+});
 
 export const ObjectPermissionSchema = lazySchema(() => z.object({
   /** C: Create */
@@ -119,7 +190,7 @@ export const ObjectPermissionSchema = lazySchema(() => z.object({
   readScope: ObjectAccessScopeSchema.optional().describe('[ADR-0057 D1] Read depth: own|unit|unit_and_below|org'),
   /** [ADR-0057 D1] Write (edit/delete) access DEPTH — same enum as readScope. */
   writeScope: ObjectAccessScopeSchema.optional().describe('[ADR-0057 D1] Write depth: own|unit|unit_and_below|org'),
-}));
+}, { error: objectPermissionUnknownKeyError }).strict());
 
 /**
  * RESPONSE-side extension of {@link ObjectPermissionSchema} carrying the
@@ -142,7 +213,12 @@ export const EffectiveObjectPermissionSchema = lazySchema(() =>
     apiOperations: z.array(ApiOperationSchema).optional().describe(
       'Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs, #3543), not the authored six-value ApiMethod enum.',
     ),
-  }),
+    // WIRE shape: `.extend()` inherits the authoring schema's `.strict()`, and a
+    // strict response parser is forward-incompatible — a newer server adding a
+    // response key would crash an older client. `.strip()` restores zod-default
+    // tolerance here; strictness is an AUTHORING-side contract only (#4001's
+    // authorable/wire split).
+  }).strip(),
 );
 export type EffectiveObjectPermission = z.infer<typeof EffectiveObjectPermissionSchema>;
 
@@ -163,6 +239,20 @@ export type EffectiveObjectPermission = z.infer<typeof EffectiveObjectPermission
  * (ADR-0066 superuser wildcard) are exempt; the `everyone`/`guest` audience
  * anchors stay tenant-level only — no delegated scope can touch them.
  */
+/** Keys {@link AdminScopeSchema} declares (drift-guarded by permission.test.ts). */
+const ADMIN_SCOPE_KEYS = [
+  'businessUnit', 'includeSubtree', 'manageAssignments', 'manageBindings',
+  'authorEnvironmentSets', 'assignablePermissionSets',
+] as const;
+
+const adminScopeUnknownKeyError = strictUnknownKeyError({
+  surface: 'this admin scope',
+  knownKeys: ADMIN_SCOPE_KEYS,
+  history:
+    'Until #4001 these were dropped silently — the scope still parsed, so a delegation ' +
+    'boundary the author intended was never enforced.',
+});
+
 export const AdminScopeSchema = lazySchema(() => z.object({
   /** Root of the delegated subtree — `sys_business_unit.name` (machine name, portable across environments). */
   businessUnit: z.string().describe('[ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root'),
@@ -181,11 +271,31 @@ export const AdminScopeSchema = lazySchema(() => z.object({
    * grantor's scope to STRICTLY contain the granted one.
    */
   assignablePermissionSets: z.array(z.string()).default([]).describe('Allowlist of permission-set names the delegate may hand out'),
-}));
+}, { error: adminScopeUnknownKeyError }).strict());
 
 export type AdminScope = z.infer<typeof AdminScopeSchema>;
 /** Authoring input for {@link AdminScope} — defaulted fields are optional. */
 export type AdminScopeInput = z.input<typeof AdminScopeSchema>;
+
+const fieldPermissionUnknownKeyError = strictUnknownKeyError({
+  surface: 'this field permission',
+  knownKeys: ['readable', 'editable'],
+  aliases: {
+    read: 'readable',
+    visible: 'readable',
+    write: 'editable',
+    edit: 'editable',
+    update: 'editable',
+  },
+  guidance: {
+    hidden:
+      '`hidden` is not a FieldPermission key — FLS is declared positively: set ' +
+      '`readable: false` to hide the field.',
+  },
+  history:
+    'Until #4001 these were dropped silently — the entry still parsed, so field-level ' +
+    'security the author intended was never applied.',
+});
 
 /**
  * Field Level Security (FLS)
@@ -195,7 +305,7 @@ export const FieldPermissionSchema = lazySchema(() => z.object({
   readable: z.boolean().default(true).describe('Field read access'),
   /** Can edit this field */
   editable: z.boolean().default(false).describe('Field edit access'),
-}));
+}, { error: fieldPermissionUnknownKeyError }).strict());
 
 /**
  * Permission Set Schema
@@ -221,12 +331,81 @@ export const FieldPermissionSchema = lazySchema(() => z.object({
  * - 'SystemAdmin' (mixed case)
  * - 'Read Only' (spaces)
  */
+/** Keys {@link PermissionSetSchema} declares (drift-guarded by permission.test.ts). */
+const PERMISSION_SET_KEYS = [
+  'name', 'label', 'description', 'packageId', 'managedBy', 'isDefault', 'objects',
+  'fields', 'systemPermissions', 'tabPermissions', 'rowLevelSecurity', 'adminScope',
+  'protection',
+  // ADR-0010 runtime protection envelope (MetadataProtectionFields spread).
+  '_lock', '_lockReason', '_lockSource', '_provenance', '_packageId',
+  '_packageVersion', '_lockDocsUrl',
+] as const;
+
+/** Semantic near-misses borrowed from neighbouring schemas / products. */
+const PERMISSION_SET_KEY_ALIASES: Readonly<Record<string, string>> = {
+  objectpermissions: 'objects',
+  entities: 'objects',
+  entitypermissions: 'objects',
+  fieldpermissions: 'fields',
+  fls: 'fields',
+  fieldlevelsecurity: 'fields',
+  tabs: 'tabPermissions',
+  tabvisibility: 'tabPermissions',
+  rls: 'rowLevelSecurity',
+  rowlevelsecurityrules: 'rowLevelSecurity',
+  policies: 'rowLevelSecurity',
+};
+
+const permissionSetUnknownKeyError = strictUnknownKeyError({
+  surface: 'this permission set',
+  knownKeys: PERMISSION_SET_KEYS,
+  aliases: PERMISSION_SET_KEY_ALIASES,
+  guidance: {
+    // ── Tombstones for RETIRED keys (upgrade prescriptions; they age out ~two
+    //    majors after removal — pattern of data/object.zod.ts UNKNOWN_KEY_GUIDANCE).
+    contextVariables:
+      '`contextVariables` was removed by ADR-0105 D11 (enforce-or-remove, ADR-0049): it ' +
+      'was authorable but had zero runtime consumers. A custom membership set a policy ' +
+      'needs as `field IN (current_user.<key>)` is staged by a registered rlsMembership ' +
+      'resolver; a constant belongs inline in the policy\'s `using` expression.',
+    isProfile:
+      '`isProfile` was removed by ADR-0090 D2 — there is no Profile concept. Permission ' +
+      'sets are the only capability container; use `isDefault` to mark the app baseline ' +
+      'bound to the built-in `everyone` position.',
+    // ── Wrong-layer pointers for keys that are never authored on a set.
+    profiles:
+      '`profiles` is not a PermissionSet field (ADR-0090 D2: no Profile concept). ' +
+      'Distribution is a runtime binding — positions bind sets to people ' +
+      '(`sys_position_permission_set`), never the set itself.',
+    roles:
+      '`roles` is not a PermissionSet field — ObjectStack has no role hierarchy: ' +
+      'capability = permission sets (union-merged), distribution = positions, ' +
+      'visibility depth = business units (ADR-0057 / ADR-0090).',
+    users:
+      '`users` is not a PermissionSet field — assignment is a runtime binding ' +
+      '(`sys_user_permission_set` / positions), never authored on the set (ADR-0090).',
+  },
+  history:
+    'Until #4001 these were dropped silently — the set still parsed, so the author ' +
+    'believed a capability boundary was declared that the runtime never saw.',
+});
+
 export const PermissionSetSchema = lazySchema(() => z.object({
   /** Unique permission set name */
   name: SnakeCaseIdentifierSchema.describe('Permission set unique name (lowercase snake_case)'),
   
   /** Display label */
   label: z.string().optional().describe('Display label'),
+
+  /**
+   * Human-readable description, surfaced on `sys_permission_set` (list columns
+   * + form) and the Setup projection (`permission-set-projection.ts` reads it
+   * from the authored set). The built-in default sets have always authored it —
+   * but until #4001 the schema could not represent it, so it was silently
+   * stripped at parse (the ADR-0078 §3 inverse-drift class); the `.strict()`
+   * gate surfaced the gap and it is now declared.
+   */
+  description: z.string().optional().describe('Human-readable description shown in Setup (persisted as sys_permission_set.description)'),
 
   /**
    * [ADR-0086 D3] Owning package for a package-shipped permission set
@@ -340,7 +519,30 @@ export const PermissionSetSchema = lazySchema(() => z.object({
    */
   adminScope: AdminScopeSchema.optional()
     .describe('[ADR-0090 D12] Scoped delegated-administration grant (BU subtree + assignable-set allowlist)'),
-}));
+
+  /**
+   * ADR-0010 §3.7 — Package-level protection envelope. Package authors declare
+   * lock policy here; the loader translates it into the private `_lock`
+   * envelope at registration time and strips this block before persistence.
+   * See `shared/protection.zod.ts`.
+   */
+  protection: ProtectionSchema.optional().describe(
+    'Package author protection block — lock policy for this permission set.',
+  ),
+
+  // ADR-0010 — runtime protection envelope (internal — set by loader).
+  //
+  // Declared in #4001 alongside every sibling registered metadata type
+  // (object / view / app / dashboard / report / dataset / flow / agent / tool /
+  // skill / email_template). `MetadataPlugin`'s artifact loader calls
+  // `applyProtection` on EVERY type, so a permission set has always carried
+  // these keys at runtime — and `getMetaItemLayered` → `saveMetaItem`
+  // round-trips a body that includes them. The schema simply could not
+  // represent them, so they were silently stripped at every parse (the same
+  // ADR-0078 §3 inverse-drift class as `description`); the `.strict()` gate
+  // turned that into a visible 422 and surfaced the gap.
+  ...MetadataProtectionFields,
+}, { error: permissionSetUnknownKeyError }).strict());
 
 export type PermissionSet = z.infer<typeof PermissionSetSchema>;
 /** Authoring input for {@link PermissionSet} — defaulted fields are optional. */

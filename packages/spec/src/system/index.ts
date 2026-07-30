@@ -63,6 +63,8 @@ export * from './worker.zod';
 export * from './notification.zod';
 export * from './translation.zod';
 export * from './i18n-resolver';
+// Localized templates for the built-in field-validation messages (#3957).
+export * from './validation-message';
 export * from './translation-typegen';
 export * from './translation-skeleton';
 export * from './collaboration.zod';

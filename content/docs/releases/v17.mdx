@@ -307,6 +307,70 @@ model), while `url` platform-wide means an HTTP endpoint to call (`http` node,
 webhooks). The singular `input` on `map` / `subflow` / `connector_action` is
 those nodes' own canonical key and is untouched.
 
+### Flow, permission, RLS, sharing, position and approval schemas reject unknown keys (#4001)
+
+Zod's default is `.strip`: a key a schema does not declare is silently
+discarded and the instance keeps parsing. On an authorable surface that is the
+worst failure mode — the author (human or AI) gets a success envelope and
+ships metadata that quietly ignores their config; that is exactly how a
+correctly intended action-param `reference: 'sys_user'` degraded into a
+paste-a-UUID text box (#3405). 17.0 extends #3746's strictness from that one
+schema to the two highest-risk authorable surfaces, per the triage in
+`docs/audits/2026-07-unknown-key-strictness-ledger.md`:
+
+- **Permission sets** — `PermissionSetSchema`, `ObjectPermissionSchema`,
+  `FieldPermissionSchema`, `AdminScopeSchema`. A silently dropped key on the
+  capability container meant the author believed a grant or restriction was in
+  place that the runtime never saw. The response-side
+  `EffectiveObjectPermissionSchema` stays wire-tolerant.
+- **Flows** — `FlowSchema`, `FlowNodeSchema`, `FlowEdgeSchema`,
+  `FlowVariableSchema`. A node's `config` stays an **open** record: it is
+  per-node-type, owned by the executor's `configSchema` and the conversion
+  layer (see the alias table above).
+- **RLS policies** — `RowLevelSecurityPolicySchema`. A silently dropped key
+  here meant a row-level restriction the author wrote was never compiled into
+  the filter (the pre-ADR-0090 D3 vocabulary → `positions`,
+  `withCheck` → `check`, `condition`/`filter`/`where` → `using`). The runtime
+  evaluation shapes stay tolerant.
+- **Sharing rules** — the rule, its criteria extension, and the `sharedWith`
+  recipient (`criteria` → `condition`, `access` → `accessLevel`,
+  `recipient` → `sharedWith`; `ownedBy` carries the removed owner-type-rule
+  prescription).
+- **Positions** — `PositionSchema`, including the guidance that
+  `permissionSets`/`users` are runtime bindings and `parent` has no meaning on
+  a deliberately flat position (ADR-0090 D3). Position also gains the
+  `protection` block and ADR-0010 runtime envelope every sibling registered
+  type already declared.
+- **Approval nodes** — all four authoring schemas (node config, approver,
+  escalation, decision-output). Process-era keys carry the ADR-0019 re-home
+  map (`steps` → successive approval nodes, `entryCriteria` → the entering
+  edge's condition, `onApprove`/`onReject` → the `approve`/`reject`
+  out-edges, `rejectionBehavior` → a declared back-edge). The published JSON
+  schema carries `additionalProperties: false` into the Studio form and
+  `registerFlow()` config validation, so a mis-keyed approval `config` is
+  rejected at registration too.
+
+Every rejection is written to be self-fixing: it names the offending key and,
+where recognisable, the canonical spelling (`steps` → `nodes`, edge
+`from`/`to` → `source`/`target`, `read` → `allowRead`, `tabs` →
+`tabPermissions`), a wrong-layer pointer (a flow-level `objectName` belongs on
+the start node's `config`; `apiOperations` is response-side only), or a
+retired-key tombstone (`contextVariables` → ADR-0105 D11's `rlsMembership`
+resolvers; `isProfile` → `isDefault`, ADR-0090 D2).
+
+Migration is by construction behavior-preserving: any key now rejected was
+previously stripped, so it never had a runtime effect — remove it or rename it
+to the canonical key the error suggests; nothing about a working app changes.
+
+The gate paid for itself immediately by exposing keys the platform *writes*
+but the spec could not express, so `PermissionSetSchema` gains three: the
+**`description`** shown in Setup (persisted to
+`sys_permission_set.description`), the author-facing **`protection`** block,
+and the ADR-0010 **runtime protection envelope** (`_lock`, `_packageId`,
+`_provenance`, …) that every sibling metadata type already carried — without
+it, a package-owned permission set could not round-trip through an
+environment overlay.
+
 ### `agent.tools[]` is removed — capability comes from skills (ADR-0109, #3820)
 
 ADR-0064's invariant is "an agent's tool set is the union of its
@@ -745,7 +809,7 @@ import or the authored key.
 | `tool.category` / `.permissions` / `.active` / `.builtIn` (+ `ToolCategorySchema`) | authorable and inert — `permissions` gated nothing, `active: false` withdrew nothing; strict-rejected with prescriptions (#3896 close-out) |
 | `action.shortcut` / `.bulkEnabled` | no keydown path dispatches shortcuts; the multi-select toolbar reads the view's `bulkActions` (#3896 close-out) |
 | `flow.active` / `.template` / node `outputSchema` / `errorHandling.fallbackNodeId` | `active: false` never stopped a flow — `status` is the enforced lifecycle; faults route via per-node fault edges (#3896 close-out) |
-| view: list `responsive`/`performance`, form `data`/`defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` stay live (#3896 close-out) |
+| view: list `responsive`/`performance`, form `defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` **and form `data`** stay live — `defineForm` writes `data: { provider: 'schema', schemaId }` onto every metadata form (#3896 close-out) |
 | `dashboard.aria` / `.performance` / widget `performance` (+ `PerformanceConfigSchema`) | no renderer applied them; virtual scrolling is the live top-level `virtualScroll` (#3896 close-out) |
 | `agent.knowledge` (+ `AIKnowledgeSchema`) | declaring sources/indexes never scoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's tool-call arguments (#3896 close-out) |
 | `skill.triggerPhrases` | phrases were never matched; activation is `triggerConditions` + the agent's `skills[]` allowlist (#3896 close-out) |

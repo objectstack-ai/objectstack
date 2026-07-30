@@ -219,6 +219,23 @@ export const MemoryConfigSchema = lazySchema(() => z.object({
    * new InMemoryDriver({ persistence: 'auto' })
    * // Custom adapter for serverless
    * new InMemoryDriver({ persistence: { adapter: upstashAdapter } })
+   *
+   * **A datasource declared with `driver: 'memory'` is ephemeral unless this
+   * key is set (#4083).** The shared datasource factory
+   * (`createDefaultDatasourceDriverFactory`) passes `false` when the
+   * declaration says nothing, so a declared memory datasource cannot silently
+   * become a file-backed store in the process's working directory — matching
+   * `objectstack dev`, which already reads an explicit memory driver as the
+   * user opting out of persistence. Set this key to opt back in; when you do
+   * without naming a `path`/`key`, the factory scopes the destination per
+   * datasource, so two memory datasources never share one file.
+   *
+   * That per-datasource scoping is still the reason to route a memory pool
+   * through the factory: #4065 made the DRIVER's own default `false` too, so
+   * the factory's explicit `false` is now belt-and-braces rather than the only
+   * thing standing between a declared datasource and a CWD write — but nothing
+   * else expands `'auto'`/`'file'`/`'local'` into a per-datasource destination,
+   * so two pools that DO opt in still need it to avoid aliasing one file.
    */
   persistence: MemoryPersistenceConfigSchema.or(z.literal(false)).default(false).describe('Persistence configuration (opt-in; defaults to pure in-memory)'),
 

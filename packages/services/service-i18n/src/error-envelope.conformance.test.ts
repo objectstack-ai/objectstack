@@ -31,7 +31,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { BaseResponseSchema } from '@objectstack/spec/api';
+import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { I18nServicePlugin } from './i18n-service-plugin';
 
@@ -167,6 +167,9 @@ describe('i18n error envelope (#3675)', () => {
 
       const parsed = BaseResponseSchema.safeParse(body);
       expect(parsed.success, `body is not a BaseResponse: ${JSON.stringify(body)}`).toBe(true);
+      // The declared envelope in full — `safeParse` alone passes a body with no
+      // `data`, or a payload duplicated into a stray top-level key (#4049).
+      expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
 
       expect(body.success).toBe(false);
       expect(body.error.code).toBe(c.code);
@@ -186,6 +189,7 @@ describe('i18n error envelope (#3675)', () => {
     const { status, body } = await drive(routes, `${BASE}/locales`);
     expect(status).toBe(500);
     expect(BaseResponseSchema.safeParse(body).success).toBe(true);
+    expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
     expect(body.error.message).toBe('Internal error');
   });
 });

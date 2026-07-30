@@ -401,6 +401,9 @@ retire it)** once the contract method is universal. (If an in-flight
 > this decision asked for — and is retained for exactly that role.
 
 **D-A3 — Add a temporal conformance matrix as the runtime regression backstop.**
+*(Landed 2026-07-30, #4081 — `packages/spec/src/data/temporal-conformance.ts`,
+consumed by five backends. Two axes and one measured limit are recorded in
+D-A3.1 below.)*
 Cover `field-type {date, datetime} × operator {eq, gte/lte/gt/lt, in, dateRange} ×
 relative-token {today, N_days_ago, N_months_ago, …} × driver {SQLite, Postgres at
 minimum}`, asserting correct **row results** — not just emitted SQL. Analytics has
@@ -782,8 +785,98 @@ cover lives in `mongodb-datetime-storage.test.ts` (against a real MongoDB via
 `mongodb-memory-server`) and `memory-datetime-storage.test.ts`. Still open
 under D-A3: the relative-token × live-driver × timezone combinations.
 
-One evaluator remains unaligned on both the D-D and D-E rules:
+~~One evaluator remains unaligned on both the D-D and D-E rules:
 `@objectstack/formula`'s `matchesFilterCondition` (the RLS write-side `check`
 path), which cannot depend on `@objectstack/core` for the shared primitive.
 Deciding its home — a private copy, as `formula` already keeps for `today()`,
-or lowering the utility into `spec`/`types` — is the remaining piece.
+or lowering the utility into `spec`/`types` — is the remaining piece.~~
+Closed 2026-07-30 — see D-D2 below.
+
+### D-D2 — The primitive lives in `spec`, beside the vocabulary it interprets
+
+`nextUtcCalendarDay` moved from `@objectstack/core` to
+`@objectstack/spec/data` (`calendar-day.ts`), next to `date-macros.zod.ts`.
+The two are halves of one contract: the macros define which bare days an author
+can *name*, D-D defines what such a day *denotes* as a bound. That is protocol,
+not business logic — the same species as the pure helpers `spec/data` already
+owns (`parseDateMacroParam`, `canonicalAstOperator`, `parseAutonumberFormat`),
+so Prime Directive #2 is satisfied.
+
+Chosen over `@objectstack/types` because **it adds no dependency edge**: every
+consumer already depends on `spec`, whereas `core` does not depend on `types`
+and would have needed a new one. `core` re-exports the symbol, so the published
+`@objectstack/core` surface — which the drivers and analytics strategies import
+from — is unchanged.
+
+Rejected: a private copy in `formula` (the precedent it would cite, `formula`'s
+own `today()`, is debt rather than a pattern). Six backends now share one
+definition: the SQL compiler, the memory and mongo drivers, the analytics
+raw-SQL strategy, the dataset preview evaluator, and `matchesFilterCondition`.
+
+The write-side gap this closed was not cosmetic. A `check` policy of the shape
+`{ signed_on: { $lte: '{today}' } }` evaluated against a `datetime` post-image
+**denied every write made after 00:00** — the write-side twin of the read-side
+loss #3777 fixed, on the one surface where the failure direction is a rejected
+write rather than a missing row.
+
+---
+
+## Addendum (2026-07-30) — D-A3.1: the conformance matrix, and what it found
+
+> **Status:** landed (#4081). Closes D-A3, the last decision in this ADR that
+> had never been actioned.
+
+### The shape: a shared table, not per-issue suites
+
+`packages/spec/src/data/temporal-conformance.ts` exports `TEMPORAL_ROWS` (a
+fixture whose times of day make a midnight-anchored bound and a whole-day bound
+distinguishable) and `TEMPORAL_CASES` (filter + expected row ids + a note naming
+the issue each case defends). Five backends consume it and assert **row-id
+sets** — the ADR's original requirement — through their own real entry points:
+`driver-sql` (typed, and via the live-dialect CI job also real Postgres and
+MySQL under a skewed process zone), `driver-memory`, `driver-mongodb` (real
+MongoDB), the analytics preview evaluator, and `formula`'s write-side `check`.
+
+It is modelled on `filter-logic-conformance.ts`, which exists for the same
+reason one layer down (#3774), and lives in `spec` for the D-D2 reason: every
+backend already depends on it.
+
+Before this, each of the four fixes left a suite proving *its own* issue with
+*its own* fixture. That is coverage without a standard: nothing could fail when
+two backends drifted apart, which is precisely how #3650, #3773, #3777 and
+#4047 each reached production.
+
+### D-A3.1 — What the matrix found on its first run
+
+Two things, which is the argument for having built it:
+
+1. **A real defect.** The preview evaluator had no `$between` case at all, so it
+   fell through to its permissive `default: return true` and matched **every**
+   row. A drafted dashboard carrying a range filter charted the whole dataset,
+   then changed its numbers at publish — the exact continuity the preview
+   exists to provide. Fixed in the same change, sharing the `$lte` bound helper
+   so the two cannot drift again.
+
+2. **A measured, irreducible limit.** `$gt` with a bare-day comparand on a
+   `datetime` column cannot agree across backends. A typed backend anchors the
+   bound to midnight and excludes a value stored at exactly 00:00; a type-blind
+   one compares raw strings, where `'2026-07-28T00:00:00.000Z'` sorts after
+   `'2026-07-28'`, and keeps it. The trick that makes the *upper* bound
+   type-blind — rewriting `<= day` as `< nextDay` — has no lower-bound
+   analogue: anchoring to `…T00:00:00.000Z` would fix `datetime` and break
+   `date`, since `'2026-07-28' >= '2026-07-28T00:00:00.000Z'` is false.
+
+   So `$gt` is asserted in the shared matrix on the `date` column only, and the
+   `datetime` cell stays in the typed drivers' own suites. `$gte` **is** shared:
+   both readings include the midnight row — they agree because the boundary is
+   inclusive, which is luck rather than design, and is pinned here for exactly
+   that reason.
+
+### Consequences
+
+- The matrix is the ratchet the previous four fixes lacked: a backend that
+  drifts now fails a named case whose note says which incident it is repeating.
+- Coverage still open, and deliberately so: the **relative-token** axis
+  (`{today}`, `{30_days_ago}` resolved through `filter-tokens.ts` and run
+  end-to-end per driver) is not yet in the table. The cases here take resolved
+  comparands, which is the layer where the four incidents actually happened.

@@ -8,7 +8,6 @@ const mockDispatcher = {
   getDiscoveryInfo: vi.fn().mockReturnValue({ version: '1.0', endpoints: [] }),
   handleAuth: vi.fn().mockResolvedValue({ handled: true, response: { body: { ok: true }, status: 200 } }),
   handleGraphQL: vi.fn().mockResolvedValue({ data: {} }),
-  handleStorage: vi.fn().mockResolvedValue({ handled: true, response: { body: {}, status: 200 } }),
   dispatch: vi.fn().mockResolvedValue({ handled: true, response: { body: { success: true }, status: 200 } }),
 };
 
@@ -481,6 +480,29 @@ describe('createHonoApp', () => {
         'GET',
         '/ui/view/account',
         undefined,
+        expect.any(Object),
+        expect.objectContaining({ request: expect.anything() }),
+        '/api',
+      );
+    });
+
+    // [#4087] The retired `/storage/*` mount was a WILDCARD: it claimed the
+    // whole subtree for two dispatcher routes, so service-storage's protocol
+    // (`/storage/upload/presigned`, `/storage/files/:id/url`, …) — registered
+    // under the same prefix on the same server — could never be reached
+    // through this app. Storage is ordinary catch-all traffic now; nothing
+    // here parses formData or shadows the subtree.
+    it('POST /api/storage/upload/presigned reaches the catch-all, not a storage mount', async () => {
+      const res = await app.request('/api/storage/upload/presigned', {
+        method: 'POST',
+        body: JSON.stringify({ filename: 'a.txt' }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      expect(res.status).toBe(200);
+      expect(mockDispatcher.dispatch).toHaveBeenCalledWith(
+        'POST',
+        '/storage/upload/presigned',
+        { filename: 'a.txt' },
         expect.any(Object),
         expect.objectContaining({ request: expect.anything() }),
         '/api',

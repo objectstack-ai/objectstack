@@ -97,13 +97,13 @@ Inline aggregation for an object-bound chart
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | ✅ |  |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | ✅ |  |
 | **title** | `string` | optional | Chart title |
 | **subtitle** | `string` | optional | Chart subtitle |
 | **description** | `string` | optional | Accessibility description — announced to screen readers as the chart’s label |
 | **xAxis** | `{ field: string; title?: string; format?: string; min?: number; … }` | optional | X-Axis configuration |
 | **yAxis** | `{ field: string; title?: string; format?: string; min?: number; … }[]` | optional | Y-Axis configuration (support dual axis) |
-| **series** | `{ name: string; label?: string; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; color?: string; … }[]` | optional | Defined series configuration |
+| **series** | `{ name: string; label?: string; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; color?: string; … }[]` | optional | Defined series configuration |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | ✅ | Display legend |
@@ -164,7 +164,7 @@ Type: `string`
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Field name or series identifier |
 | **label** | `string` | optional | Series display label |
-| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | optional | Override chart type for this series |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | optional | Override chart type for this series |
 | **color** | `string` | optional | Series color (hex/rgb/token) |
 | **stack** | `string` | optional | Stack identifier to group series |
 | **yAxis** | `Enum<'left' \| 'right'>` | ✅ | Bind to specific Y-Axis |
@@ -190,6 +190,7 @@ Type: `string`
 * `scatter`
 * `treemap`
 * `sankey`
+* `combo`
 * `gauge`
 * `solid-gauge`
 * `metric`

@@ -10,7 +10,7 @@ import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is
 // deliberately import-free, so this cannot introduce a cycle.
 import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/public-auth-features';
-import { findClosestMatches } from '../shared/suggestions.zod';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
 
 /**
  * Action Parameter Schema
@@ -67,10 +67,11 @@ const ACTION_PARAM_KEYS = [
  * borrowed from a neighbouring schema where that word is correct. Edit distance
  * cannot reach these (`visibleWhen` → `visible` is 4 apart), so they are named
  * explicitly; plain case/underscore slips (`help_text` → `helpText`) are left to
- * {@link findClosestMatches}. Mirrors the `FIELD_TYPE_ALIASES` pattern in
- * `shared/suggestions.zod.ts`.
+ * the factory's edit-distance fallback. Mirrors the `FIELD_TYPE_ALIASES`
+ * pattern in `shared/suggestions.zod.ts`.
  *
- * Keys are normalised by {@link aliasProbe} — lowercase, separators removed.
+ * Keys are matched case-insensitively with separators removed (see
+ * {@link strictUnknownKeyError}).
  */
 const ACTION_PARAM_KEY_ALIASES: Readonly<Record<string, string>> = {
   // The objectql/runtime field shape spells a lookup target `reference_to`, and
@@ -91,9 +92,6 @@ const ACTION_PARAM_KEY_ALIASES: Readonly<Record<string, string>> = {
   default: 'defaultValue',
 };
 
-/** `reference_to` / `referenceTo` / `Reference-To` all collapse onto one probe. */
-const aliasProbe = (key: string): string => key.toLowerCase().replace(/[_\-\s]/g, '');
-
 /**
  * Custom zod `error` for the `.strict()` {@link ActionParamSchema} (#3405 part 3).
  *
@@ -103,28 +101,19 @@ const aliasProbe = (key: string): string => key.toLowerCase().replace(/[_\-\s]/g
  * UUID, with no error anywhere — the config was eaten and the UI lied about why
  * (ADR-0078 no-silently-inert-metadata, ADR-0049 enforce-or-remove).
  *
- * Strict alone would only say "unrecognized key". This map makes the rejection
- * *fixable*: it names the offending key(s) and, when one is a recognisable
- * spelling of a declared key, points at the canonical one.
+ * Built by {@link strictUnknownKeyError} — the shared factory this schema's
+ * hand-rolled #3746 map was generalized into (#4001): it names the offending
+ * key(s) and, when one is a recognisable spelling of a declared key, points at
+ * the canonical one.
  */
-const actionParamUnknownKeyError: z.core.$ZodErrorMap = (issue) => {
-  if (issue.code !== 'unrecognized_keys') return undefined;
-  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
-  const suggestions = keys.flatMap((key) => {
-    // Length-relative bound, matching `suggestKey` in `data/object.zod.ts`: a
-    // flat distance of 3 is noise on a short key (`wibble` → `visible`).
-    const maxDistance = Math.max(2, Math.floor(key.length / 3));
-    const canonical =
-      ACTION_PARAM_KEY_ALIASES[aliasProbe(key)] ??
-      findClosestMatches(key, ACTION_PARAM_KEYS, maxDistance, 1)[0];
-    return canonical && canonical !== key ? [`\`${key}\` → \`${canonical}\``] : [];
-  });
-  const base =
-    `Unrecognized key(s) on this action param: ${keys.map((k) => `\`${k}\``).join(', ')}. ` +
-    `Until #3405 these were dropped silently — the param still parsed, so a mis-spelled ` +
-    `config shipped as a control that quietly ignored it.`;
-  return suggestions.length ? `${base} Did you mean ${suggestions.join(', ')}?` : base;
-};
+const actionParamUnknownKeyError = strictUnknownKeyError({
+  surface: 'this action param',
+  knownKeys: ACTION_PARAM_KEYS,
+  aliases: ACTION_PARAM_KEY_ALIASES,
+  history:
+    'Until #3405 these were dropped silently — the param still parsed, so a mis-spelled ' +
+    'config shipped as a control that quietly ignored it.',
+});
 
 
 export const ActionParamSchema = lazySchema(() => z.object({

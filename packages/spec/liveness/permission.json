@@ -14,6 +14,12 @@
       "evidence": "rendered as the record title of sys_permission_set in Setup's generic object views (objectui app-shell list/detail rendering via displayNameField)",
       "note": "display metadata."
     },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-07-30",
+      "evidence": "persisted to sys_permission_set.description (plugin-security sys-permission-set.object.ts: textarea field, list columns + form); read from the authored set by permission-set-projection.ts (description: ps.description ?? null) and diffed on re-seed",
+      "note": "Declared in #4001: the built-in default sets always authored it, but the schema could not represent it, so it was silently stripped at parse (ADR-0078 §3 inverse drift) — the .strict() gate surfaced the gap."
+    },
     "packageId": {
       "status": "live",
       "verifiedAt": "2026-07-30",

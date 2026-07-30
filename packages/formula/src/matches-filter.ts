@@ -17,6 +17,7 @@
  */
 
 import type { FilterCondition } from '@objectstack/spec/data';
+import { nextUtcCalendarDay } from '@objectstack/spec/data';
 
 /** True iff `record` satisfies `filter`. A null/empty filter matches everything. */
 export function matchesFilterCondition(record: Record<string, unknown>, filter: FilterCondition | null | undefined): boolean {
@@ -72,12 +73,12 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
     case '$gt': return actual != null && v != null && (actual as never) > (v as never);
     case '$gte': return actual != null && v != null && (actual as never) >= (v as never);
     case '$lt': return actual != null && v != null && (actual as never) < (v as never);
-    case '$lte': return actual != null && v != null && (actual as never) <= (v as never);
+    case '$lte': return actual != null && v != null && lteBound(actual, v);
     case '$in': return Array.isArray(v) && v.some((x) => looseEq(actual, x));
     case '$nin': return Array.isArray(v) && !v.some((x) => looseEq(actual, x));
     case '$between':
-      return Array.isArray(v) && v.length === 2 && actual != null
-        && (actual as never) >= (v[0] as never) && (actual as never) <= (v[1] as never);
+      return Array.isArray(v) && v.length === 2 && actual != null && v[0] != null && v[1] != null
+        && (actual as never) >= (v[0] as never) && lteBound(actual, v[1]);
     case '$contains': return typeof actual === 'string' && typeof v === 'string' && actual.includes(v);
     case '$notContains': return !(typeof actual === 'string' && typeof v === 'string' && actual.includes(v));
     case '$startsWith': return typeof actual === 'string' && typeof v === 'string' && actual.startsWith(v);
@@ -86,6 +87,31 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
     case '$exists': return v === true ? actual !== undefined : actual === undefined;
     default: return false; // unknown operator → fail closed
   }
+}
+
+/**
+ * The inclusive-upper-bound comparison, with the calendar-day rule the rest of
+ * the platform applies (ADR-0053 D-D, #3777): a bare `YYYY-MM-DD` bound means
+ * "through that whole day", so it is evaluated half-open against the next day
+ * rather than against that day's midnight.
+ *
+ * Without this, a `check` policy of the shape `{ signed_on: { $lte: '{today}' } }`
+ * evaluated on a `datetime` post-image **denied every write made after 00:00** —
+ * the write-side twin of the read-side data loss #3777 fixed, and the reason
+ * this evaluator had to stop being the one backend that disagreed. The four
+ * other backends (SQL compiler, memory, mongo, the analytics preview) already
+ * share this rule via the same primitive.
+ *
+ * String ordering makes `< nextDay` equivalent to `<= day` for a plain
+ * `YYYY-MM-DD` value, so no field-type lookup is needed — which matters here,
+ * because this evaluator sees a bare record and has no schema to consult.
+ * A full-ISO or non-string bound keeps exact-instant semantics.
+ */
+function lteBound(actual: unknown, bound: unknown): boolean {
+  if (bound == null) return false;
+  const nextDay = nextUtcCalendarDay(bound);
+  if (nextDay != null) return (actual as never) < (nextDay as never);
+  return (actual as never) <= (bound as never);
 }
 
 /** Resolve a `{ $field: 'path' }` reference against the record; else passthrough. */

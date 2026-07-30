@@ -141,10 +141,27 @@ describe('EffectiveObjectPermissionSchema (#3391 response-side)', () => {
   });
 
   it('does not leak apiOperations onto the authoring ObjectPermissionSchema', () => {
-    // The authoring schema stays unextended — a stray apiOperations key is
-    // stripped (or rejected) there, never a valid authoring field.
-    const parsed = ObjectPermissionSchema.parse({ allowRead: true, apiOperations: ['get'] } as any);
-    expect((parsed as any).apiOperations).toBeUndefined();
+    // The authoring schema stays unextended — since #4001 a stray apiOperations
+    // key is REJECTED there (loud, with the response-side pointer), never a
+    // valid authoring field and no longer a silent strip.
+    const result = ObjectPermissionSchema.safeParse({ allowRead: true, apiOperations: ['get'] } as any);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue!.message).toContain('`apiOperations`');
+    expect(issue!.message).toContain('RESPONSE surface');
+  });
+
+  it('EffectiveObjectPermissionSchema stays wire-tolerant (strips, never rejects)', () => {
+    // `.extend()` inherits `.strict()`, so the response shape explicitly
+    // `.strip()`s back — a newer server adding a response key must not crash
+    // an older parser (#4001 authorable/wire split).
+    const parsed = EffectiveObjectPermissionSchema.parse({
+      allowRead: true,
+      apiOperations: ['get'],
+      someFutureServerKey: true,
+    } as any);
+    expect((parsed as any).someFutureServerKey).toBeUndefined();
+    expect((parsed as any).allowRead).toBe(true);
   });
 });
 
@@ -531,5 +548,160 @@ describe('PermissionSetSchema - tabPermissions', () => {
       },
     });
     expect(result.tabPermissions).toBeUndefined();
+  });
+});
+
+// #4001 — the authorable permission surface is `.strict()`: an undeclared key
+// used to be dropped by zod's default `.strip`, so the author believed a grant
+// or restriction was in place that the runtime never saw (the ADR-0049
+// asymmetry at the capability container itself). Strictness plus the shared
+// `strictUnknownKeyError` factory turns that into a loud, fixable error.
+describe('unknown keys are rejected, not stripped (#4001)', () => {
+  const unknownKeyIssue = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
+    const result = schema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i: { code: string }) => i.code === 'unrecognized_keys');
+  };
+
+  describe('PermissionSetSchema', () => {
+    it('rejects an undeclared key instead of silently dropping it', () => {
+      const issue = unknownKeyIssue(PermissionSetSchema, {
+        name: 'p', objects: {}, notAKey: true,
+      });
+      expect(issue!.message).toContain('`notAKey`');
+    });
+
+    it('points neighbouring-vocabulary spellings at the canonical key', () => {
+      expect(unknownKeyIssue(PermissionSetSchema, { name: 'p', objects: {}, objectPermissions: {} })!.message)
+        .toContain('`objectPermissions` → `objects`');
+      expect(unknownKeyIssue(PermissionSetSchema, { name: 'p', objects: {}, rls: [] })!.message)
+        .toContain('`rls` → `rowLevelSecurity`');
+      expect(unknownKeyIssue(PermissionSetSchema, { name: 'p', objects: {}, tabs: {} })!.message)
+        .toContain('`tabs` → `tabPermissions`');
+    });
+
+    it('carries the ADR-0105 D11 tombstone for the retired contextVariables', () => {
+      const message = unknownKeyIssue(PermissionSetSchema, {
+        name: 'p', objects: {}, contextVariables: { teams: ['a'] },
+      })!.message;
+      expect(message).toContain('ADR-0105 D11');
+      expect(message).toContain('rlsMembership');
+    });
+
+    it('carries the ADR-0090 D2 tombstone for the retired isProfile', () => {
+      const message = unknownKeyIssue(PermissionSetSchema, {
+        name: 'p', objects: {}, isProfile: true,
+      })!.message;
+      expect(message).toContain('ADR-0090 D2');
+      expect(message).toContain('`isDefault`');
+    });
+
+    it('round-trips the ADR-0010 runtime protection envelope', () => {
+      // `MetadataPlugin`'s artifact loader calls `applyProtection` on EVERY
+      // metadata type, and `getMetaItemLayered` → `saveMetaItem` round-trips a
+      // body carrying the stamped envelope. Until #4001 the schema could not
+      // represent these keys, so they were stripped at every parse.
+      const parsed = PermissionSetSchema.parse({
+        name: 'showcase_contributor',
+        objects: {},
+        _packageId: 'com.showcase',
+        _packageVersion: '1.0.0',
+        _provenance: 'package',
+        _lock: 'full',
+      });
+      expect(parsed._packageId).toBe('com.showcase');
+      expect(parsed._provenance).toBe('package');
+      expect(parsed._lock).toBe('full');
+    });
+
+    it('points wrong-layer keys (profiles/roles/users) at the binding mechanism', () => {
+      for (const key of ['profiles', 'roles', 'users']) {
+        const message = unknownKeyIssue(PermissionSetSchema, {
+          name: 'p', objects: {}, [key]: [],
+        })!.message;
+        expect(message, `\`${key}\` should carry guidance`).toContain(`\`${key}\` is not a PermissionSet field`);
+      }
+    });
+
+    it('accepts every key the schema declares (guards PERMISSION_SET_KEYS drift)', () => {
+      const probes: Record<string, unknown> = {
+        name: 'p', label: 'P', description: 'd', packageId: 'pkg', managedBy: 'user',
+        isDefault: true,
+        objects: { task: { allowRead: true } }, fields: { 'task.secret': { readable: false } },
+        systemPermissions: ['manage_users'], tabPermissions: { app_crm: 'visible' },
+        rowLevelSecurity: [], adminScope: { businessUnit: 'east' },
+        protection: { lock: 'none' },
+      };
+      for (const [key, value] of Object.entries(probes)) {
+        const result = PermissionSetSchema.safeParse({ name: 'p', objects: {}, [key]: value });
+        const unknown = result.success
+          ? undefined
+          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(unknown, `\`${key}\` should be a declared PermissionSet key`).toBeUndefined();
+      }
+    });
+  });
+
+  describe('ObjectPermissionSchema', () => {
+    it('points the bare CRUD verbs at the allow* bits', () => {
+      expect(unknownKeyIssue(ObjectPermissionSchema, { read: true })!.message)
+        .toContain('`read` → `allowRead`');
+      expect(unknownKeyIssue(ObjectPermissionSchema, { edit: true })!.message)
+        .toContain('`edit` → `allowEdit`');
+      expect(unknownKeyIssue(ObjectPermissionSchema, { export: true })!.message)
+        .toContain('`export` → `allowExport`');
+      expect(unknownKeyIssue(ObjectPermissionSchema, { viewAll: true })!.message)
+        .toContain('`viewAll` → `viewAllRecords`');
+    });
+
+    it('accepts every key the schema declares (guards OBJECT_PERMISSION_KEYS drift)', () => {
+      const probes: Record<string, unknown> = {
+        allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true,
+        allowExport: true, allowTransfer: true, allowRestore: true, allowPurge: true,
+        viewAllRecords: true, modifyAllRecords: true, readScope: 'org', writeScope: 'own',
+      };
+      for (const [key, value] of Object.entries(probes)) {
+        const result = ObjectPermissionSchema.safeParse({ [key]: value });
+        const unknown = result.success
+          ? undefined
+          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(unknown, `\`${key}\` should be a declared ObjectPermission key`).toBeUndefined();
+      }
+    });
+  });
+
+  describe('FieldPermissionSchema', () => {
+    it('points read/write vocabulary at readable/editable', () => {
+      expect(unknownKeyIssue(FieldPermissionSchema, { read: true })!.message)
+        .toContain('`read` → `readable`');
+      expect(unknownKeyIssue(FieldPermissionSchema, { write: true })!.message)
+        .toContain('`write` → `editable`');
+    });
+
+    it('explains that FLS is declared positively for a `hidden` key', () => {
+      expect(unknownKeyIssue(FieldPermissionSchema, { hidden: true })!.message)
+        .toContain('`readable: false`');
+    });
+  });
+
+  describe('AdminScopeSchema', () => {
+    it('rejects an undeclared key with a typo suggestion', () => {
+      expect(unknownKeyIssue(AdminScopeSchema, { businessUnit: 'east', business_unit: 'x' })!.message)
+        .toContain('`business_unit` → `businessUnit`');
+    });
+
+    it('accepts every key the schema declares (guards ADMIN_SCOPE_KEYS drift)', () => {
+      const probes: Record<string, unknown> = {
+        businessUnit: 'east', includeSubtree: false, manageAssignments: true,
+        manageBindings: true, authorEnvironmentSets: true, assignablePermissionSets: ['a'],
+      };
+      for (const [key, value] of Object.entries(probes)) {
+        const result = AdminScopeSchema.safeParse({ businessUnit: 'east', [key]: value });
+        const unknown = result.success
+          ? undefined
+          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(unknown, `\`${key}\` should be a declared AdminScope key`).toBeUndefined();
+      }
+    });
   });
 });

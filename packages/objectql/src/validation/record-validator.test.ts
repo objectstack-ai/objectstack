@@ -538,3 +538,162 @@ describe('validateRecord — ADR-0113 required write contract on update', () => 
     expect(() => validateRecord(s, { rec_no: null }, 'update')).not.toThrow();
   });
 });
+
+/**
+ * #3957 — a rejected write must name the field the way the USER knows it, in
+ * the language they read, and must hand a client the constraint as data.
+ *
+ * Before this, `validateOne` string-concatenated the API field name into a
+ * hardcoded English template: a `zh-CN` user importing a bad row read
+ * `penalty_amount must be ≥ 0` for a field declared `label: '处罚金额'`. The
+ * form layer localized the SAME constraint correctly (native `min`), so the
+ * language flipped depending on which layer caught the value.
+ */
+describe('validateRecord — messages name the field by its label (#3957)', () => {
+  const schema = {
+    fields: {
+      penalty_amount: { type: 'currency', label: '处罚金额', min: 0 },
+      remark: { type: 'text', label: '备注', maxLength: 512 },
+    },
+  };
+
+  const fieldsOf = (data: Record<string, unknown>, mode: 'insert' | 'update' = 'update', options = {}) => {
+    try {
+      validateRecord(schema, data, mode, options);
+    } catch (e) {
+      return (e as ValidationError).fields;
+    }
+    throw new Error('expected a ValidationError');
+  };
+
+  it('uses the declared label, not the API name, even with no locale', () => {
+    const [err] = fieldsOf({ penalty_amount: -5 });
+    expect(err.message).toBe('处罚金额 must be ≥ 0');
+    expect(err.message).not.toContain('penalty_amount');
+    // The API name stays available for the UI to focus the right input.
+    expect(err.field).toBe('penalty_amount');
+    expect(err.label).toBe('处罚金额');
+  });
+
+  it('renders the whole sentence in the caller’s locale', () => {
+    const [err] = fieldsOf({ penalty_amount: -5 }, 'update', {
+      messages: { locale: 'zh-CN', objectName: 'mes_settlement' },
+    });
+    expect(err.message).toBe('处罚金额必须大于或等于 0');
+  });
+
+  it('falls back to the API name only when no label is declared', () => {
+    const bare = { fields: { qty: { type: 'number', min: 1 } } };
+    try {
+      validateRecord(bare, { qty: 0 }, 'update');
+    } catch (e) {
+      const [err] = (e as ValidationError).fields;
+      expect(err.message).toBe('qty must be ≥ 1');
+      expect(err.label).toBe('qty');
+    }
+  });
+
+  /**
+   * Option 2 of the issue: the bound as a discrete value, so a custom client
+   * formats its own text instead of parsing the sentence. Rides ADR-0114's
+   * `constraint` position rather than a second parallel bag.
+   */
+  it('carries the constraint as discrete values', () => {
+    expect(fieldsOf({ penalty_amount: -5 })[0]).toMatchObject({
+      code: 'min_value',
+      constraint: { min: 0 },
+    });
+    expect(fieldsOf({ remark: 'x'.repeat(3000) })[0]).toMatchObject({
+      code: 'max_length',
+      constraint: { maxLength: 512, actual: 3000 },
+    });
+  });
+
+  it('localizes the whole built-in catalog, not just the range codes', () => {
+    const zoo = {
+      fields: {
+        title: { type: 'text', label: '标题', required: true },
+        email: { type: 'email', label: '邮箱' },
+        site: { type: 'url', label: '网址' },
+        tel: { type: 'phone', label: '电话' },
+        qty: { type: 'number', label: '数量' },
+        flag: { type: 'boolean', label: '标记' },
+        due: { type: 'date', label: '截止日' },
+        at: { type: 'datetime', label: '发生时间' },
+        clock: { type: 'time', label: '打卡时间' },
+        stage: { type: 'select', label: '阶段', options: ['a', 'b'] },
+        tags: { type: 'multiselect', label: '标签', options: ['a', 'b'] },
+      },
+    };
+    const msgs = { locale: 'zh-CN', objectName: 'zoo' };
+    const one = (data: Record<string, unknown>, mode: 'insert' | 'update' = 'update') => {
+      try {
+        validateRecord(zoo, data, mode, { messages: msgs });
+      } catch (e) {
+        return (e as ValidationError).fields[0];
+      }
+      throw new Error('expected a ValidationError');
+    };
+
+    expect(one({}, 'insert').message).toBe('标题不能为空');
+    expect(one({ email: 'nope' }).message).toBe('邮箱必须是有效的电子邮件地址');
+    expect(one({ site: 'notaurl' }).message).toBe('网址必须是有效的 URL(scheme://...)');
+    expect(one({ tel: 'x' }).message).toBe('电话必须是有效的电话号码');
+    expect(one({ qty: 'abc' }).message).toBe('数量必须是数字');
+    expect(one({ flag: 'maybe' }).message).toBe('标记必须是 true 或 false');
+    expect(one({ due: 'not-a-date' }).message).toBe('截止日必须是有效的日期(ISO-8601)');
+    // Same wire code as `date`, different sentence.
+    expect(one({ at: 'not-a-date' }).message).toBe('发生时间必须是有效的日期时间(ISO-8601)');
+    expect(one({ at: 'not-a-date' }).code).toBe('invalid_date');
+    expect(one({ clock: '99:99' }).message).toBe('打卡时间必须是有效的时间(HH:MM 或 HH:MM:SS)');
+    expect(one({ stage: 'z' }).message).toBe('阶段必须是以下值之一:a, b');
+    expect(one({ tags: ['a', 'z'] }).message).toBe('标签:“z”不在允许的取值范围内:a, b');
+    expect(one({ tags: 'a,b' as unknown as string[] }).message).toBe('标签必须是数组');
+  });
+
+  /**
+   * The declared label is only the SOURCE language. An app whose metadata is
+   * authored in English but shipped with a `zh-CN` bundle must read Chinese —
+   * the case the issue reported as "has a zh-CN translation. Neither is used".
+   */
+  it('prefers the translated label over the declared one', () => {
+    const en = { fields: { penalty_amount: { type: 'currency', label: 'Penalty Amount', min: 0 } } };
+    const translate = (key: string, locale: string) =>
+      key === 'objects.mes_settlement.fields.penalty_amount.label' && locale === 'zh-CN'
+        ? '处罚金额'
+        : key;
+    try {
+      validateRecord(en, { penalty_amount: -5 }, 'update', {
+        messages: { locale: 'zh-CN', objectName: 'mes_settlement', translate },
+      });
+    } catch (e) {
+      const [err] = (e as ValidationError).fields;
+      expect(err.message).toBe('处罚金额必须大于或等于 0');
+      expect(err.label).toBe('处罚金额');
+    }
+  });
+
+  it('survives a throwing i18n service instead of 500-ing the write', () => {
+    const translate = () => { throw new Error('i18n exploded'); };
+    const [err] = fieldsOf({ penalty_amount: -5 }, 'update', {
+      messages: { locale: 'zh-CN', objectName: 'mes_settlement', translate },
+    });
+    expect(err.message).toBe('处罚金额必须大于或等于 0');
+  });
+
+  /**
+   * The top-level `ValidationError.message` is what a toast shows. It joins the
+   * per-field messages, so localizing them localizes it — no separate path.
+   */
+  it('the top-level message is localized too', () => {
+    try {
+      validateRecord(schema, { penalty_amount: -5, remark: 'x'.repeat(3000) }, 'update', {
+        messages: { locale: 'zh-CN', objectName: 'mes_settlement' },
+      });
+    } catch (e) {
+      expect((e as ValidationError).message).toBe(
+        '处罚金额必须大于或等于 0; 备注长度不能超过 512 个字符(当前 3000 个)',
+      );
+    }
+  });
+});

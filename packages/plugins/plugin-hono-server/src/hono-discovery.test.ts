@@ -35,6 +35,12 @@ function bootStandardEndpoints(installedPlugins: string[] = []) {
         hook: () => {},
         getService: () => undefined,
     };
+    // Same order `start()` wires the two `kernel:ready` hooks in: the
+    // current-user endpoints are registered unconditionally and first (#4073),
+    // the CRUD + discovery surface only under `registerStandardEndpoints`.
+    // Discovery is computed from what is really mounted, so a boot that skipped
+    // the `/auth/me/*` helpers would under-report `routes.auth`.
+    (plugin as any).registerCurrentUserEndpoints(ctx);
     (plugin as any).registerDiscoveryAndCrudEndpoints(ctx);
     return (plugin as any).server.getRawApp();
 }

@@ -87,6 +87,22 @@ export async function loadArtifactBundle(
             ? parsed.metadata
             : parsed;
     } catch (err: any) {
+        // An ABSENT artifact is not a failure (#4085). The platform is a
+        // development platform first: `os serve objectstack.config.ts` boots
+        // from the config, `os migrate` reads metadata, and a freshly authored
+        // project has no `dist/` at all until its first `os compile`. Shouting
+        // "read FAILED" at those callers described a healthy state as a fault
+        // and sent readers hunting for a build problem. A PRESENT-but-unusable
+        // artifact (malformed JSON, bad permissions, HTTP error) is a real
+        // fault and keeps the loud warning.
+        if (err?.code === 'ENOENT') {
+            // eslint-disable-next-line no-console
+            console.log(
+                `${tag} no compiled artifact at '${absArtifactPath}' — booting without one ` +
+                `(run 'os compile' to build it)`,
+            );
+            return null;
+        }
         // eslint-disable-next-line no-console
         console.warn(`${tag} artifact read FAILED: path='${absArtifactPath}' error=${err?.message ?? err}`);
         return null;

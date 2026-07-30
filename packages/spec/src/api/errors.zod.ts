@@ -283,9 +283,27 @@ export const FieldErrorSchema = lazySchema(() => z.object({
    * mapped at the boundary (`zodIssuesToFields`, ADR-0114 D3).
    */
   code: FieldErrorCode.describe('Which constraint the value violated (field-level catalog, ADR-0114)'),
-  message: z.string().describe('Human-readable error message'),
+  message: z.string().describe('Human-readable error message, rendered in the caller’s locale'),
+  /**
+   * The field's DISPLAY name in the caller's locale — what `message` names it by
+   * (#3957).
+   *
+   * Separate from `field` because they answer different questions: a form needs
+   * the API name to focus the right input, a human needs the label to read the
+   * sentence. Collapsing them is how `penalty_amount must be ≥ 0` reached end
+   * users for a field declared `label: '处罚金额'`.
+   */
+  label: z.string().optional().describe('Field display label in the caller’s locale'),
   value: z.unknown().optional().describe('The invalid value that was provided'),
-  constraint: z.unknown().optional().describe('The constraint that was violated (e.g., max length)'),
+  /**
+   * The violated constraint's discrete values, so a client can format its own
+   * text instead of parsing `message` (#3957) — `{ min: 0 }`,
+   * `{ maxLength: 512, actual: 3000 }`, `{ allowed: 'draft, sent' }`. The keys
+   * mirror the metadata properties they come from, and are what the message
+   * templates interpolate.
+   */
+  constraint: z.record(z.string(), z.unknown()).optional()
+    .describe('The constraint that was violated, as discrete values (e.g. { maxLength: 512, actual: 3000 })'),
 }));
 
 export type FieldError = z.infer<typeof FieldErrorSchema>;

@@ -1814,10 +1814,55 @@ export class AuthPlugin implements Plugin {
     // Register wildcard route to forward all auth requests to better-auth.
     // better-auth is configured with basePath matching our route prefix, so we
     // forward the original request directly — no path rewriting needed.
-    rawApp.all(`${basePath}/*`, async (c: any) => {
+    //
+    // [#4088] This catch-all owns the whole auth namespace, and it used to be
+    // TERMINAL: it returned better-auth's response unconditionally, including
+    // the 404 better-auth produces for a path it does not implement. Any OTHER
+    // plugin's route under `${basePath}/*` was therefore reachable only if it
+    // happened to register FIRST — Hono runs handlers matching a path in
+    // registration order and the first to return a Response wins. That made a
+    // load-bearing surface depend on `kernel.use()` order:
+    // `plugin-hono-server` mounts `/auth/me/permissions` and
+    // `/auth/me/localization` from its own `kernel:ready` hook, the console's
+    // entire permission layer reads the former, and `core`'s auth gate
+    // allow-lists the latter — all of it silently 404s if AuthPlugin is used
+    // before HonoServerPlugin. Same class as #2567 and #4018: an invariant held
+    // by ordering luck rather than enforced.
+    //
+    // So a 404 now means "better-auth does not own this path" and we yield to
+    // whatever else matched, in either registration order. Deliberately narrow:
+    // 401/403 are real better-auth answers, not disclaimers of ownership, and
+    // when nothing downstream answers we return better-auth's own 404 verbatim
+    // so the wire shape for a genuinely unclaimed auth path is unchanged.
+    // Precedence still favours the namespace owner — better-auth wins every
+    // path it implements, and only its leftovers are up for grabs.
+    rawApp.all(`${basePath}/*`, async (c: any, next: any) => {
       try {
         // Forward the original request to better-auth handler
         const response = await this.authManager!.handleRequest(c.req.raw);
+
+        if (response.status === 404) {
+          await next();
+          // A non-404 downstream means something else answered — hand that back.
+          // NOT `c.finalized`: reaching the end of the chain with nothing
+          // matched runs Hono's notFound handler, which sets a response and
+          // flips `finalized` to true, so it cannot tell "someone answered"
+          // from "nobody did". Status can. The one thing this trades away is a
+          // downstream route's own 404 BODY (better-auth's 404 is returned in
+          // its place); the status is identical either way, and no route under
+          // this prefix answers 404 today — `/auth/me/*` answer 200 with an
+          // `authenticated: false` payload for an anonymous caller.
+          if (c.res && c.res.status !== 404) return;
+          // Assign, don't `return`: the IP-gate `rawApp.use()` above puts a
+          // middleware in this chain, and Hono's compose only assigns a
+          // handler's returned Response while `c.finalized` is false. The
+          // notFound above already flipped it, so a `return response` here is
+          // silently dropped and the caller gets Hono's "404 Not Found" text
+          // instead of better-auth's JSON. Setting `c.res` is not subject to
+          // that condition.
+          c.res = response;
+          return;
+        }
 
         // better-auth catches internal errors and returns error Responses
         // without throwing, so the catch block below would never trigger.

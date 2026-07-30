@@ -1,7 +1,6 @@
 ---
 "@objectstack/driver-memory": major
 "@objectstack/spec": major
-"@objectstack/service-datasource": patch
 "@objectstack/plugin-dev": patch
 ---
 
@@ -35,11 +34,11 @@ rows; run N had 2N. CI never saw it — every job is a fresh clone, so every CI 
 is run 1 — but `pnpm test` twice in one working tree could only ever go green
 once. The persisted file's `created_at` values, one pair per run, were the proof.
 
-The blast radius was wider than that one suite: **every** bare
-`new InMemoryDriver()` inherited the default, including
-`createDefaultDatasourceDriverFactory`'s `memory` branch, so any test using a
-`memory` datasource wrote to its package directory. Unit tests should not have
-write side effects on the CWD at all.
+(#4083 fixed that particular suite from the factory side, and its regression
+test is kept as-is. The blast radius was wider than one suite, though: **every**
+bare `new InMemoryDriver()` inherited the default, so any code path constructing
+one directly wrote to its working directory. Unit tests should not have write
+side effects on the CWD at all.)
 
 **Migrating.** Callers that want durability now ask for it:
 
@@ -51,16 +50,22 @@ new InMemoryDriver({ persistence: 'auto' })  // previous default behaviour
 ```
 
 The `'auto'` / `'file'` / `'local'` / custom-adapter paths are unchanged; only
-the value used when `persistence` is omitted moved. Two in-tree hosts that
-genuinely wanted durability now state it, rather than inheriting it:
+the value used when `persistence` is omitted moved.
 
-- **`resolveSqliteDriver`'s last-resort rung** (`service-datasource`) mirrors the
-  sqlite target it stands in for — `persistence: 'file'` when the caller asked
-  for a file database, `false` for `:memory:`. A dev whose native and wasm SQLite
-  both failed to load keeps the durability they would have had.
-- **`createDefaultDatasourceDriverFactory`'s `memory` branch** is ephemeral unless
-  the datasource *definition* declares `config.persistence`. Per Prime Directive
-  \#12 that is a contract-level knob on the definition, not a silent host default.
+**Relationship to #4083.** That issue fixed the same hazard one consumer at a
+time, and landed first: `createDefaultDatasourceDriverFactory` now passes
+`persistence: false` for a declared `{ driver: 'memory' }` datasource and scopes
+an opted-in destination *per datasource*, and the dev sqlite step-down's
+last-resort rung passes `false` too. Both are kept exactly as #4083 wrote them.
+This change closes the half they deliberately left open — a directly-constructed
+`new InMemoryDriver()` — which is the path that still wrote into the working
+directory of whatever process happened to build one.
+
+The two are complementary, not redundant. #4083's per-datasource scoping is
+still the only thing that expands `'auto'`/`'file'`/`'local'` into a destination
+carrying the datasource name, so two pools that DO opt in never alias one file;
+its explicit `false` becomes belt-and-braces, which is the right posture for a
+path that must never persist.
 
 `DevPlugin`'s driver is now explicitly `persistence: false`, matching the cache,
 queue, job, i18n, storage and search stubs it ships beside — it was the one piece

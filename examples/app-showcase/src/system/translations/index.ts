@@ -149,6 +149,18 @@ export const ShowcaseTranslationBundle = {
         successMessage: 'Portfolio snapshot taken.',
       },
     },
+    // Translated at birth for the same reason as `globalActions` above: this
+    // example is ratcheted at its current untranslated count, so a declared
+    // label that skips zh-CN widens the debt and fails check-i18n-coverage.
+    // The gallery's other widget titles predate that ratchet and remain part of
+    // the frozen baseline. objectui#2945.
+    dashboards: {
+      showcase_chart_gallery: {
+        widgets: {
+          combo_count_vs_progress: { title: 'Task Count vs Avg Progress' },
+        },
+      },
+    },
   },
   'zh-CN': {
     objects: {
@@ -306,6 +318,13 @@ export const ShowcaseTranslationBundle = {
       showcase_portfolio_snapshot: {
         label: '业务概览',
         successMessage: '已生成业务概览。',
+      },
+    },
+    dashboards: {
+      showcase_chart_gallery: {
+        widgets: {
+          combo_count_vs_progress: { title: '任务数与平均进度' },
+        },
       },
     },
   },

@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '../src/plugin';
 import { ObjectSchema } from '@objectstack/spec/data';
+import { readServiceSelfInfo } from '@objectstack/spec/api';
 
 describe('ObjectQLPlugin - Metadata Service Integration', () => {
   let kernel: ObjectKernel;
@@ -26,10 +27,33 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       expect(objectql).toBeDefined();
       expect(kernel.getService('data')).toBeDefined();
       expect(kernel.getService('protocol')).toBeDefined();
-      // metadata is provided by kernel's core fallback, not ObjectQL
+      // metadata is provided by kernel's core fallback, not ObjectQL —
+      // identified by its standard D12 self-description (#4058; it used to
+      // carry a non-standard `_fallback: true` no consumer recognized).
       const metadataService = kernel.getService('metadata');
       expect(metadataService).toBeDefined();
-      expect((metadataService as any)._fallback).toBe(true);
+      expect(readServiceSelfInfo(metadataService)?.status).toBe('degraded');
+    });
+
+    // #4089 — the self-description above only helps if the builder reads it.
+    // On this boot path (no MetadataPlugin) the whole chain runs for real:
+    // the kernel injects `createMemoryMetadata`, the protocol shim walks the
+    // live service registry, and discovery must say `degraded` — it used to
+    // hardcode `available` for the slot and report a registry that never
+    // reaches disk as fully real.
+    it('should report the kernel metadata fallback as degraded in discovery', async () => {
+      await kernel.use(new ObjectQLPlugin());
+      await kernel.bootstrap();
+
+      const protocol = kernel.getService('protocol') as any;
+      const discovery = await protocol.getDiscovery();
+
+      expect(discovery.services.metadata.enabled).toBe(true);
+      expect(discovery.services.metadata.status).toBe('degraded');
+      expect(discovery.services.metadata.message).toContain('MetadataPlugin');
+      // Serving is unaffected — `/api/v1/meta` is the protocol's route.
+      expect(discovery.services.metadata.handlerReady).toBe(true);
+      expect(discovery.routes.metadata).toBe('/api/v1/meta');
     });
 
     it('should serve in-memory metadata definitions', async () => {

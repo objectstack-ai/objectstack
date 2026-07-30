@@ -6,13 +6,26 @@
  * Implements the ICacheService contract with basic get/set/delete/has/clear
  * and TTL expiry.  Used by ObjectKernel as an automatic fallback when no
  * real cache plugin (e.g. Redis) is registered.
+ *
+ * [#4058] Self-describes as `degraded`, not `stub` (ADR-0076 D12): this is a
+ * real cache — it stores, expires, and reports true stats — just process-local
+ * and unshared. The non-standard `_fallback: true` it used to carry was read by
+ * nothing (`readServiceSelfInfo` knows `__serviceInfo` and the legacy `_dev`),
+ * so discovery reported it as fully `available`. `handlerReady: false` because
+ * no HTTP surface is mounted for `cache` at all — the same reason realtime
+ * reports false.
  */
 export function createMemoryCache() {
   const store = new Map<string, { value: unknown; expires?: number }>();
   let hits = 0;
   let misses = 0;
   return {
-    _fallback: true, _serviceName: 'cache',
+    __serviceInfo: {
+      status: 'degraded' as const,
+      handlerReady: false,
+      message: 'In-process Map cache — not shared across instances, lost on restart. Register a cache plugin (e.g. Redis) for a real one.',
+    },
+    _serviceName: 'cache',
     async get<T = unknown>(key: string): Promise<T | undefined> {
       const entry = store.get(key);
       if (!entry || (entry.expires && Date.now() > entry.expires)) {
