@@ -534,7 +534,15 @@ describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
     it('/ai/agents returns an empty list (not 404) when no AI service is configured', async () => {
         const result = await makeDispatcher().dispatch('GET', '/ai/agents', undefined, {}, {} as any);
         expect(result.response?.status).toBe(200);
-        expect(result.response?.body?.agents).toEqual([]);
+        // #4053: in the declared envelope now, with `AiAgentsResponseSchema`'s
+        // `{ agents }` RELOCATED under `data` rather than flattened to the bare
+        // array. `unwrapResponse` returns `data`, so `client.ai.agents.list()`
+        // reads `.agents` off it and keeps working against cloud's still-
+        // unenveloped `service-ai` too — which is what lets the two surfaces
+        // convert independently instead of in lockstep.
+        expect(envelopeViolations(result.response?.body), JSON.stringify(result.response?.body)).toEqual([]);
+        expect(result.response?.body?.data?.agents).toEqual([]);
+        expect(result.response?.body?.agents).toBeUndefined();
     });
 
     it('/ai routes 404 (service missing) for non-agents paths', async () => {
