@@ -1436,7 +1436,13 @@ describe('RestServer', () => {
       const { revoke: route } = getShareRoutes(rest);
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis(), end: vi.fn() };
       await route!.handler({ params: { object: 'account', id: 'a1', shareId: 'shr_X' } } as any, res as any);
-      expect(revoke).toHaveBeenCalledWith('shr_X', expect.anything());
+      expect(revoke).toHaveBeenCalledWith(
+        'shr_X',
+        expect.anything(),
+        // [ADR-0111 D4] The URL's record is forwarded as the revoke scope
+        // so a share id cannot be revoked through an unrelated path.
+        { object: 'account', recordId: 'a1' },
+      );
       expect(res.status).toHaveBeenCalledWith(204);
     });
   });

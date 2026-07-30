@@ -5667,8 +5667,32 @@ export class RestServer {
             code: 'NOT_IMPLEMENTED',
             message: 'Sharing service is not configured on this deployment',
         });
+        // [ADR-0111] The service enforces authorization (D1/D4/D5/D7) and
+        // signals the verdict via message prefixes, the plugin's established
+        // error idiom — this maps them onto HTTP. Returns true when handled.
+        const respondSharingError = (res: any, error: any): boolean => {
+            const msg = String(error?.message ?? error ?? '');
+            const map: Array<[string, number]> = [
+                ['VALIDATION_FAILED', 400],
+                ['PERMISSION_DENIED', 403],
+                ['NOT_FOUND', 404],
+                ['CONFLICT', 409],
+                ['SHARING_NOT_ENABLED', 422],
+            ];
+            for (const [code, status] of map) {
+                if (msg.startsWith(code)) {
+                    res.status(status).json({
+                        code,
+                        error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                    });
+                    return true;
+                }
+            }
+            return false;
+        };
 
-        // GET — list shares on a record.
+        // GET — list shares on a record. [ADR-0111 D5] Management-gated in the
+        // service: invisible record → 404, visible-but-not-manager → 403.
         this.routeManager.register({
             method: 'GET',
             path: `${dataPath}/:object/:id/shares`,
@@ -5682,6 +5706,7 @@ export class RestServer {
                     const rows = await svc.listShares(req.params.object, req.params.id, context ?? {});
                     res.json({ data: rows });
                 } catch (error: any) {
+                    if (respondSharingError(res, error)) return;
                     logError('[REST] List shares error:', error);
                     res.status(500).json({ code: 'SHARES_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
                 }
@@ -5689,7 +5714,8 @@ export class RestServer {
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
         });
 
-        // POST — grant access.
+        // POST — grant access. [ADR-0111 D1/D7] Authorization + posture live
+        // in the service; this route only maps verdicts (403/404/422/400).
         this.routeManager.register({
             method: 'POST',
             path: `${dataPath}/:object/:id/shares`,
@@ -5711,21 +5737,10 @@ export class RestServer {
                         sourceId: body.sourceId ?? body.source_id,
                         reason: body.reason,
                     };
-                    try {
-                        const row = await svc.grant(input, context ?? {});
-                        res.status(201).json(row);
-                    } catch (err: any) {
-                        const msg = String(err?.message ?? err ?? '');
-                        if (msg.startsWith('VALIDATION_FAILED')) {
-                            res.status(400).json({
-                                code: 'VALIDATION_FAILED',
-                                error: msg.replace(/^VALIDATION_FAILED:\s*/, ''),
-                            });
-                            return;
-                        }
-                        throw err;
-                    }
+                    const row = await svc.grant(input, context ?? {});
+                    res.status(201).json(row);
                 } catch (error: any) {
+                    if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
                     res.status(500).json({ code: 'SHARE_GRANT_FAILED', error: String(error?.message ?? error).slice(0, 500) });
                 }
@@ -5733,7 +5748,10 @@ export class RestServer {
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
         });
 
-        // DELETE — revoke a share by id.
+        // DELETE — revoke a share by id. [ADR-0111 D4] The URL's
+        // (object, id) is forwarded as the revoke scope so a share id can only
+        // be revoked through the record it belongs to; the service enforces
+        // management authority and the manual-source rule (409).
         this.routeManager.register({
             method: 'DELETE',
             path: `${dataPath}/:object/:id/shares/:shareId`,
@@ -5744,9 +5762,14 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
-                    await svc.revoke(req.params.shareId, context ?? {});
+                    await svc.revoke(
+                        req.params.shareId,
+                        context ?? {},
+                        { object: req.params.object, recordId: req.params.id },
+                    );
                     res.status(204).end();
                 } catch (error: any) {
+                    if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
                     res.status(500).json({ code: 'SHARE_REVOKE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
                 }
@@ -5789,6 +5812,12 @@ export class RestServer {
             const msg = String(err?.message ?? err ?? '');
             if (msg.startsWith('VALIDATION_FAILED')) {
                 return res.status(400).json({ code: 'VALIDATION_FAILED', error: msg.replace(/^VALIDATION_FAILED:\s*/, '') });
+            }
+            // [ADR-0111 D6] The service gates every verb on `manage_sharing`
+            // (enforced there so non-REST callers are covered too) — map its
+            // verdict rather than burying it in a 500.
+            if (msg.startsWith('PERMISSION_DENIED')) {
+                return res.status(403).json({ code: 'PERMISSION_DENIED', error: msg.replace(/^PERMISSION_DENIED:\s*/, '') });
             }
             if (msg.startsWith('RULE_NOT_FOUND')) {
                 return res.status(404).json({ code: 'RULE_NOT_FOUND', error: msg.replace(/^RULE_NOT_FOUND:?\s*/, '') });

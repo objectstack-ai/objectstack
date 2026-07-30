@@ -149,6 +149,18 @@ compiler. A condition the compiler cannot lower is **skipped and logged —
 never seeded as a permissive match-all** (ADR-0049): a bad condition
 under-shares rather than over-shares.
 
+### Rule administration requires `manage_sharing` (ADR-0111 D6)
+
+A sharing rule is an **org-wide grant generator**, so the whole programmatic
+surface — `GET`/`POST` `{basePath}/sharing/rules`, `GET`/`DELETE`
+`{basePath}/sharing/rules/:idOrName`, and `POST …/:idOrName/evaluate` — requires
+the **`manage_sharing`** capability (seeded into `admin_full_access`;
+`manage_platform_settings` is honoured as the legacy equivalent). The gate is
+enforced in the service itself, not just at the route, so every caller is
+covered; an unauthorized call fails with `403 PERMISSION_DENIED`. Boot
+seeding, lifecycle hooks, and backfills run as system context and are
+unaffected.
+
 ### There is no "share every record" rule
 
 The predicate is **mandatory on every authoring path**, whether you declare

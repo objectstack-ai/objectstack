@@ -47,6 +47,14 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // granted — which was harmless only while settings writes went ungated.
   { name: 'setup.write', label: 'Write Settings', description: 'Save changes to tenant/Setup settings pages.', scope: 'org' },
   { name: 'studio.access', label: 'Studio Access', description: 'Enter the Studio metadata-design surfaces.', scope: 'platform' },
+  // [ADR-0111 D9] Sharing administration right-sized below full platform admin:
+  // gates the sharing-rule surface (define / delete / evaluate — an org-wide
+  // grant generator) and, in the DEPTH extension, the non-owner path to
+  // per-record share management. Salesforce ships the analogous standalone
+  // "Manage Sharing" permission. Seeded into `admin_full_access` so existing
+  // admin flows are unchanged; `manage_platform_settings` is honoured as a
+  // legacy equivalent by the enforcement seams that predate this capability.
+  { name: 'manage_sharing', label: 'Manage Sharing', description: 'Administer record sharing: author and evaluate sharing rules, and manage per-record shares beyond one’s own records.', scope: 'org' },
 ];
 
 /** Set of built-in capability names, for fast membership checks (lint, gating). */
