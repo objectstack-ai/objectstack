@@ -521,4 +521,92 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
 
   // The ADR-0062 D7 `field.columnName`-on-external-objects lint was removed with
   // `field.columnName` itself (#2377): external column mapping is `external.columnMap`.
+
+  /**
+   * Descriptor-declared expression slots (#4027). Before this, the flow walk
+   * hardcoded `config.condition` and assumed every other node string was a
+   * template, so `screen.fields[].visibleWhen` — declared bare CEL since #3304 —
+   * was validated by nobody and #3528 shipped the wrong dialect through
+   * `objectstack validate` in silence.
+   */
+  describe('descriptor-declared expression slots (#4027)', () => {
+    const screenFlow = (fields: unknown[]) => ({
+      objects,
+      flows: [{
+        name: 'lead_conversion',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+          { id: 'screen_1', type: 'screen', config: { fields } },
+        ],
+        edges: [],
+      }],
+    });
+
+    it('flags a `{var}` template dialect in a screen field visibleWhen', () => {
+      // The exact predicate HotCRM shipped (#3528).
+      const issues = validateStackExpressions(screenFlow([
+        { name: 'createOpportunity', type: 'boolean', required: true },
+        { name: 'opportunityName', type: 'text', required: true, visibleWhen: '{createOpportunity} == true' },
+      ]));
+      const found = issues.filter(i => i.where.includes('visibleWhen'));
+      expect(found).toHaveLength(1);
+      expect(found[0].severity).toBe('error');
+      expect(found[0].where).toContain("flow 'lead_conversion'");
+      expect(found[0].where).toContain("node 'screen_1'");
+      // Indexed into the repeater, so the author knows WHICH field.
+      expect(found[0].where).toContain('config.fields[1].visibleWhen');
+      expect(found[0].source).toBe('{createOpportunity} == true');
+    });
+
+    it('passes the corrected bare-CEL predicate', () => {
+      const issues = validateStackExpressions(screenFlow([
+        { name: 'createOpportunity', type: 'boolean', required: true, defaultValue: false },
+        { name: 'opportunityName', type: 'text', required: true, visibleWhen: 'createOpportunity == true' },
+      ]));
+      expect(issues.filter(i => i.where.includes('visibleWhen'))).toHaveLength(0);
+    });
+
+    it('does not report the screen field names as unknown object fields', () => {
+      // A screen's `visibleWhen` binds the screen's OWN collected values, not the
+      // trigger record's fields — so no schema hint is passed. Were one passed,
+      // `createOpportunity` would be flagged as an unknown `crm_lead` field and
+      // every correct predicate would carry a spurious finding.
+      const issues = validateStackExpressions(screenFlow([
+        { name: 'createOpportunity', type: 'boolean' },
+        { name: 'opportunityName', visibleWhen: 'createOpportunity == true' },
+      ]));
+      expect(issues).toHaveLength(0);
+    });
+
+    it('leaves a correct single-brace loop collection alone', () => {
+      // `loop.collection` is the single-brace `{var}` flow-interpolation dialect,
+      // where braces are CORRECT. It is recorded in the ledger as `flow-template`
+      // and deliberately not validated — checking it as a CEL predicate (or as an
+      // ADR-0032 §3 double-brace template) would fail every valid flow.
+      const issues = validateStackExpressions({
+        objects,
+        flows: [{
+          name: 'loop_flow',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+            { id: 'loop_1', type: 'loop', config: { collection: '{tasks}', iteratorVariable: 'task' } },
+          ],
+          edges: [],
+        }],
+      });
+      expect(issues).toHaveLength(0);
+    });
+
+    it('tolerates a screen with no fields, a non-array fields, and no config', () => {
+      expect(validateStackExpressions(screenFlow([]))).toHaveLength(0);
+      expect(validateStackExpressions({
+        objects,
+        flows: [{
+          name: 'f',
+          nodes: [{ id: 's', type: 'screen', config: { fields: 'nope' } }, { id: 's2', type: 'screen' }],
+          edges: [],
+        }],
+      })).toHaveLength(0);
+    });
+  });
 });

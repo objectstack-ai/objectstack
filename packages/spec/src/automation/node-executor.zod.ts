@@ -208,8 +208,9 @@ export type ActionParadigm = z.infer<typeof ActionParadigmSchema>;
  *
  * The runtime registry (`AutomationEngine.getActionDescriptors()`) aggregates
  * these and backs both:
- *  - **flow validation** (`registerFlow()` checks `node.type` is a registered
- *    action, and that `config` satisfies `configSchema`), and
+ *  - **flow validation** — `registerFlow()` checks `node.type` is a registered
+ *    action, and validates the expression slots the descriptor declares (see
+ *    {@link configSchema} for exactly how far that goes), and
  *  - the **designer palette** (label / icon / category / config form).
  *
  * Keyed by `type` (not `id` + `nodeTypes` like the legacy
@@ -239,11 +240,33 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
   // ── config contract ───────────────────────────────────────────────
   /**
    * JSON Schema (compiled from the executor's Zod) describing the node
-   * `config`. Drives Studio form generation and `registerFlow()` config
-   * validation. Optional — actions with no config omit it.
+   * `config`. Drives Studio form generation. Optional — actions with no config
+   * omit it.
+   *
+   * **What actually validates against this, and what does not** (#4027). An
+   * earlier revision of this doc claimed `registerFlow()` checks that `config`
+   * satisfies `configSchema`. It does not, and never did — `FlowNodeSchema.config`
+   * is `z.record(z.unknown())`, so no layer rejects an undeclared or misspelled
+   * config key at author time. What *is* enforced:
+   *
+   *  - **Expression slots are validated.** Every property marked
+   *    `xExpression: 'expression'` (bare CEL) is parse-checked at `registerFlow()`
+   *    and by `objectstack validate`, via the `FLOW_NODE_EXPRESSION_PATHS` ledger
+   *    and its reconciliation ratchet — so a declared predicate cannot go
+   *    unvalidated the way `screen.fields[].visibleWhen` did for four months
+   *    (#3528). Slots marked `xExpression: 'template'` are recorded but not
+   *    checked: no validator implements the single-brace `{var}` dialect they use.
+   *  - **Everything else is designer-facing only.** Types, `required`, `enum` and
+   *    unknown keys are not enforced anywhere. Do not rely on this schema as a
+   *    runtime guard; an executor must still validate its own config.
+   *
+   * The schema is also hand-written per executor rather than derived from the
+   * code that reads `config`, so a property can be declared without being read
+   * (or read without being declared) with nothing to reconcile the two. Only the
+   * expression subset has a ratchet today.
    */
   configSchema: z.unknown().optional()
-    .describe('JSON Schema for the node config (drives form + parse validation)'),
+    .describe('JSON Schema for the node config (drives the designer form; only declared expression slots are validated)'),
 
   // ── capabilities ──────────────────────────────────────────────────
   /** Supports async pause/resume (e.g. wait, human_task). */

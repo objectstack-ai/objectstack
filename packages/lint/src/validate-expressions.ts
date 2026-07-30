@@ -9,13 +9,16 @@
  * from `@objectstack/formula`, so the verdict matches `registerFlow` and the
  * agent `validate_expression` tool exactly.
  *
- * Scope (v1): flow predicates (start/decision `config.condition` + edge
- * `condition`), object validation-rule / formula predicates, and UI action
- * `visible` / `disabled` predicates. Each error is located (flow/object/action
- * + node/edge/field) with a corrective message.
+ * Scope: flow predicates (start/decision `config.condition` + edge `condition`),
+ * every **descriptor-declared** expression slot named by
+ * `FLOW_NODE_EXPRESSION_PATHS` (#4027 — e.g. a screen field's `visibleWhen`),
+ * object validation-rule / formula predicates, and UI action `visible` /
+ * `disabled` predicates. Each error is located (flow/object/action +
+ * node/edge/field) with a corrective message.
  */
 
 import { validateExpression } from '@objectstack/formula';
+import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 
 export interface ExprIssue {
   where: string;
@@ -111,6 +114,18 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
   };
 
+  /**
+   * A declared bare-CEL slot (#4027). No object schema is passed: these slots
+   * bind the *screen's own* collected values, not the trigger record's fields, so
+   * a field-existence pass would report every field name as unknown.
+   */
+  const checkDeclaredPredicate = (where: string, raw: unknown): void => {
+    if (raw == null) return;
+    const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string });
+    for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
+    for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+  };
+
   // ── Flows ──────────────────────────────────────────────────────────
   for (const flow of asArray(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
@@ -124,6 +139,26 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     for (const node of nodes) {
       const cfg = (node.config ?? {}) as AnyRec;
       check(`flow '${flowName}' · node '${node.id}' (${node.type}) condition`, cfg.condition, objectName);
+
+      // Descriptor-declared expression slots (#4027). Before this, the traversal
+      // hardcoded `condition` and assumed every other node string was a `{var}`
+      // template — so `screen.fields[].visibleWhen`, declared bare CEL since
+      // #3304, was validated by nobody and #3528 shipped a template-dialect
+      // predicate through compile, validate and run time in silence.
+      // Only `predicate` slots are checkable: `flow-template` slots take the
+      // single-brace `{var}` dialect `interpolate()` implements, which no
+      // validator covers (the `template` role enforces ADR-0032 §3's
+      // double-brace text template and would reject every correct
+      // `loop.collection`). The ledger records them regardless, so the
+      // reconciliation ratchet still sees the marker.
+      const nodeType = typeof node.type === 'string' ? node.type : '';
+      for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
+        if (found.entry.role !== 'predicate') continue;
+        checkDeclaredPredicate(
+          `flow '${flowName}' · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`,
+          found.value,
+        );
+      }
       // #1870 — a `script` node must declare a callable target (`actionType` or
       // `function`). A node with neither is a silent no-op that otherwise passes
       // build. (Function *existence* isn't checkable here — functions are code,
