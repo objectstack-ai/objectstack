@@ -1481,9 +1481,9 @@ describe('HTTP error shaping — envelope normalisation', () => {
     /**
      * What the runtime dispatcher put on the wire between #3918 and #3842: the
      * HTTP status in `code`, the real code parked in `details`. Kept as a
-     * fixture because the SDK must keep reading it — a client build talks to
-     * whatever server version it is pointed at, so this is a live legacy-server
-     * shape, not a stale test.
+     * fixture to PIN the #4007 retirement — the SDK deliberately no longer
+     * digs this shape's parking spot (one release train; ADR-0112 renamed the
+     * code values, so a dug-out code matches no current branch anyway).
      */
     const WRAPPED_LEGACY = {
         success: false,
@@ -1524,29 +1524,36 @@ describe('HTTP error shaping — envelope normalisation', () => {
         expect(caught.httpStatus).toBe(400);
     });
 
-    it('reads the pre-#3842 wrapped shape identically (older server, newer SDK)', async () => {
-        // #3842 cured this at the producer, but an SDK build talks to whatever
-        // server it is pointed at, so the `details.code` hop must keep working.
+    it('no longer digs the pre-#3842 parking spot (#4007: retired pairing)', async () => {
+        // #3842 cured this at the producer; #4007 retired the client-side dig.
+        // SDK and server ship as a changesets fixed group, and ADR-0112
+        // batches 1–2 renamed the code VALUES — a code dug out of an old
+        // server's `details.code` would not match any branch written against
+        // the current catalog, so the read protected nothing.
         const { client } = createMockClient(WRAPPED_LEGACY, 400);
         const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
 
-        expect(caught.code).toBe('VALIDATION_FAILED');
+        expect(caught.code).toBeUndefined();
+        // Everything else about the legacy shape still normalises: `fields`
+        // lives at `error.details.fields` in the CURRENT wrapped envelope too,
+        // and the message/status reads are shape-independent.
         expect(caught.fields).toEqual(FIELDS);
         expect(caught.httpStatus).toBe(400);
+        expect(caught.message).toBe('Validation failed');
     });
 
-    it('reports the same code from all three envelopes for the same failure', async () => {
+    it('reports the same code from both live envelopes for the same failure', async () => {
         // The asymmetry #3636 → #3675 → #3689 → #3842 has been closing: which
         // surface answered must stop being observable to the caller.
         const codes = await Promise.all(
-            [FLAT, WRAPPED, WRAPPED_LEGACY].map((body) =>
+            [FLAT, WRAPPED].map((body) =>
                 createMockClient(body, 400).client.data
                     .delete('pm_base', 'rec_1')
                     .catch((e: any) => e.code),
             ),
         );
 
-        expect(codes).toEqual(['VALIDATION_FAILED', 'VALIDATION_FAILED', 'VALIDATION_FAILED']);
+        expect(codes).toEqual(['VALIDATION_FAILED', 'VALIDATION_FAILED']);
     });
 
     it('exposes `fields[]` at the same place for BOTH envelopes', async () => {
@@ -1567,6 +1574,37 @@ describe('HTTP error shaping — envelope normalisation', () => {
 
         expect(caught.fields).toBeUndefined();
         expect(caught.code).toBe('PERMISSION_DENIED');
+    });
+
+    it('reads `category` / `retryable` from inside `error`, where the contract declares them (#4006)', async () => {
+        // These two used to be read from the body TOP level, where no envelope
+        // ever put them — `err.category` / `err.retryable` were `undefined`
+        // against every conformant server (ADR-0112 D9b).
+        const { client } = createMockClient(
+            {
+                success: false,
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: 'engine still booting',
+                    httpStatus: 503,
+                    category: 'availability',
+                    retryable: true,
+                },
+            },
+            503,
+        );
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.category).toBe('availability');
+        expect(caught.retryable).toBe(true);
+    });
+
+    it('leaves `category` / `retryable` unset when the server sent neither', async () => {
+        const { client } = createMockClient(FLAT, 400);
+        const caught: any = await client.data.delete('pm_base', 'rec_1').catch((e) => e);
+
+        expect(caught.category).toBeUndefined();
+        expect(caught.retryable).toBeUndefined();
     });
 
     it('never reports a numeric code, even with no details to fall back on', async () => {

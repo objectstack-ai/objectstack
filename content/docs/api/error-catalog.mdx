@@ -393,8 +393,10 @@ A rejection and a crash are told apart by the thrown error: a plain
 `throw new Error(msg)`, a sandboxed body's deliberate throw, or a
 `ValidationError` is a rejection (400); a `TypeError` / `ReferenceError` / a
 driver's own error class is a crash (500). An error carrying its own `status`
-is served with it. A validation rejection carries `details.code:
-'VALIDATION_FAILED'` and `details.fields[]`, identical to `/data`.
+is served with it. A validation rejection carries `error.code:
+'VALIDATION_FAILED'` with the per-field list in `error.details.fields[]` — the
+same code and field entries `/data` reports (the envelope assembly promotes a
+thrown error's `code` into `error.code`; `details` is context only).
 
 ```typescript
 const res = await fetch(`/api/v1/actions/${object}/${action}`, { /* … */ });

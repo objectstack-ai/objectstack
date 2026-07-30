@@ -461,8 +461,8 @@ status.
 Before [#3842](https://github.com/objectstack-ai/objectstack/issues/3842) this
 envelope put the HTTP status in `error.code` and the real code in
 `error.details.code`, `error.details.type` or `error.type`. `ObjectStackClient`
-reads all of them, so an SDK newer than the server it talks to is unaffected;
-code reading these bodies directly should move to `error.code`.
+no longer reads those legacy spots (#4007 — servers and SDKs ship as one
+release group); any code reading them directly should move to `error.code`.
 </Callout>
 
 ---

@@ -4455,20 +4455,23 @@ export class ObjectStackClient {
         // semantic string on both surfaces now, and the number has its own
         // `error.httpStatus`.
         //
-        // The `details.code` hop stays in the chain regardless, and is NOT debt:
-        // an SDK build talks to whatever server version it is pointed at, so a
-        // client newer than its server must still find the code where that
-        // server put it. Same reasoning as the console's two-dialect read in
-        // objectui#2869. It is now a legacy-server fallback rather than the
-        // primary path, so the order below is unchanged but its meaning is.
+        // Between #3842 and #4007 a third read sat in this chain, digging the
+        // pre-#3842 parking spot (`error.details.code`) for "newer SDK, older
+        // server" pairings. #4007 retired it: SDK and server ship on one
+        // release train (a changesets fixed group), so that pairing is not a
+        // supported deployment — and ADR-0112 batches 1–2 renamed the code
+        // VALUES anyway, so a code dug out of an old server's parking spot
+        // would no longer match any branch written against the current
+        // catalog. Location-compat without value-compat protects nothing.
         //
         // So: `err.code` is always the semantic STRING (the numeric status is on
         // `err.httpStatus`, where it always was), and `err.fields` is always the
-        // per-field list when the server sent one.
+        // per-field list when the server sent one. The two reads below are the
+        // two LIVE envelopes' declared spots, not a fallback chain — the flat
+        // shape's retirement belongs to the envelope-convergence line (#3843).
         const asSemanticCode = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
         const errorCode =
           asSemanticCode(errorBody?.code)
-          ?? asSemanticCode(errorBody?.error?.details?.code)
           ?? asSemanticCode(errorBody?.error?.code);
         const fieldErrors =
           Array.isArray(errorBody?.fields) ? errorBody.fields
@@ -4483,9 +4486,13 @@ export class ObjectStackClient {
 
         // Attach error details for programmatic access
         error.code = errorCode;
-        error.category = errorBody?.category;
+        // `category` / `retryable` are declared INSIDE `error` (ApiErrorSchema);
+        // the flat envelope never carries them and nothing ever emitted them at
+        // the body top level, so the old top-level read returned `undefined`
+        // against every conformant server (ADR-0112 D9b, #4006).
+        error.category = errorBody?.error?.category;
         error.httpStatus = res.status;
-        error.retryable = errorBody?.retryable;
+        error.retryable = errorBody?.error?.retryable;
         // Prefer the wrapped envelope's own `details` over the whole body. The
         // flat envelope has no top-level `details`, so it keeps falling through
         // to `errorBody` exactly as before — only the wrapped shape changes,

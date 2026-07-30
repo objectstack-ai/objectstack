@@ -553,14 +553,16 @@ somewhere else and did, in three different somewhere-elses: `error.details.code`
   `body.error.details?.code ?? body.error.type` read with `body.error.code`, and
   a `body.error.code` read (for the status) with `body.error.httpStatus`.
 - **SDK callers need no change.** `ObjectStackClient` already normalised this —
-  `err.code` semantic, `err.httpStatus` numeric — and still reads the old shape,
-  so a client newer than its server behaves identically.
+  `err.code` semantic, `err.httpStatus` numeric. The old-shape fallback read was
+  retired later in this same window (#4007): SDK and server ship on one release
+  train, and the ADR-0112 rename changed the code values a dug-out code would
+  need to match.
 - **No code was renamed.** `PERMISSION_DENIED`, `ROUTE_NOT_FOUND`,
   `PASSWORD_EXPIRED`, `PROJECT_MEMBERSHIP_REQUIRED`, `VALIDATION_FAILED` and
   `unauthenticated` all reach the wire spelled exactly as before; only their
   field changed. Reconciling the platform's two code vocabularies is #3841.
   A branch with no code of its own now derives a `StandardErrorCode` from the
-  status (`403` → `permission_denied`), spelled in one map in the spec.
+  status (`403` → `PERMISSION_DENIED`, post-rename spelling), spelled in one map in the spec.
 - **Spec:** `ApiErrorSchema` gains optional `httpStatus`; `StandardErrorCode`
   gains `method_not_allowed` and `precondition_required` (both additive).
   `DispatcherErrorCode` changes members from `'404' | '405' | '501' | '503'` to

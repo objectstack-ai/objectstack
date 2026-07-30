@@ -526,8 +526,8 @@ which server surface answered: the REST server replies with a flat
 `{ success, error: { code, message, httpStatus, details } }` body, and the
 client normalizes both before throwing. (Dispatcher bodies from servers older
 than #3842 put the status in `error.code` and the semantic code in
-`error.details.code`; the client still reads those, so an SDK newer than the
-server it talks to behaves the same.)
+`error.details.code`; that fallback read was retired in #4007 — SDK and server
+ship as one release group, so that pairing is not a supported deployment.)
 
 ### Per-field validation errors
 
