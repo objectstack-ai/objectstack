@@ -27,7 +27,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { ApiErrorSchema, BaseResponseSchema, DispatcherErrorCode } from '@objectstack/spec/api';
+import { ApiErrorSchema, BaseResponseSchema, DispatcherErrorCode, envelopeViolations } from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { buildApiError, splitSemanticCode } from './error-envelope.js';
 
@@ -45,6 +45,7 @@ function expectConformantError(response: { status: number; body: any } | undefin
     const body = response!.body;
 
     expect(BaseResponseSchema.safeParse(body).success).toBe(true);
+    expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
     expect(body.success).toBe(false);
 
     const parsed = ApiErrorSchema.safeParse(body.error);

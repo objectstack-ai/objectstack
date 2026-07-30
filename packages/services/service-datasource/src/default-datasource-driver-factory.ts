@@ -16,7 +16,8 @@
  *   - `sqlite-wasm` / `wasm-sqlite`    → `@objectstack/driver-sqlite-wasm` (pure-JS)
  *   - `mysql` / `mysql2`               → `@objectstack/driver-sql` (client `mysql2`)
  *   - `mongodb` / `mongo`             → `@objectstack/driver-mongodb` (peer dep)
- *   - `memory` / `inmemory`           → `@objectstack/driver-memory`
+ *   - `memory` / `inmemory`           → `@objectstack/driver-memory` (ephemeral,
+ *     per-datasource — see {@link buildMemoryConfig})
  *
  * `sqlite-wasm` joined for ADR-0062 D1 (#3826): the standalone stack's
  * `default` datasource is a *declared definition* connected through the shared
@@ -30,6 +31,7 @@
  * is never persisted or logged here.
  */
 
+import { join } from 'node:path';
 import type {
   IDatasourceDriverFactory,
   DatasourceConnectionSpec,
@@ -124,6 +126,78 @@ function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
     ...(spec.secret ? { password: spec.secret } : cfg.password ? { password: cfg.password } : {}),
     ...(cfg.ssl != null ? { ssl: cfg.ssl } : {}),
   };
+}
+
+/**
+ * Host-composition keys the CLI/standalone stack stamps into a `default`
+ * datasource's `config` for the SQL builders (#3826). They are not memory-driver
+ * config, so they are stripped before the rest of `config` is handed through.
+ */
+const NON_MEMORY_CONFIG_KEYS = ['schemaMode', 'autoMigrate', 'persist'] as const;
+
+/** `.objectstack/data/memory-<datasource>.json` — one file per pool, never one for all. */
+function memoryStatePath(datasource: string): string {
+  return join('.objectstack', 'data', `memory-${datasource}.json`);
+}
+
+/** `objectstack:memory-db:<datasource>` — the localStorage equivalent of the above. */
+function memoryStateKey(datasource: string): string {
+  return `objectstack:memory-db:${datasource}`;
+}
+
+/**
+ * Scope a REQUESTED persistence mode to one datasource.
+ *
+ * `InMemoryDriver`'s own persistence defaults are process-global — one file
+ * (`.objectstack/data/memory-driver.json`), one localStorage key — so two
+ * `driver: 'memory'` datasources in the same process load and save the SAME
+ * store: each sees the other's tables, and the last teardown to flush clobbers
+ * the other's rows. Expanding the string forms (`'auto'`/`'file'`/`'local'`) to
+ * the object form is what lets the default path/key carry the datasource name.
+ * An author-supplied `path`/`key` is theirs and is left alone, as is a custom
+ * `adapter` — they chose the destination.
+ */
+function scopeMemoryPersistence(persistence: unknown, datasource: string): unknown {
+  if (persistence === false) return false;
+  if (typeof persistence === 'string') {
+    return { type: persistence, path: memoryStatePath(datasource), key: memoryStateKey(datasource) };
+  }
+  if (persistence && typeof persistence === 'object' && !('adapter' in persistence)) {
+    const p = persistence as { path?: string; key?: string };
+    return {
+      ...p,
+      ...(p.path ? {} : { path: memoryStatePath(datasource) }),
+      ...(p.key ? {} : { key: memoryStateKey(datasource) }),
+    };
+  }
+  return persistence;
+}
+
+/**
+ * Build the `InMemoryDriver` config for a `memory` datasource (#4083).
+ *
+ * Two things the bare `new InMemoryDriver()` this replaces got wrong:
+ *
+ *  - **It was not ephemeral.** `InMemoryDriver`'s own `persistence` default is
+ *    `'auto'`, which in Node resolves to a file adapter at the *relative* path
+ *    `.objectstack/data/memory-driver.json`. Every memory datasource therefore
+ *    flushed its whole store into the server's CWD at teardown and reloaded it
+ *    on the next boot — the opposite of what this driver id promises the
+ *    operator who asks for it ("ephemeral, not real SQL", see
+ *    `cli/src/utils/storage-driver.ts`), and why the ADR-0062 D1 federated-read
+ *    acceptance read 2 rows on a clean checkout and 2×N on the Nth run (#4083).
+ *  - **Every pool shared one destination.** See {@link scopeMemoryPersistence}.
+ *
+ * So: default to no persistence, honor the datasource's own `config` (dropped on
+ * the floor entirely before — `initialData`/`strictMode` never reached the
+ * driver), and scope the destination per datasource when an author *does* ask
+ * for persistence without naming a path/key of their own.
+ */
+function buildMemoryConfig(spec: DatasourceConnectionSpec): Record<string, unknown> {
+  const cfg = { ...((spec.config ?? {}) as Record<string, unknown>) };
+  for (const key of NON_MEMORY_CONFIG_KEYS) delete cfg[key];
+  if (cfg.persistence === undefined) return { ...cfg, persistence: false };
+  return { ...cfg, persistence: scopeMemoryPersistence(cfg.persistence, spec.name ?? 'default') };
 }
 
 /** Build a mongodb connection URL from a spec's config + secret. */
@@ -256,9 +330,10 @@ export function createDefaultDatasourceDriverFactory(
         return toHandle(driver);
       }
 
-      // memory
+      // memory — ephemeral per datasource unless the author opts into
+      // persistence, and then into a destination of its own (#4083).
       const { InMemoryDriver } = await import('@objectstack/driver-memory');
-      return toHandle(new InMemoryDriver());
+      return toHandle(new InMemoryDriver(buildMemoryConfig(spec)));
     },
   };
 }

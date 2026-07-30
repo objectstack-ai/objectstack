@@ -22,12 +22,21 @@
  * silence.
  *
  * `OS_ALLOW_DRIVER_CONNECT_FAILURE` only justifies itself if the state it opts
- * into is impossible to miss — and a logger-only banner is missable: `os serve`
- * swallows ALL of stdout while the kernel boots (its "boot-quiet" capture), and
- * `Logger` routes `warn` to stdout, so the one message that matters would be
- * invisible in exactly the situation it exists for. Writing to stderr as well
- * is the same belt-and-braces the kernel already uses for plugin startup
- * failures.
+ * into is impossible to miss — and a logger-only banner is missable, because
+ * the logger answers to a level the operator sets. `Logger.write()` returns
+ * before emitting anything when the record is below `config.level`, so at
+ * `--log-level error`, `fatal`, or `silent` this `warn` never reaches ANY
+ * stream. A production host running at `error` is exactly the deployment this
+ * flag exists for, and is exactly where the banner would vanish. Writing to
+ * stderr as well is the same belt-and-braces the kernel already uses for
+ * plugin startup failures.
+ *
+ * A second reason used to be load-bearing and no longer is: `os serve` blanked
+ * ALL of stdout while the kernel booted, and `Logger` routes `warn` to stdout,
+ * so a boot-phase banner was swallowed at every level. That was framework#4012
+ * and is fixed — the boot window buffers and replays `warn`-and-above instead
+ * of discarding it. Do not re-derive this helper's necessity from the
+ * boot-quiet capture; the level filter is what keeps it alive.
  *
  * Best-effort and never throws: falls back to `console.error`, then to silence
  * on runtimes that have neither (the logger still carries the structured

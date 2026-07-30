@@ -11,6 +11,13 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'packages/**'
+      # The mapper and this workflow, so a change to the guard runs the guard. Without
+      # these, editing `affected-docs.mjs` was the one change its own self-test could
+      # never see — a `packages/**`-only trigger means the tool is unguarded exactly
+      # when it is being modified. A PR that touches only these gets the benign
+      # "0 changed package(s) ✅" comment, which is the correct answer.
+      - 'scripts/docs-audit/**'
+      - '.github/workflows/docs-drift-check.yml'
 
 permissions:
   contents: read
@@ -33,6 +40,13 @@ jobs:
 
       - name: Fetch base branch
         run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      # The mapper excludes test files (a test cannot make an implementation doc
+      # stale). Self-test first, so a regression that widened the exclusion into
+      # dropping real implementation changes fails loudly here instead of turning
+      # this whole comment quietly empty.
+      - name: Self-test the change → docs mapper
+        run: node scripts/docs-audit/affected-docs.mjs --self-test
 
       - name: Compute affected docs
         id: affected

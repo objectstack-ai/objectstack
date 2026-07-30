@@ -78,7 +78,13 @@
 import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import Ajv, { type ValidateFunction } from 'ajv';
-import { ValidationError, type FieldValidationError } from './record-validator.js';
+import {
+  ValidationError,
+  buildFieldError,
+  resolveFieldLabel,
+  type FieldValidationError,
+  type ValidationMessageContext,
+} from './record-validator.js';
 
 type Mode = 'insert' | 'update';
 
@@ -140,6 +146,10 @@ interface RuleContext {
   previous: Record<string, unknown> | undefined;
   mode: Mode;
   logger: EvaluateRulesOptions['logger'];
+  /** Declared fields — the source of a violation's display label (#3957). */
+  fields: Record<string, ConditionalFieldDef> | undefined;
+  /** Locale + translation hooks for the BUILT-IN messages (#3957). */
+  messages: ValidationMessageContext | undefined;
 }
 
 /**
@@ -174,6 +184,13 @@ export interface EvaluateRulesOptions {
    * `script`, `json_schema`, `conditional`).
    */
   skipStateMachine?: boolean;
+  /**
+   * Locale + translation hooks for this evaluator's BUILT-IN messages (#3957) —
+   * the `requiredWhen` required-check, per-option gating, and the state-machine
+   * fallbacks. An author-written `rule.message` is never touched: it is already
+   * in whatever language its author chose.
+   */
+  messages?: ValidationMessageContext;
 }
 
 /**
@@ -420,6 +437,8 @@ interface ConditionalFieldOption {
 }
 
 interface ConditionalFieldDef {
+  /** Author-declared display label, used to name the field in messages (#3957). */
+  label?: string;
   requiredWhen?: string | Expression;
   // Retired authorable key. #3754 lowered it into `requiredWhen` and dropped it,
   // so PARSED metadata never carried it; #3855 removed it from the spec outright,
@@ -506,6 +525,7 @@ function evaluateOptionVisibility(
   currentUser: EvaluateRulesOptions['currentUser'],
   errors: FieldValidationError[],
   logger: EvaluateRulesOptions['logger'],
+  messages: ValidationMessageContext | undefined,
 ): void {
   if (!fields) return;
   const user = (currentUser ?? undefined) as any;
@@ -534,11 +554,13 @@ function evaluateOptionVisibility(
         continue; // fail-open
       }
       if (res.value === false) {
-        errors.push({
+        errors.push(buildFieldError({
           field: name,
           code: 'invalid_option',
-          message: `${name}: option '${String(value)}' is not available`,
-        });
+          def,
+          value: String(value),
+          messageKey: 'option_unavailable',
+        }, messages));
       }
     }
   }
@@ -578,7 +600,7 @@ export function evaluateValidationRules(
       if (!(name in merged)) merged[name] = null;
     }
   }
-  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger };
+  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages };
 
   const errors: FieldValidationError[] = [];
 
@@ -615,7 +637,7 @@ export function evaluateValidationRules(
           const preViolated = pre.ok && pre.value === true && isMissing(previous[name]);
           if (preViolated) continue; // legacy rows rest
         }
-        errors.push({ field: name, code: 'required', message: `${name} is required` });
+        errors.push(buildFieldError({ field: name, code: 'required', def }, opts.messages));
       }
     }
   }
@@ -624,7 +646,7 @@ export function evaluateValidationRules(
   // choice value whose option `visibleWhen` resolves cleanly to FALSE against the
   // merged record + `current_user`. Complements the client-side hiding, which is
   // not a security boundary.
-  evaluateOptionVisibility(fields, data, merged, previous, opts.currentUser, errors, opts.logger);
+  evaluateOptionVisibility(fields, data, merged, previous, opts.currentUser, errors, opts.logger, opts.messages);
 
   const ordered = (hasRules ? rules! : [])
     .filter((r): r is BaseRule => r != null && typeof r === 'object')
@@ -675,7 +697,7 @@ export function evaluateValidationRules(
 function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | null {
   switch (rule.type) {
     case 'state_machine':
-      return checkStateMachine(rule as StateMachineRule, ctx.mode, ctx.data, ctx.previous);
+      return checkStateMachine(rule as StateMachineRule, ctx.mode, ctx.data, ctx.previous, ctx);
     case 'script':
     case 'cross_field':
       return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger);
@@ -709,7 +731,26 @@ function checkStateMachine(
   mode: Mode,
   data: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
+  ctx?: Pick<RuleContext, 'fields' | 'messages'>,
 ): FieldValidationError | null {
+  // An author-written `rule.message` wins untouched — it is already in the
+  // language its author chose. Only the FALLBACK is ours to localize (#3957).
+  const fallback = (
+    code: 'invalid_initial_state' | 'invalid_transition',
+    constraint: Record<string, unknown>,
+    value?: string,
+  ): FieldValidationError => {
+    const def = ctx?.fields?.[rule.field];
+    if (rule.message) {
+      return {
+        field: rule.field,
+        code,
+        message: rule.message,
+        label: resolveFieldLabel(rule.field, def, ctx?.messages),
+      };
+    }
+    return buildFieldError({ field: rule.field, code, def, constraint, value }, ctx?.messages);
+  };
   if (mode === 'insert') {
     const initial = rule.initialStates;
     if (!Array.isArray(initial) || initial.length === 0) return null; // no initial-state contract → legacy no-op
@@ -717,13 +758,7 @@ function checkStateMachine(
     const value = data[rule.field];
     if (value === undefined || value === null || value === '') return null; // empty → not an initial state to check
     if (!initial.includes(String(value))) {
-      return {
-        field: rule.field,
-        code: 'invalid_initial_state',
-        message:
-          rule.message ||
-          `Invalid initial state for ${rule.field}: ${String(value)} (allowed: ${initial.join(', ')})`,
-      };
+      return fallback('invalid_initial_state', { allowed: initial.join(', ') }, String(value));
     }
     return null;
   }
@@ -743,13 +778,7 @@ function checkStateMachine(
   if (!Array.isArray(allowed)) return null;
 
   if (!allowed.includes(String(to))) {
-    return {
-      field: rule.field,
-      code: 'invalid_transition',
-      message:
-        rule.message ||
-        `Invalid transition for ${rule.field}: ${fromKey} → ${String(to)}`,
-    };
+    return fallback('invalid_transition', { from: fromKey, to: String(to) });
   }
   return null;
 }

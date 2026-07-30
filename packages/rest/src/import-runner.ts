@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { coerceRow, firstMissingRequiredField, firstConstraintViolation, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './export-format.js';
+import { renderValidationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
 
 /**
@@ -136,6 +137,13 @@ export interface RunImportOptions {
    * stored snapshot size.
    */
   captureUndo?: boolean;
+  /**
+   * `II18nService.t`-compatible lookup so this runner's own messages (the
+   * required-field pre-check, cell coercion) resolve a deployment's
+   * `validation.field.*` overrides — the same hook the engine gets (#3957). The
+   * locale itself rides `context.locale`.
+   */
+  translate?: ValidationMessageTranslator;
 }
 
 /** Extracts a created/updated record's id regardless of which response shape the protocol returned. */
@@ -220,7 +228,7 @@ const yieldToEventLoop = (): Promise<void> =>
 
 export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   const {
-    p, objectName, environmentId, context, rows, metaMap,
+    p, objectName, environmentId, context, rows, metaMap, translate: messageTranslator,
     writeMode, matchFields, dryRun, runAutomations, treatAsHistorical,
     trimWhitespace, nullValues, createMissingOptions, skipBlankMatchKey,
     onProgress, shouldCancel, captureUndo,
@@ -554,6 +562,9 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
         // 1. Coerce every cell to its storage value (+ resolve lookups).
         const { data, errors } = await coerceRow(rows[i], metaMap, {
           trimWhitespace, nullValues, createMissingOptions, resolveRef,
+          // Cell-coercion failures land in the same row report as the engine's
+          // validation errors, so they speak the same language (#3957).
+          locale: context?.locale, translate: messageTranslator,
         });
         if (errors.length > 0) {
           const first = errors[0];
@@ -595,7 +606,19 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
 
             if (requiredMiss) {
               errCount++;
-              results[i] = { row: rowNo, ok: false, action: 'failed', field: requiredMiss, code: 'required', error: `${requiredMiss} is required` };
+              // Same catalog the engine's own required-check renders from, so a
+              // pre-check verdict and a real rejection read identically (#3957).
+              results[i] = {
+                row: rowNo, ok: false, action: 'failed', field: requiredMiss, code: 'required',
+                error: renderValidationMessage(
+                  {
+                    messageKey: 'required',
+                    label: metaMap.get(requiredMiss)?.label?.trim() || requiredMiss,
+                    field: requiredMiss,
+                  },
+                  { locale: context?.locale, translate: messageTranslator },
+                ),
+              };
             } else if (!willUpdate && !willCreate) {
               // update mode, no match → skip.
               skipped++;
@@ -609,7 +632,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               // legal. The dry run has no such backstop — without this it
               // reported `ok: true` for a row the very same endpoint then
               // failed with `VALIDATION_FAILED`.
-              const violation = firstConstraintViolation(data, metaMap);
+              const violation = firstConstraintViolation(data, metaMap, { locale: context?.locale, translate: messageTranslator });
               if (violation) {
                 errCount++;
                 results[i] = { row: rowNo, ok: false, action: 'failed', field: violation.field, code: violation.code, error: violation.message };

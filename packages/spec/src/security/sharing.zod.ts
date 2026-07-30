@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
 
 /**
  * Organization-Wide Defaults (OWD)
@@ -94,28 +95,81 @@ export const ShareRecipientType = z.enum([
 ]);
 
 /**
+ * Keys the sharing-rule surface declares — the base shape plus the
+ * `criteria`-variant extension keys (`type` / `condition`), since the strict
+ * error map rides {@link BaseSharingRuleSchema} into every extension
+ * (drift-guarded by sharing.test.ts).
+ */
+const SHARING_RULE_KEYS = [
+  'name', 'label', 'description', 'object', 'active', 'accessLevel',
+  'sharedWith', 'type', 'condition',
+] as const;
+
+const sharingRuleUnknownKeyError = strictUnknownKeyError({
+  surface: 'this sharing rule',
+  knownKeys: SHARING_RULE_KEYS,
+  aliases: {
+    // The runtime/persisted rule row spells the compiled predicate `criteria`
+    // (`criteria_json`); the authored key is the CEL `condition` (#3896).
+    criteria: 'condition',
+    filter: 'condition',
+    when: 'condition',
+    access: 'accessLevel',
+    level: 'accessLevel',
+    recipient: 'sharedWith',
+    sharewith: 'sharedWith',
+    sharedto: 'sharedWith',
+    enabled: 'active',
+  },
+  guidance: {
+    ownedBy:
+      '`ownedBy` belongs to the removed `owner`-type sharing rule — it depends on live ' +
+      'team/position membership, which the static materialiser cannot track, so it was ' +
+      'removed from the authoring surface (ADR-0078). Only `criteria` rules are ' +
+      'authorable; express membership-shaped access via RLS dynamic membership ' +
+      '(§7.3.1) or business-unit depth scopes (ADR-0057).',
+  },
+  history:
+    'Until #4001 these were dropped silently — the rule still parsed, so a share the ' +
+    'author intended was never materialised (or a constraint never applied).',
+});
+
+const sharingRecipientUnknownKeyError = strictUnknownKeyError({
+  surface: 'this sharing-rule recipient',
+  knownKeys: ['type', 'value'],
+  aliases: { id: 'value', target: 'value' },
+  history:
+    'Until #4001 these were dropped silently — the recipient still parsed, so the ' +
+    'grant could land on the wrong principal without a diagnostic.',
+});
+
+/**
  * Base Sharing Rule
  * Common metadata for all sharing strategies.
+ *
+ * `.strict()` + the error map ride into every `.extend()`ed variant
+ * (zod carries the catchall and error through extension), so the
+ * criteria rule below inherits both.
  */
 const BaseSharingRuleSchema = z.object({
   // Identification
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique rule name (snake_case)'),
   label: z.string().optional().describe('Human-readable label'),
   description: z.string().optional().describe('Administrative notes'),
-  
+
   // Scope
   object: z.string().describe('Target Object Name'),
   active: z.boolean().default(true),
-  
+
   // Access
   accessLevel: SharingLevel.default('read'),
-  
+
   // Recipient (Whom to share with)
   sharedWith: z.object({
     type: ShareRecipientType,
     value: z.string().describe('ID or code of the recipient (user / team / position / business unit)'),
-  }).describe('The recipient of the shared access'),
-});
+  }, { error: sharingRecipientUnknownKeyError }).strict().describe('The recipient of the shared access'),
+}, { error: sharingRuleUnknownKeyError }).strict();
 
 /**
  * 1. Criteria-Based Sharing Rule
