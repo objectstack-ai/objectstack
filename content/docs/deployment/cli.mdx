@@ -660,6 +660,23 @@ Exit status is `0` only when the self-check passes, so CI can gate on it.
 | **Media value shapes** | A malformed `file` / `image` / `avatar` / `video` / `audio` value is **rejected** (`400 invalid_type`) instead of warned about. Set `OS_ALLOW_LAX_MEDIA_VALUES=1` to re-open leniency while diagnosing. |
 | **Released-file collection** | A field file whose one owning record lets go (the field is cleared or the record deleted) is tombstoned into the declared 30-day grace window; re-referencing the id within the window revives it, and after it the platform sweep reclaims the row and its bytes. Unverified deployments keep every released file forever. |
 
+Other value classes are unaffected: a `lookup` or `location` value keeps its own
+warn-first rollout until `os migrate value-shapes` (below) supplies *their*
+evidence, because this migration is evidence about *file* values and says
+nothing about theirs.
+
+<Callout type="warn">
+A dry run writes **nothing** — not the conversions, and not the flag either,
+even when the self-check would pass. `--apply` is the only writing mode. A
+later run that *fails* its self-check clears the flag's verified state, so a
+database that has drifted closes its own gate.
+
+A running server reads the flag once; after migrating, **restart it** for
+enforcement (and release-time tombstoning) to take effect. The sweep's final
+delete check re-reads the flag fresh, so a later failing run stops collection
+without a restart.
+</Callout>
+
 #### `os migrate value-shapes`
 
 The same gate for the **non-media** value classes — references (`lookup`,
@@ -703,21 +720,9 @@ know my data" lever, not the route to strictness — the route is running the
 migration that produces the evidence.
 </Callout>
 
-Other value classes are unaffected: a `lookup` or `location` value keeps its own
-warn-first rollout, because this migration is evidence about *file* values and
-says nothing about theirs.
-
-<Callout type="warn">
-A dry run writes **nothing** — not the conversions, and not the flag either,
-even when the self-check would pass. `--apply` is the only writing mode. A
-later run that *fails* its self-check clears the flag's verified state, so a
-database that has drifted closes its own gate.
-
-A running server reads the flag once; after migrating, **restart it** for
-enforcement (and release-time tombstoning) to take effect. The sweep's final
-delete check re-reads the flag fresh, so a later failing run stops collection
-without a restart.
-</Callout>
+Same writing rules as its sibling: a dry run writes **nothing**, `--apply` is
+the only writing mode, a later failing run clears the verified state, and a
+running server reads the flag once — **restart it** after a successful apply.
 
 #### A database created by this version needs no migration
 
@@ -735,8 +740,10 @@ attests nothing and produces its evidence by running the command, because
 
 Importing legacy values into such a deployment is rejected at the write path
 rather than silently accepted. That is the intended outcome; if you must admit
-them temporarily, `OS_ALLOW_LAX_MEDIA_VALUES=1` re-opens leniency, and
-re-running the migration re-establishes the flag from the data itself.
+them temporarily, `OS_ALLOW_LAX_MEDIA_VALUES=1` (media) and
+`OS_ALLOW_LAX_VALUE_SHAPES=1` (references and structured JSON) re-open leniency
+per class, and re-running the corresponding migration re-establishes its flag
+from the data itself.
 
 ### Scaffolding
 
