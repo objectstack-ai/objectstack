@@ -18,14 +18,31 @@
  * that was a bare string, so `body.error.message` read `undefined`
  * (#3636 → #3675 → #3689 → #3843).
  *
+ * ## Two surfaces
+ *
+ * The platform answers REST from two kinds of file, and this audits both:
+ *
+ *   1. **Route modules** (`*-routes.ts`) — call `res.json(...)`. Counted below
+ *      in `MODULES`.
+ *   2. **Dispatcher domains** (`runtime/src/domains/*.ts`) — RETURN
+ *      `{ status, body }` for a central sender, so they never call `res.json`
+ *      and the first scan cannot see them. Counted in `DISPATCHER_DOMAINS`.
+ *
+ * Surface 2 was added after that blind spot cost something real: `/share-links`
+ * emitted its payload under both `data` and a legacy `link` / `links` for as
+ * long as nothing looked, and it was found by hand while sweeping consumers for
+ * #3983 rather than by any guard (#4038).
+ *
  * ## Why a whole-repo scan rather than a per-module test
  *
- * The load-bearing check is structural, not per-route: it COUNTS the response
- * write sites. When every body in a module goes through its `sendOk` /
+ * The load-bearing check is structural, not per-route: it COUNTS the sites where
+ * a response gets built. When every body in a module goes through its `sendOk` /
  * `sendError` pair, that count is fixed at two and does not grow with the route
  * list — so a *new* route that hand-rolls a body moves the count and fails here,
  * which is the one thing a driven-body test can never cover (it can only drive
- * the routes that existed the day it was written).
+ * the routes that existed the day it was written). The domain table applies the
+ * same idea from the other end: a domain that answers only through the `deps.*`
+ * helpers hand-builds zero responses, so any hand-built one has to be classified.
  *
  * #3675 / #3689 shipped this as a regex block copied into each converted
  * package. Three copies was the signal it wanted lifting (#3843 option 3), and
@@ -138,6 +155,88 @@ const MODULES = {
 /** Identifiers whose `.json()` READS a request rather than writing a response. */
 const REQUEST_RECEIVERS = new Set(['req', 'request']);
 
+// ── The dispatcher's OTHER surface ───────────────────────────────────────────
+
+/**
+ * `packages/runtime/src/domains/*.ts` — the dispatcher domain handlers.
+ *
+ * These serve REST paths too, but they never call `res.json(...)`: they RETURN
+ * `{ status, body }` for a central sender. So the scan above cannot see them, by
+ * construction — which is not a theoretical gap. `/share-links` emitted the
+ * payload under both `data` and a legacy `link` / `links` for as long as that
+ * blind spot existed, and it was found by hand while sweeping consumers for
+ * #3983, not by any guard (#4038).
+ *
+ * The structural fact here is the mirror of `responses` above. A domain that
+ * routes every answer through the `deps.success` / `deps.error` /
+ * `deps.routeNotFound` / `deps.errorFromThrown` helpers hand-builds **zero**
+ * response literals, and cannot drift: the envelope lives in one place for all
+ * of them. So this counts hand-built `response: { … }` object literals per file,
+ * and a new one has to be classified rather than merged quietly.
+ *
+ *   handBuilt — `response:` assigned an object literal instead of a `deps.*` call
+ *   note      — why those exist. REQUIRED whenever handBuilt > 0.
+ *   ratchet   — set when one of them is real, tracked drift.
+ *
+ * Hand-building is not automatically wrong. Four kinds show up, and only the
+ * last is drift:
+ *
+ *   1. Enveloped, but the helper cannot express the response. `deps.success`
+ *      hardcodes status 200, so a 201 must be built by hand, and `deps.error`
+ *      carries no headers, so a 405 with `Allow:` must be too. These emit the
+ *      declared envelope — they just assemble it themselves.
+ *   2. Passthrough of a body this dispatcher does not own (an upstream Web
+ *      Response, another service's result). The envelope does not govern bytes
+ *      we are only relaying.
+ *   3. A foreign wire format a client library requires — `/auth` answers
+ *      better-auth's shapes because better-auth's client parses them.
+ *   4. Drift.
+ */
+const DISPATCHER_DOMAIN_DIR = 'packages/runtime/src/domains';
+
+const DISPATCHER_DOMAINS = {
+  'actions.ts': { handBuilt: 0 },
+  'analytics.ts': { handBuilt: 0 },
+  'automation.ts': { handBuilt: 0 },
+  'data.ts': { handBuilt: 0 },
+  'i18n.ts': { handBuilt: 0 },
+  'meta.ts': { handBuilt: 0 },
+  'notifications.ts': { handBuilt: 0 },
+  'packages.ts': { handBuilt: 0 },
+  'security.ts': { handBuilt: 0 },
+  'storage.ts': { handBuilt: 0 },
+  'ui.ts': { handBuilt: 0 },
+
+  // Kind 1 — enveloped, hand-built only because the helper cannot say it.
+  'keys.ts': {
+    handBuilt: 1,
+    note: 'POST /keys is a 201 and `deps.success` hardcodes 200; the body is the declared envelope',
+  },
+  'share-links.ts': {
+    handBuilt: 1,
+    note: 'POST /share-links is a 201, same reason as /keys (#4038 removed the duplicate key it also carried)',
+  },
+
+  // Kinds 1 and 2 together.
+  'mcp.ts': {
+    handBuilt: 2,
+    note: 'one 405 that must carry an `Allow:` header (`deps.error` takes none) and emits the declared envelope; one passthrough of the upstream MCP Web Response',
+  },
+
+  // Kind 3 — a foreign wire format, all four in the mock/fallback path.
+  'auth.ts': {
+    handBuilt: 4,
+    note: "bridges better-auth, whose client parses ITS shapes (`{ user, session }`, `{ session: null, user: null }`, `{ success: true }`) — BaseResponseSchema does not govern them",
+  },
+
+  // Kind 4 — real drift, tracked.
+  'ai.ts': {
+    handBuilt: 2,
+    ratchet: '#4053',
+    note: 'one passthrough of the AI service result (kind 2); one is the unenveloped `{ agents: [] }` fallback for GET /ai/agents — an SDK-addressable route whose conversion must land with cloud and the SDK together or `ai.agents.list()` silently returns []',
+  },
+};
+
 /**
  * Count the envelope-relevant facts in one module's source.
  *
@@ -213,6 +312,55 @@ export function scanSource(source, fileName = 'module.ts') {
   return found;
 }
 
+/**
+ * Count hand-built response literals in one dispatcher domain's source.
+ *
+ * `response: { … }` is hand-built; `response: deps.success(…)` is not. Comments
+ * and strings are not tokens, so quoting either form in prose cannot move the
+ * count.
+ *
+ * Only a `response` that is a sibling of `handled` counts — that pair IS the
+ * `HttpDispatcherResult`. A payload field that happens to be named `response`
+ * (`deps.success({ response: … })`) is data, not a response, and the self-test
+ * pins the difference: matching the key alone counted it.
+ *
+ * @param {string} source TypeScript source text.
+ * @returns {{handBuilt: number, sites: string[]}}
+ */
+export function scanDomainSource(source, fileName = 'domain.ts') {
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const found = { handBuilt: 0, sites: [] };
+
+  const isDispatcherResult = (obj) =>
+    ts.isObjectLiteralExpression(obj) &&
+    obj.properties.some(
+      (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'handled',
+    );
+
+  const visit = (node) => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'response' &&
+      ts.isObjectLiteralExpression(node.initializer) &&
+      isDispatcherResult(node.parent)
+    ) {
+      found.handBuilt += 1;
+      found.sites.push(`${fileName}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+/** Domain handler files, by basename. */
+function discoverDomains() {
+  return readdirSync(join(ROOT, DISPATCHER_DOMAIN_DIR))
+    .filter((n) => n.endsWith('.ts') && !n.endsWith('.d.ts') && !n.includes('.test.') && !n.includes('.conformance.'))
+    .sort();
+}
+
 /** Recursively collect candidate route-module paths under `packages/`. */
 function discover() {
   const out = [];
@@ -275,12 +423,57 @@ function audit() {
     }
   }
 
+  // ── The dispatcher domains ────────────────────────────────────────────────
+  const domains = discoverDomains();
+
+  for (const name of domains) {
+    const declared = DISPATCHER_DOMAINS[name];
+    if (!declared) {
+      problems.push(
+        `${DISPATCHER_DOMAIN_DIR}/${name}\n    NOT DECLARED. Add it to DISPATCHER_DOMAINS in\n` +
+        `    scripts/check-route-envelope.mjs. A domain that answers only through the\n` +
+        `    \`deps.*\` helpers declares { handBuilt: 0 }; any hand-built response needs a\n` +
+        `    \`note\` saying which of the four kinds it is.`,
+      );
+      continue;
+    }
+    const got = scanDomainSource(readFileSync(join(ROOT, DISPATCHER_DOMAIN_DIR, name), 'utf8'), name);
+    if (got.handBuilt !== declared.handBuilt) {
+      problems.push(
+        `${DISPATCHER_DOMAIN_DIR}/${name}\n    handBuilt: found ${got.handBuilt}, declared ${declared.handBuilt}` +
+        (got.handBuilt > declared.handBuilt
+          ? `\n    A handler is assembling its own response instead of returning a \`deps.*\`\n` +
+            `    envelope. If that is deliberate (a status or header the helper cannot\n` +
+            `    express, or a body this dispatcher only relays), raise the count and say\n` +
+            `    which in \`note\`. Sites: ${got.sites.join(', ')}`
+          : `\n    Fewer than declared — if a hand-built response moved onto \`deps.*\`, lower\n` +
+            `    the count (and drop the \`ratchet\` if that was the drift it named).`) +
+        (declared.ratchet ? `\n    (ratchet for ${declared.ratchet} — the declared count pins current drift)` : ''),
+      );
+    }
+    if (declared.handBuilt > 0 && !declared.note) {
+      problems.push(
+        `${DISPATCHER_DOMAIN_DIR}/${name}\n    declares handBuilt: ${declared.handBuilt} with no \`note\`.\n` +
+        `    A hand-built response has to say why it is not a \`deps.*\` call.`,
+      );
+    }
+  }
+
+  for (const name of Object.keys(DISPATCHER_DOMAINS)) {
+    if (!domains.includes(name)) {
+      problems.push(
+        `${DISPATCHER_DOMAIN_DIR}/${name}\n    declared in DISPATCHER_DOMAINS but not found — moved or deleted?`,
+      );
+    }
+  }
+
   if (problems.length) {
     console.error('✗ Route-envelope conformance (#3843)\n');
     for (const p of problems) console.error('  ' + p + '\n');
     console.error(
-      'Every REST body must be built by the module\'s sendOk / sendError pair, in the\n' +
-      'envelope BaseResponseSchema declares. See scripts/check-route-envelope.mjs.',
+      'Every REST body must be built in ONE place per surface, in the envelope\n' +
+      'BaseResponseSchema declares — a route module\'s sendOk / sendError pair, or a\n' +
+      'dispatcher domain\'s deps.* helpers. See scripts/check-route-envelope.mjs.',
     );
     process.exit(1);
   }
@@ -290,7 +483,7 @@ function audit() {
   const ratcheted = entries.filter(([, m]) => m.ratchet);
   const conformant = discovered.length - exempt.length - ratcheted.length;
   console.log(
-    `✓ Route-envelope conformance — ${discovered.length} module(s) audited: ` +
+    `✓ Route-envelope conformance — ${discovered.length} route module(s) audited: ` +
     `${conformant} conformant, ${ratcheted.length} ratcheted, ${exempt.length} exempt`,
   );
   for (const [file, m] of ratcheted) {
@@ -298,6 +491,18 @@ function audit() {
   }
   for (const [file, m] of exempt) {
     console.log(`  – exempt: ${file} — ${m.exempt}`);
+  }
+
+  const dEntries = Object.entries(DISPATCHER_DOMAINS);
+  const dRatcheted = dEntries.filter(([, m]) => m.ratchet);
+  const helperOnly = dEntries.filter(([, m]) => m.handBuilt === 0);
+  console.log(
+    `✓ Dispatcher domains — ${domains.length} audited: ` +
+    `${helperOnly.length} helper-only, ${dEntries.length - helperOnly.length} with declared hand-built responses ` +
+    `(${dRatcheted.length} ratcheted)`,
+  );
+  for (const [name, m] of dRatcheted) {
+    console.log(`  ⚠ ratchet ${m.ratchet}: ${DISPATCHER_DOMAIN_DIR}/${name} — ${m.note}`);
   }
 }
 
@@ -356,6 +561,41 @@ function selfTest() {
     r.privateOk === 0 && r.responses === 2 && r.ok === 1 && r.err === 1,
     `ok passed as a helper's data must not count → ${JSON.stringify(r)}`,
   );
+
+  // ── Dispatcher domains ────────────────────────────────────────────────────
+  // A domain that answers only through the helpers hand-builds nothing.
+  let d = scanDomainSource(`
+    if (m === 'GET') return { handled: true, response: deps.success(rows) };
+    if (m === 'DELETE') return { handled: true, response: deps.success({ ok: true }) };
+    return { handled: true, response: deps.routeNotFound('/x') };
+  `);
+  assert(d.handBuilt === 0, `helper-only domain → ${JSON.stringify(d)}`);
+
+  // An assembled literal is what the count is for — this is how /share-links
+  // carried a duplicate `link` beside `data` unseen (#4038).
+  d = scanDomainSource(`return { handled: true, response: { status: 201, body: { success: true, data: link, link } } };`);
+  assert(d.handBuilt === 1, `hand-built response not caught → ${JSON.stringify(d)}`);
+
+  // Both forms in one file, counted once each.
+  d = scanDomainSource(`
+    if (a) return { handled: true, response: deps.success(x) };
+    if (b) return { handled: true, response: { status: 405, headers: { Allow: 'GET' }, body } };
+    return { handled: true, response: { status: 200, body: { agents: [] } } };
+  `);
+  assert(d.handBuilt === 2, `mixed domain miscounted → ${JSON.stringify(d)}`);
+
+  // Prose quoting either form is not code — the note fields in the table above
+  // quote both, and must not move anyone's count.
+  d = scanDomainSource(`
+    /* was: response: { status: 200, body: { agents: [] } } — see #4053 */
+    // return { handled: true, response: { status: 201, body } };
+    return { handled: true, response: deps.success(x) };
+  `);
+  assert(d.handBuilt === 0, `commented-out responses counted → ${JSON.stringify(d)}`);
+
+  // A nested `response` key inside a payload is not a response assignment.
+  d = scanDomainSource(`return { handled: true, response: deps.success({ response: { status: 'queued' } }) };`);
+  assert(d.handBuilt === 0, `a data field named response must not count → ${JSON.stringify(d)}`);
 
   console.log('✓ check-route-envelope self-test passed');
 }
