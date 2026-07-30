@@ -40,7 +40,11 @@ async function main() {
 
   // 2. Check available services
   console.log('Services:', discovery.services);
-  // → { metadata: { enabled: true, status: 'degraded' }, data: { enabled: true, status: 'available' }, auth: { enabled: false, ... } }
+  // → { metadata: { enabled: true, status: 'degraded', message: 'In-memory metadata registry — …' },
+  //     data: { enabled: true, status: 'available' }, auth: { enabled: false, ... } }
+  // `metadata` reports the implementation actually behind it: `degraded` plus a
+  // message naming what is missing while the kernel's in-memory fallback fills
+  // the slot, `available` once MetadataPlugin provides a persisted registry.
 
   // 3. Query data
   const tasks = await client.data.find('todo_task', {

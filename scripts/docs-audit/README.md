@@ -41,6 +41,24 @@ the PR where it is right. The count of excluded files is reported in the summary
 pins the matcher against paths that must and must not match (`commands/test.ts` is
 implementation; `foo.conformance.test.ts` is not).
 
+**And one deliberate non-exclusion:** `packages/*/CHANGELOG.md` stays counted, even though
+release notes define behaviour no more than a test does. Extending the exclusion there
+looks like the obvious next step and is a provable no-op, for two independent reasons:
+
+1. The only PR class that mass-touches those files is `chore: version packages`, and it
+   runs **no GitHub Actions at all** — `changesets/action` opens it with the repo's
+   `GITHUB_TOKEN`, and GitHub does not trigger workflow runs from `GITHUB_TOKEN`-authored
+   events. Measured on #3910: one check run, from Vercel's own app. So this gate never
+   sees a release PR to be noisy on. (The bump is still verified — `ci.yml` and `lint.yml`
+   both run on `push: main`, and `release.yml` gates publish on a green build.)
+2. Even if it did run, `changeset version` writes `package.json` next to every
+   `CHANGELOG.md` it appends to — 45 of the former against 46 of the latter on the first
+   page of #3910's diff — so dropping the CHANGELOGs would leave the derived package-root
+   set bit-identical.
+
+A hand-edited CHANGELOG outside a release is also close to nonexistent in practice. Left
+counted, and recorded here so the idea is not rediscovered as a gap.
+
 ## 2. CI gate — `.github/workflows/docs-drift-check.yml`
 
 On any PR that touches `packages/**`, runs `affected-docs.mjs` against the base branch

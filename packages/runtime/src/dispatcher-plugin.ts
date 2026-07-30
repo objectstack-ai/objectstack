@@ -340,7 +340,7 @@ function sendResultBase(
 
 /**
  * The single error exit for EVERY dispatcher-plugin route — `/analytics`,
- * `/packages`, `/i18n`, `/storage`, `/automation`, `/auth`, `/notifications`,
+ * `/packages`, `/i18n`, `/automation`, `/auth`, `/notifications`,
  * `/mcp`, … Each handler catches and calls here rather than re-throwing.
  *
  * [#3867] Two things were wrong with it, both invisible until a driver error
@@ -432,8 +432,10 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
  *   - /analytics (BI queries)
  *   - /packages  (package management)
  *   - /i18n      (internationalization — locales, translations, field labels)
- *   - /storage   (file storage)
  *   - /automation (CRUD + triggers + runs)
+ *
+ * NOT /storage — `@objectstack/service-storage` owns that surface and mounts
+ * it on this same http-server (#4087).
  *
  * Usage:
  * ```ts
@@ -845,24 +847,27 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             mountPackagesRoute('post', '/:id/rollback', (req) => `/${req.params.id}/rollback`);
 
             // ── Storage ─────────────────────────────────────────────────
-            server.post(`${prefix}/storage/upload`, async (req: any, res: any) => {
-                try {
-                    // For file uploads the body *is* the file (parsed by adapter)
-                    const result = await dispatcher.handleStorage('upload', 'POST', req.body, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
-                }
-            });
-
-            server.get(`${prefix}/storage/file/:id`, async (req: any, res: any) => {
-                try {
-                    const result = await dispatcher.handleStorage(`file/${req.params.id}`, 'GET', undefined, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
-                }
-            });
+            // Nothing mounted here on purpose (#4087). The dispatcher used to
+            // bridge `POST /storage/upload` and `GET /storage/file/:id` to the
+            // `file-storage` service, off the contract both ends actually
+            // speak: `upload(key, data, options?)` was called as
+            // `upload(file, { request })` — a guaranteed TypeError against
+            // every implementation in the repo — and the download branch
+            // switched on a `{ url | stream | mimeType }` result no
+            // implementation has ever returned (`download(key)` resolves a
+            // Buffer). What kept that invisible is not that something shadowed
+            // these paths — service-storage mounts `/storage/upload/...`, not
+            // `/storage/upload`, so both stayed mounted and reachable — but
+            // that nothing speaks their dialect: no SDK method, no console
+            // call. They were reachable and broken, and the only thing that
+            // ever routed a request to them was a reader of the old docs.
+            //
+            // `/api/v1/storage` is service-storage's surface: it registers the
+            // presigned / chunked / signed-URL protocol on this same
+            // http-server (`storage-routes.ts`), and that protocol is what
+            // `@objectstack/client` speaks. Without that package the path
+            // simply has no handler — the honest answer, and the one an empty
+            // capability slot gives everywhere else.
 
             // ── i18n ────────────────────────────────────────────────────
             // Route via dispatch() (not handleI18n directly) so the host

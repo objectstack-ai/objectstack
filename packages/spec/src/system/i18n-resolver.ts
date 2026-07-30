@@ -359,6 +359,37 @@ export function translateAction<T extends ActionLike>(
 }
 
 /**
+ * The dispatch table {@link translateMetadataDocument} routes on — and the one
+ * declaration of "which metadata types get localized at all".
+ *
+ * It is a table rather than an `if` chain so the type list is readable as data
+ * by callers that need to know the answer BEFORE calling. `@objectstack/rest`
+ * needed exactly that and kept a hand-copied `TRANSLATABLE_META_TYPES` set
+ * under a "keep in sync with the type dispatch" comment; it is now derived from
+ * {@link TRANSLATABLE_METADATA_TYPES} instead, so adding a translator here
+ * reaches the REST boundary with nothing else to remember (#3786).
+ */
+const METADATA_DOCUMENT_TRANSLATORS: Record<
+  string,
+  (doc: any, bundle: TranslationBundle | undefined, opts?: ResolveOptions) => any
+> = {
+  view: translateView,
+  action: translateAction,
+  object: translateObject,
+  app: translateApp,
+  dashboard: translateDashboard,
+  page: translatePage,
+};
+
+/**
+ * Metadata types whose user-facing labels {@link translateMetadataDocument}
+ * localizes. Derived from the dispatch table — never restate it.
+ */
+export const TRANSLATABLE_METADATA_TYPES: ReadonlySet<string> = new Set(
+  Object.keys(METADATA_DOCUMENT_TRANSLATORS),
+);
+
+/**
  * Generic metadata translator: dispatches to `translateView` /
  * `translateAction` based on metadata type. Returns the original document
  * unchanged for unrecognised types.
@@ -375,13 +406,8 @@ export function translateMetadataDocument(
   opts?: ResolveOptions,
 ): any {
   if (!doc || typeof doc !== 'object') return doc;
-  if (type === 'view') return translateView(doc, bundle, opts);
-  if (type === 'action') return translateAction(doc, bundle, opts);
-  if (type === 'object') return translateObject(doc, bundle, opts);
-  if (type === 'app') return translateApp(doc, bundle, opts);
-  if (type === 'dashboard') return translateDashboard(doc, bundle, opts);
-  if (type === 'page') return translatePage(doc, bundle, opts);
-  return doc;
+  const translate = METADATA_DOCUMENT_TRANSLATORS[type];
+  return translate ? translate(doc, bundle, opts) : doc;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

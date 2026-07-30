@@ -139,10 +139,20 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'raw secret returned once; user_id pinned server-side' },
 
   // ── storage ───────────────────────────────────────────────────────────────
-  { route: 'POST /storage/upload', domain: '/storage', disposition: 'server-only',
-    note: 'low-level compat surface; the SDK deliberately speaks the storage protocol (/upload/presigned, /upload/complete, /upload/chunked/*) that service-storage registers autonomously on any http-server — direct-to-cloud, chunked/resumable, auth-gated (#3584)' },
-  { route: 'GET /storage/file/:id', domain: '/storage', disposition: 'server-only',
-    note: 'ditto — the SDK downloads via /storage/files/:id/url from the service-storage protocol (authorization-gated signed URLs); this route stays as the low-level redirect/stream path (#3584)' },
+  // RETIRED (#4087) — deliberately no rows, and the `/storage` domain is gone
+  // from the registry with them. #3584 kept `POST /storage/upload` and
+  // `GET /storage/file/:id` as a "low-level redirect/stream compat surface"
+  // outside the SDK; re-verification found that surface never existed. The
+  // upload branch called `upload(key, data, options?)` as `upload(file,
+  // { request })` — a TypeError against every implementation — and the
+  // download branch switched on a `{ url | redirect | stream | mimeType }`
+  // result no implementation returns (`download(key)` resolves a Buffer).
+  // Two routes ledgered as a compat path, neither of which could serve one
+  // request. `/api/v1/storage` is service-storage's protocol, enumerated in
+  // `packages/services/service-storage/src/storage-route-ledger.ts` — the
+  // surface the SDK actually speaks. A dispatcher `/storage` row coming back
+  // means a bridge is being rebuilt; make it speak the contract or don't
+  // build it.
 
   // ── ui ────────────────────────────────────────────────────────────────────
   { route: 'GET /ui/view/:object/:type?', domain: '/ui', disposition: 'sdk', client: 'meta.getView',

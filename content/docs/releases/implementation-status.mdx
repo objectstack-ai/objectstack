@@ -468,7 +468,7 @@ Implementation spans every layer of the platform. Core infrastructure, data mode
 | **Query Engine** | ⚠️ | Partial (depends on driver) |
 | **REST API** | ✅ | Yes |
 | **Client SDKs** | ✅ | Yes |
-| **Metadata System** | ⚠️ | Partial (in-memory only, DB persistence pending) |
+| **Metadata System** | ⚠️ | Partial (`sys_metadata` persistence via `MetadataPlugin`; without it the kernel's in-memory fallback fills the slot and discovery reports it `degraded`) |
 | **HTTP Caching** | ✅ | Yes |
 | **Testing Tools** | ✅ | Yes |
 | **UI Rendering** | ❌ | No |
