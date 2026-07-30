@@ -138,6 +138,17 @@ export const ShowcaseTranslationBundle = {
         label: 'Field Zoo', pluralLabel: 'Field Zoo',
       },
     },
+    // The OBJECT-LESS action slot (framework#3913). `globalActions` is the only
+    // place the resolver looks for an action that declares no `objectName` —
+    // keys for such an action under `objects.*._actions` are never read. Before
+    // `showcase_portfolio_snapshot` the showcase had no object-less action, so
+    // this slot had no specimen anywhere in the repo.
+    globalActions: {
+      showcase_portfolio_snapshot: {
+        label: 'Portfolio Snapshot',
+        successMessage: 'Portfolio snapshot taken.',
+      },
+    },
   },
   'zh-CN': {
     objects: {
@@ -284,6 +295,17 @@ export const ShowcaseTranslationBundle = {
             },
           },
         },
+      },
+    },
+    // See the `en` block: object-less actions resolve ONLY through
+    // `globalActions`. Translated at birth for the same reason as
+    // `showcase_action_param_gallery.params.p_assignee` above — this example is
+    // ratcheted at its current untranslated count, so a new declared label that
+    // skips zh-CN widens the debt and fails `check-i18n-coverage`.
+    globalActions: {
+      showcase_portfolio_snapshot: {
+        label: '业务概览',
+        successMessage: '已生成业务概览。',
       },
     },
   },
