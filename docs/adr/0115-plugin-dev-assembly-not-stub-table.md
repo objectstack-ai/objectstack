@@ -84,6 +84,8 @@ Precision, for the record: the `auth` stub is **dead code on the real identity p
 
 **D4 — Tier C retires without a rebuild phase (`file-storage`, `search`, `realtime`, `workflow`).** Per Evidence 5 there is nothing to build first: `realtime` and `file-storage` point at `@objectstack/service-realtime` / `@objectstack/service-storage` (which exist and self-register), and `search` / `workflow` have no consumers to lose. The tombstone lives in the changeset and the retirement messages: *install the real service*. Resolves #4093 open question 2 — the "InMemory strategies first" ordering was predicated on the strategies not existing; they exist where they should (in the real packages), or the demand for them doesn't.
 
+*Refinement (maintainer review, 2026-07-30):* the dev-experience cost drops to near zero because Tier C's correct landing shape is **assembly, not absence**: plugin-dev's child-plugin list grows optional entries for `@objectstack/service-storage` and `@objectstack/service-realtime` — dynamically imported, wired when installed, skipped when not, exactly the existing 3b i18n auto-detect precedent (`I18nServicePlugin` when translations are present). The zero-config dev promise is kept by real implementations instead of fakes. `search`/`workflow` get no such wiring: there is nothing to wire for a consumer that does not exist.
+
 **D5 — Direct cut inside the 17.x rc window; the changeset carries the FROM → TO per slot.** No deprecation window and no stub-preserving grace release: the honest `stub`/`degraded` self-descriptions shipped by #4082/#4086 already are the deprecation notice (discovery has been telling every consumer these are not capabilities), and keeping an allow-all security fake alive one extra release "to be polite" is exactly what D2 forbids. External rc consumers get the standard breaking-changeset prescription (Post-Task Checklist rule: FROM → TO and the one-line fix — *install the corresponding real service, or handle the absent slot as production already requires*). Resolves open question 1.
 
 **D6 — plugin-dev grows a production guard, in the same change as Tier A.** `DevPlugin.init` throws when `NODE_ENV === 'production'`, escape hatch `OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION=1` (Prime Directive #9 `OS_ALLOW_*` shape — deliberately scary). Deleting the fakes removes the security-semantics hazard; the guard covers what deletion cannot: the plugin still assembles a stack around a well-known default auth secret and a seeded dev admin, which no production deployment should get by accident. It does not ship as a separate earlier fix because Tier A itself waits for nothing (resolves open question 3 — the "maybe it shouldn't wait" concern was about the security stubs, and D2 removes them rather than gating them).
@@ -98,15 +100,13 @@ Precision, for the record: the `auth` stub is **dead code on the real identity p
 
 ## Execution
 
-Sequenced to avoid editing `dev-plugin.ts` under an in-flight PR:
+Sequenced to avoid editing `dev-plugin.ts` under an in-flight PR. Ratified by the maintainer on 2026-07-30: D5's direct cut confirmed, and the tier work collapses into **two implementation PRs** — Tier A and Tier C are the same mechanical act on the same table (delete entries), so splitting them buys a second end-to-end verification round of the same file and a worse changeset narrative; Tier B stays separate because it reaches into core and carries #4089. Tracked in #4104.
 
 1. **#4086 merges first** (open at evaluation time — #4058 step 2). Its classification table is this ADR's baseline, and its tests are the harness the removals run against.
-2. **Tier A + guard** (D2 + D6, one PR): delete the six fabricator entries, simplify the registration loop, add the production assert, breaking changeset.
-3. **Tier B + #4089** (D3, one PR): `__serviceInfo` on core's five fallbacks; delete plugin-dev's `metadata` copy and the four wrappers.
-4. **Tier C** (D4, one PR): delete the four in-memory implementations with pointer messages to `service-storage` / `service-realtime`; changeset notes `search`/`workflow` had no consumers.
-5. **Docs** (D7, with whichever PR touches last): packages.mdx entry, README, class doc.
+2. **PR-1 — Tier A + Tier C + guard + assembly auto-wire** (D2 + D4 + D6): delete the six fabricator entries and the four in-memory implementations, simplify the registration loop, add the production assert, wire the optional `service-storage` / `service-realtime` child plugins, one breaking changeset carrying the full FROM → TO table per slot. (If #4086 stalls in review, the guard alone may ship first — it touches only the top of `init` and conflicts with nothing.)
+3. **PR-2 — Tier B + #4089 + docs** (D3 + D7): `__serviceInfo` on core's five fallbacks; delete plugin-dev's `metadata` copy and the four wrappers — the stub table and fill loop die here entirely; packages.mdx entry, README, and class doc converge.
 
-End state, mechanically checkable: `DEV_STUB_FACTORIES`, `DEV_STUB_SELF_INFO`, `SHAPELESS_STUB_SELF_INFO`, `NO_DEV_STUB_SERVICES`, and the fill loop no longer exist in `dev-plugin.ts`; `grep -r "createMemoryMetadata\|registerInMemory" packages/plugins/plugin-dev` is empty. Steps 2–4 may collapse into fewer PRs at review's discretion — the tier boundaries are the decision, the PR count is not.
+End state, mechanically checkable: `DEV_STUB_FACTORIES`, `DEV_STUB_SELF_INFO`, `SHAPELESS_STUB_SELF_INFO`, `NO_DEV_STUB_SERVICES`, and the fill loop no longer exist in `dev-plugin.ts`; `grep -r "createMemoryMetadata\|registerInMemory" packages/plugins/plugin-dev` is empty. The two-PR split is the ratified shape; the tier boundaries remain the decision.
 
 ## Consequences
 
