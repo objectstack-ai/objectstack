@@ -195,6 +195,49 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 | `content/docs/getting-started/` | hand-written | ✅ |
 | `content/docs/protocol/` | hand-written | ✅ |
 
+### Touched `packages/spec`? Regenerate its artifacts BEFORE pushing
+
+`packages/spec` has **eight** checked-in generated artifacts, each with its own CI gate.
+They live in two different jobs (`TypeScript Type Check` in `lint.yml`, `Check Generated
+Artifacts` in `ci.yml`), and each job runs its gates **sequentially** — so the first
+stale artifact masks every one behind it, and you get one red build per artifact instead
+of one for all of them. Match the change to the gate and regenerate up front:
+
+| You changed | Gate that fails | Regenerate with `pnpm --filter @objectstack/spec …` |
+|:---|:---|:---|
+| A `.describe()` / TSDoc on any schema | `check:docs` | `gen:schema && gen:docs` |
+| A public export (added / removed / renamed) | `check:api-surface` | `gen:api-surface` |
+| An authorable key on a metadata schema | `check:authorable-surface` | `gen:schema` |
+| An ADR-0087 conversion / migration registry | `check:spec-changes`, `check:upgrade-guide` | `gen:spec-changes`, `gen:upgrade-guide` |
+| A `SKILL.md` (frontmatter or body) | `check:skill-docs`, `check:skill-refs` | `gen:skill-docs`, `gen:skill-refs` |
+| The react-blocks contract | `check:react-blocks` | `gen:react-blocks` |
+
+A `.describe()` string counts — it is not "just a comment", it lands in
+`content/docs/references/`. Adding one export counts — it lands in `api-surface.json`.
+Both were learned the hard way in #4040: two separate red builds, neither a logic error.
+
+Cheapest way to be sure, since a gate is just its generator in `--check` mode — run the
+whole set and let it tell you which artifact is stale:
+
+```bash
+cd packages/spec
+pnpm build            # REQUIRED first — see the dist caveat below
+for c in check:docs check:api-surface check:authorable-surface check:spec-changes \
+         check:upgrade-guide check:skill-refs check:skill-docs check:react-blocks; do
+  printf '%-28s ' "$c"; pnpm -s $c >/dev/null 2>&1 && echo PASS || echo FAIL
+done
+```
+
+⚠️ **`check:api-surface` reads the built `dist/*.d.ts`, not `src/`.** A stale `dist`
+makes it report exports as **removed** — "N breaking (removed/narrowed)" — when nothing
+was removed at all: the snapshot is simply newer than your build. Rebuild before you
+believe it, and before you file a bug about `main` being red. (Two phantom "breaking
+removals" this way while writing this section.)
+
+`check:liveness`, `check:empty-state`, `check:skill-examples` and
+`check:react-conformance` are pure checks with no generator — a failure there is a real
+finding to fix, not an artifact to regenerate.
+
 ---
 
 ## Context Routing — apply the right role per path
