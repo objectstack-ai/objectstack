@@ -16,6 +16,24 @@
  * Strategies stay simple — they only need to know one shape — and the
  * spec is honoured: dashboard metadata is authored once in the
  * canonical MongoDB form and the server normalizes at the boundary.
+ *
+ * # Coverage, stated honestly — an unmapped operator WIDENS the query
+ *
+ * Dropping a predicate is not "not supporting" it: the compiled SQL stays
+ * valid and simply returns more rows, which reads as a chart drawn over the
+ * whole dataset (#3650's symptom) and is invisible to any test that asserts
+ * the emitted SQL string. So what this maps is a capability claim:
+ *
+ *   - mapped 1:1 — `$eq` `$ne` `$gt` `$gte` `$lt` `$lte` `$in` `$nin`
+ *     `$contains` `$notContains` `$exists`, plus `null` → `notSet`;
+ *   - lowered — `$and` (flattened in place), and `$between`, which becomes
+ *     its two bounds so each strategy's existing upper-bound handling
+ *     applies the calendar-day whole-day rule (see the note at the lowering);
+ *   - NOT covered, and silently dropped today — `$startsWith` `$endsWith`
+ *     `$null` `$regex`, and the `$or` / `$not` combinators (the latter two
+ *     deliberately, pending recursive WHERE building). Tracked in #4128,
+ *     which also carries the case for turning the fallback into a throw the
+ *     way driver-memory did in #3948.
  */
 
 export interface NormalizedAnalyticsFilter {
