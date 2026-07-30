@@ -748,6 +748,76 @@ describe('[ADR-0111 D1] SharingService.canManageShares', () => {
     expect(await svc.canManageShares('account', 'nope', { userId: 'alice' })).toBe(false);
     expect(await svc.canManageShares('account', 'a1', {})).toBe(false);
   });
+
+  // ── [ADR-0111 D1 DEPTH] hierarchy-manager authority ──────────────────
+  // a1 is owned by alice. bob is alice's manager (own_and_reports covers alice);
+  // carol is an unrelated peer. The enterprise resolver is stubbed.
+  it('a hierarchy manager whose write DEPTH covers the owner may manage the record', async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false,
+        resolveWriteScope: async () => 'own_and_reports',
+      }),
+      hierarchyResolver: () => ({
+        // bob manages alice; nobody else in bob's reports.
+        resolveOwnerIds: async (ctx: any) => ctx.userId === 'bob' ? ['bob', 'alice'] : [ctx.userId],
+      }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'bob' })).toBe(true);
+  });
+
+  it('a peer with the same DEPTH scope but NOT covering the owner is denied', async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false,
+        resolveWriteScope: async () => 'unit',
+      }),
+      hierarchyResolver: () => ({
+        resolveOwnerIds: async (ctx: any) => [ctx.userId], // carol's unit owner-set excludes alice
+      }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'carol' })).toBe(false);
+  });
+
+  it("a probe reporting 'org' does NOT widen management (fail-open guard — only Modify All via hasWriteBypass grants org)", async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false, // NOT a real Modify-All holder
+        resolveWriteScope: async () => 'org', // the fail-open unmatched-object default
+      }),
+      // A resolver that would (wrongly) return everyone if consulted.
+      hierarchyResolver: () => ({ resolveOwnerIds: async () => ['alice', 'bob', 'carol'] }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'stranger' })).toBe(false);
+  });
+
+  it("'own' scope adds nothing beyond the ownership check (non-owner denied)", async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false,
+        resolveWriteScope: async () => 'own',
+      }),
+      hierarchyResolver: () => ({ resolveOwnerIds: async (ctx: any) => [ctx.userId] }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'mallory' })).toBe(false);
+  });
+
+  it('DEPTH branch needs the enterprise resolver — a manager scope with no resolver falls back to owner-only', async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false,
+        resolveWriteScope: async () => 'unit',
+      }),
+      // No hierarchyResolver → resolveOwnerScopeIds fails closed to [me], which
+      // excludes alice, so bob cannot manage alice's record.
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'bob' })).toBe(false);
+  });
 });
 
 describe('[ADR-0111 D1/D4/D5] the #3902 Mallory reproduction', () => {
