@@ -188,3 +188,38 @@ describe('map descriptor configSchema (objectui #2670 Phase 3 / #3304)', () => {
     expect(schema?.properties?.outputVariable?.xExpression).toBeUndefined();
   });
 });
+
+// #4045 — this proves the CONVERSION, not executor tolerance. The executor
+// reads only the canonical `flowName`; a stored flow on the undeclared `flow`
+// spelling reaches it because `registerFlow` applies
+// 'flow-node-map-flow-alias', which renames it at load.
+describe('map config `flow` alias (#4045)', () => {
+  it('accepts the legacy `config.flow` spelling via the conversion layer', async () => {
+    const captured: unknown[] = [];
+    const engine = setup([{ id: 'cm', type: 'itemmark' }], captured);
+    engine.registerFlow('legacy_parent', {
+      name: 'legacy_parent',
+      label: 'Legacy Parent',
+      type: 'autolaunched',
+      variables: [{ name: 'items', type: 'list', isInput: true }],
+      nodes: [
+        { id: 'ps', type: 'start', label: 'Start' },
+        {
+          id: 'do_map', type: 'map', label: 'For each',
+          config: { flow: 'child_flow', collection: '{items}', iteratorVariable: 'item', input: { val: '{item}' }, outputVariable: 'mapped' },
+        },
+        { id: 'chk', type: 'mapcheck', label: 'Check' },
+        { id: 'pe', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'p1', source: 'ps', target: 'do_map' },
+        { id: 'p2', source: 'do_map', target: 'chk' },
+        { id: 'p3', source: 'chk', target: 'pe' },
+      ],
+    } as never);
+
+    const result = await engine.execute('legacy_parent', { params: { items: ['a', 'b'] } });
+    expect(result.success).toBe(true);
+    expect(captured).toEqual([[{ result: 'a' }, { result: 'b' }]]);
+  });
+});

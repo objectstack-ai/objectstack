@@ -204,6 +204,19 @@ export type JoinNode = z.infer<typeof JoinNodeBaseSchema> & {
 };
 
 /**
+ * The authoring shape of a join — the INPUT half of {@link JoinNodeSchema}
+ * (#4195), the same relationship {@link QueryInput} has to {@link QueryAST}.
+ *
+ * Kept as its own type rather than reusing `JoinNode` because the recursive
+ * knot differs: a nested `subquery` is authored, so it is a `QueryInput`, not
+ * the parsed `QueryAST`.
+ */
+export type JoinNodeInput = z.input<typeof JoinNodeBaseSchema> & {
+  /** Join against a derived dataset instead of a plain object/table. */
+  subquery?: QueryInput;
+};
+
+/**
  * Join Node
  * Represents table joins for combining data from multiple objects.
  * 
@@ -281,7 +294,7 @@ export type JoinNode = z.infer<typeof JoinNodeBaseSchema> & {
  *   ]
  * }
  */
-export const JoinNodeSchema: z.ZodType<JoinNode> = z.lazy(() =>
+export const JoinNodeSchema: z.ZodType<JoinNode, JoinNodeInput> = z.lazy(() =>
   JoinNodeBaseSchema.extend({
     subquery: z.lazy(() => QuerySchema).optional().describe('Subquery instead of object'),
   })
@@ -459,7 +472,7 @@ export type FieldNode =
  * Field Selection Node
  * Represents "Select" attributes, including joins.
  */
-export const FieldNodeSchema: z.ZodType<FieldNode> = z.lazy(() =>
+export const FieldNodeSchema: z.ZodType<FieldNode, FieldNode> = z.lazy(() =>
   z.union([
     z.string(), // Primitive field: "name"
     z.object({
@@ -620,7 +633,7 @@ export type QueryInput = z.input<typeof BaseQuerySchema> & {
   expand?: Record<string, QueryInput>;
 };
 
-export const QuerySchema: z.ZodType<QueryAST> = lazySchema(() => BaseQuerySchema.extend({
+export const QuerySchema: z.ZodType<QueryAST, QueryInput> = lazySchema(() => BaseQuerySchema.extend({
   expand: z.lazy(() => z.record(z.string(), QuerySchema)).optional().describe(
     'Recursive relation loading map. Keys are lookup/master_detail field names; '
     + 'values are nested QueryAST objects that control select (`fields`) and filter '

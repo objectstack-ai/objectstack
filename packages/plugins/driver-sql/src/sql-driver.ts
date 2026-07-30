@@ -568,6 +568,10 @@ export class SqlDriver implements IDataDriver {
   /** External columnMap inverse: physical remote column -> logical field (for read output remap). */
   protected columnFieldByObject: Record<string, Record<string, string>> = {};
   protected tablesWithTimestamps: Set<string> = new Set();
+  /** Tables this driver created since connect — see `getSchemaSyncStats`. */
+  protected tablesCreatedHere: Set<string> = new Set();
+  /** Tables that were already present when this driver first touched them. */
+  protected tablesFoundExisting: Set<string> = new Set();
   /**
    * Autonumber field configs per table, captured during initObjects.
    *
@@ -2893,6 +2897,14 @@ export class SqlDriver implements IDataDriver {
       }
 
       let exists = await this.knex.schema.hasTable(tableName);
+      // Recorded BEFORE the legacy-`_id` rebuild below can flip `exists`: a
+      // table that was here when we arrived stays "found" even if we then drop
+      // and recreate it. Re-syncing a table we made ourselves this boot — boot
+      // runs the sync more than once, and objects registered later sync on
+      // demand — is not evidence of anything preceding us, so it is ignored.
+      // See `getSchemaSyncStats`.
+      if (!exists) this.tablesCreatedHere.add(tableName);
+      else if (!this.tablesCreatedHere.has(tableName)) this.tablesFoundExisting.add(tableName);
 
       if (exists) {
         const columnInfo = await this.knex(tableName).columnInfo();
@@ -3334,6 +3346,16 @@ export class SqlDriver implements IDataDriver {
   /** How many objects are waiting for {@link flushDeferredSchemaDdl}. */
   get deferredSchemaObjectCount(): number {
     return this.deferredSchemaObjects.size;
+  }
+
+  /**
+   * Tables this driver created vs found already present since `connect()` —
+   * the `IDataDriver.getSchemaSyncStats` contract. `existing === 0 &&
+   * created > 0` is the platform's only observation that a datastore was
+   * empty when this process reached it (#3438 / ADR-0104).
+   */
+  getSchemaSyncStats(): { created: number; existing: number } {
+    return { created: this.tablesCreatedHere.size, existing: this.tablesFoundExisting.size };
   }
 
   /**

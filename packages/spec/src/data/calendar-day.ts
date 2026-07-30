@@ -52,6 +52,57 @@ export function nextUtcCalendarDay(value: unknown): string | null {
   return fmtUtcDay(new Date(Date.UTC(y, mo - 1, d + 1)));
 }
 
+/**
+ * The UTC instant a temporal comparand denotes, in epoch milliseconds — or
+ * `null` when the value does not denote an instant at all.
+ *
+ * The companion of {@link nextUtcCalendarDay} for the OTHER half of the same
+ * problem. That one answers "how wide is this bound"; this one answers "can
+ * these two operands be ordered against each other at all", which is the
+ * question a **type-blind** evaluator faces when one side is a JS `Date` and
+ * the other is the platform's wire text. JS relational operators cannot: `<`
+ * and friends coerce both operands with hint `number`, so a `Date` becomes its
+ * epoch and an ISO string becomes `NaN`, and EVERY comparison between the two
+ * is false regardless of the instants involved. That is the same cross-type
+ * silence #4047 measured on the drivers, in the one place no schema is
+ * available to prevent it.
+ *
+ * Accepted spellings — all unambiguous, so the answer never depends on the
+ * process timezone:
+ *   - a `Date` (and finite epoch-ms number);
+ *   - a bare `YYYY-MM-DD` → that day's `00:00:00.000Z`, matching D-D's
+ *     "a lower bound anchors to midnight" and ES's own date-only rule;
+ *   - `YYYY-MM-DDTHH:MM:SS[.fff]` with an explicit `Z`/offset;
+ *   - the zone-naive spelling of the same, whose wall clock **is** UTC — the
+ *     platform-wide rule D-B2 states for `CURRENT_TIMESTAMP`-written rows.
+ *
+ * Everything else is `null`, deliberately: `Date.parse` would accept a
+ * zone-naive timestamp as LOCAL time (so the same data would compare
+ * differently under the temporal CI job's skewed zone) and, on V8, guesses at
+ * shapes no protocol defines. A bare wall clock (`'14:30:00'`) is `null`
+ * because it denotes no instant — a `Field.time` is not an instant (#2004), so
+ * a type-blind surface must leave those operands exactly as it found them
+ * rather than invent a calendar day for them.
+ */
+export function utcInstantMs(value: unknown): number | null {
+  if (value instanceof Date) {
+    const t = value.getTime();
+    return Number.isNaN(t) ? null : t;
+  }
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    // Spec-defined as UTC; parse it through the calendar-day validator so an
+    // impossible day is refused here exactly as it is above.
+    return nextUtcCalendarDay(s) === null ? null : Date.parse(`${s}T00:00:00.000Z`);
+  }
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})?$/.exec(s);
+  if (!m) return null;
+  const t = Date.parse(`${m[1]}T${m[2]}${m[3] ?? 'Z'}`);
+  return Number.isNaN(t) ? null : t;
+}
+
 /** `YYYY-MM-DD` of an instant's UTC calendar day. */
 function fmtUtcDay(dt: Date): string {
   return (

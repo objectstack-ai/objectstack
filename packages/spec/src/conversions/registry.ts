@@ -1233,6 +1233,57 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
   },
 };
 
+/**
+ * Map flow-node config key alias → canonical (protocol 17, #4045).
+ *
+ * `flowName` is the canonical key — it is what the descriptor's `configSchema`
+ * declares, what the designer offers, and what the showcase authors. The
+ * executor nonetheless accepted a bare `cfg.flowName ?? cfg.flow` fallback for
+ * an undeclared `flow` spelling that no schema ever described: the
+ * `notify.source` shape (PD #12), found by writing `MapConfigSchema` from the
+ * executor for the #4045 reconciliation.
+ *
+ * A pure key rename with unchanged values, so the pair mechanism expresses it
+ * directly. **Live window**; retires at 18.
+ */
+const flowNodeMapFlowAlias: MetadataConversion = {
+  id: 'flow-node-map-flow-alias',
+  toMajor: 17,
+  surface: 'flow.node.map.config.flowName',
+  summary: "map flow-node config key 'flow' → 'flowName' (#4045 — undeclared executor fallback graduation)",
+  apply(stack, emit) {
+    return renameFlowConfigAliases(stack, new Set(['map']), [['flow', 'flowName']], emit);
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'batch_signoff',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'map', config: { collection: '{tasks}', flow: 'one_task_signoff' } },
+            // canonical already present → the shadowed alias is left alone (no notice)
+            { id: 'n3', type: 'map', config: { collection: '{rows}', flowName: 'per_row', flow: 'ignored' } },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'batch_signoff',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'map', config: { collection: '{tasks}', flowName: 'one_task_signoff' } },
+            { id: 'n3', type: 'map', config: { collection: '{rows}', flowName: 'per_row', flow: 'ignored' } },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 /** The `config` keys a mis-taught `connector_action` node carries, in declared-block order. */
 const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
 
@@ -2029,6 +2080,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeNotifyConfigAliases,
     flowNodeWaitEventConfigLift,
     flowNodeConnectorConfigLift,
+    flowNodeMapFlowAlias,
     flowNodeScriptConfigAliases,
     permissionRlsPriorityRemoved,
     toolInertAuthoringKeysRemoved,

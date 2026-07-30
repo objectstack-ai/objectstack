@@ -159,6 +159,26 @@ export const FILE_REFERENCES_MIGRATION_ID = 'adr-0104-file-references';
  */
 export const VALUE_SHAPES_MIGRATION_ID = 'adr-0104-value-shapes';
 
+/**
+ * The migrations a datastore attests at CREATION rather than by scanning.
+ *
+ * Both facts these ids stand for — no legacy file value here, no malformed
+ * stored value here — are true by construction of an empty store, and true
+ * *observably*: the creator watched it come into being with no rows at all.
+ * That is the same observed-transition discipline the gates run on, not
+ * version-gating in disguise; a store that merely *looks* empty when found
+ * earns nothing, because "found empty" is an inference and "created empty" is
+ * an observation.
+ *
+ * Without this, every deployment born on a version that already ships the
+ * migrations would start lax and stay lax until someone ran a command that is,
+ * for them, a no-op — so the warn regime would never die out.
+ */
+export const CREATION_ATTESTED_MIGRATION_IDS = [
+  FILE_REFERENCES_MIGRATION_ID,
+  VALUE_SHAPES_MIGRATION_ID,
+] as const;
+
 export const DataMigrationFlagSchema = lazySchema(() => z.object({
   id: z.string().describe('Migration id (e.g. adr-0104-file-references) — one row per data migration'),
   last_run_at: z.string().datetime().describe('When this migration last completed a gated (apply-mode) run on this deployment'),

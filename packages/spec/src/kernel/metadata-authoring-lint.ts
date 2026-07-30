@@ -57,7 +57,6 @@ import {
   STACK_RUNTIME_MEMBERS,
   type UnknownAuthoringKeyFinding,
 } from '../data/authoring-key-lint';
-import { FieldSchema } from '../data/field.zod';
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
 import { getMetadataTypeSchema } from './metadata-type-schemas';
 
@@ -168,6 +167,149 @@ export function listLintableAuthoringCollections(): LintableAuthoringCollection[
 }
 
 /**
+ * How deep below a metadata item the walk goes. The descent is bounded by the
+ * AUTHORED data, not by the schema, so this only matters for pathologically
+ * nested input; 12 clears the deepest real shape (a page's nested region tree).
+ */
+const MAX_DESCENT_DEPTH = 12;
+
+/**
+ * Nested surfaces that report under their own name instead of the enclosing
+ * metadata type, keyed by `<type>:<path relative to the item root>`.
+ *
+ * Only `object.fields` qualifies today. It is the surface #4120 mined for the
+ * curated guidance table, and a finding on it has always said `field` rather
+ * than `object` — callers and tests depend on that. Everything else nested
+ * reports under its metadata type, which is the axis authors think in ("this is
+ * a page problem"), and falls back to the edit-distance suggestion.
+ */
+const NESTED_SURFACES: Readonly<
+  Record<string, { surface: string; guidance: Readonly<Record<string, { to?: string; why?: string }>> }>
+> = Object.freeze({
+  'object:fields': { surface: 'field', guidance: FIELD_KEY_GUIDANCE },
+});
+
+/**
+ * Walk the authored value alongside its schema, reporting unknown keys at every
+ * strip-mode object below the item root (#4001 evidence phase).
+ *
+ * Before this, the walk stopped at each metadata item's top level plus one
+ * hard-coded descent into `object.fields`. That left 227 strip-mode objects
+ * nested below those roots — `page.regions[].components[]`, `dashboard.widgets[]`,
+ * `view.config.data`, `action.params[].options[]` — silently eating keys AND
+ * contributing nothing to the evidence base the v18 strict close-out is meant to
+ * be scheduled on. The two most-authored types were the worst off: `object` has
+ * 71 such sites, `view` 49.
+ *
+ * Posture rules match {@link keyPosture}, so the lint never double-reports what
+ * the parse already rejects:
+ *   - `strict`      → silent, the parse is loud on its own.
+ *   - `passthrough` → silent, the key legally survives.
+ *   - `strip`       → reported, and the descent continues through it.
+ *
+ * Unions descend only when the authored value picks a branch unambiguously (a
+ * discriminated union whose discriminator the author actually wrote). Otherwise
+ * the merged posture from {@link keyPosture} is applied at this level and the
+ * walk stops: guessing a branch would invent findings against a shape the author
+ * never chose.
+ */
+function descend(
+  schema: unknown,
+  raw: unknown,
+  path: string,
+  relPath: string,
+  surface: string,
+  guidance: Readonly<Record<string, { to?: string; why?: string }>>,
+  out: UnknownAuthoringKeyFinding[],
+  depth: number,
+): void {
+  if (depth > MAX_DESCENT_DEPTH || raw == null) return;
+  const u = unwrap(schema);
+  const d = u?.def ?? u?._def;
+  if (!d) return;
+
+  if (d.type === 'union' || d.type === 'discriminated_union') {
+    const branch = d.discriminator && isPlainRecord(raw)
+      ? pickUnionBranch(d, raw[d.discriminator])
+      : undefined;
+    if (branch) {
+      descend(branch, raw, path, relPath, surface, guidance, out, depth + 1);
+      return;
+    }
+    const merged = keyPosture(u);
+    if (merged?.mode === 'strip' && merged.keys.size > 0 && isPlainRecord(raw)) {
+      lintAuthoredRecordKeys(raw, merged.keys, guidance, surface, path, out);
+    }
+    return;
+  }
+
+  if (d.type === 'object') {
+    if (!isPlainRecord(raw)) return;
+    const shape = (typeof d.shape === 'function' ? d.shape() : d.shape) ?? {};
+    // depth 0 is the item root, already reported by the caller.
+    if (depth > 0) {
+      const posture = keyPosture(u);
+      if (posture?.mode === 'strip' && posture.keys.size > 0) {
+        lintAuthoredRecordKeys(raw, posture.keys, guidance, surface, path, out);
+      }
+    }
+    for (const [key, child] of Object.entries(shape)) {
+      if (!(key in raw)) continue;
+      const childRel = relPath ? `${relPath}.${key}` : key;
+      const override = NESTED_SURFACES[`${surface}:${childRel}`];
+      descend(
+        child,
+        raw[key],
+        `${path}.${key}`,
+        childRel,
+        override?.surface ?? surface,
+        override?.guidance ?? guidance,
+        out,
+        depth + 1,
+      );
+    }
+    return;
+  }
+
+  if (d.element) {
+    if (!Array.isArray(raw)) return;
+    for (let i = 0; i < raw.length; i++) {
+      descend(d.element, raw[i], `${path}.${i}`, relPath, surface, guidance, out, depth + 1);
+    }
+    return;
+  }
+
+  if (d.valueType) {
+    if (!isPlainRecord(raw)) return;
+    for (const [key, value] of Object.entries(raw)) {
+      // A record's KEYS are author-chosen names, so they never join relPath —
+      // `object.fields` must stay `fields`, not `fields.owner`, or the override
+      // above would miss every field but one.
+      descend(d.valueType, value, `${path}.${key}`, relPath, surface, guidance, out, depth + 1);
+    }
+  }
+}
+
+/** The union member whose discriminator literal matches `value`, if exactly one does. */
+function pickUnionBranch(unionDef: any, value: unknown): unknown {
+  if (value === undefined) return undefined;
+  for (const option of unionDef.options ?? []) {
+    const od = unwrap(option);
+    const shape = (() => {
+      const dd = od?.def ?? od?._def;
+      return typeof dd?.shape === 'function' ? dd.shape() : dd?.shape;
+    })();
+    const discDef = (() => {
+      const s = unwrap(shape?.[unionDef.discriminator]);
+      return s?.def ?? s?._def;
+    })();
+    const literals = discDef?.values ?? (discDef?.value !== undefined ? [discDef.value] : []);
+    if (literals && [...literals].includes(value as never)) return option;
+  }
+  return undefined;
+}
+
+/**
  * Report every key an authored stack sets — on any item of any metadata
  * collection — that the item's schema does not declare: every value the parse
  * is about to discard silently.
@@ -197,25 +339,7 @@ export function lintUnknownAuthoringKeys(rawStack: unknown): UnknownAuthoringKey
       const name = typeof item.name === 'string' && item.name ? item.name : String(i);
       const basePath = `${collection}.${name}`;
       lintAuthoredRecordKeys(item, posture.keys, guidance, type, basePath, out);
-
-      // The one nested surface: an object's `fields` record, judged by
-      // FieldSchema — where #4120 found the worst of the drift.
-      if (type === 'object' && isPlainRecord(item.fields)) {
-        const fieldPosture = keyPosture(FieldSchema);
-        if (fieldPosture && fieldPosture.mode === 'strip' && fieldPosture.keys.size > 0) {
-          for (const [fieldName, field] of Object.entries(item.fields)) {
-            if (!isPlainRecord(field)) continue;
-            lintAuthoredRecordKeys(
-              field,
-              fieldPosture.keys,
-              FIELD_KEY_GUIDANCE,
-              'field',
-              `${basePath}.fields.${fieldName}`,
-              out,
-            );
-          }
-        }
-      }
+      descend(schema, item, basePath, '', type, guidance, out, 0);
     }
   }
   return out;
