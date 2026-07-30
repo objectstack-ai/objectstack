@@ -251,7 +251,19 @@ export interface BaseValidationRuleShape {
   [key: string]: unknown;
 }
 
-export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape> = z.lazy(() =>
+/**
+ * Both type arguments are given (#4195) so `z.input` is not `unknown` —
+ * validation rules are hand-authored, and an `unknown` input type means nothing
+ * checks what an author writes.
+ *
+ * Read {@link BaseValidationRuleShape} before trusting the result: it carries a
+ * `[key: string]: unknown` index signature, so it types the KNOWN keys and
+ * accepts any others. That is a real improvement over `unknown` (which types
+ * nothing) but it is not strictness — the discriminated union below is what
+ * actually rejects a malformed rule, at parse time. Removing the index
+ * signature is the #4075 family of work, not this change.
+ */
+export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValidationRuleShape> = z.lazy(() =>
   z.discriminatedUnion('type', [
     ScriptValidationSchema,
     StateMachineValidationSchema,

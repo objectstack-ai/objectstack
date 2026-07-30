@@ -25,9 +25,9 @@
  * matching the convention used by the HotCRM reference app.
  */
 
-import type { App } from '@objectstack/spec/ui';
+import type { AppInput } from '@objectstack/spec/ui';
 
-export const SETUP_APP: App = {
+export const SETUP_APP: AppInput = {
   name: 'setup',
   label: 'Setup',
   description: 'Platform settings and administration',
@@ -47,18 +47,12 @@ export const SETUP_APP: App = {
   requiredPermissions: ['setup.access'],
   // Shell only — the stable group anchors. Children are supplied by
   // `navigationContributions` from the packages that own the objects.
-  //
-  // `expanded: false` is the schema's own default, spelled out: this literal is
-  // annotated with the PARSED `App` type, where a `.default()`ed key is
-  // required. Omitting it was only possible while `NavigationItem` resolved to
-  // `any` and nothing checked these entries at all (#4171).
   navigation: [
     {
       id: 'group_overview',
       type: 'group',
       label: 'Overview',
       icon: 'layout-dashboard',
-      expanded: false,
       requiredPermissions: ['manage_platform_settings'],
       children: [],
     },
@@ -67,7 +61,6 @@ export const SETUP_APP: App = {
       type: 'group',
       label: 'Apps',
       icon: 'package',
-      expanded: false,
       children: [],
     },
     {
@@ -75,7 +68,6 @@ export const SETUP_APP: App = {
       type: 'group',
       label: 'People & Organization',
       icon: 'users',
-      expanded: false,
       children: [],
     },
     {
@@ -83,7 +75,6 @@ export const SETUP_APP: App = {
       type: 'group',
       label: 'Access Control',
       icon: 'shield',
-      expanded: false,
       children: [],
     },
     {
@@ -91,7 +82,6 @@ export const SETUP_APP: App = {
       type: 'group',
       label: 'Approvals',
       icon: 'check-circle',
-      expanded: false,
       requiredPermissions: ['manage_platform_settings'],
       children: [],
     },
@@ -100,7 +90,6 @@ export const SETUP_APP: App = {
       type: 'group',
       label: 'Configuration',
       icon: 'sliders-horizontal',
-      expanded: false,
       children: [],
     },
     {
@@ -108,7 +97,6 @@ export const SETUP_APP: App = {
       type: 'group',
       label: 'Diagnostics',
       icon: 'stethoscope',
-      expanded: false,
       requiredPermissions: ['manage_platform_settings'],
       children: [],
     },
@@ -117,7 +105,6 @@ export const SETUP_APP: App = {
       type: 'group',
       label: 'Integrations',
       icon: 'plug',
-      expanded: false,
       requiredPermissions: ['manage_platform_settings'],
       children: [],
     },

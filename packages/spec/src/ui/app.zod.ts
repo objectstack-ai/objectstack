@@ -443,6 +443,33 @@ export type NavigationItem =
   | GroupNavItem;
 
 /**
+ * The authoring shape of a navigation item — the INPUT half of
+ * {@link NavigationItemSchema} (#4195).
+ *
+ * Two variants carry a `.default()`, which is the whole reason this has to be
+ * a separate type: `expanded` on a group and `target` on a url entry are
+ * OPTIONAL to write and REQUIRED once parsed. Typing an authoring artifact as
+ * the parsed {@link NavigationItem} therefore demands both — which is exactly
+ * what #4171 hit, and why `setup.app.ts` / `studio.app.ts` /
+ * `setup-nav.contributions.ts` briefly had to spell out defaults they were
+ * happy to rely on.
+ *
+ * Before this, `z.input<typeof NavigationItemSchema>` was `unknown`, so
+ * `AppInput['navigation']` was `unknown[]` and `defineApp` accepted any array
+ * of anything for the densest hand-authored surface on the platform.
+ */
+export type NavigationItemInput =
+  | (z.input<typeof ObjectNavItemSchema> & { children?: NavigationItemInput[] })
+  | z.input<typeof DashboardNavItemSchema>
+  | z.input<typeof PageNavItemSchema>
+  | z.input<typeof UrlNavItemSchema>
+  | z.input<typeof ReportNavItemSchema>
+  | z.input<typeof ActionNavItemSchema>
+  | z.input<typeof ComponentNavItemSchema>
+  | z.input<typeof SeparatorNavItemSchema>
+  | (z.input<typeof GroupNavItemSchema> & { children: NavigationItemInput[] });
+
+/**
  * Recursive Union of all navigation item types.
  * Allows constructing an unlimited-depth navigation tree.
  *
@@ -460,7 +487,7 @@ export type NavigationItem =
  * type, or the reverse — which app.test.ts covers at runtime by parsing all nine
  * ("accepts every variant with its full declared payload").
  */
-export const NavigationItemSchema: z.ZodType<NavigationItem> = z.lazy(() =>
+export const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput> = z.lazy(() =>
   // DISCRIMINATED on `type` (#4001 PR B). With `.strict()` members a plain
   // union would answer one unknown key with an `invalid_union` aggregate
   // listing all nine branches' failures; discriminating on `type` first means
@@ -484,7 +511,7 @@ export const NavigationItemSchema: z.ZodType<NavigationItem> = z.lazy(() =>
     // The members are lazySchema Proxies and a superRefine-wrapped variant, so
     // the array is widened for the discriminator-typed overload; runtime
     // discrimination works on all of them (asserted in app.test.ts).
-  ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]]) as unknown as z.ZodType<NavigationItem>
+  ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]]) as unknown as z.ZodType<NavigationItem, NavigationItemInput>
 );
 
 /**
@@ -529,6 +556,12 @@ export const NavigationContributionSchema = lazySchema(() => z.object({
   }),
 }).strict().describe('A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)'));
 export type NavigationContribution = z.infer<typeof NavigationContributionSchema>;
+/**
+ * The authoring shape of a contribution (#4195) — `priority` is `.default(200)`
+ * and each item is a {@link NavigationItemInput}, so this is what a package
+ * declaring its menu entries actually writes.
+ */
+export type NavigationContributionInput = z.input<typeof NavigationContributionSchema>;
 
 /**
  * App Branding Configuration

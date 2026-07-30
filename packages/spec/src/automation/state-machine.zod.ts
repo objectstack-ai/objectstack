@@ -79,8 +79,20 @@ export type StateNodeConfig = {
 
 /**
  * State Node Definition
+ *
+ * Both type arguments are given (#4195) so `z.input` is not `unknown` — a state
+ * machine is hand-authored, and an `unknown` input type means nothing checks
+ * what an author writes into `states`.
+ *
+ * Caveat worth knowing before trusting it: {@link StateNodeConfig} is written by
+ * hand in the AUTHORING shape (`type?` is optional), while `type` is
+ * `.default('atomic')` and so always present once parsed. Using it for both
+ * arguments is therefore exact on the input side and slightly loose on the
+ * output side — which is what this schema already claimed before, so nothing
+ * regressed. Making the output exact means re-deriving `StateNodeConfig` from
+ * the schema rather than maintaining it beside one; that is a separate change.
  */
-export const StateNodeSchema: z.ZodType<StateNodeConfig> = z.lazy(() => z.object({
+export const StateNodeSchema: z.ZodType<StateNodeConfig, StateNodeConfig> = z.lazy(() => z.object({
   /** Type of state */
   type: z.enum(['atomic', 'compound', 'parallel', 'final', 'history']).default('atomic'),
   
