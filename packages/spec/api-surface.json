@@ -582,6 +582,7 @@
     "isTitleEligible (function)",
     "isUniqueDeclared (function)",
     "missingFieldValues (function)",
+    "nextUtcCalendarDay (function)",
     "objectForm (const)",
     "objectTitleCompleteness (function)",
     "parseAutonumberFormat (function)",
