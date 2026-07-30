@@ -191,6 +191,7 @@ skill and a guided `/objectstack:connect` command.
 |:---|:---|
 | `404` on `/api/v1/mcp` | The HTTP surface is disabled — unset `OS_MCP_SERVER_ENABLED` (default is on) |
 | `501 Not Implemented` | The MCP plugin isn't part of this build — check your stack's plugins |
+| `mcp` missing from `GET /api/v1/discovery` and no Connect-an-Agent card, but `OS_MCP_SERVER_ENABLED` is on | The same cause as the `501` above, seen from the other side: the surface is *enabled* but not *serveable*, so discovery declines to advertise a route that would 501 rather than over-promising it (`declared === enforced`). Load the MCP plugin — `os serve` / `os dev` do it for you; a host that embeds `@objectstack/rest` directly must add `@objectstack/mcp` itself |
 | stdio won't start / boot fails closed | `OS_MCP_STDIO_ENABLED=true` but `OS_MCP_STDIO_API_KEY` is missing, unknown, revoked, or expired — fail-closed by design (ADR-0101). Set a valid `osk_` key; there is no unscoped or `system` fallback |
 | `401` on every call | Anonymous or invalid credentials. Interactive clients: complete the browser login (the `WWW-Authenticate` header advertises the OAuth metadata). Headless: check the `osk_` key and header spelling |
 | `403 insufficient_scope` | The OAuth token lacks the scope for that tool family (e.g. writes without `data:write`) — reconnect and grant the scope |
