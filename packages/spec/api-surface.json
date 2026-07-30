@@ -1962,8 +1962,6 @@
     "Tool (type)",
     "ToolCall (type)",
     "ToolCallSchema (const)",
-    "ToolCategory (type)",
-    "ToolCategorySchema (const)",
     "ToolSchema (const)",
     "TransformPipelineStep (type)",
     "TransformPipelineStepSchema (const)",

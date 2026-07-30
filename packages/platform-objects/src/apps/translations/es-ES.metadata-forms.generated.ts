@@ -1650,10 +1650,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       schemas: {
         label: "Esquemas",
         description: "Entradas que acepta la herramienta y forma de su salida."
-      },
-      declarative_metadata_not_enforced: {
-        label: "Declarative metadata (not enforced)",
-        description: "Recorded on the tool definition but read by no execution path — see the per-field notes for where the real gates live."
       }
     },
     fields: {
@@ -1669,21 +1665,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Descripción",
         helpText: "Indica a IA cuándo usar esta herramienta — sé específico."
       },
-      category: {
-        label: "Categoría",
-        helpText: "Categoría de herramienta (data, action, flow, integration, etc.)"
-      },
       objectName: {
         label: "Nombre de objeto",
         helpText: "Objeto relacionado (si esta herramienta opera sobre un objeto específico)"
-      },
-      active: {
-        label: "Activo",
-        helpText: "Activa/desactiva esta herramienta"
-      },
-      builtIn: {
-        label: "Integrado",
-        helpText: "Herramienta integrada de la plataforma (frente a definida por usuario)"
       },
       parameters: {
         label: "Parámetros",
@@ -1692,10 +1676,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       outputSchema: {
         label: "Esquema de salida",
         helpText: "Esquema de salida para validación (opcional)"
-      },
-      permissions: {
-        label: "Permisos",
-        helpText: "Permisos necesarios para usar esta herramienta"
       }
     }
   },

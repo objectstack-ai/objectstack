@@ -1650,10 +1650,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       schemas: {
         label: "Schemas",
         description: "Inputs the tool accepts and the shape of its output."
-      },
-      declarative_metadata_not_enforced: {
-        label: "Declarative metadata (not enforced)",
-        description: "Recorded on the tool definition but read by no execution path — see the per-field notes for where the real gates live."
       }
     },
     fields: {
@@ -1669,21 +1665,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Description",
         helpText: "Tell AI when to use this tool — be specific!"
       },
-      category: {
-        label: "Category",
-        helpText: "Tool category (data, action, flow, integration, etc.)"
-      },
       objectName: {
         label: "Object Name",
         helpText: "Related object (if this tool operates on a specific object)"
-      },
-      active: {
-        label: "Active",
-        helpText: "Enable/disable this tool"
-      },
-      builtIn: {
-        label: "Built In",
-        helpText: "Platform built-in tool (vs user-defined)"
       },
       parameters: {
         label: "Parameters",
@@ -1692,10 +1676,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       outputSchema: {
         label: "Output Schema",
         helpText: "Output schema for validation (optional)"
-      },
-      permissions: {
-        label: "Permissions",
-        helpText: "Required permissions to use this tool"
       }
     }
   },

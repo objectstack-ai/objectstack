@@ -1650,10 +1650,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       schemas: {
         label: "スキーマ",
         description: "ツールが受け取る入力と出力の形状。"
-      },
-      declarative_metadata_not_enforced: {
-        label: "Declarative metadata (not enforced)",
-        description: "Recorded on the tool definition but read by no execution path — see the per-field notes for where the real gates live."
       }
     },
     fields: {
@@ -1669,21 +1665,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "説明",
         helpText: "AI にこのツールの使用タイミングを指示 — 具体的に！"
       },
-      category: {
-        label: "カテゴリ",
-        helpText: "ツールカテゴリ（data, action, flow, integration など）"
-      },
       objectName: {
         label: "オブジェクト名",
         helpText: "関連オブジェクト（このツールが特定オブジェクトを扱う場合）"
-      },
-      active: {
-        label: "有効",
-        helpText: "このツールの有効/無効"
-      },
-      builtIn: {
-        label: "組み込み",
-        helpText: "プラットフォーム組み込みツール（ユーザー定義との対比）"
       },
       parameters: {
         label: "パラメーター",
@@ -1692,10 +1676,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       outputSchema: {
         label: "出力スキーマ",
         helpText: "検証用出力スキーマ（任意）"
-      },
-      permissions: {
-        label: "権限",
-        helpText: "このツールの使用に必要な権限"
       }
     }
   },
