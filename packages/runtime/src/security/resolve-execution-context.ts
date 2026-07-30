@@ -21,6 +21,7 @@
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 
 import {
   resolveAuthzContext,
@@ -230,7 +231,14 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
       userId: authz.userId,
     });
     ctx.timezone = localization.timezone;
-    ctx.locale = localization.locale;
+    // [#3957] The request's OWN language preference wins over the workspace
+    // default. `ExecutionContext.locale` drives the write path's message catalog
+    // (rejected-write messages, field labels inside them), and metadata is
+    // already translated per `Accept-Language` — reading only the workspace
+    // locale here would put an English rejection next to the Chinese label of
+    // the very field it names. The workspace value stays the fallback for a
+    // caller that expresses no preference (a job, a server-to-server client).
+    ctx.locale = preferredLocaleFromHeader(headers.get('accept-language')) ?? localization.locale;
     if (localization.currency) ctx.currency = localization.currency;
   }
 

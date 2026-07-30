@@ -231,6 +231,25 @@ export function mergeLocalizedOptionSynonyms(
     }
 }
 
+/**
+ * Overwrite each column's `label` with the locale-translated one (#3957).
+ *
+ * The row report names a failing column by `meta.label`, and `buildFieldMetaMap`
+ * reads the AUTHORED schema — so an app authored in English with a `zh-CN`
+ * bundle reported `Account: 未找到…`: a localized sentence around an English
+ * column name. The translated document is already fetched here for option
+ * synonyms; this reads its labels from the same place.
+ */
+export function applyLocalizedFieldLabels(
+    metaMap: Map<string, ExportFieldMeta>,
+    localized: Map<string, ExportFieldMeta>,
+): void {
+    for (const [name, meta] of metaMap) {
+        const label = localized.get(name)?.label;
+        if (typeof label === 'string' && label.trim().length > 0) meta.label = label;
+    }
+}
+
 export async function prepareImportRequest(
     body: any,
     opts: {
@@ -390,7 +409,11 @@ export async function prepareImportRequest(
             try {
                 const localized = await localizeSchema(schema);
                 if (localized && localized !== schema) {
-                    mergeLocalizedOptionSynonyms(metaMap, buildFieldMetaMap(localized));
+                    const localizedMeta = buildFieldMetaMap(localized);
+                    mergeLocalizedOptionSynonyms(metaMap, localizedMeta);
+                    // The row report names columns by label — it must be the
+                    // reader's label, not the authored one (#3957).
+                    applyLocalizedFieldLabels(metaMap, localizedMeta);
                 }
             } catch { /* authored-only option matching */ }
         }

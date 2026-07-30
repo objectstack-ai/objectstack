@@ -144,10 +144,43 @@ protocol `ai.chatStream` parses and owns message state for you.
 
 ### File Storage (`/storage`) — Plugin Required
 
-| Method | Endpoint | Description |
-|:-------|:---------|:------------|
-| POST | `/storage/upload` | Upload a file |
-| GET | `/storage/file/:id` | Download a file |
+Provided by `@objectstack/service-storage`, which registers these routes on the
+host HTTP server. Uploads are a three-step protocol — ask for a presigned
+target, send the bytes straight to it, then commit — so the bytes never proxy
+through the API server, and the same shape works for S3, local disk, or any
+other adapter.
+
+| Method | Endpoint | SDK | Description |
+|:-------|:---------|:----|:------------|
+| POST | `/storage/upload/presigned` | `storage.getPresignedUrl` | Step 1 — mint an upload target for a new `sys_file` row |
+| POST | `/storage/upload/complete` | `storage.upload` | Step 3 — commit the uploaded bytes |
+| POST | `/storage/upload/chunked` | `storage.initChunkedUpload` | Open a chunked / resumable session |
+| PUT | `/storage/upload/chunked/:uploadId/chunk/:chunkIndex` | `storage.uploadPart` | Send one chunk |
+| POST | `/storage/upload/chunked/:uploadId/complete` | `storage.completeChunkedUpload` | Assemble the parts |
+| GET | `/storage/upload/chunked/:uploadId/progress` | `storage.resumeUpload` | Read session progress (first step of a resume) |
+| GET | `/storage/files/:fileId/url` | `storage.getDownloadUrl` | Resolve a short-lived signed download URL |
+| GET | `/storage/files/:fileId` | — | Stable browser URL; 302s to the same signed URL (what file fields carry) |
+
+`storage.upload(file)` runs steps 1–3 for you, including the direct-to-storage
+`PUT` in step 2.
+
+<Callout type="warn">
+**This table used to list two routes that never worked (#4087).** `POST
+/storage/upload` and `GET /storage/file/:id` were a dispatcher-side bridge to
+the `file-storage` service, written against a service shape that does not
+exist: it called `upload(key, data, options?)` as `upload(file, { request })` —
+a `TypeError` against every implementation in the repo — and read the `Buffer`
+that `download(key)` resolves as if it were a `{ url | stream | mimeType }`
+descriptor. They stayed mounted and reachable — nothing shadowed them — so
+anyone who followed this table got a 500; everyone who followed the SDK used
+the protocol above and never touched them.
+
+Both routes are retired. `/storage` is service-storage's surface — install that
+package to get it. Discovery advertises the route only when the occupant of the
+`file-storage` slot actually mounts HTTP handlers, so an in-memory dev
+implementation now reports `handlerReady: false` and no `routes.storage`
+instead of pointing at a path with nothing behind it.
+</Callout>
 
 ---
 

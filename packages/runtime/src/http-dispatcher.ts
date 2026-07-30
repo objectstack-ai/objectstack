@@ -17,7 +17,6 @@ import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
 import { createNotificationsDomain, handleNotificationRequest } from './domains/notifications.js';
 import { createSecurityDomain, handleSecurityRequest } from './domains/security.js';
 import { createKeysDomains, handleKeysRequest } from './domains/keys.js';
-import { createStorageDomain, handleStorageRequest } from './domains/storage.js';
 import { createUiDomain, handleUiRequest } from './domains/ui.js';
 import { createShareLinksDomain, handleShareLinksRequest } from './domains/share-links.js';
 import { createPackagesDomain, handlePackagesRequest } from './domains/packages.js';
@@ -345,7 +344,10 @@ export class HttpDispatcher {
         this.domainRegistry.register(createNotificationsDomain(this.domainDeps));
         this.domainRegistry.register(createSecurityDomain(this.domainDeps));
         for (const route of createKeysDomains(this.domainDeps)) this.domainRegistry.register(route);
-        this.domainRegistry.register(createStorageDomain(this.domainDeps));
+        // No `/storage` domain (#4087): the dispatcher's two-route bridge was
+        // retired. `/api/v1/storage` is service-storage's surface — it mounts
+        // the presigned / chunked / signed-URL protocol autonomously on the
+        // host http-server. See route-ledger.ts for the disposition.
         this.domainRegistry.register(createUiDomain(this.domainDeps));
         this.domainRegistry.register(createShareLinksDomain(this.domainDeps));
         this.domainRegistry.register(createPackagesDomain(this.domainDeps));
@@ -873,6 +875,14 @@ export class HttpDispatcher {
         // Same predicate ⇒ same answer. #4000 did this for `analytics` alone;
         // #4058 extended it to the rest of the dispatcher-owned domains.
         //
+        // [#4087] `file-storage` is the one slot here whose surface is NOT a
+        // dispatcher domain any more — the `/storage` bridge was retired and
+        // service-storage mounts `/api/v1/storage` itself. The predicate still
+        // holds, for the same reason and one step removed: `handlerReady` is
+        // exactly "does an HTTP handler serve this slot", so an occupant that
+        // mounts nothing (plugin-dev's in-memory implementation) must not have
+        // `${prefix}/storage` advertised on its behalf.
+        //
         // A `degraded` implementation keeps its route: `handlerReady` defaults
         // to `true` for it and its domain keeps serving it (that is the whole
         // point of the `stub` / `degraded` split — see plugin-dev's markers).
@@ -911,6 +921,8 @@ export class HttpDispatcher {
                 packages:      `${prefix}/packages`,
                 auth:          hasAuth ? `${prefix}/auth` : undefined,
                 ui:            hasUi ? `${prefix}/ui` : undefined,
+                // Not a dispatcher domain since #4087 — this advertises
+                // service-storage's own mount. Gate unchanged (see above).
                 storage:       hasFiles ? `${prefix}/storage` : undefined,
                 analytics:     hasAnalytics ? `${prefix}/analytics` : undefined,
                 automation:    hasAutomation ? `${prefix}/automation` : undefined,
@@ -1198,11 +1210,6 @@ export class HttpDispatcher {
         } catch {
             return undefined;
         }
-    }
-
-    /** Thin delegate — body extracted to `./domains/storage.ts` (D11③ PR-3). */
-    async handleStorage(path: string, method: string, file: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        return handleStorageRequest(this.domainDeps, path, method, file, context);
     }
 
     /** Thin delegate — body extracted to `./domains/ui.ts` (D11③ PR-3). */

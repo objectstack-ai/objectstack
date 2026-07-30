@@ -275,7 +275,11 @@ describe('DevPlugin', () => {
 
     // No HTTP/WS surface is mounted for these, so no handler can be ready —
     // independent of the implementation being real (ADR-0076 D12, realtime).
-    for (const name of ['cache', 'queue', 'job', 'realtime']) {
+    // `file-storage` joined them in #4087: the dispatcher's `/storage` bridge
+    // was the only thing that ever routed HTTP to this slot, and it was
+    // retired — `@objectstack/service-storage` owns that surface and mounts
+    // its own routes against its own adapters, never this implementation.
+    for (const name of ['cache', 'queue', 'job', 'realtime', 'file-storage']) {
       expect(readServiceSelfInfo(registeredServices.get(name))?.handlerReady, `${name} handlerReady`).toBe(false);
     }
 

@@ -344,3 +344,68 @@ describe('firstConstraintViolation (framework#3956)', () => {
     expect(firstConstraintViolation({ p: 42 }, metaMap)).toBeNull();
   });
 });
+
+/**
+ * #3957 — the importer's row report is where a user meets these messages, and
+ * it used to be hardcoded English naming the API column
+ * (`penalty_amount: "abc" is not a number`). The engine's validation errors in
+ * the SAME report are localized, so these must be too, from the same catalog.
+ */
+describe('coerceRow — cell-coercion messages are localized (#3957)', () => {
+  const meta = new Map<string, ExportFieldMeta>([
+    ['penalty_amount', { name: 'penalty_amount', type: 'currency', label: '处罚金额' }],
+    ['is_active', { name: 'is_active', type: 'boolean', label: '启用' }],
+    ['due_at', { name: 'due_at', type: 'datetime', label: '截止时间' }],
+    ['stage', { name: 'stage', type: 'select', label: '阶段', options: [{ label: '草稿', value: 'draft' }] }],
+    ['owner', { name: 'owner', type: 'lookup', label: '负责人', reference: 'sys_user' }],
+  ]);
+
+  const firstError = async (row: Record<string, unknown>, locale?: string) => {
+    const { errors } = await coerceRow(row, meta, {
+      locale,
+      resolveRef: async () => undefined, // nothing ever matches
+    });
+    expect(errors).toHaveLength(1);
+    return errors[0];
+  };
+
+  it('names the column by its label and keeps the machine code', async () => {
+    const err = await firstError({ penalty_amount: 'abc' }, 'zh-CN');
+    expect(err.message).toBe('处罚金额:“abc”不是有效的数字');
+    expect(err).toMatchObject({ field: 'penalty_amount', code: 'invalid_number' });
+  });
+
+  it('localizes every coercion failure kind', async () => {
+    expect((await firstError({ is_active: 'maybe' }, 'zh-CN')).message)
+      .toBe('启用:“maybe”不是有效的布尔值');
+    expect((await firstError({ due_at: 'not-a-date' }, 'zh-CN')).message)
+      .toBe('截止时间:“not-a-date”不是有效的日期时间');
+    expect((await firstError({ stage: '归档' }, 'zh-CN')).message)
+      .toBe('阶段:“归档”不是可选值之一');
+    expect((await firstError({ owner: '查无此人' }, 'zh-CN')).message)
+      .toBe('负责人:未找到与“查无此人”匹配的记录');
+  });
+
+  it('renders English against the label when no locale is supplied', async () => {
+    const err = await firstError({ penalty_amount: 'abc' });
+    expect(err.message).toBe('处罚金额: "abc" is not a number');
+  });
+
+  /**
+   * The reference message no longer leaks the target object's API name
+   * (`no sys_user matches "…"`) — naming internal identifiers is the defect this
+   * issue is about, and the column plus the offending value are what an importer
+   * can act on.
+   */
+  it('does not leak the referenced object’s API name', async () => {
+    const err = await firstError({ owner: '查无此人' }, 'zh-CN');
+    expect(err.message).not.toContain('sys_user');
+    expect(err.message).toContain('查无此人');
+  });
+
+  it('falls back to the column name when no label is declared', async () => {
+    const bare = new Map<string, ExportFieldMeta>([['qty', { name: 'qty', type: 'number' }]]);
+    const { errors } = await coerceRow({ qty: 'abc' }, bare, { locale: 'zh-CN' });
+    expect(errors[0].message).toBe('qty:“abc”不是有效的数字');
+  });
+});

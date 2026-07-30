@@ -4,7 +4,7 @@
  * #3867 — the dispatcher-plugin error exit.
  *
  * `errorResponseBase` is the single error exit for EVERY route this plugin
- * mounts (`/analytics`, `/packages`, `/i18n`, `/storage`, `/automation`,
+ * mounts (`/analytics`, `/packages`, `/i18n`, `/automation`,
  * `/auth`, `/notifications`, `/mcp`, …): each handler catches and calls it
  * rather than re-throwing. Two defects lived there, and neither is visible
  * until a real error actually reaches it:

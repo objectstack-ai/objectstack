@@ -1480,10 +1480,13 @@ export class ObjectStackProtocolImplementation implements
         // registers the service (service-storage's own `/api/v1/storage`
         // routes, plugin-search, plugin-graphql, …) rather than to a dispatcher
         // domain, so `handlerReady` there says nothing about whether THAT route
-        // is mounted, and suppressing it would be a guess. `file-storage` is
-        // listed because the dispatcher does own a `/storage` bridge for the
-        // no-plugin case; when service-storage is installed it registers a real
-        // (unmarked) service, so the entry never fires.
+        // is mounted, and suppressing it would be a guess. `file-storage` stays
+        // listed as the one entry with no dispatcher domain behind it — #4087
+        // retired the `/storage` bridge — because for that slot `handlerReady`
+        // is not a proxy for anything, it is the fact itself: an occupant that
+        // mounts no HTTP surface must not have `/api/v1/storage` advertised on
+        // its behalf. When service-storage is installed it registers a real
+        // (unmarked) service and mounts the routes, so the entry never fires.
         const DISPATCHER_GATED_SERVICES = new Set([
             'analytics', 'automation', 'notification', 'ai', 'i18n', 'file-storage',
         ]);

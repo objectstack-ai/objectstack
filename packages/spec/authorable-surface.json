@@ -1037,6 +1037,7 @@
     "api/FieldError:code",
     "api/FieldError:constraint",
     "api/FieldError:field",
+    "api/FieldError:label",
     "api/FieldError:message",
     "api/FieldError:value",
     "api/FieldMappingEntry:defaultValue",
