@@ -18,7 +18,11 @@
 
 import type { Filter } from 'mongodb';
 import { nextUtcCalendarDay } from '@objectstack/core';
-import { coerceTemporalValue, type TemporalFieldKindResolver } from './mongodb-temporal.js';
+import {
+  coerceTemporalValue,
+  type TemporalFieldKind,
+  type TemporalFieldKindResolver,
+} from './mongodb-temporal.js';
 
 /**
  * Translate an ObjectStack `where` clause into a MongoDB filter document.
@@ -132,7 +136,11 @@ function translateCondition(
  */
 function translateFieldOperators(
   ops: Record<string, unknown>,
-  kind?: 'datetime' | 'date',
+  // The shared type, not a hand-copy of its members. This signature spelled
+  // the union out literally, so widening the canon to include `time`
+  // (ADR-0053 D-C1) left the two out of step and the call site stopped
+  // compiling. One definition means the next temporal type is added once.
+  kind?: TemporalFieldKind,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const store = (v: unknown) => coerceTemporalValue(v, kind);
