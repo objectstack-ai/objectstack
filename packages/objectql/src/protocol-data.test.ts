@@ -746,6 +746,11 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                 const bare = spelling.replace(/^\$/, '').toLowerCase();
                 if (bare === 'top' || bare === 'skip') return 1;
                 if (bare === 'filter' || bare === 'filters') return { status: 'open' };
+                // [#4226] `expand` needs a RELATIONSHIP, not merely a real
+                // field: expanding `title` is now a legitimate 400 for the same
+                // reason `filter: 'title'` is one — the parameter is accepted,
+                // that value for it is not. `owner_id` is this object's lookup.
+                if (bare === 'expand' || bare === 'populate') return 'owner_id';
                 return 'title';
             };
             for (const spelling of suggested) {
