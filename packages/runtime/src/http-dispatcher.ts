@@ -16,7 +16,6 @@ import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
 import { createNotificationsDomain, handleNotificationRequest } from './domains/notifications.js';
 import { createSecurityDomain, handleSecurityRequest } from './domains/security.js';
 import { createKeysDomains, handleKeysRequest } from './domains/keys.js';
-import { createStorageDomain, handleStorageRequest } from './domains/storage.js';
 import { createUiDomain, handleUiRequest } from './domains/ui.js';
 import { createShareLinksDomain, handleShareLinksRequest } from './domains/share-links.js';
 import { createPackagesDomain, handlePackagesRequest } from './domains/packages.js';
@@ -344,7 +343,10 @@ export class HttpDispatcher {
         this.domainRegistry.register(createNotificationsDomain(this.domainDeps));
         this.domainRegistry.register(createSecurityDomain(this.domainDeps));
         for (const route of createKeysDomains(this.domainDeps)) this.domainRegistry.register(route);
-        this.domainRegistry.register(createStorageDomain(this.domainDeps));
+        // No `/storage` domain (#4087): the dispatcher's two-route bridge was
+        // retired. `/api/v1/storage` is service-storage's surface — it mounts
+        // the presigned / chunked / signed-URL protocol autonomously on the
+        // host http-server. See route-ledger.ts for the disposition.
         this.domainRegistry.register(createUiDomain(this.domainDeps));
         this.domainRegistry.register(createShareLinksDomain(this.domainDeps));
         this.domainRegistry.register(createPackagesDomain(this.domainDeps));
@@ -864,6 +866,20 @@ export class HttpDispatcher {
         const hasAuth         = !!authSvc;
         const hasSearch       = !!searchSvc;
         const hasFiles        = !!filesSvc;
+        // [#4087] `/api/v1/storage` is no longer a dispatcher route — the
+        // two-route bridge was retired and the surface belongs entirely to
+        // service-storage, which mounts it on the host http-server. So the
+        // advert must follow whether the slot's occupant HAS an HTTP surface,
+        // not whether the slot is filled: an in-memory dev implementation
+        // (plugin-dev, `handlerReady: false` since this change) fills the slot
+        // and mounts nothing, and advertising `${prefix}/storage` for it is the
+        // `declared ≠ enforced` failure Prime Directive #10 forbids. Same
+        // `handlerReady` predicate #4000 gave analytics.
+        //
+        // `hasFiles` stays presence-only, for the services map alone — a
+        // registered dev implementation is reported there with its own D12
+        // self-description, which says strictly more than `unavailable` would.
+        const filesServeable  = hasFiles && readServiceSelfInfo(filesSvc)?.handlerReady !== false;
         // [#4000] Mirrors the analytics domain's OWN guard
         // (`isAnalyticsServiceServeable`, domains/analytics.ts): a slot filled
         // by a self-declared stub takes the same `handled:false` → 404 an empty
@@ -899,7 +915,7 @@ export class HttpDispatcher {
                 packages:      `${prefix}/packages`,
                 auth:          hasAuth ? `${prefix}/auth` : undefined,
                 ui:            hasUi ? `${prefix}/ui` : undefined,
-                storage:       hasFiles ? `${prefix}/storage` : undefined,
+                storage:       filesServeable ? `${prefix}/storage` : undefined,
                 analytics:     hasAnalytics ? `${prefix}/analytics` : undefined,
                 automation:    hasAutomation ? `${prefix}/automation` : undefined,
                 workflow:      hasWorkflow ? `${prefix}/workflow` : undefined,
@@ -1183,11 +1199,6 @@ export class HttpDispatcher {
         } catch {
             return undefined;
         }
-    }
-
-    /** Thin delegate — body extracted to `./domains/storage.ts` (D11③ PR-3). */
-    async handleStorage(path: string, method: string, file: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        return handleStorageRequest(this.domainDeps, path, method, file, context);
     }
 
     /** Thin delegate — body extracted to `./domains/ui.ts` (D11③ PR-3). */

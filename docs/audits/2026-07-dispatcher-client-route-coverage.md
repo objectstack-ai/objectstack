@@ -111,6 +111,37 @@ had zero call sites in `objectstack` and `objectui`.
   dispatcher's two plain routes remain a low-level redirect/stream compat
   surface, deliberately outside the SDK.
 
+### Amendment (#4087) — the storage half rested on its own bad premise
+
+The #3584 pass corrected one premise in this table and kept another it never
+checked: that the dispatcher's two storage routes were *a working low-level
+compat surface*. End-to-end verification found they were not, and never had
+been. `POST /storage/upload` called `upload(key, data, options?)` as
+`upload(file, { request })` — the file object landing in the `key` slot and
+`{ request }` in `data` — which is a `TypeError` against every implementation
+in the repo (`s3-storage-adapter`, `local-storage-adapter`,
+`swappable-storage-service`, plugin-dev's in-memory one). `GET
+/storage/file/:id` had the mirror-image defect one layer quieter: it branched
+on `result.url` / `result.redirect` / `result.stream` / `result.mimeType`
+while the contract's `download(key)` resolves a `Buffer`, so every branch fell
+through to "serialize the Buffer as JSON".
+
+Neither could serve a request. What kept that hidden was not shadowing —
+service-storage mounts `/storage/upload/presigned`, not `/storage/upload`, so
+both bridge routes stayed mounted and reachable in a full stack — but the
+absence of any caller: no SDK method, no console call — only the
+`content/docs/api/plugin-endpoints` table advertising them to readers. The
+tests that covered them mocked the shape the handler wanted rather than the
+shape `IStorageService` declares, so the suite stayed green on a pair of routes
+that answered 500.
+
+**Both routes are retired** (#4087) — the `/storage` domain, its
+dispatcher-plugin mounts, the hono adapter's `/storage/*` wildcard (which had
+been claiming the whole subtree for them) and the two ledger rows are gone.
+Read the two storage rows in §4 as retired rather than as the `server-only`
+disposition #3584 gave them: the surface belongs entirely to `service-storage`,
+enumerated in `packages/services/service-storage/src/storage-route-ledger.ts`.
+
 ## 5. Client-internal findings
 
 - **`trigger` vs `execute`** hit different URLs for the same intent

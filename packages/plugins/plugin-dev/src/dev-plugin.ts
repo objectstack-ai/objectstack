@@ -295,14 +295,18 @@ const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
  *
  * `handlerReady` answers a different question: does an HTTP handler genuinely
  * serve this? It stays `false` for every `stub`, and also for `degraded`
- * services with no HTTP surface at all (`realtime` — the D12 precedent).
+ * services with no HTTP surface at all (`realtime` — the D12 precedent, joined
+ * by `file-storage` in #4087: the dispatcher's `/storage` bridge — the one
+ * thing that ever routed HTTP to this slot — was retired, and the surface it
+ * claimed belongs to `@objectstack/service-storage`, which mounts its own
+ * routes and does not use this implementation).
  *
  * Entries are only needed for plugin-dev's OWN fakes. The wrapped kernel
  * fallbacks (`cache` / `queue` / `job` / `i18n`) already carry their own
  * `__serviceInfo`, and {@link applySelfInfo} never overwrites one.
  */
 const DEV_STUB_SELF_INFO: Record<string, { status: 'stub' | 'degraded'; handlerReady?: boolean; message: string }> = {
-  'file-storage': { status: 'degraded', message: 'Dev in-memory file storage — really stores and returns bytes, but nothing survives a restart. Register a storage plugin for durable files.' },
+  'file-storage': { status: 'degraded', handlerReady: false, message: 'Dev in-memory file storage — really stores and returns bytes to in-process callers, but nothing survives a restart and no HTTP surface is mounted. Register @objectstack/service-storage for durable files and the upload/download protocol.' },
   'search':       { status: 'degraded', message: 'Dev in-memory index — real substring matching over indexed documents, no ranking, analyzers, or persistence. Register a search plugin for the real engine.' },
   'metadata':     { status: 'degraded', message: 'Dev in-memory metadata registry — real reads and writes, no persistence. Register MetadataPlugin for a persisted registry.' },
   'workflow':     { status: 'degraded', message: 'Dev in-memory workflow state — transitions are recorded and read back, but NOTHING is validated: every transition is accepted and availableTransitions is always empty.' },
