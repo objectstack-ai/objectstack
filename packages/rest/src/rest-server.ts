@@ -4733,7 +4733,7 @@ export class RestServer {
                     if (typeof q.filter === 'string' && q.filter.length > 0) {
                         try { filter = JSON.parse(q.filter); }
                         catch {
-                            res.status(400).json({ code: 'INVALID_REQUEST', error: 'filter must be JSON' });
+                            res.status(400).json({ code: 'INVALID_FILTER', error: 'filter must be JSON' });
                             return;
                         }
                     } else if (q.filter && typeof q.filter === 'object') {

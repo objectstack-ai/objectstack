@@ -35,7 +35,7 @@
 
 import type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatcher.js';
 import type { CoreServiceName } from '@objectstack/spec/system';
-import type { CoreServiceContract } from '@objectstack/spec/contracts';
+import type { CoreServiceContract, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 
 /**
  * The normalized request slice a domain handler receives. `path` is the
@@ -86,18 +86,24 @@ export interface DomainHandlerDeps {
      * its call sites already passed a `CoreServiceName`. This one is mixed, and
      * the overloads split it exactly where the evidence does:
      *
-     *  - A **`CoreServiceName`** — however it is written. 17 call sites address a
+     *  - An **evidenced slot** — however it is written. 17 call sites address a
      *    core slot with a bare literal (`'metadata'` ×10, `'automation'` ×3,
      *    `'auth'` ×3, `'ai'`) rather than `CoreServiceName.enum.*`, so the same
-     *    slot was being addressed two ways; both resolve to the contract now.
-     *  - **Anything else** — `protocol`, `objectql`, `mcp`, `kernel-resolver`,
-     *    `security`, `scope-manager`. These are real services with no
-     *    `CoreServiceName` entry and no written contract, so they keep today's
-     *    `any` rather than being given a shape here that nothing verifies.
-     *    Writing their contracts is the next batch; until then the `any` marks
-     *    where the ledger ends.
+     *    slot was being addressed two ways; both resolve to the contract.
+     *  - **Anything else** — `protocol`, `mcp`, `kernel-resolver`,
+     *    `scope-manager`. Real services with no written contract, so they keep
+     *    today's `any` rather than being given a shape here that nothing
+     *    verifies. That `any` is where the ledger honestly ends.
+     *
+     * [batch 3] The key is `keyof ServiceSlotContracts`, not `CoreServiceName`.
+     * `security`, `shareLinks` and `objectql` each had a contract, a provider
+     * registering them, and call sites already within the contract — the only
+     * missing link was that the slot name was not in the enum, so nothing could
+     * connect them. Widening the *enum* to fix that would have paid for a type
+     * answer with a change to the boot/criticality vocabulary; the ledger
+     * extends past the enum instead. See {@link ServiceSlotContracts}.
      */
-    resolveService<K extends CoreServiceName>(name: K, environmentId?: string): Promise<CoreServiceContract<K> | undefined>;
+    resolveService<K extends keyof ServiceSlotContracts>(name: K, environmentId?: string): Promise<ServiceSlotContract<K> | undefined>;
     resolveService(name: string, environmentId?: string): any;
     /**
      * Unscoped service lookup on the current kernel, typed by the slot.

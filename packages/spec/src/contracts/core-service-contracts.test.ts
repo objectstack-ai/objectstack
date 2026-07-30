@@ -8,10 +8,15 @@
 
 import { describe, it, expect } from 'vitest';
 import { CoreServiceName } from '../system/core-services.zod';
-import type { CoreServiceContracts, CoreServiceContract } from './core-service-contracts';
+import type {
+    CoreServiceContracts, CoreServiceContract, ServiceSlotContracts, ServiceSlotContract,
+} from './core-service-contracts';
 import type { IAutomationService } from './automation-service';
 import type { INotificationService } from './notification-service';
 import type { II18nService } from './i18n-service';
+import type { IDataEngine } from './data-engine';
+import type { ISecurityService } from './security-service';
+import type { IShareLinkService } from './share-link-service';
 
 /** Compile-time assertion helper: fails to typecheck unless `T` is exactly `true`. */
 type Expect<T extends true> = T;
@@ -56,6 +61,51 @@ describe('CoreServiceName → contract map (#4127)', () => {
         // `unknown` forces a deliberate cast at the call site. `any` would let
         // an undeclared call through silently — the failure mode #4087 shipped.
         type _Ui = Expect<Equals<CoreServiceContract<'ui'>, unknown>>;
+        expect(true).toBe(true);
+    });
+});
+
+describe('slot → contract ledger beyond the enum (#4127 batch 3)', () => {
+    it('keeps every core binding', () => {
+        // The extension must not shadow or drop a core entry — `data` staying
+        // `IDataEngine` is what makes the `objectql` alias below meaningful.
+        type _Data = Expect<Equals<ServiceSlotContract<'data'>, IDataEngine>>;
+        type _Automation = Expect<Equals<ServiceSlotContract<'automation'>, IAutomationService>>;
+        expect(true).toBe(true);
+    });
+
+    it('maps the evidenced non-core slots', () => {
+        type _Security = Expect<Equals<ServiceSlotContract<'security'>, ISecurityService>>;
+        type _ShareLinks = Expect<Equals<ServiceSlotContract<'shareLinks'>, IShareLinkService>>;
+        expect(true).toBe(true);
+    });
+
+    it('resolves objectql to the same contract as data, because it is the same instance', () => {
+        // `packages/objectql`'s plugin registers `this.ql` under both names two
+        // lines apart. Anything else here would claim they are two services.
+        type _Alias = Expect<Equals<ServiceSlotContract<'objectql'>, ServiceSlotContract<'data'>>>;
+        expect(true).toBe(true);
+    });
+
+    it('holds exactly the non-core slots whose contract is written', () => {
+        const extra: Array<Exclude<keyof ServiceSlotContracts, keyof CoreServiceContracts>> = [
+            'security', 'shareLinks', 'objectql',
+        ];
+        const slots = new Set<string>(CoreServiceName.options);
+        for (const key of extra) {
+            // The point of the split: these are deliberately NOT enum members.
+            // If one is ever promoted to a real core service, its entry moves
+            // into `CoreServiceContracts` and this assertion is what catches it.
+            expect(slots.has(key), `'${key}' is a CoreServiceName — move its entry into CoreServiceContracts`).toBe(false);
+        }
+        expect(extra).toHaveLength(3);
+    });
+
+    it('still resolves a slot with no written contract to unknown', () => {
+        // `protocol` (22 call sites) and `mcp` have no contract, so they stay
+        // out of the ledger and keep reading as open gaps.
+        type _Protocol = Expect<Equals<ServiceSlotContract<'protocol'>, unknown>>;
+        type _Mcp = Expect<Equals<ServiceSlotContract<'mcp'>, unknown>>;
         expect(true).toBe(true);
     });
 });

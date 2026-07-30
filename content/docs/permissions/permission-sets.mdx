@@ -204,6 +204,11 @@ POST /api/v1/security/suggested-bindings/:id/confirm      # create the everyone 
 POST /api/v1/security/suggested-bindings/:id/dismiss      # decline the prompt
 ```
 
+`status` accepts `pending`, `confirmed` or `dismissed`, and may be omitted to
+list every suggestion. Any other value is rejected with a `400` naming the
+accepted set — it previously reached the query as a filter nothing matched, so
+a mistyped status returned an empty list that read as "no suggestions".
+
 All three require a tenant-level administrator (the anchors are tenant-level
 only — D12). Confirm writes the `sys_position_permission_set` row **as the
 caller**, so the audience-anchor gate re-checks the forbidden-bits predicate

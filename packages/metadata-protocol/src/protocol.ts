@@ -18,7 +18,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
-import { parseFilterAST, isFilterAST, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
+import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
@@ -298,6 +298,61 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
 function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     return getMetadataTypeSchema(singular) ?? null;
+}
+
+/**
+ * A 400 for a `$filter` ARRAY that looks like a filter AST but is not one.
+ *
+ * The message has to be *actionable from the request*, which is the whole point
+ * of rejecting here rather than letting a driver fail later: the caller sent a
+ * query parameter, so the error names the offending element and the vocabulary
+ * it was checked against — not a driver-internal builder state.
+ *
+ * Diagnoses the three shapes `isFilterAST` refuses, in the order they occur in
+ * practice. #4121. Sibling of {@link unusableFilterError}, which covers the
+ * non-array ways a filter fails to become one (#4181); both emit
+ * `INVALID_FILTER` so the condition has one wire code however it was reached.
+ */
+function malformedFilterArrayError(filter: unknown[]): Error {
+    const detail = describeMalformedFilter(filter);
+    const err: any = new Error(
+        `Malformed $filter: ${detail} A filter array is a comparison ` +
+        `[field, operator, value], a logical node ["and"|"or", ...conditions], or a ` +
+        `list of those. Recognised operators: ${[...VALID_AST_OPERATORS].sort().join(', ')}.`,
+    );
+    err.status = 400;
+    err.code = 'INVALID_FILTER';
+    return err;
+}
+
+/** The specific reason a filter array failed `isFilterAST`, for the message above. */
+function describeMalformedFilter(filter: unknown[]): string {
+    const [first, second] = filter;
+    const isKeyword = typeof first === 'string' && ['and', 'or'].includes(first.toLowerCase());
+
+    // `["and"]` / `["or"]` with nothing to join. The one shape that still
+    // returned every row silently after #3948: the driver sets its join mode,
+    // matches no element, and emits no predicate.
+    if (isKeyword && filter.length < 2) {
+        return `logical node ["${String(first)}"] has no conditions to join.`;
+    }
+    // A bare triple whose operator is outside the AST vocabulary — the original
+    // `before` / `after` / `'not in'` case.
+    if (typeof first === 'string' && !isKeyword && typeof second === 'string'
+        && !VALID_AST_OPERATORS.has(second.toLowerCase())) {
+        return `unrecognised operator "${second}" in [${JSON.stringify(first)}, ...].`;
+    }
+    // An element that is neither a join keyword nor a nested condition.
+    const badIndex = filter.findIndex(
+        (item) => !Array.isArray(item)
+            && !(typeof item === 'string' && ['and', 'or'].includes(item.toLowerCase())),
+    );
+    if (badIndex >= 0 && filter.some((item) => Array.isArray(item))) {
+        const bad = filter[badIndex];
+        return `element ${badIndex} is ${bad === null ? 'null' : typeof bad}, ` +
+            `expected a condition array or a logical keyword.`;
+    }
+    return `${JSON.stringify(filter)} is not a recognised filter shape.`;
 }
 
 /**
@@ -801,21 +856,28 @@ const ODATA_SPELLING: Readonly<Record<string, string>> = {
 };
 
 /**
- * [#4181] A filter the normalizer cannot turn into a usable `FilterCondition`.
+ * [#4181] A filter the normalizer cannot turn into a usable `FilterCondition`
+ * by any route other than the array shapes {@link malformedFilterArrayError}
+ * already diagnoses: unparseable JSON, or JSON that parses to something no
+ * driver can read (a number, a bare string, `null`).
  *
- * Mirrors the envelope the `GET /data/:object/export` route has always emitted
- * for the same input (`400 INVALID_REQUEST`), so the two routes of one endpoint
- * family stop disagreeing about what a malformed filter means. `INVALID_REQUEST`
- * is already registered to `@objectstack/metadata-protocol` in the ADR-0112
- * error-code ledger — no new code.
+ * Carries `INVALID_FILTER` — the standard-catalog code (`errors.zod.ts`,
+ * "Invalid filter expression") that #4121 introduced on this same code path for
+ * the array case. One condition, one wire code, however the caller reached it:
+ * a `$filter` array with a bad operator and a `?filter=` that is not JSON are
+ * the same answer to the same question ("this filter cannot run").
+ *
+ * The message states the filter was NOT APPLIED, because that is the part a
+ * caller cannot infer: the pre-#4181 behavior was an ordinary-looking 200 over
+ * the unfiltered set.
  */
-function malformedFilterError(param: string, detail: string): Error {
+function unusableFilterError(param: string, detail: string): Error {
     const err: any = new Error(
         `Query parameter '${param}' ${detail}. It was not applied, and an unapplied `
         + 'filter would have returned the unfiltered result set.',
     );
     err.status = 400;
-    err.code = 'INVALID_REQUEST';
+    err.code = 'INVALID_FILTER';
     err.param = param;
     return err;
 }
@@ -3167,19 +3229,37 @@ export class ObjectStackProtocolImplementation implements
                     try {
                         parsedFilter = JSON.parse(parsedFilter);
                     } catch {
-                        throw malformedFilterError(filterKey, 'must be valid JSON');
+                        throw unusableFilterError(filterKey, 'must be valid JSON');
                     }
                 }
                 // Filter AST array → FilterCondition object
                 if (isFilterAST(parsedFilter)) {
                     parsedFilter = parseFilterAST(parsedFilter);
+                } else if (Array.isArray(parsedFilter) && parsedFilter.length > 0) {
+                    // [#4121] `isFilterAST` was being read as a *conversion* gate,
+                    // so an array it refused was assigned to `where` unconverted —
+                    // an opaque value the driver then had to make sense of. Every
+                    // driver now fails on it, so this is not a narrowing; it moves
+                    // the failure to where the malformed filter actually arrived,
+                    // with the request's own vocabulary in the message instead of a
+                    // driver-internal one.
+                    //
+                    // It also closes what the driver-side fix could not: a lone
+                    // `['and']` / `['or']` sets the join mode, matches no element,
+                    // and emits NO predicate — the last shape that still returned
+                    // every row silently after #3948. An empty `[]` is left alone:
+                    // it means "no filter", and every path already treats it that
+                    // way — so it falls through to the shape check below, which
+                    // passes it (an array IS an object).
+                    throw malformedFilterArrayError(parsedFilter);
                 }
-                // Parsed-but-unusable is the same failure one step later:
+                // [#4181] Parsed-but-unusable is the same failure one step later:
                 // `?filter=5` / `?filter="open"` / `?filter=null` all yield a
-                // non-object `where` that no driver reads. Rejecting here is what
-                // lets the #4164 merge below trust `where` to be an object.
+                // non-object `where` that no driver reads. #4121 above catches the
+                // array shapes; this catches the scalar ones, and together they are
+                // what lets the #4164 merge below trust `where` to be an object.
                 if (parsedFilter === null || typeof parsedFilter !== 'object') {
-                    throw malformedFilterError(
+                    throw unusableFilterError(
                         filterKey,
                         `must be a filter object or condition array, received ${parsedFilter === null ? 'null' : typeof parsedFilter}`,
                     );

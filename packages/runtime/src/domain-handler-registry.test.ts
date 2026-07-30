@@ -227,12 +227,49 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
             dismissAudienceBindingSuggestion: vi.fn(),
         };
         // Direct delegate call for the same reason as the notifications case.
+        //
+        // [#4127 batch 3] This asserted `status: 'open'` — not one of the three
+        // values `AudienceBindingSuggestionFilter` declares. The test pinned the
+        // unvalidated pass-through as EXPECTED, so it proved the delegate
+        // carried a filter through and nothing about that filter being a status.
+        // Same shape as the `auth.handler` mock in batch 1: coverage in
+        // appearance, a wrong contract in substance. Now a real status.
         const context: any = { executionContext: { userId: 'admin-1' } };
-        const result = await makeDispatcher({ security }).handleSecurity('/suggested-bindings', 'GET', undefined, { status: 'open' }, context);
+        const result = await makeDispatcher({ security }).handleSecurity('/suggested-bindings', 'GET', undefined, { status: 'pending' }, context);
         expect(result.response?.status).toBe(200);
         expect(security.listAudienceBindingSuggestions).toHaveBeenCalledWith(
             expect.objectContaining({ userId: 'admin-1' }),
-            expect.objectContaining({ status: 'open' }),
+            expect.objectContaining({ status: 'pending' }),
+        );
+    });
+
+    it('/security rejects a status filter that is not a declared status, without calling the service', async () => {
+        const security = {
+            listAudienceBindingSuggestions: vi.fn().mockResolvedValue([{ id: 's1' }]),
+            confirmAudienceBindingSuggestion: vi.fn(),
+            dismissAudienceBindingSuggestion: vi.fn(),
+        };
+        const context: any = { executionContext: { userId: 'admin-1' } };
+        const result = await makeDispatcher({ security }).handleSecurity('/suggested-bindings', 'GET', undefined, { status: 'open' }, context);
+        // Previously this reached the service and became `where.status = 'open'`,
+        // which matched no row — an empty list that reads as "no suggestions"
+        // rather than "that is not a status".
+        expect(result.response?.status).toBe(400);
+        expect(security.listAudienceBindingSuggestions).not.toHaveBeenCalled();
+    });
+
+    it('/security omits the status filter entirely when the query has none', async () => {
+        const security = {
+            listAudienceBindingSuggestions: vi.fn().mockResolvedValue([]),
+            confirmAudienceBindingSuggestion: vi.fn(),
+            dismissAudienceBindingSuggestion: vi.fn(),
+        };
+        const context: any = { executionContext: { userId: 'admin-1' } };
+        const result = await makeDispatcher({ security }).handleSecurity('/suggested-bindings', 'GET', undefined, {}, context);
+        expect(result.response?.status).toBe(200);
+        expect(security.listAudienceBindingSuggestions).toHaveBeenCalledWith(
+            expect.objectContaining({ userId: 'admin-1' }),
+            expect.objectContaining({ status: undefined }),
         );
     });
 

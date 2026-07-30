@@ -19,7 +19,7 @@ Query records with filtering, sorting, selection, and pagination.
 |:----------|:---------|:------------|
 | `object` | path | Object name |
 | `select` | query | Comma-separated field names |
-| `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. Malformed JSON is rejected with `400 INVALID_REQUEST` — never ignored. |
+| `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. Malformed JSON is rejected with `400 INVALID_FILTER` — never ignored. |
 | `sort` | query | Sort expression (e.g. `name asc` or `-created_at`) |
 | `top` | query | Max records to return. No default — omitting it returns all matching records. |
 | `skip` | query | Offset |
@@ -64,7 +64,7 @@ filters it through the explicit form (`?filter={"count":3}`).
 
 `filter`, `filters`, `$filter` and `where` are four spellings of one slot. A
 value the server cannot turn into a filter is rejected with
-`400 INVALID_REQUEST` rather than dropped, because a dropped filter would
+`400 INVALID_FILTER` rather than dropped, because a dropped filter would
 return the **unfiltered** result set — a response indistinguishable from a
 successful query:
 

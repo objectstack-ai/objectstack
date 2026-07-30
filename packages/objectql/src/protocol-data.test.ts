@@ -860,7 +860,7 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                     object: 'showcase_task',
                     query: { filter: '{oops', owner_id: 'usr_1' },
                 }),
-            ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+            ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
             expect(engine.find).not.toHaveBeenCalled();
         });
 
@@ -982,12 +982,12 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
         }
 
         it.each(['filter', 'filters', '$filter'])(
-            'rejects unparseable JSON on ?%s with 400 INVALID_REQUEST, before the engine',
+            'rejects unparseable JSON on ?%s with 400 INVALID_FILTER, before the engine',
             async (alias) => {
                 const { protocol, engine } = makeProtocol();
                 await expect(
                     protocol.findData({ object: 'showcase_task', query: { [alias]: '{status:done' } }),
-                ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST', param: alias });
+                ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER', param: alias });
                 expect(engine.find).not.toHaveBeenCalled();
             },
         );
@@ -1008,7 +1008,7 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             const { protocol, engine } = makeProtocol();
             await expect(
                 protocol.findData({ object: 'showcase_task', query: { filter: raw } }),
-            ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+            ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
             expect(engine.find).not.toHaveBeenCalled();
         });
 
@@ -1064,6 +1064,28 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                 query: { filter: { status: 'done' }, filters: { status: 'done' } },
             });
             expect(engine.find.mock.calls[0][1].where).toEqual({ status: 'done' });
+        });
+
+        it('an unrunnable filter has ONE wire code however it was reached (#4121 + #4181)', async () => {
+            // #4121 rejects malformed filter ARRAYS; #4181 rejects the non-array
+            // ways a filter fails to become one. They landed independently on
+            // the same code path — a caller asking "did my filter run?" must not
+            // have to know which branch caught it.
+            const { protocol } = makeProtocol();
+            const codes = new Set<string>();
+            for (const bad of [
+                '{oops',                 // #4181 — unparseable JSON
+                '5',                     // #4181 — parses, not a filter
+                [['status', '!!', 'x']], // #4121 — array, unknown operator
+                ['and'],                 // #4121 — lone join keyword
+            ]) {
+                const err: any = await protocol
+                    .findData({ object: 'showcase_task', query: { filter: bad } })
+                    .then(() => undefined, (e: any) => e);
+                expect(err, `'${JSON.stringify(bad)}' must be rejected`).toBeDefined();
+                codes.add(`${err.status}/${err.code}`);
+            }
+            expect([...codes]).toEqual(['400/INVALID_FILTER']);
         });
 
         it('one alias alone is never a conflict', async () => {

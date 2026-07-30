@@ -25,6 +25,9 @@ export * from './field.zod';
 export * from './authoring-key-lint';
 // Field runtime value-shape contract (ADR-0104 D1)
 export * from './field-value.zod';
+// Import-coercion vocabulary (#4173): the boolean/reference token tables the
+// server's /import coercion and objectui's Import Wizard preview both check.
+export * from './import-coercion';
 export * from './autonumber-format';
 export * from './validation.zod';
 export * from './hook.zod';

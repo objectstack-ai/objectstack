@@ -2203,15 +2203,21 @@ export class ObjectQL implements IDataEngine {
    *
    * Every way of not knowing answers `false` — no storage service (so no
    * `sys_migration` object registered), no row, an unreadable table, a
-   * malformed row. That is the same posture the flag's other consumer takes:
-   * enforcement derives from evidence, and absent evidence is not permission.
-   * Here "no" means media value shapes keep warning instead of rejecting, so
-   * a deployment that cannot be asked keeps writing.
+   * malformed row. Enforcement derives from evidence, and absent evidence is
+   * not permission. Here "no" means media value shapes keep warning instead
+   * of rejecting, so a deployment that cannot be asked keeps writing.
+   *
+   * Public because the flag's other in-process consumer reads it through this
+   * same memoized seam: the storage service's release path (#3459 PR-5b) asks
+   * it whether a released field file may be tombstoned, duck-typed as an
+   * optional method so a fake or an older engine reads as "not verified".
+   * One read, one invalidation (`invalidateDataMigrationFlags`), no way for
+   * the two consumers to see different answers.
    *
    * Costs nothing on a kernel without the storage objects: the registry lookup
    * short-circuits before any query.
    */
-  private async isFileReferencesMigrationVerified(): Promise<boolean> {
+  async isFileReferencesMigrationVerified(): Promise<boolean> {
     if (!this.fileReferencesMigrationVerified) {
       this.fileReferencesMigrationVerified = (async () => {
         if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return false;
@@ -2234,7 +2240,8 @@ export class ObjectQL implements IDataEngine {
           if (verified) {
             this.logger.info(
               '[value-shape] this deployment has verified the file-as-reference migration — ' +
-                'media value shapes are enforced (ADR-0104 D1 / #3617)',
+                'media value shapes are enforced and released field files may be collected ' +
+                '(ADR-0104 / #3617)',
             );
           }
           return verified;

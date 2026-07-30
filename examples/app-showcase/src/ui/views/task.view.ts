@@ -107,6 +107,42 @@ export const TaskViews = defineView({
       rowActions: ['showcase_recalc_estimate', 'showcase_quick_view'],
     },
 
+    // ── Bulk actions — one declared action over the SELECTED records ──────
+    // The selection-bar twin of `legacy_row_actions` above, and — unlike that
+    // fixture — the CANONICAL authoring form, not a legacy one. `bulkActions`
+    // is the only way to declare a bulk action: `action.bulkEnabled` was
+    // retired in spec 17 (#3896 close-out) precisely because nothing ever
+    // consumed it, and its tombstone prescribes this key instead.
+    //
+    // Complements `project.view.ts`'s `bulkActionDefs`, which is the OTHER
+    // bulk vocabulary: inline defs that mass-EDIT records through the data
+    // API (`operation: 'update'` + a patch). Here the selected records are
+    // instead fanned out through the action runner, one dispatch each, so an
+    // action that is not a field patch at all — a script, a custom endpoint —
+    // works over a selection. Both names are already declared on the object:
+    //
+    //   `showcase_mark_done`       — type `script`; its sandboxed body flips
+    //     `done`/`progress` per record via the platform action route.
+    //   `showcase_recalc_estimate` — type `api`; POSTs the showcase's own
+    //     `/api/v1/showcase/recalc`, with `recordIdParam: 'recordId'` (already
+    //     declared for the row surface) carrying each record's id.
+    //
+    // Neither declares `list_toolbar`: a bulk action is not a toolbar action,
+    // it needs a selection. Naming it here is the whole declaration.
+    bulk_actions: {
+      label: 'Bulk Actions',
+      type: 'grid',
+      data,
+      columns: [
+        { field: 'title' },
+        { field: 'assignee' },
+        { field: 'estimate_hours' },
+        { field: 'progress' },
+        { field: 'done' },
+      ],
+      bulkActions: ['showcase_mark_done', 'showcase_recalc_estimate'],
+    },
+
     // 0 ── Tabular ───────────────────────────────────────────────────────
     // ADR-0021 Phase 2: replaces the former `showcase_task_list` report
     // (a flat record list — a ListView concern, not analytics).

@@ -24,9 +24,14 @@ import type { IStorageService } from '@objectstack/spec/contracts';
  *     confirming the row delete. Detection and scheduling stay inside the
  *     single platform sweep — ADR-0057 §3.3, no bespoke sweeper.
  *
- * Only `scope === 'attachments'` files are ever tombstoned: `Field.file` /
- * `Field.image` / avatar uploads use other scopes and reference files from
- * record columns the join-row count cannot see.
+ * The hooks in THIS file only ever tombstone `scope === 'attachments'` files:
+ * `Field.file` / `Field.image` / avatar uploads use other scopes and reference
+ * files from record columns the join-row count cannot see. Field-owned files
+ * have their own tombstone seam — `releaseOwnership` in
+ * `file-reference-lifecycle.ts`, active only on a deployment that has verified
+ * its file-as-reference migration (#3617) — and the reap guard below
+ * re-verifies their ownership columns, and re-reads that deployment flag, at
+ * sweep time (#3459 PR-5b).
  */
 
 /** Engine surface these installers need — duck-typed like the other
@@ -196,21 +201,47 @@ export function installAttachmentLifecycleHooks(
  *
  *  - `pending`: the upload was never completed; bytes may or may not exist.
  *    Best-effort byte delete, then confirm.
- *  - `deleted`: re-verify ZERO sys_attachment references at sweep time.
- *    References found (hook bypass, restore) → un-tombstone and veto.
- *    Zero references → delete bytes; a byte-delete failure vetoes so the
- *    row is retried next sweep (the row is the only pointer to the bytes —
- *    dropping it first would leak the bytes forever).
+ *  - `deleted`: re-verify at sweep time that nothing holds the file on
+ *    EITHER surface — zero `sys_attachment` join rows AND empty ownership
+ *    columns (`ref_*`). Either found (hook bypass, restore, re-claim) →
+ *    un-tombstone and veto. A tombstone outside the `attachments` scope is
+ *    field-file lineage (#3459 PR-5b) and additionally requires this
+ *    deployment's `adr-0104-file-references` flag to be verified — re-read
+ *    fresh each sweep via `isCollectionOpen`, so a regression recorded since
+ *    (a later failing migration run clears `verified_at`) stops
+ *    already-written tombstones from becoming byte deletes, without a
+ *    restart. A closed gate vetoes but does NOT un-tombstone: the observed
+ *    release stands; only the permission to delete is withheld.
+ *    Clear on both counts → delete bytes; a byte-delete failure vetoes so
+ *    the row is retried next sweep (the row is the only pointer to the
+ *    bytes — dropping it first would leak the bytes forever).
  *  - anything else: veto (shouldn't be a candidate; fail toward retention).
+ *
+ * `isCollectionOpen` absent (an older caller, a test fake) reads as "gate
+ * closed": field-file tombstones are kept, attachments behave as always.
  */
 export function createSysFileReapGuard(
   engine: AttachmentLifecycleEngine,
   getStorage: () => IStorageService | null | undefined,
   logger: AttachmentLifecycleLogger,
+  isCollectionOpen?: () => Promise<boolean>,
 ): (object: string, rows: Array<Record<string, unknown>>) => Promise<Array<string | number>> {
   return async (_object, rows) => {
     const confirmed: Array<string | number> = [];
     const storage = getStorage();
+    // One fresh flag read per sweep batch, taken lazily so a batch with no
+    // field-file tombstone costs nothing.
+    let gate: Promise<boolean> | undefined;
+    const collectionOpen = () =>
+      (gate ??= (async () => {
+        if (typeof isCollectionOpen !== 'function') return false;
+        try {
+          return (await isCollectionOpen()) === true;
+        } catch {
+          return false; // unreadable evidence → the gate is closed
+        }
+      })());
+    let keptGateClosed = 0;
     for (const row of rows) {
       const id = row?.id as string | number | undefined;
       if (id === undefined || id === null) continue;
@@ -234,15 +265,20 @@ export function createSysFileReapGuard(
             limit: 1,
             context: { ...SYSTEM_CTX },
           });
-          if (refs?.length) {
+          const owned = row.ref_object != null && row.ref_id != null && row.ref_id !== '';
+          if (refs?.length || owned) {
             await engine.update(
               'sys_file',
               { id, status: 'committed', deleted_at: null },
               { context: { ...SYSTEM_CTX } },
             );
             logger.info(
-              `[storage] reap guard: sys_file ${id} regained references since tombstoning — un-tombstoned, not reaped`,
+              `[storage] reap guard: sys_file ${id} regained ${refs?.length ? 'references' : 'an owner'} since tombstoning — un-tombstoned, not reaped`,
             );
+            continue;
+          }
+          if (row.scope !== 'attachments' && !(await collectionOpen())) {
+            keptGateClosed += 1;
             continue;
           }
           if (storage && typeof row.key === 'string' && row.key) await storage.delete(row.key);
@@ -255,6 +291,12 @@ export function createSysFileReapGuard(
         continue;
       }
       // Not a state this guard reaps — veto (fail toward retention).
+    }
+    if (keptGateClosed > 0) {
+      logger.info(
+        `[storage] reap guard: kept ${keptGateClosed} released field file(s) — this deployment's ` +
+          `file-as-reference migration is not verified (run \`os migrate files-to-references --apply\`)`,
+      );
     }
     return confirmed;
   };

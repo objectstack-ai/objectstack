@@ -252,7 +252,7 @@ describe('#4134 — unknown list query params (real ObjectQL engine)', () => {
 
         await expect(
             protocol.findData({ object: 'showcase_task', query: { filter: '{status:done' } }),
-        ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+        ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
     });
 
     it('the same garbage filter cannot hide behind pagination either', async () => {
@@ -260,7 +260,7 @@ describe('#4134 — unknown list query params (real ObjectQL engine)', () => {
         // of an unfiltered set.
         await expect(
             protocol.findData({ object: 'showcase_task', query: { filter: '{status:done', top: 2 } }),
-        ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+        ).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
     });
 
     it('a VALID filter still applies — the guard rejects only what it cannot run', async () => {
