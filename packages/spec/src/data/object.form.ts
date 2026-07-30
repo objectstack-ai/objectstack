@@ -101,15 +101,20 @@ export const objectForm = defineForm({
             { field: 'description', type: 'textarea', helpText: 'Developer documentation for this column' },
             { field: 'required', type: 'boolean', helpText: 'Must be set on every record' },
             { field: 'unique', type: 'boolean', helpText: 'Disallow duplicate values' },
-            { field: 'indexed', type: 'boolean', helpText: 'Create a database index for faster querying' },
+            // `indexed` removed: a field-level index flag built no index and was
+            // pruned from FieldSchema in the 16.x line (#2377, ADR-0049).
+            // Declare the index in the object's `indexes[]` instead.
             { field: 'readonly', type: 'boolean', helpText: 'Visible but never user-editable' },
-            { field: 'immutable', type: 'boolean', helpText: 'Editable on create, locked thereafter' },
+            // `immutable` removed: never a FieldSchema key. The mechanism is the
+            // `readonlyWhen` predicate below.
             { field: 'hidden', type: 'boolean', helpText: 'Hidden from default UI' },
             { field: 'searchable', type: 'boolean', helpText: 'Include in full-text search' },
             { field: 'sortable', type: 'boolean', helpText: 'Allow sorting on this column' },
-            { field: 'filterable', type: 'boolean', helpText: 'Allow filtering on this column' },
+            // `filterable` removed: never a FieldSchema key (only `sortable` and
+            // `searchable` exist); every declared column is filterable.
             { field: 'defaultValue', type: 'text', helpText: 'Default value for new records (JSON literal)' },
-            { field: 'placeholder', type: 'text', helpText: 'Placeholder hint' },
+            // `placeholder` removed: never a FieldSchema key. Author hint text
+            // through `inlineHelpText` / `description`.
 
             // Text constraints
             { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },
@@ -138,36 +143,62 @@ export const objectForm = defineForm({
 
             // Relational
             { field: 'reference', type: 'text', helpText: 'Target object name', visibleWhen: "type in ['lookup','master_detail','tree']" },
-            { field: 'referenceFilter', type: 'code', language: 'expression', helpText: 'CEL filter applied to the picker', visibleWhen: "type in ['lookup','master_detail']" },
-            { field: 'cascadeDelete', type: 'boolean', helpText: 'Delete children when parent is deleted', visibleWhen: "type == 'master_detail'" },
+            // `lookupFilters`, not `referenceFilter`: an array of
+            // {field, operator, value} rules, not a CEL string.
+            { field: 'lookupFilters', widget: 'json', helpText: 'Filter rules applied to the picker ({field, operator, value})', visibleWhen: "type in ['lookup','master_detail']" },
+            // `deleteBehavior`, not a `cascadeDelete` boolean: the schema models
+            // three outcomes, and only one of them is "cascade".
+            { field: 'deleteBehavior', type: 'select', helpText: 'What happens when the referenced record is deleted', visibleWhen: "type in ['lookup','master_detail']", options: [
+              { label: 'Set null', value: 'set_null' },
+              { label: 'Cascade (delete children)', value: 'cascade' },
+              { label: 'Restrict (block the delete)', value: 'restrict' },
+            ] },
             { field: 'multiple', type: 'boolean', helpText: 'Allow selecting multiple records', visibleWhen: "type in ['lookup']" },
 
             // Formula / summary
-            { field: 'formula', type: 'code', language: 'expression', helpText: 'CEL formula expression', visibleWhen: "type == 'formula'" },
+            // `expression`, not `formula` — the key is named for what it holds,
+            // not for the field type that uses it.
+            { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL formula expression', visibleWhen: "type == 'formula'" },
             { field: 'returnType', type: 'select', helpText: 'Result type for formulas', visibleWhen: "type == 'formula'", options: [
               { label: 'Text', value: 'text' }, { label: 'Number', value: 'number' }, { label: 'Boolean', value: 'boolean' },
               { label: 'Date', value: 'date' }, { label: 'Datetime', value: 'datetime' }, { label: 'Currency', value: 'currency' },
             ] },
-            { field: 'summaryType', type: 'select', helpText: 'Aggregation', visibleWhen: "type == 'summary'", options: [
-              { label: 'Count', value: 'count' }, { label: 'Sum', value: 'sum' }, { label: 'Avg', value: 'avg' },
-              { label: 'Min', value: 'min' }, { label: 'Max', value: 'max' },
-            ] },
-            { field: 'summaryField', type: 'text', helpText: 'Field on child object to aggregate', visibleWhen: "type == 'summary'" },
+            // A roll-up is ONE key — `summaryOperations` {object, field, function}.
+            // The flat `summaryType` / `summaryField` pair named neither of them
+            // and also lost `object`, so a roll-up authored here saved nothing.
+            {
+              field: 'summaryOperations',
+              type: 'composite',
+              helpText: 'Roll-up: which child object, which field, which aggregation',
+              visibleWhen: "type == 'summary'",
+              fields: [
+                { field: 'object', type: 'text', required: true, helpText: 'Source child object name' },
+                { field: 'field', type: 'text', required: true, helpText: 'Field on the child object to aggregate (ignored for count)' },
+                { field: 'function', type: 'select', required: true, helpText: 'Aggregation function', options: [
+                  { label: 'Count', value: 'count' }, { label: 'Sum', value: 'sum' }, { label: 'Avg', value: 'avg' },
+                  { label: 'Min', value: 'min' }, { label: 'Max', value: 'max' },
+                ] },
+              ],
+            },
 
-            // Autonumber
-            { field: 'displayFormat', type: 'text', helpText: 'e.g. "INV-{0000}"', visibleWhen: "type == 'autonumber'" },
-            { field: 'startingNumber', type: 'number', helpText: 'Starting sequence value', visibleWhen: "type == 'autonumber'" },
+            // Autonumber — `autonumberFormat`, not `displayFormat`. There is no
+            // `startingNumber`: the counter resets per rendered prefix, which the
+            // format string itself determines (e.g. AD{YYYYMMDD}{0000} resets daily).
+            { field: 'autonumberFormat', type: 'text', helpText: 'e.g. "INV-{0000}"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported', visibleWhen: "type == 'autonumber'" },
 
             // Code language
             { field: 'language', type: 'text', helpText: 'Editor language (e.g. sql, javascript)', visibleWhen: "type == 'code'" },
 
-            // Validation / governance
-            { field: 'validation', type: 'code', language: 'expression', helpText: 'CEL predicate — must evaluate true' },
-            { field: 'errorMessage', type: 'text', helpText: 'Shown when validation fails' },
-            { field: 'audit', type: 'boolean', helpText: 'Audit changes to this field' },
-            { field: 'trackHistory', type: 'boolean', helpText: 'Keep change history' },
-            { field: 'pii', type: 'boolean', helpText: 'Personally identifiable information' },
-            { field: 'encrypted', type: 'boolean', helpText: 'Encrypt at rest' },
+            // Governance. `validation` / `errorMessage` are not FieldSchema keys —
+            // a record-level predicate is a `validation` metadata item on the
+            // object, which carries its own message. `audit` / `pii` / `encrypted`
+            // named the `auditTrail` / `dataQuality` / `encryptionConfig` family
+            // pruned in 2026-06 as dead in both layers (see the FieldSchema
+            // tombstone); at-rest protection is `type: 'secret'`, not a flag.
+            { field: 'trackHistory', type: 'boolean', helpText: 'Summarize this field on the record activity timeline' },
+            { field: 'visibleWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is shown only when TRUE' },
+            { field: 'readonlyWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is read-only when TRUE (enforced server-side)' },
+            { field: 'requiredWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is required when TRUE (enforced server-side)' },
           ],
         },
       ],
@@ -180,7 +211,10 @@ export const objectForm = defineForm({
       collapsed: true,
       fields: [
         {
-          field: 'capabilities',
+          // The key is `enable` (ObjectCapabilities). This block named
+          // `capabilities` — a key ObjectSchema has never declared — so every
+          // toggle below was stripped on save and the section did nothing.
+          field: 'enable',
           type: 'composite',
           helpText: 'Enable/disable system features',
           fields: [
