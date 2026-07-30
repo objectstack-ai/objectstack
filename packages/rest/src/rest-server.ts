@@ -3334,7 +3334,7 @@ export class RestServer {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
-                        res.status(501).json({ error: 'Save operation not supported by protocol implementation' });
+                        res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
                         return;
                     }
 
@@ -3717,7 +3717,7 @@ export class RestServer {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
-                        res.status(501).json({ error: 'Save operation not supported by protocol implementation' });
+                        res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
                         return;
                     }
 
@@ -3780,7 +3780,7 @@ export class RestServer {
                         } as any);
                         res.json(view);
                     } else {
-                        res.status(501).json({ error: 'UI View resolution not supported by protocol implementation' });
+                        res.status(501).json({ error: 'UI View resolution not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
                     }
                 } catch (error: any) {
                     logError("[REST] Unhandled error:", error);
@@ -6877,7 +6877,9 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const ql = this.objectQLProvider ? await this.objectQLProvider(environmentId) : undefined;
                     if (!ql || typeof ql.transaction !== 'function') {
-                        res.status(501).json({ error: 'Transactional batch not supported by this runtime' });
+                        // Typed like every other 501 on this server (clone/search,
+                        // #4067) so a client can key on the code, not the prose.
+                        res.status(501).json({ error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' });
                         return;
                     }
 
