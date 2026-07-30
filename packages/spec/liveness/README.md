@@ -225,6 +225,7 @@ binding lands one class at a time (ADR-0054 §3), never as a big-bang backfill.
 | RLS `check` (post-image) | `permission.rowLevelSecurity.check` | `showcase-d3-d4-capabilities` |
 | Master-detail controlled-by-parent | `object.sharingModel` | `controlled-by-parent#cbp-controlled-by-parent` |
 | Scope-depth read grants | `permission.objects.readScope` | `showcase-scope-depth` |
+| Scope-depth write grants | `permission.objects.writeScope` | `showcase-scope-depth-write#showcase-scope-depth-write` |
 | Ownership anchor + bulk writes | `permission.objects.modifyAllRecords` | `owner-anchor-and-bulk-writes` |
 | Delegation of duty | `position.delegatable` | `delegation-of-duty#delegation-of-duty` |
 | Static readonly write | `field.readonly` | `showcase-static-readonly#readonly-static-write` |

@@ -342,6 +342,22 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
       + 'bind.',
   },
   {
+    id: 'scope-depth-write',
+    label: 'Scope-depth write grants',
+    summary:
+      'writeScope widens the owner-set an owner-scoped object accepts EDITS from, independently of '
+      + "readScope: a co-member row can be readable yet not editable (absent writeScope defaults to 'own' "
+      + "under a 'unit' read), 'unit' widens to BU co-members without descending into child BUs, and the "
+      + 'hierarchy seam fails CLOSED to owner-only when the enterprise resolver is absent. Added by the '
+      + '2026-07-30 #3896 security-subset re-verification: the entry was live on two confirmed readers '
+      + 'but was the only scope axis with no runtime proof — its sibling readScope has carried one since '
+      + 'ADR-0054 phase 1.',
+    proofId: 'showcase-scope-depth-write',
+    proofRef: 'packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts#showcase-scope-depth-write',
+    bound: true,
+    ledgerBindings: [{ type: 'permission', path: 'objects.writeScope' }],
+  },
+  {
     id: 'app-tab-permissions',
     label: 'Tab visibility (/me/apps) + anchor-bindable baseline',
     summary:

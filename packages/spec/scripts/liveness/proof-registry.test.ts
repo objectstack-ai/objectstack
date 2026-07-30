@@ -127,6 +127,10 @@ describe('registry invariants', () => {
         // me-apps dogfood proof was extended to actually AUTHOR the property on
         // a permission set, rather than mentioning it in its header.
         'permission/tabPermissions',
+        // Bound 2026-07-30, same sweep: writeScope was the only scope axis
+        // without a runtime proof; its new dogfood file asserts post-state in
+        // three postures (widen / independent-of-read / fail-closed seam).
+        'permission/objects.writeScope',
       ].sort(),
     );
   });

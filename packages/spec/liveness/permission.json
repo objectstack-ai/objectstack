@@ -105,8 +105,9 @@
         "writeScope": {
           "status": "live",
           "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:224 (getEffectiveScope write branch) + packages/plugins/plugin-sharing/src/sharing-service.ts:230 (canEdit owner-set widened by __writeScope; 'org' short-circuits to unrestricted)",
-          "note": "ADR-0057 D1 — write access DEPTH (same enum as readScope). Re-verified 2026-07-30: both cited reads confirmed. Sibling of proofed readScope with no dogfood proof of its own — a proof-binding candidate (ADR-0054)."
+          "proof": "packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts#showcase-scope-depth-write",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:224 (getEffectiveScope write branch; absent → 'own') + packages/plugins/plugin-sharing/src/sharing-service.ts:230 (canEdit owner-set widened by __writeScope; 'org' short-circuits to unrestricted)",
+          "note": "ADR-0057 D1 — write access DEPTH (same enum as readScope). Re-verified 2026-07-30 and proof-bound the same day: the proof asserts POST-STATE in three postures — 'unit' edits a BU co-member's row and does NOT descend into a child BU; an ABSENT writeScope stays owner-only even under a 'unit' readScope (the axes gate independently); and the hierarchy seam fails CLOSED without the enterprise resolver."
         }
       }
     },
