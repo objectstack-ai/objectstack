@@ -408,11 +408,13 @@ describe('import route — required-field dry-run fidelity', () => {
     expect(dry._json.results.find((r: any) => !r.ok)).toMatchObject({ row: 1, field: 'status', code: 'required' });
     expect(await engine.findOne('member', { where: { id: 'm2' } })).toBeNull(); // dry run never writes
 
-    // Real insert: SAME verdict (parity), and a readable `status is required`
-    // instead of a raw `NOT NULL constraint failed: member.status`.
+    // Real insert: SAME verdict (parity), and a readable required message
+    // instead of a raw `NOT NULL constraint failed: member.status`. The field is
+    // named by its declared LABEL, not the API name (#3957) — `status` is
+    // declared `label: 'Status'` in this fixture.
     const real = await imp({ format: 'json', runAutomations: false, rows });
     expect(real._json).toMatchObject({ total: 2, ok: 1, errors: 1, created: 1 });
-    expect(real._json.results.find((r: any) => !r.ok)).toMatchObject({ field: 'status', code: 'required', error: 'status is required' });
+    expect(real._json.results.find((r: any) => !r.ok)).toMatchObject({ field: 'status', code: 'required', error: 'Status is required' });
     expect((await engine.findOne('member', { where: { id: 'm2' } }))?.status).toBe('active');
     expect(await engine.findOne('member', { where: { id: 'm1' } })).toBeNull();
   });

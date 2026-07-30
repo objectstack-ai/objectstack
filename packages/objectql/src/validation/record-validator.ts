@@ -37,7 +37,15 @@ import {
   REFERENCE_VALUE_TYPES,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
+  type FieldValidationCode,
+  type FieldValidationError,
+  type FieldValidationParams,
 } from '@objectstack/spec/data';
+import {
+  renderValidationMessage,
+  objectFieldLabelKey,
+  type ValidationMessageTranslator,
+} from '@objectstack/spec/system';
 
 // Lifecycle columns the engine always owns and the client never supplies. These
 // are skipped by NAME because they are not author-declared business fields.
@@ -74,34 +82,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 const URL_RE = /^(?:[a-z][a-z0-9+.\-]*:\/\/[^\s]+|\/[^\s]*|data:[^\s]+|blob:[^\s]+)$/i;
 const PHONE_RE = /^[+()\-\s\d.]{5,}$/;
 
-export interface FieldValidationError {
-  field: string;
-  code:
-    | 'required'
-    | 'min_length'
-    | 'max_length'
-    | 'min_value'
-    | 'max_value'
-    | 'invalid_email'
-    | 'invalid_url'
-    | 'invalid_phone'
-    | 'invalid_number'
-    | 'invalid_boolean'
-    | 'invalid_date'
-    | 'invalid_time'
-    | 'invalid_option'
-    | 'invalid_type'
-    // Object-level validation rules (ADR-0020, see rule-validator.ts)
-    | 'invalid_transition'
-    | 'invalid_initial_state'
-    | 'rule_violation'
-    | 'invalid_format'
-    | 'invalid_json'
-    | 'json_schema_violation';
-  message: string;
-  /** Allowed values for select/multiselect, when applicable. */
-  options?: string[];
-}
+// The per-field error envelope is a PROTOCOL, not a local shape: REST ships it
+// verbatim and clients match on `code`. It lives in `@objectstack/spec/data`
+// (`validation-error.zod.ts`) — Zod-first, one definition — and is re-exported
+// here because every existing importer reaches for it through this module.
+export type { FieldValidationCode, FieldValidationError, FieldValidationParams };
 
 export class ValidationError extends Error {
   readonly code = 'VALIDATION_FAILED';
@@ -127,6 +112,12 @@ type Mode = 'insert' | 'update';
 
 interface FieldDef {
   name?: string;
+  /**
+   * Author-declared display label. The message templates name the field by
+   * THIS, not by `name` — a user has never seen `penalty_amount`, and on a
+   * localized app the declared label is already in their language (#3957).
+   */
+  label?: string;
   type: string;
   required?: boolean;
   readonly?: boolean;
@@ -141,6 +132,95 @@ interface FieldDef {
 
 function isMissing(v: unknown): boolean {
   return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+}
+
+/**
+ * What the validator needs in order to speak the caller's language (#3957).
+ *
+ * Threaded in from `ExecutionContext.locale` — the field whose contract already
+ * reads "Drives message catalogs and number/date formatting", resolved once per
+ * request from the `localization` settings (ADR-0053 Phase 2). Nothing here is
+ * required: with no context the messages render in `en` exactly as they did
+ * before, so a programmatic / bare-kernel caller is unaffected.
+ */
+export interface ValidationMessageContext {
+  /** BCP-47 locale of the principal performing the write. */
+  locale?: string;
+  /**
+   * `II18nService.t`-compatible lookup, used for two things: a deployment's
+   * `validation.field.*` message override, and the field's TRANSLATED label
+   * (the declared `label` is only the source language).
+   */
+  translate?: ValidationMessageTranslator;
+  /** Object name — needed to address the field's label in the bundle. */
+  objectName?: string;
+}
+
+/**
+ * The field's display name in the caller's locale: translation bundle →
+ * declared `label` → API name. The API name is the last resort precisely
+ * because surfacing it is the bug (#3957); it stays available to clients as
+ * `FieldValidationError.field`.
+ */
+export function resolveFieldLabel(
+  name: string,
+  def: { label?: string } | undefined,
+  ctx: ValidationMessageContext | undefined,
+): string {
+  if (ctx?.translate && ctx.objectName && ctx.locale) {
+    const key = objectFieldLabelKey(ctx.objectName, name);
+    try {
+      const translated = ctx.translate(key, ctx.locale);
+      // II18nService echoes the key back on a miss.
+      if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
+        return translated;
+      }
+    } catch {
+      // A misbehaving i18n service must not turn a 400 into a 500.
+    }
+  }
+  const declared = def?.label?.trim();
+  return declared && declared.length > 0 ? declared : name;
+}
+
+/**
+ * Build one per-field error: the machine triple (`code` + `params` + `field`)
+ * plus its rendering in the caller's locale.
+ *
+ * `messageKey` defaults to `code` and is only set explicitly where one wire code
+ * needs more than one sentence (a multiselect's `invalid_option` names the
+ * offending element; a `datetime` reads differently from a `date`).
+ *
+ * Exported because the object-level rule evaluator (`rule-validator.ts`) emits
+ * into the SAME envelope and must localize its built-in messages the same way —
+ * two constructors would drift.
+ */
+export function buildFieldError(
+  args: {
+    field: string;
+    code: FieldValidationCode;
+    /** Field definition, for its declared `label`. */
+    def?: { label?: string };
+    params?: FieldValidationParams;
+    /** Catalog key; defaults to `code`. */
+    messageKey?: string;
+    options?: string[];
+  },
+  ctx?: ValidationMessageContext,
+): FieldValidationError {
+  const label = resolveFieldLabel(args.field, args.def, ctx);
+  const message = renderValidationMessage(
+    { messageKey: args.messageKey ?? args.code, label, field: args.field, params: args.params },
+    { locale: ctx?.locale, translate: ctx?.translate },
+  );
+  return {
+    field: args.field,
+    code: args.code,
+    message,
+    label,
+    ...(args.params && Object.keys(args.params).length > 0 ? { params: args.params } : {}),
+    ...(args.options ? { options: args.options } : {}),
+  };
 }
 
 function optionValues(options: FieldDef['options']): string[] {
@@ -231,13 +311,21 @@ function validateOne(
   value: unknown,
   skipRequired = false,
   mediaStrict = false,
+  ctx?: ValidationMessageContext,
 ): FieldValidationError | null {
+  const fail = (
+    code: FieldValidationCode,
+    params?: FieldValidationParams,
+    messageKey?: string,
+    options?: string[],
+  ) => buildFieldError({ field: name, code, def, params, messageKey, options }, ctx);
+
   // ── required ────────────────────────────────────────────────────
   // `autonumber` is runtime-owned: the value is generated by the engine /
   // driver (the SQL driver assigns it from a persistent sequence AFTER this
   // validation runs), so a missing value is never a client error — see #1603.
   if (!skipRequired && def.required && isMissing(value) && def.type !== 'autonumber') {
-    return { field: name, code: 'required', message: `${name} is required` };
+    return fail('required');
   }
   if (isMissing(value)) return null; // nothing else to check
 
@@ -247,19 +335,19 @@ function validateOne(
   if (t === 'text' || t === 'textarea' || t === 'email' || t === 'url' || t === 'phone' || t === 'password' || t === 'markdown' || t === 'html' || t === 'richtext' || t === 'code') {
     const s = typeof value === 'string' ? value : String(value);
     if (def.maxLength !== undefined && s.length > def.maxLength) {
-      return { field: name, code: 'max_length', message: `${name} must be ≤ ${def.maxLength} characters (got ${s.length})` };
+      return fail('max_length', { maxLength: def.maxLength, actual: s.length });
     }
     if (def.minLength !== undefined && s.length < def.minLength) {
-      return { field: name, code: 'min_length', message: `${name} must be ≥ ${def.minLength} characters (got ${s.length})` };
+      return fail('min_length', { minLength: def.minLength, actual: s.length });
     }
     if (t === 'email' && !EMAIL_RE.test(s)) {
-      return { field: name, code: 'invalid_email', message: `${name} must be a valid email address` };
+      return fail('invalid_email');
     }
     if (t === 'url' && !URL_RE.test(s)) {
-      return { field: name, code: 'invalid_url', message: `${name} must be a valid URL (scheme://...)` };
+      return fail('invalid_url');
     }
     if (t === 'phone' && !PHONE_RE.test(s)) {
-      return { field: name, code: 'invalid_phone', message: `${name} must be a valid phone number` };
+      return fail('invalid_phone');
     }
     return null;
   }
@@ -268,13 +356,13 @@ function validateOne(
   if (t === 'number' || t === 'currency' || t === 'percent' || t === 'rating' || t === 'slider') {
     const n = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(n)) {
-      return { field: name, code: 'invalid_number', message: `${name} must be a number` };
+      return fail('invalid_number');
     }
     if (def.min !== undefined && n < def.min) {
-      return { field: name, code: 'min_value', message: `${name} must be ≥ ${def.min}` };
+      return fail('min_value', { min: def.min });
     }
     if (def.max !== undefined && n > def.max) {
-      return { field: name, code: 'max_value', message: `${name} must be ≤ ${def.max}` };
+      return fail('max_value', { max: def.max });
     }
     return null;
   }
@@ -283,14 +371,15 @@ function validateOne(
   if (t === 'boolean' || t === 'toggle') {
     if (typeof value === 'boolean') return null;
     if (value === 0 || value === 1 || value === '0' || value === '1' || value === 'true' || value === 'false') return null;
-    return { field: name, code: 'invalid_boolean', message: `${name} must be true or false` };
+    return fail('invalid_boolean');
   }
 
   // ── date/datetime ───────────────────────────────────────────────
   if (t === 'date' || t === 'datetime') {
     if (value instanceof Date) return null;
     if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) return null;
-    return { field: name, code: 'invalid_date', message: `${name} must be a valid ${t} (ISO-8601)` };
+    // Same wire code, two sentences: "a valid date" vs "a valid datetime".
+    return fail('invalid_date', { type: t }, t === 'datetime' ? 'invalid_datetime' : 'invalid_date');
   }
 
   // ── time (time-of-day) ──────────────────────────────────────────
@@ -309,7 +398,7 @@ function validateOne(
       const hasDate = /\d{4}-\d{2}-\d{2}/.test(value);
       if (timeOfDay.test(value.trim()) || (hasDate && !Number.isNaN(Date.parse(value)))) return null;
     }
-    return { field: name, code: 'invalid_time', message: `${name} must be a valid time (HH:MM or HH:MM:SS)` };
+    return fail('invalid_time');
   }
 
   // ── select / radio (single-value) ───────────────────────────────
@@ -320,7 +409,7 @@ function validateOne(
   if ((t === 'select' || t === 'radio') && def.multiple !== true) {
     const allowed = optionValues(def.options);
     if (allowed.length > 0 && !allowed.includes(String(value))) {
-      return { field: name, code: 'invalid_option', message: `${name} must be one of: ${allowed.join(', ')}`, options: allowed };
+      return fail('invalid_option', { allowed: allowed.join(', ') }, 'invalid_option', allowed);
     }
     return null;
   }
@@ -331,7 +420,7 @@ function validateOne(
   // storing it verbatim corrupts the column for every array-consumer (#2552).
   if (isMultiValueField(def)) {
     if (!Array.isArray(value)) {
-      return { field: name, code: 'invalid_type', message: `${name} must be an array of values` };
+      return fail('invalid_type', undefined, 'invalid_type_array');
     }
     // Reference / attachment types carry IDs or storage keys, not options —
     // reference integrity is handled elsewhere.
@@ -340,7 +429,12 @@ function validateOne(
     if (allowed.length === 0) return null; // free-form (tags without options)
     for (const v of value) {
       if (!allowed.includes(String(v))) {
-        return { field: name, code: 'invalid_option', message: `${name}: "${v}" is not one of: ${allowed.join(', ')}`, options: allowed };
+        return fail(
+          'invalid_option',
+          { value: String(v), allowed: allowed.join(', ') },
+          'invalid_option_value',
+          allowed,
+        );
       }
     }
     return null;
@@ -371,11 +465,14 @@ function validateOne(
     const parsed = shapeSchemaFor(def).safeParse(value);
     if (!parsed.success) {
       const detail = parsed.error.issues[0]?.message ?? 'invalid value shape';
-      const message = `${name} has an invalid ${t} value: ${detail}`;
       const isMedia = FILE_REFERENCE_TYPES.has(t);
       if (isMedia ? mediaStrictEffective(mediaStrict) : VALUE_SHAPE_STRICT()) {
-        return { field: name, code: 'invalid_type', message };
+        return fail('invalid_type', { type: t, detail }, 'invalid_value_shape');
       }
+      // The warn-first path is a DEVELOPER log line, not an end-user message —
+      // it names the API field and stays English so it greps the same in every
+      // deployment's logs.
+      const message = `${name} has an invalid ${t} value: ${detail}`;
       warnOnce(
         `${t}:${name}`,
         `[value-shape] ${message} — accepted for now (ADR-0104 warn-first; ` +
@@ -458,6 +555,13 @@ export interface ValidateRecordOptions {
    * because the evidence was unavailable.
    */
   mediaValueShapeStrict?: boolean;
+
+  /**
+   * Locale + translation hooks for the human half of each error (#3957). Omit
+   * and messages render in `en` against the declared labels — the pre-#3957
+   * behavior for any caller that has no principal to read a locale from.
+   */
+  messages?: ValidationMessageContext;
 }
 
 /**
@@ -478,6 +582,7 @@ export function validateRecord(
   const errors: FieldValidationError[] = [];
   const fields = objectSchema.fields;
   const mediaStrict = options.mediaValueShapeStrict === true;
+  const messages = options.messages;
 
   if (mode === 'insert') {
     // Walk all declared fields — required check applies even when
@@ -485,7 +590,7 @@ export function validateRecord(
     for (const [name, def] of Object.entries(fields)) {
       if (SKIP_FIELDS.has(name)) continue;
       if (def.system || def.readonly) continue;
-      const err = validateOne(name, def, data[name], false, mediaStrict);
+      const err = validateOne(name, def, data[name], false, mediaStrict, messages);
       if (err) errors.push(err);
     }
   } else {
@@ -498,7 +603,7 @@ export function validateRecord(
       // skipRequired: PATCH-omitted fields must not 400. (No def clone — the
       // registry's own field object flows through so the ADR-0104 value-shape
       // schema cache, keyed on def identity, hits.)
-      const err = validateOne(name, def, value, true, mediaStrict);
+      const err = validateOne(name, def, value, true, mediaStrict, messages);
       if (err) errors.push(err);
     }
   }

@@ -20,6 +20,9 @@ export * from './field.zod';
 export * from './field-value.zod';
 export * from './autonumber-format';
 export * from './validation.zod';
+// Write-path per-field error contract (#3957) — the `VALIDATION_FAILED` envelope's
+// `code` / `params` / `label` triple that clients format their own text from.
+export * from './validation-error.zod';
 export * from './hook.zod';
 export * from './hook-body.zod';
 export * from './mapping.zod';
