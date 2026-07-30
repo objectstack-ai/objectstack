@@ -398,6 +398,11 @@ export class ObjectQL implements IDataEngine {
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
 
+  // i18n service backing validation-message + field-label localization (#3957).
+  // Optional: without it, messages render from the built-in catalog against the
+  // declared labels.
+  private i18nService?: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string };
+
   // Crypto provider backing `secret`-typed fields. Optional: when absent,
   // writing an object that declares a secret field fails closed (never
   // persists cleartext). Injected by the host via setCryptoProvider().
@@ -1603,6 +1608,46 @@ export class ObjectQL implements IDataEngine {
   setRealtimeService(service: IRealtimeService): void {
     this.realtimeService = service;
     this.logger.info('RealtimeService configured for data events');
+  }
+
+  /**
+   * Set the i18n service used to localize write-path validation messages and
+   * the field labels inside them (#3957). Bridged by `ObjectQLPlugin` on start,
+   * the same way the realtime service is.
+   *
+   * Optional by design: with no service the built-in message catalog
+   * (`@objectstack/spec/system`) still renders each message in the caller's
+   * locale against the field's DECLARED label. The service adds two things —
+   * a deployment's `validation.field.*` message overrides, and the field's
+   * TRANSLATED label for apps whose declared labels are in another language.
+   */
+  setI18nService(service: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string }): void {
+    this.i18nService = service;
+    this.logger.info('I18nService configured for validation messages');
+  }
+
+  /**
+   * Locale + translation hooks handed to the validators so a rejected write is
+   * reported in the caller's language (#3957).
+   *
+   * `ExecutionContext.locale` is resolved once per request from the
+   * `localization` settings (ADR-0053 Phase 2) and its contract already reads
+   * "Drives message catalogs" — this is the consumer that makes that true.
+   * Undefined locale (anonymous / programmatic / system write) leaves the
+   * built-in `en` rendering in place.
+   */
+  private validationMessageContext(
+    objectName: string,
+    // Only `locale` is read — narrower than `ExecutionContext` so both the
+    // resolved and the input-shaped envelope satisfy it.
+    context?: { locale?: string },
+  ): { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string; objectName: string } {
+    const t = this.i18nService?.t;
+    return {
+      objectName,
+      locale: context?.locale,
+      translate: t ? (key, locale, params) => t.call(this.i18nService, key, locale, params) : undefined,
+    };
   }
 
   /**
@@ -3019,12 +3064,15 @@ export class ObjectQL implements IDataEngine {
         // Resolved once for the whole batch; dormant unless the object declares
         // a media field, and memoized after the first object that does.
         const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(schemaForValidation);
+        // Locale + translation hooks for the rejection messages (#3957) —
+        // resolved once for the batch, identical for every row.
+        const msgCtx = this.validationMessageContext(object, opCtx.context);
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
-            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict });
-            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context) });
+            validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, messages: msgCtx });
+            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -3305,10 +3353,11 @@ export class ObjectQL implements IDataEngine {
            let priorRecord: Record<string, unknown> | null = null;
            const updateSchema = this._registry.getObject(object);
            const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);
+           const updateMsgCtx = this.validationMessageContext(object, opCtx.context);
            if (hookContext.input.id) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict });
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, messages: updateMsgCtx });
                if (needsPriorRecord(updateSchema as any) || (this.hooks.get('afterUpdate')?.length ?? 0) > 0) {
                    const priorAst: QueryAST = { object, where: { id: hookContext.input.id }, limit: 1 };
                    priorRecord = await driver.findOne(object, priorAst, hookContext.input.options as any);
@@ -3329,12 +3378,12 @@ export class ObjectQL implements IDataEngine {
                    hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedKeys, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context) });
+               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict });
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, messages: updateMsgCtx });
                // [#2982] Consume the middleware-composed AST seeded above, so
                // the injected row-scoping (RLS write filter, sharing's
                // editable-rows filter) actually binds the driver operation. Fail
@@ -3397,7 +3446,7 @@ export class ObjectQL implements IDataEngine {
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context) });
+                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -3406,7 +3455,7 @@ export class ObjectQL implements IDataEngine {
                        }
                    }
                } else {
-                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context) });
+                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                }
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else {

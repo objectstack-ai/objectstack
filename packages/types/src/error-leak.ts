@@ -5,7 +5,7 @@
  *
  * ObjectStack has more than one HTTP boundary. `@objectstack/rest` guards the
  * REST data routes inside `mapDataError`; the dispatcher-plugin routes
- * (`/analytics`, `/packages`, `/i18n`, `/storage`, `/automation`, …) exit
+ * (`/analytics`, `/packages`, `/i18n`, `/automation`, …) exit
  * through `errorResponseBase`. Before #3867 only the first of those sanitised
  * anything, so a driver error raised under `/analytics/query` reached the
  * client verbatim — a real SQL statement in the response body:

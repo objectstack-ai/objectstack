@@ -245,7 +245,7 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PR-3 — keys / storage / ui extraction
+// PR-3 — keys / storage / ui extraction (storage since retired, #4087)
 // ---------------------------------------------------------------------------
 
 describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
@@ -284,18 +284,34 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
         expect(result.response?.body?.data?.key).toBeTruthy();
     });
 
-    it('/storage responds 501 when file-storage is not configured (extracted body keeps in-handler semantics)', async () => {
-        const result = await makeDispatcher().dispatch('POST', '/storage/upload', { blob: 1 }, {}, {} as any);
-        expect(result.handled).toBe(true);
-        expect(result.response?.status).toBe(501);
-    });
+    /**
+     * [#4087] `/storage` is no longer a dispatcher domain. The registry must
+     * not claim the prefix in either direction — with the `file-storage` slot
+     * empty AND with it filled, since the retired bridge's whole reason for
+     * existing was "a service is registered, so route to it". It called that
+     * service off-contract (`upload(key, data, options?)` invoked as
+     * `upload(file, { request })`), and `@objectstack/service-storage` — which
+     * mounts the real protocol on the http-server — never went through here.
+     */
+    it('/storage is not claimed by the registry, filled slot or not', async () => {
+        // No domain matches, so dispatch's terminal exit answers — the same
+        // ROUTE_NOT_FOUND every unregistered path gets, not a 501/500 from a
+        // half-present bridge.
+        const empty = await makeDispatcher().dispatch('POST', '/storage/upload', { blob: 1 }, {}, {} as any);
+        expect(empty.response?.status).toBe(404);
+        expect(empty.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
 
-    it('/storage/upload uploads through the file-storage service', async () => {
-        const upload = vi.fn().mockResolvedValue({ id: 'f1' });
-        const result = await makeDispatcher({ 'file-storage': { upload, download: vi.fn() } })
+        const upload = vi.fn();
+        const download = vi.fn();
+        const filled = await makeDispatcher({ 'file-storage': { upload, download } })
             .dispatch('POST', '/storage/upload', { some: 'file' }, {}, {} as any);
-        expect(result.response?.status).toBe(200);
-        expect(upload).toHaveBeenCalledTimes(1);
+        expect(filled.response?.status).toBe(404);
+        expect(upload).not.toHaveBeenCalled();
+
+        const get = await makeDispatcher({ 'file-storage': { upload, download } })
+            .dispatch('GET', '/storage/file/abc', undefined, {}, {} as any);
+        expect(get.response?.status).toBe(404);
+        expect(download).not.toHaveBeenCalled();
     });
 
     it('/ui/view/:object serves the protocol getUiView result; 503 without a protocol service', async () => {

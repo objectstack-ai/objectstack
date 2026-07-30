@@ -17,7 +17,6 @@ import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
 import { createNotificationsDomain, handleNotificationRequest } from './domains/notifications.js';
 import { createSecurityDomain, handleSecurityRequest } from './domains/security.js';
 import { createKeysDomains, handleKeysRequest } from './domains/keys.js';
-import { createStorageDomain, handleStorageRequest } from './domains/storage.js';
 import { createUiDomain, handleUiRequest } from './domains/ui.js';
 import { createShareLinksDomain, handleShareLinksRequest } from './domains/share-links.js';
 import { createPackagesDomain, handlePackagesRequest } from './domains/packages.js';
@@ -345,7 +344,10 @@ export class HttpDispatcher {
         this.domainRegistry.register(createNotificationsDomain(this.domainDeps));
         this.domainRegistry.register(createSecurityDomain(this.domainDeps));
         for (const route of createKeysDomains(this.domainDeps)) this.domainRegistry.register(route);
-        this.domainRegistry.register(createStorageDomain(this.domainDeps));
+        // No `/storage` domain (#4087): the dispatcher's two-route bridge was
+        // retired. `/api/v1/storage` is service-storage's surface — it mounts
+        // the presigned / chunked / signed-URL protocol autonomously on the
+        // host http-server. See route-ledger.ts for the disposition.
         this.domainRegistry.register(createUiDomain(this.domainDeps));
         this.domainRegistry.register(createShareLinksDomain(this.domainDeps));
         this.domainRegistry.register(createPackagesDomain(this.domainDeps));
@@ -842,6 +844,7 @@ export class HttpDispatcher {
             authSvc, searchSvc, realtimeSvc, filesSvc,
             analyticsSvc, workflowSvc, aiSvc, notificationSvc, i18nSvc,
             uiSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
+            metadataSvc,
         ] = await Promise.all([
             this.resolveService(CoreServiceName.enum.auth),
             this.resolveService(CoreServiceName.enum.search),
@@ -860,6 +863,9 @@ export class HttpDispatcher {
             // Not a CoreServiceName — plugin-mcp registers under the bare
             // 'mcp' key, the same string handleMcpRequest resolves.
             this.resolveService('mcp'),
+            // [#4089] Resolved for its self-description alone: the `metadata`
+            // slot is reported from what actually fills it, not hardcoded.
+            this.resolveService(CoreServiceName.enum.metadata),
         ]);
 
         const hasAuth         = !!authSvc;
@@ -872,6 +878,14 @@ export class HttpDispatcher {
         // `declared ≠ enforced` failure `hasMcp` below refuses by construction.
         // Same predicate ⇒ same answer. #4000 did this for `analytics` alone;
         // #4058 extended it to the rest of the dispatcher-owned domains.
+        //
+        // [#4087] `file-storage` is the one slot here whose surface is NOT a
+        // dispatcher domain any more — the `/storage` bridge was retired and
+        // service-storage mounts `/api/v1/storage` itself. The predicate still
+        // holds, for the same reason and one step removed: `handlerReady` is
+        // exactly "does an HTTP handler serve this slot", so an occupant that
+        // mounts nothing (plugin-dev's in-memory implementation) must not have
+        // `${prefix}/storage` advertised on its behalf.
         //
         // A `degraded` implementation keeps its route: `handlerReady` defaults
         // to `true` for it and its domain keeps serving it (that is the whole
@@ -911,6 +925,8 @@ export class HttpDispatcher {
                 packages:      `${prefix}/packages`,
                 auth:          hasAuth ? `${prefix}/auth` : undefined,
                 ui:            hasUi ? `${prefix}/ui` : undefined,
+                // Not a dispatcher domain since #4087 — this advertises
+                // service-storage's own mount. Gate unchanged (see above).
                 storage:       hasFiles ? `${prefix}/storage` : undefined,
                 analytics:     hasAnalytics ? `${prefix}/analytics` : undefined,
                 automation:    hasAutomation ? `${prefix}/automation` : undefined,
@@ -971,6 +987,9 @@ export class HttpDispatcher {
         // Self-description of the registered realtime service, if any (D12).
         const realtimeSelf = realtimeSvc ? readServiceSelfInfo(realtimeSvc) : undefined;
 
+        // Self-description of whatever fills the `metadata` slot (D12, #4089).
+        const metadataSelf = metadataSvc ? readServiceSelfInfo(metadataSvc) : undefined;
+
         // Derive locale info from actual i18n service when available
         let locale = { default: 'en', supported: ['en'], timezone: 'UTC' };
         if (hasI18n && i18nSvc) {
@@ -1005,8 +1024,34 @@ export class HttpDispatcher {
                 i18n: hasI18n,
             },
             services: {
-                // Kernel-provided (always available via protocol implementation)
-                metadata:       { enabled: true, status: 'degraded' as const, handlerReady: true, route: routes.metadata, provider: 'kernel', message: 'In-memory registry; DB persistence pending' },
+                // Kernel-provided (always served by the protocol implementation)
+                // — but the verdict is NOT hardcoded (#4089). Three different
+                // implementations fill this slot: MetadataPlugin's
+                // sys_metadata-backed manager, the kernel's in-memory fallback
+                // (`createMemoryMetadata`) and plugin-dev's dev registry. Only
+                // the implementation knows which it is, so read its D12
+                // self-description and report that.
+                //
+                // The hardcode this replaces (`degraded` + "In-memory registry;
+                // DB persistence pending") was the mirror image of
+                // metadata-protocol's hardcoded `available`: the two builders
+                // gave the same slot opposite answers, and each was wrong for
+                // half the stacks — this one understated a persisted registry,
+                // that one overstated the in-memory fallback.
+                //
+                // `handlerReady` stays unconditionally true and is not taken
+                // from the self-description: it answers "is /meta mounted?",
+                // and `handleMetadata` serves that route from the protocol on
+                // every host — a degraded service in this slot does not unmount
+                // it. (Contrast `realtime` below, where no surface exists at all.)
+                metadata:       {
+                                    enabled: true,
+                                    status: metadataSelf?.status ?? ('available' as const),
+                                    handlerReady: true,
+                                    route: routes.metadata,
+                                    provider: 'kernel',
+                                    ...(metadataSelf?.message ? { message: metadataSelf.message } : {}),
+                                },
                 data:           svcAvailable(routes.data, 'kernel'),
                 // Plugin-provided — only available when a plugin registers the service
                 auth:           hasAuth ? svcAvailable(routes.auth, undefined, authSvc) : svcUnavailable('auth'),
@@ -1198,11 +1243,6 @@ export class HttpDispatcher {
         } catch {
             return undefined;
         }
-    }
-
-    /** Thin delegate — body extracted to `./domains/storage.ts` (D11③ PR-3). */
-    async handleStorage(path: string, method: string, file: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        return handleStorageRequest(this.domainDeps, path, method, file, context);
     }
 
     /** Thin delegate — body extracted to `./domains/ui.ts` (D11③ PR-3). */

@@ -412,11 +412,13 @@ describe('import route — required-field dry-run fidelity', () => {
     expect(dry._json.results.find((r: any) => !r.ok)).toMatchObject({ row: 1, field: 'status', code: 'required' });
     expect(await engine.findOne('member', { where: { id: 'm2' } })).toBeNull(); // dry run never writes
 
-    // Real insert: SAME verdict (parity), and a readable `status is required`
-    // instead of a raw `NOT NULL constraint failed: member.status`.
+    // Real insert: SAME verdict (parity), and a readable required message
+    // instead of a raw `NOT NULL constraint failed: member.status`. The field is
+    // named by its declared LABEL, not the API name (#3957) — `status` is
+    // declared `label: 'Status'` in this fixture.
     const real = await imp({ format: 'json', runAutomations: false, rows });
     expect(real._json).toMatchObject({ total: 2, ok: 1, errors: 1, created: 1 });
-    expect(real._json.results.find((r: any) => !r.ok)).toMatchObject({ field: 'status', code: 'required', error: 'status is required' });
+    expect(real._json.results.find((r: any) => !r.ok)).toMatchObject({ field: 'status', code: 'required', error: 'Status is required' });
     expect((await engine.findOne('member', { where: { id: 'm2' } }))?.status).toBe('active');
     expect(await engine.findOne('member', { where: { id: 'm1' } })).toBeNull();
   });
@@ -449,15 +451,18 @@ describe('import route — required-field dry-run fidelity', () => {
 
     const dry = await imp({ format: 'json', dryRun: true, rows });
     expect(dry._json).toMatchObject({ dryRun: true, total: 1, ok: 0, errors: 1, created: 0 });
+    // #3957 — the message names the field by its LABEL, not the API column. The
+    // dry-run pre-check and the engine render from the same catalog, which is
+    // what keeps "same verdict, same message" true after localization.
     expect(dry._json.results[0]).toMatchObject({
       row: 1, ok: false, action: 'failed', field: 'penalty_amount',
-      code: 'min_value', error: 'penalty_amount must be ≥ 0',
+      code: 'min_value', error: '处罚金额 must be ≥ 0',
     });
 
     // The real write reaches the engine's validateRecord and says the same.
     const real = await imp({ format: 'json', rows });
     expect(real._json).toMatchObject({ total: 1, ok: 0, errors: 1, created: 0 });
-    expect(real._json.results[0].error).toContain('penalty_amount must be ≥ 0');
+    expect(real._json.results[0].error).toContain('处罚金额 must be ≥ 0');
     expect(await engine.findOne('member', { where: { id: 'p1' } })).toBeNull();
   });
 
@@ -467,7 +472,7 @@ describe('import route — required-field dry-run fidelity', () => {
     ] });
     expect(over._json).toMatchObject({ ok: 0, errors: 1 });
     expect(over._json.results[0]).toMatchObject({
-      field: 'nickname', code: 'max_length', error: 'nickname must be ≤ 5 characters (got 11)',
+      field: 'nickname', code: 'max_length', error: 'Nickname must be ≤ 5 characters (got 11)',
     });
 
     // Boundary values are legal — the pre-check must not over-reject.

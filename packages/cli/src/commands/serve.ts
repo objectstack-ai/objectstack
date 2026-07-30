@@ -1020,13 +1020,37 @@ export default class Serve extends Command {
       const configHasMetadata = !!(
         config.objects || config.manifest || config.apps || config.flows || config.apis
       );
+      // ORDERING (#4085): the wrap is APPENDED to `plugins` rather than
+      // registered here, because plugin registration order IS the kernel's
+      // init/start order (`resolveDependencies` preserves insertion order for
+      // plugins that declare no `dependencies`, and AppPlugin declares none).
+      // AppPlugin.init() registers its manifest through the `manifest` service
+      // and AppPlugin.start() seeds through the default datasource — both owned
+      // by plugins that live in `plugins[]` (ObjectQLPlugin /
+      // DefaultDatasourcePlugin, contributed by `createStandaloneStack`) and
+      // registered by the loop far below. Registering the wrap HERE put it
+      // ahead of them, so config-boot died in Phase 1 with
+      // "Service 'manifest' is async - use await" whenever no compiled
+      // `dist/objectstack.json` existed — the artifact path never hit it only
+      // because `createStandaloneStack` appends ITS AppPlugin after the engine
+      // (which also made the crash look artifact-related rather than
+      // order-related). Appending puts the config-derived app in exactly that
+      // same slot, so both boot paths share one plugin order.
       if (!hasAppPluginAlready && configHasMetadata) {
         try {
             const { AppPlugin } = await import('@objectstack/runtime');
-            await kernel.use(new AppPlugin(config));
-            trackPlugin('App');
+            plugins = [...plugins, new AppPlugin(config)];
         } catch (e: any) {
-            // silent
+            // Non-fatal — the platform still boots, just without this app's
+            // metadata. But it must SAY so: this catch was silent, and the two
+            // things it swallows (a malformed envelope AppPlugin rejects by
+            // construction, an unresolvable @objectstack/runtime) both leave a
+            // server answering with zero objects and no stated reason — the
+            // same class of invisible boot failure as #4085 itself.
+            console.warn(chalk.yellow(
+              `  ⚠ Skipped registering the app defined in this config: ${e?.message ?? e}\n`
+              + '    Its objects/flows will NOT be served. Fix the config (or pin an AppPlugin in `plugins`).',
+            ));
         }
       }
 

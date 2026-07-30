@@ -42,6 +42,10 @@ import {
   isMultiValueField as specIsMultiValueField,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import {
+  renderValidationMessage,
+  type ValidationMessageTranslator,
+} from '@objectstack/spec/system';
 
 /**
  * Field types whose stored value points at another record (id). The spec's
@@ -108,6 +112,14 @@ export interface CoerceContext {
   createMissingOptions?: boolean;
   /** Async reference resolver (name/email/id → record id). Optional. */
   resolveRef?: RefResolver;
+  /**
+   * Locale of the importing principal (`ExecutionContext.locale`). Cell-coercion
+   * failures land in the same row report as the engine's validation errors, so
+   * they are localized from the same catalog (#3957). Absent → `en`.
+   */
+  locale?: string;
+  /** `II18nService.t`-compatible lookup for message overrides (#3957). */
+  translate?: ValidationMessageTranslator;
 }
 
 /** A per-field coercion failure, shaped like the engine's validation errors. */
@@ -121,6 +133,34 @@ export interface FieldCoerceError {
    */
   code: FieldErrorCode;
   message: string;
+}
+
+/**
+ * Build a coercion failure whose message names the column by its (localized)
+ * label and quotes the offending cell — never the API field name (#3957).
+ *
+ * `code` stays the machine identity the importer's row report and its tests key
+ * off; `messageKey` selects the sentence from the shared catalog.
+ */
+function coerceError(
+  meta: ExportFieldMeta | undefined,
+  field: string,
+  code: FieldErrorCode,
+  messageKey: string,
+  value: unknown,
+  ctx: CoerceContext,
+): { error: FieldCoerceError } {
+  const label = meta?.label?.trim() || field;
+  return {
+    error: {
+      field,
+      code,
+      message: renderValidationMessage(
+        { messageKey, label, field, params: { value: String(value) } },
+        { locale: ctx.locale, translate: ctx.translate },
+      ),
+    },
+  };
 }
 
 // ── blank / null handling ──────────────────────────────────────────
@@ -291,19 +331,23 @@ export async function coerceFieldValue(
 
   if (BOOL_TYPES.has(t)) {
     const b = parseBooleanCell(raw);
-    if (b === undefined) return { error: { field, code: 'invalid_boolean', message: `${field}: "${String(raw)}" is not a boolean` } };
+    if (b === undefined) return coerceError(meta, field, 'invalid_boolean', 'import_invalid_boolean', raw, ctx);
     return { value: b };
   }
 
   if (NUMBER_TYPES.has(t)) {
     const n = parseNumberCell(raw);
-    if (n === undefined) return { error: { field, code: 'invalid_number', message: `${field}: "${String(raw)}" is not a number` } };
+    if (n === undefined) return coerceError(meta, field, 'invalid_number', 'import_invalid_number', raw, ctx);
     return { value: n };
   }
 
   if (t === 'date' || t === 'datetime' || t === 'time') {
     const d = parseDateCell(raw, t);
-    if (d === undefined) return { error: { field, code: 'invalid_date', message: `${field}: "${String(raw)}" is not a valid ${t}` } };
+    if (d === undefined) {
+      // One code, three sentences — a `time` cell is not "not a valid date".
+      const key = t === 'datetime' ? 'import_invalid_datetime' : t === 'time' ? 'import_invalid_time' : 'import_invalid_date';
+      return coerceError(meta, field, 'invalid_date', key, raw, ctx);
+    }
     return { value: d };
   }
 
@@ -319,7 +363,7 @@ export async function coerceFieldValue(
         const v = matchOption(part, meta?.options);
         if (v === undefined) {
           if (ctx.createMissingOptions) { out.push(part); continue; }
-          return { error: { field, code: 'invalid_option', message: `${field}: "${part}" is not a known option` } };
+          return coerceError(meta, field, 'invalid_option', 'import_unknown_option', part, ctx);
         }
         out.push(v);
       }
@@ -328,7 +372,7 @@ export async function coerceFieldValue(
     const v = matchOption(raw, meta?.options);
     if (v === undefined) {
       if (ctx.createMissingOptions) return { value: String(raw).trim() };
-      return { error: { field, code: 'invalid_option', message: `${field}: "${String(raw)}" is not a known option` } };
+      return coerceError(meta, field, 'invalid_option', 'import_unknown_option', raw, ctx);
     }
     return { value: v };
   }
@@ -347,10 +391,10 @@ export async function coerceFieldValue(
       for (const token of tokens) {
         const m = normalizeRefMatch(await ctx.resolveRef(meta.reference, token, meta));
         if (m.ambiguous) {
-          return { error: { field, code: 'reference_ambiguous', message: `${field}: "${token}" matches more than one ${meta.reference} — use a unique value or the record id` } };
+          return coerceError(meta, field, 'reference_ambiguous', 'import_reference_ambiguous', token, ctx);
         }
         if (m.id === undefined) {
-          return { error: { field, code: 'reference_not_found', message: `${field}: no ${meta.reference} matches "${token}"` } };
+          return coerceError(meta, field, 'reference_not_found', 'import_reference_not_found', token, ctx);
         }
         out.push(m.id);
       }
@@ -363,10 +407,10 @@ export async function coerceFieldValue(
     if (!ctx.resolveRef || !meta?.reference) return { value: display };
     const match = normalizeRefMatch(await ctx.resolveRef(meta.reference, display, meta));
     if (match.ambiguous) {
-      return { error: { field, code: 'reference_ambiguous', message: `${field}: "${display}" matches more than one ${meta.reference} — use a unique value or the record id` } };
+      return coerceError(meta, field, 'reference_ambiguous', 'import_reference_ambiguous', display, ctx);
     }
     if (match.id === undefined) {
-      return { error: { field, code: 'reference_not_found', message: `${field}: no ${meta.reference} matches "${display}"` } };
+      return coerceError(meta, field, 'reference_not_found', 'import_reference_not_found', display, ctx);
     }
     return { value: match.id };
   }
@@ -474,7 +518,29 @@ const BOUNDED_STRING_TYPES = new Set([
 export function firstConstraintViolation(
   data: Record<string, unknown>,
   metaMap: Map<string, ExportFieldMeta>,
+  // Optional so existing callers keep working; supplied by the runner so a dry
+  // run's verdict reads in the same language as the real rejection (#3957).
+  ctx: Pick<CoerceContext, 'locale' | 'translate'> = {},
 ): FieldCoerceError | null {
+  // Mirrors the engine's own rendering — same catalog, same label resolution —
+  // so a predicted violation and the real one are the SAME sentence.
+  const bound = (
+    meta: ExportFieldMeta,
+    code: FieldErrorCode,
+    constraint: Record<string, unknown>,
+  ): FieldCoerceError => ({
+    field: meta.name,
+    code,
+    message: renderValidationMessage(
+      {
+        messageKey: code,
+        label: meta.label?.trim() || meta.name,
+        field: meta.name,
+        params: constraint,
+      },
+      { locale: ctx.locale, translate: ctx.translate },
+    ),
+  });
   for (const meta of metaMap.values()) {
     if (meta.system || meta.readonly) continue;
     if (REQUIRED_CHECK_SKIP.has(meta.name)) continue;
@@ -486,10 +552,10 @@ export function firstConstraintViolation(
       const n = typeof value === 'number' ? value : Number(value);
       if (!Number.isFinite(n)) continue; // a non-number is coerceRow's verdict, not ours
       if (meta.min !== undefined && n < meta.min) {
-        return { field: meta.name, code: 'min_value', message: `${meta.name} must be ≥ ${meta.min}` };
+        return bound(meta, 'min_value', { min: meta.min });
       }
       if (meta.max !== undefined && n > meta.max) {
-        return { field: meta.name, code: 'max_value', message: `${meta.name} must be ≤ ${meta.max}` };
+        return bound(meta, 'max_value', { max: meta.max });
       }
       continue;
     }
@@ -500,10 +566,10 @@ export function firstConstraintViolation(
       // measuring it.
       const s = typeof value === 'string' ? value : String(value);
       if (meta.maxLength !== undefined && s.length > meta.maxLength) {
-        return { field: meta.name, code: 'max_length', message: `${meta.name} must be ≤ ${meta.maxLength} characters (got ${s.length})` };
+        return bound(meta, 'max_length', { maxLength: meta.maxLength, actual: s.length });
       }
       if (meta.minLength !== undefined && s.length < meta.minLength) {
-        return { field: meta.name, code: 'min_length', message: `${meta.name} must be ≥ ${meta.minLength} characters (got ${s.length})` };
+        return bound(meta, 'min_length', { minLength: meta.minLength, actual: s.length });
       }
     }
   }
