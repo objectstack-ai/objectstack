@@ -165,7 +165,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `external-catalog.zod.ts` | 4 | wire (p) | |
 | `field-value.zod.ts` / `seed.zod.ts` / `validation.zod.ts` | 1 ea | mixed (p) | |
 
-### `automation/` — 81 sites
+### `automation/` — 89 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
@@ -179,6 +179,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `approval.zod.ts` | 4 | authorable | **strict as of #4001 step 3** — all four authoring schemas (node config / approver / escalation / decision-output). The published JSON schema carries `additionalProperties: false` into the Studio form AND `registerFlow()` config validation (#4027/#4040), so an unknown key in an approval node's `config` is rejected at registration too — verified: `z.toJSONSchema` on the strict lazySchema does not throw (#3746 hazard checked) |
 | `node-executor.zod.ts` | 4 | wire | executor contract |
 | `io-node-config.zod.ts` | 2 | authorable | `NotifyConfigSchema` / `HttpConfigSchema` (#4045) — the sibling contracts that validate the **open** `config` slot on flow `notify` / `http` nodes. Authored per-node, so the open-slot exemption above does not extend to them; candidate once the executors' own drift is verified |
+| `builtin-node-config.zod.ts` | 8 | authorable | Same family (#4045): the CRUD quartet, `screen`, `map`. Written from what the executors read rather than from the descriptors' `configSchema` literals, and reconciled bidirectionally by `builtin-node-form-zod-ledger.test.ts` — so unlike most rows here, this one already has a drift check of its own. Same candidacy note as `io-node-config` |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
 
 ### `security/` — 20 sites
@@ -325,6 +326,14 @@ omission, now classified.
 
 That is the argument for the gate in one paragraph: the people most familiar
 with this ledger, editing it in the same week, still left eleven drifts in it.
+
+**And then it worked for real, before it had even merged.** While the gate sat
+in review, `main` landed `automation/builtin-node-config.zod.ts` (#4045/#4228) —
+eight new sites, sibling to `io-node-config.zod.ts`. Merging `main` turned the
+gate red on a branch whose own diff had not touched a single schema, which is
+precisely the intended behaviour: the file arrived, so someone had to classify
+it. It is now a row. Every existing count survived that merge unchanged, so the
+failure was exactly as narrow as it should have been.
 
 Long tail stays gated on a verification pass per shape — never a one-shot
 "make all ~453 sites strict" (ADR-0054 ratchet; #4001's own recommendation).
