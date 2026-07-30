@@ -78,6 +78,11 @@ export const jaJP: TranslationData = {
         notes: { label: 'メモ' },
         category_color: { label: 'カテゴリ色' },
       },
+      _views: {
+        list: { label: 'すべてのタスク' },
+        overdue: { label: '期限切れのタスク' },
+        due_today: { label: '本日期限' },
+      },
     },
   },
   apps: {

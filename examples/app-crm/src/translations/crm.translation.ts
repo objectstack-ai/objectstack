@@ -126,6 +126,11 @@ export const CrmTranslationBundle = defineTranslationBundle({
           discount_percent: { label: '折扣 (%)' },
           owner_id: { label: '负责人' },
         },
+        _views: {
+          list: { label: '全部商机' },
+          all: { label: '全部商机' },
+          pipeline: { label: '商机看板' },
+        },
       },
       crm_lead: {
         label: '线索',
@@ -138,6 +143,11 @@ export const CrmTranslationBundle = defineTranslationBundle({
           lead_score: { label: '线索评分' },
           source: { label: '来源' },
         },
+        _views: {
+          list: { label: '全部线索' },
+          all: { label: '全部线索' },
+          pipeline: { label: '线索看板' },
+        },
       },
       crm_activity: {
         label: '活动',
@@ -149,6 +159,11 @@ export const CrmTranslationBundle = defineTranslationBundle({
           due_date: { label: '截止日期' },
           contact: { label: '联系人' },
           opportunity: { label: '商机' },
+        },
+        _views: {
+          list: { label: '全部活动' },
+          all: { label: '全部活动' },
+          calendar: { label: '活动日历' },
         },
       },
     },
