@@ -50,11 +50,10 @@ export async function handleSecurityRequest(
     }
 
     const ec = context.executionContext;
-    // Admin surface — anonymous is denied UNCONDITIONALLY (`requireAuth:
-    // true` hardcoded), independent of the deployment posture: even a
-    // `requireAuth: false` demo must not let anonymous callers list or
-    // confirm audience bindings. Shares the decision + body with every
-    // other HTTP seam (#2567).
+    // Admin surface — anonymous is denied UNCONDITIONALLY (#2567, #3963):
+    // even before the opt-out was retired this seam never honoured it, so an
+    // anonymous caller could never list or confirm audience bindings. Shares
+    // the decision + body with every other HTTP seam.
     if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem })) {
         return {
             handled: true,
