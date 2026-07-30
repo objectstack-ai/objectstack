@@ -48,11 +48,28 @@ const logError = (...args: unknown[]) => (globalThis as any).console?.error(...a
 const logWarn = (...args: unknown[]) => ((globalThis as any).console?.warn ?? (globalThis as any).console?.error)?.(...args);
 
 /**
- * Metadata types whose user-facing labels are localized at the REST boundary
- * via `translateMetadataDocument`. Keep in sync with the type dispatch in
- * `@objectstack/spec/system`'s `translateMetadataDocument`.
+ * Whether a metadata type's user-facing labels are localized at the REST
+ * boundary by `translateMetadataDocument`.
+ *
+ * DERIVED from the spec's translator dispatch. This used to be a hand-copied
+ * literal set under a "keep in sync with the type dispatch" comment — the
+ * shape #3786 was filed about: adding a translator in spec silently left the
+ * REST boundary serving that type untranslated, with no error anywhere.
+ * Reading the answer from `TRANSLATABLE_METADATA_TYPES` means there is no
+ * second list to forget.
+ *
+ * Resolved lazily and memoised, so `@objectstack/spec/system` stays off the
+ * module-init path exactly as it was before — the same `await import` the
+ * translate helpers below already perform, and a module-cache hit after the
+ * first call.
  */
-const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'dashboard', 'page']);
+let translatableMetaTypes: ReadonlySet<string> | undefined;
+async function isTranslatableMetaType(type: string): Promise<boolean> {
+    if (!translatableMetaTypes) {
+        ({ TRANSLATABLE_METADATA_TYPES: translatableMetaTypes } = await import('@objectstack/spec/system'));
+    }
+    return translatableMetaTypes.has(type);
+}
 
 
 /**
@@ -1922,7 +1939,7 @@ export class RestServer {
      */
     private async translateMetaItem(req: any, type: string, environmentId: string | undefined, item: any, i18nService?: any): Promise<any> {
         if (!item || typeof item !== 'object') return item;
-        if (!TRANSLATABLE_META_TYPES.has(type)) return item;
+        if (!(await isTranslatableMetaType(type))) return item;
         // The cached read path resolves the i18n service up-front (to build a
         // locale-aware ETag) and passes it here so we don't repeat the
         // potentially registry-hitting lookup on every request.
@@ -1951,7 +1968,7 @@ export class RestServer {
      * Translate a list of metadata documents using `translateMetaItem`.
      */
     private async translateMetaItems(req: any, type: string, environmentId: string | undefined, items: any): Promise<any> {
-        if (!TRANSLATABLE_META_TYPES.has(type)) return items;
+        if (!(await isTranslatableMetaType(type))) return items;
         // `getMetaItems` may hand back a bare array or an `{ items: [...] }`
         // envelope. Unwrap so list responses are localized the same way the
         // single-item route is; a non-array, non-envelope value is returned

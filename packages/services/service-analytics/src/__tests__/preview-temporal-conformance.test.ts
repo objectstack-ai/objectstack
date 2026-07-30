@@ -18,14 +18,59 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TEMPORAL_CASES, TEMPORAL_ROWS } from '@objectstack/spec/data';
-import { matchesWhere } from '../preview-evaluator.js';
+import { TEMPORAL_CASES, TEMPORAL_NOW, TEMPORAL_ROWS } from '@objectstack/spec/data';
+import type { Cube } from '@objectstack/spec/data';
+import { resolveFilterTokens } from '@objectstack/core';
+import { evaluateAnalyticsQueryOverRows, matchesWhere } from '../preview-evaluator.js';
+
+const resolveTokens = <T,>(filter: T): T =>
+  resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
 
 describe('preview-evaluator — temporal conformance', () => {
   for (const c of TEMPORAL_CASES) {
     it(c.name, () => {
       const got = TEMPORAL_ROWS.filter((r) => matchesWhere(r as any, c.filter as any)).map((r) => r.id);
       expect(got, c.note).toEqual(c.expected);
+    });
+
+    // The D-A3 token axis (#4081): the same case spelled in relative tokens,
+    // resolved at the pinned instant, must reach the same rows.
+    if (c.tokenFilter) {
+      it(`${c.name} — via relative tokens`, () => {
+        const where = resolveTokens(c.tokenFilter);
+        const got = TEMPORAL_ROWS.filter((r) => matchesWhere(r as any, where as any)).map((r) => r.id);
+        expect(got, c.note).toEqual(c.expected);
+      });
+    }
+  }
+});
+
+describe('preview-evaluator — timeDimensions.dateRange temporal conformance', () => {
+  // The dashboard-window path — the surface #3650 broke (the range was
+  // dropped entirely and every row charted). Windows tagged with a
+  // `dateRange` spelling run through the full evaluator, grouped by `id` so
+  // the output rows ARE the matched row ids.
+  const CUBE = {
+    name: 'conformance_ds',
+    sql: 'conformance',
+    dimensions: { id: { name: 'id', type: 'string', sql: 'id' } },
+    measures: { count: { name: 'count', type: 'count', sql: '*' } },
+  } as unknown as Cube;
+
+  for (const c of TEMPORAL_CASES) {
+    if (!c.dateRange) continue;
+    it(`${c.name} — via timeDimensions.dateRange`, () => {
+      const result = evaluateAnalyticsQueryOverRows(
+        {
+          measures: ['count'],
+          dimensions: ['id'],
+          timeDimensions: [{ dimension: c.field, dateRange: resolveTokens(c.dateRange) }],
+        },
+        CUBE,
+        TEMPORAL_ROWS.map((r) => ({ ...r })),
+      );
+      const got = result.rows.map((r) => String(r.id)).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
     });
   }
 });

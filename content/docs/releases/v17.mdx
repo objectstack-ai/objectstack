@@ -789,6 +789,14 @@ somewhere else and did, in three different somewhere-elses: `error.details.code`
 
 ### Dead spec clusters removed
 
+**App shell (2026-06 liveness audit, #4001 app step).** `App.version`,
+`App.aria`, `App.objects`, `App.apis`, `App.sharing`, `App.embed` and
+`App.mobileNavigation` are tombstoned — none was ever read by framework or
+objectui. `sharing`/`embed` were the dangerous pair: a declared public-access
+surface no route enforced (the live path is `FormView.sharing`).
+`mobileNavigation` was a mode picker that changed nothing. Each key rejects
+with its prescription; `os migrate meta` deletes them from your source.
+
 Each of these parsed and did nothing. None has a runtime consumer; delete the
 import or the authored key.
 

@@ -57,6 +57,29 @@ export interface II18nService {
      */
     setDefaultLocale?(locale: string): void;
 
+    /**
+     * Field labels for one object in one locale, keyed by field name.
+     *
+     * [#4127] A provider-supplied SHORTCUT, not the source of truth. Both
+     * serving surfaces — the dispatcher's `/i18n/labels/:object/:locale` and
+     * service-i18n's own mount — probe for it and, finding nothing, derive the
+     * labels from the locale's loaded bundle (`resolveObjectFieldLabels`).
+     * That derivation is the path every provider in this repo takes.
+     *
+     * It is declared anyway because both probes already existed and both call
+     * sites documented it as "optional on `II18nService`" — which was simply
+     * not true until now. An undeclared method probed in two places is how a
+     * second, unwritten contract starts (#4087 is what that costs). A provider
+     * that keeps labels somewhere the bundle cannot express — a translation
+     * memory, a per-tenant override table — implements this and skips the
+     * derivation; everyone else omits it and loses nothing.
+     *
+     * @param objectName - Object whose fields to label
+     * @param locale - BCP-47 locale code
+     * @returns Field name → label, for the fields this provider knows
+     */
+    getFieldLabels?(objectName: string, locale: string): Record<string, string>;
+
     // ── Diff detection ─────────────────────────────────────────────────
 
     /**

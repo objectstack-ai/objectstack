@@ -1481,6 +1481,16 @@ export class ObjectStackProtocolImplementation implements
         // mounted whichever implementation occupies the slot.
         const metadataSelf = readServiceSelfInfo(registeredServices.get('metadata'));
 
+        // [#4130] `data` was the last self-judging entry in this block. Same
+        // reasoning, one degree weaker: its hardcoded `available` is currently
+        // true, but only because ObjectQL is the slot's sole producer and
+        // plugin-dev (whose `data` stub declares `stub`) always loads
+        // ObjectQLPlugin as a child. That is a load-order convention in another
+        // package, not something this builder verifies — so verify it here.
+        // Unmarked implementation ⇒ `available` + `handlerReady: true`, i.e.
+        // exactly what the hardcode said, now derived rather than asserted.
+        const dataSelf = readServiceSelfInfo(registeredServices.get('data'));
+
         const services: Record<string, ServiceInfo> = {
             // --- Kernel-provided (objectql is an example kernel implementation) ---
             metadata:  {
@@ -1491,7 +1501,14 @@ export class ObjectStackProtocolImplementation implements
                 provider: 'objectql',
                 ...(metadataSelf?.message ? { message: metadataSelf.message } : {}),
             },
-            data:      { enabled: true, status: 'available' as const, route: '/api/v1/data', provider: 'objectql' },
+            data:      {
+                enabled: true,
+                status: dataSelf?.status ?? ('available' as const),
+                handlerReady: dataSelf?.handlerReady ?? true,
+                route: '/api/v1/data',
+                provider: 'objectql',
+                ...(dataSelf?.message ? { message: dataSelf.message } : {}),
+            },
         };
 
         // [#4000, #4058] The dispatcher answers a self-declared non-handler in

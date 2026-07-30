@@ -44,11 +44,12 @@ const result = AIChatWindowProps.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Button display label |
-| **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | ✅ | Button visual variant |
-| **size** | `Enum<'small' \| 'medium' \| 'large'>` | ✅ | Button size |
+| **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant |
+| **size** | `Enum<'small' \| 'medium' \| 'large'>` | optional | Button size |
 | **icon** | `string` | optional | Icon name (Lucide icon) |
-| **iconPosition** | `Enum<'left' \| 'right'>` | ✅ | Icon position relative to label |
-| **disabled** | `boolean` | ✅ | Disable the button |
+| **iconPosition** | `Enum<'left' \| 'right'>` | optional | Icon position relative to label |
+| **disabled** | `boolean` | optional | Disable the button |
+| **action** | `{ type?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; name?: string; label?: string; target?: string; … }` | optional | Inline action executed on click |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 

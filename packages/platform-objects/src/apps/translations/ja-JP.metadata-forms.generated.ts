@@ -78,17 +78,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "一意",
         helpText: "重複値を許可しない"
       },
-      "fields.indexed": {
-        label: "インデックス済み",
-        helpText: "高速検索のためにデータベースインデックスを作成"
-      },
       "fields.readonly": {
         label: "読み取り専用",
         helpText: "表示されるがユーザーは編集不可"
-      },
-      "fields.immutable": {
-        label: "変更不可",
-        helpText: "作成時のみ編集可能、その後はロック"
       },
       "fields.hidden": {
         label: "非表示",
@@ -102,17 +94,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "並び替え可能",
         helpText: "この列での並び替えを許可"
       },
-      "fields.filterable": {
-        label: "フィルター可能",
-        helpText: "この列でのフィルターを許可"
-      },
       "fields.defaultValue": {
         label: "既定値",
         helpText: "新規レコードの既定値（JSON リテラル）"
-      },
-      "fields.placeholder": {
-        label: "プレースホルダー",
-        helpText: "プレースホルダーのヒント"
       },
       "fields.maxLength": {
         label: "最大長",
@@ -162,94 +146,90 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "参照",
         helpText: "対象オブジェクト（lookup/master_detail 用）"
       },
-      "fields.referenceFilter": {
-        label: "参照フィルター",
-        helpText: "ピッカーに適用する CEL フィルター"
+      "fields.lookupFilters": {
+        label: "Lookup Filters",
+        helpText: "Filter rules applied to the picker ({field, operator, value})"
       },
-      "fields.cascadeDelete": {
-        label: "カスケード削除",
-        helpText: "親の削除時に子も削除"
+      "fields.deleteBehavior": {
+        label: "Delete Behavior",
+        helpText: "What happens when the referenced record is deleted"
       },
       "fields.multiple": {
         label: "複数選択",
         helpText: "複数レコードの選択を許可"
       },
-      "fields.formula": {
-        label: "数式",
-        helpText: "CEL 公式式"
+      "fields.expression": {
+        label: "Expression",
+        helpText: "CEL formula expression"
       },
       "fields.returnType": {
         label: "戻り値の型",
         helpText: "公式の結果型"
       },
-      "fields.summaryType": {
-        label: "集計タイプ",
-        helpText: "集計方法"
+      "fields.summaryOperations": {
+        label: "Summary Operations",
+        helpText: "Roll-up: which child object, which field, which aggregation"
       },
-      "fields.summaryField": {
-        label: "集計フィールド",
-        helpText: "集計対象の子オブジェクトのフィールド"
+      "fields.summaryOperations.object": {
+        label: "Object",
+        helpText: "Source child object name"
       },
-      "fields.displayFormat": {
-        label: "表示形式",
-        helpText: "例: \"INV-{0000}\""
+      "fields.summaryOperations.field": {
+        label: "Field",
+        helpText: "Field on the child object to aggregate (ignored for count)"
       },
-      "fields.startingNumber": {
-        label: "開始番号",
-        helpText: "連番の開始値"
+      "fields.summaryOperations.function": {
+        label: "Function",
+        helpText: "Aggregation function"
+      },
+      "fields.autonumberFormat": {
+        label: "Autonumber Format",
+        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
       },
       "fields.language": {
         label: "言語",
         helpText: "エディター言語（例: sql, javascript）"
       },
-      "fields.validation": {
-        label: "検証",
-        helpText: "CEL 述語。true と評価される必要があります"
-      },
-      "fields.errorMessage": {
-        label: "エラーメッセージ",
-        helpText: "検証失敗時に表示"
-      },
-      "fields.audit": {
-        label: "監査",
-        helpText: "このフィールドの変更を監査"
-      },
       "fields.trackHistory": {
         label: "履歴追跡",
         helpText: "変更履歴を保持"
       },
-      "fields.pii": {
-        label: "個人情報",
-        helpText: "個人識別情報"
+      "fields.visibleWhen": {
+        label: "Visible When",
+        helpText: "CEL predicate — field is shown only when TRUE"
       },
-      "fields.encrypted": {
-        label: "暗号化",
-        helpText: "保存時に暗号化"
+      "fields.readonlyWhen": {
+        label: "Readonly When",
+        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
       },
-      capabilities: {
-        label: "機能",
-        helpText: "システム機能の有効/無効"
+      "fields.requiredWhen": {
+        label: "Required When",
+        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
       },
-      "capabilities.trackHistory": {
-        label: "履歴追跡"
+      enable: {
+        label: "Enable",
+        helpText: "Enable/disable system features"
       },
-      "capabilities.searchable": {
-        label: "検索可能"
+      "enable.trackHistory": {
+        label: "Track History"
       },
-      "capabilities.apiEnabled": {
-        label: "API 有効"
+      "enable.searchable": {
+        label: "Searchable"
       },
-      "capabilities.files": {
-        label: "ファイル"
+      "enable.apiEnabled": {
+        label: "Api Enabled"
       },
-      "capabilities.feeds": {
-        label: "フィード"
+      "enable.files": {
+        label: "Files"
       },
-      "capabilities.activities": {
-        label: "活動"
+      "enable.feeds": {
+        label: "Feeds"
       },
-      "capabilities.clone": {
-        label: "複製"
+      "enable.activities": {
+        label: "Activities"
+      },
+      "enable.clone": {
+        label: "Clone"
       },
       datasource: {
         label: "データソース",
@@ -528,6 +508,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "body.timeoutMs": {
         label: "タイムアウト（ms）",
         helpText: "呼び出しごとのタイムアウト（ms）"
+      },
+      "body.memoryMb": {
+        label: "Memory Mb",
+        helpText: "Per-invocation memory cap (MB, max 256)"
       },
       handler: {
         label: "ハンドラー",
@@ -818,6 +802,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "interfaceConfig.filterBy": {
         label: "Filter By",
         helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+      },
+      "interfaceConfig.sort": {
+        label: "Sort",
+        helpText: "Default sort order for the page, defined directly on the page."
       },
       "interfaceConfig.levels": {
         label: "Levels",
@@ -1111,6 +1099,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Timeout Ms",
         helpText: "Per-invocation timeout (ms)"
       },
+      "body.memoryMb": {
+        label: "Memory Mb",
+        helpText: "Per-invocation memory cap (MB, max 256)"
+      },
       params: {
         label: "パラメーター",
         helpText: "ユーザー入力パラメーター（実行前にフォームを表示）"
@@ -1179,10 +1171,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       filter_and_chart: {
         label: "フィルターとチャート",
         description: "レポートレベルのフィルターとチャート表示。"
-      },
-      advanced: {
-        label: "詳細",
-        description: "アクセシビリティとパフォーマンス調整。"
       }
     },
     fields: {
@@ -1235,14 +1223,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       chart: {
         label: "チャート",
         helpText: "チャート設定（type, legend, colors）"
-      },
-      aria: {
-        label: "アクセシビリティ",
-        helpText: "アクセシビリティラベル"
-      },
-      performance: {
-        label: "パフォーマンス",
-        helpText: "キャッシュと最適化"
       }
     }
   },

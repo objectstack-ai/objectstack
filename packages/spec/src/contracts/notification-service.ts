@@ -55,6 +55,56 @@ export interface NotificationResult {
     error?: string;
 }
 
+/**
+ * Filters for {@link INotificationService.listInbox}. Mirrors
+ * `ListNotificationsRequestSchema` minus `cursor` — no implementation paginates
+ * by cursor yet, and declaring a parameter nothing honours is the
+ * `declared ≠ enforced` gap this file exists to close (#4127).
+ */
+export interface InboxQuery {
+    /** Filter by read state; omitted returns both. */
+    read?: boolean;
+    /** Filter by notification type/topic. */
+    type?: string;
+    /** Maximum rows to return. Implementations may clamp. */
+    limit?: number;
+}
+
+/**
+ * One inbox row. Mirrors `NotificationSchema` (`api/protocol.zod.ts`) — the
+ * shape the dispatcher serializes straight to the wire.
+ */
+export interface InboxNotification {
+    /** Stable notification id — what `markRead` takes. */
+    id: string;
+    /** Notification type/topic. */
+    type: string;
+    /** Display title. */
+    title: string;
+    /** Body text. */
+    body: string;
+    /** Whether this user has read it. */
+    read: boolean;
+    /** URL to open when the notification is clicked. */
+    actionUrl?: string;
+    /** ISO-8601 creation timestamp. */
+    createdAt: string;
+}
+
+/** Result of {@link INotificationService.listInbox}. */
+export interface InboxListResult {
+    notifications: InboxNotification[];
+    /** Unread count over the returned window. */
+    unreadCount: number;
+}
+
+/** Result of {@link INotificationService.markRead} / `markAllRead`. */
+export interface MarkReadResult {
+    success: boolean;
+    /** How many notifications this call actually transitioned to read. */
+    readCount: number;
+}
+
 export interface INotificationService {
     /**
      * Send a notification
@@ -75,4 +125,47 @@ export interface INotificationService {
      * @returns Array of supported channel names
      */
     getChannels?(): NotificationChannel[];
+
+    /* ------------------------------------------------------------------ */
+    /*  Inbox — the READ half of the slot (#4127)                          */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * List the user's in-app inbox, joined with read-state.
+     *
+     * [#4127] Declared here because the dispatcher's `/notifications` domain
+     * has always called it — three SDK-expressed routes (`notifications.list`
+     * / `.markRead` / `.markAllRead`) rest on this trio, while the contract
+     * described only the send half. The consequence was not academic: the dev
+     * notification stub implements `send` / `sendBatch` and nothing else
+     * *because it followed this file*, so the one implementation written to
+     * the contract was the one the domain had to duck-type past.
+     *
+     * OPTIONAL on purpose, and the runtime probe stays. An inbox needs a
+     * durable store (`service-messaging` joins `sys_notification` against its
+     * receipt spine); a send-only provider — SMTP, Twilio, a Slack webhook —
+     * fills this slot legitimately with no inbox at all. `handlerReady` cannot
+     * express that: the slot IS serveable, one capability of it is absent. So
+     * the domain still asks `typeof service.listInbox === 'function'` — but
+     * that is now a declared optional capability being probed, not a method
+     * invented at the call site.
+     *
+     * Shapes mirror the wire contract the domain serializes untouched —
+     * `ListNotificationsResponseSchema` / `MarkNotificationsReadResponseSchema`
+     * (`api/protocol.zod.ts`).
+     */
+    listInbox?(userId: string, options?: InboxQuery): Promise<InboxListResult>;
+
+    /**
+     * Mark specific notifications read for this user.
+     * @param userId - Owner of the inbox
+     * @param ids - Notification ids to mark; unknown ids are ignored
+     */
+    markRead?(userId: string, ids: readonly string[]): Promise<MarkReadResult>;
+
+    /**
+     * Mark every unread notification in this user's inbox read.
+     * @param userId - Owner of the inbox
+     */
+    markAllRead?(userId: string): Promise<MarkReadResult>;
 }

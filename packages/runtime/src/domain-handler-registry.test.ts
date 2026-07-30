@@ -526,6 +526,99 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
         const result = await makeDispatcher().dispatch('GET', '/automation', undefined, {}, {} as any);
         expect(result.response?.status ?? 404).not.toBe(200);
     });
+
+    /**
+     * [#4127] Both trigger routes build the SAME AutomationContext.
+     *
+     * `POST /trigger/:name` — the legacy shape, and the one
+     * `client.automation.trigger()` calls — used to pass the raw HTTP body to
+     * `execute(name, body)`: no `{recordId, objectName, params}` translation
+     * and, worse, no caller identity. A flow's default `runAs` is `'user'`, and
+     * a `runAs:'user'` run whose trigger resolved no user has its data ops
+     * REFUSED (#3760), so the SDK method could not run a data-touching flow at
+     * all while `POST /:name/trigger` could.
+     */
+    it('both trigger routes translate the body and forward the caller identity', async () => {
+        const execute = vi.fn().mockResolvedValue({ success: true });
+        const automation = { execute, listFlows: vi.fn(), getFlow: vi.fn() };
+        const ctx: any = {
+            executionContext: {
+                userId: 'u-1',
+                positions: ['sales_rep'],
+                permissions: ['lead.read'],
+                tenantId: 't-1',
+            },
+        };
+        const body = { recordId: 'lead-9', objectName: 'sales_lead', extra: 'kept' };
+
+        // Direct delegate calls — `dispatch()` would re-resolve identity off
+        // the auth-less mock kernel and overwrite the seeded executionContext,
+        // the same reason the `/keys` test above bypasses it.
+        const dispatcher = makeDispatcher({ automation });
+        await dispatcher.handleAutomation('/trigger/nurture', 'POST', body, ctx);
+        await dispatcher.handleAutomation('/nurture/trigger', 'POST', body, ctx);
+
+        expect(execute).toHaveBeenCalledTimes(2);
+        const [legacyName, legacyCtx] = execute.mock.calls[0];
+        const [modernName, modernCtx] = execute.mock.calls[1];
+        expect(legacyName).toBe('nurture');
+        expect(modernName).toBe('nurture');
+        // Same context out of both routes — that is the whole point.
+        expect(legacyCtx).toEqual(modernCtx);
+        // Body translation: recordId reaches params, aliased by object name,
+        // and an unwrapped top-level key survives.
+        expect(legacyCtx.object).toBe('sales_lead');
+        expect(legacyCtx.params.recordId).toBe('lead-9');
+        expect(legacyCtx.params.salesLeadId).toBe('lead-9');
+        expect(legacyCtx.params.extra).toBe('kept');
+        // Identity envelope (#1888): not just the user id.
+        expect(legacyCtx.userId).toBe('u-1');
+        expect(legacyCtx.positions).toEqual(['sales_rep']);
+        expect(legacyCtx.permissions).toEqual(['lead.read']);
+        expect(legacyCtx.tenantId).toBe('t-1');
+    });
+
+    /**
+     * [#4127] `trigger` is not a method of the automation slot — nothing in
+     * the repo implements it and `IAutomationService` never declared it, so
+     * the probe that used to precede the `execute` fallback was dead on every
+     * deployment. A service that grows one must not be preferred over the
+     * contract method.
+     */
+    it('never calls a non-contract `trigger` method, even when one exists', async () => {
+        const trigger = vi.fn().mockResolvedValue({ success: true });
+        const execute = vi.fn().mockResolvedValue({ success: true });
+        const automation = { trigger, execute, listFlows: vi.fn(), getFlow: vi.fn() };
+
+        const result = await makeDispatcher({ automation })
+            .dispatch('POST', '/automation/trigger/nurture', {}, {}, {} as any);
+
+        expect(result.response?.status).toBe(200);
+        expect(trigger).not.toHaveBeenCalled();
+        expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * [#4127] `getFlowRuntimeStates` is declared on `IAutomationService` now,
+     * and `/automation/_status` reads it through the contract type instead of
+     * an inline cast that omitted `status` / `triggerType` / `object` — the
+     * three fields that say WHY a flow is unbound.
+     */
+    it('/automation/_status passes through the full FlowRuntimeState shape', async () => {
+        const automation = {
+            listFlows: vi.fn(),
+            getFlow: vi.fn(),
+            getFlowRuntimeStates: vi.fn().mockReturnValue([
+                { name: 'nurture', enabled: true, bound: false, status: 'active', triggerType: 'on_create', object: 'sales_lead' },
+            ]),
+        };
+        const result = await makeDispatcher({ automation }).dispatch('GET', '/automation/_status', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.flows?.[0]).toEqual({
+            name: 'nurture', enabled: true, bound: false,
+            status: 'active', triggerType: 'on_create', object: 'sales_lead',
+        });
+    });
 });
 
 // ---------------------------------------------------------------------------

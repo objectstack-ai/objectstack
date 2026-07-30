@@ -238,12 +238,14 @@ export class I18nServicePlugin implements Plugin {
           sendError(res, 400, 'INVALID_REQUEST', 'Missing object or locale parameter');
           return;
         }
-        // Some implementations may provide a dedicated getFieldLabels method
-        const hasGetFieldLabels = 'getFieldLabels' in i18n
-          && typeof (i18n as Record<string, unknown>)['getFieldLabels'] === 'function';
-        if (hasGetFieldLabels) {
-          const labels = (i18n as II18nService & { getFieldLabels(obj: string, loc: string): Record<string, string> })
-            .getFieldLabels(objectName, locale);
+        // Some implementations may provide a dedicated getFieldLabels method.
+        // [#4127] Was `'getFieldLabels' in i18n` plus two casts — one through
+        // `Record<string, unknown>`, one re-declaring the signature inline —
+        // because `II18nService` did not declare the method both this mount
+        // and the dispatcher's were probing for. It does now, so the probe is
+        // a plain optional-method check and the signature has one home.
+        if (typeof i18n.getFieldLabels === 'function') {
+          const labels = i18n.getFieldLabels(objectName, locale);
           sendOk(res, { object: objectName, locale, labels });
         } else {
           // Fallback: read field labels out of the locale's translation data.

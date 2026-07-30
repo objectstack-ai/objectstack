@@ -10,9 +10,80 @@
  */
 
 import { CoreServiceName } from '@objectstack/spec/system';
+import type { IAutomationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+
+/**
+ * Translate a trigger request body into the canonical `AutomationContext` the
+ * engine expects, and forward the caller's resolved identity.
+ *
+ * [#4127] ONE construction point for BOTH trigger routes. It used to live
+ * inline in `POST /:name/trigger` while `POST /trigger/:name` — the legacy
+ * shape, and the one `client.automation.trigger()` calls — passed the raw HTTP
+ * body straight to `execute(name, body)`. Two consequences, both silent:
+ *
+ *  - The `{ recordId, objectName, params }` translation never ran, so flow
+ *    variables (`params.recordId`, the `<object>Id` alias) resolved from
+ *    nothing.
+ *  - No identity was forwarded. A flow's default `runAs` is `'user'`, and a
+ *    `runAs:'user'` run whose trigger resolved no user has its data operations
+ *    REFUSED (#3760, fail-closed) — so the SDK's `automation.trigger()` could
+ *    not successfully run any data-touching flow, while the other route could.
+ *    service-automation's own comment claims "most trigger surfaces (REST
+ *    action / trigger endpoint) already resolve the full envelope"; for this
+ *    endpoint that was not true.
+ *
+ * Identity forwarding is the FULLY-RESOLVED envelope, not just the user id, so
+ * a `runAs:'user'` flow enforces RLS exactly as the triggering user — their
+ * positions/permissions/tenant, not a member fallback (#1888). The engine
+ * elevates to a system principal only when the flow declares `runAs:'system'`.
+ */
+function buildAutomationContext(body: any, context: HttpProtocolContext): Record<string, unknown> {
+    const ctxBody = body && typeof body === 'object' ? body : {};
+    // `{recordId, objectName, params}` (the UI/SDK request shape) → the
+    // canonical AutomationContext shape:
+    //  - `recordId` is exposed in `params.recordId` AND aliased to
+    //    `<objectName>Id` (camelCase) so flow variables like `leadId`,
+    //    `caseId`, `opportunityId` resolve from a single REST contract.
+    //  - `objectName` maps to the canonical `object` field.
+    const recordId = ctxBody.recordId;
+    const objectName = ctxBody.objectName ?? ctxBody.object;
+    const baseParams: Record<string, any> = (ctxBody.params && typeof ctxBody.params === 'object')
+        ? { ...ctxBody.params }
+        : {};
+    // Back-compat: when callers POST a flat body (no `params` wrapper),
+    // forward unknown top-level keys as flow params so the original
+    // `{ foo: 'bar' }` payload is not silently dropped.
+    if (!ctxBody.params) {
+        const reserved = new Set(['recordId', 'objectName', 'object', 'event', 'params']);
+        for (const [k, v] of Object.entries(ctxBody)) {
+            if (reserved.has(k)) continue;
+            if (baseParams[k] === undefined) baseParams[k] = v;
+        }
+    }
+    if (recordId !== undefined && baseParams.recordId === undefined) {
+        baseParams.recordId = recordId;
+    }
+    if (recordId !== undefined && objectName) {
+        const alias = `${String(objectName).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())}Id`;
+        if (baseParams[alias] === undefined) baseParams[alias] = recordId;
+    }
+
+    const automationContext: Record<string, unknown> = {
+        params: baseParams,
+        object: objectName,
+        event: ctxBody.event ?? 'manual',
+    };
+    const ec = (context as any)?.executionContext;
+    const userIdFromAuth = (context as any)?.user?.id ?? (context as any)?.userId ?? ec?.userId;
+    if (userIdFromAuth) automationContext.userId = userIdFromAuth;
+    if (Array.isArray(ec?.positions) && ec.positions.length) automationContext.positions = ec.positions;
+    if (Array.isArray(ec?.permissions) && ec.permissions.length) automationContext.permissions = ec.permissions;
+    if (ec?.tenantId) automationContext.tenantId = ec.tenantId;
+    return automationContext;
+}
 
 export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -54,18 +125,23 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     const m = method.toUpperCase();
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
-    // Legacy: POST /automation/trigger/:name
+    // Legacy: POST /automation/trigger/:name — the shape
+    // `client.automation.trigger()` calls. Same handling as
+    // `POST /:name/trigger` below: one context builder, one service method.
+    //
+    // [#4127] This branch used to probe `automationService.trigger(name, body,
+    // { request })` first and "fall back" to `execute`. Nothing in the repo has
+    // ever implemented `trigger` on the automation slot — not the engine, not
+    // the dev stub — and the contract never declared it, so the probe was dead
+    // on every deployment and the fallback WAS the route. Declaring `trigger?`
+    // to make the probe honest would have blessed a second name for `execute`
+    // (Prime Directive #12); the dead branch is gone instead.
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
-         const triggerName = parts[1];
-         if (typeof automationService.trigger === 'function') {
-             const result = await automationService.trigger(triggerName, body, { request: context.request });
-             return { handled: true, response: deps.success(result) };
-         }
-         // Fallback to execute
-         if (typeof automationService.execute === 'function') {
-             const result = await automationService.execute(triggerName, body);
-             return { handled: true, response: deps.success(result) };
-         }
+        const triggerName = parts[1];
+        if (typeof automationService.execute === 'function') {
+            const result = await automationService.execute(triggerName, buildAutomationContext(body, context));
+            return { handled: true, response: deps.success(result) };
+        }
     }
 
     // GET / → listFlows
@@ -135,7 +211,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // state). Underscore-prefixed so no flow name can shadow it; MUST precede
     // the `/:name → getFlow` catch-all.
     if (parts[0] === '_status' && parts.length === 1 && m === 'GET') {
-        const svc = automationService as { getFlowRuntimeStates?: () => Array<{ name: string; enabled: boolean; bound: boolean }> };
+        // [#4127] Was an inline cast re-declaring the shape as
+        // `{ name, enabled, bound }` — a third copy of it (engine, here,
+        // caller), and a narrower one than the engine actually returns: it
+        // omitted `status` / `triggerType` / `object`, the three fields the
+        // Studio badge needs to say WHY a flow is unbound. Reads the contract
+        // now, so there is one shape.
+        const svc = automationService as Pick<IAutomationService, 'getFlowRuntimeStates'>;
         if (typeof svc.getFlowRuntimeStates === 'function') {
             const flows = svc.getFlowRuntimeStates();
             return { handled: true, response: deps.success({ flows, total: flows.length }) };
@@ -148,57 +230,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     if (parts.length >= 1) {
         const name = parts[0];
 
-        // POST /:name/trigger → execute
+        // POST /:name/trigger → execute. Body translation and identity
+        // forwarding live in `buildAutomationContext` (#4127), shared with the
+        // legacy `POST /trigger/:name` above so the two routes cannot drift.
         if (parts[1] === 'trigger' && m === 'POST') {
             if (typeof automationService.execute === 'function') {
-                const ctxBody = body && typeof body === 'object' ? body : {};
-                // Translate UI/SDK request shape `{recordId, objectName, params}`
-                // into the canonical AutomationContext shape expected by the engine.
-                // Key transformations:
-                //  - `recordId` is exposed in `params.recordId` AND aliased to
-                //    `<objectName>Id` (camelCase) so flow variables like `leadId`,
-                //    `caseId`, `opportunityId` resolve from a single REST contract.
-                //  - `objectName` is mapped to the canonical `object` field.
-                //  - The user identity from the auth context (if any) is forwarded
-                //    as `userId` so node executors / template interpolation can
-                //    expand `{$User.Id}`.
-                const recordId = ctxBody.recordId;
-                const objectName = ctxBody.objectName ?? ctxBody.object;
-                const baseParams = (ctxBody.params && typeof ctxBody.params === 'object') ? { ...ctxBody.params } : {};
-                // Back-compat: when callers POST a flat body (no `params` wrapper),
-                // forward unknown top-level keys as flow params so the original
-                // `{ foo: 'bar' }` payload is not silently dropped.
-                if (!ctxBody.params) {
-                    const reserved = new Set(['recordId', 'objectName', 'object', 'event', 'params']);
-                    for (const [k, v] of Object.entries(ctxBody)) {
-                        if (reserved.has(k)) continue;
-                        if (baseParams[k] === undefined) baseParams[k] = v;
-                    }
-                }
-                if (recordId !== undefined && baseParams.recordId === undefined) {
-                    baseParams.recordId = recordId;
-                }
-                if (recordId !== undefined && objectName) {
-                    const alias = `${String(objectName).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())}Id`;
-                    if (baseParams[alias] === undefined) baseParams[alias] = recordId;
-                }
-                const automationContext: any = {
-                    params: baseParams,
-                    object: objectName,
-                    event: ctxBody.event ?? 'manual',
-                };
-                // Forward the FULLY-RESOLVED caller identity (not just the
-                // user id) so a `runAs:'user'` flow enforces RLS exactly as the
-                // triggering user — their roles/tenant, not a member fallback
-                // (#1888). The engine elevates to a system principal only when
-                // the flow itself declares `runAs:'system'`.
-                const ec = (context as any)?.executionContext;
-                const userIdFromAuth = (context as any)?.user?.id ?? (context as any)?.userId ?? ec?.userId;
-                if (userIdFromAuth) automationContext.userId = userIdFromAuth;
-                if (Array.isArray(ec?.positions) && ec.positions.length) automationContext.positions = ec.positions;
-                if (Array.isArray(ec?.permissions) && ec.permissions.length) automationContext.permissions = ec.permissions;
-                if (ec?.tenantId) automationContext.tenantId = ec.tenantId;
-                const result = await automationService.execute(name, automationContext);
+                const result = await automationService.execute(name, buildAutomationContext(body, context));
                 return { handled: true, response: deps.success(result) };
             }
         }

@@ -127,7 +127,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `view.zod.ts` | 51 | authorable | partially strict (ADR-0089); long tail of sub-blocks |
 | `component.zod.ts` | 29 | authorable | **next candidate** — SDUI component defs; check React-prop open slots first (p) |
 | `theme.zod.ts` | 14 | authorable (p) | authored themes |
-| `app.zod.ts` | 11 | authorable | **next verified step** — `AppSchema` + nav-item union; recursive `NavigationItemSchema` needs union-error care |
+| `app.zod.ts` | 11 | authorable | **PR A done (#4001 app step): the seven audit-dead keys (`version`/`aria`/`objects`/`apis`/`sharing`/`embed`/`mobileNavigation`) are `retiredKey()` tombstones + an ADR-0087 conversion** — the ADR-0049 precondition for strict. **PR B next**: `AppSchema` + nav union `.strict()`; the union-error question is settled — convert `NavigationItemSchema` to `z.discriminatedUnion('type', …)` (verified: matched-branch-only unknown-key errors, precise recursive paths, `toJSONSchema` clean) |
 | `dashboard.zod.ts` | 11 | authorable | partially strict |
 | `widget.zod.ts` | 9 | authorable (p) | |
 | `page.zod.ts` | 7 | authorable | partially strict (ADR-0089) |
@@ -218,6 +218,11 @@ Done in step 3: `automation/approval.zod.ts` — the four approval authoring
 schemas, with the ADR-0019 re-home map as wrong-layer guidance
 (`steps` / `entryCriteria` / `onApprove` / `onReject` / `rejectionBehavior`
 each point at where the concept lives on the flow graph now).
+
+Done in the app step, PR A: the seven audit-dead AppSchema keys tombstoned
+(`retiredKey` + `app-dead-authoring-keys-removed` conversion + step-17
+migration entry), clearing the enforce-or-remove precondition for the app
+strict step (PR B).
 
 Long tail stays gated on a verification pass per shape — never a one-shot
 "make all ~453 sites strict" (ADR-0054 ratchet; #4001's own recommendation).
