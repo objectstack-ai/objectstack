@@ -3,6 +3,35 @@
 import { z } from 'zod';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 
+/**
+ * Capability tokens a script body may request.
+ *
+ * The runtime sandbox enforces these — if a body uses a `ctx` API that requires
+ * a capability it did not declare, the call throws at invocation time.
+ *
+ * - `api.read`   — `ctx.api.object(...).find / findOne / count / aggregate`
+ * - `api.write`  — `ctx.api.object(...).insert / update / delete`
+ * - `api.transaction` — `ctx.api.transaction(async () => { … })` — runs the
+ *   callback's `ctx.api` writes/reads inside one driver transaction, committed
+ *   on return and rolled back if the callback throws. Requires `api.write`
+ *   alongside it to be useful (the transaction body still needs write access).
+ * - `crypto.uuid` — `ctx.crypto.randomUUID()`
+ * - `crypto.hash` — `ctx.crypto.hash(algo, data)`
+ * - `log`        — `ctx.log.info / warn / error`
+ *
+ * `http.fetch` is intentionally absent — outbound calls go through Connector
+ * recipes (separate spec) so they remain auditable and replayable.
+ */
+export const HookBodyCapability = z.enum([
+  'api.read',
+  'api.write',
+  'api.transaction',
+  'crypto.uuid',
+  'crypto.hash',
+  'log',
+]);
+export type HookBodyCapability = z.infer<typeof HookBodyCapability>;
+
 /*
  * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
  *
@@ -21,6 +50,12 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
  * The L1 schema additionally PRESCRIBES the L2-only keys rather than guessing a
  * rename: `capabilities` on an `expression` body is not a typo, it is a
  * misunderstanding of which level owns the key.
+ *
+ * Placement note: this block sits AFTER `HookBodyCapability` on purpose.
+ * build-docs.ts takes the file's FIRST JSDoc as the reference page's module
+ * blurb, so a `/** … *\/` comment above the capability enum silently replaced
+ * the whole capability-token table in content/docs/references/data/hook-body.mdx.
+ * Keep declarations that carry JSDoc below the first exported symbol here.
  */
 
 /** Keys {@link ExpressionBodySchema} declares (drift-guarded by hook-body.test.ts). */
@@ -64,35 +99,6 @@ const scriptBodyUnknownKeyError = strictUnknownKeyError({
     'Until #4001 these were dropped silently — the body still ran, just not under the '
     + 'limits or grants that were written.',
 });
-
-/**
- * Capability tokens a script body may request.
- *
- * The runtime sandbox enforces these — if a body uses a `ctx` API that requires
- * a capability it did not declare, the call throws at invocation time.
- *
- * - `api.read`   — `ctx.api.object(...).find / findOne / count / aggregate`
- * - `api.write`  — `ctx.api.object(...).insert / update / delete`
- * - `api.transaction` — `ctx.api.transaction(async () => { … })` — runs the
- *   callback's `ctx.api` writes/reads inside one driver transaction, committed
- *   on return and rolled back if the callback throws. Requires `api.write`
- *   alongside it to be useful (the transaction body still needs write access).
- * - `crypto.uuid` — `ctx.crypto.randomUUID()`
- * - `crypto.hash` — `ctx.crypto.hash(algo, data)`
- * - `log`        — `ctx.log.info / warn / error`
- *
- * `http.fetch` is intentionally absent — outbound calls go through Connector
- * recipes (separate spec) so they remain auditable and replayable.
- */
-export const HookBodyCapability = z.enum([
-  'api.read',
-  'api.write',
-  'api.transaction',
-  'crypto.uuid',
-  'crypto.hash',
-  'log',
-]);
-export type HookBodyCapability = z.infer<typeof HookBodyCapability>;
 
 /**
  * L1 — Pure expression body.
