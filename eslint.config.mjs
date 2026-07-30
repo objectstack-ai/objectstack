@@ -47,6 +47,29 @@ const DOMAIN_RULE_MESSAGE =
   'instead of a bare `: Type` literal. The factory validates at parse time and a ' +
   'broken value import fails loudly instead of degrading to `any` — see issue #2035.';
 
+// The dispatcher's service-lookup methods whose result carries the slot's
+// contract (#4127). `getObjectQL` is NOT here: it reaches ObjectQL's surface
+// beyond IDataEngine (`registry`, `executeAction`), which has no contract, so
+// its `any` is correct and permanent until someone writes one.
+const SLOT_LOOKUPS = ['resolveService', 'getService', 'getRequestKernelService'].join('|');
+
+// Slots with no written contract. A lookup naming one of these legitimately
+// yields `any`, so the rule exempts it BY NAME rather than by an inline
+// disable — this repo lints with `--no-inline-config`, which ignores
+// eslint-disable comments on purpose: exceptions belong in one reviewable
+// place, not sprinkled through the code. Deleting a name from this list is how
+// the exemption ends once that contract gets written.
+const UNCONTRACTED_SLOTS = ['protocol', 'mcp', 'kernel-resolver', 'scope-manager'].join('|');
+
+const SLOT_LOOKUP_ANY_MESSAGE =
+  'Do not annotate a service-lookup result as `any` — the lookup already returns ' +
+  'the slot\'s contract (#4168/#4176/#4202), and this switches that checking off ' +
+  'for the call site while looking identical to code that has it. Every such ' +
+  'annotation found so far was hiding a real gap, including a project-membership ' +
+  'gate that silently stopped gating. If the slot genuinely has no contract, add ' +
+  'its name to UNCONTRACTED_SLOTS in eslint.config.mjs with a note, so the ' +
+  'exemption is reviewed once and visible in one place — see issue #4127.';
+
 export default [
   {
     files: ['**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],
@@ -151,6 +174,55 @@ export default [
         {
           selector: `ExportNamedDeclaration VariableDeclarator[id.typeAnnotation.typeAnnotation.typeName.right.name=/^(${DOMAIN_TYPES})$/]`,
           message: DOMAIN_RULE_MESSAGE,
+        },
+      ],
+    },
+  },
+  // issue #4127 — service-lookup `any` guard. #4168/#4176/#4202 made a slot
+  // lookup return the slot's contract, so a domain calling a method nobody
+  // declares is a compile error. An `any` annotation on the RESULT silently
+  // switches that back off for that call site: nothing fails, no test breaks,
+  // and the code looks exactly like the checked kind. Three such sites already
+  // existed and were found by grep, which is the sweep this work replaced —
+  // #4087 shipped for months because a sweep is not repeatable.
+  //
+  // The `any` is not always wrong, so the exemptions are declared above —
+  // by SLOT NAME, and centrally. That is deliberate: `pnpm lint` runs with
+  // `--no-inline-config`, so an `eslint-disable` comment would be ignored and
+  // the escape has to live in config anyway. The effect is the one worth
+  // having — a deliberate gap is a reviewed line in this file, a careless one
+  // is a build failure, and the two stop looking identical in the code.
+  //
+  // KNOWN RESIDUAL: a wrapper whose own return type is annotated
+  // (`const getEngine = async (): Promise<any> => …resolveService(…)`) erases
+  // the slot type just as effectively, and this selector cannot see it — the
+  // annotation is on the enclosing function, not on the call. One such site
+  // existed (share-links `getEngine`, fixed in batch 4). Catching that shape
+  // needs type information, so it belongs to a typed-lint pass, not here.
+  {
+    files: ['packages/runtime/**/*.{ts,mts,cts}'],
+    ignores: ['**/node_modules/**', '**/dist/**'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+    },
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          // `const svc: any = await deps.resolveService('auth', env)`
+          selector:
+            'VariableDeclarator[id.typeAnnotation.typeAnnotation.type="TSAnyKeyword"]' +
+            `:has(CallExpression[callee.property.name=/^(${SLOT_LOOKUPS})$/]` +
+            `:not(:has(Literal[value=/^(${UNCONTRACTED_SLOTS})$/])))`,
+          message: SLOT_LOOKUP_ANY_MESSAGE,
+        },
+        {
+          // `await deps.resolveService('security', env) as any`
+          selector:
+            'TSAsExpression[typeAnnotation.type="TSAnyKeyword"]' +
+            `:has(CallExpression[callee.property.name=/^(${SLOT_LOOKUPS})$/]` +
+            `:not(:has(Literal[value=/^(${UNCONTRACTED_SLOTS})$/])))`,
+          message: SLOT_LOOKUP_ANY_MESSAGE,
         },
       ],
     },

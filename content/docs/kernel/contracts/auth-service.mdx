@@ -29,10 +29,33 @@ export interface IAuthService {
 
   /** Resolve the current user from a request. Optional. */
   getCurrentUser?(request: Request): Promise<AuthUser | undefined>;
+
+  /** The session API, when the provider mounts it directly (legacy shape). Optional. */
+  api?: AuthSessionApi;
+
+  /** Resolve the session API, creating the auth instance on first use. Optional. */
+  getApi?(): Promise<AuthSessionApi | undefined>;
+
+  /** Whether this deployment's auth gate is live. Optional. */
+  isAuthGateActive?(): boolean;
+
+  /** Verify an OAuth 2.1 access token from the embedded AS (MCP surface). Optional. */
+  verifyMcpAccessToken?(token: string): Promise<{ userId: string; scopes: string[]; clientId?: string } | undefined>;
+
+  /** The MCP resource identifier (RFC 8707 `resource` / token `aud`). Optional. */
+  getMcpResourceUrl?(): string;
+
+  /** RFC 9728 protected-resource metadata URL, or `null` when OAuth is off. Optional. */
+  getMcpResourceMetadataUrl?(): string | null;
 }
 ```
 
-The interface is intentionally minimal: it follows the Dependency Inversion Principle so that plugins depend on the contract rather than a concrete provider. Concrete implementations (better-auth, custom, LDAP, etc.) supply the actual logic. `handleRequest` works directly with the standard `Request`/`Response` types; `logout` and `getCurrentUser` are optional.
+The two required members are the core: it follows the Dependency Inversion Principle so that plugins depend on the contract rather than a concrete provider. Concrete implementations (better-auth, custom, LDAP, etc.) supply the actual logic, and `handleRequest` works directly with the standard `Request`/`Response` types.
+
+Everything after `verify` is optional, and each optional member describes a capability a provider may or may not have — a caller must probe before use. Two pairs are worth reading together:
+
+- **`api` and `getApi()`** are the same session handle by two routes. `api` is the legacy direct mount; `getApi()` is the lazy accessor, and it is the one to prefer — the shipped `plugin-auth` registers an `AuthManager`, which has **no `api` member at all**, so a caller that reads only `api` gets `undefined` on every current deployment. Read `api ?? await getApi?.()`.
+- **`getMcpResourceUrl()` and `getMcpResourceMetadataUrl()`** both describe the MCP OAuth surface; the second returns `null` (rather than being absent) when the OAuth track is off for the deployment.
 
 ---
 

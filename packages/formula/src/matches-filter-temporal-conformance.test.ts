@@ -34,6 +34,52 @@ describe('matchesFilterCondition — temporal conformance', () => {
 });
 
 /**
+ * The storage-form axis, as it exists on a type-blind surface (#4191).
+ *
+ * The drivers' version of this axis injects rows below the write path. This
+ * evaluator has no storage to inject into — but it has the same defect for the
+ * same reason, and the population is not synthetic: `plugin-security` builds
+ * the RLS `check` post-image as `{ ...opCtx.data }`, the caller's RAW write
+ * payload, BEFORE any driver `formatInput` converges it. So an SDK write of
+ * `new Date()` is exactly what this evaluator is handed, and the shared
+ * `writerForm` tag names precisely that population.
+ *
+ * Measured before the fix: 10 of the 16 shared cases dropped every
+ * `Date`-valued row, because JS relational operators coerce a `Date`/ISO-string
+ * pair to `epoch`/`NaN`. Fail-closed turns that into a **denied write** — the
+ * write-side twin of #4047, on the surface where the failure direction is a
+ * rejected write rather than a missing row (the same asymmetry D-D2 recorded
+ * for the bare-day upper bound).
+ *
+ * `on` stays text: a `Field.date` payload is a calendar day, and the shared
+ * expectations for the `date` column are calendar-day text semantics. A `Date`
+ * there would be asserting a different question (what a native `date` write
+ * denotes), which belongs with the drivers that own a `date` storage form.
+ */
+describe('matchesFilterCondition — temporal conformance on a native-writer post-image', () => {
+  const nativeRows = TEMPORAL_ROWS.map((r) => ({
+    ...r,
+    at: r.writerForm === 'native' ? new Date(r.at) : r.at,
+  }));
+
+  for (const c of TEMPORAL_CASES) {
+    it(c.name, () => {
+      const got = nativeRows.filter((r) => matchesFilterCondition(r as any, c.filter)).map((r) => r.id);
+      expect(got, c.note).toEqual(c.expected);
+    });
+  }
+
+  it('the mirror pairing too: a CEL-lowered Date comparand against wire-form records', () => {
+    // `today()` lowers to a `Date` at UTC midnight (ADR-0053 D1), so a compiled
+    // `check` hands this evaluator the OTHER cross-type pairing. It broke
+    // identically and must answer identically.
+    const bound = new Date('2026-07-28T00:00:00.000Z');
+    const got = TEMPORAL_ROWS.filter((r) => matchesFilterCondition(r, { at: { $gte: bound } } as any)).map((r) => r.id);
+    expect(got).toEqual(['c_open', 'd_mid', 'e_late', 'f_next', 'g_eom']);
+  });
+});
+
+/**
  * Why the token axis is absent here.
  *
  * `TemporalCase` carries a `tokenFilter` — the same filter spelled with

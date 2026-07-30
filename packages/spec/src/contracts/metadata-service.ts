@@ -485,4 +485,42 @@ export interface IMetadataService {
      * @returns Diff result with changes
      */
     diff?(type: string, name: string, version1: number, version2: number): Promise<MetadataDiffResult>;
+
+    /**
+     * Load one metadata item through the registered loaders, or `null`.
+     *
+     * [#4127 batch 4] Declared alongside {@link loadDiagnosed}, which the same
+     * call site reaches for first. `null` here is AMBIGUOUS by construction —
+     * `MetadataManager` defines this as `(await loadDiagnosed(…)).data`, so a
+     * miss and a total loader outage are the same answer. Prefer
+     * `loadDiagnosed` wherever the difference could change a decision.
+     */
+    load?<T = unknown>(
+        type: string,
+        name: string,
+        options?: Record<string, unknown>,
+    ): Promise<T | null>;
+
+    /**
+     * Load one metadata item, and say whether the answer can be trusted as
+     * complete. A MISS and an OUTAGE are different facts with opposite security
+     * meanings — a loader that throws is warn-logged and skipped, so a plain
+     * lookup cannot tell "this action does not exist" from "the store holding
+     * it is down" (ADR-0110 D3).
+     *
+     * `degraded` is true when at least one loader failed, with their messages
+     * in `errors`. A caller deciding whether something is ABSENT must check it:
+     * treating a degraded read as an absence is how an outage becomes an
+     * authorization answer.
+     *
+     * [#4127 batch 4] Implemented by `MetadataManager` — which defines plain
+     * `load` as `(await loadDiagnosed(…)).data` — and reached by the action
+     * resolver through `any`. Declared so the callers that need the
+     * distinction can see that it exists.
+     */
+    loadDiagnosed?<T = unknown>(
+        type: string,
+        name: string,
+        options?: Record<string, unknown>,
+    ): Promise<{ data: T | null; degraded: boolean; errors: string[] }>;
 }

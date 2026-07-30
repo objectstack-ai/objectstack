@@ -208,7 +208,16 @@ beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'mil-fsm-exempt-')); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks(); });
 
 describe('marketplace install — state_machine initialStates exemption (#3433)', () => {
-    it('lands every mid-lifecycle seed row (no initialStates rejection on the marketplace seam)', { timeout: 30_000 }, async () => {
+    // Same budget, same reason, as `marketplace-install-local-seed-lookup.test.ts`
+    // (#3785): both drive `MarketplaceInstallLocalPlugin`, whose install handler
+    // dynamically imports the real @objectstack/runtime (unmocked on purpose).
+    // That cold import costs seconds on its own and multiples of that under a
+    // fully parallel turbo run, where this file competes with every other
+    // package's suite for cores. The sibling was diagnosed as exactly this —
+    // "an import stall, not a hang" — and raised to 120s; this one was left at
+    // 30s and kept flaking the same way (observed again at 30076ms). A genuine
+    // hang still fails here, just later.
+    it('lands every mid-lifecycle seed row (no initialStates rejection on the marketplace seam)', { timeout: 120_000 }, async () => {
         const { engine, store, registry } = makeEngine();
         const rawApp = makeRawApp();
         const { ctx, fire } = makeCtx(rawApp, {

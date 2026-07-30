@@ -51,7 +51,6 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     if (!isMcpServerEnabled()) {
         return { handled: true, response: deps.error('MCP server is not enabled for this environment', 404) };
     }
-
     const mcp: any = await deps.resolveService('mcp', context.environmentId);
     if (!mcp || typeof mcp.handleHttpRequest !== 'function') {
         return { handled: true, response: deps.error('MCP server is not available', 501) };
@@ -181,7 +180,6 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
             },
         };
     }
-
     const mcp: any = await deps.resolveService('mcp', context.environmentId);
     if (!mcp || typeof mcp.renderSkill !== 'function') {
         return { handled: true, response: deps.error('MCP server is not available', 501) };

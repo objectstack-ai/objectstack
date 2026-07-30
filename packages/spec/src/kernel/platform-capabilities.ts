@@ -180,13 +180,22 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
  * Published here rather than left on `Serve.ALWAYS_ON_CAPABILITIES` for the same
  * reason {@link PLATFORM_CAPABILITY_PROVIDERS} was: **more than one runtime
  * mounts this slate.** The CLI's `serve` builds one kernel per process; cloud's
- * objectos-runtime builds one per tenant environment and carried its own copy,
- * under a CLI comment that merely said such hosts "mirror this list". They had
- * already diverged — the hosted slate was missing `sms`, `messaging` and
- * `analytics` — so an app that worked under `objectstack serve` could lose
- * dataset previews and `notify` deliveries once hosted, silently, with no error
- * anywhere (cloud#925, framework#3786). A second list nobody checks is how that
- * happens; one exported list is how it stops.
+ * objectos-runtime builds one per tenant environment, from its own wiring, under
+ * a CLI comment that merely said such hosts "mirror this list" — a claim nothing
+ * checked. An app that works under `objectstack serve` can therefore lose
+ * capabilities once hosted, silently, with no error anywhere (cloud#925,
+ * framework#3786). A second description nobody checks is how that happens; one
+ * exported list is how it stops.
+ *
+ * On the shape of that divergence, since an earlier revision of this comment got
+ * it wrong: cloud does not keep a rival slate ARRAY to diff against. Its hosted
+ * set is assembled from the host's `defaultRequires` plus the capability
+ * loader's dependency patches, so the comparison has to be against what actually
+ * mounts, not against the nearest list-shaped thing. (The array this comment
+ * once cited, `mountDefaultEnvironmentPlugins`' `ORDER`, has no production call
+ * site — diffing it proved nothing.) Measured against the real wiring,
+ * `analytics` IS force-mounted there and was never the gap; `messaging` loads
+ * only when `audit` does; `sms` has no provider package in that image at all.
  *
  * This is the FLOOR, not the ceiling: a host may mount more (cloud adds
  * `observability`), and `objectstack serve --preset minimal` opts out entirely.

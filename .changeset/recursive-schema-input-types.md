@@ -3,76 +3,72 @@
 "@objectstack/platform-objects": patch
 ---
 
-fix(spec): the authoring side of every recursive schema was `unknown`, so nothing checked what an author wrote (#4195)
+fix(spec): the remaining six recursive schemas name both type parameters, and the authoring artifacts stop spelling out defaults (#4195)
 
-#4171 fixed what a consumer **reads** from these schemas. This is the other
-half: what an author **writes** into them.
+#4221 fixed `NavigationItemSchema` — the worst instance, and the one with a
+reproducible "`defineApp` compiles `navigation: [42, 'nonsense']`" demo. This
+finishes the sweep: **six more schemas** had the same shape, and the authoring
+artifacts that #4171 had to work around can now be typed honestly.
 
-Zod 4's `ZodType` is `ZodType<out Output = unknown, out Input = unknown>`, and
-every recursive schema in the spec supplied only the first argument:
-
-```ts
-export const NavigationItemSchema: z.ZodType<NavigationItem> = z.lazy(() => …);
-//                                            ^ Output only — Input stayed `unknown`
-```
-
-That `unknown` propagated to every schema embedding one. Measured before the
-fix:
+`z.ZodType` takes `<Output, Input>` and `Input` defaults to `unknown`, so naming
+only the first parameter leaves `z.input` of anything embedding that schema at
+`unknown`. Measured with a type probe:
 
 | | was | now |
 |---|---|---|
-| `AppInput['navigation']` | `unknown[]` | `NavigationItemInput[]` |
-| `QueryInput['joins']` / `['fields']` | `unknown[]` | `JoinNodeInput[]` / `FieldNode[]` |
+| `QueryInput['joins']` | `unknown[]` | `JoinNodeInput[]` |
+| `QueryInput['fields']` | `unknown[]` | `FieldNode[]` |
 | `z.input<typeof FormFieldSchema>` | `unknown` | `FormFieldInput` |
+| `z.input<typeof QuerySchema>` | `unknown` | `QueryInput` |
+| `z.input<typeof StateNodeSchema>` | `unknown` | `StateNodeConfig` |
+| `z.input<typeof ValidationRuleSchema>` | `unknown` | `BaseValidationRuleShape` |
 
-So `defineApp` accepted **any array of anything** for `navigation` — the densest
-hand-authored surface on the platform, and the one #4001 made `.strict()`
-precisely because an author is most likely to write a key from memory there.
-The strictness was real at parse time and absent at authoring time.
+New exported types: `FormFieldInput`, `JoinNodeInput`, `NavigationContributionInput`.
+`FilterCondition`, `NormalizedFilter` and `FieldNode` carry no `.default()` or
+`.transform()`, so their input is their output and the second parameter is the
+first.
 
-**Seven schemas now carry both type arguments.** Where input and output genuinely
-differ, the input shape is derived the same way #4171 derived the output —
-`z.input` of the non-recursive half, with the recursive knot tied by hand:
+**The `z.ZodType<T>` single-parameter form is now absent from the codebase.**
 
-```ts
-export type NavigationItemInput =
-  | (z.input<typeof ObjectNavItemSchema> & { children?: NavigationItemInput[] })
-  | …
-  | (z.input<typeof GroupNavItemSchema> & { children: NavigationItemInput[] });
-```
+## 26 hand-written defaults deleted
 
-New exported types: `NavigationItemInput`, `NavigationContributionInput`,
-`FormFieldInput`, `JoinNodeInput`. `FilterCondition`, `NormalizedFilter` and
-`FieldNode` carry no `.default()` or `.transform()`, so their input is their
-output and the second argument is simply the first.
+This is the half #4221 left on the table. #4171 had to spell out
+`expanded: false` (×16) and `target: '_self'` (×10) across `setup.app.ts`,
+`studio.app.ts` and `setup-nav.contributions.ts`, because those artifacts are
+annotated with the PARSED type where a `.default()`ed key is required — and
+retyping them to the input surface would have traded eight loud errors for no
+checking at all.
 
-**26 hand-written defaults deleted.** #4171 had to spell out `expanded: false`
-(×16), `target: '_self'` (×10) in `setup.app.ts` / `studio.app.ts` /
-`setup-nav.contributions.ts`, because those artifacts are annotated with the
-PARSED type where a `.default()`ed key is required — and retyping them to the
-input surface would have traded eight loud errors for no checking at all. With
-the input types real, they are now annotated `AppInput` /
-`NavigationContributionInput`, the defaults are back to being defaults, and the
-literals are checked for the first time.
+With `NavigationItemInput` landed (#4221) and `NavigationContributionInput`
+added here, they are annotated `AppInput` / `NavigationContributionInput`, the
+defaults are defaults again, and the literals are checked for the first time.
+Net across those four files: 21 lines added, 54 removed.
 
-Verified the check is live, not nominal: an authoring literal that omits
-`expanded` / `target` compiles, and one that writes `defaultOpen` — the
-non-spec key #4171 found in `account.app.ts` — is now a **compile error** that
-names `expanded` in its suggestion list. Previously that key was invisible until
-parse.
+Verified live, not nominal: a literal omitting `expanded`/`target` compiles, and
+one writing `defaultOpen` — the non-spec key #4171 found in `account.app.ts` —
+is a compile error whose suggestion list names `expanded`.
 
-Two schemas are typed with a deliberate caveat, documented at each declaration:
+## Two typed with a documented caveat
+
 `StateNodeSchema` and `ValidationRuleSchema` reuse their hand-written type for
-both arguments. That is exact on the input side and loose on the output side —
+both parameters: exact on the input side, loose on the output side.
 `StateNodeConfig` marks `type` optional though `.default('atomic')` makes it
-always present, and `BaseValidationRuleShape` carries a `[key: string]: unknown`
-index signature. Both were already that loose before this change; making them
-exact means deriving those types from their schemas instead of maintaining them
-beside one, which is separate work.
+always present; `BaseValidationRuleShape` carries a `[key: string]: unknown`
+index signature. Both were already that loose — input went from `unknown` (types
+nothing) to a real type, output is untouched. Making them exact means deriving
+those types from their schemas instead of maintaining them beside one, which is
+separate work; the caveat is written at each declaration rather than left for a
+reader to find.
 
-Two remain `unknown` on the input side and correctly so: `TranslationItemSchema`
-and `InlineActionSchema` are `z.preprocess(...)`, where an `unknown` input is
-zod's semantics rather than a missing annotation. That is also why this did not
-land as a CI gate — "output precise but input `unknown`" cannot be separated
-from legitimate `preprocess` mechanically, and a gate with false positives is
-worse than none.
+## Why there is still no CI gate for this
+
+Worth recording, since #4195 proposed one: extend `check:exported-any` to fail on
+"output precise but input `unknown`". Measured after this change — exactly two
+schemas match, `TranslationItemSchema` and `InlineActionSchema`, and **both are
+correct**: they are `z.preprocess(...)`, where an `unknown` input is zod's
+semantics rather than a missing annotation. Separating those from a genuinely
+missing parameter needs heuristics on emitted type names, and per the rule in
+that script's own header — zero false positives, so red keeps meaning broken — a
+gate that cannot be made reliable is worse than none. #4221's
+`app.nav-type-assertions.ts` is the better pattern where it applies: pin the
+contract at compile level rather than infer intent from shape.

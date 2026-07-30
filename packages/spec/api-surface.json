@@ -637,6 +637,7 @@
     "sequenceWidth (function)",
     "stripLegacyApiMethods (function)",
     "suggestFieldType (function)",
+    "utcInstantMs (function)",
     "valueSchemaFor (function)"
   ],
   "./system": [
@@ -3586,6 +3587,7 @@
     "AudienceBindingSuggestionSync (interface)",
     "AuthResult (interface)",
     "AuthSession (interface)",
+    "AuthSessionApi (interface)",
     "AuthUser (interface)",
     "AutomationContext (interface)",
     "AutomationResult (interface)",

@@ -124,6 +124,9 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     }
     const projectQl: any = await deps.resolveProjectKernelObjectQL(_context);
 
+    // [#4127] Same as the
+    // action-execution site: `executeAction` is outside IDataEngine, and
+    // ObjectQL's wider surface has no contract yet.
     const ql: any = projectQl ?? await deps.getObjectQL(_context?.environmentId);
     if (!ql || typeof ql.executeAction !== 'function') {
         return { handled: true, response: deps.error('Data engine not available', 503) };
@@ -246,7 +249,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
 
     // [ADR-0104 D2] Enforce the declared param contract before the handler
     // runs — required/option/multiple/reference-id shape + unknown keys.
-    // Warn-first unless OS_ACTION_PARAMS_STRICT_ENABLED=1 (then a 400).
+    // Strict by default (#3438); OS_ALLOW_LAX_ACTION_PARAMS=1 warns instead.
     const paramError = actionExec.enforceActionParams(deps, actionDef, actionSchema, reqParams, { objectName, actionName });
     if (paramError) {
         return { handled: true, response: deps.error(paramError, 400) };

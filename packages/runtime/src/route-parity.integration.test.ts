@@ -235,12 +235,19 @@ describe('Route parity: discovery is service-aware — no dead advertisement (#3
         ).toBeFalsy();
     });
 
-    it('a request to the un-provisioned notifications route resolves to 404 (consistent with not advertising it)', async () => {
-        // Not advertised AND 404 → declared === enforced (neither over- nor
-        // under-promised). The failure mode #3369 forbids is the inverse:
-        // advertised in discovery yet 404 on the listener.
+    it('a request to the un-provisioned notifications route refuses (consistent with not advertising it)', async () => {
+        // Not advertised AND not served → declared === enforced (neither over-
+        // nor under-promised). The failure mode #3369 forbids is the inverse:
+        // advertised in discovery yet refused on the listener.
+        //
+        // [#4093 follow-up] The refusal is 501, not 404. The invariant this
+        // test protects is unchanged — 501 is just as much "not served" — and
+        // it expresses it better: the route IS mounted, so a 404 claiming "no
+        // handler matched" sent the operator hunting for a routing bug. The
+        // body now names the package that would provide the capability.
         const res = await fetch(`${baseUrl}/api/v1/notifications`, { headers: { 'x-test-user': 'admin1' } });
-        expect(res.status).toBe(404);
+        expect(res.status).toBe(501);
+        expect(JSON.stringify(await res.json())).toContain('service-messaging');
     });
 });
 

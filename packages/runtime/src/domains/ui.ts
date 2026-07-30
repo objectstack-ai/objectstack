@@ -10,6 +10,7 @@
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { capabilityUnavailable } from './unavailable.js';
 
 export function createUiDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -44,7 +45,11 @@ export async function handleUiRequest(
                 return { handled: true, response: deps.errorFromThrown(e, 500) };
             }
         } else {
-            return { handled: true, response: deps.error('Protocol service not available', 503) };
+            // 501, not the 503 this used to answer: 503 claims the condition
+            // is temporary, but an uninstalled MetadataPlugin does not become
+            // installed by retrying. The message now names that remedy, and is
+            // the same sentence discovery reports for the slot (#4146).
+            return capabilityUnavailable(deps, 'ui');
         }
     }
 

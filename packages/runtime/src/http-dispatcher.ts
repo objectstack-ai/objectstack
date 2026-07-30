@@ -235,7 +235,9 @@ export class HttpDispatcher {
         getObjectQL: (environmentId) => this.getObjectQLService(environmentId),
         // Reads off the per-request RESOLVED kernel (`this.kernel` is set by
         // dispatch() before any handler runs) — see the deps contract note.
-        getRequestKernelService: async (name) => {
+        // [#4127 batch 4] Annotated for the same reason as the two above: an
+        // arrow cannot be contextually typed against an overloaded signature.
+        getRequestKernelService: async (name: string) => {
             const k: any = this.kernel;
             return typeof k?.getServiceAsync === 'function'
                 ? k.getServiceAsync(name)
@@ -714,7 +716,13 @@ export class HttpDispatcher {
     private async enforceAuthGate(context: any, cleanPath: string): Promise<any | null> {
         try {
             if (isAuthGateAllowlisted(cleanPath)) return null;
-            const authService: any = await this.resolveService('auth', context.environmentId);
+            // [#4127 FINDING, batch 5]
+            // `auth` IS contracted, so this `any` is not legitimate.
+            // `isAuthGateActive` is implemented (auth-manager.ts) and load-bearing
+            // — the whole auth gate turns on it — but IAuthService never declared
+            // it. `packages/rest` probes it the same way, so two independent
+            // callers agree on a member the contract does not mention.
+            const authService = await this.resolveService('auth', context.environmentId);
             if (!authService || typeof authService.isAuthGateActive !== 'function' || !authService.isAuthGateActive()) {
                 return null;
             }
@@ -770,8 +778,25 @@ export class HttpDispatcher {
         let userId: string | undefined;
         let activeOrganizationId: string | undefined;
         try {
-            const authService: any = await this.resolveService(CoreServiceName.enum.auth);
-            const sessionData = await authService?.api?.getSession?.({
+            // [#4127 batch 4] This read was `authService?.api?.getSession?.(…)`
+            // with NO `getApi()` fallback — the only one of the three `.api`
+            // readers in the codebase without it (resolve-execution-context and
+            // dispatcher-plugin both have it, and their comments explain why:
+            // `.api` is the LEGACY direct mount, `getApi()` the lazy-plugin
+            // accessor). `plugin-auth` registers `AuthManager` as the `auth`
+            // service, and AuthManager has no `.api` at all.
+            //
+            // So against the shipped auth plugin this resolved to `undefined`,
+            // `userId` stayed unset, and the function returned at the
+            // "anonymous — upstream auth will decide" line BEFORE ever querying
+            // `sys_environment_member`. The project-membership gate did not
+            // gate: a signed-in NON-MEMBER passed it, on every deployment with
+            // project scoping on, which is where the flag defaults to true.
+            // Anonymous callers were still denied elsewhere (#2567/#3963), so
+            // this was specifically the signed-in non-member case.
+            const authService = await this.resolveService(CoreServiceName.enum.auth);
+            const api = authService?.api ?? (typeof authService?.getApi === 'function' ? await authService.getApi() : undefined);
+            const sessionData = await api?.getSession?.({
                 headers: context.request?.headers,
             });
             userId = sessionData?.user?.id ?? sessionData?.session?.userId;
@@ -1288,7 +1313,9 @@ export class HttpDispatcher {
      */
     private async resolveActiveOrganizationId(context: HttpProtocolContext): Promise<string | undefined> {
         try {
-            const authService: any = await this.resolveService(CoreServiceName.enum.auth);
+            // [#4127 FINDING, batch 5]
+            // Third `.api` reader on the auth service; see the note above.
+            const authService = await this.resolveService(CoreServiceName.enum.auth);
             const rawHeaders = context.request?.headers;
             let headers: any = rawHeaders;
             if (rawHeaders && typeof rawHeaders === 'object' && typeof (rawHeaders as any).get !== 'function') {
