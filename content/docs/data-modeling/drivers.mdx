@@ -279,6 +279,64 @@ export OS_DATABASE_URL=file:./data/app.db
 export OS_DATABASE_URL=:memory:
 ```
 
+### Journal mode: WAL, and cross-process access
+
+A file-backed SQLite database is switched to **WAL** (write-ahead logging) the
+first time ObjectStack connects to it. SQLite's own default is a rollback
+journal (`journal_mode = delete`), which is the wrong trade for the way this
+platform is actually used — **several processes on one file**: a dev server,
+`os migrate`, `os meta resync`, a test run.
+
+| | rollback journal (SQLite default) | WAL (ObjectStack default) |
+|:---|:---|:---|
+| Reader while another process writes | allowed until the writer commits | always allowed (last committed snapshot) |
+| Writer while another process reads | **blocked** — committing needs an exclusive lock (`SQLITE_BUSY`) | allowed |
+| Idle connection visible to other processes | no — a lock lasts only as long as its transaction | yes, which is what makes the [`os migrate` occupancy check](/docs/deployment/cli#occupancy-check-sqlite) reliable |
+| Files on disk | `app.db` (plus a transient `app.db-journal`) | `app.db`, plus `app.db-wal` / `app.db-shm` while a connection is attached |
+
+Concurrent *writers* still serialize — SQLite allows one at a time in any mode.
+
+Two consequences worth knowing:
+
+- **Journal mode is stored in the file.** One connection sets it and it stays
+  set, so an existing database is converted in place on the next boot (a header
+  change; no rows are touched) and stays in WAL even when opened by other tools.
+- **`app.db-wal` can hold committed data.** A clean shutdown checkpoints and
+  removes it, but do not copy or restore `app.db` on its own while a server is
+  attached — use `sqlite3 app.db ".backup …"`, as
+  [Backup & restore](/docs/deployment/backup-restore#sqlite-single-host)
+  describes.
+
+**Opting out.** WAL requires shared memory beside the database and therefore
+**does not work on network filesystems** (NFS/SMB). Set the journal mode back
+per deployment:
+
+```bash
+export OS_DATABASE_SQLITE_JOURNAL_MODE=delete
+```
+
+…or per datasource, which outranks the env var:
+
+```typescript
+new SqlDriver({
+  client: 'better-sqlite3',
+  connection: { filename: '/mnt/share/app.db' },
+  useNullAsDefault: true,
+  sqliteJournalMode: 'delete',
+});
+```
+
+Either form *applies* `delete`, so it also converts a database that already
+adopted WAL back. The driver never assumes the switch worked: it reads the mode
+back and, if WAL is accepted but cannot be read through (the usual network-share
+symptom), reverts to `delete` and says so. A database that stays on a rollback
+journal is slower under concurrency, never broken.
+
+`:memory:` databases and the WASM SQLite driver are left on their own journal
+mode. Neither is shared between processes: the WASM driver's live database sits
+in the WASM heap and what reaches disk is a byte image it exports, so there is no
+cross-process concurrency for WAL to buy.
+
 ### Space Reclamation & Table Rotation (ADR-0057)
 
 The SQL driver connects SQLite with `auto_vacuum=INCREMENTAL` and exposes

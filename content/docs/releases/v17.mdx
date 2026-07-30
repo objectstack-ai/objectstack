@@ -922,6 +922,17 @@ most of its rows in silence.
   state, and requires each to be classified (`scope` / `closed` / `open` /
   `output`) with a rationale. Omission is the commonest authoring error a model
   makes; it must not also be the widest grant.
+- **File-backed SQLite runs in WAL mode** (#3941). SQLite's built-in rollback
+  journal makes a writer wait for every reader and leaves an idle connection
+  invisible to SQL — both wrong for the platform's normal shape, several
+  processes on one file (a dev server, `os migrate`, a test run). The driver now
+  switches such a database to WAL on connect, which is also what lets the
+  `os migrate` occupancy check *see* an idle server instead of inferring one from
+  file descriptors. Two things to know: `app.db-wal` / `app.db-shm` appear beside
+  the database while a connection is attached (so back up with
+  `sqlite3 … ".backup"`, never a bare file copy), and WAL cannot work on a
+  **network filesystem** — set `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` there,
+  which converts an already-switched database back.
 - Metadata-plane FLS (per-caller masking) is proposed as ADR-0106.
 
 ## New in Console (Studio) — bundled objectui 17.0

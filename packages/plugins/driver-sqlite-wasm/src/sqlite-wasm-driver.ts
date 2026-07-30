@@ -77,6 +77,30 @@ export class SqliteWasmDriver extends SqlDriver {
     return true;
   }
 
+  /**
+   * Never WAL (#3941). The base driver switches a file-backed SQLite database to
+   * WAL so several processes can share one file. Nothing here is shared: the live
+   * database sits in this process's WASM heap, and what reaches disk is a byte
+   * image {@link flush} exports from it — another process reads that snapshot,
+   * never the database. So the pragma buys this transport nothing.
+   *
+   * It is also not free. Journal mode is a persistent header change in the
+   * operator's file, and under WAL the export path's correctness would rest on
+   * sql.js checkpointing the log while `export()` closes and reopens the
+   * database. Measured, it does — no row is lost today — which is why this is a
+   * declined default and not a bug report. But a transport that persists by
+   * serializing an image should not be one implementation detail away from
+   * dropping committed rows for a concurrency benefit it cannot use.
+   *
+   * Declared rather than discovered: sql.js *accepts* `journal_mode = WAL`,
+   * because its VFS is memory-backed, so the refusal the base class gets from
+   * `:memory:` never comes — and an image whose header already says WAL (one a
+   * native run left behind) reports `wal` here too.
+   */
+  protected override get supportsWalJournal(): boolean {
+    return false;
+  }
+
   private wasmConfig: SqliteWasmDriverConfig;
   private beforeExitHandler: (() => void) | null = null;
 

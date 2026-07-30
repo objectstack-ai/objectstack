@@ -427,6 +427,13 @@ export interface IntrospectedSchema {
  */
 export type ReadPresentationKind = 'datetime' | 'date' | 'time' | 'boolean' | 'number';
 
+/**
+ * Journal modes the driver knows how to ask a file-backed SQLite database for.
+ * See {@link SqlDriver.applySqliteJournalMode} for why `'wal'` is the default
+ * and what `'delete'` is for.
+ */
+export type SqliteJournalMode = 'wal' | 'delete';
+
 export type SqlDriverConfig = Knex.Config & {
   schemaMode?: SchemaMode;
   /**
@@ -437,6 +444,18 @@ export type SqlDriverConfig = Knex.Config & {
    * destructive DDL, and is force-disabled when `NODE_ENV==='production'`.
    */
   autoMigrate?: 'off' | 'safe';
+  /**
+   * Journal mode for a **file-backed** SQLite database (#3941). Defaults to
+   * `'wal'`, which is what lets a dev server and a CLI command share one file
+   * without serializing against each other. `'delete'` restores SQLite's
+   * built-in rollback journal — the escape hatch for a database on a network
+   * filesystem, where WAL cannot work. Ignored for `:memory:` and for
+   * non-SQLite dialects; overridable per deployment with
+   * `OS_DATABASE_SQLITE_JOURNAL_MODE`.
+   *
+   * @see {@link SqlDriver.applySqliteJournalMode}
+   */
+  sqliteJournalMode?: SqliteJournalMode;
 };
 
 // ── SQL Driver ───────────────────────────────────────────────────────────────
@@ -758,6 +777,13 @@ export class SqlDriver implements IDataDriver {
   protected readonly autoMigrate: 'off' | 'safe';
 
   /**
+   * The journal mode the host declared, if any (#3941). Kept unresolved so an
+   * absent declaration can still defer to the environment at connect time —
+   * see {@link resolveSqliteJournalMode}.
+   */
+  protected readonly declaredJournalMode?: SqliteJournalMode;
+
+  /**
    * Metadata field defs for every table this driver manages, captured during
    * `initObjects` (tableName → fields). The source of truth that
    * {@link detectManagedDrift} diffs the physical schema against.
@@ -777,11 +803,12 @@ export class SqlDriver implements IDataDriver {
   protected deferredSchemaObjects = new Map<string, { name: string; fields?: Record<string, any> }>();
 
   constructor(config: SqlDriverConfig) {
-    // `schemaMode` / `autoMigrate` are ObjectStack concerns, not Knex options —
-    // strip them before handing the config to Knex.
-    const { schemaMode, autoMigrate, ...knexConfig } = config;
+    // `schemaMode` / `autoMigrate` / `sqliteJournalMode` are ObjectStack
+    // concerns, not Knex options — strip them before handing the config to Knex.
+    const { schemaMode, autoMigrate, sqliteJournalMode, ...knexConfig } = config;
     this.schemaMode = schemaMode ?? 'managed';
     this.autoMigrate = autoMigrate ?? 'off';
+    this.declaredJournalMode = sqliteJournalMode;
     this.config = knexConfig;
     this.knex = knex(SqlDriver.withConnectBound(knexConfig));
     this.installQueryTiming();
@@ -995,48 +1022,279 @@ export class SqlDriver implements IDataDriver {
     // better-sqlite3 to open the file (e.g. loadMetaFromDb on startup).
     await this.ensureDatabaseExists();
 
-    // SQLite space hygiene (ADR-0057). With the default `auto_vacuum=NONE`,
-    // freed pages are never returned to the OS — a database that briefly grew
-    // (e.g. high-frequency telemetry before retention sweeps run) stays at its
-    // high-water mark forever. INCREMENTAL lets a later `PRAGMA incremental_vacuum`
-    // (run by the lifecycle Reaper, or manually) reclaim that space without a
-    // full blocking VACUUM. NOTE: auto_vacuum only changes layout on a *fresh*
-    // database or after a one-time full VACUUM, so this benefits new dev DBs;
-    // existing files need a single `VACUUM` to adopt it. Harmless / no-op on
-    // :memory: and on already-incremental databases.
     if (this.isSqlite) {
-      try {
-        await this.knex.raw('PRAGMA auto_vacuum = INCREMENTAL');
-      } catch (e) {
-        // A native better-sqlite3 load failure surfaces HERE first — this PRAGMA
-        // is the first query that forces the lazy `.node` addon to load. Two
-        // real-world variants, both handled by `resolveSqliteDriver`'s probe,
-        // which catches the failure and steps down to wasm SQLite with a clean
-        // one-line notice (#2229):
-        //   • ABI mismatch  — `ERR_DLOPEN_FAILED` / "…NODE_MODULE_VERSION 127…"
-        //                      (a stale prebuilt binary after a Node upgrade)
-        //   • not built     — "Could not locate the bindings file" (native addon
-        //                      never compiled, e.g. a fresh clone / blocked build)
-        // Dumping the full multi-line stack for either looks like a fatal crash
-        // to the reader (it isn't), so log a concise, actionable one-liner and
-        // let the step-down message that follows explain the outcome. Any OTHER
-        // PRAGMA failure keeps the full warning (with stack) as before.
-        const code = (e as { code?: string } | null | undefined)?.code;
-        const msg = e instanceof Error ? e.message : String(e);
-        const isNativeLoadFailure =
-          code === 'ERR_DLOPEN_FAILED' ||
-          code === 'MODULE_NOT_FOUND' ||
-          code === 'ERR_MODULE_NOT_FOUND' ||
-          /NODE_MODULE_VERSION|could not locate the bindings|was compiled against a different/i.test(msg);
-        if (isNativeLoadFailure) {
-          this.logger.warn(
-            'native better-sqlite3 unavailable (ABI mismatch or not built) — will step down to wasm SQLite; run `pnpm rebuild better-sqlite3` for native speed',
-          );
-        } else {
-          this.logger.warn('Failed to set PRAGMA auto_vacuum=INCREMENTAL', e);
-        }
+      // Both pragmas below are persistent properties of the FILE, so one
+      // connection setting them is enough for every process that follows.
+      // A `false` means the very first statement on this connection failed —
+      // in practice a native addon that cannot load — so asking it for another
+      // pragma would only repeat the same warning.
+      if (await this.applyAutoVacuumIncremental()) {
+        await this.applySqliteJournalMode();
       }
     }
+  }
+
+  /**
+   * SQLite space hygiene (ADR-0057). With the default `auto_vacuum=NONE`,
+   * freed pages are never returned to the OS — a database that briefly grew
+   * (e.g. high-frequency telemetry before retention sweeps run) stays at its
+   * high-water mark forever. INCREMENTAL lets a later `PRAGMA incremental_vacuum`
+   * (run by the lifecycle Reaper, or manually) reclaim that space without a
+   * full blocking VACUUM. NOTE: auto_vacuum only changes layout on a *fresh*
+   * database or after a one-time full VACUUM, so this benefits new dev DBs;
+   * existing files need a single `VACUUM` to adopt it. Harmless / no-op on
+   * :memory: and on already-incremental databases. Unaffected by the journal
+   * mode: an INCREMENTAL database keeps reclaiming under WAL.
+   *
+   * @returns whether the PRAGMA went through. This is the first statement any
+   * connection runs, so `false` says the connection itself is not answering —
+   * not merely that space hygiene is unavailable.
+   */
+  private async applyAutoVacuumIncremental(): Promise<boolean> {
+    try {
+      await this.knex.raw('PRAGMA auto_vacuum = INCREMENTAL');
+      return true;
+    } catch (e) {
+      // A native better-sqlite3 load failure surfaces HERE first — this PRAGMA
+      // is the first query that forces the lazy `.node` addon to load. Two
+      // real-world variants, both handled by `resolveSqliteDriver`'s probe,
+      // which catches the failure and steps down to wasm SQLite with a clean
+      // one-line notice (#2229):
+      //   • ABI mismatch  — `ERR_DLOPEN_FAILED` / "…NODE_MODULE_VERSION 127…"
+      //                      (a stale prebuilt binary after a Node upgrade)
+      //   • not built     — "Could not locate the bindings file" (native addon
+      //                      never compiled, e.g. a fresh clone / blocked build)
+      // Dumping the full multi-line stack for either looks like a fatal crash
+      // to the reader (it isn't), so log a concise, actionable one-liner and
+      // let the step-down message that follows explain the outcome. Any OTHER
+      // PRAGMA failure keeps the full warning (with stack) as before.
+      const code = (e as { code?: string } | null | undefined)?.code;
+      const msg = e instanceof Error ? e.message : String(e);
+      const isNativeLoadFailure =
+        code === 'ERR_DLOPEN_FAILED' ||
+        code === 'MODULE_NOT_FOUND' ||
+        code === 'ERR_MODULE_NOT_FOUND' ||
+        /NODE_MODULE_VERSION|could not locate the bindings|was compiled against a different/i.test(msg);
+      if (isNativeLoadFailure) {
+        this.logger.warn(
+          'native better-sqlite3 unavailable (ABI mismatch or not built) — will step down to wasm SQLite; run `pnpm rebuild better-sqlite3` for native speed',
+        );
+      } else {
+        this.logger.warn('Failed to set PRAGMA auto_vacuum=INCREMENTAL', e);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Env override for the SQLite journal mode — the ops-side escape hatch for a
+   * deployment whose filesystem cannot host WAL.
+   */
+  private static readonly SQLITE_JOURNAL_MODE_ENV = 'OS_DATABASE_SQLITE_JOURNAL_MODE';
+
+  /**
+   * Which journal mode to ask this file-backed database for.
+   *
+   * An explicit `sqliteJournalMode` in the driver config outranks the
+   * environment: it is a decision the host made about this datasource, while
+   * the env var is a blanket per-deployment setting. Anything unrecognised is
+   * reported and ignored rather than silently treated as an opt-out — a typo
+   * must not quietly leave a database serialized.
+   */
+  protected resolveSqliteJournalMode(): SqliteJournalMode {
+    const fromEnv = (process.env[SqlDriver.SQLITE_JOURNAL_MODE_ENV] ?? '').trim().toLowerCase();
+    const requested = this.declaredJournalMode ?? (fromEnv || undefined);
+    if (requested === undefined) return 'wal';
+    if (requested === 'wal' || requested === 'delete') return requested;
+    this.logger.warn(
+      `Ignoring SQLite journal mode '${requested}' (expected 'wal' or 'delete') — using 'wal'`,
+    );
+    return 'wal';
+  }
+
+  /**
+   * Whether this transport can hold its database in WAL mode.
+   *
+   * True for a real SQLite file. Overridden to `false` by a transport whose
+   * "file" is a byte image it serializes itself (`SqliteWasmDriver`): no other
+   * process reads its live database, so a persistent mode change made for
+   * cross-process concurrency buys it nothing.
+   */
+  protected get supportsWalJournal(): boolean {
+    return true;
+  }
+
+  /**
+   * Put a file-backed SQLite database in WAL mode (#3941).
+   *
+   * ObjectStack's normal shape is **several processes on one file**: a dev
+   * server, `os migrate`, `os meta resync`, a test run. SQLite's built-in
+   * default — `journal_mode = delete`, a rollback journal — is the worst mode
+   * for that, in two measured ways:
+   *
+   *   - **A writer must wait for every reader.** Committing a rollback journal
+   *     takes an EXCLUSIVE lock, which cannot coexist with a reader, so an
+   *     `os migrate` write serializes behind whatever the live server is
+   *     reading (`SQLITE_BUSY`). Under WAL neither direction blocks: readers
+   *     see the last committed snapshot while a writer appends.
+   *   - **An attached connection leaves no trace.** Rollback-journal locks
+   *     exist only for the duration of a transaction, so an idle `os serve` is
+   *     invisible to SQL — which is what defeated the first cut of the
+   *     `os migrate` occupancy check (#3924) and forced it onto file-descriptor
+   *     inspection (#3940). Under WAL the SQL probe
+   *     (`locking_mode = EXCLUSIVE` + `BEGIN IMMEDIATE`) reports `SQLITE_BUSY`
+   *     against an idle attached connection, so it becomes authoritative
+   *     instead of a fallback.
+   *
+   * Journal mode is a **persistent property of the file**, not of a connection:
+   * setting it once is enough, and it stays set after every process detaches.
+   * That is also why the opt-out has to *apply* `delete` rather than skip —
+   * skipping would leave an already-converted database in WAL forever. Only
+   * `journal_mode` changes here; `synchronous` is untouched, so durability is
+   * exactly what it was before.
+   *
+   * Two failure modes, both handled because neither is loud on its own:
+   *
+   *   1. **A refusal is an answer, not an error.** `PRAGMA journal_mode = X`
+   *      replies with the mode actually in force — `:memory:` answers `memory`,
+   *      and a filesystem that cannot host WAL answers `delete` — without
+   *      raising anything. So the reply is always read back, never assumed.
+   *   2. **Accepted, then unusable.** WAL needs a shared-memory index beside
+   *      the database, which network filesystems (NFS/SMB) do not provide; the
+   *      mode change can succeed and the first read *through* the WAL then
+   *      fail. The mode is persisted by that point, so leaving it would strand
+   *      the database — hence the read-back probe and the revert to `delete`.
+   *
+   * Never throws and never blocks the boot: a database that stays on a rollback
+   * journal is slower under concurrency, not broken, and refusing to start over
+   * a pragma would be worse than the problem this solves.
+   */
+  protected async applySqliteJournalMode(): Promise<void> {
+    if (!this.supportsWalJournal) return;
+
+    // No file means nobody to share it with: `:memory:` (and every other
+    // `:`-prefixed pseudo-filename) is private to this process.
+    const filename = this.sqliteFilename();
+    if (!filename) return;
+
+    const target = this.resolveSqliteJournalMode();
+
+    let current: string | null;
+    try {
+      current = SqlDriver.journalModeOf(await this.knex.raw('PRAGMA journal_mode'));
+    } catch (e) {
+      this.logger.warn(`Failed to read SQLite journal_mode on ${filename}`, e);
+      return;
+    }
+
+    // `memory` / `off` is a deliberate no-journal transport, not a rollback
+    // journal worth migrating — leave whatever the host chose in place.
+    if (current === null || current === 'memory' || current === 'off') return;
+
+    if (current === target) {
+      // Nothing to change — but when the mode is already WAL, still prove it is
+      // usable. A database an earlier boot left in WAL on a filesystem that
+      // cannot serve it (failure mode 2) would otherwise fail every query with
+      // nothing pointing at the cause, and the revert that would fix it only
+      // ever gets one attempt.
+      if (target === 'wal') await this.verifyWalReadable(filename);
+      return;
+    }
+
+    let applied: string | null;
+    try {
+      applied = SqlDriver.journalModeOf(
+        await this.knex.raw(`PRAGMA journal_mode = ${target.toUpperCase()}`),
+      );
+    } catch (e) {
+      // SQLITE_BUSY is the benign case: a mode change needs the file to itself,
+      // and another process has it open. Whoever wins the race sets the mode
+      // and everyone else reads it back on their next boot.
+      this.logger.warn(
+        `Failed to set SQLite journal_mode=${target} on ${filename} (it stays '${current}')`,
+        e,
+      );
+      return;
+    }
+
+    if (applied !== target) {
+      this.logger.warn(
+        `SQLite kept journal_mode='${applied ?? 'unknown'}' on ${filename} instead of '${target}' — ` +
+          (target === 'wal'
+            ? `WAL needs a local filesystem (it does not work on NFS/SMB), so this database stays serialized between processes. ` +
+              `Set ${SqlDriver.SQLITE_JOURNAL_MODE_ENV}=delete to stop asking.`
+            : `close every other connection and retry, or run \`sqlite3 ${filename} "PRAGMA journal_mode=delete"\` with nothing attached.`),
+      );
+      return;
+    }
+
+    if (target === 'wal') await this.verifyWalReadable(filename);
+  }
+
+  /**
+   * Prove a WAL database can actually be read through, and undo the mode if
+   * not — see failure mode 2 in {@link applySqliteJournalMode}. Runs on every
+   * connect to a WAL database, not only right after a switch, so a database
+   * some earlier boot stranded still gets recovered.
+   *
+   * Any read on a WAL database opens the shared-memory index, which is the part
+   * a network filesystem cannot provide; `sqlite_master` is the cheapest such
+   * read and needs no schema to exist.
+   */
+  private async verifyWalReadable(filename: string): Promise<void> {
+    try {
+      await this.knex.raw('SELECT count(*) FROM sqlite_master');
+      return;
+    } catch (e) {
+      // Busy is not unusable. Another connection in EXCLUSIVE locking mode — the
+      // `os migrate` occupancy probe takes exactly that, briefly — makes this
+      // read fail for a reason that passes on its own, and changing the journal
+      // mode underneath it would be both wrong and impossible.
+      if (SqlDriver.isSqliteBusyError(e)) return;
+
+      const detail = e instanceof Error ? e.message : String(e);
+      let reverted: string | null = null;
+      try {
+        reverted = SqlDriver.journalModeOf(await this.knex.raw('PRAGMA journal_mode = DELETE'));
+      } catch {
+        // Leaving `reverted` null — reported as "did not take" below, which is
+        // the honest outcome either way.
+      }
+      this.logger.warn(
+        `SQLite accepted WAL on ${filename} but cannot read through it (${detail}) — ` +
+          (reverted === 'delete'
+            ? `reverted to journal_mode=delete. Set ${SqlDriver.SQLITE_JOURNAL_MODE_ENV}=delete to skip this on every boot.`
+            : `and the revert did not take (journal_mode='${reverted ?? 'unknown'}'). Run ` +
+              `\`sqlite3 ${filename} "PRAGMA journal_mode=delete"\` with nothing attached, then set ` +
+              `${SqlDriver.SQLITE_JOURNAL_MODE_ENV}=delete.`),
+      );
+    }
+  }
+
+  /**
+   * Whether an error is SQLite reporting contention rather than a broken
+   * database. Mirrors `isBusyError` in the CLI's occupancy probe, which asks the
+   * same question of the same engine from the other side of the package graph.
+   */
+  private static isSqliteBusyError(e: unknown): boolean {
+    const code = (e as { code?: string } | null | undefined)?.code ?? '';
+    const message = e instanceof Error ? e.message : String(e ?? '');
+    return code.startsWith('SQLITE_BUSY') || /database is locked|SQLITE_BUSY/i.test(message);
+  }
+
+  /**
+   * The `journal_mode` a PRAGMA reply carries, lower-cased.
+   *
+   * Both SQLite dialects answer a PRAGMA with rows (`[{ journal_mode: 'wal' }]`)
+   * — a reply shaped any other way yields `null`, which every caller treats as
+   * "leave the database alone" rather than guessing.
+   */
+  private static journalModeOf(result: unknown): string | null {
+    const rows: unknown = Array.isArray(result) ? result : (result as { rows?: unknown })?.rows;
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    const value =
+      row && typeof row === 'object' ? (row as { journal_mode?: unknown }).journal_mode : row;
+    return typeof value === 'string' ? value.toLowerCase() : null;
   }
 
   async checkHealth(): Promise<boolean> {
@@ -5468,13 +5726,26 @@ export class SqlDriver implements IDataDriver {
 
   // ── Database helpers ────────────────────────────────────────────────────────
 
+  /**
+   * The on-disk path backing this SQLite datasource, or `null` when there is
+   * none: a non-SQLite dialect, `:memory:` (and any other `:`-prefixed
+   * pseudo-filename), or a function-valued `connection` where the host builds
+   * each connection itself and the target is not ours to read.
+   */
+  protected sqliteFilename(): string | null {
+    if (!this.isSqlite) return null;
+    const conn = (this.config as any).connection;
+    const filename = typeof conn === 'string' ? conn : conn?.filename;
+    if (typeof filename !== 'string' || filename === '') return null;
+    return filename.startsWith(':') ? null : filename;
+  }
+
   protected async ensureDatabaseExists() {
     // SQLite auto-creates database files but NOT parent directories.
     // Ensure the directory exists so better-sqlite3 can create the file.
     if (this.isSqlite) {
-      const conn = (this.config as any).connection;
-      const filename = typeof conn === 'string' ? conn : conn?.filename;
-      if (filename && filename !== ':memory:' && !filename.startsWith(':')) {
+      const filename = this.sqliteFilename();
+      if (filename) {
         const { dirname } = await import('node:path');
         const { mkdir } = await import('node:fs/promises');
         const dir = dirname(filename);

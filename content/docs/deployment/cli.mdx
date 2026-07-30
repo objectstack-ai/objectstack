@@ -541,15 +541,16 @@ schema cookie that the migration invalidates, and its writes can collide as
 `SQLITE_BUSY`. Before booting, `os migrate` checks two things:
 
 1. **Which processes hold the file open** (`/proc` on Linux, `lsof` on macOS).
-   This is the signal that fires in practice. ObjectStack's sqlite driver runs
-   `journal_mode = delete`, and a rollback-journal database keeps no record of
-   who is attached — an idle server holds no lock at all, so no SQL probe can
-   see it. An open file descriptor is what it does leave, and it names the
-   process to go and stop.
+   The signal that works in every journal mode, and the only one that names the
+   process to go and stop. It is also the only one that sees an *idle* server on
+   a rollback-journal database, where a lock lasts no longer than the
+   transaction that took it.
 2. **A SQL lock probe** (`PRAGMA locking_mode = EXCLUSIVE` under
-   `busy_timeout = 0`). On a WAL database this catches an attached connection
-   even when step 1 cannot run — a platform without process inspection, or a
-   database held by another user's process.
+   `busy_timeout = 0`). ObjectStack keeps file-backed SQLite in
+   [WAL mode](/docs/data-modeling/drivers#journal-mode-wal-and-cross-process-access),
+   where this catches any attached connection — idle or not — including the cases
+   step 1 cannot reach: a platform without process inspection, or a database held
+   by another user's process.
 
 Either one firing counts as busy. Both are non-destructive: no row is read or
 written.

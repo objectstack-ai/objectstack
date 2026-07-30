@@ -15,35 +15,40 @@
  * ## Two independent signals, because neither covers the ground alone
  *
  * **1. Which processes hold the file open** (`/proc` on Linux, `lsof` on
- * macOS). This is the signal that actually fires in practice, and it took
- * dogfooding to learn why: ObjectStack's sqlite driver runs
- * `journal_mode = delete`, NOT WAL. A rollback-journal database keeps no
- * persistent record of who is attached — locks exist only for the duration of
- * a transaction — so an idle `os serve` holds no lock at all and no amount of
- * SQL can see it. An open file descriptor is the only thing it does leave, and
- * it names the culprit, which is what an operator needs anyway.
+ * macOS). The signal that survives every journal mode, and the only one that
+ * names the culprit — "stop pid 12367 (node)" is worth more to an operator than
+ * "something is using it". It is also the only one that fires on a
+ * rollback-journal database, where locks exist just for the duration of a
+ * transaction, so an idle `os serve` holds nothing any query could see. That is
+ * what dogfooding caught (#3940), back when every ObjectStack database ran
+ * `journal_mode = delete`.
  *
  * **2. A SQL lock probe** — `PRAGMA locking_mode = EXCLUSIVE` then
- * `BEGIN IMMEDIATE` under `busy_timeout = 0`. On WAL this catches an attached
- * connection even when signal 1 cannot run (a foreign platform, a hardened
- * container with no `/proc` visibility, a connection held by another *user's*
- * process); on a rollback journal it narrows to "someone is mid-write". Kept
- * because it is authoritative where it applies and costs a millisecond.
+ * `BEGIN IMMEDIATE` under `busy_timeout = 0`. Since #3941 the driver keeps
+ * file-backed databases in **WAL**, where this reports `SQLITE_BUSY` against an
+ * *attached* connection whether or not it is doing anything — so for a database
+ * ObjectStack created it is authoritative, and it reaches the cases signal 1
+ * cannot: a platform with no process inspection, a hardened container with no
+ * `/proc` visibility, a connection held by another *user's* process. On a
+ * database still (or deliberately) on a rollback journal it narrows back to
+ * "someone is mid-write", which is why signal 1 stays first.
  *
  * Either signal firing means busy. Three rejected alternatives, all measured
  * rather than assumed:
  *
- * - **`-wal` / `-shm` presence alone.** Correct while a connection is open, but
- *   it cannot tell a live server from a crashed one, and it does not exist at
- *   all on a rollback journal — which is what we actually ship. Sidecars are
- *   reported as supporting evidence, never as the verdict.
+ * - **`-wal` / `-shm` presence alone.** Correct while a connection is open — a
+ *   clean close checkpoints and removes them — but it cannot tell a live server
+ *   from a crashed one, and it says nothing at all about a database on a
+ *   rollback journal. Sidecars are reported as supporting evidence, never as
+ *   the verdict.
  * - **`PRAGMA wal_checkpoint(TRUNCATE)`.** Reports `busy = 1` only when a
  *   *writer* is mid-transaction; an attached-but-idle connection checkpoints
  *   cleanly. Misses precisely the common case.
  * - **The SQL probe on its own.** What shipped first, and what dogfooding
  *   caught: against a real `os serve` holding a real project database, it
  *   reported idle and the migration ran unannounced. Correct on WAL, blind on
- *   the mode the platform defaults to.
+ *   the mode the platform defaulted to then — and still blind on any database
+ *   opted back out to `delete`, so it does not get to be the only signal.
  *
  * Both probes are non-destructive: an empty transaction rolled back with
  * locking mode restored, and read-only filesystem inspection. No row is read
