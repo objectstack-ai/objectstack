@@ -1113,6 +1113,73 @@ const flowNodeScriptConfigAliases: MetadataConversion = {
 };
 
 /**
+ * RLS-policy `priority` removed (protocol 17, #3896 security audit).
+ *
+ * A pure DELETE with no rename target, because the promised semantics never
+ * existed: applicable policies OR-combine (any match allows access — most
+ * permissive wins), so there is no conflict for a priority to resolve and
+ * evaluation order cannot change an outcome. The 2026-07-30 security-subset
+ * liveness re-verification closed the call graph — collection site, projection
+ * round-trip, compiler — and found NO reader, ever. Dropping the key is
+ * therefore strictly lossless: outcomes are identical with or without it.
+ *
+ * `retiredFromLoadPath`: the schema tombstones the key (`retiredKey`, tsc
+ * `never` + a parse-time prescription), same posture as its step-17 siblings.
+ */
+const permissionRlsPriorityRemoved: MetadataConversion = {
+  id: 'permission-rls-priority-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'permission.rowLevelSecurity.priority',
+  summary: "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'permissions', (ps, path) => {
+      const rls = (ps as { rowLevelSecurity?: unknown }).rowLevelSecurity;
+      if (!Array.isArray(rls)) return ps;
+      let touched = false;
+      const next = rls.map((policy, i) => {
+        if (!isDict(policy) || !('priority' in policy)) return policy;
+        const { priority: _dropped, ...rest } = policy;
+        emit({ from: 'priority', to: '(removed)', path: `${path}.rowLevelSecurity[${i}].priority` });
+        touched = true;
+        return rest;
+      });
+      return touched ? { ...ps, rowLevelSecurity: next } : ps;
+    });
+  },
+  fixture: {
+    before: {
+      permissions: [{
+        name: 'contributor',
+        label: 'Contributor',
+        rowLevelSecurity: [{
+          name: 'own_tasks',
+          object: 'crm_task',
+          operation: 'select',
+          using: 'assignee == current_user.email',
+          enabled: true,
+          priority: 10,
+        }],
+      }],
+    },
+    after: {
+      permissions: [{
+        name: 'contributor',
+        label: 'Contributor',
+        rowLevelSecurity: [{
+          name: 'own_tasks',
+          object: 'crm_task',
+          operation: 'select',
+          using: 'assignee == current_user.email',
+          enabled: true,
+        }],
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
  * All conversions, keyed by the protocol major that introduced the canonical
  * shape. Newest majors last; ordering within a major is application order.
  */
@@ -1130,6 +1197,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeCrudObjectAlias,
     flowNodeNotifyConfigAliases,
     flowNodeScriptConfigAliases,
+    permissionRlsPriorityRemoved,
   ],
 };
 

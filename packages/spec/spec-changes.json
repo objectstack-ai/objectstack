@@ -115,6 +115,12 @@
         "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
         "conversionId": "flow-node-script-config-aliases",
         "toMajor": 17
+      },
+      {
+        "surface": "permission.rowLevelSecurity.priority",
+        "to": "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+        "conversionId": "permission-rls-priority-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -430,6 +436,12 @@
           "surface": "flow.node.script.config",
           "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
           "conversionId": "flow-node-script-config-aliases",
+          "toMajor": 17
+        },
+        {
+          "surface": "permission.rowLevelSecurity.priority",
+          "to": "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+          "conversionId": "permission-rls-priority-removed",
           "toMajor": 17
         }
       ],

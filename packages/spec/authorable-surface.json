@@ -1,5 +1,5 @@
 {
-  "description": "Ratchet of every AUTHORABLE key in the spec \u2014 what a metadata author may write, which for this platform IS the third-party API. Auto-updated on additions (commit the change). A key that disappears without a tombstone fails gen:schema, because these schemas are not .strict() and Zod would silently strip it. \"[RETIRED]\" marks a tombstoned key that still rejects with an upgrade prescription. See #3855, ADR-0059 \u00a75.",
+  "description": "Ratchet of every AUTHORABLE key in the spec — what a metadata author may write, which for this platform IS the third-party API. Auto-updated on additions (commit the change). A key that disappears without a tombstone fails gen:schema, because these schemas are not .strict() and Zod would silently strip it. \"[RETIRED]\" marks a tombstoned key that still rejects with an upgrade prescription. See #3855, ADR-0059 §5.",
   "keys": [
     "ai/AIKnowledge:indexes",
     "ai/AIKnowledge:sources",
@@ -5746,7 +5746,7 @@
     "security/RowLevelSecurityPolicy:object",
     "security/RowLevelSecurityPolicy:operation",
     "security/RowLevelSecurityPolicy:positions",
-    "security/RowLevelSecurityPolicy:priority",
+    "security/RowLevelSecurityPolicy:priority [RETIRED]",
     "security/RowLevelSecurityPolicy:tags",
     "security/RowLevelSecurityPolicy:using",
     "security/SharingRule:accessLevel",

@@ -36,7 +36,7 @@ describe('Row-Level Security (RLS) Protocol', () => {
       const result = RowLevelSecurityPolicySchema.parse(policy);
       expect(result.name).toBe('tenant_isolation');
       expect(result.enabled).toBe(true); // default
-      expect(result.priority).toBe(0); // default
+      expect('priority' in result, 'retired key contributes nothing to the parsed output').toBe(false);
     });
 
     it('should validate a complete policy with all fields', () => {
@@ -50,7 +50,6 @@ describe('Row-Level Security (RLS) Protocol', () => {
         check: 'assigned_to_id IN (SELECT id FROM users WHERE manager_id = current_user.id)',
         positions: ['manager', 'director'],
         enabled: true,
-        priority: 10,
         tags: ['team_access', 'hierarchy'],
       };
 
@@ -117,16 +116,23 @@ describe('Row-Level Security (RLS) Protocol', () => {
       expect(result.enabled).toBe(true);
     });
 
-    it('should default priority to 0 if not specified', () => {
+    it('priority is RETIRED: absent parses clean, authored rejects with the prescription', () => {
+      // Removed by the 2026-07-30 #3896 security audit: policies OR-combine
+      // (most permissive wins), so the promised "conflict resolution" cannot
+      // exist and nothing ever read the key. The tombstone keeps the removal
+      // audible instead of silently stripping an authored value.
       const policy = {
         name: 'test_policy',
         object: 'account',
         operation: 'select',
         using: 'owner_id == current_user.id',
       };
+      expect('priority' in RowLevelSecurityPolicySchema.parse(policy)).toBe(false);
 
-      const result = RowLevelSecurityPolicySchema.parse(policy);
-      expect(result.priority).toBe(0);
+      const authored = { ...policy, priority: 10 } as never;
+      const r = RowLevelSecurityPolicySchema.safeParse(authored);
+      expect(r.success).toBe(false);
+      expect(JSON.stringify(!r.success ? r.error.issues : [])).toContain('removed in @objectstack/spec 17.0.0');
     });
 
     it('should handle policies for all operations', () => {
@@ -457,12 +463,10 @@ describe('Row-Level Security (RLS) Protocol', () => {
         using: '1 == 1', // Always true - see everything
         positions: ['ceo', 'cfo', 'cto'],
         enabled: true,
-        priority: 100, // Highest priority
       };
 
       const result = RowLevelSecurityPolicySchema.parse(policy);
       expect(result.using).toBe('1 == 1');
-      expect(result.priority).toBe(100);
     });
   });
 

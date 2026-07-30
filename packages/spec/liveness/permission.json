@@ -105,8 +105,9 @@
         "writeScope": {
           "status": "live",
           "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:224 (getEffectiveScope write branch) + packages/plugins/plugin-sharing/src/sharing-service.ts:230 (canEdit owner-set widened by __writeScope; 'org' short-circuits to unrestricted)",
-          "note": "ADR-0057 D1 — write access DEPTH (same enum as readScope). Re-verified 2026-07-30: both cited reads confirmed. Sibling of proofed readScope with no dogfood proof of its own — a proof-binding candidate (ADR-0054)."
+          "proof": "packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts#showcase-scope-depth-write",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:224 (getEffectiveScope write branch; absent → 'own') + packages/plugins/plugin-sharing/src/sharing-service.ts:230 (canEdit owner-set widened by __writeScope; 'org' short-circuits to unrestricted)",
+          "note": "ADR-0057 D1 — write access DEPTH (same enum as readScope). Re-verified 2026-07-30 and proof-bound the same day: the proof asserts POST-STATE in three postures — 'unit' edits a BU co-member's row and does NOT descend into a child BU; an ABSENT writeScope stays owner-only even under a 'unit' readScope (the axes gate independently); and the hierarchy seam fails CLOSED without the enterprise resolver."
         }
       }
     },
@@ -135,8 +136,9 @@
     "tabPermissions": {
       "status": "live",
       "verifiedAt": "2026-07-30",
+      "proof": "packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts#me-apps-and-everyone-baseline",
       "evidence": "packages/plugins/plugin-hono-server/src/hono-plugin.ts:1200 (tabRank merges all four values — hidden/default_off/default_on/visible — across resolved sets, most-visible wins; app hidden ⇒ dropped from /me/apps) + packages/runtime/src/security/resolve-execution-context.ts:205 + packages/rest/src/rest-server.ts:1551 (projection)",
-      "note": "Re-verified 2026-07-30 — the previous note ('only hidden is read') UNDERSTATED it: the rank merge reads every value. Exercised by packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts (registered in proof-registry.mts, unbound there because the binding was recorded against the ungoverned `app` type — this governed entry could carry it instead)."
+      "note": "Re-verified 2026-07-30 — the previous note ('only hidden is read') UNDERSTATED it: the rank merge reads every value. Proof BOUND the same day after the dogfood test was extended to actually AUTHOR the property on a permission set (it had only mentioned tabPermissions in its header): hidden drops the app from /me/apps, a more-visible sibling grant wins it back."
     },
     "rowLevelSecurity": {
       "children": {
@@ -193,9 +195,8 @@
         "priority": {
           "status": "dead",
           "verifiedAt": "2026-07-30",
-          "authorWarn": true,
-          "authorHint": "priority has no effect and CANNOT have one: applicable policies OR-combine (most permissive wins, per the schema's own describe), so there is no conflict to order and no evaluation-order effect on the outcome. Remove it from the policy.",
-          "note": "CORRECTED 2026-07-30 (was live citing rls-compiler.ts, which never reads it — confirmed across the load site, the projection round-trip and the compiler). Not merely unimplemented: under OR-combination the promised 'conflict resolution' semantics cannot exist, so this is a REMOVE candidate (#3715/#3950 precedent, v17 window) rather than an implement candidate."
+          "evidence": "packages/spec/src/security/rls.zod.ts (retiredKey tombstone — authored values REJECT with the prescription; z.input types the key never)",
+          "note": "REMOVED 2026-07-30, same day the audit corrected it (was live citing rls-compiler.ts, which never reads it — confirmed across the load site, the projection round-trip and the compiler). Not merely unimplemented: under OR-combination the promised 'conflict resolution' semantics cannot exist, so it went straight to the #3715/#3950 remove disposition inside the v17 breaking window. Tombstoned rather than deleted so the removal is audible; drop the tombstone (and this entry) ~two majors out."
         },
         "tags": {
           "status": "dead",

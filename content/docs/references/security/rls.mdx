@@ -221,7 +221,7 @@ const result = RLSEvaluationResult.parse(data);
 | **check** | `string` | optional | Validation condition for INSERT/UPDATE (defaults to USING clause if not specified - enforced at application level) |
 | **positions** | `string[]` | optional | Positions this policy applies to (omit for all) |
 | **enabled** | `boolean` | ✅ | Whether this policy is active |
-| **priority** | `integer` | ✅ | Policy evaluation priority (higher = evaluated first) |
+| **priority** | `any` | optional | [REMOVED] `rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). It never had an effect and could not: applicable policies OR-combine (most permissive wins), so there is no conflict to order. Delete the key — policy outcomes are unchanged. |
 | **tags** | `string[]` | optional | Policy categorization tags |
 
 
