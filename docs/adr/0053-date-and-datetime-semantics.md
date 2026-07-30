@@ -876,7 +876,36 @@ Two things, which is the argument for having built it:
 
 - The matrix is the ratchet the previous four fixes lacked: a backend that
   drifts now fails a named case whose note says which incident it is repeating.
-- Coverage still open, and deliberately so: the **relative-token** axis
+- ~~Coverage still open, and deliberately so: the **relative-token** axis
   (`{today}`, `{30_days_ago}` resolved through `filter-tokens.ts` and run
   end-to-end per driver) is not yet in the table. The cases here take resolved
-  comparands, which is the layer where the four incidents actually happened.
+  comparands, which is the layer where the four incidents actually happened.~~
+  Landed 2026-07-30 — see D-A3.2.
+
+### D-A3.2 — The relative-token axis closes the last gap in D-A3
+
+`TEMPORAL_TOKEN_CASES` carries filters with their placeholders **intact**
+(`{ at: { $lte: '{today}' } }`) plus a pinned reference instant, and each
+consumer resolves them through `resolveFilterTokens` exactly as the ObjectQL
+engine does before a driver is called.
+
+This asserts a property neither half could on its own. That `{today}` resolves
+to today's calendar day is covered in core; that a bare day as an upper bound
+denotes the whole day is D-D. What was never asserted is the **composition** —
+and the composition is the filter the default dashboard actually emits, the one
+#3777 was reported against. `{current_month_end}` is in the table for the same
+reason: the issue named it as the case where the author's "last day of the
+month" intent had no layer translating it.
+
+Run by the four backends downstream of resolution — the three drivers and the
+analytics preview. `formula`'s `matchesFilterCondition` is excluded on
+architecture, not for lack of coverage: an RLS `check` is a CEL expression
+compiled by `compileCelToFilter`, where a relative date is the *function*
+`today()` evaluated at compile time. A `{token}` string cannot reach it, since
+`resolveFilterTokens` runs on the read path (`engine.ts`) and the write-side
+check does not go through it. The exclusion is stated in that suite so it reads
+as a decision rather than an omission.
+
+With this, every axis D-A3 asked for is covered: `field-type × operator ×
+relative-token × driver`, asserting row results, plus the `bound-semantics` and
+`storage-form` axes the later addenda added.

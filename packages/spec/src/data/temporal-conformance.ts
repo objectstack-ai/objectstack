@@ -245,3 +245,100 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     note: 'Guards the opposite error: rolling 02-28 to 03-01 (skipping the 29th) would wrongly include h_leap.',
   },
 ] as const;
+
+// ── The relative-token axis ─────────────────────────────────────────────────
+
+/**
+ * A case whose filter still carries `{token}` placeholders — the shape an
+ * author actually writes (ADR-0053 D-A3's `relative-token` axis).
+ *
+ * The cases above take *resolved* comparands, which is the layer the four
+ * incidents happened at. This axis asserts the layer above: that resolution and
+ * bound semantics **compose**. `{today}` resolving correctly and a bare day
+ * meaning the whole day are each covered on their own; what was never asserted
+ * is `$lte: '{today}'` end-to-end — which is precisely the filter the default
+ * dashboard emits, and the one #3777 was reported against.
+ *
+ * `now` is pinned so a case is a fixed expectation rather than a moving one.
+ * The resolver (`resolveFilterTokens` in `@objectstack/core`) takes it
+ * explicitly for the same reason it pins one instant per tree: a filter whose
+ * bounds resolved microseconds apart could straddle a boundary.
+ *
+ * # Which backends run this axis
+ *
+ * The four that sit downstream of resolution: the three drivers (the ObjectQL
+ * engine resolves `ast.where` before the driver sees it) and the analytics
+ * preview. `formula`'s `matchesFilterCondition` does **not** — its filters come
+ * from `compileCelToFilter`, where a relative date is the CEL *function*
+ * `today()` evaluated during compilation, never a `{token}` string. That is an
+ * architectural exclusion, not a coverage hole.
+ */
+export interface TemporalTokenCase {
+  /** Stable identifier, usable as a test name. */
+  name: string;
+  field: 'at' | 'on';
+  kind: TemporalFieldKind;
+  /** The filter as authored — placeholders intact. */
+  filter: FilterCondition;
+  /** Reference instant for resolution, as an ISO string. */
+  now: string;
+  /** Ids of matching rows, ascending, after resolution. */
+  expected: string[];
+  /** Why the case is here — surfaced in failure output. */
+  note?: string;
+}
+
+/**
+ * Pinned so `{today}` is the fixture's boundary day and `{current_month_*}`
+ * brackets it — the same 2026-07-28 the resolved-comparand cases use, at a time
+ * of day (09:15) that a midnight-anchored upper bound would discard.
+ */
+export const TEMPORAL_TOKEN_NOW = '2026-07-28T09:15:00.000Z';
+
+export const TEMPORAL_TOKEN_CASES: readonly TemporalTokenCase[] = [
+  {
+    name: 'token: `$lte: {today}` on datetime keeps all of today',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $lte: '{today}' } },
+    now: TEMPORAL_TOKEN_NOW,
+    expected: ['a_old', 'b_prev', 'c_open', 'd_mid', 'e_late', 'h_leap'],
+    note: '#3777 as authored: the dashboard emits this, and pre-fix it dropped d_mid and e_late — rows created earlier the same day.',
+  },
+  {
+    name: 'token: `$lte: {today}` on date behaves identically',
+    field: 'on',
+    kind: 'date',
+    filter: { on: { $lte: '{today}' } },
+    now: TEMPORAL_TOKEN_NOW,
+    expected: ['a_old', 'b_prev', 'c_open', 'd_mid', 'e_late', 'h_leap'],
+    note: 'The two field types must not diverge once the token is resolved.',
+  },
+  {
+    name: 'token: a `{current_month_start}`..`{current_month_end}` window spans the whole final day',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '{current_month_start}', $lte: '{current_month_end}' } },
+    now: TEMPORAL_TOKEN_NOW,
+    expected: ['b_prev', 'c_open', 'd_mid', 'e_late', 'f_next', 'g_eom'],
+    note: 'The issue named this one: `{current_month_end}` means "the last DAY of the month", so g_eom at 23:59:59.999 on the 31st has to be inside.',
+  },
+  {
+    name: 'token: `{30_days_ago}`..`{today}` is the rolling-window shape',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '{30_days_ago}', $lte: '{today}' } },
+    now: TEMPORAL_TOKEN_NOW,
+    expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
+    note: 'The lower bound stays midnight-anchored while the upper spans its day — the two halves of the rule in one filter.',
+  },
+  {
+    name: 'token: a parameterised `{1_days_ago}` upper bound stops before today',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $lte: '{1_days_ago}' } },
+    now: TEMPORAL_TOKEN_NOW,
+    expected: ['a_old', 'b_prev', 'h_leap'],
+    note: 'Guards the off-by-one in the other direction: widening must land on the 28th, not the 29th.',
+  },
+] as const;

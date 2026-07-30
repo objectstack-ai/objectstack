@@ -15,7 +15,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { TEMPORAL_CASES, TEMPORAL_ROWS } from '@objectstack/spec/data';
+import { TEMPORAL_CASES, TEMPORAL_ROWS, TEMPORAL_TOKEN_CASES } from '@objectstack/spec/data';
+import { resolveFilterTokens } from '@objectstack/core';
 import { MongoDBDriver } from './mongodb-driver.js';
 
 let sharedMongod: MongoMemoryServer | undefined;
@@ -54,6 +55,17 @@ describe.skipIf(!sharedMongod)('driver-mongodb — temporal conformance', () => 
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
       const rows = await driver.find('conformance', { where: c.filter } as any);
+      const got = (rows as any[]).map((r) => r.id).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
+    });
+  }
+
+  // The relative-token axis — resolved here the way the ObjectQL engine
+  // resolves `ast.where` before a driver sees it.
+  for (const c of TEMPORAL_TOKEN_CASES) {
+    it(c.name, async () => {
+      const where = resolveFilterTokens(c.filter, { now: new Date(c.now) });
+      const rows = await driver.find('conformance', { where } as any);
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });

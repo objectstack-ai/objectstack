@@ -27,3 +27,19 @@ describe('matchesFilterCondition — temporal conformance', () => {
     });
   }
 });
+
+/**
+ * The matrix's relative-token axis (`TEMPORAL_TOKEN_CASES`) is deliberately NOT
+ * run here, and the reason is architectural rather than a gap in coverage.
+ *
+ * This evaluator's filters come from `compileCelToFilter`: an RLS `check` is a
+ * CEL expression, where a relative date is the *function* `today()` evaluated
+ * during compilation. A `{token}` string never reaches it — `resolveFilterTokens`
+ * runs on the ObjectQL read path (`engine.ts`), which the write-side `check` does
+ * not go through.
+ *
+ * Asserting the axis here would therefore test a shape this backend cannot be
+ * handed; if that ever changes — if a `check` gains a token-bearing filter form —
+ * this comment is the thing to delete, and the axis is already sitting in spec
+ * ready to be consumed.
+ */

@@ -18,13 +18,29 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TEMPORAL_CASES, TEMPORAL_ROWS } from '@objectstack/spec/data';
+import { TEMPORAL_CASES, TEMPORAL_ROWS, TEMPORAL_TOKEN_CASES } from '@objectstack/spec/data';
+import { resolveFilterTokens } from '@objectstack/core';
 import { matchesWhere } from '../preview-evaluator.js';
 
 describe('preview-evaluator — temporal conformance', () => {
   for (const c of TEMPORAL_CASES) {
     it(c.name, () => {
       const got = TEMPORAL_ROWS.filter((r) => matchesWhere(r as any, c.filter as any)).map((r) => r.id);
+      expect(got, c.note).toEqual(c.expected);
+    });
+  }
+});
+
+/**
+ * The relative-token axis. A dashboard filter reaches the preview with its
+ * placeholders already resolved, so the suite resolves them the same way — with
+ * the case's pinned instant — and asserts the composed result.
+ */
+describe('preview-evaluator — temporal conformance (relative tokens)', () => {
+  for (const c of TEMPORAL_TOKEN_CASES) {
+    it(c.name, () => {
+      const where = resolveFilterTokens(c.filter, { now: new Date(c.now) });
+      const got = TEMPORAL_ROWS.filter((r) => matchesWhere(r as any, where as any)).map((r) => r.id);
       expect(got, c.note).toEqual(c.expected);
     });
   }
