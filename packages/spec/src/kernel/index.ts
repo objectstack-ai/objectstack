@@ -4,7 +4,15 @@ export * from './cli-extension.zod';
 export * from './cluster.zod';
 export * from './context.zod';
 export * from './dependency-resolution.zod';
-export * from './dev-plugin.zod';
+// dev-plugin.zod (DevPluginConfigSchema / DevServiceOverrideSchema /
+// DevFixtureConfigSchema / DevToolsConfigSchema / DevPluginPreset) was REMOVED
+// per ADR-0049 enforce-or-remove (#4149): the whole family had zero consumers —
+// @objectstack/plugin-dev reads its own DevPluginOptions and never imported it,
+// no load path parsed it (`stack.devPlugins` takes ManifestSchema | string, not
+// this config), and none of the declared surfaces (presets, fixtures, dev-tools
+// dashboard, per-service strategies, simulated latency) were ever implemented.
+// Its `strategy: 'stub'` vocabulary described the dev-stub design ADR-0115
+// retired. The real dev assembly contract is plugin-dev's DevPluginOptions.
 export * from './events.zod';
 // feature.zod (FeatureFlagSchema / FeatureStrategy / FeatureFlag factory) was
 // REMOVED per ADR-0056 D8: zero runtime consumers, and its only protocol home —

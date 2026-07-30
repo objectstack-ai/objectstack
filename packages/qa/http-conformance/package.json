@@ -3,7 +3,7 @@
   "version": "0.0.6-rc.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "HTTP transport-port conformance gate (ADR-0076 D11/OQ#10, #2462) — a zero-dependency node:http reference implementation of IHttpServer plus a cross-adapter suite that boots the dispatcher bridge and REST generator on it AND on plugin-hono-server, pinning that the port stays free of framework-isms. Not published; validation instrument, not a product server.",
+  "description": "HTTP transport-port conformance gate (ADR-0076 D11/OQ#10, #2462) \u2014 a zero-dependency node:http reference implementation of IHttpServer plus a cross-adapter suite that boots the dispatcher bridge and REST generator on it AND on plugin-hono-server, pinning that the port stays free of framework-isms. Not published; validation instrument, not a product server.",
   "type": "module",
   "scripts": {
     "test": "vitest run"
@@ -12,7 +12,7 @@
     "@objectstack/core": "workspace:*"
   },
   "devDependencies": {
-    "@objectstack/driver-memory": "workspace:*",
+    "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/runtime": "workspace:*",

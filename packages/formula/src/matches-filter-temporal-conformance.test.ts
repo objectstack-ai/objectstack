@@ -15,7 +15,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TEMPORAL_CASES, TEMPORAL_ROWS } from '@objectstack/spec/data';
+import {
+  TEMPORAL_CASES,
+  TEMPORAL_ROWS,
+  TEMPORAL_TIME_CASES,
+  TEMPORAL_TIME_ROWS,
+} from '@objectstack/spec/data';
 
 import { matchesFilterCondition } from './matches-filter';
 
@@ -48,4 +53,20 @@ describe('matchesFilterCondition — temporal conformance', () => {
  * cannot be handed. If that ever changes — if a `check` gains a token-bearing
  * filter form — this comment is the thing to delete, and the axis is already
  * sitting in the shared table ready to be consumed.
+ *
+ * The same reasoning covers the wall-clock sweep below: `TemporalTimeCase`
+ * carries no token spelling at all, because no relative-date macro resolves to
+ * a time of day.
  */
+
+describe('matchesFilterCondition — Field.time conformance', () => {
+  // Type-blind, so the records carry the canonical wall-clock text a converged
+  // column presents. That the variable-width canon still orders correctly under
+  // a plain string comparison is the assertion.
+  for (const c of TEMPORAL_TIME_CASES) {
+    it(c.name, () => {
+      const got = TEMPORAL_TIME_ROWS.filter((r) => matchesFilterCondition(r, c.filter)).map((r) => r.id);
+      expect(got, c.note).toEqual(c.expected);
+    });
+  }
+});

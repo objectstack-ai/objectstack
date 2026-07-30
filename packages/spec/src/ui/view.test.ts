@@ -591,6 +591,66 @@ describe('FormViewSchema', () => {
       sections: [{ fields: ['name'] }],
     })).not.toThrow();
   });
+
+  // `section.pane` — explicit split placement. Explicit-per-section so the
+  // assignment is visible in the metadata and survives reordering (the legacy
+  // rule was positional: first section left, rest right — invisible, and a
+  // reorder silently moved sections across the divider).
+  describe('section.pane (split placement)', () => {
+    it('accepts pane assignments on a split form', () => {
+      const result = FormViewSchema.parse({
+        type: 'split',
+        sections: [
+          { label: 'Task', pane: 'primary', fields: ['title'] },
+          { label: 'Schedule', pane: 'secondary', fields: ['due_date'] },
+          // Omitted pane is fine — the renderer defaults by position.
+          { label: 'Notes', fields: ['notes'] },
+        ],
+      });
+      expect(result.sections?.map((s) => s.pane)).toEqual(['primary', 'secondary', undefined]);
+    });
+
+    it('rejects a typo pane value (strict enum, not free text)', () => {
+      expect(() => FormViewSchema.parse({
+        type: 'split',
+        sections: [{ label: 'Task', pane: 'left', fields: ['title'] }],
+      })).toThrow();
+    });
+
+    it('rejects pane on a non-split form instead of silently ignoring it', () => {
+      // "Accepted but ignored" is the failure mode this key must never have —
+      // especially for AI-authored metadata, where a no-op reads as working.
+      const result = FormViewSchema.safeParse({
+        type: 'tabbed',
+        sections: [
+          { label: 'Details', fields: ['name'] },
+          { label: 'Advanced', pane: 'secondary', fields: ['settings'] },
+        ],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find((i) => i.path.join('.') === 'sections.1.pane');
+        expect(issue?.message).toMatch(/only valid on `type: 'split'`/);
+      }
+    });
+
+    it('rejects pane on the legacy `groups` alias the same way', () => {
+      const result = FormViewSchema.safeParse({
+        type: 'simple',
+        groups: [{ label: 'Account', pane: 'primary', fields: ['account_name'] }],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((i) => i.path.join('.') === 'groups.0.pane')).toBe(true);
+      }
+    });
+
+    it('defaulted `type` counts as non-split (a forgotten type errors loudly)', () => {
+      expect(FormViewSchema.safeParse({
+        sections: [{ label: 'Task', pane: 'primary', fields: ['title'] }],
+      }).success).toBe(false);
+    });
+  });
 });
 
 describe('ViewSchema', () => {

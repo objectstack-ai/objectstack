@@ -344,3 +344,142 @@ export const TEMPORAL_CASES: readonly TemporalCase[] = [
     note: 'The `expires_on: { $in: [daysFromNow(30)] }` template shape from the #1874 family — element-wise, order-independent.',
   },
 ] as const;
+
+// ── `Field.time` — the third temporal type, its own axis ─────────────────────
+
+/**
+ * A row in the time-of-day fixture.
+ *
+ * `at` is a `Field.time`: a timezone-naive WALL CLOCK (#2004), not an instant
+ * and not a calendar day. The canonical form is `HH:MM:SS`, extended to
+ * `HH:MM:SS.fff` exactly when the milliseconds are non-zero (ADR-0053 D-C1) —
+ * variable width on purpose, because `.` sorts below every digit, so
+ * lexicographic order stays chronological order across the two widths.
+ */
+export interface TemporalTimeRow {
+  id: string;
+  /** `Field.time` — canonical wall-clock text. */
+  at: string;
+  /**
+   * Writer-population seeding hint — the D-E4 axis, one field type over. See
+   * {@link TemporalWriterForm}. `native` means a driver consumer writes the
+   * row as a JS `Date` whose UTC time-of-day IS `at` (build it from
+   * `1970-01-01T${at}Z`), which is what an SDK caller or a bound `NOW()`
+   * produces; `wire` means the canonical text a REST/JSON write delivers.
+   *
+   * Seeding both is the point. A fixture written entirely in canonical text
+   * passes even on a backend with NO time convention at all, because both
+   * sides of every comparison happen to be the same string — so it would
+   * assert nothing. The mixed column is what #3994 measured on SQL, and it is
+   * the shape that must not survive on any other backend either.
+   */
+  writerForm: TemporalWriterForm;
+  /** Why the row is in the fixture — surfaced when a case fails. */
+  why: string;
+}
+
+/**
+ * The fixture: a business day, chosen so the boundaries that broke #3994 are
+ * each decidable. `c_open` and `f_close` sit exactly ON the window edges,
+ * `d_mid`/`e_mid_ms` straddle the millisecond-suffix width change, and
+ * `a_midnight`/`g_last` are the extremes of the 24-hour range.
+ */
+export const TEMPORAL_TIME_ROWS: readonly TemporalTimeRow[] = [
+  { id: 'a_midnight', at: '00:00:00',     writerForm: 'native', why: 'the day\'s lower extreme, written as a Date — epoch 0 on SQLite, which sorts before every TEXT row' },
+  { id: 'b_early',    at: '08:00:00',     writerForm: 'wire',   why: 'before opening — the row a business-hours lower bound must exclude' },
+  { id: 'c_open',     at: '09:00:00',     writerForm: 'native', why: 'exactly the opening bound, which is inclusive' },
+  { id: 'd_mid',      at: '14:30:00',     writerForm: 'wire',   why: 'mid-afternoon, zero milliseconds — the `HH:MM:SS` spelling every dialect\'s native TIME emits' },
+  { id: 'e_mid_ms',   at: '14:30:00.500', writerForm: 'native', why: 'the same wall clock plus 500ms: the width change lexicographic order has to survive, and what MySQL bare TIME rounded away' },
+  { id: 'f_close',    at: '18:00:00',     writerForm: 'wire',   why: 'exactly the closing bound, which is inclusive' },
+  { id: 'g_last',     at: '23:59:59.999', writerForm: 'native', why: 'the day\'s upper extreme — the last representable wall clock' },
+] as const;
+
+/** One time conformance case: a filter on the wall-clock column. */
+export interface TemporalTimeCase {
+  /** Stable identifier, usable as a test name. */
+  name: string;
+  filter: FilterCondition;
+  /** Ids of matching rows, ascending. */
+  expected: string[];
+  /** Why the case is here — surfaced in failure output. */
+  note?: string;
+}
+
+/**
+ * The cases.
+ *
+ * # Why `Field.time` needs its own table rather than a `kind` on the one above
+ *
+ * A wall clock shares no comparand vocabulary with the other two: no relative
+ * token resolves to one (`{today}` is a calendar day), and the bare-day
+ * whole-day rule (D-D) must NOT reach it — `nextUtcCalendarDay` only widens a
+ * `YYYY-MM-DD` string, and a time never matches that shape. That last point is
+ * asserted rather than assumed, because "the rule leaks into the wrong field
+ * type" is precisely the class of bug this file exists to catch.
+ *
+ * # The scope rule is the same: only what EVERY backend must agree on
+ *
+ * One cell is deliberately absent. A minutes-only comparand (`{ at: '14:30' }`)
+ * is canonicalised to `'14:30:00'` by a TYPED backend and compared as raw text
+ * by a type-blind one, where `'14:30' !== '14:30:00'` — so it matches on the
+ * drivers and misses in `formula`/the preview evaluator. It is the exact twin
+ * of the `$gt`-on-`datetime` gap documented above, irreducible for the same
+ * reason, and stays pinned in the typed drivers' own suites
+ * (`sql-driver-time-of-day.test.ts`). Every case below uses a fully-spelled
+ * canonical comparand, which both readings agree on.
+ */
+export const TEMPORAL_TIME_CASES: readonly TemporalTimeCase[] = [
+  {
+    name: 'time: a business-hours window keeps both bounds',
+    filter: { at: { $gte: '09:00:00', $lte: '18:00:00' } },
+    expected: ['c_open', 'd_mid', 'e_mid_ms', 'f_close'],
+    note: '#3994, measured: 4 of 7 rows silently dropped. An epoch-ms row failed `>= 09:00:00` outright (INTEGER < TEXT on SQLite) and a full-timestamp row failed `<= 18:00:00` lexicographically.',
+  },
+  {
+    name: 'time: an inclusive upper bound is EXACT, not widened',
+    filter: { at: { $lte: '14:30:00' } },
+    expected: ['a_midnight', 'b_early', 'c_open', 'd_mid'],
+    note: 'The bare-day whole-day rule (D-D) must not reach a time column: `nextUtcCalendarDay` widens only a `YYYY-MM-DD` string. If it leaked, e_mid_ms (14:30:00.500) would appear.',
+  },
+  {
+    name: 'time: the millisecond suffix sorts after its zero-ms twin',
+    filter: { at: { $gt: '14:30:00' } },
+    expected: ['e_mid_ms', 'f_close', 'g_last'],
+    note: 'The variable-width canon (D-C1) only works because `.` sorts below every digit; d_mid is excluded by strict-greater and e_mid_ms is kept.',
+  },
+  {
+    name: 'time: a sub-second window bounds the millisecond row',
+    filter: { at: { $gte: '14:30:00.100', $lt: '14:30:01' } },
+    expected: ['e_mid_ms'],
+    note: 'Guards the same ordering from the other side — `14:30:00.500` must fall inside a window whose bounds differ only after the decimal point.',
+  },
+  {
+    name: 'time: equality on a canonical wall clock',
+    filter: { at: '14:30:00' },
+    expected: ['d_mid'],
+    note: 'Determinism is what equality and distinct() rest on: one wall clock has exactly one canonical spelling, so e_mid_ms is a DIFFERENT value, not a near-match.',
+  },
+  {
+    name: 'time: $in of two canonical wall clocks',
+    filter: { at: { $in: ['09:00:00', '18:00:00'] } },
+    expected: ['c_open', 'f_close'],
+  },
+  {
+    name: 'time: $between spans the working day inclusively',
+    filter: { at: { $between: ['08:00:00', '18:00:00'] } },
+    expected: ['b_early', 'c_open', 'd_mid', 'e_mid_ms', 'f_close'],
+    note: 'Both ends inclusive, and — like the $lte case — NOT widened by the calendar-day rule.',
+  },
+  {
+    name: 'time: midnight is an ordinary wall clock, not a null',
+    filter: { at: { $lt: '09:00:00' } },
+    expected: ['a_midnight', 'b_early'],
+    note: 'A `00:00:00` write that became INTEGER 0 (a bound `Date` at UTC midnight) sorted before every TEXT row on SQLite and was reachable by no text bound at all.',
+  },
+  {
+    name: 'time: the last wall clock of the day is reachable',
+    filter: { at: { $gte: '23:59:59' } },
+    expected: ['g_last'],
+    note: 'The upper extreme, where an implementation that truncates or rounds the millisecond suffix (MySQL bare TIME did) loses the row.',
+  },
+] as const;

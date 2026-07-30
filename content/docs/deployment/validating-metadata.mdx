@@ -209,6 +209,41 @@ literal (it comes from React state or a variable), a usage carrying a `{...sprea
 a chart given static `data` (its columns are the author's own), and objects
 another package defines.
 
+### 9. Object and field keys the schema never declared
+
+`ObjectSchema` and `FieldSchema` are deliberately not strict, so a key they do
+not declare **parses clean and is dropped** on the way to storage. Nothing fails;
+the setting simply is not there.
+
+```ts
+fields: {
+  ssn: { label: 'SSN', type: 'text', pii: true, indexed: true },
+  //                                  ↑ neither is a FieldSchema key → both dropped
+}
+```
+
+Each one is reported with what to do about it — a rename where the concept
+survives under another key, or the reason it was retired where it does not:
+
+```
+objects.employee.fields.ssn.pii: 'pii' is not a declared field key, so its value
+  is dropped at load — the `dataQuality` governance family was pruned in 2026-06
+  as dead in both layers — it enforced nothing.
+objects.employee.fields.ssn.indexed: 'indexed' is not a declared field key, so its
+  value is dropped at load — never a FieldSchema key; a field-level index flag
+  built no index (#2377). Declare the index in the object's `indexes[]`.
+```
+
+Plain typos get a "did you mean" (`requred` → `required`); a retired key does
+not, because the nearest declared key by spelling would be noise rather than
+advice.
+
+This is **advisory** — the stack still loads. Strict rejection is where these
+schemas are headed (ADR-0049 enforce-or-remove), but they are the two
+most-authored surfaces in the protocol, so the tightening is scheduled on what
+this check finds rather than assumed. `defineStack` reports the same findings at
+config-load time, so an author sees them without running the CLI at all.
+
 ## The one gate, two entry points
 
 `os validate` and `os build` (alias of `os compile`) run the **same** validator:
@@ -228,6 +263,7 @@ another package defines.
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ |
 | Liveness author-warnings | ✓ | ✓ |
+| Undeclared object/field keys (#3786) | ✓ | ✓ |
 | Emits `dist/objectstack.json` | — | ✓ |
 
 So `os validate` is the fast inner-loop check (no artifact); `os build` is what

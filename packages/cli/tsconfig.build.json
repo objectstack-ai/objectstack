@@ -16,5 +16,14 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Tests are not part of the shipped CLI. Compiling them had two costs beyond
+  // tarball weight: `files: ["dist"]` published them, and — because this package
+  // has no vitest config — `vitest run` COLLECTED the compiled copies too, so
+  // every `src/**/*.test.ts` also ran as a stale `dist/**/*.test.js` built from
+  // whatever the source said at the last build. That is how #4065's
+  // `packages/cli/.objectstack` residue survived a fix to the source: the run
+  // was still executing the pre-fix compiled duplicate. It also means a source
+  // test could be edited to pass while its stale twin asserted the old thing.
+  "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts", "src/**/__tests__/**"]
 }

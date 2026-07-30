@@ -127,6 +127,18 @@ export async function handleAnalyticsRequest(
     if (subPath === 'sql' && m === 'POST') {
         // [#3878] Same body contract as /query — validated the same way.
         assertAnalyticsQueryBody(body);
+        // [#4127] `generateSql` is OPTIONAL on `IAnalyticsService` — unlike
+        // `query` / `getMeta` above, which are required — and this call had no
+        // guard, so a provider filling the slot without it answered a 500 from
+        // `TypeError: generateSql is not a function` instead of saying the
+        // capability is absent. service-analytics implements it, which is why
+        // nothing noticed; the contract permits a provider that does not, and
+        // the registry names this slot as multi-provider by design.
+        //
+        // `handled: false` is the file's own answer for absent analytics
+        // capability (the entry gate above), so an absent SUB-capability gets
+        // the same 404 rather than a new third shape.
+        if (typeof analyticsService.generateSql !== 'function') return { handled: false };
         // [#2852] Scope the generated SQL to the caller too, so a preview
         // reflects the same per-object read filter the real query applies.
         const result = await analyticsService.generateSql(body, context?.executionContext);

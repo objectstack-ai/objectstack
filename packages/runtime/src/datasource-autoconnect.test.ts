@@ -138,7 +138,8 @@ describe('ADR-0062 declared-datasource auto-connect', () => {
 
 // #4083 — the acceptance above passed on a clean checkout and failed on every
 // subsequent run, reading 2×N rows on the Nth: the auto-connected `memory`
-// datasource inherited `InMemoryDriver`'s `persistence: 'auto'` default, so it
+// datasource inherited `InMemoryDriver`'s then-default `persistence: 'auto'`
+// (#4065 has since made that default `false`), so it
 // flushed `ext_note` into `.objectstack/data/memory-driver.json` under the CWD
 // and the next boot's connect() loaded those rows back before this file seeded
 // its own. CI never caught it because CI always runs #1 on a fresh checkout.

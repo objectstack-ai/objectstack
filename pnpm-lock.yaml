@@ -573,9 +573,9 @@ importers:
       '@hono/node-server':
         specifier: ^2.0.12
         version: 2.0.12(hono@4.12.32)
-      '@objectstack/driver-memory':
+      '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
-        version: link:../plugins/driver-memory
+        version: link:../plugins/driver-sqlite-wasm
       '@objectstack/hono':
         specifier: workspace:*
         version: link:../adapters/hono
@@ -887,6 +887,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@objectstack/driver-sqlite-wasm':
+        specifier: workspace:*
+        version: link:../plugins/driver-sqlite-wasm
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -1689,9 +1692,9 @@ importers:
         specifier: workspace:*
         version: link:../../core
     devDependencies:
-      '@objectstack/driver-memory':
+      '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
-        version: link:../../plugins/driver-memory
+        version: link:../../plugins/driver-sqlite-wasm
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
@@ -1817,6 +1820,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../platform-objects
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server

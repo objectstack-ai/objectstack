@@ -31,6 +31,11 @@ export * from './ai-service.js';
 export * from './llm-adapter.js';
 export * from './i18n-service.js';
 export * from './workflow-service.js';
+
+// CoreServiceName → contract map (#4127). Lets a slot lookup return the slot's
+// contract instead of `any`, so a call outside it is a compile error.
+export * from './core-service-contracts.js';
+
 export * from './export-service.js';
 export * from './email-service.js';
 export * from './sms-service.js';

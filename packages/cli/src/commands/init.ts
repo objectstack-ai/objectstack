@@ -103,11 +103,17 @@ export const TEMPLATES: Record<string, {
     description: 'Full application with objects, views, and actions',
     get dependencies() {
       const v = pkgVersion();
+      // No driver is listed on purpose. `@objectstack/runtime` already depends
+      // on driver-sql / driver-sqlite-wasm / driver-memory, and every script
+      // here runs through the CLI, which carries them too — so naming one was
+      // redundant. Naming `driver-memory` specifically also read as an
+      // endorsement: it is the LAST-RESORT rung of the dev step-down (native
+      // better-sqlite3 → wasm SQLite → mingo), not the driver a new app should
+      // start on. `objectstack dev` resolves sqlite by default.
       return {
         '@objectstack/spec': v,
         '@objectstack/runtime': v,
         '@objectstack/objectql': v,
-        '@objectstack/driver-memory': v,
       };
     },
     get devDependencies() {

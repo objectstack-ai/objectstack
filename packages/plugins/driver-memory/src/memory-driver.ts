@@ -38,19 +38,28 @@ export interface InMemoryDriverConfig {
   /** Optional: Logger instance */
   logger?: Logger;
   /**
-   * Persistence configuration. Defaults to `'auto'`.
-   * - `'auto'` (default) — Auto-detect environment (browser → localStorage, Node.js → file, serverless → disabled)
+   * Persistence configuration. **Defaults to `false` — pure in-memory.**
+   * - `false` (default) — No persistence. `new InMemoryDriver()` keeps nothing
+   *   across process exits, which is what the driver's name promises.
+   * - `'auto'` — Auto-detect environment (browser → localStorage, Node.js → file, serverless → disabled)
    * - `'file'` — File-system persistence with defaults (Node.js only)
    * - `'local'` — localStorage persistence with defaults (Browser only)
    * - `{ type: 'file', path?: string, autoSaveInterval?: number }` — File-system with options
    * - `{ type: 'local', key?: string }` — localStorage with options
    * - `{ type: 'auto', path?: string, key?: string, autoSaveInterval?: number }` — Auto-detect with options
    * - `{ adapter: PersistenceAdapterInterface }` — Custom adapter
-   * - `false` — Disable persistence (pure in-memory)
+   *
+   * Durability is **opt-in**, as #815 specified ("默认情况下不启用持久化（纯内存，行为不变）",
+   * requirement #1, with `new InMemoryDriver()` listed as the pure-memory example).
+   * The `'auto'` default this driver shipped with was a drift from that accepted
+   * design, and it silently wrote `.objectstack/data/memory-driver.json` into the
+   * process CWD on every Node.js run — which made any suite seeded with fixed ids
+   * pass once and fail on every rerun (#4065). A host that wants durability now
+   * says so: `persistence: 'file'` / `'local'` / `'auto'`.
    *
    * ⚠️ In serverless environments (Vercel, AWS Lambda, Netlify, etc.),
    * auto mode disables file persistence to prevent silent data loss.
-   * Use `persistence: false` or supply a custom adapter for serverless deployments.
+   * Supply a custom adapter for serverless deployments.
    */
   persistence?: string | false | {
     type?: 'file' | 'local' | 'auto';
@@ -71,10 +80,10 @@ interface MemoryTransaction {
 
 /**
  * In-Memory Driver for ObjectStack
- * 
- * A production-ready implementation of the ObjectStack Driver Protocol
- * powered by Mingo — a MongoDB-compatible query and aggregation engine.
- * 
+ *
+ * An implementation of the ObjectStack Driver Protocol powered by Mingo — a
+ * MongoDB-compatible query and aggregation engine.
+ *
  * Features:
  * - MongoDB-compatible query engine (Mingo) for filtering, projection, aggregation
  * - Full CRUD and bulk operations
@@ -82,7 +91,27 @@ interface MemoryTransaction {
  * - Snapshot-based transactions (begin/commit/rollback)
  * - Field projection and distinct values
  * - Strict mode and initial data loading
- * 
+ *
+ * ## What this driver does NOT enforce
+ *
+ * It stores no constraints of any kind. {@link create} is a `table.push()` and
+ * {@link syncSchema} only allocates an array and indexes temporal fields, so
+ * there is no primary key, no uniqueness, no `NOT NULL`, no foreign key and no
+ * column typing. `bulkCreate` will happily land two rows with the same `id`
+ * where a SQL driver raises a constraint violation, and a read returns both.
+ *
+ * That makes it a WEAK oracle: code green against this driver can still be
+ * broken against the SQL engines production runs on. Prefer in-memory SQLite
+ * for tests — `SqlDriver` with `connection: { filename: ':memory:' }`, or
+ * `SqliteWasmDriver({ filename: ':memory:' })` where no native build is wanted.
+ * This driver's remaining roles are the last-resort rung of the dev step-down
+ * (native better-sqlite3 → WASM SQLite → here), browser/edge runtimes where no
+ * SQLite build is available, and the cross-driver read-coercion parity gate.
+ *
+ * The docstring said "production-ready" until #4065; the constraints above were
+ * true then too, and saying so is the fix (Prime Directive #10 — never advertise
+ * a capability the runtime does not deliver).
+ *
  * Reference: objectql/packages/drivers/memory
  */
 export class InMemoryDriver implements IDataDriver {
@@ -1323,15 +1352,17 @@ export class InMemoryDriver implements IDataDriver {
 
   /**
    * Initialize the persistence adapter based on configuration.
-   * Defaults to 'auto' when persistence is not specified.
-   * Use `persistence: false` to explicitly disable persistence.
    *
-   * In serverless environments (Vercel, AWS Lambda, etc.), auto mode disables
-   * file-system persistence and emits a warning. Use `persistence: false` or
-   * supply a custom adapter for serverless-safe operation.
+   * **Persistence is opt-in.** An omitted `persistence` means none — the driver
+   * is pure in-memory, matching its name and #815's requirement #1. Ask for
+   * durability explicitly with `'auto'` / `'file'` / `'local'` / a custom adapter.
+   *
+   * In serverless environments (Vercel, AWS Lambda, etc.), `'auto'` disables
+   * file-system persistence and emits a warning; supply a custom adapter for
+   * serverless-safe durability.
    */
   private async initPersistence(): Promise<void> {
-    const persistence = this.config.persistence === undefined ? 'auto' : this.config.persistence;
+    const persistence = this.config.persistence ?? false;
     if (persistence === false) return;
 
     if (typeof persistence === 'string') {

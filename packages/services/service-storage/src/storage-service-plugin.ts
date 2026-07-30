@@ -36,6 +36,12 @@ import { SysAttachment } from '@objectstack/platform-objects/audit';
 // value-shape default (#3438).
 import { SysMigration } from '@objectstack/platform-objects/system';
 import { SwappableStorageService } from './swappable-storage-service.js';
+import {
+  resolveStorageTarget,
+  needsStorageSwap,
+  movesStorageLocation,
+  type StorageTarget,
+} from './storage-target.js';
 
 /**
  * Configuration options for the StorageServicePlugin.
@@ -116,6 +122,19 @@ export class StorageServicePlugin implements Plugin {
   private storage: SwappableStorageService | null = null;
   private store: StorageMetadataStore | null = null;
   private metrics: MetricsRegistry = new NoopMetricsRegistry();
+  /**
+   * What the CURRENTLY installed adapter points at (#4096). Set beside every
+   * adapter this plugin builds, so a settings re-read can tell "nothing
+   * changed" and "the store moved" apart instead of warning on both.
+   */
+  private target?: StorageTarget;
+  /**
+   * Verdict for the swap in flight, set by the caller that resolved both
+   * configurations. Absent means a caller we know nothing about, and the
+   * migration warning must not be silenced by ignorance — see
+   * {@link movesStorageLocation}.
+   */
+  private pendingSwapMovesStore?: boolean;
 
   constructor(options: StorageServicePluginOptions = {}) {
     this.options = { adapter: 'local', ...options };
@@ -168,10 +187,34 @@ export class StorageServicePlugin implements Plugin {
       const basePath = this.options.basePath ?? '/api/v1/storage';
       initial = new LocalStorageAdapter({ rootDir, basePath, ...this.options.local, metrics: this.metrics });
     }
+    // #4096 — record what this adapter points at, so a settings re-read can
+    // recognise an identical configuration instead of swapping and warning.
+    // `options.s3` carries only bucket/region/endpoint: constructor-configured
+    // S3 leaves credentials to the AWS SDK's own resolution chain, so there are
+    // none to fingerprint here.
+    this.target = resolveStorageTarget({
+      kind: adapter,
+      rootDir: this.options.local?.rootDir,
+      basePath: this.options.basePath,
+      bucket: this.options.s3?.bucket,
+      region: this.options.s3?.region,
+      endpoint: this.options.s3?.endpoint,
+    });
 
     this.storage = new SwappableStorageService(initial, (prev, next) => {
       const prevName = (prev as any)?.constructor?.name ?? 'unknown';
       const nextName = (next as any)?.constructor?.name ?? 'unknown';
+      // #4096 — the hazard this warns about is a MOVED backing store, not the
+      // act of swapping: a credential rotation replaces the adapter while every
+      // existing object stays exactly where it was. `undefined` means a caller
+      // that resolved no target, and an unknown swap still warns.
+      if (this.pendingSwapMovesStore === false) {
+        ctx.logger.info(
+          `StorageServicePlugin: storage adapter replaced (${prevName} → ${nextName}) — `
+          + 'same backing store, existing files unaffected.',
+        );
+        return;
+      }
       ctx.logger.warn(
         `StorageServicePlugin: storage adapter swapped (${prevName} → ${nextName}). ` +
         'Existing files were NOT migrated and may be unreachable through the new adapter.',
@@ -331,8 +374,36 @@ export class StorageServicePlugin implements Plugin {
             // No persisted values yet → keep the constructor-built adapter.
             const hasAny = Object.values(values).some((v) => v !== undefined && v !== null && v !== '');
             if (!hasAny) return;
+
+            // #4096 — `hasAny` is true on every boot once the settings service
+            // has persisted its own defaults, so this used to rebuild and swap
+            // unconditionally, warning about stranded files on a swap from an
+            // adapter to an identically-configured one. Compare the resolved
+            // CONFIGURATIONS instead: skip entirely when nothing changed, and
+            // only call it a migration hazard when the backing store moved.
+            const nextTarget = resolveStorageTarget({
+              kind: values.adapter,
+              rootDir: values.local_root,
+              basePath: this.options.basePath,
+              bucket: values.s3_bucket,
+              region: values.s3_region,
+              endpoint: values.s3_endpoint,
+              forcePathStyle: !!values.s3_force_path_style,
+              accessKeyId: values.s3_access_key_id,
+              secretAccessKey: values.s3_secret_access_key,
+            });
+            if (!needsStorageSwap(this.target, nextTarget)) return;
+
             const next = await this.buildAdapterFromValues(values);
-            this.storage.swap(next);
+            this.pendingSwapMovesStore = movesStorageLocation(this.target, nextTarget);
+            try {
+              this.storage.swap(next);
+            } finally {
+              // Only the swap this block resolved may claim the verdict; a
+              // later `swap()` from anywhere else must fall back to warning.
+              this.pendingSwapMovesStore = undefined;
+            }
+            this.target = nextTarget;
           } catch (err: any) {
             ctx.logger.warn(
               'StorageServicePlugin: failed to apply storage settings: ' + (err?.message ?? err),

@@ -56,7 +56,7 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 
 | # | Service Name | Criticality | Methods | Status | Provider |
 |:--|:-------------|:------------|:--------|:-------|:---------|
-| 1 | **metadata** | `core` | 7 | ⚠️ Framework | Kernel (in-memory) |
+| 1 | **metadata** | `core` | 8 | ⚠️ Framework | Kernel (in-memory) |
 | 2 | **data** | `required` | 9 | ✅ Implemented | `@objectstack/objectql` |
 | 3 | **analytics** | `optional` | 2 | ❌ Plugin Required | `@objectstack/service-analytics` |
 | 4 | **auth** | `core` | — | 🟡 In Development | `@objectstack/plugin-auth` |
@@ -77,7 +77,7 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 **Criticality Levels**
 - **required**: System cannot start without this service
 - **core**: Falls back to in-memory implementation with a warning if missing
-- **optional**: Feature disabled; API returns `501 Not Implemented` if missing
+- **optional**: Feature disabled; the API answers as an empty slot if missing (404, or the domain's 501)
 </Callout>
 
 ---
@@ -97,6 +97,7 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 | `getMetaItems` | `GetMetaItemsRequest → GetMetaItemsResponse` | ✅ |
 | `getMetaItem` | `GetMetaItemRequest → GetMetaItemResponse` | ✅ |
 | `saveMetaItem` | `SaveMetaItemRequest → SaveMetaItemResponse` | ✅ |
+| `deleteMetaItem` | `DeleteMetaItemRequest → DeleteMetaItemResponse` | ✅ |
 | `getMetaItemCached` | `GetMetaItemCachedRequest → GetMetaItemCachedResponse` | ✅ |
 | `getUiView` | `GetUiViewRequest → GetUiViewResponse` | ✅ |
 
@@ -106,7 +107,7 @@ The metadata service is a **framework** — it works with an in-memory `SchemaRe
 
 | Gap | Description | Priority |
 |:----|:------------|:--------:|
-| **DB Persistence** | Metadata is only in memory; no save-to-database path exists | P0 |
+| **DB Persistence** | Shipped: `MetadataPlugin` (`@objectstack/metadata`) persists to `sys_metadata`; only the kernel's in-memory fallback is non-persistent | Shipped |
 | **Multi-instance Sync** | No mechanism to share metadata changes across instances | P1 |
 | **Migration / Versioning** | No schema diff or migration tooling | P1 |
 | **Hot Reload** | Metadata changes require restart | P2 |
@@ -133,7 +134,7 @@ no message. Below is the former — the fallback case:
     },
     "auth": {
       "enabled": false, "status": "unavailable",
-      "message": "Install an auth plugin to enable"
+      "message": "Install a auth plugin to enable"
     }
   }
 }
@@ -158,7 +159,9 @@ empty. The rule is enforced by one predicate (`isServiceServeable`) shared by
 the service domains, the route-mount gate, and both discovery builders, so what
 is advertised and what is served cannot disagree. It applies to the
 dispatcher-owned domains: `/analytics`, `/automation`, `/notifications`, `/ai`,
-`/storage`, `/i18n`.
+`/i18n`. (`/storage` is no longer a dispatcher domain — the bridge was retired
+in #4087 and `service-storage` mounts `/api/v1/storage` itself — but its route
+advertisement is still gated on the same predicate.)
 
 The `services` map still reports a registered stub as
 `{ enabled: true, status: "stub", handlerReady: false }` rather than collapsing
@@ -196,10 +199,9 @@ than "install a plugin".
 | Driver | Package | CRUD | Aggregation | Ready |
 |:-------|:--------|:----:|:-----------:|:-----:|
 | InMemory | `@objectstack/driver-memory` | ✅ | ✅ | Dev/Test |
-| PostgreSQL | TBD | — | — | — |
-| MySQL | TBD | — | — | — |
-| MongoDB | TBD | — | — | — |
-| SQLite | TBD | — | — | — |
+| PostgreSQL / MySQL / SQLite | `@objectstack/driver-sql` (Knex) | ✅ | ✅ | ✅ |
+| MongoDB | `@objectstack/driver-mongodb` | ✅ | ✅ | ✅ |
+| SQLite (WASM) | `@objectstack/driver-sqlite-wasm` | ✅ | ✅ | Browser/WebContainer |
 
 ---
 
@@ -221,8 +223,9 @@ discovery reports `analytics: { enabled: false, status: "unavailable" }`.
 `analytics` dev stub, and the dispatcher treats a slot filled by any
 self-declared stub (`handlerReady: false`, ADR-0076 D12) exactly like an empty
 one — routes unmounted, request 404. To use analytics locally, install the real
-engine; `@objectstack/service-analytics` runs an InMemory strategy, so it needs
-no database of its own.
+engine; `@objectstack/service-analytics` works against the in-memory driver
+(via its ObjectQL strategy, or `InMemoryStrategy` injected from
+`@objectstack/driver-memory`), so it needs no database of its own.
 
 **And it is no longer analytics-only** (#4058 step 2): every dispatcher-owned
 domain now gates on `handlerReady`, so a slot occupied by a self-declared `stub`
@@ -298,12 +301,14 @@ Trigger engine, event triggers from ObjectQL hooks, flow executor, scheduled tri
 `aiNlq`, `aiSuggest`, `aiInsights`
 
 <Callout type="warn">
-Declared only. All three are **optional** protocol methods (`aiNlq?` …) that no
-service in any repo implements, so the `/ai/{nlq,suggest,insights}` routes they
-back are mounted by nothing. The `client.ai` namespace that called them was
-removed in v17 (#3718). The AI service that does exist (`service-ai`) serves a
-different set — chat, complete, models, conversations — through none of these
-methods, so this entry describes a contract with no implementer on either side.
+Removed. These three were **optional** protocol methods (`aiNlq?` …) that no
+service in any repo ever implemented — the `/ai/{nlq,suggest,insights}` routes
+they backed were mounted by nothing and 404ed for their whole life. In v17 the
+`AiProtocol` contract, its schemas, and the `client.ai.{nlq,suggest,insights}`
+methods that called them were deleted outright (#3718). The AI service that
+does exist (`service-ai`, Cloud/EE) serves a different surface — chat,
+complete, models, conversations, agents — and `client.ai` was rebuilt against
+those real routes, so this entry describes a contract that no longer exists.
 </Callout>
 
 ### 11. i18n — 3 methods
@@ -380,7 +385,7 @@ AppPlugin will:
 | **file-storage** | Unified upload/download/delete. Drivers: local FS, S3, MinIO. |
 | **search** | Full-text search. Drivers: in-memory, Elasticsearch, Meilisearch. |
 | **cache** | General-purpose cache. In-memory fallback; Redis via `@objectstack/service-cache`. |
-| **queue** | Message queue. In-memory fallback; BullMQ / Redis via `@objectstack/service-queue`. |
+| **queue** | Message queue. In-memory fallback; durable DB-backed adapter via `@objectstack/service-queue` (no BullMQ/Redis adapter is shipped). |
 | **job** | Scheduled task execution. In-memory fallback; cron-based, concurrency control. |
 
 ---

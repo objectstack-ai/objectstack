@@ -911,3 +911,70 @@ Two things, which is the argument for having built it:
   (#1874's original shape), a `driver-sqlite-wasm` consumer pinning the
   inheritance seam, and a legacy-storage sweep in the `driver-sql` consumer so
   the un-backfilled read-repair path answers the same table.
+
+---
+
+## Addendum — D-A3.2: the `Field.time` axis, and the two backends that had no time convention at all
+
+> **Status:** landed. Extends the D-A3 matrix to the third temporal field type,
+> and closes the gap that extension measured.
+
+### The axis
+
+`TEMPORAL_TIME_ROWS` / `TEMPORAL_TIME_CASES` sit beside the existing table. A
+wall clock gets its **own** table rather than a third `kind` on the first,
+because it shares no comparand vocabulary with the other two: no relative token
+resolves to a time (`{today}` is a calendar day), and the bare-day whole-day
+rule (D-D) must NOT reach it. That last point is asserted rather than assumed —
+`nextUtcCalendarDay` widens only a `YYYY-MM-DD` string, and "the rule leaked
+into the wrong field type" is exactly the class of defect this matrix exists to
+catch, so an inclusive time upper bound is pinned as EXACT.
+
+The fixture is a business day whose boundaries are the ones #3994 measured:
+both window edges, the two rows straddling the millisecond-suffix width change
+(`14:30:00` and `14:30:00.500`), midnight, and `23:59:59.999`. Same scope rule
+as the parent table — a minutes-only comparand (`'14:30'`) is canonicalised by
+a typed backend and compared raw by a type-blind one, so that cell is
+schema-aware-only and stays in the typed drivers' own suites, the exact twin of
+the `$gt`-on-`datetime` limit above.
+
+### What the axis found: D-C never reached the non-SQL drivers
+
+D-C gave `Field.time` a canonical form on every SQL dialect. `driver-memory`
+and `driver-mongodb` were never extended: both declared
+`TemporalFieldKind = 'datetime' | 'date'`, so `indexTemporalFields` never
+classified a time column and `coerceTemporalValue` never touched one. A `time`
+field kept whatever each writer produced — and mingo (memory) and BSON (mongo)
+both compare across types by bracket, so a text bound matched no `Date`-written
+row in either direction, for every operator.
+
+Measured on `driver-memory`: **8 of the 9 shared time cases** returned only the
+text-written half of the fixture. A business-hours window answered
+`[d_mid, f_close]` instead of `[c_open, d_mid, e_mid_ms, f_close]`. This is
+#4047's failure, one field type over, and it survived #4047 precisely because
+that work extended `datetime` and `date` without revisiting `time`.
+
+Worth recording as a documentation failure too: `mongodb-temporal.ts`'s own
+canon table has listed `time` as `HH:MM:SS[.fff]` text since #3994. The
+document was right and the code never implemented it — a declared-but-unenforced
+claim of the kind Prime Directive #10 is about, invisible until something
+executed it.
+
+### The resolution
+
+`storageTimeValue` in each driver, mirroring `canonicalTimeOfDay`: `HH:MM:SS`,
+`.fff` only when non-zero, a `Date`/epoch/full-timestamp folding to its **UTC**
+time-of-day, and totality (an out-of-range wall clock passes through rather
+than being rewritten). Text on both, including mongo — a wall clock is not an
+instant, so a BSON `Date` would invent a calendar day and a zone the author
+never wrote, the same reasoning that keeps `date` as text there.
+
+The variable width is what makes text storage correct rather than merely
+convenient: `.` sorts below every digit, so lexicographic order — which is
+exactly what mingo performs and what a mongo text range uses — stays
+chronological across both widths.
+
+Coverage note: the mongo end-to-end sweep needs a real server
+(`mongodb-memory-server`), so it runs in CI and skips where no binary is
+available. The conversion itself is pinned by `mongodb-time-storage.test.ts`,
+which is pure and runs everywhere.

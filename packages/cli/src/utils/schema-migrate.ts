@@ -157,13 +157,25 @@ export async function bootSchemaStack(
      * tables to exist.
      */
     deferSchemaDdl?: boolean;
+    /**
+     * Project root the booted stack scopes its on-disk state to — the default
+     * sqlite database and the metadata FileSystemRepository
+     * (`<projectRoot>/.objectstack/…`). Defaults to `process.cwd()`, which is
+     * correct for every real `os migrate` invocation: the CLI runs from the
+     * project directory.
+     *
+     * Tests that assemble a fixture project in a tempdir must pass it, or the
+     * boot scopes its database to the tempdir while writing metadata into
+     * whatever directory the test runner happens to be standing in (#4065).
+     */
+    projectRoot?: string;
   } = {},
 ): Promise<SchemaStack> {
   const { createStandaloneStack, Runtime } = await import('@objectstack/runtime');
   const defer = opts.deferSchemaDdl === true;
 
   const stack = await createStandaloneStack({
-    projectRoot: process.cwd(),
+    projectRoot: opts.projectRoot ?? process.cwd(),
     ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}),
     ...(defer ? { skipSeedData: true } : {}),
   });

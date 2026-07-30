@@ -3,6 +3,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { ObjectKernel } from '@objectstack/core';
 import { ApiErrorSchema } from '@objectstack/spec/api';
+import type { ConnectorDescriptor } from '@objectstack/spec/integration';
+import type { IAuthService, IAutomationService } from '@objectstack/spec/contracts';
+
+/**
+ * [#4127] Mock-shape guard: every key must be a method the contract DECLARES.
+ *
+ * Signatures stay `unknown` on purpose — `vi.fn()` does not match a contract
+ * signature, and forcing it to would push these mocks straight back to `as any`,
+ * which is the state this is fixing. What it catches is the failure that keeps
+ * actually happening: a mock naming a method the contract does not have, so the
+ * handler and its test agree with each other and with no implementation.
+ * `upload(file, { request })` in #4087, `authService.handler` and
+ * `automation.trigger` here — each one sat green for months behind a mock
+ * written to the handler's wish rather than the declared surface.
+ */
+type ContractMock<T> = Partial<Record<keyof T, unknown>>;
 
 describe('HttpDispatcher', () => {
     let kernel: ObjectKernel;
@@ -161,7 +177,8 @@ describe('HttpDispatcher', () => {
         let mockAutomationService: any;
 
         beforeEach(() => {
-            mockAutomationService = {
+            // [#4127] Everything the CONTRACT declares, checked against it.
+            const contractMethods = {
                 listFlows: vi.fn().mockResolvedValue(['flow_a', 'flow_b']),
                 getFlow: vi.fn().mockResolvedValue({ name: 'flow_a', label: 'Flow A' }),
                 registerFlow: vi.fn(),
@@ -170,7 +187,6 @@ describe('HttpDispatcher', () => {
                 toggleFlow: vi.fn().mockResolvedValue(undefined),
                 listRuns: vi.fn().mockResolvedValue([{ id: 'run_1', status: 'completed' }]),
                 getRun: vi.fn().mockResolvedValue({ id: 'run_1', status: 'completed' }),
-                trigger: vi.fn().mockResolvedValue({ success: true }),
                 resume: vi.fn().mockResolvedValue({ success: true, output: {}, durationMs: 7 }),
                 // Sync per IAutomationService — `ScreenSpec | null`, not a promise.
                 getSuspendedScreen: vi.fn().mockReturnValue({ nodeId: 'collect', fields: [] }),
@@ -179,15 +195,33 @@ describe('HttpDispatcher', () => {
                     { type: 'http_request', name: 'HTTP Request', category: 'io', paradigms: ['flow', 'approval'], source: 'builtin' },
                     { type: 'send_sms', name: 'Send SMS', category: 'io', paradigms: ['flow'], source: 'plugin' },
                 ]),
+                // [#4127] Typed as `ConnectorDescriptor[]` now that the contract
+                // declares `getConnectorDescriptors`, so this fixture cannot
+                // drift from the shape the route serves. The previous untyped
+                // literal was already missing `origin` and `state` — both
+                // REQUIRED, and both the fields a designer reads to tell a
+                // declarative instance from a plugin one, or a degraded
+                // connector from a live one (#3017).
                 getConnectorDescriptors: vi.fn().mockReturnValue([
-                    { name: 'rest', label: 'REST', type: 'api', actions: [{ key: 'request', label: 'Request' }] },
-                    { name: 'slack', label: 'Slack', type: 'api', actions: [{ key: 'chat.postMessage', label: 'Post Message' }] },
-                    { name: 'pg', label: 'Postgres', type: 'database', actions: [] },
-                ]),
+                    { name: 'rest', label: 'REST', type: 'api', origin: 'plugin', state: 'ready', actions: [{ key: 'request', label: 'Request' }] },
+                    { name: 'slack', label: 'Slack', type: 'api', origin: 'plugin', state: 'ready', actions: [{ key: 'chat.postMessage', label: 'Post Message' }] },
+                    { name: 'pg', label: 'Postgres', type: 'database', origin: 'declarative', state: 'degraded', degradedReason: 'upstream unreachable', actions: [] },
+                ] satisfies ConnectorDescriptor[]),
                 getFlowRuntimeStates: vi.fn().mockReturnValue([
                     { name: 'flow_a', enabled: true, bound: true },
                     { name: 'flow_b', enabled: false, bound: false },
                 ]),
+            } satisfies ContractMock<IAutomationService>;
+
+            mockAutomationService = {
+                ...contractMethods,
+                // NEGATIVE CONTROL (#4143) — deliberately NOT on the contract.
+                // Nothing in the repo implements `trigger` on the automation
+                // slot; it exists here only so the legacy-route test below can
+                // assert it is never called. Kept outside the checked literal
+                // so it reads as the exception it is, instead of quietly
+                // re-opening the hole the check above closes.
+                trigger: vi.fn().mockResolvedValue({ success: true }),
             };
 
             // Set up kernel services to include automation
@@ -508,6 +542,25 @@ describe('HttpDispatcher', () => {
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.total).toBe(1);
             expect(result.response?.body?.data?.connectors[0].name).toBe('pg');
+        });
+
+        // [#4127] The route serves the WHOLE descriptor. `origin` and `state`
+        // are what the designer reads to distinguish a live declarative
+        // instance from a plugin connector, and a dispatchable one from a
+        // degraded one (ADR-0097 §4, #3017) — while the contract did not
+        // declare the method, nothing pinned that they survive the hop.
+        it('should preserve origin / state / degradedReason on GET /connectors', async () => {
+            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            const byName = Object.fromEntries(
+                result.response?.body?.data?.connectors.map((c: ConnectorDescriptor) => [c.name, c]),
+            );
+            expect(byName.rest).toMatchObject({ origin: 'plugin', state: 'ready' });
+            expect(byName.pg).toMatchObject({
+                origin: 'declarative',
+                state: 'degraded',
+                degradedReason: 'upstream unreachable',
+            });
         });
 
         it('should return an empty registry when the service lacks getConnectorDescriptors', async () => {
@@ -885,10 +938,19 @@ describe('HttpDispatcher', () => {
         });
 
         describe('handleAuth with async service', () => {
-            it('should resolve auth service from Promise', async () => {
+            // [#4127] This mocked `{ handler }` — a method `IAuthService` does
+            // not declare and `AuthManager` does not have — and asserted it was
+            // called, which is why the dead branch stayed green. Exactly the
+            // test-side hole that kept #4087 alive: the mock was written to the
+            // handler's fabricated shape instead of the declared contract. It
+            // pins `handleRequest` now, and `satisfies` makes a future drift
+            // back to an undeclared name a compile error rather than a passing
+            // test asserting a call nothing makes.
+            it('should resolve auth service from Promise and call the contract method', async () => {
                 const mockAuth = {
-                    handler: vi.fn().mockResolvedValue({ user: { id: '1' } }),
-                };
+                    handleRequest: vi.fn().mockResolvedValue({ user: { id: '1' } }),
+                    verify: vi.fn().mockResolvedValue({ success: true }),
+                } satisfies Pick<IAuthService, 'handleRequest' | 'verify'>;
                 (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
                     if (name === 'auth') return Promise.resolve(mockAuth);
                     return null;
@@ -896,10 +958,10 @@ describe('HttpDispatcher', () => {
 
                 const result = await dispatcher.handleAuth('', 'POST', {}, { request: {}, response: {} });
                 expect(result.handled).toBe(true);
-                expect(mockAuth.handler).toHaveBeenCalled();
+                expect(mockAuth.handleRequest).toHaveBeenCalled();
             });
 
-            it('should fallback to mock auth when async auth service has no handler', async () => {
+            it('should fallback to mock auth when async auth service has no handleRequest', async () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue({});
 
                 const result = await dispatcher.handleAuth('/login', 'POST', { email: 'test@example.com' }, { request: {} });
@@ -1109,9 +1171,15 @@ describe('HttpDispatcher', () => {
         });
 
         it('should prefer getServiceAsync over getService for auth', async () => {
+            // [#4127] Second copy of the same fabricated `handler` mock — this
+            // one asserted the resolution PATH (getServiceAsync over
+            // getService) while pinning a method no auth service has, so it
+            // proved the lookup worked and nothing about the call. The path
+            // assertion is the point of this test and is unchanged; the mock
+            // now names the contract method the handler actually invokes.
             const asyncAuth = {
-                handler: vi.fn().mockResolvedValue({ user: { id: '1' } }),
-            };
+                handleRequest: vi.fn().mockResolvedValue({ user: { id: '1' } }),
+            } satisfies ContractMock<IAuthService>;
             (kernel as any).getServiceAsync = vi.fn().mockResolvedValue(asyncAuth);
             (kernel as any).getService = vi.fn().mockImplementation(() => {
                 throw new Error("Service 'auth' is async - use await");
@@ -1119,7 +1187,7 @@ describe('HttpDispatcher', () => {
 
             const result = await dispatcher.handleAuth('', 'POST', {}, { request: {}, response: {} });
             expect(result.handled).toBe(true);
-            expect(asyncAuth.handler).toHaveBeenCalled();
+            expect(asyncAuth.handleRequest).toHaveBeenCalled();
             expect((kernel as any).getServiceAsync).toHaveBeenCalledWith('auth');
         });
 
@@ -2685,6 +2753,80 @@ describe('HttpDispatcher', () => {
             expect(info.features.i18n).toBe(true);
             expect(info.services['file-storage'].status).toBe('degraded');
             expect(info.services['file-storage'].handlerReady).toBe(true);
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // [#4093] /ui advertisement reads what /ui reads
+    //
+    // domains/ui.ts serves GET /ui/view/:object off the `protocol` service and
+    // 503s without it; the `ui` SLOT never enters that decision — nothing in
+    // the platform registers a `ui` service (plugin-dev's shapeless
+    // placeholder, retired in #4093, was its only occupant ever). Discovery
+    // used to gate `routes.ui` on that slot, which was wrong in both
+    // directions: a boot with the placeholder but no protocol advertised a
+    // route that could only 503, and a production boot with a working
+    // protocol hid a route that serves. Same predicate ⇒ same answer
+    // (the `hasMcp` rule).
+    // ═══════════════════════════════════════════════════════════════
+
+    describe('/ui discovery gates on the protocol service, not the vestigial ui slot (#4093)', () => {
+        const serveMap = (services: Record<string, unknown>) => {
+            (kernel as any).getService = vi.fn().mockImplementation((n: string) => services[n] ?? null);
+            (kernel as any).services = new Map(Object.entries(services));
+        };
+
+        it('advertises /ui and serves it when a protocol with getUiView is registered', async () => {
+            const protocol = { getUiView: vi.fn().mockResolvedValue({ object: 'account', type: 'list', view: {} }) };
+            serveMap({ protocol });
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.ui).toBe('/api/v1/ui');
+            expect(info.services.ui.enabled).toBe(true);
+            expect(info.services.ui.status).toBe('available');
+            expect(info.services.ui.handlerReady).toBe(true);
+            expect(info.services.ui.provider).toBe('metadata-protocol');
+
+            // The advertised route really answers — same predicate, same fact.
+            const served = await dispatcher.handleUi('/view/account', {}, { request: {} });
+            expect(served.handled).toBe(true);
+            expect(served.response?.status).toBe(200);
+            expect(protocol.getUiView).toHaveBeenCalledWith({ object: 'account', type: 'list' });
+        });
+
+        it('does not advertise /ui without a protocol, and names the actual remedy', async () => {
+            serveMap({});
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.ui).toBeUndefined();
+            expect(info.services.ui.enabled).toBe(false);
+            expect(info.services.ui.handlerReady).toBe(false);
+            // Not svcUnavailable's "Install a ui plugin" — no such plugin exists.
+            expect(info.services.ui.message).toContain('MetadataPlugin');
+        });
+
+        it('a ui-slot occupant buys no route: the old dev-boot shape stays un-advertised and un-served', async () => {
+            // What plugin-dev used to register: a shapeless placeholder in the
+            // `ui` slot, no protocol anywhere. /ui could only 503 — discovery
+            // must say so instead of advertising it.
+            const placeholder = { _serviceName: 'ui', __serviceInfo: { status: 'stub', handlerReady: false, message: 'Dev placeholder' } };
+            serveMap({ ui: placeholder });
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.ui).toBeUndefined();
+            expect(info.services.ui.enabled).toBe(false);
+
+            const served = await dispatcher.handleUi('/view/account', {}, { request: {} });
+            expect(served.handled).toBe(true);
+            expect(served.response?.status).toBe(503);
+        });
+
+        it('a wrong-shaped protocol (no getUiView) is not advertised — mirrors the domain 503', async () => {
+            serveMap({ protocol: { saveMetaItem: vi.fn() } });
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.ui).toBeUndefined();
+            expect(info.services.ui.enabled).toBe(false);
         });
     });
 

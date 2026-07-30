@@ -5,7 +5,13 @@ import path from 'path';
 import fs from 'fs';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
-import { ObjectStackDefinitionSchema, normalizeStackInput, type ConversionNotice } from '@objectstack/spec';
+import {
+  ObjectStackDefinitionSchema,
+  normalizeStackInput,
+  lintUnknownAuthoringKeys,
+  formatUnknownAuthoringKey,
+  type ConversionNotice,
+} from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { validateStackExpressions } from '@objectstack/lint';
@@ -248,6 +254,20 @@ export default class Compile extends Command {
           console.log(`  • ${f.where}: ${f.message}`);
           console.log(`      ${f.hint}`);
           console.log(`      rule: ${f.rule}  at ${f.path}`);
+        }
+      }
+
+      // 3b-ter. [#3786] Keys `ObjectSchema` / `FieldSchema` do not declare, and
+      //     so drop silently on the way to storage. PRE-parse for the same
+      //     reason as the rule above. `defineStack` already warns for configs
+      //     authored through it; this covers the ones that skip it (a plain
+      //     object default-export, `strict: false`) and would otherwise emit an
+      //     artifact with the key quietly gone. Advisory, never fatal.
+      const unknownKeyFindings = lintUnknownAuthoringKeys(normalized as Record<string, unknown>);
+      if (unknownKeyFindings.length > 0 && !flags.json) {
+        printWarning(`Undeclared authoring keys (${unknownKeyFindings.length}) — dropped at load (#3786)`);
+        for (const f of unknownKeyFindings.slice(0, 50)) {
+          console.log(`  • ${formatUnknownAuthoringKey(f)}`);
         }
       }
 

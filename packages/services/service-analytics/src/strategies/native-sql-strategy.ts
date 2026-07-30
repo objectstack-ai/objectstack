@@ -8,11 +8,48 @@ import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 
 /**
+ * The SQL wrapper for each aggregate a measure's `type` can name.
+ *
+ * A table rather than a `switch` so its coverage is *assertable*: the aggregate
+ * vocabulary lives in `@objectstack/spec` (`AggregationFunction`), the dataset
+ * compiler subtracts the two it cannot lower (`array_agg`, `string_agg`), and
+ * `aggregation-lockstep.test.ts` checks that what remains is exactly the keys
+ * below. A `switch` gave that no purchase — the missing case fell to
+ * `default: COUNT(*)`, so an aggregate the spec grew would have returned a row
+ * count instead of the number the author asked for, silently. objectui#2945.
+ *
+ * Non-aggregate metric types (`number`/`string`/`boolean` — custom SQL
+ * expressions, `AggregationMetricType` in `data/analytics.zod.ts`) are
+ * deliberately absent, and keep the caller's existing fallback rather than
+ * changing behaviour here; see the note at {@link NativeSQLStrategy}.
+ */
+const AGGREGATE_SQL: Record<string, (col: string) => string> = {
+  'count': () => 'COUNT(*)',
+  'sum': (col) => `SUM(${col})`,
+  'avg': (col) => `AVG(${col})`,
+  'min': (col) => `MIN(${col})`,
+  'max': (col) => `MAX(${col})`,
+  'count_distinct': (col) => `COUNT(DISTINCT ${col})`,
+};
+
+/** Exported for the lockstep guard — the aggregates this strategy can lower. */
+export const SUPPORTED_AGGREGATE_SQL_KEYS = Object.keys(AGGREGATE_SQL);
+
+/**
  * NativeSQLStrategy — Priority 1
  *
  * Pushes the analytics query down to the database as a native SQL statement.
  * This is the most efficient path and is preferred whenever the backing driver
  * supports raw SQL execution (e.g. Postgres, MySQL, SQLite).
+ *
+ * Known gap, unchanged by the lockstep work and reported separately: a measure
+ * whose `type` is `number`/`string`/`boolean` — a custom SQL *expression*, not
+ * an aggregate — also lands on the `COUNT(*)` fallback in
+ * `resolveMeasureSql`, so its expression is replaced by a row count. Datasets
+ * cannot produce such a measure (`aggregateToMetricType` only ever returns an
+ * `AggregationFunction` member), so this is reachable only from a hand-authored
+ * Cube. Left as-is on purpose: emitting `col` instead is a behavioural change
+ * in an analytics SQL path, and deserves its own change with its own tests.
  */
 export class NativeSQLStrategy implements AnalyticsStrategy {
   readonly name = 'NativeSQLStrategy';
@@ -370,15 +407,8 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const col = measure.sql === '*'
       ? '*'
       : this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
-    switch (measure.type) {
-      case 'count': return 'COUNT(*)';
-      case 'sum': return `SUM(${col})`;
-      case 'avg': return `AVG(${col})`;
-      case 'min': return `MIN(${col})`;
-      case 'max': return `MAX(${col})`;
-      case 'count_distinct': return `COUNT(DISTINCT ${col})`;
-      default: return `COUNT(*)`;
-    }
+    const wrap = AGGREGATE_SQL[measure.type];
+    return wrap ? wrap(col) : `COUNT(*)`;
   }
 
   private resolveFieldSql(

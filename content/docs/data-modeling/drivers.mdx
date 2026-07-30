@@ -353,34 +353,62 @@ equivalent age-based reap.
 ## Memory Driver
 
 The in-memory driver keeps records in plain in-process objects (queried via
-[`mingo`](https://github.com/kofrasa/mingo)).
+[`mingo`](https://github.com/kofrasa/mingo)). Data is lost when the process
+exits unless persistence is explicitly requested.
 It is the **last-resort fallback** in dev mode: `objectstack dev` prefers native
 SQLite (`better-sqlite3`), falls back to the pure-JS WASM SQLite driver if the
 native binary is unavailable, and only drops to the in-memory driver if WASM also
 fails to load. Set `OS_DATABASE_DRIVER=memory` to select it explicitly.
 
-**Whether data survives the process depends on how the driver is built** (#4083):
+**Both ways of building the driver are ephemeral by default** (#4083, #4065):
 
 | How it is built | Persistence |
 | :--- | :--- |
 | A **declared datasource** — `{ driver: 'memory' }` in a stack/app config | **Ephemeral.** Nothing is written to disk unless the declaration sets `config.persistence` — and when it does, the destination is scoped per datasource, so two memory datasources never share one file. |
-| `new InMemoryDriver()` **constructed directly** | `persistence: 'auto'` — under Node that means a JSON file at `.objectstack/data/memory-driver.json`, relative to the process's working directory, reloaded on the next boot. |
-
-Pass `persistence: false` for a driver you construct yourself and want purely in
-memory — a test, for instance, which should neither depend on nor leave behind
-state in the working directory. Two directly-constructed `'auto'` drivers in one
-process still share that single default path.
+| `new InMemoryDriver()` **constructed directly** | **Ephemeral.** Pass `persistence` to opt in (see below). Note the scoping above is the *factory's* job: two directly-constructed `'auto'` drivers in one process still share the single default path. |
 
 ```typescript
 import { InMemoryDriver } from '@objectstack/driver-memory';
 
-new InMemoryDriver({ persistence: false });   // pure memory
-new InMemoryDriver();                         // 'auto' — file-backed under Node
+new InMemoryDriver();                         // pure memory — the default
+new InMemoryDriver({ persistence: 'file' });  // opt in to durability
 ```
 
+### Persistence is opt-in
+
+A bare `new InMemoryDriver()` persists nothing. Durability is requested
+explicitly:
+
+```typescript
+new InMemoryDriver({ persistence: 'file' })   // Node.js — .objectstack/data/memory-driver.json
+new InMemoryDriver({ persistence: 'local' })  // browser — localStorage
+new InMemoryDriver({ persistence: 'auto' })   // pick per environment (file / localStorage / off)
+```
+
+`'auto'` chooses localStorage in a browser, a file under Node.js, and **disables**
+persistence in serverless/edge runtimes (Vercel, Lambda, Netlify, Cloud Run, Deno
+Deploy) where a local write would be silently discarded — supply a custom adapter
+there instead.
+
+<Callout type="warn">
+Before v17 the default was `'auto'`, which on Node.js meant **file** — so a bare
+`new InMemoryDriver()` silently wrote `.objectstack/data/memory-driver.json` into
+the working directory and reloaded it on the next boot. If you relied on that,
+pass `persistence: 'auto'` (or `'file'`) explicitly. See
+[#4065](https://github.com/objectstack-ai/objectstack/issues/4065).
+</Callout>
+
 <Callout type="tip">
-Use the memory driver for unit tests. It requires no setup and runs instantly —
-with `persistence: false`, so one run cannot see what an earlier run left behind.
+For tests, prefer in-memory **SQLite** — `SqlDriver` with
+`connection: { filename: ':memory:' }`, or `SqliteWasmDriver({ filename: ':memory:' })`
+when you want no native build. Both give the SQL semantics production runs on;
+mingo does not enforce primary keys, uniqueness, `NOT NULL` or column types, so a
+green run against the memory driver is weaker evidence than it looks. The
+framework's own dogfood gate boots on WASM SQLite at `:memory:` for this reason.
+
+The memory driver remains fine where you want no setup at all and the assertions
+do not depend on storage semantics — it is ephemeral by default, so one run
+cannot see what an earlier run left behind.
 </Callout>
 
 ## Local Environment Runtime

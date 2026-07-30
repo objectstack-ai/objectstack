@@ -11,23 +11,31 @@ export type {
     ConnectorActionHandler,
     ConnectorActionContext,
     RegisteredConnector,
-    ConnectorOrigin,
-    ConnectorDescriptor,
-    ConnectorActionDescriptor,
     SuspendedRun,
     SuspendedRunStore,
     RunRecord,
     StepLogEntry,
 } from './engine.js';
 
-// Connector provider contract (ADR-0097) — re-exported from @objectstack/spec so
-// hosts/tests can reach it via this package too. Connector plugins should import
-// it directly from `@objectstack/spec/integration` (no coupling to this engine).
+// Connector provider contract (ADR-0097) and the registry vocabulary that goes
+// with it — re-exported from @objectstack/spec so hosts/tests can reach them via
+// this package too. Connector plugins should import them directly from
+// `@objectstack/spec/integration` (no coupling to this engine).
+//
+// [#4127] The descriptor types moved to the spec: `ConnectorDescriptor` is the
+// return type of `IAutomationService.getConnectorDescriptors`, so declaring it
+// here left the contract unable to name its own method. Same names, same
+// shapes — this re-export keeps `@objectstack/service-automation` importers
+// working unchanged.
 export type {
     ConnectorProviderFactory,
     ConnectorProviderContext,
     ConnectorMaterialization,
     ConnectorMaterializationHandler,
+    ConnectorOrigin,
+    ConnectorState,
+    ConnectorDescriptor,
+    ConnectorActionDescriptor,
 } from '@objectstack/spec/integration';
 
 // Durable suspended-run persistence (ADR-0019). The in-memory store is the

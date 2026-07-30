@@ -11,11 +11,12 @@ import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from '../utils/storage-driver.js';
 import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
-import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
+import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
+import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
 import {
   printHeader,
@@ -199,20 +200,19 @@ export default class Serve extends Command {
    *
    * Opt out: `objectstack serve --preset minimal`.
    *
-   * Cloud / multi-environment hosts (which live in a separate distribution)
-   * mirror this list on their per-project kernels.
+   * DERIVED from `@objectstack/spec`'s `PLATFORM_ALWAYS_ON_CAPABILITIES`, where
+   * the slate and its per-entry rationale now live. This used to BE the
+   * declaration, under a comment noting that cloud / multi-environment hosts
+   * "mirror this list on their per-project kernels" — with nothing making that
+   * true. They had diverged: the hosted slate was missing `sms`, `messaging` and
+   * `analytics`, so an app that worked under `objectstack serve` silently lost
+   * dataset previews and `notify` deliveries once hosted (cloud#925, #3786).
+   *
+   * Kept as a re-export rather than deleted so `Serve.ALWAYS_ON_CAPABILITIES`
+   * stays a stable handle for existing callers and tests — one declaration, two
+   * readers.
    */
-  static readonly ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze([
-    // The first six form the pinned foundational prefix (see
-    // serve-defaults.test.ts) — grow the slate AFTER them.
-    'queue', 'job', 'cache', 'settings', 'email', 'storage', 'sms', 'sharing', 'messaging',
-    // `analytics` is foundational post-ADR-0021: the AnalyticsService backs the
-    // dataset/cube query endpoints (`/api/v1/analytics/*`). It must exist even
-    // when an app declares no `analyticsCubes`, because a `dataset` can be
-    // authored/previewed inline (Studio) and compiled on the fly. Without it the
-    // dataset preview + dashboard/report analytics widgets silently no-op.
-    'analytics',
-  ]);
+  static readonly ALWAYS_ON_CAPABILITIES: readonly string[] = PLATFORM_ALWAYS_ON_CAPABILITIES;
 
   /**
    * Auto-registered plugin tiers. Plugins explicitly listed in
@@ -1047,9 +1047,7 @@ export default class Serve extends Command {
       // To avoid double-registration when the host already wraps itself with
       // an AppPlugin (e.g. apps/objectos's dev-workspace stack), we skip if
       // any plugin in `plugins[]` is already an AppPlugin instance.
-      const hasAppPluginAlready = plugins.some(
-        (p: any) => p && (p.type === 'app' || p.constructor?.name === 'AppPlugin' || (p.name && typeof p.name === 'string' && p.name.startsWith('plugin.app.')))
-      );
+      const hasAppPluginAlready = plugins.some(isAppPluginLike);
       const configHasMetadata = !!(
         config.objects || config.manifest || config.apps || config.flows || config.apis
       );
@@ -1079,6 +1077,30 @@ export default class Serve extends Command {
               `  ⚠ Skipped registering the app defined in this config: ${e?.message ?? e}\n`
               + '    Its objects/flows will NOT be served. Fix the config (or pin an AppPlugin in `plugins`).',
             ));
+        }
+      } else if (hasAppPluginAlready) {
+        // #4095 — skipping the wrap above also discards the authored module's
+        // CODE. On the config-boot path the bundle already in `plugins[]` came
+        // from `createStandaloneStack()` reading `dist/objectstack.json`, and a
+        // JSON artifact cannot carry a function: the app booted with every
+        // `script` action DECLARED and no handler registered, so each one 404'd
+        // at dispatch. Move the executable members onto that bundle (the
+        // bundle's own value always wins, so a host that wrapped itself on
+        // purpose is untouched) and say so out loud when they have nowhere to go
+        // — that silent drop is what hid this.
+        // Success is silent: on the config-boot path this is now the normal
+        // route by which handlers reach the engine, and the observable proof is
+        // that the actions dispatch.
+        const graft = graftAuthoredRuntimeMembers(plugins, config);
+        if (graft.orphaned.length > 0) {
+          console.warn(chalk.yellow(
+            `  ⚠ ${relativeConfig} exports ${graft.orphaned.join(' / ')} but no app bundle claimed `
+            + `${graft.orphaned.length === 1 ? 'it' : 'them'}`
+            + `${graft.reason === 'ambiguous-app-plugin'
+              ? ' — several apps are registered and the config declares no manifest.id to match'
+              : ' — no registered app bundle has a matching manifest.id'}`
+            + '. Action handlers registered there will NOT be reachable (they 404 at dispatch).',
+          ));
         }
       }
 
@@ -2162,17 +2184,15 @@ export default class Serve extends Command {
             // In production mode we emit a single loud warning so the
             // operator knows to point storage at S3 / GCS / Azure before
             // shipping (data on a single pod is volatile / non-replicated).
-            const cfgStorage = (config as any).storage;
-            if (cfgStorage && (cfgStorage.driver || cfgStorage.adapter)) {
-              arg = cfgStorage;
-            } else {
-              const root = process.env.OS_STORAGE_ROOT || '.objectstack/data/uploads';
-              arg = { driver: 'local', root };
-              if (!isDev) {
-                console.warn(chalk.yellow(
-                  `  ⚠ StorageServicePlugin using local driver (${root}) — switch to S3/GCS/Azure for production (set config.storage or OS_STORAGE_*).`,
-                ));
-              }
+            const storageArg = resolveStorageCapabilityArg(
+              (config as any).storage,
+              process.env.OS_STORAGE_ROOT,
+            );
+            arg = storageArg.options;
+            if (storageArg.localRoot && !isDev) {
+              console.warn(chalk.yellow(
+                `  ⚠ StorageServicePlugin using local driver (${storageArg.localRoot}) — switch to S3/GCS/Azure for production (set config.storage or OS_STORAGE_*).`,
+              ));
             }
           }
           await kernel.use(arg !== undefined ? new Ctor(arg) : new Ctor());
@@ -2619,6 +2639,48 @@ export default class Serve extends Command {
       this.exit(1);
     }
   }
+}
+
+/**
+ * Constructor options for `StorageServicePlugin`, plus the local root to name in
+ * the production warning (absent when the host configured a backend itself).
+ */
+export interface StorageCapabilityArg {
+  options: Record<string, unknown>;
+  localRoot?: string;
+}
+
+/**
+ * Resolve what `StorageServicePlugin` is constructed with (#4096).
+ *
+ * Storage is in the default capability slate, so a host that configures nothing
+ * still gets local disk under `.objectstack/data/uploads/` and avatars /
+ * attachments / report files work out of the box.
+ *
+ * The fallback used to be `{ driver: 'local', root }` — neither of which
+ * `StorageServicePluginOptions` declares. Both were dropped on the floor, so the
+ * plugin applied its OWN default (`./storage`), `OS_STORAGE_ROOT` changed
+ * nothing, and uploads landed somewhere the operator never named. The `storage`
+ * settings namespace then corrected the root on its first read (its manifest
+ * default IS `./.objectstack/data/uploads`), which swapped the adapter and
+ * warned about stranded files — on every boot of a healthy server.
+ *
+ * A caller-supplied `config.storage` is still forwarded verbatim, including the
+ * `driver`/`root` dialect, which the plugin does not read either. That is the
+ * same mismatch one layer up and is tracked separately: correcting it means
+ * deciding whether the plugin accepts that dialect or the config schema is
+ * wrong, and a lenient alias here would fossilize the wrong contract
+ * (AGENTS.md Prime Directive #12).
+ */
+export function resolveStorageCapabilityArg(
+  cfgStorage: any,
+  envRoot?: string,
+): StorageCapabilityArg {
+  if (cfgStorage && (cfgStorage.driver || cfgStorage.adapter)) {
+    return { options: cfgStorage };
+  }
+  const rootDir = envRoot?.trim() || '.objectstack/data/uploads';
+  return { options: { adapter: 'local', local: { rootDir } }, localRoot: rootDir };
 }
 
 /**

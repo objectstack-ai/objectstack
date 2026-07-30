@@ -12,14 +12,27 @@ import {
 } from './memory.zod';
 
 describe('MemoryConfigSchema', () => {
-  it('should default persistence to "auto" when empty config', () => {
+  // Persistence is OPT-IN (#815 requirement #1, restored in #4065). This
+  // schema previously defaulted to `'auto'`, which on Node.js resolves to file
+  // persistence — so an unconfigured memory driver wrote
+  // `.objectstack/data/memory-driver.json` into the process CWD and reloaded it
+  // on the next boot. The spec and the driver agreed on `'auto'`, which is why
+  // the drift survived; what neither checked was whether `'auto'` was the
+  // default #815 accepted. It was not.
+  it('should default persistence to false (pure in-memory) when empty config', () => {
     const config = MemoryConfigSchema.parse({});
 
     expect(config.strictMode).toBe(false);
     expect(config.initialData).toBeUndefined();
-    expect(config.persistence).toBe('auto');
+    expect(config.persistence).toBe(false);
     expect(config.indexes).toBeUndefined();
     expect(config.maxRecordsPerObject).toBeUndefined();
+  });
+
+  it('still accepts "auto" as an explicit opt-in to the previous behaviour', () => {
+    const config = MemoryConfigSchema.parse({ persistence: 'auto' });
+
+    expect(config.persistence).toBe('auto');
   });
 
   it('should accept persistence: false to disable persistence', () => {

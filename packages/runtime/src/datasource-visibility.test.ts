@@ -52,14 +52,14 @@ describe('code-defined datasource visibility (ADR-0015 §18)', () => {
 
   beforeAll(async () => {
     const { ObjectQLPlugin } = await import('@objectstack/objectql');
-    const { InMemoryDriver } = await import('@objectstack/driver-memory');
+    const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
     const { DatasourceAdminServicePlugin } = await import('@objectstack/service-datasource');
 
     // Host-config shape: NO MetadataPlugin — the kernel auto-injects its
     // in-memory `metadata` fallback (CORE_FALLBACK_FACTORIES.metadata).
     const runtime = new Runtime({ cluster: false });
     kernel = runtime.getKernel();
-    await kernel.use(new DriverPlugin(new InMemoryDriver()));
+    await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AppPlugin(ARTIFACT));
     await kernel.use(new DatasourceAdminServicePlugin({}));

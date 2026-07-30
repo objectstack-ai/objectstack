@@ -13,7 +13,13 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { TEMPORAL_CASES, TEMPORAL_NOW, TEMPORAL_ROWS } from '@objectstack/spec/data';
+import {
+  TEMPORAL_CASES,
+  TEMPORAL_NOW,
+  TEMPORAL_ROWS,
+  TEMPORAL_TIME_CASES,
+  TEMPORAL_TIME_ROWS,
+} from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
 import { SqliteWasmDriver } from './index.js';
 
@@ -64,5 +70,41 @@ describe('driver-sqlite-wasm — temporal conformance', () => {
         expect(got, c.note).toEqual([...c.expected].sort());
       });
     }
+  }
+});
+
+describe('driver-sqlite-wasm — Field.time conformance', () => {
+  let driver: SqliteWasmDriver;
+
+  beforeAll(async () => {
+    driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.initObjects([
+      { name: 'time_conformance', fields: { at: { type: 'time' }, why: { type: 'string' } } },
+    ]);
+    for (const r of TEMPORAL_TIME_ROWS) {
+      await driver.create(
+        'time_conformance',
+        {
+          id: r.id,
+          // The mixed-writer axis for wall clocks (#3994 measured this exact
+          // column): a bound `Date` and a canonical-text write must converge.
+          at: r.writerForm === 'native' ? new Date(`1970-01-01T${r.at}Z`) : r.at,
+          why: r.why,
+        },
+        { bypassTenantAudit: true } as any,
+      );
+    }
+  });
+
+  afterAll(async () => {
+    await (driver as any).knex.destroy();
+  });
+
+  for (const c of TEMPORAL_TIME_CASES) {
+    it(c.name, async () => {
+      const rows = await driver.find('time_conformance', { where: c.filter } as any);
+      const got = (rows as any[]).map((r) => r.id).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
+    });
   }
 });

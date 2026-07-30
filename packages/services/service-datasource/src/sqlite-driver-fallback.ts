@@ -189,10 +189,13 @@ export async function resolveSqliteDriver(
   }
 
   // 3. In-memory (mingo) — dev-only last resort. Not real SQL, not persistent.
-  // `persistence: false` is what makes that second half true: the driver's own
-  // default is `'auto'`, which in Node flushes the whole store to
-  // `.objectstack/data/memory-driver.json` in the CWD and reloads it next boot —
-  // a shared file that every memory pool in the process would alias (#4083).
+  // `persistence: false` says the second half out loud. It used to be the only
+  // thing making it true: the driver defaulted to `'auto'`, which in Node
+  // flushed the whole store to `.objectstack/data/memory-driver.json` in the CWD
+  // and reloaded it next boot — a shared file every memory pool in the process
+  // aliased (#4083). #4065 made `false` the driver's own default, so this is now
+  // a restatement rather than a correction; it stays because a rung that MUST
+  // NOT persist should not be one edit away from persisting again.
   const { InMemoryDriver } = await import('@objectstack/driver-memory');
   warn(NATIVE_SQLITE_MEMORY_FALLBACK_WARNING);
   return {

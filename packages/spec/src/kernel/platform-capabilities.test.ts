@@ -3,6 +3,7 @@ import {
   PLATFORM_CAPABILITY_TOKENS,
   isKnownPlatformCapability,
   PLATFORM_CAPABILITY_PROVIDERS,
+  PLATFORM_ALWAYS_ON_CAPABILITIES,
   classifyRequiredCapability,
 } from './platform-capabilities';
 
@@ -112,5 +113,59 @@ describe('classifyRequiredCapability (#3366)', () => {
     const seen: string[] = [];
     classifyRequiredCapability('automation', (pkg) => { seen.push(pkg); return true; });
     expect(seen).toEqual(['@objectstack/service-automation']);
+  });
+});
+
+/**
+ * The foundational slate (cloud#925, #3786).
+ *
+ * It moved here from `Serve.ALWAYS_ON_CAPABILITIES` because two runtimes mount
+ * it — `objectstack serve` and cloud's per-tenant objectos-runtime — and the
+ * second kept a copy under a comment that only said hosts "mirror this list".
+ * They had already diverged by three entries. These assertions are what makes
+ * the single declaration trustworthy for both readers.
+ */
+describe('PLATFORM_ALWAYS_ON_CAPABILITIES', () => {
+  it('is frozen, non-empty and free of duplicates', () => {
+    expect(Object.isFrozen(PLATFORM_ALWAYS_ON_CAPABILITIES)).toBe(true);
+    expect(PLATFORM_ALWAYS_ON_CAPABILITIES.length).toBeGreaterThan(0);
+    expect(PLATFORM_ALWAYS_ON_CAPABILITIES).toHaveLength(
+      new Set(PLATFORM_ALWAYS_ON_CAPABILITIES).size,
+    );
+  });
+
+  it('pins the foundational prefix — grow the slate AFTER these six', () => {
+    // Order matters at mount time: settings/queue/job must precede the services
+    // that bind to them during their own `kernel:ready` phase.
+    expect(PLATFORM_ALWAYS_ON_CAPABILITIES.slice(0, 6)).toEqual([
+      'queue', 'job', 'cache', 'settings', 'email', 'storage',
+    ]);
+  });
+
+  it('every member is a real platform capability token', () => {
+    // A slate entry outside the vocabulary could never be classified, and every
+    // runtime mounting the slate would force-add a token nothing provides.
+    const unknown = PLATFORM_ALWAYS_ON_CAPABILITIES.filter(
+      (c) => !(PLATFORM_CAPABILITY_TOKENS as readonly string[]).includes(c),
+    );
+    expect(unknown).toEqual([]);
+  });
+
+  it('every member has a declared provider', () => {
+    // The slate is force-mounted, so a member with no provider entry would be
+    // added to every app's `requires` and then fail to resolve for all of them.
+    const providerless = PLATFORM_ALWAYS_ON_CAPABILITIES.filter(
+      (c) => !PLATFORM_CAPABILITY_PROVIDERS[c],
+    );
+    expect(providerless).toEqual([]);
+  });
+
+  it('is open-edition only — the floor must be mountable without a licence', () => {
+    // A cloud/enterprise-edition entry in the FLOOR would make the open
+    // distribution unable to satisfy its own defaults.
+    const gated = PLATFORM_ALWAYS_ON_CAPABILITIES.filter(
+      (c) => PLATFORM_CAPABILITY_PROVIDERS[c]?.edition !== 'open',
+    );
+    expect(gated).toEqual([]);
   });
 });

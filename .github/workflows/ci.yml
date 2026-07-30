@@ -18,6 +18,7 @@ concurrency:
 jobs:
   filter:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
@@ -83,6 +84,7 @@ jobs:
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
 
@@ -217,6 +219,7 @@ jobs:
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -327,6 +330,7 @@ jobs:
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
@@ -443,6 +447,7 @@ jobs:
     needs: dogfood
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -473,6 +478,7 @@ jobs:
     needs: filter
     if: needs.filter.outputs.core == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -523,6 +529,38 @@ jobs:
 
       - name: Build packages (excluding docs)
         run: pnpm build
+
+      # A package that builds with plain `tsc` and does not exclude tests emits
+      # `dist/**/*.test.js`. Two costs, and the second is the dangerous one:
+      #
+      #   1. `files: ["dist"]` publishes the tests to npm.
+      #   2. A package with no vitest config COLLECTS those compiled copies
+      #      alongside the sources, so every `src/**/*.test.ts` also runs as a
+      #      stale `dist/**/*.test.js` built at the last `pnpm build`. That
+      #      silently defeats edits — a fix to a source test appears not to work
+      #      because the run is still executing the pre-fix duplicate — and it
+      #      lets a source test be edited to pass while its stale twin keeps
+      #      asserting the old behaviour, with neither obviously wrong.
+      #
+      # `@objectstack/cli` shipped exactly that (81 test files / 849 tests where
+      # its sources hold 58 / 581) until #4065 excluded them. The rest of the
+      # repo builds with tsup, which emits only declared entry points — so this
+      # gate exists to stop the NEXT tsc-built package repeating it, not to
+      # re-check the one that was fixed.
+      - name: No compiled test files in any dist
+        run: |
+          set -o pipefail
+          found="$(find packages -type d -name node_modules -prune -o \
+            -type f \( -name '*.test.js' -o -name '*.test.cjs' -o -name '*.test.mjs' \) \
+            -path '*/dist/*' -print | sort)"
+          if [ -n "$found" ]; then
+            echo "::error::Compiled test files found in build output. A tsc-built package is"
+            echo "::error::missing a test exclude in its tsconfig.build.json, so these ship to"
+            echo "::error::npm AND run as stale duplicates of their own sources."
+            echo "$found"
+            exit 1
+          fi
+          echo "OK — no compiled test files in any package dist."
 
       - name: Verify build outputs
         run: |
@@ -587,6 +625,7 @@ jobs:
     needs: filter
     if: needs.filter.outputs.docs == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -645,6 +684,7 @@ jobs:
     needs: filter
     if: needs.filter.outputs.generated == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
 

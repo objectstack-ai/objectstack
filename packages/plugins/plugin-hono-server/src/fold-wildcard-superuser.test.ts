@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { foldWildcardSuperUser, clampManagedObjectWrites, type ManagedSchemaLike } from './hono-plugin.js';
+import { foldWildcardSuperUser, clampManagedObjectWrites, type ManagedSchemaLike } from './current-user-endpoints.js';
 
 /**
  * ADR-0057 D10 / ADR-0092 D5 — the `/me/permissions` per-object FLS map must

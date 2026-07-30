@@ -225,7 +225,12 @@ export class DevPlugin implements Plugin {
       try {
         const { DriverPlugin } = await import('@objectstack/runtime') as any;
         const { InMemoryDriver } = await import('@objectstack/driver-memory') as any;
-        const driver = new InMemoryDriver();
+        // Ephemeral, like every other service this plugin stubs (cache, queue,
+        // job, i18n, storage, search are all in-memory). Stated explicitly
+        // rather than inherited: the driver used to default to writing
+        // `.objectstack/data/memory-driver.json` into the CWD, which made this
+        // stack the one piece of DevPlugin that quietly outlived the process.
+        const driver = new InMemoryDriver({ persistence: false });
         const driverPlugin = new DriverPlugin(driver, 'memory');
         this.childPlugins.push(driverPlugin);
         ctx.logger.info('  ✔ InMemoryDriver enabled');
