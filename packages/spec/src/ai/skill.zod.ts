@@ -15,6 +15,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * Allows context-aware activation based on object type, user role, etc.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const SkillTriggerConditionSchema = lazySchema(() => z.object({
   /** Condition field (e.g. 'objectName', 'userRole', 'channel') */
   field: z.string().describe('Context field to evaluate'),
@@ -116,7 +117,18 @@ export const SkillSchema = lazySchema(() => z.object({
    * Natural language phrases that trigger skill activation.
    * Used for intent matching and skill routing.
    */
-  triggerPhrases: z.array(z.string()).optional().describe('Phrases that activate this skill'),
+  // `triggerPhrases` REMOVED (#3896 audit close-out): phrases were NEVER
+  // matched against the user's message — activation is `triggerConditions` ∩
+  // the agent's `skills[]` allowlist (+ explicit /skill-name pinning). The
+  // cloud API served the field back to clients, a dead-end projection that
+  // made the false capability look extra real.
+  triggerPhrases: retiredKey(
+    '`skill.triggerPhrases` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) ' +
+    "— phrases were never matched against the user's message; skill activation is " +
+    "`triggerConditions` (AND of context field/operator/value) intersected with the agent's " +
+    '`skills[]`, plus explicit /skill-name pinning. Delete the key. Put routing intent in ' +
+    '`triggerConditions`; describe intent in `description`/`instructions` for the LLM.',
+  ),
 
   /**
    * Programmatic conditions for skill activation.

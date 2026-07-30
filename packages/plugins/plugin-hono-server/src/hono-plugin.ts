@@ -7,6 +7,7 @@ import {
 } from '@objectstack/core';
 import {
     RestServerConfig,
+    type ApiRoutes,
 } from '@objectstack/spec/api';
 import { ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
 import {
@@ -369,6 +370,44 @@ export function annotateEffectiveApiOperations(
         acc.apiOperations = effectiveOperationsArray(eff);
     }
 }
+
+/**
+ * The two plugins that own a REAL, computed `/discovery` (ADR-0076 D11 / OQ#9).
+ * `@objectstack/rest` serves `metadata-protocol`'s registry-driven `getDiscovery()`;
+ * the runtime dispatcher serves `HttpDispatcher.getDiscoveryInfo()`. When either is
+ * on the kernel, this convenience surface cedes the route to it rather than
+ * publishing a third payload.
+ */
+const REST_API_PLUGIN = 'com.objectstack.rest.api';
+const RUNTIME_DISPATCHER_PLUGIN = 'com.objectstack.runtime.dispatcher';
+
+/**
+ * Base-path segment for every route family this surface can advertise, keyed by
+ * its `ApiRoutes` field (`spec/api/discovery.zod.ts`). Typed against the spec so a
+ * renamed or dropped key breaks the build here instead of drifting silently.
+ *
+ * This is a path map, not a capability list — nothing here is advertised unless a
+ * matching route is actually registered (see `advertisableRoutes`).
+ *
+ * `realtime` is deliberately absent (ADR-0076 D12, #2462): service-realtime is an
+ * in-process pub/sub bus with no HTTP surface anywhere, so it could never be
+ * mounted under `/api/v1/realtime` and listing it would only invite a stale entry.
+ */
+const DISCOVERY_ROUTE_SEGMENTS: Partial<Record<keyof ApiRoutes, string>> = {
+    data:          'data',
+    metadata:      'meta',
+    auth:          'auth',
+    packages:      'packages',
+    analytics:     'analytics',
+    workflow:      'workflow',
+    approvals:     'approvals',
+    automation:    'automation',
+    ai:            'ai',
+    notifications: 'notifications',
+    i18n:          'i18n',
+    storage:       'storage',
+    ui:            'ui',
+};
 
 export class HonoServerPlugin implements Plugin {
     name = 'com.objectstack.server.hono';
@@ -758,37 +797,76 @@ export class HonoServerPlugin implements Plugin {
     }
 
     /**
-     * Register discovery and basic CRUD endpoints.
-     * Called when `registerStandardEndpoints` is true, before the server starts listening.
+     * Discovery for this standalone convenience surface. Two rules, both ADR-0076:
+     *
+     * **1. Single owner (D11 / OQ#9).** `@objectstack/rest` and the runtime
+     * dispatcher each serve a real, computed discovery; whichever is on the kernel
+     * owns `${prefix}/discovery` and we do not register it. Hono is
+     * first-registration-wins and both of those register during plugin `start()` —
+     * i.e. before this `kernel:ready` hook — so they already shadowed this handler
+     * in every composed deployment; ceding cannot change which payload a client
+     * sees, it just stops us shipping a third one that nobody serves. (The
+     * dispatcher cedes to REST on the same `hasPlugin` predicate, without probing
+     * REST's `enableDiscovery`; matching it keeps the three surfaces consistent.)
+     *
+     * `/.well-known/objectstack` is ceded to the dispatcher ONLY — REST never
+     * registers it, so in a REST-without-dispatcher composition this redirect is
+     * the only thing pointing a `.well-known`-first client at `/discovery`.
+     *
+     * **2. Computed, never hardcoded (D12, #4018).** When we do own `/discovery`,
+     * `routes` is derived from the routes actually registered on this Hono app.
+     * The table used to be a hardcoded list of every ObjectStack domain —
+     * `/analytics`, `/workflow`, `/ai`, … — advertised whether or not anything
+     * mounted them, which is exactly the "advertise a route that 404s" class D12
+     * exists to kill: a standalone host with no service plugins advertised the
+     * whole platform while serving `/data` CRUD and two `/auth/me/*` helpers.
+     * Both real discovery surfaces compute per service
+     * (`hasXxx ? route : undefined`); this one computes per registration, which on
+     * a bare host is the stricter and more honest question — service-registered
+     * does not imply route-mounted here, because nothing bridges services to HTTP
+     * on this surface (that bridging IS the dispatcher).
      */
-    private registerDiscoveryAndCrudEndpoints(ctx: PluginContext) {
-        const rawApp = this.server.getRawApp();
-        const prefix = '/api/v1';
+    private registerDiscoveryEndpoints(ctx: PluginContext, rawApp: any, prefix: string) {
+        const kernel = ctx.getKernel() as { hasPlugin?(name: string): boolean } | undefined;
+        const hasPlugin = (name: string) =>
+            typeof kernel?.hasPlugin === 'function' && kernel.hasPlugin(name);
 
-        // Build the standard discovery response
-        const discovery = {
+        if (hasPlugin(RUNTIME_DISPATCHER_PLUGIN)) {
+            ctx.logger.info(
+                `/.well-known/objectstack ceded to ${RUNTIME_DISPATCHER_PLUGIN} (single owner)`,
+            );
+        } else {
+            rawApp.get('/.well-known/objectstack', (c: any) => c.redirect(`${prefix}/discovery`));
+        }
+
+        const discoveryOwner =
+            hasPlugin(REST_API_PLUGIN) ? REST_API_PLUGIN
+            : hasPlugin(RUNTIME_DISPATCHER_PLUGIN) ? RUNTIME_DISPATCHER_PLUGIN
+            : undefined;
+        if (discoveryOwner) {
+            ctx.logger.info(`${prefix}/discovery ceded to ${discoveryOwner} (single owner)`);
+            return;
+        }
+
+        // Built per request, not here: sibling plugins keep registering routes
+        // through the rest of `kernel:ready`, and the socket only opens on
+        // `kernel:listening` — so by the time a request can arrive the route table
+        // is final, while a table snapshotted now would miss every later mount.
+        rawApp.get(`${prefix}/discovery`, (c: any) => c.json({ data: this.buildDiscovery(prefix) }));
+
+        ctx.logger.info('Registered discovery endpoints', { prefix });
+    }
+
+    /** The discovery payload served when this surface owns `/discovery`. */
+    private buildDiscovery(prefix: string) {
+        return {
             version: 'v1',
             apiName: 'ObjectStack API',
-            routes: {
-                data:          `${prefix}/data`,
-                metadata:      `${prefix}/meta`,
-                auth:          `${prefix}/auth`,
-                packages:      `${prefix}/packages`,
-                analytics:     `${prefix}/analytics`,
-                // realtime deliberately absent (ADR-0076 D12, #2462): no
-                // /realtime HTTP surface is mounted anywhere — advertising
-                // it here made clients call a route that 404s.
-                workflow:      `${prefix}/workflow`,
-                automation:    `${prefix}/automation`,
-                ai:            `${prefix}/ai`,
-                notifications: `${prefix}/notifications`,
-                i18n:          `${prefix}/i18n`,
-                storage:       `${prefix}/storage`,
-                ui:            `${prefix}/ui`,
-            },
+            routes: this.advertisableRoutes(prefix),
             capabilities: {
                 // This standalone Hono surface registers CRUD + auth only (see
-                // below) — it does NOT mount the cross-object `/batch` route,
+                // `registerDiscoveryAndCrudEndpoints`) — it does NOT mount the
+                // cross-object `/batch` route,
                 // which ships with `@objectstack/rest`. `declared === enforced`
                 // (#3298): report `transactionalBatch: false` so a client never
                 // drops its non-atomic fallback against a backend that lacks the
@@ -797,12 +875,43 @@ export class HonoServerPlugin implements Plugin {
                 transactionalBatch: { enabled: false },
             },
         };
+    }
 
-        // Discovery endpoints
-        rawApp.get('/.well-known/objectstack', (c: any) => c.redirect(`${prefix}/discovery`));
-        rawApp.get(`${prefix}/discovery`, (c: any) => c.json({ data: discovery }));
+    /**
+     * `ApiRoutes` computed from the live Hono route table: a family is advertised
+     * iff some route is registered AT its base path or UNDER it.
+     *
+     * `app.routes` is every registration on this app — adapter routes, `getRawApp()`
+     * routes (how plugin-auth mounts `${basePath}/*`), mounted sub-apps and `use()`
+     * middleware alike — so this sees what a request will actually hit, not what a
+     * parallel bookkeeping list believes. Requiring the base or a `/`-separated
+     * child means a wildcard ABOVE the base (global `/*` middleware, `/api/v1/*`)
+     * never counts as a mount, while `/api/v1/auth/*` and `/api/v1/data/:object`
+     * both do — and `/api/v1/me/apps` does not pass for `metadata` (`/api/v1/meta`).
+     */
+    private advertisableRoutes(prefix: string): Partial<Record<keyof ApiRoutes, string>> {
+        const app = this.server.getRawApp() as { routes?: Array<{ path?: string }> };
+        const registered = Array.isArray(app?.routes) ? app.routes : [];
+        const routes: Partial<Record<keyof ApiRoutes, string>> = {};
+        for (const [key, segment] of Object.entries(DISCOVERY_ROUTE_SEGMENTS)) {
+            const base = `${prefix}/${segment}`;
+            const mounted = registered.some(
+                (r) => typeof r?.path === 'string' && (r.path === base || r.path.startsWith(`${base}/`)),
+            );
+            if (mounted) routes[key as keyof ApiRoutes] = base;
+        }
+        return routes;
+    }
 
-        ctx.logger.info('Registered discovery endpoints', { prefix });
+    /**
+     * Register discovery and basic CRUD endpoints.
+     * Called when `registerStandardEndpoints` is true, before the server starts listening.
+     */
+    private registerDiscoveryAndCrudEndpoints(ctx: PluginContext) {
+        const rawApp = this.server.getRawApp();
+        const prefix = '/api/v1';
+
+        this.registerDiscoveryEndpoints(ctx, rawApp, prefix);
 
         // ── Anonymous-deny gate (ADR-0056 D2, #2567) ──────────────────────────
         // These raw `/data/:object` routes delegate straight to ObjectQL. They

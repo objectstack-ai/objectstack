@@ -61,6 +61,7 @@ const query = {
 | Operator | Description | Example |
 |:---|:---|:---|
 | `$contains` | String contains substring | `{ title: { $contains: 'urgent' } }` |
+| `$notContains` | String does NOT contain substring | `{ title: { $notContains: 'spam' } }` |
 | `$startsWith` | String starts with | `{ email: { $startsWith: 'admin' } }` |
 | `$endsWith` | String ends with | `{ email: { $endsWith: '@acme.com' } }` |
 
@@ -70,6 +71,41 @@ const query = {
 |:---|:---|:---|
 | `$null` | Value is null | `{ deleted_at: { $null: true } }` |
 | `$exists` | Field has a value | `{ phone: { $exists: true } }` |
+
+---
+
+## Date, Datetime & Time Comparands
+
+On SQL-backed objects, filter values on temporal fields are **canonicalised by the same
+functions the driver's write path uses**, so the two sides of a comparison can never
+disagree about shape:
+
+| Field type | Canonical comparand | Semantics |
+|:---|:---|:---|
+| `date` | `YYYY-MM-DD` | Timezone-naive calendar day. A `Date` collapses to its UTC day; a longer ISO string is truncated to its leading date. |
+| `datetime` | `YYYY-MM-DDTHH:MM:SS.sssZ` | A UTC instant. A `Date`, an epoch-millisecond number, a bare `YYYY-MM-DD` (→ midnight UTC) and a zone-naive `YYYY-MM-DD HH:MM:SS` (→ read as UTC) all fold to this one form. |
+| `time` | `HH:MM:SS`, with `.fff` **only** when the milliseconds are non-zero | Timezone-naive wall clock. `'14:30'` and `'14:30:00'` canonicalise identically, so they are the same filter. |
+
+```typescript
+{
+  object: 'meeting',
+  where: {
+    meeting_day: { $gte: '2026-01-01' },           // date     → '2026-01-01'
+    starts_at:   { $gte: '2026-01-01T00:00:00Z' }, // datetime → '2026-01-01T00:00:00.000Z'
+    start_time:  { $between: ['09:00', '18:00'] }  // time     → '09:00:00' / '18:00:00'
+  }
+}
+```
+
+<Callout type="info">
+Canonicalisation runs on **every SQL dialect**, not just SQLite — a zone-naive string bound
+into a Postgres `timestamptz` would otherwise be read in the *server's* timezone. MySQL
+is the one dialect that cannot parse the `T`/`Z` spelling, so the driver binds the same
+instant as a MySQL datetime literal — a physical respelling only; every layer above the
+bind (filter authoring, API payloads, CEL) stays on the canonical `…Z` form. Values the
+driver cannot interpret (empty strings, junk) pass through untouched rather than being
+silently rewritten.
+</Callout>
 
 ---
 
@@ -167,7 +203,7 @@ Sort results with `orderBy` (array of sort nodes):
 }
 ```
 
-### Cursor-Based Pagination (Keyset)
+### Cursor-Based Pagination (Keyset) — not implemented
 
 ```typescript
 {
@@ -176,9 +212,13 @@ Sort results with `orderBy` (array of sort nodes):
 }
 ```
 
-<Callout type="info">
-`cursor` is an opaque record (`Record<string, unknown>`) carrying the keyset
-position from the previous page. There is no `keyset`/`after` query property.
+<Callout type="warn">
+`cursor` is declared on `QuerySchema` as an opaque record (`Record<string, unknown>`)
+and `QueryBuilder.cursor()` will set it on a query, but **nothing on the server reads
+it** — the query engine, the REST query dispatcher, and the SQL / in-memory / MongoDB
+drivers all ignore it, so a cursor query silently returns the same first page every
+time. Use `limit` + `offset` until keyset pagination is wired up. (There is no
+`keyset`/`after` query property either.)
 </Callout>
 
 ---
@@ -211,17 +251,27 @@ position from the previous page. There is no `keyset`/`after` query property.
 This object form of a field node isn't wired up for top-level `fields` projection. When the
 object's schema is registered, the engine's unknown-field filter compares each entry against
 the schema's field names via `String(f)`, so an object entry never matches and is silently
-dropped from the projection — the aliased field is simply missing from results, no error. Use
-`expand` to pull in a relationship's fields instead.
+dropped from the projection — the aliased field is simply missing from results, no error.
+
+Dotted relationship paths (`'owner.name'`) fare no better: the unknown-field filter validates
+only the **head** segment and keeps the path, but there is no populate step anywhere in the
+engine, so the SQL driver selects `owner.name` verbatim and the database rejects it. What you
+get back depends on whether the driver recognises that dialect's error text (`no such column`,
+or `column … does not exist`): if it does, its recovery retry re-runs the query as `SELECT *`
+and you get every column; if it doesn't, the error is rethrown. Either way there is never an
+`owner.name` key.
+
+Use `expand` to pull in a relationship's fields instead.
 </Callout>
 
 ---
 
 ## Expand (Related Records)
 
-Load related records through `lookup` / `master_detail` fields with `expand`.
-Each key is a relationship field name; the value is a nested query that can
-select fields, filter, and expand further (default max depth: 3).
+Load related records through `lookup`, `master_detail`, and `user` fields with
+`expand`. Each key is a relationship field name; the value is a nested query that
+can select fields, filter, and expand further (max depth 3 — a fixed constant, not
+configurable).
 
 ```typescript
 {
@@ -239,8 +289,12 @@ select fields, filter, and expand further (default max depth: 3).
 ```
 
 The engine resolves `expand` via batch `$in` queries (driver-agnostic), so it
-works on every driver. Per-parent `limit` / `offset` / `orderBy` are **not**
-applied on this path.
+works on every driver. A nested `limit` / `offset` is **not forwarded at all** —
+one batch query serves every parent, so a per-parent window cannot be expressed.
+A nested `orderBy` *is* forwarded to that batch query, but it has no observable
+effect: the expanded records are re-keyed to each parent by id, so a multi-value
+relationship keeps the order stored on the parent record. Paginate or sort by
+querying the related object directly.
 
 ---
 
@@ -481,6 +535,38 @@ As noted under [Aggregations](#aggregations) above, `having` is not currently en
 it's dropped before reaching the aggregation engine or any driver.
 </Callout>
 
+### Date Bucketing in `groupBy`
+
+A `groupBy` entry is either a bare field name or a structured node that buckets a
+`date` / `datetime` column into uniform periods:
+
+```typescript
+{
+  object: 'deal',
+  aggregations: [
+    { function: 'sum', field: 'amount', alias: 'revenue' }
+  ],
+  groupBy: ['stage', { field: 'closed_at', dateGranularity: 'quarter' }]
+}
+```
+
+`dateGranularity` accepts `day` | `week` | `month` | `quarter` | `year`. The engine
+pushes bucketing down to the driver only when that driver advertises the granularity
+via `supports.queryDateGranularity` — SQLite reports `week: false`, for instance, so a
+weekly bucket falls back to fetching rows and bucketing in memory. The fallback is
+transparent to the query — you get the same buckets either way.
+
+<Callout type="warn">
+Buckets are computed in **UTC**. A non-UTC reference timezone is only reachable through
+`ObjectQL.aggregate(object, { …, timezone })`; the `POST /api/v1/data/:object/query`
+route forwards only `where` / `groupBy` / `aggregations`, so a query sent over REST
+always buckets on UTC calendar boundaries.
+
+The optional `alias` on a structured `groupBy` node is honoured only on the in-memory
+path. The SQL driver ignores it and always projects the bucket under the **field name**,
+so don't depend on the aliased key being present.
+</Callout>
+
 ---
 
 ## Common Query Patterns
@@ -530,9 +616,12 @@ it's dropped before reaching the aggregation engine or any driver.
 ```typescript
 {
   object: 'activity',
-  fields: ['id', 'type', 'description', 'user.name', 'created_at'],
+  fields: ['id', 'type', 'description', 'user', 'created_at'],
+  expand: {
+    user: { object: 'user', fields: ['name'] }
+  },
   where: {
-    created_at: { $gte: '2026-01-01T00:00:00Z' }
+    created_at: { $gte: '2026-01-01T00:00:00Z' }   // canonicalised to '…T00:00:00.000Z'
   },
   orderBy: [{ field: 'created_at', order: 'desc' }],
   limit: 10

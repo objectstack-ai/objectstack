@@ -72,6 +72,17 @@ export async function backfillRuleGrants(
       ms: Date.now() - start,
     });
   }
+  // [#3929 follow-up] One aggregate line for the legacy criteria-less rules
+  // the pass just walked (each also warned once, above, via the per-rule
+  // dedup): the operator-facing summary of what is under-sharing and why.
+  const inert = ruleService.inertRuleNames;
+  if (inert.length > 0) {
+    logger?.warn?.(
+      'SharingServicePlugin: rule(s) with no usable criteria are matching NO records — their ' +
+        'grants are revoked on reconcile (ADR-0049). Fix the criteria or set active: false.',
+      { count: inert.length, rules: inert },
+    );
+  }
   return reconciled;
 }
 

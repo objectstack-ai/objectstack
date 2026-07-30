@@ -143,16 +143,23 @@ describe('ObjectStackClient (with Hono Server)', () => {
     it('should connect to hono server and discover endpoints', async () => {
         const client = new ObjectStackClient({ baseUrl });
         await client.connect();
-        
+
         // Client should have populated discovery info
         expect(client['discoveryInfo']).toBeDefined();
-        
-        // Verify endpoints from valid discovery response
-        // Standard: /api/v1/data, /api/v1/meta, etc.
+
+        // The standalone hono surface advertises what it actually mounts
+        // (#4018): /data CRUD and the /auth/me/* helpers are registered here,
+        // so both are advertised and both answer.
         const endpoints = client['discoveryInfo']!.routes;
         expect(endpoints.data).toContain('/api/v1/data');
-        expect(endpoints.metadata).toContain('/api/v1/meta');
         expect(endpoints.auth).toContain('/api/v1/auth');
+
+        // `metadata` is NOT advertised on this boot, and that is the point of
+        // #4018: no plugin here mounts /api/v1/meta (it ships with
+        // @objectstack/rest / the dispatcher), so the old hardcoded table was
+        // promising a route that 404s. Proof the omission is honest:
+        expect(endpoints.metadata).toBeUndefined();
+        expect((await fetch(`${baseUrl}/api/v1/meta/objects`)).status).toBe(404);
     });
 
     it('should create and retrieve data via hono', async () => {

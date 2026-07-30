@@ -936,14 +936,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       globalFilters: {
         label: "Filtros globales",
         helpText: "Filtros aplicados a todos los widgets"
-      },
-      aria: {
-        label: "Accesibilidad",
-        helpText: "Etiquetas de accesibilidad"
-      },
-      performance: {
-        label: "Rendimiento",
-        helpText: "Configuración de caché y optimización"
       }
     }
   },
@@ -1151,14 +1143,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Deshabilitado",
         helpText: "Expresión CEL: desactivar cuando la condición sea true"
       },
-      shortcut: {
-        label: "Atajo",
-        helpText: "Atajo de teclado (p. ej., \"Ctrl+S\", \"Cmd+Enter\")"
-      },
-      bulkEnabled: {
-        label: "Acción masiva",
-        helpText: "Permite aplicar a varios registros seleccionados"
-      },
       ai: {
         label: "Ai",
         helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
@@ -1346,10 +1330,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       type: {
         label: "Tipo",
         helpText: "Cómo se inicia el flujo (autolaunched, record_change, schedule, screen, api)"
-      },
-      template: {
-        label: "Plantilla",
-        helpText: "Indica si es un subflujo reutilizable (puede llamarse desde otros flujos)"
       },
       description: {
         label: "Descripción",
@@ -1622,10 +1602,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Habilidades",
         helpText: "Nombres de skill (arquitectura Agent→Skill→Tool)"
       },
-      knowledge: {
-        label: "Conocimiento",
-        helpText: "Configuración de acceso a conocimiento RAG"
-      },
       access: {
         label: "Acceso",
         helpText: "IDs de usuario o nombres de rol que pueden chatear con este agente"
@@ -1719,10 +1695,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       tools: {
         label: "Herramientas",
         helpText: "Nombres de herramienta (admite comodín: action_*)"
-      },
-      triggerPhrases: {
-        label: "Frases disparadoras",
-        helpText: "Frases de lenguaje natural que activan esta skill"
       },
       triggerConditions: {
         label: "Condiciones disparadoras",

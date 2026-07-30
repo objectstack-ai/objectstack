@@ -76,7 +76,9 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
   the capabilities-descriptor cluster, `FeatureFlagSchema`, `SkillSchema.permissions`,
   `tool.requiresConfirmation`, `agent.tools[]`, `object.enable.trash`/`mru`,
   report `aria`/`performance`, `DEFAULT_DISPATCHER_ROUTES`, the four inert tool
-  authoring keys (`category`/`permissions`/`active`/`builtIn`) and the last three
+  authoring keys (`category`/`permissions`/`active`/`builtIn`), the close-out
+  sweep across action/flow/view/dashboard/agent/skill (fourteen more inert
+  keys, `flow.active` and `agent.knowledge` among them) and the last three
   deprecated authorable aliases are removed — each one had been parsed and
   ignored.
 
@@ -242,7 +244,7 @@ swallows flow errors.
 |---|---|---|
 | `action.execute` | `action.target` | unchanged |
 | `field.conditionalRequired` | `field.requiredWhen` | unchanged |
-| `agent.knowledge.topics` | `agent.knowledge.sources` | unchanged |
+| `agent.knowledge.topics` | ~~`agent.knowledge.sources`~~ → the whole `knowledge` block was later removed (#3896 close-out — see the dead-cluster table) | — |
 
 All three are pure key renames — each alias was already lowered into its
 canonical key at parse time, so what shrinks is the authorable surface, not the
@@ -263,7 +265,8 @@ three plus every earlier step you skipped. Manual alternative: rename the key.
 + fields: { due_date: { type: 'date', requiredWhen: 'record.stage == "closed"' } }
 
 - knowledge: { topics: ['faq', 'policies'], indexes: ['docs'] }
-+ knowledge: { sources: ['faq', 'policies'], indexes: ['docs'] }
++ (delete the block — `agent.knowledge` was removed outright in the #3896
++  close-out: declaring sources never scoped retrieval)
 ```
 
 Each removed key is **tombstoned** as `never` rather than simply deleted, so
@@ -323,6 +326,65 @@ declares `ai.exposed: true` + `ai.description` **and** has a headless path —
 `url`/`modal`/`form` are UI-only), and a new `validate-ai-agent-authoring` rule
 warns on a stack declaring `stack.agents`, which the runtime has filtered from
 the catalog since ADR-0063.
+
+### Error codes are one SCREAMING_SNAKE vocabulary, and `error.code` is a closed set (ADR-0112, #3841)
+
+The platform shipped two live error-code dialects: `StandardErrorCode` declared
+lowercase `snake_case` members while 139 codes on the wire were SCREAMING_SNAKE,
+and `ApiErrorSchema.code` was a bare `z.string()`, so nothing validated either.
+Now there is one vocabulary — the standard catalog plus `ERROR_CODE_LEDGER` for
+service-specific codes — and `error.code` validates against their union, so an
+unregistered code fails parse instead of quietly becoming a new dialect.
+
+**Wire-visible.** Codes change spelling on every surface that spoke lowercase.
+Generic conditions collapse onto the standard catalog rather than keeping a
+synonym: `unauthorized`/`unauthenticated` → `UNAUTHENTICATED`, `forbidden` →
+`PERMISSION_DENIED`, `not_found` → `RESOURCE_NOT_FOUND`, `internal` →
+`INTERNAL_ERROR`, `unavailable` → `SERVICE_UNAVAILABLE`, `not_supported` →
+`NOT_IMPLEMENTED`, `bad_request` → `INVALID_REQUEST` (a status name is not a
+semantic code). Domain conditions get a registered SCREAMING code.
+
+**Migration:** branch on `error.code` **values**, and do not pattern-match their
+case. A code branch that misses fails *silently* — nothing throws, the affordance
+it guards just disappears — which is how eleven console branches broke without a
+single test failing (objectui#2977). If you support servers on both sides of the
+upgrade, compare case-insensitively; that is what the console does.
+
+Four routes also stop putting a code in the message slot: the webhook redeliver
+route, the API-trigger webhook and two `rest` routes answered
+`{ success: false, error: '<code>', message }`. They now emit
+`error: { code, message }`, so a client reading `body.error` as a string on those
+routes must read `body.error.code`.
+
+Not swept, deliberately: `sys_metadata_audit.code` (persisted audit history, and
+the column also holds non-errors like `ok`), diagnostics records that ship inside
+a 200, field-level codes (see below), and the CLI's `--json` output contract.
+
+### Field-level error codes are their own closed catalog, and `fieldErrors` becomes `fields` (ADR-0114, #3977)
+
+The per-field `code` inside `fields[]` is a **different** vocabulary from
+`error.code`, and it stays lowercase on purpose: a top-level code names the
+condition the *request* hit, while a field-level code names the *constraint* the
+value violated — and constraints are declared in the metadata's own snake_case,
+so `max_length` the code and `max_length: 50` the property are the same word.
+`FieldErrorCode` closes that set (27 members) and `FieldErrorSchema.code`
+validates against it, where it used to be `z.string()`.
+
+**`EnhancedApiError.fieldErrors` is renamed to `fields`** — the name every
+producer already emitted. The old key was declared and emitted by nobody, so a
+reader keying on it was reading a field no server sent. It is tombstoned rather
+than deleted: writing it now fails with the rename instead of parsing clean and
+losing the array.
+
+**Wire-visible.** Routes that validate with Zod stopped leaking Zod's issue codes:
+`too_small` now becomes `min_length` / `min_value` / `min_items` depending on what
+was too small, `unrecognized_keys` becomes `unknown_field`, and — the one that was
+a real bug — a **missing** required property now reports `required` instead of the
+`invalid_type` Zod uses for it, so a form marks it as missing rather than
+wrong-typed.
+
+**Migration:** read `error.fields`; branch on the catalog's lowercase codes for
+per-field handling, and show `message` to the user rather than the code.
 
 ### Approval requests are visible to participants, not the whole tenant (#3590)
 
@@ -681,6 +743,12 @@ import or the authored key.
 | `DynamicLoadingConfig` / `PluginDiscoveryConfig` / `PluginDiscoverySource` | promised plugin sandboxing / integrity verification / source allow-listing / load approval; none of it was ever wired (#3950) |
 | `RowLevelSecurityPolicy.priority` | conflict-resolution semantics that cannot exist under OR-combination (#3990) |
 | `tool.category` / `.permissions` / `.active` / `.builtIn` (+ `ToolCategorySchema`) | authorable and inert — `permissions` gated nothing, `active: false` withdrew nothing; strict-rejected with prescriptions (#3896 close-out) |
+| `action.shortcut` / `.bulkEnabled` | no keydown path dispatches shortcuts; the multi-select toolbar reads the view's `bulkActions` (#3896 close-out) |
+| `flow.active` / `.template` / node `outputSchema` / `errorHandling.fallbackNodeId` | `active: false` never stopped a flow — `status` is the enforced lifecycle; faults route via per-node fault edges (#3896 close-out) |
+| view: list `responsive`/`performance`, form `data`/`defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` stay live (#3896 close-out) |
+| `dashboard.aria` / `.performance` / widget `performance` (+ `PerformanceConfigSchema`) | no renderer applied them; virtual scrolling is the live top-level `virtualScroll` (#3896 close-out) |
+| `agent.knowledge` (+ `AIKnowledgeSchema`) | declaring sources/indexes never scoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's tool-call arguments (#3896 close-out) |
+| `skill.triggerPhrases` | phrases were never matched; activation is `triggerConditions` + the agent's `skills[]` allowlist (#3896 close-out) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
 | `ChartInteraction.zoom` / `.clickAction` | never implemented (#3752) |
@@ -922,6 +990,17 @@ most of its rows in silence.
   state, and requires each to be classified (`scope` / `closed` / `open` /
   `output`) with a rationale. Omission is the commonest authoring error a model
   makes; it must not also be the widest grant.
+- **File-backed SQLite runs in WAL mode** (#3941). SQLite's built-in rollback
+  journal makes a writer wait for every reader and leaves an idle connection
+  invisible to SQL — both wrong for the platform's normal shape, several
+  processes on one file (a dev server, `os migrate`, a test run). The driver now
+  switches such a database to WAL on connect, which is also what lets the
+  `os migrate` occupancy check *see* an idle server instead of inferring one from
+  file descriptors. Two things to know: `app.db-wal` / `app.db-shm` appear beside
+  the database while a connection is attached (so back up with
+  `sqlite3 … ".backup"`, never a bare file copy), and WAL cannot work on a
+  **network filesystem** — set `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` there,
+  which converts an already-switched database back.
 - Metadata-plane FLS (per-caller masking) is proposed as ADR-0106.
 
 ## New in Console (Studio) — bundled objectui 17.0
@@ -1024,7 +1103,7 @@ objectui commits on top of the pin 16.1.0 shipped.
   six remain. Watch for a legacy-only whitelist stripping to deny-all.
 - **Metadata renames:** run `os migrate meta --from <your current major>` — it
   applies `execute`→`target`, `conditionalRequired`→`requiredWhen`,
-  `knowledge.topics`→`knowledge.sources`, sharing `full`→`edit`, and every
+  the retired-key deletions (`os migrate meta` handles all of them), sharing `full`→`edit`, and every
   earlier step you skipped, in one pass.
 - **Flows:** declare `runAs: 'system'` on any flow that reacts to system writes
   and must act beyond one user's grants; otherwise ensure the trigger supplies a
@@ -1053,6 +1132,12 @@ objectui commits on top of the pin 16.1.0 shipped.
   metadata (`os migrate meta` does it; none ever had an effect). To gate a tool,
   gate the underlying action (`action.requiredPermissions`); to withdraw one,
   remove it from the skills/agents that reference it.
+- **Close-out sweep:** run `os migrate meta` once more — it also strips
+  `action.shortcut`/`bulkEnabled`, `flow.active`/`template`/node
+  `outputSchema`/`errorHandling.fallbackNodeId`, the inert view keys,
+  dashboard/widget `aria`/`performance`, `agent.knowledge` and
+  `skill.triggerPhrases`. If you set `flow.active: false` expecting a flow to
+  stop, set `status: 'obsolete'` — the flag never worked.
 - **Required fields:** run `os migrate meta` — it stamps
   `storage: { notNull: true }` onto every pre-17 `required: true` field so your
   columns keep their exact constraints. New fields: `required: true` alone

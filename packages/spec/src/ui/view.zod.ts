@@ -8,7 +8,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, strictVisibilityError } from '../shared/visibility';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { SharingConfigSchema } from './sharing.zod';
-import { ResponsiveConfigSchema, PerformanceConfigSchema } from './responsive.zod';
+import { retiredKey } from '../shared/retired-key';
 import { FieldType, SelectOptionSchema } from '../data/field.zod';
 
 /**
@@ -774,11 +774,18 @@ export const ListViewSchema = lazySchema(() => z.object({
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes for the list view'),
 
-  /** Responsive layout overrides per breakpoint */
-  responsive: ResponsiveConfigSchema.optional().describe('Responsive layout configuration'),
-
-  /** Performance optimization settings */
-  performance: PerformanceConfigSchema.optional().describe('Performance optimization settings'),
+  // `responsive` / `performance` REMOVED (#3896 audit close-out): authorable
+  // and inert — no renderer in either repo read them (re-grepped 2026-07-16,
+  // objectui@fb35e48; ledger: dead).
+  responsive: retiredKey(
+    '`view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key.',
+  ),
+  performance: retiredKey(
+    '`view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
+    'Delete the key.',
+  ),
 }));
 
 /**
@@ -995,9 +1002,17 @@ export const FormViewSchema = lazySchema(() => z.object({
   /** Modal (`type: 'modal'`). */
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal size (modal forms)'),
 
-  /** Data Source Configuration */
+  /**
+   * Data Source Configuration. NOT removed in the #3896 sweep despite the
+   * ledger's dead verdict — the removal attempt broke the build and thereby
+   * re-verified the entry: `defineForm` (below) writes
+   * `data: { provider: 'schema', schemaId }` onto EVERY metadata form, and
+   * `metadata-protocol` serves it to the metadata-admin pipeline. The
+   * record-form provider values (`object`/`api`/`value`) may still be
+   * unread — that is a narrower value-subset audit, not a key removal.
+   */
   data: ViewDataSchema.optional().describe('Data source configuration (defaults to "object" provider)'),
-  
+
   sections: z.array(FormSectionSchema).optional(), // For simple layout
   groups: z.array(FormSectionSchema).optional(), // Legacy support -> alias to sections
 
@@ -1022,11 +1037,13 @@ export const FormViewSchema = lazySchema(() => z.object({
     maxRows: z.number().optional(),
   })).optional().describe('Inline master-detail child collections'),
 
-  /** Default Sort for Related Lists (e.g., sort child records by date) */
-  defaultSort: z.array(z.object({
-    field: z.string().describe('Field name to sort by'),
-    order: z.enum(['asc', 'desc']).default('desc').describe('Sort direction'),
-  })).optional().describe('Default sort order for related list views within this form'),
+  // `defaultSort` REMOVED (#3896 audit close-out): no reader in either repo —
+  // related lists sort by their OWN list view's sort, never by this.
+  defaultSort: retiredKey(
+    '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    'nothing read it: a related list inside a form sorts by its own list view\'s `sort`. ' +
+    'Delete the key and set the sort on the related list view instead.',
+  ),
 
   /** Public form sharing configuration */
   sharing: SharingConfigSchema.optional().describe('Public sharing configuration for this form'),
@@ -1080,8 +1097,16 @@ export const FormViewSchema = lazySchema(() => z.object({
   defaults: z.record(z.string(), z.unknown()).optional()
     .describe('Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998).'),
 
-  /** ARIA accessibility attributes */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes for the form view'),
+  // `aria` REMOVED from the FORM view (#3896 audit close-out): no form
+  // renderer applied it (plugin-form/SchemaForm never read schema.aria) — an
+  // ACCESSIBILITY claim that is merely accepted is false compliance, the
+  // requiresConfirmation shape.
+  aria: retiredKey(
+    '`form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form ' +
+    'renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. ' +
+    'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
+    'renderer issues rather than per-view attribute overrides.',
+  ),
 }));
 
 /**

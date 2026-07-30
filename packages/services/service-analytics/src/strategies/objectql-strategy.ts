@@ -148,14 +148,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       context: ctx.context,
     });
 
-    // Remap short field names back to cube-qualified names
+    // Remap short field names back to cube-qualified names. Driven by
+    // `projectedDimensions`, so a `timeDimensions`-only bucket — grouped by
+    // just above, and therefore present in `row` — reaches the caller instead
+    // of being silently dropped (#4033).
     const mappedRows = rows.map(row => {
       const mapped: Record<string, unknown> = {};
-      if (query.dimensions) {
-        for (const dim of query.dimensions) {
-          const shortName = this.resolveFieldName(cube, dim, 'dimension');
-          if (shortName in row) mapped[dim] = row[shortName];
-        }
+      for (const dim of this.projectedDimensions(query)) {
+        const shortName = this.resolveFieldName(cube, dim, 'dimension');
+        if (shortName in row) mapped[dim] = row[shortName];
       }
       if (query.measures) {
         for (const m of query.measures) {
@@ -543,18 +544,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // Map resolved group keys back to the caller's dimension names.
     const mappedRows = merged.map((row) => {
       const out: Record<string, unknown> = {};
-      for (const dim of query.dimensions ?? []) {
+      // Same projection set as the direct path and `buildFieldMeta`
+      // ({@link projectedDimensions}) — a cross-object dimension carries the
+      // caller's name already, everything else is remapped from its short name.
+      for (const dim of this.projectedDimensions(query)) {
         if (crossByDim.has(dim)) {
           if (dim in row) out[dim] = row[dim];
         } else {
           const field = this.resolveFieldName(cube, dim, 'dimension');
           if (field in row) out[dim] = row[field];
         }
-      }
-      for (const td of query.timeDimensions ?? []) {
-        if (query.dimensions?.includes(td.dimension)) continue;
-        const field = this.resolveFieldName(cube, td.dimension, 'dimension');
-        if (field in row) out[td.dimension] = row[field];
       }
       for (const m of query.measures ?? []) {
         if (m in row) out[m] = row[m];
@@ -831,13 +830,37 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     return cube.sql.trim();
   }
 
+  /**
+   * The dimensions this query PROJECTS, in the order the result carries them:
+   * every `dimensions` entry, then every granular `timeDimensions` entry that
+   * is not already one of them.
+   *
+   * `timeDimensions` is not merely a filter carrier. An entry with a
+   * `granularity` is GROUPED BY — see the `td.granularity` sites that build
+   * groupBy here, in `generateSql` and in the cross-object path — so its
+   * bucket is a COLUMN of the result; an entry without one only contributes a
+   * `dateRange` predicate and must NOT be projected.
+   *
+   * Grouping, row mapping and {@link buildFieldMeta} have to agree on exactly
+   * that set. When they did not, a bucketed query returned rows carrying only
+   * the measures and a `fields` list that never mentioned the bucket — a trend
+   * chart got N values and no x-axis (#4033) — even though the SQL had
+   * selected `date_trunc(…) AS "<dim>"` all along. One definition, every
+   * consumer.
+   */
+  private projectedDimensions(query: AnalyticsQuery): string[] {
+    const out = [...(query.dimensions ?? [])];
+    for (const td of query.timeDimensions ?? []) {
+      if (td.granularity && !out.includes(td.dimension)) out.push(td.dimension);
+    }
+    return out;
+  }
+
   private buildFieldMeta(query: AnalyticsQuery, cube: Cube): Array<{ name: string; type: string }> {
     const fields: Array<{ name: string; type: string }> = [];
-    if (query.dimensions) {
-      for (const dim of query.dimensions) {
-        const d = this.lookupMember(cube, dim, 'dimension');
-        fields.push({ name: dim, type: d?.type || 'string' });
-      }
+    for (const dim of this.projectedDimensions(query)) {
+      const d = this.lookupMember(cube, dim, 'dimension');
+      fields.push({ name: dim, type: d?.type || 'string' });
     }
     if (query.measures) {
       for (const m of query.measures) {

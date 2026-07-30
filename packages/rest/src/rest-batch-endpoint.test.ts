@@ -109,10 +109,12 @@ describe('POST {basePath}/batch — cross-object transactional batch', () => {
     expect(route!.metadata?.tags).toEqual(expect.arrayContaining(['data', 'batch']));
   });
 
-  it('returns 501 when the runtime has no transactional ObjectQL', async () => {
+  it('returns 501 with a NOT_IMPLEMENTED code when the runtime has no transactional ObjectQL', async () => {
     const { route } = buildServer({}); // no ql provider
     const res = await post(route, { operations: [{ object: 'account', data: {} }] });
     expect(res.statusCode).toBe(501);
+    // Typed like every other 501 (#4067) so clients key on the code, not the prose.
+    expect(res.body.code).toBe('NOT_IMPLEMENTED');
   });
 
   // ── happy path ───────────────────────────────────────────────────────────

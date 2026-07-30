@@ -155,6 +155,31 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
       for (const r of ANALYTICS_ROUTES) expect(routes).toContain(r);
     });
 
+    // [#4000] "Registered" is not the test — `handlerReady` is (ADR-0076 D12).
+    // plugin-dev used to fill this slot with a stub, which mounted the three
+    // routes and served its fabricated rows with a 200. The stub is retired,
+    // and the mount gate now reads the same predicate the domain does, so the
+    // wire surface can't advertise routes that could only 404.
+    it('does NOT mount /analytics when the registered analytics service self-declares as a stub', async () => {
+      const { server, routes } = makeFakeServer();
+      const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+      await plugin.start?.(ctxWithServices(server, {
+        analytics: { _dev: true, query: async () => ({ rows: [], fields: [] }) },
+      }));
+
+      for (const r of ANALYTICS_ROUTES) expect(routes).not.toContain(r);
+    });
+
+    it('DOES mount /analytics for a degraded-but-serving analytics service', async () => {
+      const { server, routes } = makeFakeServer();
+      const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+      await plugin.start?.(ctxWithServices(server, {
+        analytics: { __serviceInfo: { status: 'degraded' }, query: async () => ({ rows: [] }) },
+      }));
+
+      for (const r of ANALYTICS_ROUTES) expect(routes).toContain(r);
+    });
+
     it('mounts /analytics unconditionally on a multi-tenant host (kernel-resolver wired)', async () => {
       // Host-global mounts, per-project services: presence is a per-request
       // question the analytics domain answers (`handled:false` → 404), so the

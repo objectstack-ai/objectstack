@@ -97,16 +97,6 @@ function createAutomationStub() {
 }
 
 
-/** IAnalyticsService — dev stub returning empty results */
-function createAnalyticsStub() {
-  return {
-    _dev: true, _serviceName: 'analytics',
-    async query() { return { rows: [], fields: [] }; },
-    async getMeta() { return []; },
-    async generateSql() { return { sql: '', params: [] }; },
-  };
-}
-
 /** IRealtimeService — in-memory pub/sub stub */
 function createRealtimeStub() {
   const subs = new Map<string, Function>();
@@ -266,7 +256,6 @@ const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
   'file-storage': createStorageStub,
   'search':      createSearchStub,
   'automation':  createAutomationStub,
-  'analytics':   createAnalyticsStub,
   'realtime':    createRealtimeStub,
   'notification': createNotificationStub,
   'ai':          createAIStub,
@@ -280,6 +269,24 @@ const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
   'security.rls':         createSecurityRLSStub,
   'security.fieldMasker': createSecurityFieldMaskerStub,
 };
+
+/**
+ * Core service slots that deliberately get NO dev stub — not even the
+ * shapeless `{ _dev: true }` fallback the registration loop uses for slots
+ * without a factory.
+ *
+ * `analytics` (#4000): #3891/#3989 retired the degraded analytics shim, making
+ * an unoccupied slot the honest signal — `/analytics/*` is not mounted, the
+ * request 404s, and discovery reports `unavailable`. Registering a dev stub
+ * re-filled that slot and re-created the retired shape one layer down: the
+ * dispatcher gates on service presence, so a stub was called like a real
+ * engine and answered 200 with fabricated rows. Dev mode is explicit opt-in
+ * and the fake was empty, so this was never the security hole the shim was —
+ * but "the capability is present" must mean the same thing in dev as in
+ * production. To use analytics locally, install the real engine:
+ * `@objectstack/service-analytics` runs an InMemory strategy.
+ */
+const NO_DEV_STUB_SERVICES = new Set<string>(['analytics']);
 
 /**
  * Dev Plugin Options
@@ -657,11 +664,13 @@ export class DevPlugin implements Plugin {
     // dev stub (implementing the interface from packages/spec/src/contracts/)
     // so that the full kernel service map is populated and downstream code
     // receives correct return types (arrays, booleans, objects — not undefined).
+    // Exception: NO_DEV_STUB_SERVICES slots stay empty on purpose (#4000).
 
     const stubNames: string[] = [];
 
     for (const svc of CORE_SERVICE_NAMES) {
       if (!enabled(svc)) continue;
+      if (NO_DEV_STUB_SERVICES.has(svc)) continue;
       try {
         ctx.getService(svc);
         // Already registered by a real plugin — skip

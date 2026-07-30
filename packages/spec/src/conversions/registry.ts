@@ -739,37 +739,15 @@ const fieldConditionalRequiredToRequiredWhen: MetadataConversion = {
   },
 };
 
-/**
- * Agent `knowledge.topics` → `knowledge.sources` (protocol 17, #1891 / #3855).
- *
- * A pure key rename — the value (a list of RAG source tags) is unchanged.
+/*
+ * ABSORBED — `agent-knowledge-topics-to-sources` (protocol 17, #3855). The
+ * rename lived inside the same unreleased major that now REMOVES the whole
+ * `agent.knowledge` block (`agent-knowledge-removed` below): composed, its
+ * effect is unobservable — any pre-17 `knowledge` ends deleted regardless of
+ * its inner spelling — and two notices for one dead block would only confuse
+ * the author. Folded pre-release per the ADR-0090 discipline; the removal's
+ * prescription covers the historical `topics` spelling.
  */
-const agentKnowledgeTopicsToSources: MetadataConversion = {
-  id: 'agent-knowledge-topics-to-sources',
-  toMajor: 17,
-  retiredFromLoadPath: true,
-  surface: 'agent.knowledge.topics',
-  summary: "agent knowledge key 'topics' → 'sources' (the deprecated RAG-source alias, #1891)",
-  apply(stack, emit) {
-    return mapCollection(stack, 'agents', (agent, path) => {
-      const knowledge = agent.knowledge;
-      if (!isDict(knowledge)) return agent;
-      const renamed = renameKey(knowledge, 'topics', 'sources');
-      if (!renamed) return agent;
-      emit({ from: 'topics', to: 'sources', path: `${path}.knowledge.sources` });
-      return { ...agent, knowledge: renamed };
-    });
-  },
-  fixture: {
-    before: {
-      agents: [{ name: 'support_bot', knowledge: { topics: ['faq', 'policies'], indexes: ['docs'] } }],
-    },
-    after: {
-      agents: [{ name: 'support_bot', knowledge: { sources: ['faq', 'policies'], indexes: ['docs'] } }],
-    },
-    expectedNotices: 1,
-  },
-};
 
 /**
  * Agent `tools` → dropped (protocol 17, #3894 / #3820).
@@ -1377,6 +1355,263 @@ const fieldRequiredNotNullExplicit: MetadataConversion = {
   },
 };
 
+
+/**
+ * The #3896 close-out sweep, part 2 (protocol 17): the remaining inert
+ * authoring keys leave the surface, one conversion per metadata type. All are
+ * pure lossless deletes — none of these keys ever had a runtime effect to
+ * lose — and all are retired from the load path: each schema tombstones its
+ * keys with the prescription (`retiredKey`), so the loader rejects loudly and
+ * only `os migrate meta` rewrites sources.
+ */
+const stripKeys = (
+  item: Record<string, unknown>,
+  keys: readonly string[],
+  emit: (n: { from: string; to: string; path: string }) => void,
+  path: string,
+): Record<string, unknown> => {
+  let touched = false;
+  const next: Record<string, unknown> = { ...item };
+  for (const key of keys) {
+    if (!(key in next)) continue;
+    delete next[key];
+    emit({ from: key, to: '(removed)', path: `${path}.${key}` });
+    touched = true;
+  }
+  return touched ? next : item;
+};
+
+/** action.shortcut / action.bulkEnabled — capability claims nothing enforced. */
+const actionInertKeysRemoved: MetadataConversion = {
+  id: 'action-inert-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'action.shortcut / action.bulkEnabled',
+  summary: "action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'actions', (a, path) => stripKeys(a, ['shortcut', 'bulkEnabled'], emit, path));
+  },
+  fixture: {
+    before: { actions: [{ name: 'close_case', label: 'Close', type: 'script', shortcut: 'Ctrl+K', bulkEnabled: true }] },
+    after: { actions: [{ name: 'close_case', label: 'Close', type: 'script' }] },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * flow.active / flow.template / nodes[].outputSchema /
+ * errorHandling.fallbackNodeId — `active` is the rls.enabled shape (writing
+ * `active: false` never stopped a flow; `status` is the enforced lifecycle),
+ * the rest were never read. Deleting `active` preserves behavior exactly —
+ * the flow was governed by `status` all along; the notice tells the author
+ * where the real switch is.
+ */
+const flowInertKeysRemoved: MetadataConversion = {
+  id: 'flow-inert-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'flow.active / flow.template / flow.nodes[].outputSchema / flow.errorHandling.fallbackNodeId',
+  summary: "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (#3896 close-out — active:false never stopped a flow; status is the enforced lifecycle)",
+  apply(stack, emit) {
+    let out = mapCollection(stack, 'flows', (f, path) => {
+      let next = stripKeys(f, ['active', 'template'], emit, path);
+      const eh = next.errorHandling;
+      if (eh && typeof eh === 'object' && !Array.isArray(eh) && 'fallbackNodeId' in (eh as Record<string, unknown>)) {
+        const nextEh = { ...(eh as Record<string, unknown>) };
+        delete nextEh.fallbackNodeId;
+        emit({ from: 'fallbackNodeId', to: '(removed)', path: `${path}.errorHandling.fallbackNodeId` });
+        next = next === f ? { ...f } : next;
+        next.errorHandling = nextEh;
+      }
+      return next;
+    });
+    out = mapFlowNodes(out, (node, path) => {
+      if (!('outputSchema' in node)) return node;
+      const next = { ...node };
+      delete next.outputSchema;
+      emit({ from: 'outputSchema', to: '(removed)', path: `${path}.outputSchema` });
+      return next;
+    });
+    return out;
+  },
+  fixture: {
+    before: {
+      flows: [{
+        name: 'escalate',
+        type: 'autolaunched',
+        active: false,
+        template: true,
+        errorHandling: { strategy: 'retry', fallbackNodeId: 'n9' },
+        nodes: [{ id: 'n1', type: 'start', outputSchema: { ok: { type: 'boolean' } } }],
+        edges: [],
+      }],
+    },
+    after: {
+      flows: [{
+        name: 'escalate',
+        type: 'autolaunched',
+        errorHandling: { strategy: 'retry' },
+        nodes: [{ id: 'n1', type: 'start' }],
+        edges: [],
+      }],
+    },
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * View container: list-shaped entries lose `responsive`/`performance`,
+ * form-shaped entries lose `data`/`defaultSort`/`aria`. Deliberately
+ * SHAPE-SCOPED — the LIST view's `aria` and `data` are live and untouched.
+ */
+const viewInertKeysRemoved: MetadataConversion = {
+  id: 'view-inert-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria',
+  summary: "view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
+  apply(stack, emit) {
+    const LIST_KEYS = ['responsive', 'performance'] as const;
+    // NOT 'data': the sweep's removal attempt was refuted by the build —
+    // defineForm writes data.provider='schema' on every metadata form.
+    const FORM_KEYS = ['defaultSort', 'aria'] as const;
+    return mapCollection(stack, 'views', (view, path) => {
+      let touched = false;
+      const next: Record<string, unknown> = { ...view };
+      const fix = (keys: readonly string[], sub: Record<string, unknown>, subPath: string) => {
+        const cleaned = stripKeys(sub, keys, emit, subPath);
+        if (cleaned !== sub) { touched = true; return cleaned; }
+        return sub;
+      };
+      for (const [slot, keys] of [['list', LIST_KEYS], ['form', FORM_KEYS]] as const) {
+        const v = next[slot];
+        if (v && typeof v === 'object' && !Array.isArray(v)) next[slot] = fix(keys, v as Record<string, unknown>, `${path}.${slot}`);
+      }
+      for (const [slot, keys] of [['listViews', LIST_KEYS], ['formViews', FORM_KEYS]] as const) {
+        const named = next[slot];
+        if (named && typeof named === 'object' && !Array.isArray(named)) {
+          const rebuilt: Record<string, unknown> = { ...(named as Record<string, unknown>) };
+          let subTouched = false;
+          for (const [name, v] of Object.entries(rebuilt)) {
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+              const cleaned = stripKeys(v as Record<string, unknown>, keys, emit, `${path}.${slot}.${name}`);
+              if (cleaned !== v) { rebuilt[name] = cleaned; subTouched = true; }
+            }
+          }
+          if (subTouched) { next[slot] = rebuilt; touched = true; }
+        }
+      }
+      return touched ? next : view;
+    });
+  },
+  fixture: {
+    before: {
+      views: [{
+        object: 'crm_lead',
+        list: { type: 'grid', columns: ['name'], responsive: { sm: {} }, performance: { lazyLoad: true }, aria: { label: 'Leads' } },
+        form: { type: 'simple', data: { provider: 'object', object: 'crm_lead' }, defaultSort: [{ field: 'created_at', order: 'desc' }], aria: { label: 'Lead form' } },  // data survives
+      }],
+    },
+    after: {
+      views: [{
+        object: 'crm_lead',
+        list: { type: 'grid', columns: ['name'], aria: { label: 'Leads' } },
+        form: { type: 'simple', data: { provider: 'object', object: 'crm_lead' } },
+      }],
+    },
+    expectedNotices: 4,
+  },
+};
+
+/** dashboard.aria / dashboard.performance / widgets[].performance. */
+const dashboardInertKeysRemoved: MetadataConversion = {
+  id: 'dashboard-inert-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'dashboard.aria / dashboard.performance / dashboard.widgets[].performance',
+  summary: "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'dashboards', (d, path) => {
+      let next = stripKeys(d, ['aria', 'performance'], emit, path);
+      const widgets = next.widgets;
+      if (Array.isArray(widgets)) {
+        let subTouched = false;
+        const rebuilt = widgets.map((w, i) => {
+          if (w && typeof w === 'object' && !Array.isArray(w) && 'performance' in w) {
+            const cleaned = { ...(w as Record<string, unknown>) };
+            delete cleaned.performance;
+            emit({ from: 'performance', to: '(removed)', path: `${path}.widgets[${i}].performance` });
+            subTouched = true;
+            return cleaned;
+          }
+          return w;
+        });
+        if (subTouched) {
+          next = next === d ? { ...d } : next;
+          next.widgets = rebuilt;
+        }
+      }
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      dashboards: [{
+        name: 'sales_kpis',
+        aria: { label: 'Sales' },
+        performance: { lazyLoad: true },
+        widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'], performance: { prefetch: true } }],
+      }],
+    },
+    after: {
+      dashboards: [{
+        name: 'sales_kpis',
+        widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'] }],
+      }],
+    },
+    expectedNotices: 3,
+  },
+};
+
+/**
+ * agent.knowledge — a grounding claim nothing enforced (the RAG path reads
+ * `sourceIds` from the LLM's tool-call arguments, never the agent record).
+ * Absorbs the former `agent-knowledge-topics-to-sources` rename (#3855):
+ * both spellings of the block end deleted, in one notice.
+ */
+const agentKnowledgeRemoved: MetadataConversion = {
+  id: 'agent-knowledge-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'agent.knowledge',
+  summary: "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'agents', (a, path) => stripKeys(a, ['knowledge'], emit, path));
+  },
+  fixture: {
+    before: { agents: [{ name: 'support_agent', label: 'Support', knowledge: { sources: ['faq'], indexes: ['docs'] } }] },
+    after: { agents: [{ name: 'support_agent', label: 'Support' }] },
+    expectedNotices: 1,
+  },
+};
+
+/** skill.triggerPhrases — phrases were never matched against the user's message. */
+const skillTriggerPhrasesRemoved: MetadataConversion = {
+  id: 'skill-trigger-phrases-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'skill.triggerPhrases',
+  summary: "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'skills', (sk, path) => stripKeys(sk, ['triggerPhrases'], emit, path));
+  },
+  fixture: {
+    before: { skills: [{ name: 'case_mgmt', label: 'Cases', triggerPhrases: ['open a ticket'] }] },
+    after: { skills: [{ name: 'case_mgmt', label: 'Cases' }] },
+    expectedNotices: 1,
+  },
+};
+
 /**
  * All conversions, keyed by the protocol major that introduced the canonical
  * shape. Newest majors last; ordering within a major is application order.
@@ -1431,7 +1666,6 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
   17: [
     actionExecuteToTarget,
     fieldConditionalRequiredToRequiredWhen,
-    agentKnowledgeTopicsToSources,
     agentToolsToSkills,
     sharingRuleAccessLevelFullToEdit,
     flowNodeCrudObjectAlias,
@@ -1440,6 +1674,12 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     permissionRlsPriorityRemoved,
     toolInertAuthoringKeysRemoved,
     fieldRequiredNotNullExplicit,
+    actionInertKeysRemoved,
+    flowInertKeysRemoved,
+    viewInertKeysRemoved,
+    dashboardInertKeysRemoved,
+    agentKnowledgeRemoved,
+    skillTriggerPhrasesRemoved,
   ],
   18: [
     stackApiRequireAuthRemoved,

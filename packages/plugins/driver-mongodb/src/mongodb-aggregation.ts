@@ -9,6 +9,7 @@
 
 import type { Document } from 'mongodb';
 import { translateFilter } from './mongodb-filter.js';
+import type { TemporalFieldKindResolver } from './mongodb-temporal.js';
 
 /**
  * Aggregation function descriptor from QueryAST.
@@ -38,12 +39,19 @@ export function buildAggregationPipeline(opts: {
   orderBy?: Array<{ field: string; order?: string }>;
   limit?: number;
   offset?: number;
+  /**
+   * Declared temporal kinds of the aggregated object, so a `$match` comparand
+   * lands in the field's storage form (#4047) — the aggregate path has to agree
+   * with `find()` about that, or the same window answers differently depending
+   * on which one the caller took.
+   */
+  temporalKind?: TemporalFieldKindResolver;
 }): Document[] {
   const pipeline: Document[] = [];
 
   // $match stage
   if (opts.where) {
-    const matchFilter = translateFilter(opts.where);
+    const matchFilter = translateFilter(opts.where, opts.temporalKind);
     if (Object.keys(matchFilter).length > 0) {
       pipeline.push({ $match: matchFilter });
     }

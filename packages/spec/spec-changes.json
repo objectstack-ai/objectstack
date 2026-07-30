@@ -81,12 +81,6 @@
         "toMajor": 17
       },
       {
-        "surface": "agent.knowledge.topics",
-        "to": "agent knowledge key 'topics' → 'sources' (the deprecated RAG-source alias, #1891)",
-        "conversionId": "agent-knowledge-topics-to-sources",
-        "toMajor": 17
-      },
-      {
         "surface": "agent.tools",
         "to": "agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894)",
         "conversionId": "agent-tools-to-skills",
@@ -132,6 +126,42 @@
         "surface": "object.fields.*.required / object.fields.*.storage.notNull",
         "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
         "conversionId": "field-required-notnull-explicit",
+        "toMajor": 17
+      },
+      {
+        "surface": "action.shortcut / action.bulkEnabled",
+        "to": "action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
+        "conversionId": "action-inert-keys-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "flow.active / flow.template / flow.nodes[].outputSchema / flow.errorHandling.fallbackNodeId",
+        "to": "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (#3896 close-out — active:false never stopped a flow; status is the enforced lifecycle)",
+        "conversionId": "flow-inert-keys-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria",
+        "to": "view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
+        "conversionId": "view-inert-keys-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "dashboard.aria / dashboard.performance / dashboard.widgets[].performance",
+        "to": "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
+        "conversionId": "dashboard-inert-keys-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "agent.knowledge",
+        "to": "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
+        "conversionId": "agent-knowledge-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "skill.triggerPhrases",
+        "to": "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
+        "conversionId": "skill-trigger-phrases-removed",
         "toMajor": 17
       }
     ],
@@ -212,6 +242,13 @@
         "migrationId": "analytics-query-request-envelope-retired",
         "toMajor": 17,
         "rationale": "The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves."
+      },
+      {
+        "surface": "api.enhancedApiError.fieldErrors",
+        "replacement": "fields",
+        "migrationId": "enhanced-api-error-field-errors-renamed",
+        "toMajor": 17,
+        "rationale": "The wire has always carried `fields` — the validators, import coercion, validation-failure.ts, @objectstack/client and the console's field-error extractor all say `fields`, and nothing ever emitted `fieldErrors`, so a reader keying on it was reading a field no server sent (ADR-0078's silently-inert declaration, on the error envelope). This is a RESPONSE surface: no stack, example or template carries the key, so there is no source for the chain to rewrite — the schema tombstones it via retiredKey() and consumers move their read themselves. ADR-0114 D4, #3977."
       },
       {
         "surface": "api.analyticsQueryRequest.format",
@@ -429,12 +466,6 @@
           "toMajor": 17
         },
         {
-          "surface": "agent.knowledge.topics",
-          "to": "agent knowledge key 'topics' → 'sources' (the deprecated RAG-source alias, #1891)",
-          "conversionId": "agent-knowledge-topics-to-sources",
-          "toMajor": 17
-        },
-        {
           "surface": "agent.tools",
           "to": "agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894)",
           "conversionId": "agent-tools-to-skills",
@@ -481,6 +512,42 @@
           "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
           "conversionId": "field-required-notnull-explicit",
           "toMajor": 17
+        },
+        {
+          "surface": "action.shortcut / action.bulkEnabled",
+          "to": "action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
+          "conversionId": "action-inert-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "flow.active / flow.template / flow.nodes[].outputSchema / flow.errorHandling.fallbackNodeId",
+          "to": "flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (#3896 close-out — active:false never stopped a flow; status is the enforced lifecycle)",
+          "conversionId": "flow-inert-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria",
+          "to": "view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
+          "conversionId": "view-inert-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "dashboard.aria / dashboard.performance / dashboard.widgets[].performance",
+          "to": "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
+          "conversionId": "dashboard-inert-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "agent.knowledge",
+          "to": "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
+          "conversionId": "agent-knowledge-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "skill.triggerPhrases",
+          "to": "skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection)",
+          "conversionId": "skill-trigger-phrases-removed",
+          "toMajor": 17
         }
       ],
       "migrated": [
@@ -490,6 +557,13 @@
           "migrationId": "analytics-query-request-envelope-retired",
           "toMajor": 17,
           "rationale": "The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves."
+        },
+        {
+          "surface": "api.enhancedApiError.fieldErrors",
+          "replacement": "fields",
+          "migrationId": "enhanced-api-error-field-errors-renamed",
+          "toMajor": 17,
+          "rationale": "The wire has always carried `fields` — the validators, import coercion, validation-failure.ts, @objectstack/client and the console's field-error extractor all say `fields`, and nothing ever emitted `fieldErrors`, so a reader keying on it was reading a field no server sent (ADR-0078's silently-inert declaration, on the error envelope). This is a RESPONSE surface: no stack, example or template carries the key, so there is no source for the chain to rewrite — the schema tombstones it via retiredKey() and consumers move their read themselves. ADR-0114 D4, #3977."
         },
         {
           "surface": "api.analyticsQueryRequest.format",

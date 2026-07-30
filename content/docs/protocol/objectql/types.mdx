@@ -77,9 +77,9 @@ company_name:
 ```
 
 **Database mapping:**
-- PostgreSQL: `VARCHAR(maxLength)` or `TEXT`
+- SQL driver: `TEXT` on every dialect. `maxLength` is enforced by record
+  validation, not by the column type — the DDL does not read it.
 - MongoDB: `String`
-- Redis: `String`
 
 **UI rendering:**
 ```html
@@ -104,7 +104,7 @@ description:
 ```
 
 **Database mapping:**
-- PostgreSQL: `TEXT`
+- SQL driver: `TEXT`
 - MongoDB: `String`
 
 **UI rendering:**
@@ -129,7 +129,7 @@ bio:
 ```
 
 **Database mapping:**
-- PostgreSQL: `TEXT`
+- SQL driver: `TEXT`
 - MongoDB: `String`
 
 **UI rendering:**
@@ -156,13 +156,13 @@ email:
   unique: true
 ```
 
-**Validation:**
-- RFC 5322 compliant regex
-- Lowercase normalization
-- Domain validation (optional DNS check)
+**Validation:** a deliberately permissive, ReDoS-safe shape check — a local part,
+an `@`, and a dotted domain (`invalid_email` otherwise). It is **not** an RFC 5322
+parser, the value is **not** lowercased, and no DNS/MX lookup is performed. Stricter
+rules belong in a validation rule or custom validator.
 
 **Database mapping:**
-- PostgreSQL: `VARCHAR(255)`
+- SQL driver: `VARCHAR(255)`
 - MongoDB: `String`
 
 **Use cases:**
@@ -181,10 +181,11 @@ website:
   label: Website
 ```
 
-**Validation:**
-- Must include protocol (`http://`, `https://`)
-- Valid domain format
-- Optional reachability check
+**Validation:** accepts any `scheme://…` (not just `http`/`https` — `libsql://`,
+`postgres://`, `s3://`, `file://` all pass), plus root-/protocol-relative refs
+(`/path`, `//host/path`) and `data:` / `blob:` URIs. A bare scheme-less string
+with no leading `/` is rejected (`invalid_url`). There is **no** domain-format
+check and **no** reachability check.
 
 **Use cases:**
 - Company websites
@@ -200,17 +201,15 @@ Phone number with international format.
 phone:
   type: phone
   label: Phone Number
-  format: international  # E.164 format
 ```
 
-**Storage format:** E.164 (`+12025551234`)
+**Storage format:** the string as entered — a `VARCHAR(255)` column. The engine
+does **not** normalize to E.164 and does **not** reformat for display.
 
-**Display format:** `(202) 555-1234`
-
-**Validation:**
-- Valid phone number format
-- Country code verification
-- Optional SMS capability check
+**Validation:** a shape check only — at least 5 characters drawn from digits and
+`+ ( ) - . ` and whitespace (`invalid_phone` otherwise). There is no country-code
+verification and no SMS-capability check. If you need E.164 at rest, normalize in
+a before-save trigger or a custom validator.
 
 ---
 
@@ -235,8 +234,10 @@ quantity:
 - `min`/`max`: Range validation
 
 **Database mapping:**
-- PostgreSQL: `NUMERIC(precision, scale)`
-- MongoDB: `Number` or `Decimal128`
+- SQL driver: a floating-point column (`REAL` on PostgreSQL/SQLite, `FLOAT` on
+  MySQL). `precision`/`scale` are validation and display metadata — the DDL does
+  **not** emit `NUMERIC(precision, scale)`.
+- MongoDB: `Number`
 
 **Use cases:**
 - Quantities, counts
@@ -258,23 +259,30 @@ annual_revenue:
     defaultCurrency: USD
 ```
 
-**Storage:**
+**Storage:** a **bare number** — the same value shape as `number`.
+
 ```json
-{
-  "value": 1234.56,
-  "currency": "USD"
-}
+1234.56
 ```
 
+<Callout type="warn">
+A currency value is **not** a `{ value, currency }` object. The currency *code*
+lives once on the field definition (`currencyConfig.defaultCurrency`), not on
+every stored value. The old per-value object shape (`CurrencyValueSchema`) was
+never consumed by the validator, the driver, or import coercion and is
+deprecated in the spec.
+</Callout>
+
 **Features:**
-- Multi-currency support
-- Automatic formatting ($1,234.56)
-- Exchange rate conversion (optional)
-- ISO 4217 currency codes
+- `currencyMode: fixed | dynamic` and a `defaultCurrency` code on the field
+- Codes are validated by **length only** (3 characters), so ISO 4217 (`USD`,
+  `EUR`, `CNY`) and non-ISO codes (`BTC`, `ETH`) both pass
+- `precision` (0–10, default 2) for decimal places
 
 **Database mapping:**
-- PostgreSQL: `NUMERIC(18,2)` + `VARCHAR(3)` or `JSONB`
-- MongoDB: `{ value: Decimal128, currency: String }`
+- SQL driver: a floating-point column (`REAL` / `FLOAT`) — one column, no
+  companion currency column and no JSON blob
+- MongoDB: `Number`
 
 ---
 
@@ -292,7 +300,15 @@ discount_rate:
 
 **Display:** `25.5%` (automatically adds % symbol)
 
-**Storage:** As decimal (0.255 for 25.5%)
+**Storage:** the percentage **number itself** — `25.5` means 25.5%, matching the
+`min: 0` / `max: 100` bounds above. It is *not* rescaled to a 0–1 ratio on write.
+Physically it is the same floating-point column as `number`.
+
+<Callout>
+The separate `percent` **template filter** (`{{ record.rate | percent }}`) does
+take a 0–1 ratio and render it as `42%`. That is a formatting choice at render
+time, not the field type's storage convention — don't mix the two.
+</Callout>
 
 **Use cases:**
 - Discounts, margins
@@ -312,11 +328,23 @@ birth_date:
   label: Date of Birth
 ```
 
-**Storage format:** ISO 8601 (`2024-01-15`)
+**Storage format:** a **timezone-naive calendar day** — the `YYYY-MM-DD` string
+`2024-01-15`, never an instant (ADR-0053). A `Date` collapses to its **UTC**
+calendar day; a longer ISO string is truncated to its leading 10 characters. The
+same normalization is applied on write, on read, and to every filter comparand,
+so the two sides of a comparison can never disagree about what a date *is*.
+
+<Callout type="warn">
+A `date` is never converted to a timestamp and never timezone-shifted. Storing
+UTC-midnight instants is exactly the "date-as-instant" mistake ADR-0053 removed —
+it renders as the *previous* day for any viewer west of UTC. If a value genuinely
+depends on a timezone, it is a `datetime`, not a `date`.
+</Callout>
 
 **Database mapping:**
-- PostgreSQL: `DATE`
-- MongoDB: `Date` (time set to 00:00:00 UTC)
+- SQL driver: `DATE` on PostgreSQL/MySQL, `TEXT` on SQLite — holding
+  `YYYY-MM-DD` on every dialect
+- MongoDB: no DDL (schemaless); the driver stores the value it is given
 
 **Use cases:**
 - Birthdays, anniversaries
@@ -326,7 +354,7 @@ birth_date:
 ---
 
 #### `datetime`
-Date and time with timezone.
+A UTC instant.
 
 ```yaml
 meeting_time:
@@ -334,11 +362,29 @@ meeting_time:
   label: Meeting Time
 ```
 
-**Storage format:** ISO 8601 with timezone (`2024-01-15T14:30:00Z`)
+**Storage format:** the canonical, fixed-width, zone-explicit UTC instant
+`YYYY-MM-DDTHH:MM:SS.sssZ` — e.g. `2024-01-15T14:30:00.000Z`. Milliseconds are
+always present and the zone is always `Z`; an offset-bearing input such as
+`…T22:30:00+08:00` is rewritten to the equivalent `…Z` instant so text ordering
+stays chronological ordering.
 
 **Database mapping:**
-- PostgreSQL: `TIMESTAMP WITH TIME ZONE`
-- MongoDB: `Date`
+- PostgreSQL: `timestamptz`
+- MySQL: `DATETIME(3)` — deliberately **not** `TIMESTAMP`, which is a 32-bit
+  epoch (a 2038 ceiling on the column every list view sorts by), drops the
+  milliseconds, and converts on read/write using the session timezone. The
+  canonical instant is bound as a MySQL literal (`YYYY-MM-DD HH:MM:SS.sss`,
+  no `T`/`Z`) because MySQL rejects ISO-8601 in a datetime literal.
+- SQLite: `TEXT` holding the canonical string — fixed width plus UTC means
+  lexicographic order is chronological order, so range filters use the index
+- MongoDB: no DDL (schemaless)
+
+<Callout>
+Filter comparands go through the **same** canonicalization function as writes, on
+**every** dialect. That is what makes `$gte`/`$lt` windows and `$eq` behave
+identically on SQLite, PostgreSQL, and MySQL instead of depending on the shape
+the caller happened to pass.
+</Callout>
 
 ---
 
@@ -352,12 +398,62 @@ business_hours_start:
   defaultValue: "09:00:00"
 ```
 
-**Storage format:** `HH:MM:SS` — input accepts `HH:MM` or `HH:MM:SS` (with an optional fractional part and `Z`/offset). A `time` is a wall-clock value, not an instant: it is validated as a time-of-day, not parsed as a date.
+**Storage format:** `HH:MM:SS`, gaining a `.fff` millisecond suffix **only** when
+the milliseconds are non-zero (`14:30:00`, but `14:30:00.100`). Input accepts
+`HH:MM` or `HH:MM:SS` (with an optional fractional part and `Z`/offset); `14:30`
+is completed to `14:30:00`, so one wall clock can never split into several stored
+values. A `Date`, an epoch, or a full timestamp folds to its **UTC** time-of-day.
+A `time` is a wall-clock value, not an instant: it is validated as a time-of-day,
+not parsed as a date.
+
+**Database mapping:**
+- PostgreSQL: `time`
+- MySQL: `TIME(3)` — bare `TIME` is zero-precision and *rounds* a fractional
+  literal (`14:30:00.500` → `14:30:01`), which would change the stored wall clock
+- SQLite: `TEXT` holding the canonical string
+- MongoDB: no DDL (schemaless)
+
+As with `date` and `datetime`, filter comparands are canonicalized by the same
+function as writes, so `09:00 <= t <= 18:00` windows compare like against like.
 
 **Use cases:**
 - Business hours
 - Recurring event times
 - Time-based triggers
+
+---
+
+#### `defaultValue: 'NOW()'` on temporal fields
+
+`NOW()` is a framework convention meaning "use the database clock at insert
+time". The driver translates it into a dialect-native default that resolves
+against the **UTC** clock on every dialect, for `date`, `datetime`, and `time`
+alike:
+
+```yaml
+opened_at:
+  type: datetime
+  label: Opened At
+  defaultValue: "NOW()"
+```
+
+For `date` and `time` on PostgreSQL and MySQL the driver emits an explicit
+UTC **expression** default rather than a bare `CURRENT_TIMESTAMP`, which resolves
+the calendar day / wall clock in the *server's* timezone on PostgreSQL and the
+*inserting session's* timezone on MySQL — one instant producing three different
+stored values across the three dialects (and MySQL 8.0 rejects a bare
+`CURRENT_TIMESTAMP` default on `DATE`/`TIME` columns outright). On SQLite all
+three types use `strftime(…, 'now')` expressions that emit the canonical form
+directly. `datetime` on PostgreSQL/MySQL keeps the native `now()`, which is
+already UTC — the driver pins every MySQL connection with
+`SET time_zone = '+00:00'`.
+
+<Callout type="warn">
+A DDL default only governs **newly created** columns. A column created before
+this convention keeps its legacy default and can still emit a zone-naive value on
+a defaulted insert; the read path repairs those to canonical form, so `find()`
+stays uniform without a data migration.
+</Callout>
 
 ---
 
@@ -374,9 +470,9 @@ is_active:
 ```
 
 **Storage:**
-- PostgreSQL: `BOOLEAN`
+- SQL driver: `BOOLEAN` (SQLite stores `1`/`0`; the driver coerces it back to a
+  real JS boolean on read)
 - MongoDB: `Boolean`
-- Redis: `1` or `0`
 
 **UI rendering:**
 ```html
@@ -432,10 +528,12 @@ priority:
   required: true
 ```
 
-**Storage:** Stores `value` (not `label`)
+**Storage:** Stores `value` (not `label`). Option `value`s must be lowercase
+machine identifiers — the spec rejects `New`, `In Progress`, or `Closed_Won`.
 
 **Database mapping:**
-- PostgreSQL: `VARCHAR` or `ENUM`
+- SQL driver: `VARCHAR(255)` — the driver never emits a native `ENUM`, so adding
+  an option is a metadata change, not a schema migration
 - MongoDB: `String`
 
 **Use cases:**
@@ -460,7 +558,8 @@ tags:
 ```
 
 **Storage:**
-- PostgreSQL: `TEXT[]` (array) or `JSONB`
+- SQL driver: a `JSON` column holding the serialized array — not a native
+  `TEXT[]`, so the same DDL works on SQLite and MySQL
 - MongoDB: `[String]`
 
 **Example value:** `['customer', 'partner']`
@@ -536,8 +635,19 @@ contacts:
 ```
 
 **Database mapping:**
-- PostgreSQL: `UUID` + Foreign Key constraint
-- MongoDB: `ObjectId` or `String`
+- SQL driver: `VARCHAR(255)` holding the related record id. Not a native `UUID`
+  column — record ids are opaque strings. A `multiple: true` lookup becomes a
+  `JSON` column instead.
+- MongoDB: `String`
+
+<Callout type="warn">
+A relationship field authored with `reference:` gets **no database-level
+`FOREIGN KEY` constraint**. The SQL driver's FK DDL is gated on a `reference_to`
+property that the spec's `reference` never populates, and `master_detail` /
+`tree` do not reach that branch at all. Referential integrity is enforced by the
+**engine** instead: `deleteBehavior` is applied on delete, which is what produces
+the `409 DELETE_RESTRICTED` above.
+</Callout>
 
 ---
 
@@ -692,15 +802,24 @@ total_opportunity_value:
 - Aggregates a child object that references this object (via its `lookup`/`master_detail` field)
 - Set `relationshipField` only when the child has more than one reference back to this object
 
-**Database implementation:**
-- Materialized view (PostgreSQL)
-- Aggregation pipeline (MongoDB)
-- Background job recalculation
+**Optional `filter`:** a `where`-style `FilterCondition` restricting *which* child
+rows are aggregated, ANDed with the parent-FK match. This is what lets several
+summaries roll the same child object into different totals:
 
-**Performance:**
-- Real-time: Recalculate on child write (slow)
-- Batch: Update every N minutes (stale data)
-- Hybrid: Increment/decrement on simple changes
+```yaml
+total_signups:
+  type: summary
+  summaryOperations:
+    object: engagement
+    function: count
+    filter: { type: signup }
+```
+
+**Implementation:** the summary is a **real numeric column** on the parent,
+recomputed by the ObjectQL engine when a child row is inserted, updated, or
+deleted. There is no materialized view, no MongoDB aggregation pipeline, and no
+batch/hybrid recalculation mode — a child moving in or out of the `filter`
+recomputes the parent on its next write like any other child update.
 
 ---
 
@@ -717,10 +836,12 @@ case_number:
 **Example values:** `CASE-0001`, `CASE-0002`, ...
 
 **Format tokens:**
-- `{0000}`: Zero-padded number
-- `{YYYY}`: Year
-- `{MM}`: Month
-- `{DD}`: Day
+- `{0000}`: Zero-padded counter
+- `{YYYY}` / `{MM}` / `{DD}` / `{YYYYMMDD}`: date tokens (business timezone)
+- `{field_name}`: interpolates another field's value
+
+The counter resets **per rendered prefix** — `AD{YYYYMMDD}{0000}` therefore
+restarts at 1 each day.
 
 **Complex formats:**
 ```yaml
@@ -730,9 +851,10 @@ invoice_number:
   # Generates: INV-2024-0001, INV-2024-0002, ...
 ```
 
-**Database implementation:**
-- PostgreSQL: `SEQUENCE`
-- MongoDB: Atomic counter collection
+**Database implementation:** a `VARCHAR(255)` column, numbered from an atomic
+counter row in the driver's own `_objectstack_sequences` table (bootstrapped from
+the existing MAX on first use, and scoped per tenant when the object is
+tenant-scoped). The driver does **not** create a native PostgreSQL `SEQUENCE`.
 
 ---
 
@@ -748,7 +870,8 @@ metadata:
 ```
 
 **Storage:**
-- PostgreSQL: `JSONB`
+- SQL driver: a `JSON` column (`json` on PostgreSQL/MySQL, `TEXT` on SQLite) —
+  the driver uses `json`, not `jsonb`
 - MongoDB: Native object
 
 **Query support:**
@@ -783,7 +906,7 @@ There is no generic `array` field type. To store multiple values, use `tags`
 </Callout>
 
 **Storage:**
-- PostgreSQL: `TEXT[]` or `JSONB`
+- SQL driver: a `JSON` column holding the serialized string array
 - MongoDB: `[String]`
 
 ---
@@ -811,7 +934,7 @@ billing_address:
 ```
 
 **Database mapping:**
-- PostgreSQL: `JSONB` or composite type
+- SQL driver: a `JSON` column (not a composite type)
 - MongoDB: Embedded document
 
 ---
@@ -828,10 +951,14 @@ office_location:
 **Storage:**
 ```json
 {
-  "latitude": 37.7749,
-  "longitude": -122.4194
+  "lat": 37.7749,
+  "lng": -122.4194
 }
 ```
+
+`altitude` and `accuracy` (both in metres) are optional additional members. Note
+the keys are `lat`/`lng` — the `{ latitude, longitude }` spelling was never
+consumed by the runtime and has been retired from the value contract.
 
 <Callout type="warn">
 Proximity / radius ("near") search is **not** a built-in filter operator.
@@ -844,8 +971,10 @@ geospatial indexes), which the SQL and in-memory drivers do not provide.
 </Callout>
 
 **Database mapping:**
-- PostgreSQL: `POINT` or `GEOGRAPHY`
-- MongoDB: GeoJSON
+- SQL driver: a `JSON` column — the driver does not emit a native `POINT` /
+  `GEOGRAPHY` column, which is the other half of why proximity search is not
+  available
+- MongoDB: an embedded document
 
 ---
 
@@ -859,27 +988,37 @@ avatar:
   multiple: false  # set true to store an array of file references
 ```
 
-**Storage:**
+**Stored value:** an opaque `sys_file` id string. The expanded read form is the
+media metadata object, whose only required member is `url`:
+
 ```json
 {
-  "filename": "profile.jpg",
-  "content_type": "image/jpeg",
+  "url": "https://cdn.example.com/files/abc123.jpg",
+  "name": "profile.jpg",
   "size": 1024000,
-  "url": "https://cdn.example.com/files/abc123.jpg"
+  "mimeType": "image/jpeg"
 }
 ```
 
-**Storage backends:**
+`alt` and `duration` are the other optional members. The keys are `name` and
+`mimeType` — not `filename` / `content_type`.
+
+<Callout>
+Deployments predating the file-as-reference migration may still hold the inline
+metadata object (or a bare URL) as the *stored* value. The engine warns rather
+than rejects until `os migrate files-to-references --apply` has run, so an
+existing database keeps working while it is backfilled.
+</Callout>
+
+**Storage backends** (configured on the file-storage connector, not the field):
 - `local`: Server filesystem
 - `s3`: Amazon S3
 - `azure_blob`: Azure Blob Storage
 - `gcs`: Google Cloud Storage
 
-**Features:**
-- Automatic upload handling
-- Content-type validation
-- Virus scanning (optional)
-- CDN integration
+…plus `dropbox`, `box`, `onedrive`, `google_drive`, `sharepoint`, `ftp`, and
+`custom`. Upload-time processing — thumbnail generation, virus scanning — is
+configured there too, under `contentProcessing`.
 
 ---
 
@@ -904,21 +1043,37 @@ the uploaded file reference.
 
 ## Type Conversion Matrix
 
-How types convert between databases:
+The column each type gets from the SQL driver, per dialect:
 
-| ObjectQL Type | PostgreSQL | MongoDB | Redis |
-|---------------|------------|---------|-------|
-| `text` | `VARCHAR` / `TEXT` | `String` | `String` |
-| `number` | `NUMERIC` | `Number` | `String` |
-| `currency` | `JSONB` | `Object` | `String` (JSON) |
-| `date` | `DATE` | `Date` | `String` (ISO) |
-| `datetime` | `TIMESTAMP` | `Date` | `String` (ISO) |
-| `boolean` | `BOOLEAN` | `Boolean` | `0` / `1` |
-| `select` | `VARCHAR` / `ENUM` | `String` | `String` |
-| `lookup` | `UUID` + FK | `ObjectId` | `String` |
-| `formula` | `GENERATED` | Virtual | Computed |
-| `json` | `JSONB` | `Object` | `String` (JSON) |
-| `location` | `POINT` | `GeoJSON` | `String` (JSON) |
+| ObjectQL Type | PostgreSQL | MySQL | SQLite |
+|---------------|------------|-------|--------|
+| `text` | `TEXT` | `TEXT` | `TEXT` |
+| `email` / `url` / `phone` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
+| `number` / `currency` / `percent` | `REAL` | `FLOAT` | `REAL` |
+| `date` | `DATE` | `DATE` | `TEXT` (`YYYY-MM-DD`) |
+| `datetime` | `TIMESTAMPTZ` | `DATETIME(3)` | `TEXT` (canonical `…Z`) |
+| `time` | `TIME` | `TIME(3)` | `TEXT` (`HH:MM:SS[.fff]`) |
+| `boolean` / `toggle` | `BOOLEAN` | `BOOLEAN` | `INTEGER` `0`/`1` |
+| `select` / `radio` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
+| `multiselect` / `tags` | `JSON` | `JSON` | `TEXT` (JSON) |
+| `lookup` / `master_detail` / `tree` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
+| `summary` | `REAL` | `FLOAT` | `REAL` |
+| `autonumber` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
+| `formula` | *(no column — virtual)* | *(no column)* | *(no column)* |
+| `json` / `location` / `address` | `JSON` | `JSON` | `TEXT` (JSON) |
+
+Any field flagged `multiple: true` becomes a `JSON` column regardless of its
+type. Relationship columns are plain id strings with no database `FOREIGN KEY`
+constraint (see `lookup` above). The MongoDB driver is schemaless — it issues no
+DDL and stores the value it is given.
+
+<Callout type="warn">
+There is no Redis persistence backend. ObjectQL's data drivers are SQL
+(PostgreSQL / MySQL / SQLite, plus a SQLite-WASM build of the same driver for the
+browser), MongoDB, and in-memory. Redis appears in the platform only as an
+optional *cluster-primitives* driver (pub/sub, locks, KV, counters), never as a
+place records are stored.
+</Callout>
 
 ## Sensitive Data: Masking & Encryption
 

@@ -165,12 +165,15 @@ describe('probeSqliteOccupancy', () => {
   });
 
   /**
-   * The dogfood regression. ObjectStack's sqlite driver runs
-   * `journal_mode = delete`, and an idle connection to a rollback-journal
-   * database holds NO lock — so the SQL probe reports idle and, before the
+   * The dogfood regression. An idle connection to a rollback-journal database
+   * holds NO lock — so the SQL probe reports idle and, before the
    * file-descriptor signal existed, `os migrate apply` ran unannounced against
    * a live `os serve`. Verified by hand against a real CRM project before this
    * test was written; the test is what keeps it fixed.
+   *
+   * Still reachable after #3941 made WAL the driver default: a database on a
+   * filesystem that cannot host WAL, or one explicitly opted back out with
+   * `OS_DATABASE_SQLITE_JOURNAL_MODE=delete`, lands here again.
    */
   it('reports busy for a ROLLBACK-JOURNAL database an idle connection holds open', async () => {
     const file = newDb('busy-journal-idle.db', 'delete');

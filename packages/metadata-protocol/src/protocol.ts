@@ -1408,6 +1408,19 @@ export class ObjectStackProtocolImplementation implements
             data:      { enabled: true, status: 'available' as const, route: '/api/v1/data', provider: 'objectql' },
         };
 
+        // [#4000] The dispatcher answers a self-declared stub in the `analytics`
+        // slot with the same 404 an empty slot gets (`isAnalyticsServiceServeable`,
+        // runtime/src/domains/analytics.ts), so this builder must not advertise a
+        // route for it — that would be the `declared ≠ enforced` gap discovery
+        // exists to close. Analytics-only on purpose: every other stub-backed
+        // slot IS still served by its dispatcher domain, so their route
+        // advertisement stays presence-gated and honest. Unifying the rule
+        // across domains is #4058.
+        const analyticsUnserveable =
+            readServiceSelfInfo(registeredServices.get('analytics'))?.handlerReady === false;
+        const advertisedRoute = (serviceName: string, route?: string) =>
+            serviceName === 'analytics' && analyticsUnserveable ? undefined : route;
+
         // Check which services are actually registered
         for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
             if (registeredServices.has(serviceName)) {
@@ -1420,7 +1433,7 @@ export class ObjectStackProtocolImplementation implements
                 services[serviceName] = {
                     enabled: true,
                     status: self?.status ?? (noHttpSurface ? ('degraded' as const) : ('available' as const)),
-                    route: config.route,
+                    route: advertisedRoute(serviceName, config.route),
                     provider: config.plugin,
                     ...(noHttpSurface || self?.handlerReady !== undefined
                         ? { handlerReady: noHttpSurface ? false : self?.handlerReady }
@@ -1460,10 +1473,11 @@ export class ObjectStackProtocolImplementation implements
         // Add routes for available plugin services. Services without an HTTP
         // surface (config.route undefined) advertise no route (D12, #2462).
         for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
-            if (registeredServices.has(serviceName) && config.route) {
+            const route = advertisedRoute(serviceName, config.route);
+            if (registeredServices.has(serviceName) && route) {
                 const routeKey = serviceToRouteKey[serviceName];
                 if (routeKey) {
-                    optionalRoutes[routeKey] = config.route;
+                    optionalRoutes[routeKey] = route;
                 }
             }
         }

@@ -57,6 +57,17 @@ sqlite3 /srv/data/app.db ".backup '/backups/app-$(date +%F).db'"
 The default location when `OS_DATABASE_URL` is unset is
 `<home>/data/objectstack.db` under the ObjectStack home directory.
 
+<Callout type="warn">
+ObjectStack keeps file-backed SQLite in
+[WAL mode](/docs/data-modeling/drivers#journal-mode-wal-and-cross-process-access),
+so `app.db-wal` beside the database can hold committed transactions that are not
+yet in `app.db`. `.backup` accounts for that; copying `app.db` on its own does
+not. If you must copy files, stop the server first (a clean shutdown checkpoints
+and removes `-wal`/`-shm`), or copy `app.db`, `app.db-wal` and `app.db-shm`
+together — a database restored beside a *stale* log is worse than one restored
+without it.
+</Callout>
+
 ### Managed databases (hosted Postgres, MongoDB Atlas, …)
 
 Use the provider's snapshot, branching, or point-in-time-restore facilities.
@@ -87,7 +98,9 @@ Fresh container or VM. Install Node 22+ and `@objectstack/cli`.
 
 ```bash
 pg_restore --clean --if-exists -d "$OS_DATABASE_URL" backup-2026-07-14.dump
-# or copy the SQLite file / restore the provider snapshot
+# or restore the provider snapshot
+# SQLite: put the `.backup` file in place with the server stopped, and make sure
+# no stale app.db-wal / app.db-shm is left beside it (see the warning above)
 ```
 
 ### Provide the original secrets

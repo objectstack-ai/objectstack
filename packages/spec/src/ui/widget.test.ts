@@ -354,12 +354,15 @@ describe('Widget ARIA Integration', () => {
   });
 });
 
-describe('Widget Performance Integration', () => {
-  it('should accept widget with performance config', () => {
-    expect(() => WidgetManifestSchema.parse({
-      name: 'perf_widget',
-      label: 'Performance Widget',
-      performance: { lazyLoad: true, virtualScroll: { enabled: true } },
-    })).not.toThrow();
+describe('Widget — retired performance (#3896 close-out)', () => {
+  it('REJECTS the retired `performance` and names the live alternative', () => {
+    let message = '';
+    try {
+      WidgetManifestSchema.parse({
+        name: 'perf_widget', label: 'Performance Widget', performance: { lazyLoad: true },
+      });
+    } catch (e) { message = String((e as Error).message); }
+    expect(message).toMatch(/virtualScroll/);
+    expect(message).toMatch(/#3896/);
   });
 });

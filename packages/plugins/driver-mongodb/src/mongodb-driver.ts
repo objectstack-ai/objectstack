@@ -23,6 +23,12 @@ import {
 import { nanoid } from 'nanoid';
 import { translateFilter } from './mongodb-filter.js';
 import {
+  coerceTemporalValue,
+  indexTemporalFields,
+  type TemporalFieldKind,
+  type TemporalFieldKindResolver,
+} from './mongodb-temporal.js';
+import {
   buildAggregationPipeline,
   postProcessAggregation,
 } from './mongodb-aggregation.js';
@@ -127,6 +133,15 @@ export class MongoDBDriver implements IDataDriver {
   private db!: Db;
   private config: MongoDBDriverConfig;
 
+  /**
+   * Declared temporal fields per object, populated by {@link syncSchema} —
+   * this driver's equivalent of `SqlDriver.datetimeFields`/`dateFields`, and
+   * the only thing that lets write and filter agree on a storage form (#4047).
+   * An object absent from this map was never declared, so nothing is coerced
+   * for it: the driver does not guess types from values.
+   */
+  private temporalFields = new Map<string, Map<string, TemporalFieldKind>>();
+
   constructor(config: MongoDBDriverConfig) {
     // Refuse to even EXIST in a multi-tenant deployment (#3724). The check is
     // repeated in `connect()`; construction just fails earliest, before a host
@@ -201,7 +216,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = translateFilter(query.where);
+    const filter = translateFilter(query.where, this.temporalKindFor(object));
     const findOptions: FindOptions = { session };
 
     // Field projection
@@ -242,7 +257,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = translateFilter(query.where);
+    const filter = translateFilter(query.where, this.temporalKindFor(object));
     const result = await collection.findOne(filter, {
       session,
       projection: { _id: 0 },
@@ -259,7 +274,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = translateFilter(query.where);
+    const filter = translateFilter(query.where, this.temporalKindFor(object));
     const findOptions: FindOptions = {
       session,
       projection: { _id: 0 },
@@ -290,7 +305,7 @@ export class MongoDBDriver implements IDataDriver {
     const session = this.getSession(options);
 
     const { _id, ...rest } = data;
-    const toInsert: Record<string, unknown> = { ...rest };
+    const toInsert: Record<string, unknown> = { ...this.toStorageForms(object, rest) };
 
     // Assign ID
     if (toInsert.id === undefined) {
@@ -313,7 +328,8 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const { _id, id: dataId, ...updateData } = data;
+    const { _id, id: dataId, ...rawUpdate } = data;
+    const updateData: Record<string, unknown> = { ...this.toStorageForms(object, rawUpdate) };
     updateData.updated_at = new Date();
 
     await collection.updateOne(
@@ -382,7 +398,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = query?.where ? translateFilter(query.where) : {};
+    const filter = query?.where ? translateFilter(query.where, this.temporalKindFor(object)) : {};
     return await collection.countDocuments(filter, { session });
   }
 
@@ -397,7 +413,7 @@ export class MongoDBDriver implements IDataDriver {
     const now = new Date();
     const docs = dataArray.map((data) => {
       const { _id, ...rest } = data;
-      const doc: Record<string, unknown> = { ...rest };
+      const doc: Record<string, unknown> = { ...this.toStorageForms(object, rest) };
       if (doc.id === undefined) doc.id = nanoid(DEFAULT_ID_LENGTH);
       if (doc.created_at === undefined) doc.created_at = now;
       if (doc.updated_at === undefined) doc.updated_at = now;
@@ -416,7 +432,8 @@ export class MongoDBDriver implements IDataDriver {
 
     const now = new Date();
     const bulkOps = updates.map(({ id, data }) => {
-      const { _id, id: dataId, ...updateData } = data;
+      const { _id, id: dataId, ...rawUpdate } = data;
+      const updateData: Record<string, unknown> = { ...this.toStorageForms(object, rawUpdate) };
       updateData.updated_at = now;
       return {
         updateOne: {
@@ -452,8 +469,9 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = translateFilter(query.where);
-    const { _id, id, ...updateData } = data;
+    const filter = translateFilter(query.where, this.temporalKindFor(object));
+    const { _id, id, ...rawUpdate } = data;
+    const updateData: Record<string, unknown> = { ...this.toStorageForms(object, rawUpdate) };
     updateData.updated_at = new Date();
 
     const result = await collection.updateMany(
@@ -469,7 +487,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const filter = translateFilter(query.where);
+    const filter = translateFilter(query.where, this.temporalKindFor(object));
     const result = await collection.deleteMany(filter, { session });
     return result.deletedCount;
   }
@@ -491,6 +509,7 @@ export class MongoDBDriver implements IDataDriver {
       orderBy: query.orderBy as Array<{ field: string; order?: string }>,
       limit: query.limit,
       offset: query.offset,
+      temporalKind: this.temporalKindFor(object),
     });
 
     const results = await collection.aggregate(pipeline, { session }).toArray();
@@ -529,6 +548,9 @@ export class MongoDBDriver implements IDataDriver {
     assertObjectsNotTenantScoped([{ object, schema }]);
 
     const objectDef = schema as { name: string; fields?: Record<string, any> };
+    // Learn which fields are temporal BEFORE any write can land, so the write
+    // path and the filter path share one storage convention (#4047).
+    this.temporalFields.set(object, indexTemporalFields(objectDef.fields));
     await syncCollectionSchema(this.db, object, objectDef);
   }
 
@@ -552,7 +574,7 @@ export class MongoDBDriver implements IDataDriver {
 
   async explain(object: string, query: QueryAST, _options?: DriverOptions): Promise<unknown> {
     const collection = this.getCollection(object);
-    const filter = translateFilter(query.where);
+    const filter = translateFilter(query.where, this.temporalKindFor(object));
     const explanation = await collection.find(filter).explain('executionStats');
     return explanation;
   }
@@ -583,6 +605,43 @@ export class MongoDBDriver implements IDataDriver {
     if (field === 'createdAt') return 'created_at';
     if (field === 'updatedAt') return 'updated_at';
     return field;
+  }
+
+  // ── Temporal storage form (#4047) ─────────────────────────────────────────
+
+  /**
+   * The declared-temporal-kind lookup for one object, handed to
+   * {@link translateFilter} so comparands land in the field's storage form.
+   * `undefined` for an undeclared object — nothing to coerce against.
+   */
+  private temporalKindFor(object: string): TemporalFieldKindResolver | undefined {
+    const kinds = this.temporalFields.get(object);
+    if (!kinds || kinds.size === 0) return undefined;
+    return (field: string) => kinds.get(field);
+  }
+
+  /**
+   * Put every declared temporal field of a document into its storage form —
+   * the write half of the convention {@link translateFilter} reads against.
+   * Applied by `create`/`update`/`bulkCreate`/`bulkUpdate`/`updateMany`, so no
+   * write path can leave a value in a form the filter path cannot reach.
+   *
+   * The driver's own `created_at`/`updated_at` stamps already bind a `Date`;
+   * this is what converts an ISO string from a REST/JSON write into the same
+   * BSON Date rather than leaving the collection holding both.
+   */
+  private toStorageForms(object: string, data: Record<string, unknown>): Record<string, unknown> {
+    const kinds = this.temporalFields.get(object);
+    if (!kinds || kinds.size === 0) return data;
+    let out: Record<string, unknown> | undefined;
+    for (const [field, kind] of kinds) {
+      if (!(field in data)) continue;
+      const coerced = coerceTemporalValue(data[field], kind);
+      if (coerced === data[field]) continue;
+      out ??= { ...data };
+      out[field] = coerced;
+    }
+    return out ?? data;
   }
 
   private extractDatabaseName(url: string): string {

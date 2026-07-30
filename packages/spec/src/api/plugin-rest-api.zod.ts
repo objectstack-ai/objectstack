@@ -915,7 +915,10 @@ export const DEFAULT_BATCH_ROUTES: RestApiRouteRegistration = {
       summary: 'Batch create',
       description: 'Create multiple records in a single operation',
       tags: ['Batch'],
-      requestSchema: 'CreateManyRequestSchema',
+      // Was 'CreateManyRequestSchema' — a name no schema ever exported (the real
+      // request contract is CreateManyDataRequestSchema in protocol.zod.ts). A
+      // dangling documentation reference; point it at the schema that exists.
+      requestSchema: 'CreateManyDataRequestSchema',
       responseSchema: 'BatchUpdateResponseSchema',
       permissions: ['data.create', 'data.batch'],
       timeout: 60000,

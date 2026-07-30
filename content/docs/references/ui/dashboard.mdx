@@ -39,8 +39,8 @@ const result = Dashboard.parse(data);
 | **refreshInterval** | `number` | optional | Auto-refresh interval in seconds |
 | **dateRange** | `{ field?: string; defaultRange: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| 'this_quarter' \| 'last_quarter' \| 'this_year' \| 'last_year' \| 'last_7_days' \| 'last_30_days' \| 'last_90_days' \| 'custom'>; allowCustomRange: boolean }` | optional | Global dashboard date range filter configuration |
 | **globalFilters** | `{ name?: string; field: string; label?: string; type?: Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
-| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
-| **performance** | `{ lazyLoad?: boolean; virtualScroll?: object; cacheStrategy?: Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>; prefetch?: boolean; … }` | optional | Performance optimization settings |
+| **aria** | `any` | optional | [REMOVED] `dashboard.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no dashboard renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. |
+| **performance** | `any` | optional | [REMOVED] `dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; dashboard performance tuning was never implemented. Delete the key. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this dashboard. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

@@ -206,3 +206,41 @@ describe("backfillRetiredAccessLevels (#3865 — stored 'full' normalises to 'ed
     expect(engine._tables.sys_record_share[0].access_level).toBe('full');
   });
 });
+
+describe('#3929 follow-up — inert-rule warn dedup + boot aggregate', () => {
+  it('warns ONCE per inert rule per process, and the boot pass emits one aggregate', async () => {
+    const engine = makeEngine();
+    const sharing = new SharingService({ engine: engine as any });
+    const warn = vi.fn();
+    const rules = new SharingRuleService({ engine: engine as any, sharing, logger: { warn } as any });
+
+    engine._tables.sys_sharing_rule = [
+      { id: 'r_legacy', name: 'legacy_match_all', object_name: 'showcase_inquiry', criteria: null, recipient_type: 'position', recipient_id: 'p1', access_level: 'read', active: true },
+      { id: 'r_legacy2', name: 'legacy_match_all_2', object_name: 'showcase_inquiry', criteria: {}, recipient_type: 'position', recipient_id: 'p1', access_level: 'read', active: true },
+    ];
+    engine._tables.showcase_inquiry = [{ id: 'inq_1', status: 'new' }];
+
+    // Repeated evaluations — the pre-dedup behavior warned on every one.
+    await rules.evaluateRule('r_legacy', SYS);
+    await rules.evaluateRule('r_legacy', SYS);
+    await rules.evaluateRule('r_legacy2', SYS);
+    await rules.evaluateRule('r_legacy', SYS);
+
+    const perRule = warn.mock.calls.filter(([msg]) => String(msg).includes('no usable criteria'));
+    expect(perRule).toHaveLength(2); // once per DISTINCT rule, not per pass
+    expect(perRule.map(([, meta]) => (meta as any).rule).sort()).toEqual(['legacy_match_all', 'legacy_match_all_2']);
+
+    // Enforcement unchanged on every pass: nothing granted, ever.
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+
+    // The boot backfill walks the same rules and adds ONE aggregate line.
+    const bootWarn = vi.fn();
+    await backfillRuleGrants(rules, engine._tables.sys_sharing_rule, { warn: bootWarn });
+    const agg = bootWarn.mock.calls.filter(([msg]) => String(msg).includes('matching NO records'));
+    expect(agg).toHaveLength(1);
+    expect((agg[0][1] as any).count).toBe(2);
+    expect((agg[0][1] as any).rules.sort()).toEqual(['r_legacy', 'r_legacy2']);
+    // …and the per-rule warns did NOT repeat during the backfill pass.
+    expect(warn.mock.calls.filter(([msg]) => String(msg).includes('no usable criteria'))).toHaveLength(2);
+  });
+});

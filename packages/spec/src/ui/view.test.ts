@@ -574,63 +574,22 @@ describe('FormViewSchema', () => {
     expect(() => FormViewSchema.parse(wizardView)).not.toThrow();
   });
 
-  it('should accept form view with object provider', () => {
-    const formView: FormView = {
+  // form `data` SURVIVED the #3896 sweep: the removal attempt broke the build
+  // — defineForm writes data.provider='schema' onto every metadata form — so
+  // the ledger verdict was corrected instead. These pin the surviving shapes.
+  it('accepts form view with object provider', () => {
+    expect(() => FormViewSchema.parse({
       type: 'simple',
-      data: {
-        provider: 'object',
-        object: 'account',
-      },
-      sections: [
-        {
-          label: 'Account Information',
-          fields: ['name', 'industry', 'revenue'],
-        },
-      ],
-    };
-
-    expect(() => FormViewSchema.parse(formView)).not.toThrow();
+      data: { provider: 'object', object: 'account' },
+      sections: [{ fields: ['name'] }],
+    })).not.toThrow();
   });
-
-  it('should accept form view with api provider', () => {
-    const formView: FormView = {
+  it('accepts the schema provider defineForm writes', () => {
+    expect(() => FormViewSchema.parse({
       type: 'simple',
-      data: {
-        provider: 'api',
-        read: {
-          url: '/api/accounts/:id',
-          method: 'GET',
-        },
-        write: {
-          url: '/api/accounts/:id',
-          method: 'PUT',
-        },
-      },
-      sections: [
-        {
-          fields: ['name', 'email', 'phone'],
-        },
-      ],
-    };
-
-    expect(() => FormViewSchema.parse(formView)).not.toThrow();
-  });
-
-  it('should accept form view with value provider', () => {
-    const formView: FormView = {
-      type: 'simple',
-      data: {
-        provider: 'value',
-        items: [{ name: 'Default Account', type: 'Customer' }],
-      },
-      sections: [
-        {
-          fields: ['name', 'type'],
-        },
-      ],
-    };
-
-    expect(() => FormViewSchema.parse(formView)).not.toThrow();
+      data: { provider: 'schema', schemaId: 'flow' },
+      sections: [{ fields: ['name'] }],
+    })).not.toThrow();
   });
 });
 
@@ -1948,42 +1907,22 @@ describe('Airtable-style ListView enhancements', () => {
 // Protocol Improvement Tests: FormView defaultSort
 // ============================================================================
 
-describe('FormViewSchema - defaultSort', () => {
-  it('should accept defaultSort configuration', () => {
-    const result = FormViewSchema.parse({
-      type: 'simple',
-      sections: [{ fields: ['name'] }],
-      defaultSort: [
-        { field: 'created_at', order: 'desc' },
-        { field: 'name', order: 'asc' },
-      ],
-    });
-    expect(result.defaultSort).toHaveLength(2);
-    expect(result.defaultSort![0].field).toBe('created_at');
-    expect(result.defaultSort![0].order).toBe('desc');
+describe('FormViewSchema — retired defaultSort (#3896 close-out)', () => {
+  it('REJECTS the retired `defaultSort` and points at the related list view', () => {
+    let message = '';
+    try {
+      FormViewSchema.parse({
+        type: 'simple', sections: [{ fields: ['name'] }],
+        defaultSort: [{ field: 'created_at', order: 'desc' }],
+      });
+    } catch (e) { message = String((e as Error).message); }
+    expect(message).toMatch(/list view/);
+    expect(message).toMatch(/#3896/);
   });
-
-  it('should default sort order to desc', () => {
-    const result = FormViewSchema.parse({
-      type: 'simple',
-      sections: [{ fields: ['name'] }],
-      defaultSort: [{ field: 'updated_at' }],
-    });
-    expect(result.defaultSort![0].order).toBe('desc');
-  });
-
-  it('should accept form view without defaultSort (optional)', () => {
-    const result = FormViewSchema.parse({
-      type: 'simple',
-      sections: [{ fields: ['name'] }],
-    });
-    expect(result.defaultSort).toBeUndefined();
+  it('a form without it still parses', () => {
+    expect(() => FormViewSchema.parse({ type: 'simple', sections: [{ fields: ['name'] }] })).not.toThrow();
   });
 });
-
-// ============================================================================
-// FormView structured buttons + defaults (#2998; live now the objectui ObjectForm folds them, framework#1894)
-// ============================================================================
 
 describe('FormViewSchema - buttons & defaults', () => {
   it('should accept structured button config with visibility and labels', () => {
@@ -2596,49 +2535,21 @@ describe('ListViewSchema filter field', () => {
 // ============================================================================
 // Issue #7: ListView responsive and performance config
 // ============================================================================
-describe('ListViewSchema - responsive and performance', () => {
-  it('should accept list view with responsive config', () => {
-    const view = ListViewSchema.parse({
-      type: 'grid',
-      columns: ['name', 'status'],
-      responsive: {
-        hiddenOn: ['xs'],
-        columns: { xs: 12, md: 6, lg: 4 },
-      },
-    });
-    expect(view.responsive?.hiddenOn).toEqual(['xs']);
-    expect(view.responsive?.columns?.md).toBe(6);
+describe('ListViewSchema — retired responsive/performance (#3896 close-out)', () => {
+  it('REJECTS the retired `responsive` with the prescription', () => {
+    expect(() => ListViewSchema.parse({
+      type: 'grid', columns: ['name'], responsive: { hiddenOn: ['xs'] },
+    })).toThrow(/responsive.*removed|removed.*responsive/s);
   });
-
-  it('should accept list view with performance config', () => {
-    const view = ListViewSchema.parse({
-      type: 'grid',
-      columns: ['name'],
-      performance: {
-        lazyLoad: true,
-        virtualScroll: { enabled: true, itemHeight: 40, overscan: 5 },
-        cacheStrategy: 'stale-while-revalidate',
-        prefetch: true,
-      },
-    });
-    expect(view.performance?.lazyLoad).toBe(true);
-    expect(view.performance?.virtualScroll?.enabled).toBe(true);
-    expect(view.performance?.cacheStrategy).toBe('stale-while-revalidate');
-  });
-
-  it('should accept list view without responsive/performance (optional)', () => {
-    const view = ListViewSchema.parse({
-      type: 'grid',
-      columns: ['name'],
-    });
-    expect(view.responsive).toBeUndefined();
-    expect(view.performance).toBeUndefined();
+  it('REJECTS the retired `performance` with the prescription', () => {
+    let message = '';
+    try {
+      ListViewSchema.parse({ type: 'grid', columns: ['name'], performance: { lazyLoad: true } });
+    } catch (e) { message = String((e as Error).message); }
+    expect(message).toMatch(/#3896/);
   });
 });
 
-// ============================================================================
-// Issue #8: HttpMethodSchema/HttpRequestSchema re-exported from view.zod
-// ============================================================================
 describe('HttpMethodSchema/HttpRequestSchema backward compat', () => {
   it('should still be importable from view.zod', () => {
     expect(HttpMethodSchema).toBeDefined();

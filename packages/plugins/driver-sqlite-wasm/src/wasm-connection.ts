@@ -189,6 +189,8 @@ export class WasmSqliteConnection {
       return;
     }
 
+    await this.quarantineOrphanedWal();
+
     // Open the on-disk bytes, but guard against a corrupt image. A torn write
     // (process killed mid-flush before atomic writes existed) or otherwise
     // damaged file makes `new SQL.Database(bytes)` either throw ("file is not a
@@ -247,6 +249,53 @@ export class WasmSqliteConnection {
           `(${reason}) and could not be quarantined (${String(renameErr)}). ` +
           `Starting from an empty database; the corrupt file will be overwritten ` +
           `on the next flush.`,
+      );
+    }
+  }
+
+  /**
+   * Move a write-ahead log left behind by a *real* SQLite aside (#3941).
+   *
+   * The native driver keeps file-backed databases in WAL mode, and a clean close
+   * checkpoints the log away — so a non-empty `<db>-wal` here means the last
+   * process died without one. That log is a problem in both directions, and
+   * neither is something wasm SQLite can fix: it cannot read the log (we load
+   * only the main image, so any transaction still in there is invisible), and it
+   * must not leave it in place either — the next {@link flush} rewrites the
+   * image, and a real SQLite opening a fresh image beside a stale log would
+   * replay frames that no longer belong to it.
+   *
+   * So rename it, which loses nothing recoverable (the bytes are preserved for a
+   * real `sqlite3` to recover from) and disarms the mismatch. Best-effort: this
+   * is a dev-only step-down path and must never prevent a boot.
+   */
+  private async quarantineOrphanedWal(): Promise<void> {
+    if (!this.fs) return;
+    const wal = `${this.filename}-wal`;
+    let size: number;
+    try {
+      size = (await this.fs.stat(wal)).size;
+    } catch {
+      return; // no sidecar (the normal case) or an unreadable one
+    }
+    if (size <= 0) return; // checkpointed-and-truncated: nothing in it
+
+    const parked = `${wal}.orphaned-${Date.now()}`;
+    try {
+      await this.fs.rename(wal, parked);
+      this.logger.warn(
+        `[driver-sqlite-wasm] ${wal} holds ${size} bytes of write-ahead log that wasm SQLite ` +
+          `cannot read — this database was last used in WAL mode and closed uncleanly. Parked it ` +
+          `at ${parked} and loaded the main image without it, so anything committed only to the ` +
+          `log is NOT in this session. To recover it, rebuild better-sqlite3 (or use \`sqlite3\`), ` +
+          `restore the log next to the database, and run \`PRAGMA wal_checkpoint(TRUNCATE)\`.`,
+      );
+    } catch (renameErr) {
+      this.logger.warn(
+        `[driver-sqlite-wasm] ${wal} holds ${size} bytes of write-ahead log that wasm SQLite ` +
+          `cannot read, and it could not be moved aside (${String(renameErr)}). Data committed ` +
+          `only to the log is missing from this session; checkpoint it with a real sqlite3 before ` +
+          `writing further.`,
       );
     }
   }

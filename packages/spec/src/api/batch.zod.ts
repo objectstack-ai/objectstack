@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { ApiErrorSchema, BaseResponseSchema, RecordDataSchema } from './contract.zod';
 import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Batch Operations API
@@ -61,7 +62,22 @@ export const BatchOptionsSchema = lazySchema(() => z.object({
   atomic: z.boolean().optional().default(true).describe('If true, rollback entire batch on any failure (transaction mode)'),
   returnRecords: z.boolean().optional().default(false).describe('If true, return full record data in response'),
   continueOnError: z.boolean().optional().default(false).describe('If true (and atomic=false), continue processing remaining records after errors'),
-  validateOnly: z.boolean().optional().default(false).describe('If true, validate records without persisting changes (dry-run mode)'),
+  // `validateOnly` promised a dry-run — "validate records without persisting" —
+  // but no batch surface ever read it (`updateManyData` / `deleteManyData` /
+  // `batchData` all persist regardless). A caller sending `validateOnly: true`
+  // to preview a mutation got it EXECUTED: a declared flag actively lying about
+  // a data-safety guarantee, the worst shape of "declared ≠ enforced" (PD #10).
+  // Retired rather than half-implemented: a real dry-run has its own design
+  // space (cascade / constraint semantics under no-commit, response contract)
+  // and should be reintroduced deliberately, not back-filled to match a promise
+  // nothing kept. Tombstoned so writing it is audible, not silently stripped.
+  validateOnly: retiredKey(
+    '`options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). '
+    + 'It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have '
+    + 'silently executed. There is no dry-run today — drop the key. If you need to preview a batch '
+    + 'without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) '
+    + 'and reintroduced as a flag that actually holds.',
+  ),
 }));
 
 export type BatchOptions = z.infer<typeof BatchOptionsSchema>;

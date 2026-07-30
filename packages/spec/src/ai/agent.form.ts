@@ -42,7 +42,8 @@ export const agentForm = defineForm({
       description: 'Skills and knowledge sources the agent can use.',
       fields: [
         { field: 'skills', widget: 'string-tags', helpText: 'Skill names (Agent→Skill→Tool architecture)' },
-        { field: 'knowledge', type: 'composite', helpText: 'RAG knowledge access configuration' },
+        // `knowledge` input removed with the block (#3896 close-out): the RAG
+        // path never read the agent record — a form for it was false compliance.
       ],
     },
     {

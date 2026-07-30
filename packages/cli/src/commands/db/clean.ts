@@ -68,9 +68,20 @@ export default class DbClean extends Command {
 
     const { resolveSqliteDriver } = await import('@objectstack/service-datasource');
 
+    // Count the WAL sidecars as part of the database (#3941): a file-backed
+    // SQLite database runs in WAL mode, so bytes waiting in `-wal` are bytes on
+    // disk. Measuring `app.db` alone would compare a before that excludes them
+    // against an after that has absorbed them — and report a reclaim of zero (or
+    // less) for a VACUUM that genuinely shrank things.
+    const sizeOnDisk = (file: string): number =>
+      [file, `${file}-wal`, `${file}-shm`].reduce(
+        (total, path) => total + (existsSync(path) ? statSync(path).size : 0),
+        0,
+      );
+
     let failed = false;
     for (const file of targets) {
-      const before = statSync(file).size;
+      const before = sizeOnDisk(file);
       try {
         const resolved = await resolveSqliteDriver({
           filename: file,
@@ -86,7 +97,9 @@ export default class DbClean extends Command {
         await resolved.driver.execute('VACUUM');
         await resolved.driver.disconnect();
 
-        const after = statSync(file).size;
+        // Measured after `disconnect()`, which checkpoints and removes the
+        // sidecars — so this is the settled on-disk size either way.
+        const after = sizeOnDisk(file);
         const saved = before - after;
         const fmt = (n: number) => `${(n / 1024 / 1024).toFixed(2)} MB`;
         console.log(

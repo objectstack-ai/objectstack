@@ -936,14 +936,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       globalFilters: {
         label: "グローバルフィルター",
         helpText: "全ウィジェットに適用するフィルター"
-      },
-      aria: {
-        label: "アクセシビリティ",
-        helpText: "アクセシビリティラベル"
-      },
-      performance: {
-        label: "パフォーマンス",
-        helpText: "キャッシュと最適化設定"
       }
     }
   },
@@ -1151,14 +1143,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "無効",
         helpText: "CEL 式: 条件が true の場合に無効化"
       },
-      shortcut: {
-        label: "ショートカット",
-        helpText: "キーボードショートカット（例: \"Ctrl+S\", \"Cmd+Enter\"）"
-      },
-      bulkEnabled: {
-        label: "一括操作有効",
-        helpText: "選択した複数レコードへの適用を許可"
-      },
       ai: {
         label: "Ai",
         helpText: "AI exposure (opt-in): set ai.exposed=true and write ai.description (≥40 chars) to make this callable by agents."
@@ -1346,10 +1330,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       type: {
         label: "型",
         helpText: "フローの開始方法（autolaunched, record_change, schedule, screen, api）"
-      },
-      template: {
-        label: "テンプレート",
-        helpText: "再利用可能なサブフローか（他のフローから呼び出し可）"
       },
       description: {
         label: "説明",
@@ -1622,10 +1602,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "スキル",
         helpText: "スキル名（Agent→Skill→Tool アーキテクチャ）"
       },
-      knowledge: {
-        label: "ナレッジ",
-        helpText: "RAG ナレッジアクセス設定"
-      },
       access: {
         label: "アクセス",
         helpText: "このエージェントとチャット可能なユーザー ID またはロール名"
@@ -1719,10 +1695,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       tools: {
         label: "ツール",
         helpText: "ツール名（ワイルドカード対応: action_*）"
-      },
-      triggerPhrases: {
-        label: "トリガーフレーズ",
-        helpText: "このスキルを起動する自然言語フレーズ"
       },
       triggerConditions: {
         label: "トリガー条件",

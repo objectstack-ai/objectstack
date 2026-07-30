@@ -6,6 +6,11 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
+import {
+  coerceTemporalValue,
+  indexTemporalFields,
+  type TemporalFieldKind,
+} from './memory-temporal.js';
 
 /**
  * Persistence adapter interface.
@@ -87,6 +92,15 @@ export class InMemoryDriver implements IDataDriver {
   private config: InMemoryDriverConfig;
   private logger: Logger;
   private idCounters: Map<string, number> = new Map();
+
+  /**
+   * Declared temporal fields per object, populated by {@link syncSchema} —
+   * this driver's equivalent of `SqlDriver.datetimeFields`/`dateFields`, and
+   * the only thing that lets write and filter agree on a storage form (#4047).
+   * An object absent from this map was never declared, so nothing is coerced
+   * for it: the driver does not guess types from values.
+   */
+  private temporalFields: Map<string, Map<string, TemporalFieldKind>> = new Map();
   private transactions: Map<string, MemoryTransaction> = new Map();
   private persistenceAdapter: PersistenceAdapterInterface | null = null;
 
@@ -265,7 +279,7 @@ export class InMemoryDriver implements IDataDriver {
 
     // 1. Filter using Mingo
     if (query.where) {
-        const mongoQuery = this.convertToMongoQuery(query.where);
+        const mongoQuery = this.convertToMongoQuery(query.where, object);
         if (mongoQuery && Object.keys(mongoQuery).length > 0) {
           const mingoQuery = new Query(mongoQuery);
           results = mingoQuery.find(results).all();
@@ -335,12 +349,12 @@ export class InMemoryDriver implements IDataDriver {
     
     const table = this.getTable(object);
     
-    const newRecord = {
+    const newRecord = this.toStorageForms(object, {
       id: data.id || this.generateId(object),
       ...data,
       created_at: data.created_at || new Date().toISOString(),
       updated_at: data.updated_at || new Date().toISOString(),
-    };
+    });
 
     table.push(newRecord);
     this.markDirty();
@@ -362,13 +376,13 @@ export class InMemoryDriver implements IDataDriver {
       return null;
     }
 
-    const updatedRecord = {
+    const updatedRecord = this.toStorageForms(object, {
       ...table[index],
       ...data,
       id: table[index].id, // Preserve original ID
       created_at: table[index].created_at, // Preserve created_at
       updated_at: new Date().toISOString(),
-    };
+    });
     
     table[index] = updatedRecord;
     this.markDirty();
@@ -420,7 +434,7 @@ export class InMemoryDriver implements IDataDriver {
   async count(object: string, query?: QueryAST, options?: DriverOptions) {
     let records = this.getTable(object);
     if (query?.where) {
-        const mongoQuery = this.convertToMongoQuery(query.where);
+        const mongoQuery = this.convertToMongoQuery(query.where, object);
         if (mongoQuery && Object.keys(mongoQuery).length > 0) {
           const mingoQuery = new Query(mongoQuery);
           records = mingoQuery.find(records).all();
@@ -449,7 +463,7 @@ export class InMemoryDriver implements IDataDriver {
       let targetRecords = table;
       
       if (query && query.where) {
-          const mongoQuery = this.convertToMongoQuery(query.where);
+          const mongoQuery = this.convertToMongoQuery(query.where, object);
           if (mongoQuery && Object.keys(mongoQuery).length > 0) {
             const mingoQuery = new Query(mongoQuery);
             targetRecords = mingoQuery.find(targetRecords).all();
@@ -461,11 +475,11 @@ export class InMemoryDriver implements IDataDriver {
       for (const record of targetRecords) {
           const index = table.findIndex(r => r.id === record.id);
           if (index !== -1) {
-              const updated = {
+              const updated = this.toStorageForms(object, {
                   ...table[index],
                   ...data,
                   updated_at: new Date().toISOString()
-              };
+              });
               table[index] = updated;
           }
       }
@@ -482,7 +496,7 @@ export class InMemoryDriver implements IDataDriver {
       const initialLength = table.length;
       
       if (query && query.where) {
-          const mongoQuery = this.convertToMongoQuery(query.where);
+          const mongoQuery = this.convertToMongoQuery(query.where, object);
           if (mongoQuery && Object.keys(mongoQuery).length > 0) {
             const mingoQuery = new Query(mongoQuery);
             const matched = mingoQuery.find(table).all();
@@ -588,7 +602,7 @@ export class InMemoryDriver implements IDataDriver {
   async distinct(object: string, field: string, query?: QueryInput): Promise<any[]> {
     let records = this.getTable(object);
     if (query?.where) {
-      const mongoQuery = this.convertToMongoQuery(query.where);
+      const mongoQuery = this.convertToMongoQuery(query.where, object);
       if (mongoQuery && Object.keys(mongoQuery).length > 0) {
         const mingoQuery = new Query(mongoQuery);
         records = mingoQuery.find(records).all();
@@ -643,7 +657,7 @@ export class InMemoryDriver implements IDataDriver {
       });
       let results = this.getTable(object).map((r) => ({ ...r }));
       if (query.where) {
-        const mongoQuery = this.convertToMongoQuery(query.where);
+        const mongoQuery = this.convertToMongoQuery(query.where, object);
         if (mongoQuery && Object.keys(mongoQuery).length > 0) {
           results = new Query(mongoQuery).find(results).all() as Record<string, any>[];
         }
@@ -674,16 +688,16 @@ export class InMemoryDriver implements IDataDriver {
    * 3. Legacy Array Format: [['field', 'op', value], 'and', ['field2', 'op', value2]]
    * 4. MongoDB Format: { field: value } or { field: { $eq: value } } (passthrough)
    */
-  private convertToMongoQuery(filters?: any): Record<string, any> {
+  private convertToMongoQuery(filters?: any, object?: string): Record<string, any> {
     if (!filters) return {};
 
     // AST node format (ObjectQL QueryAST)
     if (!Array.isArray(filters) && typeof filters === 'object') {
       if (filters.type === 'comparison') {
-        return this.convertConditionToMongo(filters.field, filters.operator, filters.value) || {};
+        return this.convertConditionToMongo(filters.field, filters.operator, filters.value, object) || {};
       }
       if (filters.type === 'logical') {
-        const conditions = filters.conditions?.map((c: any) => this.convertToMongoQuery(c)) || [];
+        const conditions = filters.conditions?.map((c: any) => this.convertToMongoQuery(c, object)) || [];
         if (conditions.length === 0) return {};
         if (conditions.length === 1) return conditions[0];
         const op = filters.operator === 'or' ? '$or' : '$and';
@@ -691,7 +705,7 @@ export class InMemoryDriver implements IDataDriver {
       }
       // MongoDB/FilterCondition format: { field: value } or { field: { $op: value } }
       // Translate non-standard operators ($contains, $notContains, etc.) to Mingo-compatible format
-      return this.normalizeFilterCondition(filters);
+      return this.normalizeFilterCondition(filters, object);
     }
 
     // Legacy array format
@@ -730,7 +744,7 @@ export class InMemoryDriver implements IDataDriver {
         // `convertConditionToMongo` now throws rather than returning null for an
         // operator it cannot express, so a dropped condition can no longer
         // silently widen the result set.
-        const cond = this.convertConditionToMongo(field, operator, value);
+        const cond = this.convertConditionToMongo(field, operator, value, object);
         if (cond) logicGroups[logicGroups.length - 1].conditions.push(cond);
       } else {
         throw new Error(
@@ -760,7 +774,8 @@ export class InMemoryDriver implements IDataDriver {
   /**
    * Convert a single ObjectQL condition to MongoDB operator format.
    */
-  private convertConditionToMongo(field: string, operator: string, value: any): Record<string, any> | null {
+  private convertConditionToMongo(field: string, operator: string, value: any, object?: string): Record<string, any> | null {
+    const store = (v: any) => this.toStorageForm(object, field, v);
     // Fold every accepted spelling of one comparison onto a single infix form,
     // so this switch has one case per comparison rather than one per spelling —
     // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
@@ -768,15 +783,15 @@ export class InMemoryDriver implements IDataDriver {
     // driver and driver-sql accept different vocabularies. #3948.
     switch (canonicalAstOperator(operator)) {
       case '=': case '==':
-        return { [field]: value };
+        return { [field]: store(value) };
       case '!=': case '<>':
-        return { [field]: { $ne: value } };
+        return { [field]: { $ne: store(value) } };
       case '>':
-        return { [field]: { $gt: value } };
+        return { [field]: { $gt: store(value) } };
       case '>=':
-        return { [field]: { $gte: value } };
+        return { [field]: { $gte: store(value) } };
       case '<':
-        return { [field]: { $lt: value } };
+        return { [field]: { $lt: store(value) } };
       case '<=': {
         // A bare-day upper bound means "through that whole day" (#4042, the
         // driver-sql twin is #3777): `<= 2026-07-28` on an ISO-timestamp value
@@ -784,12 +799,12 @@ export class InMemoryDriver implements IDataDriver {
         // to `<=` for plain `YYYY-MM-DD` date values — so no field-type lookup
         // is needed, exactly the argument the preview evaluator uses.
         const nextDay = nextUtcCalendarDay(value);
-        return { [field]: nextDay != null ? { $lt: nextDay } : { $lte: value } };
+        return { [field]: nextDay != null ? { $lt: store(nextDay) } : { $lte: store(value) } };
       }
       case 'in':
-        return { [field]: { $in: value } };
+        return { [field]: { $in: store(value) } };
       case 'nin': case 'not_in': case 'notin': case 'not in':
-        return { [field]: { $nin: value } };
+        return { [field]: { $nin: store(value) } };
       case 'contains': case 'like': case 'ilike':
         return { [field]: { $regex: new RegExp(this.escapeRegex(value), 'i') } };
       case 'notcontains': case 'not_contains':
@@ -817,8 +832,8 @@ export class InMemoryDriver implements IDataDriver {
           const nextDay = nextUtcCalendarDay(value[1]);
           return {
             [field]: nextDay != null
-              ? { $gte: value[0], $lt: nextDay }
-              : { $gte: value[0], $lte: value[1] },
+              ? { $gte: store(value[0]), $lt: store(nextDay) }
+              : { $gte: store(value[0]), $lte: store(value[1]) },
           };
         }
         throw new Error(
@@ -842,7 +857,7 @@ export class InMemoryDriver implements IDataDriver {
    * operators ($contains, $notContains, $startsWith, $endsWith, $between, $null)
    * to Mingo-compatible equivalents ($regex, $gte/$lte, null checks).
    */
-  private normalizeFilterCondition(filter: Record<string, any>): Record<string, any> {
+  private normalizeFilterCondition(filter: Record<string, any>, object?: string): Record<string, any> {
     const result: Record<string, any> = {};
     const extraAndConditions: Record<string, any>[] = [];
 
@@ -851,13 +866,13 @@ export class InMemoryDriver implements IDataDriver {
       // Recurse into logical operators
       if (key === '$and' || key === '$or') {
         result[key] = Array.isArray(value)
-          ? value.map((child: any) => this.normalizeFilterCondition(child))
+          ? value.map((child: any) => this.normalizeFilterCondition(child, object))
           : value;
         continue;
       }
       if (key === '$not') {
         result[key] = value && typeof value === 'object'
-          ? this.normalizeFilterCondition(value)
+          ? this.normalizeFilterCondition(value, object)
           : value;
         continue;
       }
@@ -868,7 +883,7 @@ export class InMemoryDriver implements IDataDriver {
       }
       // Field-level: value may be primitive (implicit eq) or operator object
       if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof RegExp)) {
-        const normalized = this.normalizeFieldOperators(value);
+        const normalized = this.normalizeFieldOperators(value, this.temporalKind(object, key));
         // Handle multiple regex conditions on the same field (e.g. $startsWith + $endsWith)
         if (normalized._multiRegex) {
           const regexConditions: Record<string, any>[] = normalized._multiRegex;
@@ -881,7 +896,8 @@ export class InMemoryDriver implements IDataDriver {
           result[key] = normalized;
         }
       } else {
-        result[key] = value;
+        // Implicit equality — still a comparand, so it takes the storage form.
+        result[key] = this.toStorageForm(object, key, value);
       }
     }
 
@@ -907,7 +923,8 @@ export class InMemoryDriver implements IDataDriver {
    * When multiple regex-producing operators appear on the same field
    * (e.g. $startsWith + $endsWith), they are combined via $and.
    */
-  private normalizeFieldOperators(ops: Record<string, any>): Record<string, any> {
+  private normalizeFieldOperators(ops: Record<string, any>, kind?: TemporalFieldKind): Record<string, any> {
+    const store = (v: any) => coerceTemporalValue(v, kind);
     const result: Record<string, any> = {};
     const regexConditions: Record<string, any>[] = [];
 
@@ -928,11 +945,11 @@ export class InMemoryDriver implements IDataDriver {
           break;
         case '$between':
           if (Array.isArray(val) && val.length === 2) {
-            result.$gte = val[0];
+            result.$gte = store(val[0]);
             // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
             const betweenNextDay = nextUtcCalendarDay(val[1]);
-            if (betweenNextDay != null) result.$lt = betweenNextDay;
-            else result.$lte = val[1];
+            if (betweenNextDay != null) result.$lt = store(betweenNextDay);
+            else result.$lte = store(val[1]);
           }
           break;
         case '$lte': {
@@ -940,8 +957,8 @@ export class InMemoryDriver implements IDataDriver {
           // driver-sql twin is #3777). Order-equivalent to `<=` for plain
           // `YYYY-MM-DD` values, so it applies without a field-type lookup.
           const nextDay = nextUtcCalendarDay(val);
-          if (nextDay != null) result.$lt = nextDay;
-          else result.$lte = val;
+          if (nextDay != null) result.$lt = store(nextDay);
+          else result.$lte = store(val);
           break;
         }
         case '$null':
@@ -952,6 +969,12 @@ export class InMemoryDriver implements IDataDriver {
           } else {
             result.$ne = null;
           }
+          break;
+        // Value comparisons take the field's storage form (#4047); the null /
+        // existence predicates above are value-independent and must not.
+        case '$eq': case '$ne': case '$gt': case '$gte': case '$lt':
+        case '$in': case '$nin':
+          result[op] = store(val);
           break;
         default:
           result[op] = val;
@@ -1099,6 +1122,22 @@ export class InMemoryDriver implements IDataDriver {
       this.db[object] = [];
       this.logger.info('Created in-memory table', { object });
     }
+    // Learn the object's temporal fields, then converge the rows ALREADY in the
+    // table (#4047). Both halves matter: the map is what the write and filter
+    // paths consult from here on, and the retroactive pass is what catches rows
+    // this driver never wrote — `initialData` fixtures and anything a
+    // persistence adapter restored, both of which land before any schema is
+    // declared. It is the in-memory analogue of `backfillCanonicalDatetimes`
+    // (ADR-0053 D-B3) and, like it, is idempotent.
+    const kinds = indexTemporalFields(schema?.fields);
+    this.temporalFields.set(object, kinds);
+    if (kinds.size > 0) {
+      const table = this.db[object];
+      for (let i = 0; i < table.length; i++) {
+        const converged = this.toStorageForms(object, table[i]);
+        if (converged !== table[i]) table[i] = converged;
+      }
+    }
   }
 
   async dropTable(object: string, options?: DriverOptions) {
@@ -1112,6 +1151,39 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
   // Helpers
   // ===================================
+
+  // ── Temporal storage form (#4047) ─────────────────────────────────────────
+
+  /** The declared temporal kind of `field` on `object`, if any. */
+  private temporalKind(object: string | undefined, field: string): TemporalFieldKind | undefined {
+    if (!object) return undefined;
+    return this.temporalFields.get(object)?.get(field);
+  }
+
+  /** Put one filter comparand into the storage form of its field. */
+  private toStorageForm(object: string | undefined, field: string, value: any): any {
+    return coerceTemporalValue(value, this.temporalKind(object, field));
+  }
+
+  /**
+   * Put every declared temporal field of a record into its storage form — the
+   * write half of the convention the filter path reads against. Returns the
+   * input unchanged (same reference) when nothing needed converting, so the
+   * common non-temporal case allocates nothing.
+   */
+  private toStorageForms<T extends Record<string, any>>(object: string, record: T): T {
+    const kinds = this.temporalFields.get(object);
+    if (!kinds || kinds.size === 0) return record;
+    let out: Record<string, any> | undefined;
+    for (const [field, kind] of kinds) {
+      if (!(field in record)) continue;
+      const coerced = coerceTemporalValue(record[field], kind);
+      if (coerced === record[field]) continue;
+      out ??= { ...record };
+      out[field] = coerced;
+    }
+    return (out as T) ?? record;
+  }
 
   /**
    * Apply manual sorting (Mingo sort has CJS build issues).

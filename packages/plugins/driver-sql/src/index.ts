@@ -5,6 +5,7 @@ import { SqlDriver } from './sql-driver.js';
 export { SqlDriver };
 export type {
   SqlDriverConfig,
+  SqliteJournalMode,
   IntrospectedSchema,
   IntrospectedTable,
   IntrospectedColumn,

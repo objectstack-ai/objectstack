@@ -717,3 +717,73 @@ row-result coverage for the `$lte`/`$between` upper-bound cells now lives in
 storage, dialect physical forms, boundary rollovers) and the strategy/preview
 suites; the full matrix program (relative-token × live-driver × timezone)
 remains open under D-A3.
+
+---
+
+## Addendum (2026-07-30) — the non-SQL drivers get one storage form too (#4047)
+
+> **Status:** landed. Extends the 2026-07-29 addendum (D-B, `Field.datetime`
+> has ONE storage form per SQL dialect) to `driver-memory` and
+> `driver-mongodb`, which had the same defect for the same reason and one worse
+> symptom.
+
+### D-E1 — Type-bracket comparison makes a mixed column WORSE than it is on SQL
+
+MongoDB compares across BSON types by type bracket, and mingo copies that rule
+for JS types: a string comparand never matches a `Date` value, in either
+direction, **for every operator** — `$gte` included, not just the upper bound
+#3777 was about. SQLite's affinity rules at least left one half reachable; here
+a window silently answers with whichever half matches the comparand's type.
+
+And both columns really were mixed. Each driver's own `created_at`/`updated_at`
+default writes one form (`new Date()` on mongo, `new Date().toISOString()` in
+memory) while REST/JSON writes, relative-date tokens and `initialData` fixtures
+supply the other. On MongoDB the dashboard's default window — string bounds
+against a BSON-`Date` `created_at` — therefore returned **nothing at all**.
+
+### D-E2 — One canon per driver, chosen by what the store natively has
+
+| Driver | `datetime` | Why |
+|---|---|---|
+| `driver-mongodb` | BSON `Date` | the dialect's native instant: indexable, range-queryable, timezone-unambiguous. The `timestamptz` of this driver. |
+| `driver-memory` | canonical UTC ISO text | no native instant type exists; ISO-8601 UTC sorts chronologically under the plain string comparison mingo performs, and it is the wire form, so it survives JSON persistence unchanged. |
+
+`Field.date` stays timezone-naive `YYYY-MM-DD` text on both, for the Phase 1
+reason: an instant would invent a midnight and re-couple the value to a zone.
+
+Both drivers learn their temporal fields from `syncSchema` — the only place a
+driver is handed an object definition — into the direct equivalent of
+`SqlDriver.datetimeFields`/`dateFields`. An **undeclared** object is left
+exactly as written: these drivers are schemaless stores, and guessing a type
+from a value would coerce data the platform never claimed to own.
+
+### D-E3 — Existing rows, and how this composes with the bound semantics
+
+`driver-memory` converges the rows already in a table when the schema arrives,
+which is what catches `initialData` fixtures and persistence-adapter restores
+(both land before any schema is declared). It is the in-memory analogue of
+`backfillCanonicalDatetimes` and idempotent like it. MongoDB gets no automatic
+backfill — rewriting a real collection is a migration, not a boot step — so a
+pre-existing collection keeps whatever it holds until migrated; new and updated
+documents converge from the first write.
+
+Ordering is load-bearing where D-D meets D-E: the calendar-day upper-bound
+rewrite (#3777/#4042) is a *calendar* operation and runs on the bare-day
+STRING first; only the resulting bound is converted to the storage form.
+Converting first would hand `nextUtcCalendarDay` a `Date`, which it correctly
+refuses to widen — and the whole-day window would silently narrow back to an
+instant.
+
+### D-E4 — Consequences for D-A3
+
+The conformance matrix's **driver** axis now has non-SQL cells worth asserting,
+and its **storage-form** axis gains `mixed-writer-form` for them. Row-result
+cover lives in `mongodb-datetime-storage.test.ts` (against a real MongoDB via
+`mongodb-memory-server`) and `memory-datetime-storage.test.ts`. Still open
+under D-A3: the relative-token × live-driver × timezone combinations.
+
+One evaluator remains unaligned on both the D-D and D-E rules:
+`@objectstack/formula`'s `matchesFilterCondition` (the RLS write-side `check`
+path), which cannot depend on `@objectstack/core` for the shared primitive.
+Deciding its home — a private copy, as `formula` already keeps for `today()`,
+or lowering the utility into `spec`/`types` — is the remaining piece.
