@@ -50,10 +50,27 @@ export interface Plugin {
     version?: string;
     
     /**
-     * Plugin dependencies
+     * Plugin dependencies (hard — a missing name fails the boot)
      */
     dependencies?: string[];
-    
+
+    /**
+     * Soft dependencies — order-if-present (ADR-0116). Composed names are
+     * hoisted ahead like `dependencies`; absent names are skipped.
+     */
+    optionalDependencies?: string[];
+
+    /**
+     * Services the plugin resolves synchronously during init(). The kernel
+     * validates ordering against these before Phase 1 (ADR-0116).
+     */
+    requiresServices?: string[];
+
+    /**
+     * Services the plugin's init() unconditionally registers (ADR-0116).
+     */
+    providesServices?: string[];
+
     /**
      * Plugin initialization function
      */

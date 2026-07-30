@@ -92,6 +92,16 @@ dropped at parse, and nothing failed.
    faith, silently discarded, believed to be in effect. Removed (the identical
    stamp on the fixture's *object* is real and stays).
 
+5. **`position.test.ts` asserted a fictional hierarchy** (step 2) — see the
+   entry below.
+6. **The platform's own Account app declared `defaultOpen` on three navigation
+   groups** (app step, PR B). `expanded` is the schema key; `defaultOpen`
+   never was — so all three groups shipped COLLAPSED while their author
+   believed they opened by default. Fixed at the producer, and the spelling
+   now aliases to `expanded`. Note where this one was found: not in a tenant
+   project, but in first-party platform metadata that had been shipping for
+   releases.
+
 This is the empirical argument for the ratchet: the inference "no metadata in
 the repo carries unknown keys" was **false three times over**, and only the
 strict gate could prove it. Note the asymmetry in the two schema gaps — both
@@ -127,7 +137,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `view.zod.ts` | 51 | authorable | partially strict (ADR-0089); long tail of sub-blocks |
 | `component.zod.ts` | 29 | authorable | **next candidate** — SDUI component defs; check React-prop open slots first (p) |
 | `theme.zod.ts` | 14 | authorable (p) | authored themes |
-| `app.zod.ts` | 11 | authorable | **PR A done (#4001 app step): the seven audit-dead keys (`version`/`aria`/`objects`/`apis`/`sharing`/`embed`/`mobileNavigation`) are `retiredKey()` tombstones + an ADR-0087 conversion** — the ADR-0049 precondition for strict. **PR B next**: `AppSchema` + nav union `.strict()`; the union-error question is settled — convert `NavigationItemSchema` to `z.discriminatedUnion('type', …)` (verified: matched-branch-only unknown-key errors, precise recursive paths, `toJSONSchema` clean) |
+| `app.zod.ts` | 11 | authorable | **strict as of #4001 PR B** — `AppSchema` + branding / area / context-selector / contribution, and the nav-item union converted to `z.discriminatedUnion('type', …)` (the union-error question, settled empirically: matched-branch-only errors, exact recursive paths, `toJSONSchema` clean). Per-target `params` stay open. PR A (#4142) tombstoned the seven audit-dead keys first |
 | `dashboard.zod.ts` | 11 | authorable | partially strict |
 | `widget.zod.ts` | 9 | authorable (p) | |
 | `page.zod.ts` | 7 | authorable | partially strict (ADR-0089) |
@@ -203,9 +213,12 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
 ## Next steps (verify-then-enforce, one shape at a time)
 
-1. `ui/app.zod.ts` — `AppSchema` + navigation union (highest-traffic remaining
-   authorable type; needs union-error design so the strict error is readable).
-2. `data/hook.zod.ts`, `data/datasource.zod.ts` — `defineHook` / stack config.
+1. `data/hook.zod.ts`, `data/datasource.zod.ts` — `defineHook` / stack config
+   (both still provisional (p) classifications — verify before tightening).
+2. The `@objectstack/lint` unknown-key WARNING layer: non-breaking, shippable
+   in a minor, and it extends AI-detectable coverage to every remaining
+   authorable site at once while accumulating evidence (which keys real
+   tenant projects actually carry) for a v18 strict close-out.
 3. Promote this ledger to a machine-checked gate (pattern of
    `packages/spec/liveness/` + `check:liveness`) once enough of the surface is
    classified that the table above is enforceable rather than descriptive.
@@ -218,6 +231,10 @@ Done in step 3: `automation/approval.zod.ts` — the four approval authoring
 schemas, with the ADR-0019 re-home map as wrong-layer guidance
 (`steps` / `entryCriteria` / `onApprove` / `onReject` / `rejectionBehavior`
 each point at where the concept lives on the flow graph now).
+
+Done in the app step, PR B: `AppSchema` + the navigation tree strict, via a
+discriminated union — the union-error concern that deferred this step was
+resolved by measurement, not design work.
 
 Done in the app step, PR A: the seven audit-dead AppSchema keys tombstoned
 (`retiredKey` + `app-dead-authoring-keys-removed` conversion + step-17

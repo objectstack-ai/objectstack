@@ -111,6 +111,35 @@ kernel.use(new AppPlugin(stack));
 await kernel.bootstrap();
 ```
 
+### Plugin Ordering Contract
+
+`kernel.use()` **registration order is not a contract**. The kernel resolves
+both init and start order from the plugin dependency graph (topological sort;
+insertion order is kept only between plugins with no edges), and Phase 1
+(every `init()`) completes before Phase 2 (any `start()`) begins. A plugin
+that needs something another plugin sets up declares it (ADR-0116):
+
+| Declaration | Semantics |
+| :--- | :--- |
+| `dependencies: string[]` | Hard — hoisted ahead of the declarant; a name not composed on the kernel fails the boot. |
+| `optionalDependencies: string[]` | Order-if-present — hoisted exactly like `dependencies` when composed, silently skipped when absent. For plugins that degrade without the dependency but must never init before it. |
+| `requiresServices: string[]` | Services the plugin resolves **synchronously during `init()`** with no fallback. Validated before Phase 1 (a required service whose only declared provider inits later is a named boot error, before any init side effects) and again immediately before the plugin's own init. |
+| `providesServices: string[]` | Services the plugin's `init()` **unconditionally** registers. Powers the validation above and lets ordering errors name the provider. Never declare option-gated registrations. |
+
+Start-time needs require no declaration — the Phase 1/2 split already
+guarantees every init-registered service is visible to every `start()`.
+
+```typescript
+// AppPlugin: degrades on engine-less kernels, but when the engine is
+// composed it must never init first — and a non-empty bundle cannot
+// register at all without the manifest service.
+class AppPlugin implements Plugin {
+  optionalDependencies = ['com.objectstack.engine.objectql'];
+  requiresServices = ['manifest'];
+  // ...
+}
+```
+
 ### Boot Logs (Example)
 
 ```

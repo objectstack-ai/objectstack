@@ -41,7 +41,10 @@ Plugin metadata for validation
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique plugin identifier |
 | **version** | `string` | optional | Semantic version (e.g., 1.0.0) |
-| **dependencies** | `string[]` | optional | Array of plugin names this plugin depends on |
+| **dependencies** | `string[]` | optional | Array of plugin names this plugin depends on (hard — a missing name fails the boot) |
+| **optionalDependencies** | `string[]` | optional | Plugin names hoisted ahead when composed, skipped when absent (order-if-present, ADR-0116) |
+| **requiresServices** | `string[]` | optional | Service names the plugin resolves synchronously during init(); validated by the kernel before Phase 1 (ADR-0116) |
+| **providesServices** | `string[]` | optional | Service names the plugin's init() unconditionally registers (ADR-0116) |
 | **signature** | `string` | optional | Cryptographic signature for plugin verification |
 
 

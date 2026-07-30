@@ -61,6 +61,11 @@ export class LiteKernel extends ObjectKernelBase {
         // Resolve dependencies
         const orderedPlugins = this.resolveDependencies();
 
+        // Pre-Phase-1 ordering contract (ADR-0116, #4131): a plugin that
+        // requires a service provided only by a later plugin fails HERE,
+        // named, before any init side effects.
+        this.validateInitServices(orderedPlugins);
+
         // Phase 1: Init - Plugins register services
         this.logger.info('Phase 1: Init plugins');
         for (const plugin of orderedPlugins) {

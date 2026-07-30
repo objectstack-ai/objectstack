@@ -140,6 +140,101 @@ describe('wait node executor', () => {
   });
 });
 
+/**
+ * The loose `config.*` back door the executor used to read alongside
+ * `waitEventConfig` graduated into the ADR-0087 D2 conversion layer
+ * (`flow-node-wait-event-config-lift`, #4045), so the executor now reads the
+ * declared block only (PD #12).
+ *
+ * These go through `registerFlow`, which is the seam that applies the conversion
+ * — so they prove the graduation end-to-end on a legacy source, not merely that
+ * the executor stopped looking. Both spellings under test (`duration`, `signal`)
+ * are ones the spec never declared; they existed only as the tail of the `??`
+ * chains this change deleted.
+ */
+describe('wait config graduation — legacy loose `config` still works via the conversion (#4045)', () => {
+  let engine: AutomationEngine;
+  let ran: string[];
+
+  /** The same flow, but authored the legacy way: event keys loose under `config`. */
+  const looseWaitFlow = (config: Record<string, unknown>) => ({
+    ...waitFlow({ eventType: 'timer' }),
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'pause', type: 'wait', label: 'Wait', config },
+      { id: 'after', type: 'mark', label: 'After' },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+  });
+
+  beforeEach(() => {
+    engine = new AutomationEngine(silentLogger());
+    ran = [];
+    engine.registerNodeExecutor(markerExecutor(ran));
+  });
+
+  it('schedules the same timer from a loose `config.duration` (undeclared spelling, no eventType)', async () => {
+    const { ctx, scheduled } = fakeJobCtx();
+    registerWaitNode(engine, ctx);
+    // No eventType anywhere: the conversion stamps the executor's own 'timer'
+    // default, without which the converted flow would not even parse.
+    engine.registerFlow('wait_flow', looseWaitFlow({ duration: 'PT2H' }));
+
+    const before = Date.now();
+    const paused = await engine.execute('wait_flow');
+    expect(paused.status).toBe('paused');
+    expect(ran).toEqual([]);
+
+    expect(scheduled).toHaveLength(1);
+    const at = new Date(scheduled[0].schedule.at!).getTime();
+    expect(at).toBeGreaterThanOrEqual(before + 7_200_000 - 1000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 7_200_000 + 1000);
+  });
+
+  it('suspends on a loose `config.signal` (undeclared spelling) as its declared counterpart', async () => {
+    registerWaitNode(engine, ctxNoJob());
+    engine.registerFlow('wait_flow', looseWaitFlow({ eventType: 'signal', signal: 'contract.renewed' }));
+
+    const paused = await engine.execute('wait_flow');
+    expect(paused.status).toBe('paused');
+    expect(engine.listSuspendedRuns()[0]).toMatchObject({ nodeId: 'pause', correlation: 'contract.renewed' });
+
+    const resumed = await engine.resume(paused.runId!);
+    expect(resumed.success).toBe(true);
+    expect(ran).toEqual(['after']);
+  });
+
+  // Unlike the two above, this one passes with the conversion unregistered too —
+  // it pins the EXECUTOR's side of the precedence (a declared value is what gets
+  // read), not the conversion's. Kept because that is the half a future
+  // "simplification" of the lift could silently invert.
+  it('reads the declared value, not its loose counterpart, when both are present', async () => {
+    const { ctx, scheduled } = fakeJobCtx();
+    registerWaitNode(engine, ctx);
+    engine.registerFlow('wait_flow', {
+      ...waitFlow({ eventType: 'timer' }),
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        {
+          id: 'pause',
+          type: 'wait',
+          label: 'Wait',
+          waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' },
+          config: { duration: 'PT9H' },
+        },
+        { id: 'after', type: 'mark', label: 'After' },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+    });
+
+    const before = Date.now();
+    await engine.execute('wait_flow');
+    // 1h (declared) — not 9h (loose). Same precedence the deleted `??` had.
+    const at = new Date(scheduled[0].schedule.at!).getTime();
+    expect(at).toBeLessThanOrEqual(before + 3_600_000 + 1000);
+  });
+});
+
 describe('rearmSuspendedWaitTimers (cold-boot timer re-arm)', () => {
   /** Boot a fresh engine wired to `store` with the wait flow registered — one "process". */
   function bootEngine(store: InMemorySuspendedRunStore, ctx: any, waitConfig: Record<string, unknown>) {

@@ -380,6 +380,17 @@ const step17: MigrationStep = {
     'warning, and `FlowNodeSchema.config` is an unconstrained record, so no schema ' +
     'tombstone can reject them — the conversion layer is the only seam that can ' +
     'declare, convert, and retire them.\n\n' +
+    'The same graduation covers `wait`, whose fallback was not a config-to-config ' +
+    'rename (#4045). `wait` keeps its contract in the declared `waitEventConfig` ' +
+    'block, not in `config` at all — yet the executor also read six loose `config` ' +
+    'keys, two of them (`duration`, `signal`) spellings the spec never declared. ' +
+    'The conversion lifts them onto the declared block in the executor\'s own `??` ' +
+    'precedence, so a value already declared wins and its loose counterpart is left ' +
+    'shadowed. One wrinkle makes this a rewrite rather than a delete: ' +
+    '`waitEventConfig.eventType` is required once the block exists, and the loader ' +
+    'parses the CONVERTED flow — so a source carrying only `config: { duration }` ' +
+    'is stamped with `eventType: \'timer\'`, the exact default the executor applied ' +
+    'to that shape. Behaviour-preserving in both directions.\n\n' +
     'And it removes the RLS-policy key `priority` (#3896 security audit): promised ' +
     '"conflict resolution" that cannot exist, because applicable policies OR-combine ' +
     '(most permissive wins) — there is never a conflict to order, and nothing ever ' +
@@ -439,6 +450,7 @@ const step17: MigrationStep = {
     'sharing-rule-access-level-full-to-edit',
     'flow-node-crud-object-alias',
     'flow-node-notify-config-aliases',
+    'flow-node-wait-event-config-lift',
     'flow-node-script-config-aliases',
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',

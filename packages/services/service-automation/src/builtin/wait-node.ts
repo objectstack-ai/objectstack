@@ -49,18 +49,29 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
       isAsync: true,
     }),
     async execute(node, variables, _context) {
-      // Prefer the spec-structured `waitEventConfig` block; fall back to a loose
-      // `config` for hand-authored flows that put the same keys under config.
-      const loose = (node.config ?? {}) as Record<string, unknown>;
+      // `waitEventConfig` is the whole contract (`FlowNodeSchema`, flow.zod.ts).
+      // The loose `config.*` back door this used to also read — six keys, two of
+      // them (`duration`, `signal`) spellings the spec never declared — graduated
+      // into the ADR-0087 D2 conversion layer as
+      // `flow-node-wait-event-config-lift` (#4045). It is rewritten at load,
+      // including the `registerFlow` rehydration seam, so there is nothing left
+      // to fall back to here (PD #12: no consumer-side fallbacks).
+      //
+      // The `?? 'timer'` below is NOT such a fallback: `waitEventConfig` is
+      // itself optional, and a wait node without one is a valid timer wait.
       const wec = (node.waitEventConfig ?? {}) as Record<string, unknown>;
-      const eventType = String(wec.eventType ?? loose.eventType ?? 'timer');
+      const eventType = String(wec.eventType ?? 'timer');
       const runId = variables.get('$runId');
 
       if (eventType === 'timer') {
+        // `timeoutMs` doubling as a duration is pre-existing behaviour, kept
+        // deliberately — the declared meaning is a timeout guard, and `wait` has
+        // no timeout implementation at all (`onTimeout` has zero readers). That
+        // gap is #4158; changing it here would be a behaviour change riding on a
+        // contract cleanup.
         const durationMs =
-          parseIsoDuration(wec.timerDuration ?? loose.timerDuration ?? loose.duration) ??
-          (typeof wec.timeoutMs === 'number' ? wec.timeoutMs : undefined) ??
-          (typeof loose.timeoutMs === 'number' ? (loose.timeoutMs as number) : undefined);
+          parseIsoDuration(wec.timerDuration) ??
+          (typeof wec.timeoutMs === 'number' ? wec.timeoutMs : undefined);
 
         // Persist the wake deadline as node output: the engine writes output
         // to variables (`<nodeId>.waitUntil`) *before* snapshotting the
@@ -105,7 +116,7 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
 
       // signal / webhook / manual / condition — suspend; an external producer
       // resumes the run when the named event arrives.
-      const signal = String(wec.signalName ?? loose.signalName ?? loose.signal ?? `wait:${node.id}`);
+      const signal = String(wec.signalName ?? `wait:${node.id}`);
       return { success: true, suspend: true, correlation: signal };
     },
   });

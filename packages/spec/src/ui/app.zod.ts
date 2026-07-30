@@ -5,6 +5,7 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { retiredKey } from '../shared/retired-key';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
 
 /**
  * Base Navigation Item Schema
@@ -25,6 +26,128 @@ import { retiredKey } from '../shared/retired-key';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
+
+/*
+ * ── Unknown-key strictness (#4001 app step, PR B) ───────────────────────────
+ *
+ * Every AUTHORING schema in this module is `.strict()`. The app shell is the
+ * densest hand-authored surface on the platform — a navigation tree is where
+ * an author (or AI) is most likely to write a key from memory — so a silent
+ * strip here is the most probable instance of the #3405 trap: the entry
+ * renders, just not the way it was declared.
+ *
+ * The nav-item union is a **discriminated** union on `type`. That is what
+ * makes strict readable: a plain `z.union` of strict members answers one
+ * unknown key with an `invalid_union` aggregate naming every branch's
+ * failure, whereas the discriminated form matches on `type` FIRST and then
+ * reports a single `unrecognized_keys` issue against that branch alone —
+ * with an exact path through nested `children`. A mistyped `type` gets its
+ * own precise "Invalid discriminator value" instead of the same wall.
+ * (`view.zod.ts` and `widget.zod.ts` set the in-repo precedent.)
+ *
+ * Deliberately still OPEN: `PageNavItem.params` / `ComponentNavItem.params`
+ * (React props passed verbatim to a component) and `ActionNavItem.actionDef.
+ * params` (action arguments) — those are per-target payloads whose contract
+ * belongs to the page/component/action, not to the nav item.
+ *
+ * PR A (#4142) is the precondition: the seven audit-dead App keys became
+ * tombstones there, so strictness now guards the real contract rather than
+ * dead surface (ADR-0049 enforce-or-remove).
+ */
+
+/** Keys every nav-item variant shares (drift-guarded by app.test.ts). */
+const BASE_NAV_ITEM_KEYS = [
+  'id', 'label', 'icon', 'order', 'badge', 'badgeVariant', 'visible',
+  'requiredPermissions', 'requiresObject', 'requiresService', 'type',
+] as const;
+
+/**
+ * Semantic near-misses shared by every nav-item variant.
+ *
+ * `visibleWhen` is the load-bearing entry, and the same one #3746 found on
+ * action params: ADR-0089 made `visibleWhen` the canonical predicate on
+ * view/page schemas, so an author who learned it there writes it here — and
+ * before this, borrowing it silently REMOVED the entry's visibility gate,
+ * rendering a nav item that should have been hidden. A capability gate that
+ * fails open is the worst shape of the silent-strip bug.
+ */
+const NAV_ITEM_ALIASES: Readonly<Record<string, string>> = {
+  visiblewhen: 'visible',
+  visibleon: 'visible',
+  visibility: 'visible',
+  hidden: 'visible',
+  title: 'label',
+  name: 'id',
+  sort: 'order',
+  sortorder: 'order',
+  position: 'order',
+  permissions: 'requiredPermissions',
+  requiredpermission: 'requiredPermissions',
+  requiresobjects: 'requiresObject',
+  badgecolor: 'badgeVariant',
+  badgestyle: 'badgeVariant',
+  // Found by this very gate: the platform's own Account app declared
+  // `defaultOpen` on three groups (never a schema key), so all three shipped
+  // COLLAPSED while their author believed they opened by default.
+  defaultopen: 'expanded',
+  open: 'expanded',
+  collapsed: 'expanded',
+  isopen: 'expanded',
+};
+
+/** Per-variant payload keys, for the error map's suggestion pool. */
+const NAV_VARIANT_KEYS: Readonly<Record<string, readonly string[]>> = {
+  object: ['objectName', 'viewName', 'recordId', 'recordMode', 'filters', 'children'],
+  dashboard: ['dashboardName'],
+  page: ['pageName', 'params'],
+  url: ['url', 'target'],
+  report: ['reportName'],
+  action: ['actionDef'],
+  component: ['componentRef', 'params'],
+  group: ['expanded', 'children'],
+  separator: [],
+};
+
+/**
+ * Build the strict error map for one nav-item variant. Each variant gets its
+ * own so the "did you mean" pool is that variant's real key set — suggesting
+ * `dashboardName` on a `url` item would be noise, not help.
+ */
+const navItemUnknownKeyError = (variant: keyof typeof NAV_VARIANT_KEYS) =>
+  strictUnknownKeyError({
+    surface: `this \`${variant}\` navigation item`,
+    knownKeys: [...BASE_NAV_ITEM_KEYS, ...NAV_VARIANT_KEYS[variant]],
+    aliases: {
+      ...NAV_ITEM_ALIASES,
+      // Cross-variant payloads: naming the right key on the wrong `type` is
+      // the commonest nav mistake, so point at the type that owns it.
+      ...(variant !== 'object' ? { objectname: 'type: \'object\' (with objectName)' } : {}),
+      ...(variant !== 'page' ? { pagename: 'type: \'page\' (with pageName)' } : {}),
+      ...(variant !== 'url' ? { url: 'type: \'url\' (with url)' } : {}),
+      ...(variant !== 'dashboard' ? { dashboardname: 'type: \'dashboard\' (with dashboardName)' } : {}),
+      ...(variant !== 'report' ? { reportname: 'type: \'report\' (with reportName)' } : {}),
+      ...(variant !== 'component' ? { componentref: 'type: \'component\' (with componentRef)' } : {}),
+    },
+    guidance: {
+      children:
+        '`children` is only meaningful on a `group` item (or an `object` item nesting its ' +
+        'views). Nest entries under `{ type: \'group\', children: [...] }`.',
+    },
+    history:
+      'Until #4001 these were dropped silently — the entry still parsed, so a mis-spelled ' +
+      'config shipped as a nav item that quietly ignored it (a stripped `visible` renders ' +
+      'an entry that should have been gated).',
+  });
+
+const actionDefUnknownKeyError = strictUnknownKeyError({
+  surface: "this nav item's action definition",
+  knownKeys: ['actionName', 'params'],
+  aliases: { action: 'actionName', name: 'actionName', args: 'params', input: 'params' },
+  history:
+    'Until #4001 these were dropped silently — the definition still parsed, so clicking ' +
+    'the entry dispatched a different action than the author declared.',
+});
+
 const BaseNavItemSchema = z.object({
   /** Unique identifier for the item */
   id: SnakeCaseIdentifierSchema.describe('Unique identifier for this navigation item (lowercase snake_case)'),
@@ -114,7 +237,8 @@ const BaseNavItemSchema = z.object({
  *   objectName: 'ticket', filters: { owner_id: '{current_user_id}', status: 'open' } }
  * ```
  */
-export const ObjectNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
+export const ObjectNavItemSchema = lazySchema(() => z.object({
+  ...BaseNavItemSchema.shape,
   type: z.literal('object'),
   objectName: z.string().describe('Target object name'),
   viewName: z.string().optional().describe('Default list view to open. Defaults to "all". Ignored when `recordId` is set.'),
@@ -153,7 +277,7 @@ export const ObjectNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
   filters: z.record(z.string(), z.string()).optional().describe(
     'URL filter conditions — targets the /:objectName/data bare surface via filter[<field>]=<value> params instead of a saved view. Values support template vars {current_user_id}, {current_org_id}. Mutually exclusive with recordId/viewName.',
   ),
-}));
+}, { error: navItemUnknownKeyError('object') }).strict());
 
 /**
  * Correct-by-construction guard (ADR-0053 philosophy): `filters` combined
@@ -184,51 +308,58 @@ const objectNavTargetExclusivity = (
  * 2. Dashboard Navigation Item
  * Navigates to a specific dashboard.
  */
-export const DashboardNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
+export const DashboardNavItemSchema = lazySchema(() => z.object({
+  ...BaseNavItemSchema.shape,
   type: z.literal('dashboard'),
   dashboardName: z.string().describe('Target dashboard name'),
-}));
+}, { error: navItemUnknownKeyError('dashboard') }).strict());
 
 /**
  * 3. Page Navigation Item
  * Navigates to a custom UI page/component.
  */
-export const PageNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
+export const PageNavItemSchema = lazySchema(() => z.object({
+  ...BaseNavItemSchema.shape,
   type: z.literal('page'),
   pageName: z.string().describe('Target custom page component name'),
+  // OPEN by design: the page owns its own param contract.
   params: z.record(z.string(), z.unknown()).optional().describe('Parameters passed to the page context'),
-}));
+}, { error: navItemUnknownKeyError('page') }).strict());
 
 /**
  * 4. URL Navigation Item
  * Navigates to an external or absolute URL.
  */
-export const UrlNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
+export const UrlNavItemSchema = lazySchema(() => z.object({
+  ...BaseNavItemSchema.shape,
   type: z.literal('url'),
   url: z.string().describe('Target external URL'),
   target: z.enum(['_self', '_blank']).default('_self').describe('Link target window'),
-}));
+}, { error: navItemUnknownKeyError('url') }).strict());
 
 /**
  * 5. Report Navigation Item
  * Navigates to a specific report.
  */
-export const ReportNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
+export const ReportNavItemSchema = lazySchema(() => z.object({
+  ...BaseNavItemSchema.shape,
   type: z.literal('report'),
   reportName: z.string().describe('Target report name'),
-}));
+}, { error: navItemUnknownKeyError('report') }).strict());
 
 /**
  * 6. Action Navigation Item
  * Triggers an action (e.g. opening a flow, running a script, or launching a screen action).
  */
-export const ActionNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
+export const ActionNavItemSchema = lazySchema(() => z.object({
+  ...BaseNavItemSchema.shape,
   type: z.literal('action'),
   actionDef: z.object({
     actionName: z.string().describe('Action machine name to execute'),
+    // OPEN by design: the action owns its own param contract.
     params: z.record(z.string(), z.unknown()).optional().describe('Parameters passed to the action'),
-  }).describe('Action definition to execute when clicked'),
-}));
+  }, { error: actionDefUnknownKeyError }).strict().describe('Action definition to execute when clicked'),
+}, { error: navItemUnknownKeyError('action') }).strict());
 
 /**
  * 7. Component Navigation Item
@@ -249,22 +380,25 @@ export const ActionNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
  *   componentRef: 'metadata:resource', params: { type: 'object' } }
  * ```
  */
-export const ComponentNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
+export const ComponentNavItemSchema = lazySchema(() => z.object({
+  ...BaseNavItemSchema.shape,
   type: z.literal('component'),
   componentRef: z.string().describe('Component registry key (e.g. "metadata:directory")'),
+  // OPEN by design: props are the component's own contract.
   params: z.record(z.string(), z.unknown()).optional().describe('Props passed to the component'),
-}));
+}, { error: navItemUnknownKeyError('component') }).strict());
 
 /**
  * 8. Group Navigation Item
  * A container for child navigation items (Sub-menu).
  * Does not perform navigation itself.
  */
-export const GroupNavItemSchema = lazySchema(() => BaseNavItemSchema.extend({
+export const GroupNavItemSchema = lazySchema(() => z.object({
+  ...BaseNavItemSchema.shape,
   type: z.literal('group'),
   expanded: z.boolean().default(false).describe('Default expansion state in sidebar'),
   // children property is added in the recursive definition below
-}));
+}, { error: navItemUnknownKeyError('group') }).strict());
 
 /**
  * 9. Separator Navigation Item
@@ -276,17 +410,23 @@ const SeparatorNavItemSchema = lazySchema(() => z.object({
   type: z.literal('separator'),
   id: SnakeCaseIdentifierSchema.optional().describe('Optional id for the separator'),
   order: z.number().optional().describe('Sort order within the same level (lower = first)'),
-}));
+}, { error: navItemUnknownKeyError('separator') }).strict());
 
 /**
  * Recursive Union of all navigation item types.
  * Allows constructing an unlimited-depth navigation tree.
  */
 export const NavigationItemSchema: z.ZodType<any> = z.lazy(() =>
-  z.union([
+  // DISCRIMINATED on `type` (#4001 PR B). With `.strict()` members a plain
+  // union would answer one unknown key with an `invalid_union` aggregate
+  // listing all nine branches' failures; discriminating on `type` first means
+  // the author gets a single `unrecognized_keys` issue against the branch they
+  // actually wrote, at an exact path (`navigation.0.children.2`), and a
+  // mistyped `type` gets "Invalid discriminator value" instead of that wall.
+  z.discriminatedUnion('type', [
     ObjectNavItemSchema.extend({
       children: z.array(NavigationItemSchema).optional().describe('Child navigation items (e.g. specific views)'),
-    }).superRefine(objectNavTargetExclusivity),
+    }).strict().superRefine(objectNavTargetExclusivity),
     DashboardNavItemSchema,
     PageNavItemSchema,
     UrlNavItemSchema,
@@ -296,8 +436,11 @@ export const NavigationItemSchema: z.ZodType<any> = z.lazy(() =>
     SeparatorNavItemSchema,
     GroupNavItemSchema.extend({
       children: z.array(NavigationItemSchema).describe('Child navigation items'),
-    })
-  ])
+    }).strict(),
+    // The members are lazySchema Proxies and a superRefine-wrapped variant, so
+    // the array is widened for the discriminator-typed overload; runtime
+    // discrimination works on all of them (asserted in app.test.ts).
+  ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]])
 );
 
 /**
@@ -331,7 +474,16 @@ export const NavigationContributionSchema = lazySchema(() => z.object({
   group: SnakeCaseIdentifierSchema.optional().describe('Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level'),
   priority: z.number().int().min(0).default(200).describe('Merge priority within the target group — lower applied first (matches object extender priority)'),
   items: z.array(NavigationItemSchema).describe('Navigation items contributed into the target app/group'),
-}).describe('A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)'));
+}, {
+  error: strictUnknownKeyError({
+    surface: 'this navigation contribution',
+    knownKeys: ['app', 'group', 'priority', 'items'],
+    aliases: { targetapp: 'app', appname: 'app', targetgroup: 'group', groupid: 'group', order: 'priority', navigation: 'items' },
+    history:
+      'Until #4001 these were dropped silently — the contribution still parsed, so a ' +
+      'package injected its menu into the wrong place, or nowhere.',
+  }),
+}).strict().describe('A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)'));
 export type NavigationContribution = z.infer<typeof NavigationContributionSchema>;
 
 /**
@@ -343,7 +495,16 @@ export const AppBrandingSchema = lazySchema(() => z.object({
   accentColor: z.string().optional().describe('Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit #1878/#1891/#1894).'),
   logo: z.string().optional().describe('Custom logo URL for this app'),
   favicon: z.string().optional().describe('Custom favicon URL for this app'),
-}));
+}, {
+  error: strictUnknownKeyError({
+    surface: "this app's branding block",
+    knownKeys: ['primaryColor', 'accentColor', 'logo', 'favicon'],
+    aliases: { primary: 'primaryColor', accent: 'accentColor', color: 'primaryColor', logourl: 'logo', icon: 'favicon', theme: 'primaryColor' },
+    history:
+      'Until #4001 these were dropped silently — branding still parsed, so a theme the ' +
+      'author set never reached the shell.',
+  }),
+}).strict());
 
 /**
  * Navigation Area Schema
@@ -397,7 +558,16 @@ export const NavigationAreaSchema = lazySchema(() => z.object({
 
   /** Navigation items within this area */
   navigation: z.array(NavigationItemSchema).describe('Navigation items within this area'),
-}));
+}, {
+  error: strictUnknownKeyError({
+    surface: 'this navigation area',
+    knownKeys: ['id', 'label', 'icon', 'order', 'description', 'visible', 'requiredPermissions', 'navigation'],
+    aliases: { visiblewhen: 'visible', visibleon: 'visible', title: 'label', name: 'id', sort: 'order', permissions: 'requiredPermissions', items: 'navigation', children: 'navigation' },
+    history:
+      'Until #4001 these were dropped silently — the area still parsed, so its gating or ' +
+      'ordering was quietly ignored.',
+  }),
+}).strict());
 
 /**
  * App Context Selector Schema
@@ -481,8 +651,26 @@ export const AppContextSelectorSchema = lazySchema(() => z.object({
         .describe('Comparison operator: eq | ne | in | nin'),
       value: z.union([z.string(), z.array(z.string())])
         .describe('Comparison value (string for eq/ne, string[] for in/nin)'),
-    })).optional().describe('Predicates (AND) each option row must satisfy'),
-  }).describe('Option data source'),
+    }, {
+      error: strictUnknownKeyError({
+        surface: 'this context-selector option filter',
+        knownKeys: ['key', 'op', 'value'],
+        aliases: { field: 'key', path: 'key', operator: 'op', values: 'value' },
+        history:
+          'Until #4001 these were dropped silently — the predicate still parsed, so the ' +
+          'option list was not narrowed the way the author declared.',
+      }),
+    }).strict()).optional().describe('Predicates (AND) each option row must satisfy'),
+  }, {
+    error: strictUnknownKeyError({
+      surface: "this context selector's options source",
+      knownKeys: ['endpoint', 'valueKey', 'labelKey', 'filter'],
+      aliases: { url: 'endpoint', path: 'endpoint', value: 'valueKey', label: 'labelKey', filters: 'filter', where: 'filter' },
+      history:
+        'Until #4001 these were dropped silently — the source still parsed, so the ' +
+        'dropdown resolved its options from a different shape than declared.',
+    }),
+  }).strict().describe('Option data source'),
 
   /** Whether to prepend an "All" option that clears the scope. */
   includeAll: z.boolean().default(true).describe('Prepend an "All" option that clears the scope'),
@@ -497,7 +685,16 @@ export const AppContextSelectorSchema = lazySchema(() => z.object({
   /** Where the dropdown is rendered. */
   placement: z.enum(['sidebar_header', 'topbar']).default('sidebar_header')
     .describe('Render location in the app chrome'),
-}));
+}, {
+  error: strictUnknownKeyError({
+    surface: 'this app context selector',
+    knownKeys: ['id', 'label', 'icon', 'optionsSource', 'includeAll', 'allValue', 'persist', 'placement'],
+    aliases: { name: 'id', title: 'label', source: 'optionsSource', options: 'optionsSource', showall: 'includeAll', location: 'placement' },
+    history:
+      'Until #4001 these were dropped silently — the selector still parsed, so its scope ' +
+      'variable behaved differently than declared.',
+  }),
+}).strict());
 
 export type AppContextSelector = z.infer<typeof AppContextSelectorSchema>;
 
@@ -542,6 +739,59 @@ export type AppContextSelector = z.infer<typeof AppContextSelectorSchema>;
  *   ]
  * }
  */
+/** Keys {@link AppSchema} declares (drift-guarded by app.test.ts). */
+const APP_KEYS = [
+  'name', 'label', 'description', 'icon', 'branding', 'active', 'isDefault',
+  'hidden', 'navigation', 'areas', 'contextSelectors', 'homePageId',
+  'requiredPermissions', 'defaultAgent', 'protection',
+  // ADR-0010 runtime protection envelope (MetadataProtectionFields spread).
+  '_lock', '_lockReason', '_lockSource', '_provenance', '_packageId',
+  '_packageVersion', '_lockDocsUrl',
+  // Tombstoned in PR A (#4142) — declared so the prescription, not a bare
+  // "unrecognized key", is what an upgrading author sees.
+  'version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation',
+] as const;
+
+const appUnknownKeyError = strictUnknownKeyError({
+  surface: 'this app',
+  knownKeys: APP_KEYS,
+  aliases: {
+    title: 'label',
+    nav: 'navigation',
+    menu: 'navigation',
+    menus: 'navigation',
+    items: 'navigation',
+    sidebar: 'navigation',
+    tabs: 'navigation',
+    sections: 'areas',
+    groups: 'areas',
+    permissions: 'requiredPermissions',
+    home: 'homePageId',
+    homepage: 'homePageId',
+    landingpage: 'homePageId',
+    agent: 'defaultAgent',
+    logo: 'branding',
+    theme: 'branding',
+    enabled: 'active',
+    default: 'isDefault',
+    selectors: 'contextSelectors',
+  },
+  guidance: {
+    pages:
+      '`pages` is not an App field — a page is its own metadata record; reference it from ' +
+      "navigation with `{ type: 'page', pageName: '<name>' }`.",
+    views:
+      '`views` is not an App field — views belong to their object (`listViews`); reference ' +
+      "one from navigation with `{ type: 'object', objectName, viewName }`.",
+    flows:
+      '`flows` is not an App field — flows are top-level stack metadata ' +
+      '(`defineStack({ flows })`), not app-scoped.',
+  },
+  history:
+    'Until #4001 these were dropped silently — the app still parsed, so navigation or ' +
+    'gating the author declared never reached the shell.',
+});
+
 export const AppSchema = lazySchema(() => z.object({
   /** Machine name (id) */
   name: SnakeCaseIdentifierSchema.describe('App unique machine name (lowercase snake_case)'),
@@ -740,7 +990,7 @@ export const AppSchema = lazySchema(() => z.object({
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
-}));
+}, { error: appUnknownKeyError }).strict());
 
 /**
  * App Factory Helper
