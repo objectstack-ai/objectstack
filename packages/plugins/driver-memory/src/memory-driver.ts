@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
+import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
@@ -760,7 +761,12 @@ export class InMemoryDriver implements IDataDriver {
    * Convert a single ObjectQL condition to MongoDB operator format.
    */
   private convertConditionToMongo(field: string, operator: string, value: any): Record<string, any> | null {
-    switch (operator) {
+    // Fold every accepted spelling of one comparison onto a single infix form,
+    // so this switch has one case per comparison rather than one per spelling —
+    // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
+    // `after` for the same thing. A private alias list here is what let this
+    // driver and driver-sql accept different vocabularies. #3948.
+    switch (canonicalAstOperator(operator)) {
       case '=': case '==':
         return { [field]: value };
       case '!=': case '<>':

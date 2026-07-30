@@ -549,6 +549,7 @@
     "WindowFunctionNodeSchema (const)",
     "WindowSpec (type)",
     "WindowSpecSchema (const)",
+    "canonicalAstOperator (function)",
     "canonicalizeSqlType (function)",
     "classifyFilterToken (function)",
     "countAuthorableFields (function)",

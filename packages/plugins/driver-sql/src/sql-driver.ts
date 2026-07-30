@@ -10,6 +10,7 @@
 import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, isGlobalUnique, isUniqueDeclared, type AutonumberToken } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
@@ -4766,7 +4767,12 @@ export class SqlDriver implements IDataDriver {
     const where = join === 'or' ? 'orWhere' : 'where';
     const whereNull = join === 'or' ? 'orWhereNull' : 'whereNull';
     const whereNotNull = join === 'or' ? 'orWhereNotNull' : 'whereNotNull';
-    const opLower = String(op).toLowerCase();
+    // Fold every accepted spelling of one comparison onto a single infix form so
+    // the switch below has one case per comparison rather than one per spelling.
+    // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
+    // `after` for the same thing; growing a private alias list here is how this
+    // driver and driver-memory drifted apart. #3948.
+    const opLower = canonicalAstOperator(String(op));
 
     // Value comparisons on a mixed-storage column read it through the CASE; every
     // other operator (null predicates, the LIKE family, a malformed `between`)
