@@ -6,6 +6,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
+import { runActionGovernanceInventory } from './action-governance.js';
 
 export type { Plugin, PluginContext };
 
@@ -334,6 +335,13 @@ export class ObjectQLPlugin implements Plugin {
     ctx.hook('kernel:ready', async () => {
         await this.resyncAuthoredHooks(ctx);
         await this.resyncAuthoredActions(ctx);
+        // [ADR-0110 D5] Governance inventory — AFTER the authored-action
+        // re-sync, so the registry it audits is final for this boot. It lived
+        // in AppPlugin first, which is registered conditionally; on the `os
+        // dev` path it never ran, so the checklist that justifies D3's hard
+        // refusal was never printed where an upgrade most needs it. The
+        // engine owns the map being audited; the engine plugin reports on it.
+        await this.runGovernanceInventory(ctx);
         // ADR-0057 P4: surface the lifecycle governance namespace in Settings
         // (overrides / quotas / growth alerts) when a SettingsService exists.
         try {
@@ -376,6 +384,12 @@ export class ObjectQLPlugin implements Plugin {
             });
             await this.reloadSchemaSync;
         }
+        // [ADR-0110 D5] Re-run the inventory after a live metadata reload —
+        // a Studio edit can orphan a handler (declaration deleted) or bind
+        // one (declaration added), and a boot-only snapshot goes stale the
+        // moment either happens. Fingerprint-suppressed: a reload that
+        // changed nothing action-related logs nothing.
+        await this.runGovernanceInventory(ctx);
     });
 
     // Discover features from Kernel Services
@@ -1457,6 +1471,47 @@ export class ObjectQLPlugin implements Plugin {
    * must not finish out of order and leave the older snapshot registered.
    */
   private authoredActionResyncChain: Promise<void> = Promise.resolve();
+
+  /**
+   * [ADR-0110 D5] Fingerprint of the last governance report, so a
+   * `metadata:reloaded` that changed nothing action-related does not repeat
+   * the same warning verbatim.
+   */
+  private lastGovernanceFingerprint = '';
+
+  /**
+   * [ADR-0110 D5] Audit the engine's action-handler registry against the
+   * declarations it can dispatch for, and warn about the orphans on both
+   * sides. Runs at `kernel:ready` (after {@link resyncAuthoredActions}, so
+   * the registry is final for the boot) and again on `metadata:reloaded`.
+   *
+   * This is the checklist that makes D3's hard refusal a migration step
+   * instead of a mystery: every handler listed here answers 404 at dispatch,
+   * and the message says which `defineAction` fixes it. It lives on the
+   * ENGINE plugin deliberately — AppPlugin hosted it first and is registered
+   * conditionally, so the platform's own `os dev` path never printed it.
+   *
+   * Warn-only, exception-proof (the runner swallows its own failures): a
+   * diagnostic must never be the reason a kernel fails to boot.
+   */
+  private async runGovernanceInventory(ctx: PluginContext): Promise<void> {
+    const ql: any = this.ql;
+    if (!ql || typeof ql.listRegisteredActions !== 'function') return;
+    let loadStandaloneActions: (() => Promise<any[]>) | undefined;
+    try {
+      const meta: any = ctx.getService('metadata');
+      if (meta && typeof meta.loadMany === 'function') {
+        loadStandaloneActions = () => meta.loadMany('action');
+      }
+    } catch { /* no metadata service — registry objects still audit */ }
+    this.lastGovernanceFingerprint = await runActionGovernanceInventory({
+      registered: ql.listRegisteredActions(),
+      objects: (() => { try { return ql.registry?.getAllObjects?.() ?? []; } catch { return []; } })(),
+      loadStandaloneActions,
+      logger: ctx.logger,
+      lastFingerprint: this.lastGovernanceFingerprint,
+    });
+  }
 
   /**
    * (Re-)register runtime-authored actions on the engine (#2605 item 1 —

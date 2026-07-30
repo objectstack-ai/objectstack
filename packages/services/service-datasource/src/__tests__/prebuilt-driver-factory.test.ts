@@ -112,6 +112,80 @@ describe('createPrebuiltDriverFactory — through DatasourceConnectionService (t
     expect(driver.calls).toContain('connect');
   });
 
+  it("stamps the handle 'host'-owned, and kernel teardown leaves the adopted pool alone (#3993)", async () => {
+    // The cloud constraint: the adopted instance's pool outlives this kernel
+    // (proxy base / registry cache). disconnect() must clear the retained
+    // verdict WITHOUT closing the pool.
+    const driver = stubDriver('turso');
+    const factory = createPrebuiltDriverFactory(driver, { driverId: 'turso' });
+    const handle: any = await factory.create({ driver: 'turso', config: {} });
+    expect(handle.ownership).toBe('host');
+
+    const { svc } = service(factory);
+    const result = await svc.connect(
+      { name: 'default', driver: 'turso', config: {}, origin: 'code', bootCritical: true },
+      { asDefault: true, context: { origin: 'code', trigger: 'declared-auto' } },
+    );
+    expect(result.ownership).toBe('host');
+    expect(svc.getConnectionState('default')?.ownership).toBe('host');
+
+    await svc.disconnect('default', { asDefault: true });
+    expect(driver.calls).not.toContain('disconnect'); // the pool belongs to the host
+    expect(svc.getConnectionState('default')).toBeUndefined(); // the verdict is gone
+  });
+
+  it('a FACTORY-built default IS disconnected at teardown — natural-name resolution via asDefault (#3993)', async () => {
+    // Without ownership the instance was built for this connect: teardown may
+    // close it. `asDefault` must resolve the driver under its natural name —
+    // `getDriverByName('default')` can never find it (#3826).
+    const driver = stubDriver('sql');
+    const factoryBuilt = {
+      supports: () => true,
+      create: () => ({
+        connect: async () => { await driver.connect(); },
+        disconnect: async () => { await driver.disconnect(); },
+        driver,
+      }),
+    };
+    const { svc } = service(factoryBuilt as any);
+    await svc.connect(
+      { name: 'default', driver: 'sqlite', config: {}, origin: 'code', bootCritical: true },
+      { asDefault: true, context: { origin: 'code', trigger: 'declared-auto' } },
+    );
+    await svc.disconnect('default', { asDefault: true });
+    expect(driver.calls).toContain('disconnect');
+    expect(svc.getConnectionState('default')).toBeUndefined();
+  });
+
+  it("disconnectAll() closes only what THIS service opened — 'connected' states, never 'already-registered' (#3993)", async () => {
+    const opened = stubDriver('sql');
+    const factoryBuilt = {
+      supports: () => true,
+      create: () => ({ disconnect: async () => { await opened.disconnect(); }, driver: opened }),
+    };
+    const { svc, drivers } = service(factoryBuilt as any);
+    // A driver someone ELSE registered (the D8 onEnable escape hatch): the
+    // idempotency guard records `already-registered` — not ours to close.
+    const foreign = stubDriver('warehouse');
+    drivers.set('warehouse', foreign);
+    const pre = await svc.connect(
+      { name: 'warehouse', driver: 'sqlite', config: {}, autoConnect: true },
+      { context: { origin: 'code', trigger: 'declared-auto' } },
+    );
+    expect(pre.status).toBe('already-registered');
+    // A pool this service opened.
+    await svc.connect(
+      { name: 'analytics', driver: 'sqlite', config: {}, autoConnect: true },
+      { context: { origin: 'code', trigger: 'declared-auto' } },
+    );
+
+    await svc.disconnectAll();
+    expect(opened.calls).toContain('disconnect');
+    expect(foreign.calls).not.toContain('disconnect');
+    expect(svc.getConnectionState('analytics')).toBeUndefined();
+    expect(svc.getConnectionState('warehouse')).toBeDefined(); // untouched
+  });
+
   it('a failing adopted instance takes the SAME bootCritical fail-fast verdict', async () => {
     const driver = stubDriver('turso', { failConnect: true });
     const { svc } = service(createPrebuiltDriverFactory(driver, { driverId: 'turso' }));

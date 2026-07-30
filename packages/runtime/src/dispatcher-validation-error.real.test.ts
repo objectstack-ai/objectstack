@@ -20,7 +20,7 @@
  * are the tests that fail if the contract moves.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ValidationError } from '@objectstack/objectql';
 
 import { HttpDispatcher } from './http-dispatcher.js';
@@ -100,7 +100,9 @@ async function analyticsQuery(thrown: unknown) {
         header() { return res; },
         json(b: any) { res.body = b; return res; },
     };
-    await handlers['POST /api/v1/analytics/query']({ body: { cube: 'x', query: {} }, query: {} }, res);
+    // [#3878] Body must pass entry validation so the SERVICE's thrown error —
+    // the thing under test — is what reaches the exit, not an entry 400.
+    await handlers['POST /api/v1/analytics/query']({ body: { cube: 'x', measures: ['count'] }, query: {} }, res);
     return res;
 }
 
@@ -136,5 +138,60 @@ describe('#3918 — both exits serve the real ValidationError as 400 + fields[]'
 
         expect(res.status).toBe(400);
         expect(res.body.error.details.fields).toEqual([]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+
+/** [#3878] Post `body` through the real route handler; the service never throws. */
+async function postAnalyticsBody(body: unknown) {
+    const handlers: Record<string, (req: any, res: any) => any> = {};
+    const rec = (verb: string) => (path: string, h: any) => { handlers[`${verb} ${path}`] = h; };
+    const server = {
+        get: rec('GET'), post: rec('POST'), put: rec('PUT'),
+        delete: rec('DELETE'), patch: rec('PATCH'),
+    };
+    const query = vi.fn(async () => ({ rows: [] }));
+    const analytics = { query, getMeta: async () => ({ cubes: [] }), generateSql: async () => ({ sql: null }) };
+    const kernel = {
+        getService: (n: string) => (n === 'analytics' ? analytics : undefined),
+        getServiceAsync: async (n: string) => (n === 'analytics' ? analytics : undefined),
+    };
+    const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+    await plugin.start?.({
+        getKernel: () => kernel,
+        getService: (n: string) => (n === 'http.server' ? server : undefined),
+        environmentId: undefined,
+        logger: { info() {}, warn() {}, error() {}, debug() {} },
+        hook: () => {}, on: () => {},
+    } as any);
+
+    const res: any = {
+        statusCode: undefined, body: undefined,
+        status(c: number) { res.statusCode = c; return res; },
+        header() { return res; },
+        json(b: any) { res.body = b; return res; },
+    };
+    await handlers['POST /api/v1/analytics/query']({ body, query: {} }, res);
+    return { res, query };
+}
+
+describe('#3878 — entry validation reaches the wire as a 400, service untouched', () => {
+    it('the retired envelope answers 400 with the tombstone prescription', async () => {
+        const { res, query } = await postAnalyticsBody({ cube: 'x', query: { measures: ['count'] } });
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(res.body.error.message).toContain('top level');
+        expect(query).not.toHaveBeenCalled();
+        // A caller mistake, not a server fault: the reporter side-channel stays clear.
+        expect(res.__obsRecordedError).toBeUndefined();
+    });
+
+    it('a valid bare body passes through and answers 200', async () => {
+        const { res, query } = await postAnalyticsBody({ cube: 'x', measures: ['count'] });
+
+        expect(res.statusCode).toBe(200);
+        expect(query).toHaveBeenCalledOnce();
     });
 });

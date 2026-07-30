@@ -194,6 +194,37 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
   }, BOOT_TIMEOUT);
 
+  it('kernel teardown disconnects an OWNED (factory-built) default through the one service (#3993)', async () => {
+    const kernel = await assemble({});
+    await kernel.bootstrap();
+    const engine = kernel.getService<any>('data');
+    const drv = engine.getDriverByName(engine.getDefaultDriverName());
+    let disconnects = 0;
+    const orig = drv.disconnect?.bind(drv);
+    drv.disconnect = async () => { disconnects += 1; return orig?.(); };
+    await (kernel as any).shutdown();
+    expect(disconnects).toBeGreaterThan(0);
+  }, BOOT_TIMEOUT);
+
+  it('kernel teardown NEVER closes an ADOPTED (host-owned) default — the pool outlives the kernel (#3993)', async () => {
+    // The cloud shape: the instance is shared beyond this kernel (proxy base /
+    // registry cache). An LRU eviction shutting the kernel down must not pull
+    // the pool from under every other consumer.
+    const { createPrebuiltDriverFactory } = await import('@objectstack/service-datasource');
+    const { InMemoryDriver } = await import('@objectstack/driver-memory');
+    const hostBuilt = new InMemoryDriver() as any;
+    let disconnects = 0;
+    const orig = hostBuilt.disconnect?.bind(hostBuilt);
+    hostBuilt.disconnect = async () => { disconnects += 1; return orig?.(); };
+    const kernel = await assemble({
+      driver: 'turso',
+      factory: createPrebuiltDriverFactory(hostBuilt, { driverId: 'turso' }),
+    });
+    await kernel.bootstrap();
+    await (kernel as any).shutdown();
+    expect(disconnects).toBe(0);
+  }, BOOT_TIMEOUT);
+
   it("rejects an app bundle that declares a datasource named 'default' (host-reserved name)", async () => {
     const kernel = await assemble({
       bundle: {

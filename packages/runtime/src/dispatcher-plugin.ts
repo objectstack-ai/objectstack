@@ -1053,6 +1053,30 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // `req.params` and is picked up by `prepareResolverHints`, exactly as
             // the automation routes handle it.
             const registerActionRoutes = (base: string) => {
+                // [#3913 follow-up] The OBJECT-LESS shape, with the object
+                // segment left empty: `POST /actions//:action`. This is the URL
+                // an SDK that has no object to name emits, and it is the exact
+                // one #3913 was filed against. `handleActionsRequest` has
+                // routed it at the canonical `'global'` key since #3913 — but
+                // ONLY when something delivers the path, and nothing did:
+                // `:object` does not match an empty segment, so the request
+                // fell through to Hono's `notFound` and answered a bare
+                // `{error: 'Not found'}` without the domain ever running. The
+                // unit tests call `handleActions()` / `dispatch()` directly,
+                // which is precisely why they could not catch this — found by
+                // dogfooding the real HTTP surface.
+                //
+                // Registered FIRST and with the empty segment spelled out.
+                // Hono matches the literal `//` and does not let this shadow
+                // the two-segment route below (verified against the router).
+                server!.post(`${base}/actions//:action`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', `/actions//${req.params.action}`, req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
                 server!.post(`${base}/actions/:object/:action`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}`, req.body, req.query, { request: req });

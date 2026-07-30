@@ -239,7 +239,9 @@ async function postAnalyticsQuery(err: unknown) {
     expect(handler, 'POST /api/v1/analytics/query must be mounted').toBeTypeOf('function');
 
     const res = makeRes();
-    await handler({ body: { cube: 'x', query: {} }, query: {} }, res);
+    // [#3878] Body must pass entry validation so the SERVICE's thrown error —
+    // the thing under test — is what reaches the exit, not an entry 400.
+    await handler({ body: { cube: 'x', measures: ['count'] }, query: {} }, res);
     return res;
 }
 

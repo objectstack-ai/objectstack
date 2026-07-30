@@ -10,12 +10,7 @@ import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IMetadataService, II18nService } from '@objectstack/spec/contracts';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
-import {
-    GLOBAL_ACTION_OBJECT_KEY,
-    collectActionDeclarations,
-    reconcileActionRegistrations,
-    type ActionExecutionDeps,
-} from './action-execution.js';
+import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
 import { countServerTiming } from '@objectstack/observability';
 
 /**
@@ -690,64 +685,13 @@ export class AppPlugin implements Plugin {
             });
         }
 
-        // ── [ADR-0110 D5] Action governance inventory ────────────────────
-        // Reconcile the handler registry against the declarations, on
-        // `kernel:ready` so imperative `engine.registerAction(...)` calls in
-        // user code (which run after this bind) are counted.
-        //
-        // Since D3 an undeclared handler is REFUSED at dispatch. A hard
-        // failure with no inventory is a support ticket; with one it is a
-        // checklist, so this list is the whole point of shipping the refusal
-        // and the inventory in the same release. Best-effort and warn-only —
-        // a diagnostic must never be the reason a kernel fails to boot.
-        // A host whose context predates `hook` (or a partial test double) must
-        // not lose its kernel to a DIAGNOSTIC — the guard keeps this block's
-        // own promise, which registering unconditionally did not.
-        ctx.hook?.('kernel:ready', async () => {
-            try {
-                const engine: any = ctx.getService('objectql');
-                if (!engine || typeof engine.listRegisteredActions !== 'function') return;
-                let meta: any;
-                try { meta = ctx.getService('metadata'); } catch { /* optional */ }
-                // The reconciliation reads no services of its own — it is pure
-                // over the two lists — so a thin deps shim is enough here.
-                const actionDeps: ActionExecutionDeps = {
-                    resolveService: (name: string) => { try { return ctx.getService(name); } catch { return undefined; } },
-                    getObjectQL: async () => engine,
-                };
-                const declarations = await collectActionDeclarations(actionDeps, meta);
-                const { undeclaredHandlers, unboundDeclarations } = reconcileActionRegistrations(
-                    actionDeps, engine.listRegisteredActions(), declarations,
-                );
-                if (undeclaredHandlers.length > 0) {
-                    ctx.logger.warn(
-                        '[action-governance] registered handlers with NO declaration — these are REFUSED ' +
-                        'at dispatch (ADR-0110 D3) and there is no opt-out; declare each one with ' +
-                        '`defineAction`, or drop the registration if nothing should invoke it over HTTP',
-                        {
-                            appId,
-                            count: undeclaredHandlers.length,
-                            handlers: undeclaredHandlers.map((h) => `${h.objectName}:${h.actionName}`),
-                        },
-                    );
-                }
-                if (unboundDeclarations.length > 0) {
-                    ctx.logger.warn(
-                        '[action-governance] declared script actions with NO handler — a button wired to ' +
-                        'nothing (ADR-0078); add a `body`, or register a handler under the declared `target`',
-                        {
-                            appId,
-                            count: unboundDeclarations.length,
-                            actions: unboundDeclarations.map((d) => `${d.objectName}:${d.actionName}`),
-                        },
-                    );
-                }
-            } catch (err: any) {
-                ctx.logger.debug('[action-governance] inventory skipped', {
-                    appId, error: err?.message ?? String(err),
-                });
-            }
-        });
+        // [ADR-0110 D5] The action-governance inventory used to hang off a
+        // `kernel:ready` hook HERE. Moved to ObjectQLPlugin: AppPlugin is
+        // registered conditionally (serve.ts skips it when the host wraps
+        // itself; the `os dev` fast path loads apps without it), so on the
+        // platform's own dev loop the inventory never ran — and the engine
+        // plugin owns the very registry being audited, is unconditionally
+        // present, and re-runs the audit on `metadata:reloaded`.
 
         // ── Auto-register declarative Background Jobs ────────────────────
         // Jobs declared via `defineStack({ jobs })` are scheduled against the

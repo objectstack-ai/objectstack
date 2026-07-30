@@ -56,7 +56,7 @@ describe('settings-routes', () => {
     const h = http.routes.get('GET /api/settings')!;
     const { req, res, state } = makeReqRes();
     await h(req, res);
-    expect(state.body.manifests.length).toBe(1);
+    expect(state.body.data.manifests.length).toBe(1);
   });
 
   it('GET /api/settings/:ns → payload', async () => {
@@ -68,8 +68,8 @@ describe('settings-routes', () => {
     const h = http.routes.get('GET /api/settings/:namespace')!;
     const { req, res, state } = makeReqRes({ params: { namespace: 'branding' } });
     await h(req, res);
-    expect(state.body.manifest.namespace).toBe('branding');
-    expect(state.body.values.workspace_name.source).toBe('default');
+    expect(state.body.data.manifest.namespace).toBe('branding');
+    expect(state.body.data.values.workspace_name.source).toBe('default');
   });
 
   it('PUT returns 409 for env-locked', async () => {
@@ -105,8 +105,8 @@ describe('settings-routes', () => {
     const { req, res, state } = makeReqRes({ params: { namespace: 'branding' }, body: { values: { workspace_name: 'My Co' } } });
     await h(req, res);
     expect(state.body.error).toBeUndefined();
-    expect(state.body.values.workspace_name.value).toBe('My Co');
-    expect(state.body.values.workspace_name.source).toBe('tenant');
+    expect(state.body.data.values.workspace_name.value).toBe('My Co');
+    expect(state.body.data.values.workspace_name.source).toBe('tenant');
   });
 
   it('PUT accepts the read-shape envelope echoed back from GET', async () => {
@@ -123,7 +123,7 @@ describe('settings-routes', () => {
     });
     await h(req, res);
     expect(state.body.error).toBeUndefined();
-    expect(state.body.values.workspace_name.value).toBe('Echoed');
+    expect(state.body.data.values.workspace_name.value).toBe('Echoed');
   });
 
   it('POST action invokes service.runAction', async () => {
@@ -137,7 +137,7 @@ describe('settings-routes', () => {
     const { req, res, state } = makeReqRes({ params: { namespace: 'branding', actionId: 'ping' }, body: null });
     await h(req, res);
     expect(state.status).toBe(200);
-    expect(state.body.ok).toBe(true);
+    expect(state.body.data.ok).toBe(true);
   });
 
   // ── [Finding-1] the DEFAULT (no verified provider) is SECURE ──────────────
@@ -152,7 +152,7 @@ describe('settings-routes', () => {
     const h = http.routes.get('GET /api/settings')!;
     const { req, res, state } = makeReqRes();
     await h(req, res);
-    expect(state.body.manifests.length).toBe(0);
+    expect(state.body.data.manifests.length).toBe(0);
   });
 
   it('anonymous GET /api/settings/:ns is DENIED (403), not served', async () => {
@@ -206,7 +206,7 @@ describe('settings-routes', () => {
     const read = http.routes.get('GET /api/settings/:namespace')!;
     const r1 = makeReqRes({ params: { namespace: 'branding' } });
     await read(r1.req, r1.res);
-    expect(r1.state.body.manifest.namespace).toBe('branding');
+    expect(r1.state.body.data.manifest.namespace).toBe('branding');
 
     const write = http.routes.get('PUT /api/settings/:namespace')!;
     const r2 = makeReqRes({ params: { namespace: 'branding' }, body: { workspace_name: 'X' } });

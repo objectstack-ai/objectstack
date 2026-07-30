@@ -18,10 +18,22 @@
  *   2. the module source is scanned so a NEW route cannot quietly reintroduce
  *      the bare shape. Without (2) this suite only ever covers the branches
  *      that existed the day it was written.
+ *
+ * The STATIC half — proving no route can bypass the `sendOk` / `sendError` pair
+ * — used to be an open-coded regex block right here. #3843 lifted it out to
+ * `scripts/check-route-envelope.mjs` (`pnpm check:route-envelope`), which audits
+ * EVERY route module in the repo rather than this one package.
+ *
+ * That move mattered more than deduplication. A per-package scan structurally
+ * cannot notice a module nobody thought to convert, and going repo-wide found two
+ * immediately (#3973, #3983). It also dropped the regex: the old block stripped
+ * comments with `String.replace`, which ate `//` inside string literals and
+ * truncated the rest of that line — response writes included — and counted
+ * `c.req.json()` (a request READ) as an unenveloped response. The AST has neither
+ * bug.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -288,22 +300,4 @@ describe('storage error envelope (#3675)', () => {
       expect(body.code).toBeUndefined();
     });
   }
-
-  it('routes every error through `sendError` — no route may reintroduce the bare shape', () => {
-    // Comments stripped first: this file's own prose quotes both the old and
-    // the new shape, and a doc comment is not a code path.
-    const source = readFileSync(new URL('./storage-routes.ts', import.meta.url), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '');
-
-    // `res.status(…).json({ error…` was the bare-shape idiom. Any reappearance
-    // means a new route bypassed the helper.
-    const bare = [...source.matchAll(/res\s*\.\s*status\([^)]*\)\s*\.\s*json\(\s*\{\s*error/g)];
-    expect(bare, `bare error bodies found: ${bare.map((m) => m[0]).join(', ')}`).toHaveLength(0);
-
-    // And the helper is the only place that builds one, so the shape lives in
-    // exactly one line of this package.
-    const builders = [...source.matchAll(/success:\s*false/g)];
-    expect(builders).toHaveLength(1);
-  });
 });

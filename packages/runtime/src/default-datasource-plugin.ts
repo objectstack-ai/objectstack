@@ -98,6 +98,8 @@ export class DefaultDatasourcePlugin implements Plugin {
   private readonly def: DefaultDatasourceDefinition;
   private readonly dev?: boolean;
   private readonly factory?: IDatasourceDriverFactory;
+  /** The init()-time local connection service — held for destroy()'s teardown. */
+  private connection?: DatasourceConnectionService;
 
   constructor(def: DefaultDatasourceDefinition, opts: DefaultDatasourcePluginOptions = {}) {
     this.def = def;
@@ -131,6 +133,7 @@ export class DefaultDatasourcePlugin implements Plugin {
       // packages.
       logger: ctx.logger as unknown as ConstructorParameters<typeof DatasourceConnectionService>[0]['logger'],
     });
+    this.connection = connection;
 
     // Throws on failure (bootCritical ⇒ fail-fast per ADR-0062 D5), aborting
     // bootstrap exactly like the engine-level guard did — same escape hatch,
@@ -243,4 +246,24 @@ export class DefaultDatasourcePlugin implements Plugin {
       ctx.logger.debug('[DefaultDatasourcePlugin] metadata service unavailable — default not listed', { error: e });
     }
   }
+
+  /**
+   * Kernel teardown (ADR-0062 D5, #3993): the default disconnects through the
+   * SAME service that connected it — one teardown implementation, mirroring
+   * the one connect implementation. The service resolves the driver the way
+   * the default was registered (natural name via `asDefault`) and honours
+   * ownership: a host-owned ADOPTED instance (`createPrebuiltDriverFactory`,
+   * the cloud compositions — pools shared beyond this kernel) is never
+   * closed here; only the retained verdict is cleared. Note the kernel's
+   * teardown phase is `destroy()` — `stop()` exists nowhere in the Plugin
+   * contract and is never called.
+   */
+  destroy = async () => {
+    try {
+      await this.connection?.disconnect('default', { asDefault: true });
+    } catch {
+      // Teardown is best-effort — the kernel is going away either way, and a
+      // failed disconnect must not mask the real shutdown path.
+    }
+  };
 }
