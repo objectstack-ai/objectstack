@@ -130,7 +130,9 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // not serialized into the artifact — so this is a structural check; the
       // runtime verifies the named function is actually registered.)
       if (node.type === 'script') {
-        // `function` is canonical; `functionName` is an accepted alias.
+        // `function` is canonical; a pre-parse source may still carry the
+        // `functionName` alias during the protocol-17 window, until the
+        // 'flow-node-script-config-aliases' conversion (#3796) canonicalizes it.
         const fn =
           (typeof cfg.function === 'string' ? cfg.function.trim() : '') ||
           (typeof cfg.functionName === 'string' ? cfg.functionName.trim() : '');

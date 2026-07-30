@@ -887,6 +887,231 @@ const sharingRuleAccessLevelFullToEdit: MetadataConversion = {
   },
 };
 
+/** Rename each `[from, to]` config pair on flow nodes of the given types. */
+function renameFlowConfigAliases(
+  stack: Dict,
+  nodeTypes: ReadonlySet<string>,
+  pairs: ReadonlyArray<readonly [string, string]>,
+  emit: Emit,
+): Dict {
+  return mapFlowNodes(stack, (node, path) => {
+    if (typeof node.type !== 'string' || !nodeTypes.has(node.type)) return node;
+    let next = node;
+    for (const [from, to] of pairs) {
+      const renamed = renameConfigKey(next, from, to);
+      if (!renamed) continue;
+      emit({ from, to, path: `${path}.config.${to}` });
+      next = renamed;
+    }
+    return next;
+  });
+}
+
+/**
+ * CRUD flow-node `config.object` → `config.objectName` (protocol 17, #3796).
+ *
+ * The last tenant of the `readAliasedConfig` executor shim
+ * (`service-automation/src/builtin/config-aliases.ts`) graduates into the
+ * conversion layer, completing the PD #12 retirement path that
+ * {@link flowNodeFilterAlias} pioneered: the alias is rewritten to the
+ * canonical key at load — including the `AutomationEngine.registerFlow`
+ * rehydration seam — so the CRUD executors read `cfg.objectName` directly and
+ * the shim is deleted. **Live window**: stored flows authored with `object`
+ * keep loading through this major; retires at 18.
+ */
+const flowNodeCrudObjectAlias: MetadataConversion = {
+  id: 'flow-node-crud-object-alias',
+  toMajor: 17,
+  surface: 'flow.node.config.objectName',
+  summary: "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+  apply(stack, emit) {
+    const crudTypes = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
+    return renameFlowConfigAliases(stack, crudTypes, [['object', 'objectName']], emit);
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'lead_lookup',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'get_record', config: { object: 'lead', recordId: '{leadId}' } },
+            // canonical already present → the shadowed alias is left alone (no notice)
+            { id: 'n3', type: 'create_record', config: { objectName: 'task', object: 'ignored' } },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'lead_lookup',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'get_record', config: { objectName: 'lead', recordId: '{leadId}' } },
+            { id: 'n3', type: 'create_record', config: { objectName: 'task', object: 'ignored' } },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * Notify flow-node config key aliases → canonical (protocol 17, #3796).
+ *
+ * The `notify` executor carried four open-coded `??` fallbacks that never went
+ * through the deprecation shim — an author who wrote the email-idiom keys got
+ * a flow that worked forever and was never steered to the canonical spelling.
+ * All four are pure key renames with unchanged values.
+ *
+ * `actionUrl` is the deliberate canonical of its pair (the executor's own
+ * `configSchema` used to claim the opposite): the entire downstream chain
+ * already uses it — `sys_notification.action_url`, the channel-dispatch
+ * contract, the REST notification read model — and `url` elsewhere in the
+ * platform means "HTTP endpoint to call" (`http` node, webhooks), a different
+ * concept from this in-app click-through target. The executor precedence
+ * already put `actionUrl` first, so the choice is behaviour-preserving.
+ * **Live window**; retires at 18.
+ */
+const flowNodeNotifyConfigAliases: MetadataConversion = {
+  id: 'flow-node-notify-config-aliases',
+  toMajor: 17,
+  surface: 'flow.node.notify.config',
+  summary:
+    "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796)",
+  apply(stack, emit) {
+    return renameFlowConfigAliases(
+      stack,
+      new Set(['notify']),
+      [
+        ['to', 'recipients'],
+        ['subject', 'title'],
+        ['body', 'message'],
+        ['url', 'actionUrl'],
+      ],
+      emit,
+    );
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'task_assigned',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            {
+              id: 'n2',
+              type: 'notify',
+              config: {
+                to: ['{record.assignee}'],
+                subject: 'New task: {record.title}',
+                body: 'You have been assigned "{record.title}".',
+                url: '/task/{record.id}',
+                channels: ['inbox'],
+              },
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'task_assigned',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            {
+              id: 'n2',
+              type: 'notify',
+              config: {
+                recipients: ['{record.assignee}'],
+                title: 'New task: {record.title}',
+                message: 'You have been assigned "{record.title}".',
+                actionUrl: '/task/{record.id}',
+                channels: ['inbox'],
+              },
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * Script flow-node config key aliases → canonical (protocol 17, #3796).
+ *
+ * `function` is the canonical callable reference (#1870); `functionName` was
+ * the AI/template-emitted alias. `inputs` is the canonical input map; the
+ * `input` alias almost certainly leaked from `connector_action`, whose
+ * `connectorConfig.input` (singular) is a *different, canonical* surface and is
+ * deliberately not touched here. Both are pure key renames with unchanged
+ * values. **Live window**; retires at 18.
+ */
+const flowNodeScriptConfigAliases: MetadataConversion = {
+  id: 'flow-node-script-config-aliases',
+  toMajor: 17,
+  surface: 'flow.node.script.config',
+  summary: "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+  apply(stack, emit) {
+    return renameFlowConfigAliases(
+      stack,
+      new Set(['script']),
+      [
+        ['functionName', 'function'],
+        ['input', 'inputs'],
+      ],
+      emit,
+    );
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'score_lead',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            {
+              id: 'n2',
+              type: 'script',
+              config: {
+                actionType: 'invoke_function',
+                functionName: 'score_lead',
+                input: { leadId: '{record.id}' },
+                outputVariable: 'score',
+              },
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'score_lead',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            {
+              id: 'n2',
+              type: 'script',
+              config: {
+                actionType: 'invoke_function',
+                function: 'score_lead',
+                inputs: { leadId: '{record.id}' },
+                outputVariable: 'score',
+              },
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
 /**
  * All conversions, keyed by the protocol major that introduced the canonical
  * shape. Newest majors last; ordering within a major is application order.
@@ -902,6 +1127,9 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     agentKnowledgeTopicsToSources,
     agentToolsToSkills,
     sharingRuleAccessLevelFullToEdit,
+    flowNodeCrudObjectAlias,
+    flowNodeNotifyConfigAliases,
+    flowNodeScriptConfigAliases,
   ],
 };
 

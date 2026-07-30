@@ -97,6 +97,24 @@
         "to": "sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`)",
         "conversionId": "sharing-rule-access-level-full-to-edit",
         "toMajor": 17
+      },
+      {
+        "surface": "flow.node.config.objectName",
+        "to": "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+        "conversionId": "flow-node-crud-object-alias",
+        "toMajor": 17
+      },
+      {
+        "surface": "flow.node.notify.config",
+        "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796)",
+        "conversionId": "flow-node-notify-config-aliases",
+        "toMajor": 17
+      },
+      {
+        "surface": "flow.node.script.config",
+        "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+        "conversionId": "flow-node-script-config-aliases",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -394,6 +412,24 @@
           "surface": "sharingRule.accessLevel",
           "to": "sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`)",
           "conversionId": "sharing-rule-access-level-full-to-edit",
+          "toMajor": 17
+        },
+        {
+          "surface": "flow.node.config.objectName",
+          "to": "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+          "conversionId": "flow-node-crud-object-alias",
+          "toMajor": 17
+        },
+        {
+          "surface": "flow.node.notify.config",
+          "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796)",
+          "conversionId": "flow-node-notify-config-aliases",
+          "toMajor": 17
+        },
+        {
+          "surface": "flow.node.script.config",
+          "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+          "conversionId": "flow-node-script-config-aliases",
           "toMajor": 17
         }
       ],
