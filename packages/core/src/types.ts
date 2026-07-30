@@ -108,8 +108,38 @@ export interface Plugin {
     /**
      * List of other plugin names that this plugin depends on.
      * The kernel ensures these plugins are initialized before this one.
+     * A name that is not registered on the kernel is a boot error.
      */
     dependencies?: string[];
+
+    /**
+     * Soft dependencies — order-if-present (ADR-0116, #4131).
+     * Registered names are hoisted ahead exactly like `dependencies`;
+     * absent names are silently skipped instead of failing the boot.
+     * For plugins that DEGRADE gracefully without the dependency but must
+     * never initialize before it when both are composed (e.g. AppPlugin on
+     * an engine-less metadata-only kernel).
+     */
+    optionalDependencies?: string[];
+
+    /**
+     * Services this plugin resolves SYNCHRONOUSLY during `init()`
+     * (ADR-0116, #4131). The kernel validates the resolved order before
+     * Phase 1 (a required service whose only declared provider initializes
+     * later is a named boot error) and re-checks immediately before this
+     * plugin's init runs. Declare only hard init-time needs — a service the
+     * init merely probes behind a try/catch does not belong here.
+     */
+    requiresServices?: string[];
+
+    /**
+     * Services this plugin's `init()` UNCONDITIONALLY registers
+     * (ADR-0116, #4131). Powers the pre-Phase-1 ordering validation and
+     * lets misordering errors name the provider. Never declare a service
+     * that is registered conditionally (option-gated, environment-gated):
+     * the kernel would blame orderings this plugin cannot satisfy.
+     */
+    providesServices?: string[];
 
     /**
      * Init Phase: Register services

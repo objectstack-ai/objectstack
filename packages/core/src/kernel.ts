@@ -7,6 +7,12 @@ import { ServiceRequirementDef } from '@objectstack/spec/system';
 import { PluginLoader, PluginMetadata, ServiceLifecycle, ServiceFactory, PluginStartupResult } from './plugin-loader.js';
 import { isNode, safeExit } from './utils/env.js';
 import { CORE_FALLBACK_FACTORIES } from './fallbacks/index.js';
+import {
+    resolvePluginOrder,
+    validateInitServiceContract,
+    assertInitServiceRequirements,
+    describeInitOrderFault,
+} from './plugin-order.js';
 
 /**
  * Enhanced Kernel Configuration
@@ -59,6 +65,12 @@ export class ObjectKernel {
     private startedPlugins: Set<string> = new Set();
     private pluginStartTimes: Map<string, number> = new Map();
     private shutdownHandlers: Array<() => Promise<void>> = [];
+    /**
+     * Name of the plugin whose init() is currently executing (Phase 1 is
+     * sequential, so at most one). Lets a getService miss during init name
+     * the structural fault (#4131) instead of only the symptom.
+     */
+    private currentlyInitializing?: string;
 
     constructor(config: ObjectKernelConfig = {}) {
         this.config = {
@@ -112,7 +124,9 @@ export class ObjectKernel {
                 //    pointing at the wrong layer. Decide from the registry
                 //    instead, which is synchronous and authoritative.
                 if (!this.pluginLoader.hasService(name)) {
-                    throw new Error(`[Kernel] Service '${name}' not found`);
+                    throw new Error(
+                        `[Kernel] Service '${name}' not found${this.describeInitOrderFault(name)}`
+                    );
                 }
 
                 // Registered but not instantiated ⇒ factory-backed. Message
@@ -310,6 +324,11 @@ export class ObjectKernel {
 
             // Resolve plugin dependencies
             const orderedPlugins = this.resolveDependencies();
+
+            // Pre-Phase-1 ordering contract (ADR-0116, #4131): a plugin that
+            // requires a service provided only by a later plugin fails HERE,
+            // named, before any init side effects.
+            validateInitServiceContract(orderedPlugins, (name) => this.hasAnyService(name));
 
             // Phase 1: Init - Plugins register services
             this.logger.info('Phase 1: Init plugins');
@@ -513,17 +532,45 @@ export class ObjectKernel {
 
     private async initPluginWithTimeout(plugin: PluginMetadata): Promise<void> {
         const timeout = plugin.startupTimeout || this.config.defaultStartupTimeout!;
-        
-        this.logger.debug(`Init: ${plugin.name}`, { plugin: plugin.name });
-        
-        const initPromise = plugin.init(this.context);
-        const timeoutPromise = new Promise<void>((_, reject) => {
-            setTimeout(() => {
-                reject(new Error(`Plugin ${plugin.name} init timeout after ${timeout}ms`));
-            }, timeout);
-        });
 
-        await Promise.race([initPromise, timeoutPromise]);
+        this.logger.debug(`Init: ${plugin.name}`, { plugin: plugin.name });
+
+        // Authoritative init-service check (#4131): Phase 1 is sequential,
+        // so a required service absent NOW is absent for this init.
+        assertInitServiceRequirements(plugin, (name) => this.hasAnyService(name));
+
+        this.currentlyInitializing = plugin.name;
+        try {
+            const initPromise = plugin.init(this.context);
+            const timeoutPromise = new Promise<void>((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error(`Plugin ${plugin.name} init timeout after ${timeout}ms`));
+                }, timeout);
+            });
+
+            await Promise.race([initPromise, timeoutPromise]);
+        } finally {
+            this.currentlyInitializing = undefined;
+        }
+    }
+
+    /**
+     * Whether a service is resolvable on this kernel right now — direct
+     * registration or a loader-registered factory. Backs the init-service
+     * contract checks (#4131).
+     */
+    private hasAnyService(name: string): boolean {
+        return this.services.has(name) || this.pluginLoader.hasService(name);
+    }
+
+    /**
+     * When a getService miss happens while a plugin's init() is running,
+     * append the structural diagnosis (#4131): which plugin was initializing,
+     * and — when a composed plugin declares the service — who provides it.
+     * Empty string outside Phase 1, so non-boot messages stay unchanged.
+     */
+    private describeInitOrderFault(serviceName: string): string {
+        return describeInitOrderFault(this.currentlyInitializing, this.plugins.values(), serviceName);
     }
 
     private async startPluginWithTimeout(plugin: PluginMetadata): Promise<PluginStartupResult> {
@@ -616,45 +663,13 @@ export class ObjectKernel {
         }
     }
 
+    /**
+     * Topological order over `dependencies` (hard) + `optionalDependencies`
+     * (order-if-present) — ADR-0116, #4131. One implementation shared with
+     * LiteKernel via `plugin-order.ts`.
+     */
     private resolveDependencies(): PluginMetadata[] {
-        const resolved: PluginMetadata[] = [];
-        const visited = new Set<string>();
-        const visiting = new Set<string>();
-
-        const visit = (pluginName: string) => {
-            if (visited.has(pluginName)) return;
-            
-            if (visiting.has(pluginName)) {
-                throw new Error(`[Kernel] Circular dependency detected: ${pluginName}`);
-            }
-
-            const plugin = this.plugins.get(pluginName);
-            if (!plugin) {
-                throw new Error(`[Kernel] Plugin '${pluginName}' not found`);
-            }
-
-            visiting.add(pluginName);
-
-            // Visit dependencies first
-            const deps = plugin.dependencies || [];
-            for (const dep of deps) {
-                if (!this.plugins.has(dep)) {
-                    throw new Error(`[Kernel] Dependency '${dep}' not found for plugin '${pluginName}'`);
-                }
-                visit(dep);
-            }
-
-            visiting.delete(pluginName);
-            visited.add(pluginName);
-            resolved.push(plugin);
-        };
-
-        // Visit all plugins
-        for (const pluginName of this.plugins.keys()) {
-            visit(pluginName);
-        }
-
-        return resolved;
+        return resolvePluginOrder(this.plugins);
     }
 
     private registerShutdownSignals(): void {

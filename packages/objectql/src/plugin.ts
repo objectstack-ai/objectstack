@@ -124,6 +124,14 @@ export class ObjectQLPlugin implements Plugin {
   type = 'objectql';
   version = '1.0.0';
   /**
+   * Services init() UNCONDITIONALLY registers (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one of them before it
+   * initializes. `protocol`/`objects`/`analytics` are deliberately absent:
+   * they are option-gated (`registerProtocol`) and may be owned by
+   * MetadataProtocolPlugin instead.
+   */
+  providesServices = ['objectql', 'data', 'manifest', 'lifecycle'];
+  /**
    * Schema sync to remote SQL DBs is latency-bound (one round-trip per
    * table × 2 phases). Default to 120s instead of the kernel's 30s so
    * cold Neon/Turso starts don't get killed mid-sync.

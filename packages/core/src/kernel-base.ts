@@ -3,6 +3,12 @@
 import type { Plugin, PluginContext } from './types.js';
 import type { Logger } from '@objectstack/spec/contracts';
 import type { IServiceRegistry } from '@objectstack/spec/contracts';
+import {
+    resolvePluginOrder,
+    validateInitServiceContract,
+    assertInitServiceRequirements,
+    describeInitOrderFault,
+} from './plugin-order.js';
 
 /**
  * Kernel state machine
@@ -28,6 +34,12 @@ export abstract class ObjectKernelBase {
     protected state: KernelState = 'idle';
     protected logger: Logger;
     protected context!: PluginContext;
+    /**
+     * Name of the plugin whose init() is currently executing (Phase 1 runs
+     * sequentially, so there is at most one). Lets a getService miss during
+     * init name the structural fault (#4131) instead of only the symptom.
+     */
+    protected currentlyInitializing?: string;
 
     constructor(logger: Logger) {
         this.logger = logger;
@@ -77,7 +89,9 @@ export abstract class ObjectKernelBase {
                 if (this.services instanceof Map) {
                     const service = this.services.get(name);
                     if (!service) {
-                        throw new Error(`[Kernel] Service '${name}' not found`);
+                        throw new Error(
+                            `[Kernel] Service '${name}' not found${this.describeInitOrderFault(name)}`
+                        );
                     }
                     return service as T;
                 } else {
@@ -133,50 +147,41 @@ export abstract class ObjectKernelBase {
     }
 
     /**
-     * Resolve plugin dependencies using topological sort
+     * Resolve plugin dependencies using topological sort — `dependencies`
+     * hard, `optionalDependencies` order-if-present (ADR-0116, #4131). One
+     * implementation shared with ObjectKernel via `plugin-order.ts`.
      * @returns Ordered list of plugins (dependencies first)
      */
     protected resolveDependencies(): Plugin[] {
-        const resolved: Plugin[] = [];
-        const visited = new Set<string>();
-        const visiting = new Set<string>();
+        return resolvePluginOrder(this.plugins);
+    }
 
-        const visit = (pluginName: string) => {
-            if (visited.has(pluginName)) return;
-            
-            if (visiting.has(pluginName)) {
-                throw new Error(`[Kernel] Circular dependency detected: ${pluginName}`);
-            }
+    /**
+     * Whether a service is registered on this kernel right now. Backs the
+     * init-service contract checks (#4131).
+     */
+    protected hasRegisteredService(name: string): boolean {
+        // Both the plain Map and IServiceRegistry expose `has`.
+        return this.services.has(name);
+    }
 
-            const plugin = this.plugins.get(pluginName);
-            if (!plugin) {
-                throw new Error(`[Kernel] Plugin '${pluginName}' not found`);
-            }
+    /**
+     * Pre-Phase-1 ordering validation (ADR-0116, #4131): a plugin whose
+     * `requiresServices` names a service provided only by a LATER plugin is
+     * a named boot error before any init side effects.
+     */
+    protected validateInitServices(ordered: Plugin[]): void {
+        validateInitServiceContract(ordered, (name) => this.hasRegisteredService(name));
+    }
 
-            visiting.add(pluginName);
-
-            // Visit dependencies first
-            const deps = plugin.dependencies || [];
-            for (const dep of deps) {
-                if (!this.plugins.has(dep)) {
-                    throw new Error(
-                        `[Kernel] Dependency '${dep}' not found for plugin '${pluginName}'`
-                    );
-                }
-                visit(dep);
-            }
-
-            visiting.delete(pluginName);
-            visited.add(pluginName);
-            resolved.push(plugin);
-        };
-
-        // Visit all plugins
-        for (const pluginName of this.plugins.keys()) {
-            visit(pluginName);
-        }
-
-        return resolved;
+    /**
+     * When a getService miss happens while a plugin's init() is running,
+     * append the structural diagnosis (#4131): which plugin was initializing,
+     * and — when a composed plugin declares the service — who provides it.
+     * Empty string outside Phase 1, so non-boot messages stay unchanged.
+     */
+    protected describeInitOrderFault(serviceName: string): string {
+        return describeInitOrderFault(this.currentlyInitializing, this.plugins.values(), serviceName);
     }
 
     /**
@@ -186,13 +191,20 @@ export abstract class ObjectKernelBase {
     protected async runPluginInit(plugin: Plugin): Promise<void> {
         const pluginName = plugin.name;
         this.logger.info(`Initializing plugin: ${pluginName}`);
-        
+
+        // Authoritative init-service check (#4131): Phase 1 is sequential,
+        // so a required service absent NOW is absent for this init.
+        assertInitServiceRequirements(plugin, (name) => this.hasRegisteredService(name));
+
+        this.currentlyInitializing = pluginName;
         try {
             await plugin.init(this.context);
             this.logger.info(`Plugin initialized: ${pluginName}`);
         } catch (error) {
             this.logger.error(`Plugin init failed: ${pluginName}`, error as Error);
             throw error;
+        } finally {
+            this.currentlyInitializing = undefined;
         }
     }
 

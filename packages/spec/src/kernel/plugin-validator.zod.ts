@@ -146,8 +146,32 @@ export const PluginMetadataSchema = lazySchema(() => z.object({
   /**
    * Plugin dependencies (array of plugin names)
    */
-  dependencies: z.array(z.string()).optional().describe('Array of plugin names this plugin depends on'),
-  
+  dependencies: z.array(z.string()).optional().describe('Array of plugin names this plugin depends on (hard — a missing name fails the boot)'),
+
+  /**
+   * Soft dependencies — order-if-present (ADR-0116, #4131). The kernel
+   * hoists composed names ahead exactly like `dependencies`, and silently
+   * skips absent names instead of failing the boot. For plugins that
+   * degrade gracefully without the dependency but must never initialize
+   * before it when both are composed.
+   */
+  optionalDependencies: z.array(z.string()).optional().describe('Plugin names hoisted ahead when composed, skipped when absent (order-if-present, ADR-0116)'),
+
+  /**
+   * Services the plugin resolves synchronously during init() (ADR-0116).
+   * The kernel validates the resolved order before Phase 1 — a required
+   * service whose only declared provider initializes later is a named boot
+   * error — and re-checks immediately before this plugin's init runs.
+   */
+  requiresServices: z.array(z.string()).optional().describe('Service names the plugin resolves synchronously during init(); validated by the kernel before Phase 1 (ADR-0116)'),
+
+  /**
+   * Services the plugin's init() UNCONDITIONALLY registers (ADR-0116).
+   * Never declare a conditionally-registered service: the kernel would
+   * blame orderings this plugin cannot satisfy.
+   */
+  providesServices: z.array(z.string()).optional().describe('Service names the plugin\'s init() unconditionally registers (ADR-0116)'),
+
   /**
    * Plugin signature for cryptographic verification (optional)
    */

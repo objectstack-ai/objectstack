@@ -9,6 +9,7 @@
 
 export * from './kernel-base.js';
 export * from './kernel.js';
+export * from './plugin-order.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';
