@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '../src/plugin';
 import { ObjectSchema } from '@objectstack/spec/data';
+import { readServiceSelfInfo } from '@objectstack/spec/api';
 
 describe('ObjectQLPlugin - Metadata Service Integration', () => {
   let kernel: ObjectKernel;
@@ -26,10 +27,12 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       expect(objectql).toBeDefined();
       expect(kernel.getService('data')).toBeDefined();
       expect(kernel.getService('protocol')).toBeDefined();
-      // metadata is provided by kernel's core fallback, not ObjectQL
+      // metadata is provided by kernel's core fallback, not ObjectQL —
+      // identified by its standard D12 self-description (#4058; it used to
+      // carry a non-standard `_fallback: true` no consumer recognized).
       const metadataService = kernel.getService('metadata');
       expect(metadataService).toBeDefined();
-      expect((metadataService as any)._fallback).toBe(true);
+      expect(readServiceSelfInfo(metadataService)?.status).toBe('degraded');
     });
 
     it('should serve in-memory metadata definitions', async () => {

@@ -61,28 +61,14 @@ describe('zonedDateStartToUtcMs — round-trips to the day boundary in the zone'
   }
 });
 
-describe('nextUtcCalendarDay — the exclusive upper bound of a bare calendar day (#3777)', () => {
-  it('advances one day, rolling month, year and leap boundaries', () => {
+describe('nextUtcCalendarDay — re-exported from @objectstack/spec (ADR-0053 D-D)', () => {
+  it('is still reachable from this package, with the same semantics', () => {
+    // The rule itself now lives in spec (six backends share it, and
+    // `@objectstack/formula` cannot depend on core) — its thorough coverage is
+    // `packages/spec/src/data/calendar-day.test.ts`. What this asserts is the
+    // re-export the drivers and analytics strategies import from HERE, so
+    // dropping it would break them loudly rather than at their call sites.
     expect(nextUtcCalendarDay('2026-07-28')).toBe('2026-07-29');
-    expect(nextUtcCalendarDay('2026-07-31')).toBe('2026-08-01');
-    expect(nextUtcCalendarDay('2026-12-31')).toBe('2027-01-01');
-    expect(nextUtcCalendarDay('2024-02-28')).toBe('2024-02-29'); // leap year
-    expect(nextUtcCalendarDay('2025-02-28')).toBe('2025-03-01');
-    expect(nextUtcCalendarDay(' 2026-07-28 ')).toBe('2026-07-29'); // trimmed
-  });
-
-  it('returns null for anything that is not a valid bare calendar day', () => {
-    // Instants keep instant semantics — never widened.
     expect(nextUtcCalendarDay('2026-07-28T12:00:00Z')).toBeNull();
-    expect(nextUtcCalendarDay(new Date('2026-07-28T00:00:00Z'))).toBeNull();
-    // Impossible days are rejected, not rolled into an invented bound.
-    expect(nextUtcCalendarDay('2026-02-30')).toBeNull();
-    expect(nextUtcCalendarDay('2026-13-01')).toBeNull();
-    // Non-strings / junk.
-    expect(nextUtcCalendarDay(1753660800000)).toBeNull();
-    expect(nextUtcCalendarDay(null)).toBeNull();
-    expect(nextUtcCalendarDay(undefined)).toBeNull();
-    expect(nextUtcCalendarDay('7/28/2026')).toBeNull();
-    expect(nextUtcCalendarDay('2026-7-28')).toBeNull(); // not zero-padded → not the canonical shape
   });
 });

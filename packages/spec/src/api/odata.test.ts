@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   ODataQuerySchema,
-  ODataFilterOperatorSchema,
   ODataFilterFunctionSchema,
   ODataResponseSchema,
   ODataErrorSchema,
@@ -266,38 +265,6 @@ describe('ODataQuerySchema', () => {
       expect(query.$top).toBe(10);
       expect(query.$count).toBe(true);
     });
-  });
-});
-
-describe('ODataFilterOperatorSchema', () => {
-  it('should accept comparison operators', () => {
-    const operators = ['eq', 'ne', 'lt', 'le', 'gt', 'ge'];
-    
-    operators.forEach(op => {
-      expect(() => ODataFilterOperatorSchema.parse(op)).not.toThrow();
-    });
-  });
-
-  it('should accept logical operators', () => {
-    const operators = ['and', 'or', 'not'];
-    
-    operators.forEach(op => {
-      expect(() => ODataFilterOperatorSchema.parse(op)).not.toThrow();
-    });
-  });
-
-  it('should accept grouping operators', () => {
-    expect(() => ODataFilterOperatorSchema.parse('(')).not.toThrow();
-    expect(() => ODataFilterOperatorSchema.parse(')')).not.toThrow();
-  });
-
-  it('should accept other operators', () => {
-    expect(() => ODataFilterOperatorSchema.parse('in')).not.toThrow();
-    expect(() => ODataFilterOperatorSchema.parse('has')).not.toThrow();
-  });
-
-  it('should reject invalid operators', () => {
-    expect(() => ODataFilterOperatorSchema.parse('invalid')).toThrow();
   });
 });
 

@@ -209,35 +209,18 @@ export const ODataQuerySchema = lazySchema(() => z.object({
 
 export type ODataQuery = z.infer<typeof ODataQuerySchema>;
 
-/**
- * OData Filter Operator
- * 
- * Standard comparison and logical operators in OData filter expressions.
- */
-export const ODataFilterOperatorSchema = lazySchema(() => z.enum([
-  // Comparison Operators
-  'eq',  // Equal to
-  'ne',  // Not equal to
-  'lt',  // Less than
-  'le',  // Less than or equal to
-  'gt',  // Greater than
-  'ge',  // Greater than or equal to
-
-  // Logical Operators
-  'and', // Logical AND
-  'or',  // Logical OR
-  'not', // Logical NOT
-
-  // Grouping
-  '(',   // Left parenthesis
-  ')',   // Right parenthesis
-
-  // Other
-  'in',  // Value in list
-  'has', // Has flag (for enum flags)
-]));
-
-export type ODataFilterOperator = z.infer<typeof ODataFilterOperatorSchema>;
+// `ODataFilterOperatorSchema` — one more spelling of comparison
+// (eq/ne/lt/le/gt/ge, and/or/not, `(`/`)`, in/has) — lived here with no
+// importer in this repo, objectui, or cloud. Nothing parses an OData `$filter`
+// against it: `$filter` is carried as an opaque string
+// (`ODataQuerySchema.$filter`, and the `odata` adapter template in
+// `query-adapter.zod.ts`), and an enum that mixes operators with parentheses
+// could not validate an expression anyway — it describes tokens, not a grammar.
+//
+// A real OData implementation needs a parser, and that parser should lower onto
+// `AST_OPERATOR_MAP` (`data/filter.zod.ts`) like every other entry point. Kept
+// as an enum, this was only a way for the count of filter vocabularies to grow.
+// objectui#2945.
 
 /**
  * OData Filter Function

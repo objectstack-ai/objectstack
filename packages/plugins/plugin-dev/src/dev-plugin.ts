@@ -33,54 +33,13 @@ const SECURITY_SERVICE_NAMES = [
  * Where an interface method is optional (marked with `?`), the stub only
  * implements the required methods plus any optional ones that have
  * a trivially useful implementation.
- *
- * ── Honesty class: every stub declares its own (#4058) ──────────────────────
- *
- * These fakes are not one kind of thing, and until #4058 they all carried the
- * single `_dev: true` marker, which `readServiceSelfInfo` normalizes to
- * `{ status: 'stub', handlerReady: false }`. That one-size-fits-all label is
- * what made the class impossible to reason about: it says the in-memory file
- * store (which really stores and really reads back) is the same kind of fake as
- * the AI stub (which invents answers). Consumers must gate on the difference —
- * ADR-0076 D12 conclusion 3, executed by the dispatcher since #4000/#4058 — so
- * the difference has to be *declared*, per stub, in the standard place:
- *
- * - {@link devDegraded} — functional in-memory implementation, reduced
- *   capability (no persistence, no cross-process fan-out). `handlerReady: true`:
- *   an HTTP domain backed by one of these serves real work and keeps serving.
- * - {@link devStub} — placeholder that fabricates a result. `handlerReady:
- *   false`: consumers treat the slot as EMPTY. Fakes that would answer an HTTP
- *   request with invented data (`analytics`, `automation`, `notification`, `ai`)
- *   are not marked at all — they are not registered (see
- *   {@link NO_DEV_STUB_SERVICES}), because an empty slot is one less layer of
- *   indirection than a slot that is occupied but must be ignored.
- *
- * `_dev: true` stays on every stub as the plugin-dev *provenance* tag (log
- * diagnostics such as AppPlugin's i18n fallback notice read it). It is only the
- * fallback interpretation for a service that declares nothing — `__serviceInfo`
- * always wins in `readServiceSelfInfo`.
  */
-
-/** `__serviceInfo` for a fake that really does the work, in memory only. */
-function devDegraded(message: string) {
-  return {
-    [SERVICE_SELF_INFO_KEY]: { status: 'degraded' as const, message },
-  };
-}
-
-/** `__serviceInfo` for a fake that fabricates its answers — treat as an empty slot. */
-function devStub(message: string) {
-  return {
-    [SERVICE_SELF_INFO_KEY]: { status: 'stub' as const, message },
-  };
-}
 
 /** IStorageService — in-memory file storage stub */
 function createStorageStub() {
   const files = new Map<string, { data: Buffer; meta: any }>();
   return {
-    _dev: true, _serviceName: 'file-storage',
-    ...devDegraded('In-memory dev file store (plugin-dev) — uploads are real but process-local and lost on restart; install @objectstack/service-storage for persistence'),
+    _serviceName: 'file-storage',
     async upload(key: string, data: any, options?: any): Promise<void> {
       files.set(key, { data: Buffer.from(data), meta: { contentType: options?.contentType, metadata: options?.metadata } });
     },
@@ -102,8 +61,7 @@ function createStorageStub() {
 function createSearchStub() {
   const indexes = new Map<string, Map<string, Record<string, unknown>>>();
   return {
-    _dev: true, _serviceName: 'search',
-    ...devDegraded('In-memory dev search index (plugin-dev) — real substring matching over documents indexed in this process, no ranking or analyzers'),
+    _serviceName: 'search',
     async index(object: string, id: string, document: Record<string, unknown>): Promise<void> {
       if (!indexes.has(object)) indexes.set(object, new Map());
       indexes.get(object)!.set(id, document);
@@ -127,13 +85,25 @@ function createSearchStub() {
   };
 }
 
+/** IAutomationService — no-op flow execution stub */
+function createAutomationStub() {
+  const flows = new Map<string, unknown>();
+  return {
+    _serviceName: 'automation',
+    async execute(_flowName: string) { return { success: true, output: undefined, durationMs: 0 }; },
+    async listFlows(): Promise<string[]> { return [...flows.keys()]; },
+    registerFlow(name: string, definition: unknown) { flows.set(name, definition); },
+    unregisterFlow(name: string) { flows.delete(name); },
+  };
+}
+
+
 /** IRealtimeService — in-memory pub/sub stub */
 function createRealtimeStub() {
   const subs = new Map<string, Function>();
   let subId = 0;
   return {
-    _dev: true, _serviceName: 'realtime',
-    ...devDegraded('In-process dev pub/sub (plugin-dev) — events really reach subscribers in this process, but channel filtering and cross-process fan-out are not implemented'),
+    _serviceName: 'realtime',
     async publish(event: any): Promise<void> { for (const fn of subs.values()) fn(event); },
     async subscribe(_channel: string, handler: Function): Promise<string> {
       const id = `dev-sub-${++subId}`; subs.set(id, handler); return id;
@@ -142,13 +112,34 @@ function createRealtimeStub() {
   };
 }
 
+/** INotificationService — in-memory log stub */
+function createNotificationStub() {
+  const sent: any[] = [];
+  return {
+    _serviceName: 'notification',
+    async send(message: any) { sent.push(message); return { success: true, messageId: `dev-notif-${sent.length}` }; },
+    async sendBatch(messages: any[]) { return messages.map(m => { sent.push(m); return { success: true, messageId: `dev-notif-${sent.length}` }; }); },
+    getChannels() { return ['email', 'in-app'] as const; },
+  };
+}
+
+/** IAIService — dev stub returning placeholder responses */
+function createAIStub() {
+  return {
+    _serviceName: 'ai',
+    async chat() { return { content: '[dev-stub] AI not available in development mode', model: 'dev-stub' }; },
+    async complete() { return { content: '[dev-stub] AI not available in development mode', model: 'dev-stub' }; },
+    async embed() { return [[0]]; },
+    async listModels() { return ['dev-stub']; },
+  };
+}
+
 /** II18nService — delegates to createMemoryI18n from core with locale fallback */
 function createI18nStub() {
   const base = createMemoryI18n();
   return {
     ...base,
-    _dev: true, _serviceName: 'i18n',
-    ...devDegraded('In-memory dev translations (plugin-dev) — bundles loaded in this process are really served; install @objectstack/service-i18n for DB-backed translations'),
+    _serviceName: 'i18n',
   };
 }
 
@@ -157,8 +148,7 @@ function createWorkflowStub() {
   const states = new Map<string, string>(); // recordKey → currentState
   const key = (obj: string, id: string) => `${obj}:${id}`;
   return {
-    _dev: true, _serviceName: 'workflow',
-    ...devDegraded('In-memory dev workflow state (plugin-dev) — transitions are really recorded and read back, but no state machine is enforced and no history is kept'),
+    _serviceName: 'workflow',
     async transition(t: any) {
       states.set(key(t.object, t.recordId), t.targetState);
       return { success: true, currentState: t.targetState };
@@ -174,8 +164,7 @@ function createWorkflowStub() {
 function createMetadataStub() {
   const store = new Map<string, Map<string, unknown>>(); // type → (name → def)
   return {
-    _dev: true, _serviceName: 'metadata',
-    ...devDegraded('In-memory dev metadata registry (plugin-dev) — registrations are really stored and queried, but nothing persists to sys_metadata'),
+    _serviceName: 'metadata',
     register(type: string, nameOrDef: string | Record<string, any>, data?: unknown) {
       if (!store.has(type)) store.set(type, new Map());
       if (typeof nameOrDef === 'object' && nameOrDef !== null) {
@@ -211,8 +200,7 @@ function createMetadataStub() {
 /** IAuthService — dev auth stub returning success for all */
 function createAuthStub() {
   return {
-    _dev: true, _serviceName: 'auth',
-    ...devStub('Dev auth stub (plugin-dev) — every request is accepted as a fabricated platform admin; install @objectstack/plugin-auth for real authentication'),
+    _serviceName: 'auth',
     async handleRequest() { return new Response(JSON.stringify({ success: true }), { status: 200 }); },
     async verify() { return { success: true, user: { id: 'dev-admin', email: 'admin@dev.local', name: 'Admin', roles: ['admin'] } }; },
     async logout() {},
@@ -223,8 +211,7 @@ function createAuthStub() {
 /** IDataEngine — minimal no-op data stub (fallback) */
 function createDataStub() {
   return {
-    _dev: true, _serviceName: 'data',
-    ...devStub('Dev data stub (plugin-dev) — reads answer empty and writes are discarded while reporting success; register a driver + ObjectQL for a real engine'),
+    _serviceName: 'data',
     async find() { return []; },
     async findOne() { return undefined; },
     async insert(_obj: string, params: any) { return { id: `dev-${Date.now()}`, ...params?.data }; },
@@ -238,8 +225,7 @@ function createDataStub() {
 /** Security sub-service stubs (PermissionEvaluator, RLSCompiler, FieldMasker) */
 function createSecurityPermissionsStub() {
   return {
-    _dev: true, _serviceName: 'security.permissions',
-    ...devStub('Dev permission stub (plugin-dev) — every object permission check answers "allowed"; install SecurityPlugin for real RBAC'),
+    _serviceName: 'security.permissions',
     resolvePermissionSets() { return []; },
     checkObjectPermission() { return true; },
     getFieldPermissions() { return {}; },
@@ -247,16 +233,14 @@ function createSecurityPermissionsStub() {
 }
 function createSecurityRLSStub() {
   return {
-    _dev: true, _serviceName: 'security.rls',
-    ...devStub('Dev RLS stub (plugin-dev) — compiles no row filter, so no row-level policy is applied; install SecurityPlugin for real RLS'),
+    _serviceName: 'security.rls',
     compileFilter() { return null; },
     getApplicablePolicies() { return []; },
   };
 }
 function createSecurityFieldMaskerStub() {
   return {
-    _dev: true, _serviceName: 'security.fieldMasker',
-    ...devStub('Dev field-masker stub (plugin-dev) — returns rows unmasked; install SecurityPlugin for real field-level masking'),
+    _serviceName: 'security.fieldMasker',
     maskResults(results: any) { return results; },
   };
 }
@@ -267,12 +251,15 @@ function createSecurityFieldMaskerStub() {
  * from `packages/spec/src/contracts/`.
  */
 const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
-  'cache':       () => ({ ...createMemoryCache(), _dev: true, ...devDegraded('In-memory dev cache (plugin-dev) — really caches, process-local and lost on restart') }),
-  'queue':       () => ({ ...createMemoryQueue(), _dev: true, ...devDegraded('In-memory dev queue (plugin-dev) — really enqueues and delivers in-process, with no durability') }),
-  'job':         () => ({ ...createMemoryJob(), _dev: true, ...devDegraded('In-memory dev job scheduler (plugin-dev) — really schedules in-process, with no durability across restarts') }),
+  'cache':       () => createMemoryCache(),
+  'queue':       () => createMemoryQueue(),
+  'job':         () => createMemoryJob(),
   'file-storage': createStorageStub,
   'search':      createSearchStub,
+  'automation':  createAutomationStub,
   'realtime':    createRealtimeStub,
+  'notification': createNotificationStub,
+  'ai':          createAIStub,
   'i18n':        createI18nStub,
   'workflow':    createWorkflowStub,
   'metadata':    createMetadataStub,
@@ -285,17 +272,73 @@ const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
 };
 
 /**
- * Core service slots that deliberately get NO dev stub — not even the
- * shapeless `{ _dev: true }` fallback the registration loop uses for slots
- * without a factory.
+ * How each dev implementation describes ITSELF (ADR-0076 D12 `__serviceInfo`),
+ * in one reviewable table — the point of #4058.
  *
- * The membership rule is the honesty class above: a fake that would answer a
- * caller with **fabricated data** does not belong in a canonical slot at all.
- * An empty slot is one less layer of indirection than a slot that is occupied
- * but must be ignored, and it is the state production already has when the real
- * plugin isn't installed — so dev and production agree on what "this capability
- * exists" means. Fakes that really do the work (in memory) are NOT here: they
- * declare `degraded` and stay registered.
+ * Every stub used to carry the same `_dev: true`, which `readServiceSelfInfo`
+ * normalizes to `{ status: 'stub', handlerReady: false }`. That single marker
+ * declared all of these equally fake, and so could not tell apart the two
+ * kinds actually in here:
+ *
+ * - **`degraded`** — the implementation really does the work, with reduced
+ *   capability (no persistence, no cross-process scope, no validation). Its
+ *   answers are true answers. `storage` really stores and returns the bytes;
+ *   `search` really indexes and matches; `metadata` really registers and lists.
+ *   Calling these "stub" understated them and pushed consumers to ignore a
+ *   capability that works.
+ * - **`stub`** — the answer is fabricated. `ai.chat` returns invented text,
+ *   `automation.execute` reports success without running the flow,
+ *   `notification.send` claims delivery and delivers nothing, `data` accepts
+ *   writes and stores none, `auth.verify` waves everyone through as an admin,
+ *   and the `security.*` trio answers allow-all. These must never be mistaken
+ *   for a capability — the AI stub already misled an agent (ADR-0076 D12).
+ *
+ * `handlerReady` answers a different question: does an HTTP handler genuinely
+ * serve this? It stays `false` for every `stub`, and also for `degraded`
+ * services with no HTTP surface at all (`realtime` — the D12 precedent).
+ *
+ * Entries are only needed for plugin-dev's OWN fakes. The wrapped kernel
+ * fallbacks (`cache` / `queue` / `job` / `i18n`) already carry their own
+ * `__serviceInfo`, and {@link applySelfInfo} never overwrites one.
+ */
+const DEV_STUB_SELF_INFO: Record<string, { status: 'stub' | 'degraded'; handlerReady?: boolean; message: string }> = {
+  'file-storage': { status: 'degraded', message: 'Dev in-memory file storage — really stores and returns bytes, but nothing survives a restart. Register a storage plugin for durable files.' },
+  'search':       { status: 'degraded', message: 'Dev in-memory index — real substring matching over indexed documents, no ranking, analyzers, or persistence. Register a search plugin for the real engine.' },
+  'metadata':     { status: 'degraded', message: 'Dev in-memory metadata registry — real reads and writes, no persistence. Register MetadataPlugin for a persisted registry.' },
+  'workflow':     { status: 'degraded', message: 'Dev in-memory workflow state — transitions are recorded and read back, but NOTHING is validated: every transition is accepted and availableTransitions is always empty.' },
+  'realtime':     { status: 'degraded', handlerReady: false, message: 'Dev in-process pub/sub — real delivery to in-process subscribers, but no HTTP or WebSocket surface is mounted.' },
+  'automation':   { status: 'stub', message: 'Dev stub — execute() reports success WITHOUT running the flow. Register an automation plugin to actually run flows.' },
+  'notification': { status: 'stub', message: 'Dev stub — messages are recorded in memory and reported as sent; nothing is delivered. Register a notification plugin to actually send.' },
+  'ai':           { status: 'stub', message: 'Dev stub — replies are placeholder text, not model output. Register AIServicePlugin from @objectstack/service-ai for real completions.' },
+  'data':         { status: 'stub', message: 'Dev stub — find() always returns [], insert() mints an id and stores nothing. Register ObjectQLPlugin for a real engine.' },
+  'auth':         { status: 'stub', message: 'Dev stub — verify() accepts EVERY request as a fixed dev admin. Never use outside local development; register plugin-auth for real authentication.' },
+  'security.permissions': { status: 'stub', message: 'Dev stub — every object permission check returns allowed. Register SecurityPlugin for real permission evaluation.' },
+  'security.rls':         { status: 'stub', message: 'Dev stub — compiles no row-level filter, so NO RLS predicate is applied. Register SecurityPlugin for real row-level security.' },
+  'security.fieldMasker':  { status: 'stub', message: 'Dev stub — returns results unmasked. Register SecurityPlugin for real field-level masking.' },
+};
+
+/** Self-description for a slot with no factory at all (see the registration loop). */
+const SHAPELESS_STUB_SELF_INFO = {
+  status: 'stub' as const,
+  handlerReady: false,
+  message: 'Dev placeholder with no implementation — the slot is occupied so lookups do not throw, and nothing else.',
+};
+
+/**
+ * Attach the D12 self-description, without ever overwriting one the
+ * implementation already carries: the kernel fallbacks this plugin wraps
+ * (`createMemoryCache` & co.) describe themselves, and their own account of
+ * what they do beats anything this table could restate.
+ */
+function applySelfInfo(svc: Record<string, any>, info: Record<string, unknown>): Record<string, any> {
+  if (SERVICE_SELF_INFO_KEY in svc) return svc;
+  return Object.assign(svc, { [SERVICE_SELF_INFO_KEY]: info });
+}
+
+/**
+ * Core service slots that deliberately get NO dev stub — not even the
+ * shapeless placeholder the registration loop uses for slots
+ * without a factory.
  *
  * `analytics` (#4000): #3891/#3989 retired the degraded analytics shim, making
  * an unoccupied slot the honest signal — `/analytics/*` is not mounted, the
@@ -307,27 +350,8 @@ const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
  * but "the capability is present" must mean the same thing in dev as in
  * production. To use analytics locally, install the real engine:
  * `@objectstack/service-analytics` runs an InMemory strategy.
- *
- * The next three are the rest of that class (#4058), retired for the same
- * reason — each one's headline method reported success for work that never
- * happened:
- *
- * - `automation`: `execute()` returned `{ success: true, durationMs: 0 }`
- *   without running a flow, and the `/automation` domain served that as a 200 —
- *   the same "200 + fabricated data" shape #3891 retired. Install
- *   `@objectstack/service-automation` to run flows locally.
- * - `notification`: `send()` pushed the message into an array and reported
- *   `{ success: true, messageId }`, so a caller read "notification sent" for
- *   one that was never delivered. Install `@objectstack/service-messaging`
- *   (ADR-0030's single ingress, and part of `os serve`'s always-on slate).
- * - `ai`: answered every prompt with a placeholder string. ADR-0076 D12 names
- *   this one as having already misled an agent. Install a real AI service —
- *   and note that with the slot empty the console's `GET /ai/agents` poll gets
- *   its honest empty list back, instead of the 503 the occupied slot produced.
  */
-const NO_DEV_STUB_SERVICES = new Set<string>([
-  'analytics', 'automation', 'notification', 'ai',
-]);
+const NO_DEV_STUB_SERVICES = new Set<string>(['analytics']);
 
 /**
  * Dev Plugin Options
@@ -705,19 +729,21 @@ export class DevPlugin implements Plugin {
     // dev stub (implementing the interface from packages/spec/src/contracts/)
     // so that the full kernel service map is populated and downstream code
     // receives correct return types (arrays, booleans, objects — not undefined).
-    // Exception: NO_DEV_STUB_SERVICES slots stay empty on purpose (#4000/#4058).
+    // Exception: NO_DEV_STUB_SERVICES slots stay empty on purpose (#4000).
     //
-    // A slot with no factory gets the shapeless fallback, which implements no
-    // contract method at all — the purest non-handler there is, so it declares
-    // `stub` (#4058) and every consumer that honours ADR-0076 D12 treats it as
-    // the empty slot it effectively is.
-    const shapelessStub = (svc: string) => ({
-      _dev: true,
-      _serviceName: svc,
-      ...devStub(`Placeholder dev slot (plugin-dev) — no ${svc} implementation is registered`),
-    });
+    // Each registered implementation carries its D12 self-description from
+    // DEV_STUB_SELF_INFO (#4058), so discovery reports what it actually is —
+    // `degraded` for the ones that really work, `stub` for the ones that
+    // fabricate — instead of one blanket `_dev: true` for all of them.
 
     const stubNames: string[] = [];
+
+    /** Build + self-describe one slot's dev implementation. */
+    const makeStub = (svc: string) => {
+      const factory = DEV_STUB_FACTORIES[svc];
+      const info = DEV_STUB_SELF_INFO[svc] ?? SHAPELESS_STUB_SELF_INFO;
+      return applySelfInfo(factory ? factory() : { _serviceName: svc }, info);
+    };
 
     for (const svc of CORE_SERVICE_NAMES) {
       if (!enabled(svc)) continue;
@@ -726,8 +752,7 @@ export class DevPlugin implements Plugin {
         ctx.getService(svc);
         // Already registered by a real plugin — skip
       } catch {
-        const factory = DEV_STUB_FACTORIES[svc];
-        ctx.registerService(svc, factory ? factory() : shapelessStub(svc));
+        ctx.registerService(svc, makeStub(svc));
         stubNames.push(svc);
       }
     }
@@ -738,8 +763,7 @@ export class DevPlugin implements Plugin {
         try {
           ctx.getService(svc);
         } catch {
-          const factory = DEV_STUB_FACTORIES[svc];
-          ctx.registerService(svc, factory ? factory() : shapelessStub(svc));
+          ctx.registerService(svc, makeStub(svc));
           stubNames.push(svc);
         }
       }

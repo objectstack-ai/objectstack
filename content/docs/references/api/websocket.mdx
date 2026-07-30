@@ -30,8 +30,8 @@ runtime today.
 ## TypeScript Usage
 
 ```typescript
-import { AckMessage, CursorMessage, CursorPosition, DocumentState, EditMessage, EditOperation, EditOperationType, ErrorMessage, EventFilter, EventFilterCondition, EventMessage, EventPattern, EventSubscription, FilterOperator, PingMessage, PongMessage, PresenceMessage, PresenceState, PresenceUpdate, SimpleCursorPosition, SimplePresenceState, SubscribeMessage, UnsubscribeMessage, UnsubscribeRequest, WebSocketConfig, WebSocketEvent, WebSocketMessage, WebSocketMessageType, WebSocketPresenceStatus, WebSocketServerConfig } from '@objectstack/spec/api';
-import type { AckMessage, CursorMessage, CursorPosition, DocumentState, EditMessage, EditOperation, EditOperationType, ErrorMessage, EventFilter, EventFilterCondition, EventMessage, EventPattern, EventSubscription, FilterOperator, PingMessage, PongMessage, PresenceMessage, PresenceState, PresenceUpdate, SimpleCursorPosition, SimplePresenceState, SubscribeMessage, UnsubscribeMessage, UnsubscribeRequest, WebSocketConfig, WebSocketEvent, WebSocketMessage, WebSocketMessageType, WebSocketPresenceStatus, WebSocketServerConfig } from '@objectstack/spec/api';
+import { AckMessage, CursorMessage, CursorPosition, DocumentState, EditMessage, EditOperation, EditOperationType, ErrorMessage, EventMessage, EventPattern, EventSubscription, PingMessage, PongMessage, PresenceMessage, PresenceState, PresenceUpdate, SimpleCursorPosition, SimplePresenceState, SubscribeMessage, UnsubscribeMessage, UnsubscribeRequest, WebSocketConfig, WebSocketEvent, WebSocketMessage, WebSocketMessageType, WebSocketPresenceStatus, WebSocketServerConfig } from '@objectstack/spec/api';
+import type { AckMessage, CursorMessage, CursorPosition, DocumentState, EditMessage, EditOperation, EditOperationType, ErrorMessage, EventMessage, EventPattern, EventSubscription, PingMessage, PongMessage, PresenceMessage, PresenceState, PresenceUpdate, SimpleCursorPosition, SimplePresenceState, SubscribeMessage, UnsubscribeMessage, UnsubscribeRequest, WebSocketConfig, WebSocketEvent, WebSocketMessage, WebSocketMessageType, WebSocketPresenceStatus, WebSocketServerConfig } from '@objectstack/spec/api';
 
 // Validate data
 const result = AckMessage.parse(data);
@@ -165,33 +165,6 @@ const result = AckMessage.parse(data);
 
 ---
 
-## EventFilter
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **conditions** | `{ field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'nin' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'exists' \| 'regex'>; value?: any }[]` | optional | Array of filter conditions |
-| **and** | `[EventFilter](#eventfilter)[]` | optional | AND logical combination of filters |
-| **or** | `[EventFilter](#eventfilter)[]` | optional | OR logical combination of filters |
-| **not** | `[EventFilter](#eventfilter)` | optional | NOT logical negation of filter |
-
-
----
-
-## EventFilterCondition
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field path to filter on (supports dot notation, e.g., "user.email") |
-| **operator** | `Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'nin' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'exists' \| 'regex'>` | ✅ | Comparison operator |
-| **value** | `any` | optional | Value to compare against (not needed for "exists" operator) |
-
-
----
-
 ## EventMessage
 
 ### Properties
@@ -222,29 +195,8 @@ const result = AckMessage.parse(data);
 | **subscriptionId** | `string` | ✅ | Unique subscription identifier |
 | **events** | `string[]` | ✅ | Event patterns to subscribe to (supports wildcards, e.g., "record.*", "user.created") |
 | **objects** | `string[]` | optional | Object names to filter events by (e.g., ["account", "contact"]) |
-| **filters** | `{ conditions?: { field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'nin' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'exists' \| 'regex'>; value?: any }[]; and?: object[]; or?: object[]; not?: object }` | optional | Advanced filter conditions for event payloads |
+| **filters** | `any` | optional | Filter conditions for event payloads (not yet enforced — the runtime filters by object name and event type only) |
 | **channels** | `string[]` | optional | Channel names for scoped subscriptions |
-
-
----
-
-## FilterOperator
-
-### Allowed Values
-
-* `eq`
-* `ne`
-* `gt`
-* `gte`
-* `lt`
-* `lte`
-* `in`
-* `nin`
-* `contains`
-* `startsWith`
-* `endsWith`
-* `exists`
-* `regex`
 
 
 ---
@@ -361,7 +313,7 @@ const result = AckMessage.parse(data);
 | **messageId** | `string` | ✅ | Unique message identifier |
 | **type** | `'subscribe'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **subscription** | `{ subscriptionId: string; events: string[]; objects?: string[]; filters?: { conditions?: { field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'nin' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'exists' \| 'regex'>; value?: any }[]; and?: object[]; or?: object[]; not?: object }; … }` | ✅ | Subscription configuration |
+| **subscription** | `{ subscriptionId: string; events: string[]; objects?: string[]; filters?: any; … }` | ✅ | Subscription configuration |
 
 
 ---
@@ -440,7 +392,7 @@ This schema accepts one of the following structures:
 | **messageId** | `string` | ✅ | Unique message identifier |
 | **type** | `'subscribe'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
-| **subscription** | `{ subscriptionId: string; events: string[]; objects?: string[]; filters?: { conditions?: { field: string; operator: Enum<'eq' \| 'ne' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'in' \| 'nin' \| 'contains' \| 'startsWith' \| 'endsWith' \| 'exists' \| 'regex'>; value?: any }[]; and?: object[]; or?: object[]; not?: object }; … }` | ✅ | Subscription configuration |
+| **subscription** | `{ subscriptionId: string; events: string[]; objects?: string[]; filters?: any; … }` | ✅ | Subscription configuration |
 
 ---
 

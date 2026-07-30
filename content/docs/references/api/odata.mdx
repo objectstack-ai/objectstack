@@ -112,8 +112,8 @@ count: true
 ## TypeScript Usage
 
 ```typescript
-import { ODataConfig, ODataError, ODataFilterFunction, ODataFilterOperator, ODataMetadata, ODataQuery, ODataResponse } from '@objectstack/spec/api';
-import type { ODataConfig, ODataError, ODataFilterFunction, ODataFilterOperator, ODataMetadata, ODataQuery, ODataResponse } from '@objectstack/spec/api';
+import { ODataConfig, ODataError, ODataFilterFunction, ODataMetadata, ODataQuery, ODataResponse } from '@objectstack/spec/api';
+import type { ODataConfig, ODataError, ODataFilterFunction, ODataMetadata, ODataQuery, ODataResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = ODataConfig.parse(data);
@@ -177,27 +177,6 @@ const result = ODataConfig.parse(data);
 * `isof`
 * `any`
 * `all`
-
-
----
-
-## ODataFilterOperator
-
-### Allowed Values
-
-* `eq`
-* `ne`
-* `lt`
-* `le`
-* `gt`
-* `ge`
-* `and`
-* `or`
-* `not`
-* `(`
-* `)`
-* `in`
-* `has`
 
 
 ---

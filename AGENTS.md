@@ -270,6 +270,11 @@ finding to fix, not an artifact to regenerate.
 
 Consult the matching `SKILL.md` when working in its domain: `objectstack-platform`, `objectstack-data`, `objectstack-query`, `objectstack-api`, `objectstack-ui`, `objectstack-automation`, `objectstack-ai`, `objectstack-i18n`, `objectstack-formula` (CEL).
 
+`skills/` is the **published** catalog (it ships to customer projects). Repo-internal
+agent playbooks live in `.claude/skills/` and must carry `metadata.internal: true`:
+`dogfood-verification` (boot and drive the real app in a browser) and
+`spec-property-retirement` (ADR-0049 enforce-or-remove — the full retirement kit).
+
 ---
 
 ## Patterns
@@ -306,7 +311,7 @@ export default {
    never `gh pr merge --auto`). A finished task = a merged PR, not a dirty
    working tree.
 3. **Add a changeset for feature work.** When the change is a feature or functional improvement, run `pnpm changeset` (or add a `.changeset/*.md` entry) describing it before committing. Pure bug fixes do **not** require a changeset.
-   **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix — this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error. Removing an authorable spec key also requires a tombstone entry in the relevant `UNKNOWN_KEY_GUIDANCE` map (see `object.zod.ts`) so the rejection itself carries the prescription.
+   **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix — this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error. Removing an authorable spec key also requires a tombstone so the rejection itself carries the prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on a non-strict schema, or an entry in the relevant `UNKNOWN_KEY_GUIDANCE` / `*_RETIRED_KEY_GUIDANCE` map (see `object.zod.ts`, `ai/tool.zod.ts`) when the schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes imply **opposite** liveness-ledger dispositions.
 4. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
 5. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc scripts. Repo must look identical to before, minus intended changes.
 

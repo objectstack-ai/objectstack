@@ -32,8 +32,8 @@ const result = Dashboard.parse(data);
 | **name** | `string` | ✅ | Dashboard unique name |
 | **label** | `string` | ✅ | Dashboard label |
 | **description** | `string` | optional | Dashboard description |
-| **header** | `{ showTitle: boolean; showDescription: boolean; actions?: { label: string; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api'>; icon?: string }[] }` | optional | Dashboard header configuration |
-| **widgets** | `{ id: string; title?: string; description?: string; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; … }[]` | ✅ | Widgets to display |
+| **header** | `{ showTitle: boolean; showDescription: boolean; actions?: { label: string; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[] }` | optional | Dashboard header configuration |
+| **widgets** | `{ id: string; title?: string; description?: string; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; … }[]` | ✅ | Widgets to display |
 | **columns** | `integer` | optional | Number of grid columns (default 12) |
 | **gap** | `integer` | optional | Grid gap in Tailwind spacing units |
 | **refreshInterval** | `number` | optional | Auto-refresh interval in seconds |
@@ -63,7 +63,7 @@ Dashboard header configuration
 | :--- | :--- | :--- | :--- |
 | **showTitle** | `boolean` | ✅ | Show dashboard title in header |
 | **showDescription** | `boolean` | ✅ | Show dashboard description in header |
-| **actions** | `{ label: string; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api'>; icon?: string }[]` | optional | Header action buttons |
+| **actions** | `{ label: string; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[]` | optional | Header action buttons |
 
 
 ---
@@ -78,7 +78,7 @@ Dashboard header action
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Action button label |
 | **actionUrl** | `string` | ✅ | URL or target for the action |
-| **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api'>` | optional | Type of action |
+| **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Type of action |
 | **icon** | `string` | optional | Icon identifier for the action button |
 
 
@@ -93,13 +93,13 @@ Dashboard header action
 | **id** | `string` | ✅ | Unique widget identifier (snake_case) |
 | **title** | `string` | optional | Widget title |
 | **description** | `string` | optional | Widget description text below the header |
-| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | ✅ | Visualization type |
-| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; title?: string; subtitle?: string; description?: string; … }` | optional | Chart visualization configuration |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | ✅ | Visualization type |
+| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>; title?: string; subtitle?: string; description?: string; … }` | optional | Chart visualization configuration |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
 | **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
 | **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |
 | **actionUrl** | `string` | optional | URL or target for the widget action button |
-| **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api'>` | optional | Type of action for the widget action button |
+| **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Type of action for the widget action button |
 | **actionIcon** | `string` | optional | Icon identifier for the widget action button |
 | **filter** | `any` | optional | Presentation-scope filter (runtimeFilter) |
 | **compareTo** | `'previousPeriod' \| 'previousYear' \| { offset: string }` | optional | Period-over-period comparison window |
@@ -179,6 +179,7 @@ Widget action type
 * `modal`
 * `flow`
 * `api`
+* `form`
 
 
 ---

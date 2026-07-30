@@ -41,12 +41,11 @@ export async function handleI18nRequest(
 ): Promise<HttpDispatcherResult> {
     const i18nService = await deps.getService(CoreServiceName.enum.i18n);
     // [#4058] An empty slot and a slot filled by a self-declared non-handler
-    // (`handlerReady: false`, ADR-0076 D12) are the same amount of i18n. Neither
-    // in-memory provider of this slot is affected: plugin-dev's stub really
-    // translates and now declares `degraded`, and the AppPlugin fallback
-    // (`createMemoryI18n`) declares nothing at all, which `readServiceSelfInfo`
-    // reads as "claims to be real" ⇒ served. This gate is for an occupant that
-    // would answer with invented strings.
+    // (`handlerReady: false`, ADR-0076 D12) are the same amount of i18n. Both
+    // in-memory providers of this slot really translate, so both declare
+    // `degraded` (#4058 step 1 — `createMemoryI18n`, which plugin-dev also
+    // wraps) and `handlerReady` defaults to `true` for them: they keep serving.
+    // This gate is for an occupant that would answer with invented strings.
     if (!isServiceServeable(i18nService)) return { handled: true, response: deps.error('i18n service not available', 501) };
 
     const m = method.toUpperCase();

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { isIncoherentAggregate } from '@objectstack/spec/data';
+import { ChartTypeSchema } from '@objectstack/spec/ui';
 
 /**
  * Build-time dashboard widget binding diagnostics (issues #1719, #1721).
@@ -139,16 +140,28 @@ function asStrings(v: unknown): string[] {
 }
 
 /**
- * Chart families whose renderer needs a `chartConfig` measure mapping.
- * Single-value types (metric/kpi/gauge/…) plot their lone value and tabular
- * types (table/pivot) render every column, so they are exempt.
+ * Chart families that plot a single value or every column, and so need no
+ * `chartConfig` measure mapping: single-value types plot their lone value,
+ * tabular types render each column as-is.
  */
-const CHART_TYPES = new Set([
-  'bar', 'horizontal-bar', 'column',
-  'line', 'area',
-  'pie', 'donut', 'funnel',
-  'scatter', 'treemap', 'sankey', 'radar',
+const MEASURE_EXEMPT_CHART_TYPES = new Set([
+  'gauge', 'solid-gauge', 'metric', 'kpi', 'bullet',
+  'table', 'pivot',
 ]);
+
+/**
+ * Chart families whose renderer needs a `chartConfig` measure mapping — the
+ * taxonomy minus the exemptions above.
+ *
+ * Derived from `ChartTypeSchema` rather than restated. As a hand-written list it
+ * had no way to know when the taxonomy grew, and the omission is silent in
+ * exactly the wrong direction: an unlisted family is treated as "not a chart",
+ * so a widget missing its measure mapping passes validation instead of being
+ * reported. objectui#2945.
+ */
+const CHART_TYPES = new Set<string>(
+  ChartTypeSchema.options.filter(t => !MEASURE_EXEMPT_CHART_TYPES.has(t)),
+);
 
 function levenshtein(a: string, b: string): number {
   const m = a.length, n = b.length;

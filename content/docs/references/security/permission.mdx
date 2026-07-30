@@ -127,6 +127,7 @@ const result = AdminScope.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Permission set unique name (lowercase snake_case) |
 | **label** | `string` | optional | Display label |
+| **description** | `string` | optional | Human-readable description shown in Setup (persisted as sys_permission_set.description) |
 | **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored) |
 | **managedBy** | `Enum<'package' \| 'platform' \| 'user'>` | optional | [ADR-0086 D3] Record provenance: package (upgrade-owned metadata) vs platform/user (env config) |
 | **isDefault** | `boolean` | ✅ | [ADR-0090 D5] App baseline for the everyone position: app-level sets are auto-bound at boot (guarded, idempotent); package-level sets become install-time suggestions an admin confirms |
@@ -136,6 +137,14 @@ const result = AdminScope.parse(data);
 | **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional | App/tab visibility: visible, hidden, default_on (shown by default), default_off (available but hidden initially) |
 | **rowLevelSecurity** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | Row-level security policies (see rls.zod.ts for full spec) |
 | **adminScope** | `{ businessUnit: string; includeSubtree: boolean; manageAssignments: boolean; manageBindings: boolean; … }` | optional | [ADR-0090 D12] Scoped delegated-administration grant (BU subtree + assignable-set allowlist) |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this permission set. |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---

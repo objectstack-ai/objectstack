@@ -139,8 +139,9 @@ The discovery endpoint returns a `services` map so clients know what is availabl
 
 A service may self-declare that it is not the full thing (ADR-0076 D12), via a
 `__serviceInfo: { status, handlerReady?, message? }` property on the registered
-instance. The two values mean different things, and the difference is
-load-bearing (#4058):
+instance — see [Services → presence is not capability](./services.mdx) for how
+an in-process caller reads it. The two values mean different things, and for the
+HTTP surface the difference is load-bearing (#4058):
 
 | Declared | `handlerReady` default | Meaning | Dispatcher behaviour |
 |:---|:---|:---|:---|
@@ -219,12 +220,11 @@ one — routes unmounted, request 404. To use analytics locally, install the rea
 engine; `@objectstack/service-analytics` runs an InMemory strategy, so it needs
 no database of its own.
 
-**And it is no longer analytics-only** (#4058): `plugin-dev`'s `automation`,
-`notification` and `ai` dev stubs are retired for the same reason — each
-reported success for work that never happened — and every dispatcher-owned
-domain now gates on `handlerReady`. The dev stubs that really do the work in
-memory (`file-storage`, `i18n`, `cache`, `queue`, `job`, `search`, `realtime`,
-`workflow`, `metadata`) declare `degraded` and keep serving. See
+**And it is no longer analytics-only** (#4058 step 2): every dispatcher-owned
+domain now gates on `handlerReady`, so a slot occupied by a self-declared `stub`
+— `automation`, `notification`, `ai`, wherever one is registered — answers as an
+empty slot does. The implementations that really do the work in memory declare
+`degraded` and keep serving. See
 [`stub` vs `degraded`](#stub-vs-degraded--and-what-the-dispatcher-does-with-each).
 </Callout>
 

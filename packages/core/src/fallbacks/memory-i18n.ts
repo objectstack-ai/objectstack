@@ -123,7 +123,16 @@ export function createMemoryI18n() {
   }
 
   return {
-    _fallback: true, _serviceName: 'i18n',
+    // [#4058] `degraded` (ADR-0076 D12): translations, locale fallback and
+    // interpolation are all real — what is missing is persistence and the
+    // authoring surface service-i18n adds. `handlerReady` left at the
+    // `degraded` default (true): the dispatcher's `/i18n` domain does serve
+    // this implementation.
+    __serviceInfo: {
+      status: 'degraded' as const,
+      message: 'In-memory translations — real lookup and locale fallback, but nothing is persisted. Register I18nServicePlugin from @objectstack/service-i18n for the full implementation.',
+    },
+    _serviceName: 'i18n',
 
     t(key: string, locale: string, params?: Record<string, unknown>): string {
       const data = resolveTranslations(locale) ?? mergedLocale(defaultLocale);

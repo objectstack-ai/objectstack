@@ -1087,3 +1087,130 @@ describe('BPMN — Fault Edge Enhancement', () => {
     });
   });
 });
+
+// #4001 — the authorable flow surface is `.strict()`: an undeclared key used to
+// be dropped by zod's default `.strip`, so a trigger binding or config the
+// author wrote was quietly ignored — worst on this, the most AI-authored
+// surface (cloud#688 / #2419). A node's `config` record deliberately stays
+// OPEN: it is per-node-type, owned by the executor's `configSchema`
+// (#4027/#4040) and the ADR-0087 conversion layer.
+describe('unknown keys are rejected, not stripped (#4001)', () => {
+  const unknownKeyIssue = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
+    const result = schema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i: { code: string }) => i.code === 'unrecognized_keys');
+  };
+
+  const minimalFlow = {
+    name: 'f', label: 'F', type: 'autolaunched' as const,
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  };
+
+  describe('FlowSchema', () => {
+    it('rejects an undeclared key instead of silently dropping it', () => {
+      const issue = unknownKeyIssue(FlowSchema, { ...minimalFlow, notAKey: 1 });
+      expect(issue!.message).toContain('`notAKey`');
+    });
+
+    it('points builder vocabulary (steps/connections/trigger) at the canonical keys', () => {
+      expect(unknownKeyIssue(FlowSchema, { ...minimalFlow, steps: [] })!.message)
+        .toContain('`steps` → `nodes`');
+      expect(unknownKeyIssue(FlowSchema, { ...minimalFlow, connections: [] })!.message)
+        .toContain('`connections` → `edges`');
+      expect(unknownKeyIssue(FlowSchema, { ...minimalFlow, trigger: 'record_change' })!.message)
+        .toContain('`trigger` → `type`');
+    });
+
+    it('points a top-level object binding at the START node config', () => {
+      for (const key of ['object', 'objectName']) {
+        const message = unknownKeyIssue(FlowSchema, { ...minimalFlow, [key]: 'task' })!.message;
+        expect(message, `\`${key}\` should point at the start node`).toContain('START node');
+      }
+    });
+
+    it('accepts every key the schema declares (guards FLOW_KEYS drift)', () => {
+      const probes: Record<string, unknown> = {
+        description: 'd', successMessage: 's', errorMessage: 'e', version: 2,
+        status: 'active', template: false, variables: [{ name: 'v', type: 'text' }],
+        active: true, runAs: 'system',
+        errorHandling: { strategy: 'retry', maxRetries: 2 },
+        protection: { lock: 'none' },
+      };
+      for (const [key, value] of Object.entries(probes)) {
+        const result = FlowSchema.safeParse({ ...minimalFlow, [key]: value });
+        const unknown = result.success
+          ? undefined
+          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(unknown, `\`${key}\` should be a declared Flow key`).toBeUndefined();
+      }
+    });
+  });
+
+  describe('FlowNodeSchema', () => {
+    it('keeps `config` open — per-node-type keys are the executor contract', () => {
+      const parsed = FlowNodeSchema.parse({
+        id: 'n1', type: 'create_record', label: 'Create',
+        config: { objectName: 'task', fields: { subject: 'hi' }, anyExecutorKey: 1 },
+      });
+      expect((parsed.config as Record<string, unknown>).anyExecutorKey).toBe(1);
+    });
+
+    it('points config synonyms at `config`', () => {
+      const node = { id: 'n1', type: 'script', label: 'S' };
+      expect(unknownKeyIssue(FlowNodeSchema, { ...node, settings: {} })!.message)
+        .toContain('`settings` → `config`');
+      expect(unknownKeyIssue(FlowNodeSchema, { ...node, parameters: {} })!.message)
+        .toContain('`parameters` → `config`');
+    });
+
+    it('explains where node inputs live for an `inputs` key', () => {
+      expect(unknownKeyIssue(FlowNodeSchema, { id: 'n1', type: 'script', label: 'S', inputs: {} })!.message)
+        .toContain('`config`');
+    });
+
+    it('accepts every key the schema declares (guards FLOW_NODE_KEYS drift)', () => {
+      const probes: Record<string, unknown> = {
+        config: { a: 1 },
+        connectorConfig: { connectorId: 'c', actionId: 'a', input: {} },
+        position: { x: 0, y: 0 }, timeoutMs: 100,
+        inputSchema: { p: { type: 'string' } }, outputSchema: { o: { type: 'number' } },
+        waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' },
+        boundaryConfig: { attachedToNodeId: 'n0', eventType: 'error' },
+      };
+      for (const [key, value] of Object.entries(probes)) {
+        const result = FlowNodeSchema.safeParse({ id: 'n1', type: 'script', label: 'S', [key]: value });
+        const unknown = result.success
+          ? undefined
+          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(unknown, `\`${key}\` should be a declared FlowNode key`).toBeUndefined();
+      }
+    });
+  });
+
+  describe('FlowEdgeSchema', () => {
+    it('points from/to at source/target (the n8n/mermaid slip)', () => {
+      expect(unknownKeyIssue(FlowEdgeSchema, { id: 'e1', source: 'a', target: 'b', from: 'a' })!.message)
+        .toContain('`from` → `source`');
+      expect(unknownKeyIssue(FlowEdgeSchema, { id: 'e1', source: 'a', target: 'b', to: 'b' })!.message)
+        .toContain('`to` → `target`');
+    });
+
+    it('points a guard/when/expression key at `condition`', () => {
+      for (const key of ['guard', 'when', 'expression']) {
+        expect(unknownKeyIssue(FlowEdgeSchema, { id: 'e1', source: 'a', target: 'b', [key]: 'x > 1' })!.message)
+          .toContain(`\`${key}\` → \`condition\``);
+      }
+    });
+  });
+
+  describe('FlowVariableSchema', () => {
+    it('rejects an undeclared key with a suggestion', () => {
+      expect(unknownKeyIssue(FlowVariableSchema, { name: 'v', type: 'text', is_input: true })!.message)
+        .toContain('`is_input` → `isInput`');
+    });
+  });
+});

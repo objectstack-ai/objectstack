@@ -44,9 +44,6 @@ export const FlowNote = ObjectSchema.create({
  */
 export const flowTouch = {
   name: 'flow_touch',
-  // [ADR-0090 D1] grandfather stamp: this fixture's gate under test is
-  // permission-set RLS / flow scoping, not owner-sharing.
-  sharingModel: 'public_read_write',
   label: 'Flow Touch',
   type: 'autolaunched',
   variables: [{ name: 'noteId', type: 'text', isInput: true }],
