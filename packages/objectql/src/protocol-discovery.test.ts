@@ -41,7 +41,9 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.services.auth.enabled).toBe(true);
     expect(discovery.services.auth.status).toBe('available');
     expect(discovery.services.auth.route).toBe('/api/v1/auth');
-    expect(discovery.services.auth.provider).toBe('plugin-auth');
+    // [#4093 follow-up] Scoped now: `provider` comes from CORE_SERVICE_PROVIDER,
+    // which names the package you can actually install rather than a bare label.
+    expect(discovery.services.auth.provider).toBe('@objectstack/plugin-auth');
     expect(discovery.routes.auth).toBe('/api/v1/auth');
   });
 
