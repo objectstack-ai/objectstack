@@ -7906,6 +7906,7 @@
     "ui/FormSection:fields",
     "ui/FormSection:label",
     "ui/FormSection:name",
+    "ui/FormSection:pane",
     "ui/FormSection:visibleOn",
     "ui/FormSection:visibleWhen",
     "ui/FormView:allowSkip",
