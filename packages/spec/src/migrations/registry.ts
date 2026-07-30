@@ -444,6 +444,23 @@ const step17: MigrationStep = {
 };
 
 /** All migration steps, keyed by the major they migrate into. */
+const step18: MigrationStep = {
+  toMajor: 18,
+  rationale:
+    'Protocol 18 retires `api.requireAuth` (#3963): the deployment-wide opt-out that let a '
+    + 'stack serve its ENTIRE data plane anonymously with one boolean. Auth is a kernel '
+    + 'concern, not a deployment posture — anonymous access to object data is now denied '
+    + 'unconditionally on every HTTP surface. Every surface that legitimately serves a '
+    + 'session-less caller derives its own narrow authorization from a DECLARATION instead: '
+    + 'the control-plane allowlist, `publicFormGrant` (public form views), share-link tokens '
+    + "(read as SYSTEM), and `book.audience: 'public'` (ADR-0046 §6.7). The key is dropped "
+    + 'with a notice rather than mapped — there is no replacement value, only a different '
+    + 'way to publish (by declaration). A stack that mounts no auth at all now fails at boot '
+    + 'when it would serve a data API, instead of receiving an implicit fail-open.',
+  conversionIds: ['stack-api-require-auth-removed'],
+  semantic: [],
+};
+
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   11: step11,
   12: step12,
@@ -452,6 +469,7 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   15: step15,
   16: step16,
   17: step17,
+  18: step18,
 };
 
 /** The majors that have a step, ascending. */

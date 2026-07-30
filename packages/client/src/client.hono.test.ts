@@ -13,6 +13,17 @@ describe('ObjectStackClient (with Hono Server)', () => {
         // 1. Setup Kernel
         kernel = new LiteKernel();
         kernel.use(new ObjectQLPlugin());
+        // [#3963] The anonymous-deny gate is unconditional now, so the live-server
+        // client suites need an authenticated session. Register a minimal auth
+        // service that resolves a fixed user for every request.
+        kernel.use({
+            metadata: { name: 'test-auth', version: '1.0.0' },
+            async init(ctx: any) {
+                ctx.registerService('auth', {
+                    api: { getSession: async () => ({ user: { id: 'test-user' } }) },
+                });
+            },
+        } as any);
         
         // 2. Setup Hono Plugin
         // This suite exercises the CLIENT's data operations over the raw-hono
@@ -25,7 +36,6 @@ describe('ObjectStackClient (with Hono Server)', () => {
         const honoPlugin = new HonoServerPlugin({
             port: 0,
             registerStandardEndpoints: true,
-            restConfig: { api: { requireAuth: false } } as any,
         });
         kernel.use(honoPlugin);
         

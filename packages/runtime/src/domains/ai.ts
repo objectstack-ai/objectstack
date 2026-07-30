@@ -95,8 +95,8 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // passes, matching the REST `enforceAuth` seam. Off → unchanged.
         if (route.auth !== false) {
             const gec: any = context.executionContext;
-            // `requireAuth && route.auth !== false` is the AI-route contract;
-            // the shared function owns the anonymous decision itself.
+            // `route.auth !== false` is the AI-route contract; #3963 dropped the
+            // deployment-wide opt-out, so the shared function owns the decision.
             if (shouldDenyAnonymous({ userId: gec?.userId, isSystem: gec?.isSystem })) {
                 return {
                     handled: true,

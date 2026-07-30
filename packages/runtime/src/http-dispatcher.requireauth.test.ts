@@ -31,36 +31,38 @@ const anon = { request: {}, executionContext: undefined } as any;
 const authed = { request: {}, executionContext: { userId: 'u1' } } as any;
 const system = { request: {}, executionContext: { isSystem: true } } as any;
 
-describe('HttpDispatcher requireAuth gate — AI routes (handleAI)', () => {
-    it('401s an anonymous caller when requireAuth is on', async () => {
-        const d = new HttpDispatcher(makeKernel(), undefined, { requireAuth: true });
+describe('HttpDispatcher anonymous-deny — AI routes (handleAI) (#3963)', () => {
+    it('401s an anonymous caller (unconditional)', async () => {
+        const d = new HttpDispatcher(makeKernel());
         const r = await d.handleAI('/ai/status', 'GET', undefined, undefined, anon);
         expect(r.response?.status).toBe(401);
         expect(r.response?.body?.error?.details?.code ?? r.response?.body?.error?.code).toBeDefined();
     });
 
     it('lets an authenticated caller through', async () => {
-        const d = new HttpDispatcher(makeKernel(), undefined, { requireAuth: true });
+        const d = new HttpDispatcher(makeKernel());
         const r = await d.handleAI('/ai/status', 'GET', undefined, undefined, authed);
         expect(r.response?.status).toBe(200);
         expect(r.response?.body?.adapter).toBe('test');
     });
 
     it('lets an internal system context through', async () => {
-        const d = new HttpDispatcher(makeKernel(), undefined, { requireAuth: true });
+        const d = new HttpDispatcher(makeKernel());
         const r = await d.handleAI('/ai/status', 'GET', undefined, undefined, system);
         expect(r.response?.status).toBe(200);
     });
 
-    it('serves anonymously when requireAuth is off (unchanged legacy behaviour)', async () => {
-        const d = new HttpDispatcher(makeKernel(), undefined, { requireAuth: false });
+    it('an auth:false route is the only way an anonymous caller gets through (no global opt-out)', async () => {
+        // There is no `requireAuth: false` any more; only a route declaring
+        // auth:false opens itself — asserted by the opt-out test below.
+        const d = new HttpDispatcher(makeKernel());
         const r = await d.handleAI('/ai/status', 'GET', undefined, undefined, anon);
-        expect(r.response?.status).toBe(200);
+        expect(r.response?.status).toBe(401);
     });
 
     it('does not gate a route that opts out with auth:false', async () => {
         const openRoute = { ...aiRoute, path: '/api/v1/ai/public', auth: false };
-        const d = new HttpDispatcher(makeKernel({ __aiRoutes: [openRoute] }), undefined, { requireAuth: true });
+        const d = new HttpDispatcher(makeKernel({ __aiRoutes: [openRoute] }));
         const r = await d.handleAI('/ai/public', 'GET', undefined, undefined, anon);
         expect(r.response?.status).toBe(200);
     });
@@ -68,22 +70,22 @@ describe('HttpDispatcher requireAuth gate — AI routes (handleAI)', () => {
 
 
 
-describe('HttpDispatcher requireAuth gate — metadata catch-all (handleMetadata)', () => {
-    it('401s an anonymous caller when requireAuth is on', async () => {
-        const d = new HttpDispatcher(makeKernel(), undefined, { requireAuth: true });
+describe('HttpDispatcher anonymous-deny — metadata catch-all (handleMetadata) (#3963)', () => {
+    it('401s an anonymous caller (unconditional)', async () => {
+        const d = new HttpDispatcher(makeKernel());
         const r = await d.handleMetadata('/object', anon, 'GET');
         expect(r.response?.status).toBe(401);
     });
 
     it('does not 401 an authenticated caller (proceeds past the gate)', async () => {
-        const d = new HttpDispatcher(makeKernel(), undefined, { requireAuth: true });
+        const d = new HttpDispatcher(makeKernel());
         const r = await d.handleMetadata('/object', authed, 'GET');
         expect(r.response?.status).not.toBe(401);
     });
 
-    it('does not 401 when requireAuth is off', async () => {
-        const d = new HttpDispatcher(makeKernel(), undefined, { requireAuth: false });
+    it('401s an anonymous caller unconditionally — the opt-out is retired (#3963)', async () => {
+        const d = new HttpDispatcher(makeKernel());
         const r = await d.handleMetadata('/object', anon, 'GET');
-        expect(r.response?.status).not.toBe(401);
+        expect(r.response?.status).toBe(401);
     });
 });

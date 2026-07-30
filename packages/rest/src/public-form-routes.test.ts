@@ -69,6 +69,7 @@ function buildServer(sections: any[]) {
     createData,
   };
   const rest = new RestServer(mockServer() as any, protocol, { api: { requireAuth: false } } as any);
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
   const find = (method: string, suffix: string) =>
     rest.getRoutes().find((r) => r.method === method && r.path.endsWith(suffix))!;
