@@ -906,9 +906,19 @@ os migrate files-to-references --apply   # converts, verifies, records the flag
 The run backfills legacy file-field values (inline metadata blobs, own-resolver
 URLs, `data:` URIs) into owned `sys_file` references and reconciles the ownership
 ledger against what records actually hold. The **deployment-level flag it
-records** — never the platform version — is what may later authorise
-irreversible behaviour, and media value shapes enforce only once *this*
-deployment has verified its own migration.
+records** — never the platform version — is what authorises irreversible
+behaviour, and media value shapes enforce only once *this* deployment has
+verified its own migration.
+
+**Released-file collection is live behind that same flag** (#3459). On a
+verified deployment, a field file whose one owning record lets go — the field
+cleared, or the record deleted — is tombstoned into the declared 30-day grace
+window; re-referencing the id inside the window revives it, and past it the
+platform sweep re-verifies at delete time that nothing holds the file (join
+rows, ownership columns, and a fresh read of the flag itself) before
+reclaiming the row and its bytes. A deployment that never migrates keeps every
+released file forever: upgrading is not consent — passing your own
+migration's self-check is.
 
 ### Approvals: dynamic approver routing (#3447)
 

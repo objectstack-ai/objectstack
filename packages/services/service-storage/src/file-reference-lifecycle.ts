@@ -36,13 +36,16 @@ import type { IStorageService } from '@objectstack/spec/contracts';
  *
  * ## What this module does NOT do
  *
- * It records ownership and it releases ownership. It never tombstones and
- * never deletes bytes. The `scope === 'attachments'` guardrail in
- * `attachment-lifecycle.ts` — which is what keeps field-referenced files out
- * of the reap entirely — is untouched here, so shipping this module cannot
- * delete anything. Turning released files into reap candidates is a separate,
- * gated change that must also extend the reap guard's sweep-time re-verify in
- * the same commit; see {@link releaseOwnership}.
+ * It records ownership, releases ownership, and — only on a deployment that
+ * has verified its file-as-reference migration (#3617) — tombstones a
+ * released file so the platform sweep can collect it after the declared
+ * grace window. It never deletes bytes itself: reclaiming them stays with the
+ * `sys_file` reap guard in `attachment-lifecycle.ts`, whose sweep-time
+ * re-verify covers the ownership columns for exactly this lineage. Those two
+ * halves — the tombstone here, the re-verify there — shipped in the same
+ * change (#3459 PR-5b) and must stay together; see {@link releaseOwnership}.
+ * On a deployment that has not migrated, nothing here ever tombstones, so
+ * nothing this module does can lead to a deleted byte.
  *
  * ## Dormancy
  *
@@ -83,6 +86,11 @@ export interface FileReferenceEngine {
   findOne(object: string, options: Record<string, unknown>): Promise<Record<string, unknown> | null>;
   insert(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
   update(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
+  /** Memoized read of this deployment's `adr-0104-file-references` migration
+   * flag (#3617) — the gate on tombstoning released files. Optional: an
+   * engine without it (an older engine, a test fake) reads as "not verified",
+   * so release stays tombstone-free. Fail closed, never open. */
+  isFileReferencesMigrationVerified?(): Promise<boolean>;
 }
 
 export interface FileReferenceLogger {
@@ -421,34 +429,70 @@ async function claimFile(
 }
 
 /**
+ * May a released file enter collection on this deployment? True only when the
+ * engine attests the file-as-reference migration verified (#3617). Every way
+ * of not knowing — no such engine method, a read failure — answers false and
+ * keeps release tombstone-free: absent evidence is not permission. The engine
+ * memoizes the underlying flag read (one query per process; a flag recorded
+ * by a separate `os migrate` process is picked up on restart or via
+ * `invalidateDataMigrationFlags()`).
+ */
+async function collectionOpen(engine: FileReferenceEngine): Promise<boolean> {
+  if (typeof engine.isFileReferencesMigrationVerified !== 'function') return false;
+  try {
+    return (await engine.isFileReferencesMigrationVerified()) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Give up ownership of `rows` — the single seam through which a field-owned
  * file becomes unreferenced.
  *
- * Today this only clears the ownership columns; the file becomes unowned and
- * stays exactly as retained as it was before (no tombstone, so nothing makes
- * it a reap candidate). Enabling collection means extending THIS function to
- * also set `status='deleted'` + `deleted_at` — and that change is only safe in
- * the same commit that teaches the `sys_file` reap guard to re-verify the
- * ownership columns at sweep time. Doing the tombstone half alone would make
- * every released file reapable while the guard still re-verifies only
- * `sys_attachment` (always empty for field files), i.e. a guaranteed byte
- * delete rather than a merely risky one. Keep both halves together.
+ * On a deployment that has verified its file-as-reference migration
+ * (`os migrate files-to-references --apply`, #3617), a released committed
+ * file is also tombstoned — `status='deleted'` + `deleted_at` — which starts
+ * the `sys_file` lifecycle's declared grace window and, at its end, hands the
+ * row to the reap guard. That guard's sweep-time re-verify covers the
+ * ownership columns for exactly this lineage, and the two halves shipped in
+ * the same change (#3459 PR-5b) deliberately: tombstoning released files
+ * while the guard still re-verified only `sys_attachment` — always empty for
+ * a field file — would turn every release into a guaranteed byte delete
+ * rather than a risky one. Do not separate them.
+ *
+ * On a deployment that has NOT verified (or where the engine cannot say),
+ * this only clears the ownership columns and the file stays exactly as
+ * retained as it was. A release the memoized flag read lets through after a
+ * recorded regression still cannot delete anything: the guard re-reads the
+ * flag fresh at sweep time and vetoes while the gate is closed.
+ *
+ * Only a `committed` file is tombstoned: `pending` rows already carry their
+ * own never-completed reap policy, and re-tombstoning a `deleted` row would
+ * reset its grace clock.
  */
 async function releaseOwnership(
   engine: FileReferenceEngine,
   logger: FileReferenceLogger,
   rows: Array<Record<string, unknown>>,
 ): Promise<void> {
+  if (rows.length === 0) return;
+  const collect = await collectionOpen(engine);
   for (const row of rows) {
     const id = row?.id;
     if (id == null) continue;
+    const tombstone = collect && row.status === 'committed';
     try {
-      await engine.update(
-        'sys_file',
-        { id, ref_object: null, ref_id: null, ref_field: null },
-        { context: { ...SYSTEM_CTX } },
+      const patch: Record<string, unknown> = { id, ref_object: null, ref_id: null, ref_field: null };
+      if (tombstone) {
+        patch.status = 'deleted';
+        patch.deleted_at = new Date().toISOString();
+      }
+      await engine.update('sys_file', patch, { context: { ...SYSTEM_CTX } });
+      logger.debug?.(
+        `[storage] file reference: released ownership of sys_file ${String(id)}` +
+          (tombstone ? ' (tombstoned — grace window started)' : ''),
       );
-      logger.debug?.(`[storage] file reference: released ownership of sys_file ${String(id)}`);
     } catch (err) {
       // Bookkeeping must never break a user's write. A missed release only
       // means the file stays owned — it lingers rather than being collected,

@@ -34,7 +34,8 @@ import { SysAttachment } from '@objectstack/platform-objects/audit';
 // its first consuming domain: the ADR-0104 file-as-reference row gates this
 // service's released-file collection (#3459 PR-5b) and the strict media
 // value-shape default (#3438).
-import { SysMigration } from '@objectstack/platform-objects/system';
+import { SysMigration, isDataMigrationVerified } from '@objectstack/platform-objects/system';
+import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
 import { SwappableStorageService } from './swappable-storage-service.js';
 import {
   resolveStorageTarget,
@@ -301,16 +302,23 @@ export class StorageServicePlugin implements Plugin {
         // Field-reference ownership (ADR-0104 D3 wave 2) — keeps
         // sys_file.ref_object/ref_id/ref_field in step with what records hold,
         // and copies bytes rather than sharing a row when a second field slot
-        // writes an already-owned id. Records ownership only: it never
-        // tombstones, so the `scope==='attachments'` reap guardrail above
-        // still keeps field-referenced files out of collection entirely.
+        // writes an already-owned id. On a deployment whose file-as-reference
+        // migration is verified (#3617), releasing ownership also tombstones
+        // the file into the declared grace window (#3459 PR-5b); the reap
+        // guard below re-verifies the ownership columns — and re-reads the
+        // deployment flag, fresh — before any byte is deleted.
         installFileReferenceHooks(engine as any, () => this.storage, ctx.logger);
         try {
           const lifecycle = ctx.getService<any>('lifecycle');
           if (lifecycle && typeof lifecycle.registerReapGuard === 'function') {
             lifecycle.registerReapGuard(
               'sys_file',
-              createSysFileReapGuard(engine as any, () => this.storage, ctx.logger),
+              createSysFileReapGuard(engine as any, () => this.storage, ctx.logger, () =>
+                // Fresh read each sweep — deliberately NOT the engine's
+                // memoized one: this sits at the moment of irreversibility,
+                // so a regressed gate must close without a restart.
+                isDataMigrationVerified(engine as any, FILE_REFERENCES_MIGRATION_ID),
+              ),
             );
             // Abort the backend multipart upload before an abandoned/terminal
             // sys_upload_session row is reaped, so its parts don't leak (#2970).
