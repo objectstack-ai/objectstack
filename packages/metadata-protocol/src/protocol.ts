@@ -18,7 +18,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
-import { parseFilterAST, isFilterAST, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
+import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
@@ -298,6 +298,59 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
 function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     return getMetadataTypeSchema(singular) ?? null;
+}
+
+/**
+ * A 400 for a `$filter` that looks like a filter AST but is not one.
+ *
+ * The message has to be *actionable from the request*, which is the whole point
+ * of rejecting here rather than letting a driver fail later: the caller sent a
+ * query parameter, so the error names the offending element and the vocabulary
+ * it was checked against — not a driver-internal builder state.
+ *
+ * Diagnoses the three shapes `isFilterAST` refuses, in the order they occur in
+ * practice. #4121.
+ */
+function malformedFilterError(filter: unknown[]): Error {
+    const detail = describeMalformedFilter(filter);
+    const err: any = new Error(
+        `Malformed $filter: ${detail} A filter array is a comparison ` +
+        `[field, operator, value], a logical node ["and"|"or", ...conditions], or a ` +
+        `list of those. Recognised operators: ${[...VALID_AST_OPERATORS].sort().join(', ')}.`,
+    );
+    err.status = 400;
+    err.code = 'INVALID_FILTER';
+    return err;
+}
+
+/** The specific reason a filter array failed `isFilterAST`, for the message above. */
+function describeMalformedFilter(filter: unknown[]): string {
+    const [first, second] = filter;
+    const isKeyword = typeof first === 'string' && ['and', 'or'].includes(first.toLowerCase());
+
+    // `["and"]` / `["or"]` with nothing to join. The one shape that still
+    // returned every row silently after #3948: the driver sets its join mode,
+    // matches no element, and emits no predicate.
+    if (isKeyword && filter.length < 2) {
+        return `logical node ["${String(first)}"] has no conditions to join.`;
+    }
+    // A bare triple whose operator is outside the AST vocabulary — the original
+    // `before` / `after` / `'not in'` case.
+    if (typeof first === 'string' && !isKeyword && typeof second === 'string'
+        && !VALID_AST_OPERATORS.has(second.toLowerCase())) {
+        return `unrecognised operator "${second}" in [${JSON.stringify(first)}, ...].`;
+    }
+    // An element that is neither a join keyword nor a nested condition.
+    const badIndex = filter.findIndex(
+        (item) => !Array.isArray(item)
+            && !(typeof item === 'string' && ['and', 'or'].includes(item.toLowerCase())),
+    );
+    if (badIndex >= 0 && filter.some((item) => Array.isArray(item))) {
+        const bad = filter[badIndex];
+        return `element ${badIndex} is ${bad === null ? 'null' : typeof bad}, ` +
+            `expected a condition array or a logical keyword.`;
+    }
+    return `${JSON.stringify(filter)} is not a recognised filter shape.`;
 }
 
 /**
@@ -3102,6 +3155,20 @@ export class ObjectStackProtocolImplementation implements
             // Filter AST array → FilterCondition object
             if (isFilterAST(parsedFilter)) {
                 parsedFilter = parseFilterAST(parsedFilter);
+            } else if (Array.isArray(parsedFilter) && parsedFilter.length > 0) {
+                // `isFilterAST` was being read as a *conversion* gate, so an array
+                // it refused was assigned to `where` unconverted — an opaque value
+                // the driver then had to make sense of. Every driver now fails on
+                // it, so this is not a narrowing; it moves the failure to where the
+                // malformed filter actually arrived, with the request's own
+                // vocabulary in the message instead of a driver-internal one.
+                //
+                // It also closes what the driver-side fix could not: a lone
+                // `['and']` / `['or']` sets the join mode, matches no element, and
+                // emits NO predicate — the last shape that still returned every row
+                // silently after #3948. An empty `[]` is left alone: it means "no
+                // filter", and every path already treats it that way. #4121.
+                throw malformedFilterError(parsedFilter);
             }
             options.where = parsedFilter;
         }
