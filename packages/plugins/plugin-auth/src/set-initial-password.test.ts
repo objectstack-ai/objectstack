@@ -21,7 +21,7 @@ describe('runSetInitialPassword', () => {
     const api: SetPasswordCapableApi = { setPassword: vi.fn() };
     const res = await runSetInitialPassword(api, makeRequest({}));
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ success: false, error: { code: 'invalid_request', message: 'newPassword is required' } });
+    expect(res.body).toEqual({ success: false, error: { code: 'INVALID_REQUEST', message: 'newPassword is required' } });
     expect(api.setPassword).not.toHaveBeenCalled();
   });
 
@@ -29,7 +29,7 @@ describe('runSetInitialPassword', () => {
     const api: SetPasswordCapableApi = { setPassword: vi.fn() };
     const res = await runSetInitialPassword(api, makeRequest('not-json{'));
     expect(res.status).toBe(400);
-    expect(res.body.error?.code).toBe('invalid_request');
+    expect(res.body.error?.code).toBe('INVALID_REQUEST');
   });
 
   it('forwards newPassword + session headers to better-auth and returns 200 on success', async () => {
@@ -73,6 +73,6 @@ describe('runSetInitialPassword', () => {
     const setPassword = vi.fn().mockRejectedValue(new Error('adapter exploded'));
     const res = await runSetInitialPassword({ setPassword }, makeRequest({ newPassword: 'x'.repeat(12) }));
     expect(res.status).toBe(500);
-    expect(res.body.error).toEqual({ code: 'internal', message: 'adapter exploded' });
+    expect(res.body.error).toEqual({ code: 'INTERNAL_ERROR', message: 'adapter exploded' });
   });
 });

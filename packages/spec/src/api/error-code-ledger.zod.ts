@@ -147,7 +147,9 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/plugin-auth': [
     'ACCOUNT_LOCKED',
     'ASYNC_NOT_SUPPORTED',
+    'AUTH_CONFIG_ERROR',
     'CREATE_FAILED',
+    'DOMAIN_VERIFICATION_DISABLED', // domain verification is off on this deployment
     'DOMAIN_VERIFICATION_FAILED', // pass-through from better-auth
     'EMAIL_SERVICE_REQUIRED',
     'ENV_ACCESS_DENIED',
@@ -155,6 +157,7 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_PHONE',
     'INVITE_EMAIL_FAILED',
     'INVITE_REQUIRES_EMAIL',
+    'INVALID_REQUEST',
     'INVITE_SMS_FAILED',
     'IP_NOT_ALLOWED',
     'LAST_LOCAL_CREDENTIAL',      // refusing to remove the user's only local credential
@@ -164,7 +167,10 @@ export const ERROR_CODE_LEDGER = {
     'PASSWORD_EXPIRED',
     'PASSWORD_POLICY_VIOLATION',
     'PASSWORD_REUSE',
+    'OAUTH_REGISTER_FAILED',       // better-auth rejected the client registration
     'PHONE_NOT_ENABLED',
+    'SAML_REGISTER_FAILED',
+    'SSO_REGISTER_FAILED',
     'SSO_REGISTER_FORBIDDEN',
     'USER_ALREADY_EXISTS',        // pass-through from better-auth
     'VALIDATION_FAILED',
@@ -213,6 +219,28 @@ export const ERROR_CODE_LEDGER = {
     'ERR_BULK_RESULT_MISMATCH',
     'FILTER_TOKEN_UNKNOWN',       // filter references an unknown context token
     'FILTER_TOKEN_UNRESOLVED',
+  ],
+  '@objectstack/hono': [
+    'AUTH_CONFIG_ERROR',             // auth service threw while the adapter mounted it
+  ],
+  '@objectstack/cloud-connection': [
+    'CLOUD_FETCH_FAILED',            // fetching the manifest/bundle from cloud failed
+    'CLOUD_UNCONFIGURED',            // no cloud endpoint configured on this runtime
+    'DEVICE_CODE_FAILED',            // cloud rejected the device-code exchange
+    'DRIVER_UNAVAILABLE',            // no driver service — cannot purge seeded rows
+    'ENVIRONMENT_BIND_FAILED',
+    'ENVIRONMENT_NOT_FOUND',
+    'INVALID_REQUEST',
+    'MANIFEST_CONFLICT',             // manifest_id already defined by local code
+    'MARKETPLACE_PROXY_FAILED',
+    'MARKETPLACE_STORAGE_FAILED',    // install-record read/write failed
+    'MARKETPLACE_UNAVAILABLE',
+    'NOTHING_TO_PURGE',              // package declares no seed datasets
+    'PLUGIN_INSTALL_FAILED',
+    'PLUGIN_MANIFEST_INVALID',
+    'PLUGIN_REGISTER_FAILED',
+    'RESEED_NO_ROWS',                // reseed ran but wrote nothing
+    'RESEED_SKIPPED',                // reseed declined to run; message carries why
   ],
   '@objectstack/service-settings': [
     'INTERNAL',

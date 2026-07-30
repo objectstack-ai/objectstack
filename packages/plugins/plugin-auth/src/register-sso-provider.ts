@@ -112,7 +112,7 @@ export async function runRegisterSsoProviderFromForm(
   if (missing.length) {
     return {
       status: 400,
-      body: { success: false, error: { code: 'invalid_request', message: `Missing required field(s): ${missing.join(', ')}` } },
+      body: { success: false, error: { code: 'INVALID_REQUEST', message: `Missing required field(s): ${missing.join(', ')}` } },
     };
   }
 
@@ -134,7 +134,7 @@ export async function runRegisterSsoProviderFromForm(
     origin = url.origin;
     innerUrl = `${origin}${url.pathname.replace(/\/admin\/sso\/register$/, '/sso/register')}`;
   } catch {
-    return { status: 400, body: { success: false, error: { code: 'invalid_request', message: 'Bad request URL' } } };
+    return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
   }
   const headers = new Headers({ 'content-type': 'application/json' });
   const cookie = request.headers.get('cookie');
@@ -170,7 +170,7 @@ export async function runRegisterSsoProviderFromForm(
   if (!resp.ok) {
     return {
       status: resp.status,
-      body: { success: false, error: { code: 'sso_register_failed', message: parsed?.message || 'SSO provider registration failed' } },
+      body: { success: false, error: { code: 'SSO_REGISTER_FAILED', message: parsed?.message || 'SSO provider registration failed' } },
     };
   }
   return { status: 200, body: { success: true, data: { providerId: parsed?.providerId ?? providerId } } };
@@ -212,7 +212,7 @@ export async function runRegisterSamlProviderFromForm(
     ] as const
   ).filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) {
-    return { status: 400, body: { success: false, error: { code: 'invalid_request', message: `Missing required field(s): ${missing.join(', ')}` } } };
+    return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: `Missing required field(s): ${missing.join(', ')}` } } };
   }
 
   let origin: string;
@@ -224,7 +224,7 @@ export async function runRegisterSamlProviderFromForm(
     prefix = url.pathname.replace(/\/admin\/sso\/register-saml$/, '');
     innerUrl = `${origin}${prefix}/sso/register`;
   } catch {
-    return { status: 400, body: { success: false, error: { code: 'invalid_request', message: 'Bad request URL' } } };
+    return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
   }
   const acsUrl = `${origin}${prefix}/sso/saml2/sp/acs/${encodeURIComponent(providerId)}`;
   const spMetadataUrl = `${origin}${prefix}/sso/saml2/sp/metadata?providerId=${encodeURIComponent(providerId)}`;
@@ -259,7 +259,7 @@ export async function runRegisterSamlProviderFromForm(
   let parsed: any = {};
   try { const t = await resp.text(); parsed = t ? JSON.parse(t) : {}; } catch { parsed = {}; }
   if (!resp.ok) {
-    return { status: resp.status, body: { success: false, error: { code: 'saml_register_failed', message: parsed?.message || 'SAML provider registration failed' } } };
+    return { status: resp.status, body: { success: false, error: { code: 'SAML_REGISTER_FAILED', message: parsed?.message || 'SAML provider registration failed' } } };
   }
   return { status: 200, body: { success: true, data: { providerId: parsed?.providerId ?? providerId }, acsUrl, spMetadataUrl } };
 }
@@ -346,11 +346,11 @@ export async function runRequestDomainVerification(
   const providerId = str(body?.providerId);
   const domain = bareHostname(str(body?.domain));
   if (!providerId) {
-    return { status: 400, body: { success: false, error: { code: 'invalid_request', message: 'Missing required field: providerId' } } };
+    return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Missing required field: providerId' } } };
   }
 
   const rw = rewriteSsoAdminUrl(request, /\/admin\/sso\/request-domain-verification$/, '/sso/request-domain-verification');
-  if (!rw) return { status: 400, body: { success: false, error: { code: 'invalid_request', message: 'Bad request URL' } } };
+  if (!rw) return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
   const headers = forwardAuthHeaders(request, rw.origin);
 
   const resp = await handle(new Request(rw.innerUrl, { method: 'POST', headers, body: JSON.stringify({ providerId }) }));
@@ -358,7 +358,7 @@ export async function runRequestDomainVerification(
   try { const t = await resp.text(); parsed = t ? JSON.parse(t) : {}; } catch { parsed = {}; }
   if (!resp.ok) {
     if (resp.status === 404 && !parsed?.code) {
-      return { status: 400, body: { success: false, error: { code: 'domain_verification_disabled', message: 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).' } } };
+      return { status: 400, body: { success: false, error: { code: 'DOMAIN_VERIFICATION_DISABLED', message: 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).' } } };
     }
     return { status: resp.status, body: { success: false, error: { code: parsed?.code || 'request_domain_verification_failed', message: parsed?.message || 'Failed to request domain verification' } } };
   }
@@ -392,11 +392,11 @@ export async function runVerifyDomain(
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const providerId = str(body?.providerId);
   if (!providerId) {
-    return { status: 400, body: { success: false, error: { code: 'invalid_request', message: 'Missing required field: providerId' } } };
+    return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Missing required field: providerId' } } };
   }
 
   const rw = rewriteSsoAdminUrl(request, /\/admin\/sso\/verify-domain$/, '/sso/verify-domain');
-  if (!rw) return { status: 400, body: { success: false, error: { code: 'invalid_request', message: 'Bad request URL' } } };
+  if (!rw) return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
   const headers = forwardAuthHeaders(request, rw.origin);
 
   const resp = await handle(new Request(rw.innerUrl, { method: 'POST', headers, body: JSON.stringify({ providerId }) }));

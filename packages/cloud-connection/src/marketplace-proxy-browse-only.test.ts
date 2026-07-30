@@ -75,6 +75,6 @@ describe('MarketplaceProxyPlugin — browse-only (no install dead-end)', () => {
         const handler = await captureHandler(plugin);
         const result: any = await handler(fakeCtx('GET', '/api/v1/marketplace/packages'), async () => 'NEXT');
         expect(result.__status).toBe(503);
-        expect(result.__body?.error?.code).toBe('marketplace_unavailable');
+        expect(result.__body?.error?.code).toBe('MARKETPLACE_UNAVAILABLE');
     });
 });

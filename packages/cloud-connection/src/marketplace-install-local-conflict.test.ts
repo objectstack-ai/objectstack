@@ -81,7 +81,7 @@ describe('findConflict — orphaned ledger vs real user code', () => {
             makeC({ manifest: MANIFEST('app.user.foo') }),
         );
         expect(res.status).toBe(409);
-        expect(res.payload?.error?.code).toBe('manifest_conflict');
+        expect(res.payload?.error?.code).toBe('MANIFEST_CONFLICT');
     });
 
     it('allows upgrading an orphaned marketplace install (registered, ledger entry gone)', async () => {
@@ -106,7 +106,7 @@ describe('findConflict — orphaned ledger vs real user code', () => {
         const second = await install(makeC({ manifest: MANIFEST('app.mk.bar', '1.0.1') }));
         expect(second.status).not.toBe(409);
         expect(second.payload?.success).toBe(true);
-        expect(second.payload?.error?.code).not.toBe('manifest_conflict');
+        expect(second.payload?.error?.code).not.toBe('MANIFEST_CONFLICT');
     });
 
     it('still treats a fresh, never-seen manifest as a clean install', async () => {

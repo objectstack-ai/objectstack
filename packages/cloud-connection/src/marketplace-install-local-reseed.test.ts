@@ -124,7 +124,7 @@ describe('reseed honest result', () => {
         );
         expect(res.status).toBe(422);
         expect(res.payload?.success).toBe(false);
-        expect(res.payload?.error?.code).toBe('reseed_no_rows');
+        expect(res.payload?.error?.code).toBe('RESEED_NO_ROWS');
         // The real failure reason is surfaced, not swallowed.
         expect(res.payload?.error?.message).toContain('database is locked');
         expect(res.payload?.error?.details).toMatchObject({ inserted: 0, updated: 0, errors: 2 });
@@ -137,7 +137,7 @@ describe('reseed honest result', () => {
             makeC({}, 'app.test.proj'),
         );
         expect(res.status).toBe(422);
-        expect(res.payload?.error?.code).toBe('reseed_no_rows');
+        expect(res.payload?.error?.code).toBe('RESEED_NO_ROWS');
     });
 
     it('SUCCEEDS and flips withSampleData when rows actually land', async () => {

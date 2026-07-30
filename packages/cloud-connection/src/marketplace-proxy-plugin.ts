@@ -207,7 +207,7 @@ export class MarketplaceProxyPlugin implements Plugin {
                     return c.json({
                         success: false,
                         error: {
-                            code: 'marketplace_unavailable',
+                            code: 'MARKETPLACE_UNAVAILABLE',
                             message: 'No control-plane URL configured for this runtime (OS_CLOUD_URL).',
                         },
                     }, 503);
@@ -325,7 +325,7 @@ export class MarketplaceProxyPlugin implements Plugin {
                     return c.json({
                         success: false,
                         error: {
-                            code: 'marketplace_proxy_failed',
+                            code: 'MARKETPLACE_PROXY_FAILED',
                             message: err?.message ?? String(err),
                         },
                     }, 502);

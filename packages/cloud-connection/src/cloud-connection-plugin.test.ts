@@ -131,7 +131,7 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
         await fireKernelReady();
         const res = await rawApp.routes.get('GET /api/v1/cloud-connection/status')!(makeC('https://nope.example.com/x'));
         expect(res.status).toBe(404);
-        expect(res.payload.error.code).toBe('environment_not_found');
+        expect(res.payload.error.code).toBe('ENVIRONMENT_NOT_FOUND');
     });
 
     it('install rejects unauthenticated callers with 401 (no control-plane call)', async () => {

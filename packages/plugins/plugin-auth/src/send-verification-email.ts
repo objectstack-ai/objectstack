@@ -103,7 +103,7 @@ export async function runResendVerificationEmail(
     origin = url.origin;
     sendUrl = url.href;
   } catch {
-    return { status: 400, body: { success: false, error: { code: 'invalid_request', message: 'Bad request URL' } } };
+    return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
   }
 
   // No address supplied → this is the one-click self-service resend. Default to
@@ -114,7 +114,7 @@ export async function runResendVerificationEmail(
   if (!email) {
     return {
       status: 400,
-      body: { success: false, error: { code: 'invalid_request', message: 'email is required (sign in to resend to your own address)' } },
+      body: { success: false, error: { code: 'INVALID_REQUEST', message: 'email is required (sign in to resend to your own address)' } },
     };
   }
 

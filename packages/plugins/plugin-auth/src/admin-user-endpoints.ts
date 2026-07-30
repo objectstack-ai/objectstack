@@ -183,7 +183,7 @@ async function parseJson(request: Request): Promise<Record<string, unknown>> {
 }
 
 function badRequest(message: string): EndpointResult {
-  return { status: 400, body: { success: false, error: { code: 'invalid_request', message } } };
+  return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message } } };
 }
 
 /**
@@ -361,7 +361,7 @@ function mapAuthApiError(error: unknown, fallback: string): EndpointResult {
     body?: { code?: string; message?: string };
     message?: string;
   } | null;
-  const code = e?.body?.code ?? 'internal';
+  const code = e?.body?.code ?? 'INTERNAL_ERROR';
   const message = e?.body?.message ?? e?.message ?? fallback;
   const rawStatus =
     typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;
@@ -438,7 +438,7 @@ export async function runAdminCreateUser(
   if (typeof userId !== 'string' || userId.length === 0) {
     return {
       status: 500,
-      body: { success: false, error: { code: 'internal', message: 'better-auth returned no user id' } },
+      body: { success: false, error: { code: 'INTERNAL_ERROR', message: 'better-auth returned no user id' } },
     };
   }
 
@@ -528,7 +528,7 @@ export async function runAdminSetUserPassword(
     }
 
     if (!(await authCtx.internalAdapter.findUserById(userId))) {
-      return { status: 404, body: { success: false, error: { code: 'not_found', message: 'User not found' } } };
+      return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'User not found' } } };
     }
 
     // Mirrors the stock /admin/set-user-password core: hash, then update the
