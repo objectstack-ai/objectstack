@@ -83,7 +83,7 @@ disagree about shape:
 | Field type | Canonical comparand | Semantics |
 |:---|:---|:---|
 | `date` | `YYYY-MM-DD` | Timezone-naive calendar day. A `Date` collapses to its UTC day; a longer ISO string is truncated to its leading date. |
-| `datetime` | `YYYY-MM-DDTHH:MM:SS.sssZ` | A UTC instant. A `Date`, an epoch-millisecond number, a bare `YYYY-MM-DD` (→ midnight UTC) and a zone-naive `YYYY-MM-DD HH:MM:SS` (→ read as UTC) all fold to this one form. |
+| `datetime` | `YYYY-MM-DDTHH:MM:SS.sssZ` | A UTC instant. A `Date`, an epoch-millisecond number, a bare `YYYY-MM-DD` (→ midnight UTC, but see the whole-day rule below) and a zone-naive `YYYY-MM-DD HH:MM:SS` (→ read as UTC) all fold to this one form. |
 | `time` | `HH:MM:SS`, with `.fff` **only** when the milliseconds are non-zero | Timezone-naive wall clock. `'14:30'` and `'14:30:00'` canonicalise identically, so they are the same filter. |
 
 ```typescript
@@ -96,6 +96,32 @@ disagree about shape:
   }
 }
 ```
+
+### A bare calendar day as an UPPER bound means the whole day
+
+Canonicalisation settles a comparand's *shape*; which **instant** a bare
+`YYYY-MM-DD` denotes additionally depends on the side of the comparison it sits on:
+
+| Operator | A bare `YYYY-MM-DD` means |
+|:---|:---|
+| `$gte` / `$gt` / `$lt` | that day's `00:00:00.000` |
+| `$lte`, and the max of a `$between` | the **whole** day — compiled half-open, as `< next day` |
+
+So `{ created_at: { $gte: '2026-01-01', $lte: '2026-03-31' } }` includes
+everything recorded *on* March 31st, not just the instant it began. Without
+that rule a dashboard window ending "today" silently dropped every row created
+after midnight (#3777). Pass a full ISO timestamp when you want an exact
+instant — only the day-granular *string* carries whole-day intent:
+
+```typescript
+{ created_at: { $lte: '2026-03-31' } }              // through all of March 31st
+{ created_at: { $lte: '2026-03-31T12:00:00.000Z' } } // up to noon exactly
+```
+
+On a `date` field the two forms are equivalent (`< next day` and `<= day` order
+identically over `YYYY-MM-DD` text), so the rule needs no special handling
+there. It applies uniformly across the SQL drivers, the in-memory and MongoDB
+drivers, analytics windows, and the RLS write-side `check` evaluator.
 
 <Callout type="info">
 Canonicalisation runs on **every SQL dialect**, not just SQLite — a zone-naive string bound
