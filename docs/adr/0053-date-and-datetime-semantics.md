@@ -1,6 +1,6 @@
 # ADR-0053: `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone
 
-**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 (`temporalFilterValue` promotion onto the `IDataDriver` contract) still open as the ADR predicted. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942).
+**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
 **Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
@@ -387,6 +387,19 @@ that is not on the driver contract. Promote it to a first-class
 retire it)** once the contract method is universal. (If an in-flight
 `IDataDriver`-interface change is open, align this with it; do not block on it.)
 
+> **Resolved (2026-07-30).** Both hooks — `temporalFilterValue` and the D-B
+> column-side companion `temporalFilterColumnSql` — are optional members of
+> `IDataDriver` (`spec/contracts/data-driver.ts`), documented as a PAIR:
+> implementing one without the other reintroduces half of #3912, so the
+> contract says implement both or neither, with "absent = identity" semantics
+> for drivers whose storage form is the wire form. `SqlDriver implements
+> IDataDriver`, so its signatures are compile-checked; analytics derives its
+> driver seam by `Pick`-ing the contract instead of a local duck type, keeping
+> the runtime `typeof` guards as the (correct) way to consume an optional
+> member. `coerceFilterValueForSql` already sits behind the hook as the
+> last-resort boolean/number recovery for non-temporal columns — the demotion
+> this decision asked for — and is retained for exactly that role.
+
 **D-A3 — Add a temporal conformance matrix as the runtime regression backstop.**
 Cover `field-type {date, datetime} × operator {eq, gte/lte/gt/lt, in, dateRange} ×
 relative-token {today, N_days_ago, N_months_ago, …} × driver {SQLite, Postgres at
@@ -400,8 +413,9 @@ time, the matrix proves runtime correctness across drivers.
 - The `datetime`-on-raw-SQL filter bug is closed at the driver boundary, mirroring
   Phase 1's "align the consumer with the driver's existing contract rather than
   inventing a semantic" stance. No change to Phase 2's reference-timezone plan.
-- Until D-A2 lands, the hook depends on a duck-typed driver method — a known,
-  intentionally-temporary seam tracked here.
+- ~~Until D-A2 lands, the hook depends on a duck-typed driver method — a known,
+  intentionally-temporary seam tracked here.~~ Landed 2026-07-30; see the
+  resolution note under D-A2.
 
 ---
 
@@ -503,7 +517,8 @@ is clean.
   companion threaded to analytics as
   `StrategyContext.coerceTemporalFilterColumn`. Coercing the value alone is not
   sufficient on a mixed-form column, so any surface that binds a comparand into
-  raw SQL must wrap its column reference too. Both remain duck-typed until D-A2.
+  raw SQL must wrap its column reference too. Both promoted onto the contract
+  2026-07-30 — see the resolution note under D-A2.
 - D-A3's conformance matrix should gain a **storage-form** axis (canonical,
   legacy-epoch, legacy-naive) and a **server-timezone** axis, since both are now
   known to have produced dialect-divergent row results.
