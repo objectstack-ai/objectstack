@@ -47,6 +47,13 @@ derivations still hold (a restated list fails silently — it keeps validating,
 just not what the other list says), and the lint suite now walks every
 multi-series family in the taxonomy rather than a list of its own.
 
+A third ratchet already existed and did its job: `app-showcase`'s coverage test
+requires a gallery widget for every distinctly-renderable `ChartType`, and it
+failed the moment `combo` was admitted. The Chart Gallery dashboard now
+demonstrates it — a task count as bars on the left axis, an average as a line on
+the right, which is the configuration `series[].type` / `series[].yAxis` exist
+for.
+
 `ActionType` deliberately does **not** gain `navigation`, which the audit
 suggested. `ActionRunner.executeNavigation` is a strictly weaker
 `executeUrl` — no `${param.X}` interpolation, no `apiBase` promotion, no
