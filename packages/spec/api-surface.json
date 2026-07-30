@@ -499,6 +499,7 @@
     "SQLiteDataTypeMappingDefaults (const)",
     "SSLConfig (type)",
     "SSLConfigSchema (const)",
+    "STACK_KEY_GUIDANCE (const)",
     "STRING_VALUE_TYPES (const)",
     "STRUCTURED_JSON_TYPES (const)",
     "Scalar (type)",
