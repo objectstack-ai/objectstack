@@ -39,7 +39,6 @@ const demoSet = PermissionSetSchema.parse({
       operation: 'select',
       using: 'owner = current_user.email',
       enabled: true,
-      priority: 10,
     },
   ],
 });
