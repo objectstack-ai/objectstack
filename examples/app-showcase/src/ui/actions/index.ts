@@ -275,6 +275,55 @@ export const ArchiveTaskAction = defineAction({
   refreshAfter: false,
 });
 
+/**
+ * script, **OBJECT-LESS** — the `global` action specimen (framework#3913).
+ *
+ * Every other action here declares an `objectName`. This one deliberately does
+ * NOT, which is the whole point: `objectName` is optional, and an action
+ * without one is an *object-less* action. `AppPlugin` registers it under the
+ * canonical `'global'` engine key (`action.object || 'global'`), and it is
+ * reachable over REST at BOTH object-less URL shapes:
+ *
+ *   POST /api/v1/actions/global/showcase_portfolio_snapshot
+ *   POST /api/v1/actions//showcase_portfolio_snapshot      ← empty object segment
+ *
+ * Why the app needed this: framework#3913 was filed because object-less actions
+ * were unreachable (registered under `'global'`, looked up under `'*'`), and its
+ * follow-up found the empty-segment URL had no route registration at all. Both
+ * were fixed blind — the showcase, the "one specimen of everything" app, had no
+ * object-less action, so neither the dispatch path nor either URL shape had a
+ * live specimen to exercise. This is that specimen.
+ *
+ * The body is genuinely object-less: it counts across SEVERAL objects, so there
+ * is no single record or object the action could sensibly hang off. `location`
+ * is `global_nav` for the same reason — an object-less action has no row and no
+ * record header to render on.
+ */
+export const PortfolioSnapshotAction = defineAction({
+  name: 'showcase_portfolio_snapshot',
+  label: 'Portfolio Snapshot',
+  icon: 'gauge',
+  // NO objectName — this is what makes it an object-less ('global') action.
+  type: 'script',
+  body: {
+    language: 'js',
+    source:
+      "var accounts = await ctx.api.object('showcase_account').count({});" +
+      "var projects = await ctx.api.object('showcase_project').count({});" +
+      "var invoices = await ctx.api.object('showcase_invoice').count({});" +
+      "return { ok: true, scope: 'global', accounts: accounts, projects: projects, invoices: invoices };",
+    capabilities: ['api.read'],
+  },
+  successMessage: 'Portfolio snapshot taken.',
+  locations: ['global_nav'],
+  refreshAfter: false,
+  ai: {
+    exposed: true,
+    description:
+      'Count the accounts, projects and invoices in this workspace. Use when the user asks how big the portfolio is, or for a quick health snapshot across objects.',
+  },
+});
+
 export const allActions = [
   MarkDoneAction,
   OpenDocsAction,
@@ -286,4 +335,5 @@ export const allActions = [
   SubmitForSignoffAction,
   ActionParamGalleryAction,
   ArchiveTaskAction,
+  PortfolioSnapshotAction,
 ];

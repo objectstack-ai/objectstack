@@ -95,7 +95,7 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     status: 'demonstrated',
     files: ['src/ui/actions/index.ts'],
     notes:
-      'Every ActionType (script/url/flow/modal/api/form). `ActionParamGalleryAction` additionally exercises the ADR-0059 param-dialog widgets: one inline param per non-trivial type (richtext/color/date/select/number/autonumber) plus image/file uploads with multiple/accept/maxSize and the upload guard.',
+      "Every ActionType (script/url/flow/modal/api/form). `ActionParamGalleryAction` additionally exercises the ADR-0059 param-dialog widgets: one inline param per non-trivial type (richtext/color/date/select/number/autonumber) plus image/file uploads with multiple/accept/maxSize and the upload guard. `PortfolioSnapshotAction` is the OBJECT-LESS specimen (framework#3913): it declares no `objectName`, so it keys at `global` — the app's only live exerciser of object-less dispatch and of both object-less URL shapes (`/actions/global/:action` and `/actions//:action`).",
   },
   report: { status: 'demonstrated', files: ['src/ui/reports/index.ts'] },
   dataset: { status: 'demonstrated', files: ['src/ui/datasets/index.ts'] },
