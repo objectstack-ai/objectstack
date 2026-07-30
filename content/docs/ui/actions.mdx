@@ -19,7 +19,7 @@ The types you'll actually use:
 | `script` *(default)* | Run server-side logic | Inline `body` **or** a handler registered via `target` |
 | `flow` | Launch a flow (e.g. a screen-flow wizard) | `target` names the flow |
 | `url` | Navigate / open a link | `target` is the URL (`${ctx.record.id}` interpolation supported) |
-| `modal` | Open a modal page to collect input, then submit to a handler | `target` names the modal page |
+| `modal` | Open a modal page — client-side only, no server dispatch | `target` names the modal page (to collect input *and* run logic, use `script` + `params`) |
 | `api` | Call an HTTP endpoint directly | `target` is the endpoint; `method` / `bodyShape` / `bodyExtra` shape the request |
 | `form` | Open a form view, prefilled with the current record | `target` names the FormView; routed to `/forms/:target?recordId=…` |
 
