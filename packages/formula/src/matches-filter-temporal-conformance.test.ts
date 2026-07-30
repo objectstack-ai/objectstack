@@ -27,3 +27,25 @@ describe('matchesFilterCondition — temporal conformance', () => {
     });
   }
 });
+
+/**
+ * Why the token axis is absent here.
+ *
+ * `TemporalCase` carries a `tokenFilter` — the same filter spelled with
+ * `{today}` / `{current_month_end}` placeholders — which the driver and
+ * analytics suites resolve through `resolveFilterTokens` before asserting. This
+ * suite deliberately runs only `c.filter`, and that is an architectural fact
+ * rather than a coverage hole:
+ *
+ * an RLS `check` is a **CEL expression** (`PermissionSet.check` is a string,
+ * compiled by `rlsCompiler.compileFilter`), where a relative date is the
+ * *function* `today()` evaluated during compilation. A `{token}` string never
+ * reaches this evaluator — `resolveFilterTokens` runs on the ObjectQL **read**
+ * path (`engine.ts` resolves `ast.where`), and the write-side check does not go
+ * through it (`plugin-security` never calls the resolver).
+ *
+ * Asserting `tokenFilter` here would therefore test an input this backend
+ * cannot be handed. If that ever changes — if a `check` gains a token-bearing
+ * filter form — this comment is the thing to delete, and the axis is already
+ * sitting in the shared table ready to be consumed.
+ */
