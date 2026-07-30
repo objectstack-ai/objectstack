@@ -18,8 +18,16 @@ import { SwappableStorageService } from './swappable-storage-service';
 function makeCtx() {
   const services = new Map<string, any>();
   const hooks: Array<() => Promise<void> | void> = [];
+  // Captured so tests can assert on what a boot SAID, not just what it built —
+  // #4096 is entirely about a warning that should not have been emitted.
+  const logs: { info: string[]; warn: string[]; error: string[] } = { info: [], warn: [], error: [] };
   const ctx: any = {
-    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    logger: {
+      info: (m: string) => { logs.info.push(String(m)); },
+      warn: (m: string) => { logs.warn.push(String(m)); },
+      error: (m: string) => { logs.error.push(String(m)); },
+    },
+    _logs: logs,
     registerService: (name: string, svc: any) => { services.set(name, svc); },
     getService: <T>(name: string): T => {
       const s = services.get(name);
@@ -119,6 +127,103 @@ describe('StorageServicePlugin: settings live-wire', () => {
     const before = proxy.getInner();
     await ctx._flushReady();
     expect(proxy.getInner()).toBe(before);
+  });
+
+  // ── #4096: the swap decision, and what it says out loud ──────────────────
+  //
+  // `hasAny` is true on every boot once the settings service has persisted its
+  // own defaults, so this used to rebuild and swap the adapter unconditionally
+  // and warn that "existing files were NOT migrated" — about a swap from an
+  // adapter to an identically-configured one, on a healthy server, forever.
+
+  it('neither swaps nor warns when persisted settings match the running adapter', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'oss-same-'));
+    const plugin = new StorageServicePlugin({
+      adapter: 'local',
+      local: { rootDir: dir },
+      registerRoutes: false,
+    });
+    const ctx = makeCtx();
+    // Exactly what the settings namespace holds after it persists its defaults:
+    // values present (so `hasAny` is true) and identical to what is running.
+    ctx.registerService('settings', makeFakeSettings({ adapter: 'local', local_root: dir }));
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    const proxy = ctx.getService('file-storage') as SwappableStorageService;
+    const before = proxy.getInner();
+
+    await ctx._flushReady();
+
+    expect(proxy.getInner()).toBe(before);
+    expect(ctx._logs.warn.join('\n')).not.toContain('adapter swapped');
+  });
+
+  it('treats an implicit local root and its explicit default as the same store', async () => {
+    // The real boot shape: the host leaves `local.rootDir` unset while the
+    // settings namespace persists the schema default, so the two spellings of
+    // one location must not read as a move.
+    const plugin = new StorageServicePlugin({ adapter: 'local', registerRoutes: false });
+    const ctx = makeCtx();
+    ctx.registerService('settings', makeFakeSettings({ adapter: 'local', local_root: './storage' }));
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    const proxy = ctx.getService('file-storage') as SwappableStorageService;
+    const before = proxy.getInner();
+
+    await ctx._flushReady();
+
+    expect(proxy.getInner()).toBe(before);
+    expect(ctx._logs.warn.join('\n')).not.toContain('adapter swapped');
+  });
+
+  it('still warns when the backing store really moves', async () => {
+    // The guard has to survive the fix: Local → another root strands whatever
+    // the old one held, and that is the whole point of the message.
+    const dirA = await fs.mkdtemp(join(tmpdir(), 'oss-move-a-'));
+    const dirB = await fs.mkdtemp(join(tmpdir(), 'oss-move-b-'));
+    const plugin = new StorageServicePlugin({
+      adapter: 'local',
+      local: { rootDir: dirA },
+      registerRoutes: false,
+    });
+    const ctx = makeCtx();
+    ctx.registerService('settings', makeFakeSettings({ adapter: 'local', local_root: dirB }));
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await ctx._flushReady();
+
+    const warned = ctx._logs.warn.join('\n');
+    expect(warned).toContain('adapter swapped');
+    expect(warned).toContain('were NOT migrated');
+  });
+
+  it('warns again on a later real move, having stayed quiet for the no-op', async () => {
+    // The verdict is per-swap state, so a quiet boot must not disarm the next
+    // genuine migration.
+    const dir = await fs.mkdtemp(join(tmpdir(), 'oss-seq-'));
+    const moved = await fs.mkdtemp(join(tmpdir(), 'oss-seq-moved-'));
+    const plugin = new StorageServicePlugin({
+      adapter: 'local',
+      local: { rootDir: dir },
+      registerRoutes: false,
+    });
+    const ctx = makeCtx();
+    const settings = makeFakeSettings({ adapter: 'local', local_root: dir });
+    ctx.registerService('settings', settings);
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await ctx._flushReady();
+    expect(ctx._logs.warn.join('\n')).not.toContain('adapter swapped');
+
+    settings.values = { adapter: 'local', local_root: moved };
+    settings._emit('storage');
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(ctx._logs.warn.join('\n')).toContain('adapter swapped');
   });
 
   it('registers a working storage/test action handler that round-trips a probe blob', async () => {

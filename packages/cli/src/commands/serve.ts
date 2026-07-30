@@ -2190,17 +2190,15 @@ export default class Serve extends Command {
             // In production mode we emit a single loud warning so the
             // operator knows to point storage at S3 / GCS / Azure before
             // shipping (data on a single pod is volatile / non-replicated).
-            const cfgStorage = (config as any).storage;
-            if (cfgStorage && (cfgStorage.driver || cfgStorage.adapter)) {
-              arg = cfgStorage;
-            } else {
-              const root = process.env.OS_STORAGE_ROOT || '.objectstack/data/uploads';
-              arg = { driver: 'local', root };
-              if (!isDev) {
-                console.warn(chalk.yellow(
-                  `  ⚠ StorageServicePlugin using local driver (${root}) — switch to S3/GCS/Azure for production (set config.storage or OS_STORAGE_*).`,
-                ));
-              }
+            const storageArg = resolveStorageCapabilityArg(
+              (config as any).storage,
+              process.env.OS_STORAGE_ROOT,
+            );
+            arg = storageArg.options;
+            if (storageArg.localRoot && !isDev) {
+              console.warn(chalk.yellow(
+                `  ⚠ StorageServicePlugin using local driver (${storageArg.localRoot}) — switch to S3/GCS/Azure for production (set config.storage or OS_STORAGE_*).`,
+              ));
             }
           }
           await kernel.use(arg !== undefined ? new Ctor(arg) : new Ctor());
@@ -2647,6 +2645,48 @@ export default class Serve extends Command {
       this.exit(1);
     }
   }
+}
+
+/**
+ * Constructor options for `StorageServicePlugin`, plus the local root to name in
+ * the production warning (absent when the host configured a backend itself).
+ */
+export interface StorageCapabilityArg {
+  options: Record<string, unknown>;
+  localRoot?: string;
+}
+
+/**
+ * Resolve what `StorageServicePlugin` is constructed with (#4096).
+ *
+ * Storage is in the default capability slate, so a host that configures nothing
+ * still gets local disk under `.objectstack/data/uploads/` and avatars /
+ * attachments / report files work out of the box.
+ *
+ * The fallback used to be `{ driver: 'local', root }` — neither of which
+ * `StorageServicePluginOptions` declares. Both were dropped on the floor, so the
+ * plugin applied its OWN default (`./storage`), `OS_STORAGE_ROOT` changed
+ * nothing, and uploads landed somewhere the operator never named. The `storage`
+ * settings namespace then corrected the root on its first read (its manifest
+ * default IS `./.objectstack/data/uploads`), which swapped the adapter and
+ * warned about stranded files — on every boot of a healthy server.
+ *
+ * A caller-supplied `config.storage` is still forwarded verbatim, including the
+ * `driver`/`root` dialect, which the plugin does not read either. That is the
+ * same mismatch one layer up and is tracked separately: correcting it means
+ * deciding whether the plugin accepts that dialect or the config schema is
+ * wrong, and a lenient alias here would fossilize the wrong contract
+ * (AGENTS.md Prime Directive #12).
+ */
+export function resolveStorageCapabilityArg(
+  cfgStorage: any,
+  envRoot?: string,
+): StorageCapabilityArg {
+  if (cfgStorage && (cfgStorage.driver || cfgStorage.adapter)) {
+    return { options: cfgStorage };
+  }
+  const rootDir = envRoot?.trim() || '.objectstack/data/uploads';
+  return { options: { adapter: 'local', local: { rootDir } }, localRoot: rootDir };
 }
 
 /**
