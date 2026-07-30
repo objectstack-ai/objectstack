@@ -65,3 +65,13 @@ genuinely wanted durability now state it, rather than inheriting it:
 `DevPlugin`'s driver is now explicitly `persistence: false`, matching the cache,
 queue, job, i18n, storage and search stubs it ships beside — it was the one piece
 of that stack that quietly outlived the process.
+
+**One claim trimmed, no behaviour attached.** The class docstring called this a
+"production-ready implementation of the ObjectStack Driver Protocol". It stores
+no constraints at all — `create()` is a `table.push()` and `syncSchema()` only
+allocates an array — so there is no primary key, uniqueness, `NOT NULL`, foreign
+key or column typing, and `bulkCreate` lands duplicate ids where a SQL driver
+raises a violation (the second finding in #4065). The docstring now says so, and
+points test authors at in-memory SQLite. Per Prime Directive #10 the fix for
+`declared ≠ enforced` is to implement it, trim the claim, or file it; with this
+driver moving to maintenance-only the claim is what goes.

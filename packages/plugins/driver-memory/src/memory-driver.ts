@@ -80,10 +80,10 @@ interface MemoryTransaction {
 
 /**
  * In-Memory Driver for ObjectStack
- * 
- * A production-ready implementation of the ObjectStack Driver Protocol
- * powered by Mingo — a MongoDB-compatible query and aggregation engine.
- * 
+ *
+ * An implementation of the ObjectStack Driver Protocol powered by Mingo — a
+ * MongoDB-compatible query and aggregation engine.
+ *
  * Features:
  * - MongoDB-compatible query engine (Mingo) for filtering, projection, aggregation
  * - Full CRUD and bulk operations
@@ -91,7 +91,27 @@ interface MemoryTransaction {
  * - Snapshot-based transactions (begin/commit/rollback)
  * - Field projection and distinct values
  * - Strict mode and initial data loading
- * 
+ *
+ * ## What this driver does NOT enforce
+ *
+ * It stores no constraints of any kind. {@link create} is a `table.push()` and
+ * {@link syncSchema} only allocates an array and indexes temporal fields, so
+ * there is no primary key, no uniqueness, no `NOT NULL`, no foreign key and no
+ * column typing. `bulkCreate` will happily land two rows with the same `id`
+ * where a SQL driver raises a constraint violation, and a read returns both.
+ *
+ * That makes it a WEAK oracle: code green against this driver can still be
+ * broken against the SQL engines production runs on. Prefer in-memory SQLite
+ * for tests — `SqlDriver` with `connection: { filename: ':memory:' }`, or
+ * `SqliteWasmDriver({ filename: ':memory:' })` where no native build is wanted.
+ * This driver's remaining roles are the last-resort rung of the dev step-down
+ * (native better-sqlite3 → WASM SQLite → here), browser/edge runtimes where no
+ * SQLite build is available, and the cross-driver read-coercion parity gate.
+ *
+ * The docstring said "production-ready" until #4065; the constraints above were
+ * true then too, and saying so is the fix (Prime Directive #10 — never advertise
+ * a capability the runtime does not deliver).
+ *
  * Reference: objectql/packages/drivers/memory
  */
 export class InMemoryDriver implements IDataDriver {
