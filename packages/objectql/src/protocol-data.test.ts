@@ -760,16 +760,99 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             ).rejects.toMatchObject({ field: 'zzzz', fields: ['zzzz', 'yyyy'] });
         });
 
-        it('leaves the known-field-plus-explicit-filter case alone (#4164)', async () => {
-            // The scope edge, pinned so a later change to it is deliberate: a
-            // REAL field name alongside an explicit filter is still dropped
-            // silently. #4134 made only the UNKNOWN half loud.
+        it('AND-merges a known field with an explicit filter instead of dropping it (#4164)', async () => {
+            // The #4134 pin test used to freeze the drop behavior here; #4164
+            // is the deliberate change it was waiting for. Both predicates now
+            // apply, and the consumed key no longer rides to the engine as a
+            // stray top-level AST key.
             const { protocol, engine } = makeProtocol();
             await protocol.findData({
                 object: 'showcase_task',
                 query: { filter: { status: 'open' }, owner_id: 'usr_1' },
             });
-            expect(engine.find.mock.calls[0][1].where).toEqual({ status: 'open' });
+            const opts = engine.find.mock.calls[0][1];
+            expect(opts.where).toEqual({ $and: [{ status: 'open' }, { owner_id: 'usr_1' }] });
+            expect(opts.owner_id).toBeUndefined();
+        });
+
+        it('merges every implicit field as ONE $and arm', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { filter: { status: 'open' }, owner_id: 'usr_1', due_date: '2026-08-01' },
+            });
+            expect(engine.find.mock.calls[0][1].where).toEqual({
+                $and: [{ status: 'open' }, { owner_id: 'usr_1', due_date: '2026-08-01' }],
+            });
+        });
+
+        it('a contradictory pair applies both sides — an honest empty set, not a silent wide one', async () => {
+            // `?filter={"status":"open"}&status=closed` — both predicates run;
+            // the intersection being empty is the caller's contradiction, not a
+            // dropped filter. No special-casing of same-field collisions.
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { filter: { status: 'open' }, status: 'closed' },
+            });
+            expect(engine.find.mock.calls[0][1].where).toEqual({
+                $and: [{ status: 'open' }, { status: 'closed' }],
+            });
+        });
+
+        it('a vacuous explicit filter ({} or empty string) lets implicit predicates stand alone', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { filter: {}, owner_id: 'usr_1' },
+            });
+            expect(engine.find.mock.calls[0][1].where).toEqual({ owner_id: 'usr_1' });
+            // `?filter=` — the parse tolerance keeps '' as-is; the old guard
+            // treated it as no-filter, and the merge must keep doing so.
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { filter: '', owner_id: 'usr_1' },
+            });
+            expect(engine.find.mock.calls[1][1].where).toEqual({ owner_id: 'usr_1' });
+        });
+
+        it('count() sees the merged where — pagination totals cannot disagree with records (#4164)', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { filter: { status: 'open' }, owner_id: 'usr_1', top: 5 },
+            });
+            expect(engine.count).toHaveBeenCalledTimes(1);
+            expect(engine.count.mock.calls[0][1].where).toEqual({
+                $and: [{ status: 'open' }, { owner_id: 'usr_1' }],
+            });
+        });
+
+        it('merges identically through the $filter JSON-string alias', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { $filter: JSON.stringify({ status: 'open' }), owner_id: 'usr_1' },
+            });
+            expect(engine.find.mock.calls[0][1].where).toEqual({
+                $and: [{ status: 'open' }, { owner_id: 'usr_1' }],
+            });
+        });
+
+        it('leaves a non-object where (unparseable filter JSON) untouched — pinned until #4181', async () => {
+            // `?filter={oops` — the parse tolerance keeps the raw string and it
+            // becomes `where`. Folding real predicates into that garbage would
+            // neither apply them nor surface the tolerance bug itself (#4181),
+            // so this path keeps its pre-#4164 shape: string where forwarded,
+            // implicit key left as a stray option.
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { filter: '{oops', owner_id: 'usr_1' },
+            });
+            const opts = engine.find.mock.calls[0][1];
+            expect(opts.where).toBe('{oops');
+            expect(opts.owner_id).toBe('usr_1');
         });
 
         it('rejects even when an explicit filter rode along — the 400 must not depend on it', async () => {

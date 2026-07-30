@@ -8,7 +8,10 @@
  * @mention hook).
  *
  * Intentionally NOT moved here:
- *   - `sys_notification` — reworked by ADR-0030 messaging.
+ *   - `sys_notification` — the ADR-0030 rework landed, and the object is the
+ *     messaging pipeline's L2 event. Its definition stays in platform-objects,
+ *     and `@objectstack/service-messaging` — the only writer — is what
+ *     contributes it to a kernel (#4154). This plugin no longer registers it.
  *   - `sys_attachment` — a file↔record link belonging with service-storage's
  *     sys_file; stays in platform-objects pending the storage-domain move.
  */

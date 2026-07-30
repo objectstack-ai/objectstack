@@ -242,6 +242,11 @@ const DISCOVERY_ROUTE_SEGMENTS: Partial<Record<keyof ApiRoutes, string>> = {
  */
 export class HonoServerPlugin implements Plugin {
     name = 'com.objectstack.server.hono';
+    /**
+     * Services init() registers on every path (ADR-0116, #4131) — lets the
+     * kernel name this plugin when a consumer requires one before it inits.
+     */
+    providesServices = ['http.server', 'http-server'];
     type = 'server';
     version = '0.9.0';
 

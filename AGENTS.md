@@ -247,27 +247,41 @@ A `.describe()` string counts — it is not "just a comment", it lands in
 `content/docs/references/`. Adding one export counts — it lands in `api-surface.json`.
 Both were learned the hard way in #4040: two separate red builds, neither a logic error.
 
-Cheapest way to be sure, since a gate is just its generator in `--check` mode — run the
-whole set and let it tell you which artifact is stale:
+Don't match by hand — one command runs **every** gate and reports **all** stale
+artifacts at once, which is precisely what CI cannot do:
 
 ```bash
-cd packages/spec
-pnpm build            # REQUIRED first — see the dist caveat below
-for c in check:docs check:api-surface check:authorable-surface check:spec-changes \
-         check:upgrade-guide check:skill-refs check:skill-docs check:react-blocks; do
-  printf '%-28s ' "$c"; pnpm -s $c >/dev/null 2>&1 && echo PASS || echo FAIL
-done
+pnpm --filter @objectstack/spec build             # REQUIRED first — see the dist caveat
+pnpm --filter @objectstack/spec check:generated   # every gate; the first failure does not stop the rest
+pnpm --filter @objectstack/spec check:generated --fix   # regenerate ONLY the ones it proved stale
 ```
+
+`--fix` is deliberately narrow. Regenerating the whole set on principle destroys the
+signal: it rewrites artifacts whose staleness you never saw, so a real semantic change
+lands silently inside a mechanical diff. Let the check tell you which are stale, then
+regenerate those.
+
+The script carries its own ledger of gate → generator and **reconciles it against
+`package.json` on every run**, in both directions. A new `check:`/`gen:` script that
+nobody classified fails the run rather than quietly dropping out of coverage — the
+failure mode a hardcoded list here would have had. (It caught its own `package.json`
+entry on the very first run.)
 
 ⚠️ **`check:api-surface` reads the built `dist/*.d.ts`, not `src/`.** A stale `dist`
 makes it report exports as **removed** — "N breaking (removed/narrowed)" — when nothing
 was removed at all: the snapshot is simply newer than your build. Rebuild before you
 believe it, and before you file a bug about `main` being red. (Two phantom "breaking
-removals" this way while writing this section.)
+removals" this way while writing this section; `check:generated` now prints this caveat
+inline when that gate is the one failing.)
 
 `check:liveness`, `check:empty-state`, `check:skill-examples` and
 `check:react-conformance` are pure checks with no generator — a failure there is a real
-finding to fix, not an artifact to regenerate.
+finding to fix, not an artifact to regenerate. `check:generated` names them as
+deliberately not run, so its "all up to date" never reads as "everything passed".
+
+Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
+their output is current; the script reports that each run rather than staying silent
+about it.
 
 ---
 

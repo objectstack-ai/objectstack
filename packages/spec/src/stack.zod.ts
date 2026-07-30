@@ -11,10 +11,8 @@ import { hasPlatformObjectPrefix } from './system/constants/platform-object-name
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
 import type { ConversionNotice } from './conversions/types.js';
-import {
-  lintUnknownAuthoringKeys,
-  formatUnknownAuthoringKey,
-} from './data/authoring-key-lint';
+import { formatUnknownAuthoringKey } from './data/authoring-key-lint';
+import { lintUnknownAuthoringKeys } from './kernel/metadata-authoring-lint';
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';

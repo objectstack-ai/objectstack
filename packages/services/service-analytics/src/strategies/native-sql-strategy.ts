@@ -22,10 +22,9 @@ import { nextUtcCalendarDay } from '@objectstack/core';
  * `default: COUNT(*)`, so an aggregate the spec grew would have returned a row
  * count instead of the number the author asked for, silently. objectui#2945.
  *
- * Non-aggregate metric types (`number`/`string`/`boolean` — custom SQL
- * expressions, `AggregationMetricType` in `data/analytics.zod.ts`) are
- * deliberately absent, and keep the caller's existing fallback rather than
- * changing behaviour here; see the note at {@link NativeSQLStrategy}.
+ * Non-aggregate metric types (`number`/`string`/`boolean`) are deliberately
+ * absent — they are handled by {@link EXPRESSION_METRIC_TYPES}, which emits the
+ * author's expression rather than wrapping it.
  */
 const AGGREGATE_SQL: Record<string, (col: string) => string> = {
   'count': () => 'COUNT(*)',
@@ -40,20 +39,43 @@ const AGGREGATE_SQL: Record<string, (col: string) => string> = {
 export const SUPPORTED_AGGREGATE_SQL_KEYS = Object.keys(AGGREGATE_SQL);
 
 /**
+ * Metric types that are a custom SQL *expression*, not an aggregate to wrap.
+ *
+ * `AggregationMetricType` (`data/analytics.zod.ts`) documents these three as
+ * "Custom SQL expression returning a number / string / boolean" — the measure's
+ * `sql` IS the whole computation (a ratio, a `CASE`, a window function), so the
+ * only correct emission is the expression itself. They used to fall through to
+ * `resolveMeasureSql`'s `COUNT(*)` fallback, which threw the expression away and
+ * returned a row count. #4157.
+ *
+ * Named rather than derived as "everything that is not an aggregate": deriving it
+ * would silently classify a *new* aggregate the spec grows (`median`, …) as an
+ * expression and emit a bare column. `metric-type-coverage.test.ts` asserts these
+ * two sets partition `AggregationMetricType`, so a new member fails a test
+ * instead of picking a default.
+ */
+export const EXPRESSION_METRIC_TYPES = new Set(['number', 'string', 'boolean']);
+
+/**
+ * A dot-separated chain of bare identifiers — `amount`, `account.amount`,
+ * `account.owner.region`. Distinguishes a relationship PATH, which
+ * {@link NativeSQLStrategy.qualifyAndRegisterJoin} lowers into joins, from a SQL
+ * expression that merely contains a dot. #4157.
+ */
+const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+
+/**
  * NativeSQLStrategy — Priority 1
  *
  * Pushes the analytics query down to the database as a native SQL statement.
  * This is the most efficient path and is preferred whenever the backing driver
  * supports raw SQL execution (e.g. Postgres, MySQL, SQLite).
  *
- * Known gap, unchanged by the lockstep work and reported separately: a measure
- * whose `type` is `number`/`string`/`boolean` — a custom SQL *expression*, not
- * an aggregate — also lands on the `COUNT(*)` fallback in
- * `resolveMeasureSql`, so its expression is replaced by a row count. Datasets
- * cannot produce such a measure (`aggregateToMetricType` only ever returns an
- * `AggregationFunction` member), so this is reachable only from a hand-authored
- * Cube. Left as-is on purpose: emitting `col` instead is a behavioural change
- * in an analytics SQL path, and deserves its own change with its own tests.
+ * `resolveMeasureSql` used to answer `COUNT(*)` to three different questions it
+ * could not otherwise answer — an undeclared measure, a custom-SQL-expression
+ * metric type, and an unrecognised type. All three returned a plausible number
+ * for a query that asked for something else. They now emit the expression or
+ * throw; see that method. #4157.
  */
 export class NativeSQLStrategy implements AnalyticsStrategy {
   readonly name = 'NativeSQLStrategy';
@@ -313,6 +335,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       }
       return rawSql;
     }
+    // A dot does not by itself mean "relationship path". `SUM(account.amount)`
+    // is one SQL EXPRESSION that happens to contain a dot, and splitting it as a
+    // path produced `"SUM(account"."amount)"` plus a phantom
+    // `LEFT JOIN "SUM(account"` — invalid SQL and a join to a table that does not
+    // exist. Only qualify when every segment is a bare identifier; otherwise the
+    // author wrote an expression and it is returned as-is. #4157.
+    if (!IDENTIFIER_PATH.test(rawSql)) return rawSql;
     // Multi-hop (ADR-0071): the dotted path IS the join chain. Every segment but
     // the last is a relationship hop; the last is the column. The join ALIAS at
     // each hop is the full path PREFIX (`account`, then `account.owner`), which
@@ -406,13 +435,37 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const measure = this.lookupMember(cube, member, 'measure') as
       | { sql: string; type: string }
       | undefined;
-    if (!measure) return `COUNT(*)`;
+    // `lookupMember`'s synthetic relation fallback is dimension-only, so an
+    // undeclared measure name lands here — a typo, or a query naming a metric
+    // this cube does not have. It used to return `COUNT(*)`: the caller asked
+    // for revenue and got a row count, aliased AS "revenue". #4157.
+    if (!measure) {
+      const declared = Object.keys(cube.measures ?? {});
+      throw new Error(
+        `[native-sql-strategy] cube "${cube.name}" declares no measure "${member}"` +
+          (declared.length ? ` (declared: ${declared.join(', ')})` : ' (it declares none)'),
+      );
+    }
 
     const col = measure.sql === '*'
       ? '*'
       : this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
+
     const wrap = AGGREGATE_SQL[measure.type];
-    return wrap ? wrap(col) : `COUNT(*)`;
+    if (wrap) return wrap(col);
+    // A custom SQL expression: the measure's `sql` IS the computation, so emit
+    // it unwrapped. In a grouped query the expression must itself be
+    // aggregate-shaped — measures never join `GROUP BY` (only dimensions do), so
+    // a scalar expression there is invalid SQL. That is the author's contract to
+    // keep; silently substituting `COUNT(*)` did not keep it for them.
+    if (EXPRESSION_METRIC_TYPES.has(measure.type)) return col;
+
+    throw new Error(
+      `[native-sql-strategy] measure "${member}" on cube "${cube.name}" has ` +
+        `unrecognised type "${measure.type}" — expected an aggregate ` +
+        `(${SUPPORTED_AGGREGATE_SQL_KEYS.join(', ')}) or a custom-expression type ` +
+        `(${[...EXPRESSION_METRIC_TYPES].join(', ')}).`,
+    );
   }
 
   private resolveFieldSql(

@@ -3,7 +3,9 @@
 - **Status**: Accepted (2026-07-22) — staged per D4. D1 landed (#3429), D2
   landed (#3432); D3 refined into two waves by the 2026-07-24 addendum below,
   and wave 2's ownership model settled by the 2026-07-27 addendum.
-  Strict-default flip of D1/D2 tracked in #3438; wave 2 sequence in #3459.
+  Strict-default flip of D1/D2 tracked in #3438 — the media half flips per
+  deployment (#3681); evidence for the remaining halves decided by the
+  2026-07-30 addendum. Wave 2 sequence in #3459.
 - **Date**: 2026-07-22
 - **Issue**: design follow-up generalizing #3405 / #3406 (inline lookup param
   silently stripped); relates #3407 (silently dropped writes), #1878 / #1891
@@ -716,3 +718,155 @@ separate ADRs, because each settles *how* D3's already-accepted "field values
 point into `sys_file`" reaches production rather than revisiting whether to do
 it. A future choice that stands on its own (say, a chunked-migration protocol,
 or byte-layer content dedup) would earn its own ADR.
+
+## Addendum (2026-07-30) — evidence for the remaining flips: a scan gate for references / structured JSON; the action-param flip rides a declared major
+
+The 2026-07-27 amendment split #3438 into three and settled only the first:
+media value shapes flip per deployment, on the `adr-0104-file-references` flag
+(#3681). The other two were left "blocked on someone deciding what would
+constitute evidence." This addendum decides — differently for the two, because
+their facts have different epistemic reach — and fixes the release vehicle for
+each around the v17 major.
+
+One timeline fact frames everything: **warn-first itself first reaches stable
+deployments in 17.0.** D1 and D2 ride the v17 train (their changesets sit in
+the same pre-mode window as this addendum), so no stable deployment has served
+a single day of the warn window yet. Whatever the right gate is, 17.0 cannot
+flip any default version-wide without deleting the warn window R2/R3 promised
+— independent of the per-deployment argument.
+
+### D1 references + structured JSON: the evidence can exist, so build it
+
+The fact strict enforcement needs is: *no stored value of the covered classes
+fails `valueSchemaFor(field, 'stored')`.* The covered classes are exactly the
+validator's own non-media branch — `REFERENCE_VALUE_TYPES` (single-value
+`lookup` / `master_detail` / `user` / `tree`) and `STRUCTURED_JSON_TYPES`
+(`location` / `address` / `composite` / `repeater` / `record` / `vector`;
+`json`'s derived schema is deliberately `z.unknown()`, so it can yield no
+findings). Unlike caller behaviour, data at rest is enumerable: a scan that
+walks every row is **complete** evidence, with the same epistemic standing the
+file reconciliation has. So the gate takes the #3617 shape, minus the
+backfill:
+
+```
+os migrate value-shapes
+  1. scan every object's covered fields against valueSchemaFor(field, 'stored')
+  2. report violations per (object, field, type): count, sample record ids,
+     first parse issue — the per-deployment form of R1's stored-data audit
+  3. zero blocking findings + --apply → record sys_migration
+       { id: 'adr-0104-value-shapes', verified_at, blocking: 0 }
+  4. strict enforcement of the covered classes reads THAT row, never the
+     version number
+```
+
+- **There is nothing to convert.** A malformed `location` payload, or an
+  expanded object stored where an id belongs, is an application-data fix only
+  its owner can make: the command reports and prescribes; the operator fixes
+  and re-runs until green. (A mechanical normaliser — say, collapsing a stored
+  expanded-lookup object to its `id` — is deliberately *not* built until real
+  reports show the shape common enough to justify one; a normaliser that
+  guesses is how silently-wrong values got here.) With no conversions,
+  `--apply`'s only write is the flag row — which keeps the #3617 invariant
+  intact: a dry run changes nothing, and whether a run changed the
+  deployment's posture never depends on what the run found.
+- **The scanner and the validator share one predicate.** Same class sets,
+  same cached `valueSchemaFor`, same skip rules (`system` / `readonly` /
+  lifecycle columns are never validated, so they are never scanned): the scan
+  must count exactly what strict mode would reject on that record's next
+  rewrite, and nothing else. Imported, not re-derived — hand-copied value
+  knowledge is the disease this ADR exists to cure.
+- **Gate consumption mirrors the media half verbatim**: the engine reads the
+  flag once per process (memoized), an object declaring no covered field never
+  consults it, `ValidateRecordOptions` gains the parallel option beside
+  `mediaValueShapeStrict`, and a later failing run clears `verified_at` — a
+  regression closes its own gate.
+- **Precedence, and the one new env var**: `OS_ALLOW_LAX_VALUE_SHAPES` (an
+  `OS_ALLOW_*` escape hatch per Prime Directive #9, scoped to these classes —
+  media keeps its own `OS_ALLOW_LAX_MEDIA_VALUES`) beats
+  `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` (unchanged: still the all-class
+  opt-in) beats the flag. Same contradictory-config rule as
+  `mediaStrictEffective`, for the same reason: wrongly lax costs a warning,
+  wrongly strict stops a working app.
+
+### Fresh datastores attest at creation — both flags
+
+Today nothing records a flag except a migration run, which leaves a gap at
+the other end of a deployment's life: a deployment born on ≥17 starts **lax**
+and stays lax until its operator thinks to run a migration that is, for them,
+a no-op. The warn regime would never die out — every new deployment re-enters
+it.
+
+So the bootstrap that creates an empty datastore records both rows
+(`adr-0104-file-references`, `adr-0104-value-shapes`) at creation time. This
+is not version-gating in disguise: the fact recorded — *no legacy value
+exists here* — is **observed** (the store is empty by construction at the
+moment of creation), the same observed-transition discipline the GC gate runs
+on. An existing database upgrading to 17 is non-empty at boot, gets no
+attestation, and keeps producing its evidence by scan. A later legacy import
+into a born-strict deployment is rejected loudly at the write path — the
+correct outcome; an operator who must temporarily admit such data has the
+escape hatch, and re-verifies by re-running the scan. The exact seam is the
+implementing PR's decision (candidates: the system seed that first creates
+`sys_migration`, or the engine's schema bootstrap), with one hard
+requirement: it fires only for a store it is itself creating from empty,
+never for one it found.
+
+Born-strict deployments also make the platform's own dogfood the standing
+canary for R2 (a codified shape stricter than some legitimate client's
+writes): showcase/CRM boots are fresh datastores, so they enforce from birth,
+and a false rejection fails our suites before any customer sees it.
+
+### D2 action params: the evidence cannot exist, so the honest gate is a declared major
+
+What per-deployment evidence would have to prove is: *no caller of this
+deployment still depends on the lax contract.* Callers are not enumerable —
+an integration that fires monthly, a script in a cron nobody remembers, an AI
+agent constructing each call fresh. Data at rest can be scanned to
+completion; future calls cannot. A "quiet for N days" flag would assert a
+completeness it cannot have — the unlocatable-gate error of the 2026-07-27
+addendum, reproduced one layer down. A gate must not claim evidence that
+cannot exist, and we decline to build the theatre of one.
+
+What remains is the failure-mode calculus that already sequenced wave 2: a
+strict rejection here is **loud** (a 400 naming the offending param and the
+declared list), **caller-facing** (a developer or an AI mid-integration — not
+an end user stranded in a form above data they cannot fix), **recoverable**
+(fix the call), and **reversible** (the escape hatch below). No data is
+stranded, no byte is deleted. That is precisely the class of break wave 2's
+step 4 was allowed to ride a declared major for, while step 6 waits on
+evidence.
+
+So, owned explicitly rather than smuggled: **the D2 flip is a version flip —
+on the major *after* the warn window, not this one.** 17.0 ships warn-first
+(first exposure) and announces the coming default in its release notes; 18.0
+flips `actionParamsStrict()` to default-true. The v17→v18 gap is every
+deployment's own warn window, served on its own upgrade schedule; the warn
+line already names `OS_ACTION_PARAMS_STRICT_ENABLED=1`, which is the
+per-deployment act of opting into tomorrow's default today. Version-wide
+flips remain wrong where per-deployment evidence is *possible* (D1); where it
+is impossible in principle, a declared major with a served warn window and an
+escape hatch is what honest looks like. The alternative — warn forever —
+permanently un-enforces the declared contract at exactly the surface (AI/MCP
+callers) D2 was built for, where a 400 is corrective feedback the caller
+consumes and a server-side warn is feedback nobody sees.
+
+Mechanics at 18.0: `OS_ACTION_PARAMS_STRICT_ENABLED` stays accepted — it
+becomes a redundant opt-in to the default; its semantics never change, so no
+`readEnvWithDeprecation` rename, the same conclusion the media half reached.
+A new `OS_ALLOW_LAX_ACTION_PARAMS` opt-out wins over everything (the
+contradictory-config rule again), and the dogfood contract suite
+(`action-params-contract.dogfood.test.ts`) flips its duals so the *default*
+path is the strict one and the escape hatch is the explicitly-set case.
+
+### What rides where
+
+| vehicle | change |
+|---|---|
+| 17.0 | warn-first first ships (D1 non-media + D2). `os migrate value-shapes` + the `adr-0104-value-shapes` gate wiring. Fresh-datastore attestation of both flags. Release notes announce the 18.0 D2 default. **No version-wide default changes.** |
+| each deployment, ≥17.0 | runs `os migrate value-shapes --apply` (or is born attested) → its own D1 non-media classes flip to strict. |
+| 18.0 | D2 strict by default + `OS_ALLOW_LAX_ACTION_PARAMS`; dogfood duals flip. |
+
+#3438 then tracks two work items instead of an open question: the scan
+migration (command, engine wiring, creation-time attestation) targeting the
+17.0 train, and the D2 flip parked for the 18.0 train with its release-note
+announcement landing now.

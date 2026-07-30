@@ -6,11 +6,9 @@ import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { MessagingServicePlugin, MessagingService } from '@objectstack/service-messaging';
-import { SysNotification } from '@objectstack/platform-objects';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
-import { AppPlugin } from './app-plugin.js';
 
 /**
  * End-to-end regression for framework #3362 (`#3354 not effective on hono`).
@@ -76,20 +74,12 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     // writes the inbox row synchronously so `emit()` is observable immediately.
     await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
     await kernel.use(new ObjectQLPlugin());
-    // The L2 event object `sys_notification` is a PLATFORM object, declared in
-    // `@objectstack/platform-objects` — MessagingServicePlugin writes it but
-    // does not declare it, so this lean kernel (no platform-objects boot) has to
-    // register it or the engine has no schema to issue DDL from. Under the
-    // mingo driver this suite used before #4065 the omission was invisible: it
-    // auto-creates a table on first touch, so a missing declaration read as
-    // working. Registering the REAL object rather than a hand-copied stand-in
-    // keeps one schema (Prime Directive #12).
-    await kernel.use(
-      new AppPlugin({
-        manifest: { id: 'com.test.notifications-e2e', name: 'Notifications E2E', version: '1.0.0' },
-        objects: [SysNotification],
-      } as never),
-    );
+    // No app plugin registers `sys_notification` here: MessagingServicePlugin
+    // contributes the L2 event it writes, so this lean kernel needs nothing
+    // extra (#4154). Until that move it was contributed by the OPTIONAL
+    // AuditPlugin, and this suite had to register the object itself — which is
+    // exactly the shape of the deployment bug: messaging's single ingress
+    // depending on another plugin being installed.
     await kernel.use(new MessagingServicePlugin({ reliableDelivery: false }));
     await kernel.use(fakeAuthPlugin());
     // port 0 → OS-assigned free port; resolved via getPort() after listening.

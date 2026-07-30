@@ -21,6 +21,15 @@ import {
     NotificationTemplate,
     HttpDelivery,
 } from './objects/index.js';
+// The L2 event this service writes on every `emit()`. It is OWNED by
+// platform-objects (it is in `PLATFORM_OBJECTS_BY_PACKAGE`), and — like
+// service-job with `SysJob` and service-queue with `SysJobQueue` — the service
+// that owns the BEHAVIOUR is the one that contributes it to the manifest.
+// It was parked in AuditPlugin until ADR-0030 landed; that migration is done
+// (#4154), and AuditPlugin is an OPTIONAL pair in the CLI, so leaving it there
+// meant this service's single ingress depended on another plugin being
+// installed to register the table it writes.
+import { SysNotification } from '@objectstack/platform-objects/audit';
 
 export interface MessagingServicePluginOptions {
     /**
@@ -71,6 +80,11 @@ export interface MessagingServicePluginOptions {
  */
 export class MessagingServicePlugin implements Plugin {
     name = 'com.objectstack.service.messaging';
+    /**
+     * Services init() registers on every path (ADR-0116, #4131) — lets the
+     * kernel name this plugin when a consumer requires one before it inits.
+     */
+    providesServices = ['messaging', 'notification'];
     version = '1.0.0';
     type = 'standard' as const;
     dependencies = ['com.objectstack.engine.objectql'];
@@ -135,6 +149,7 @@ export class MessagingServicePlugin implements Plugin {
             type: 'plugin',
             scope: 'system',
             objects: [
+                SysNotification,
                 InboxMessage,
                 NotificationReceipt,
                 NotificationDelivery,
@@ -315,6 +330,12 @@ export class MessagingServicePlugin implements Plugin {
         const sync = (engine as unknown as { syncObjectSchema?: (name: string) => Promise<void> }).syncObjectSchema;
         if (typeof sync !== 'function') return;
         const objects = [
+            // The L2 event is provisioned with the rest of the pipeline it
+            // heads. Its table was previously created lazily by the SQL driver
+            // on the first `emit()` — which works only where the object is
+            // REGISTERED, and until #4154 that registration came from the
+            // optional AuditPlugin rather than from this service.
+            SysNotification,
             InboxMessage,
             NotificationReceipt,
             NotificationDelivery,

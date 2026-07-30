@@ -43,6 +43,11 @@ export interface JobServicePluginOptions {
  */
 export class JobServicePlugin implements Plugin {
   name = 'com.objectstack.service.job';
+  /**
+   * Services init() registers on every path (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one before it inits.
+   */
+  providesServices = ['job'];
   version = '1.1.0';
   type = 'standard';
 

@@ -93,6 +93,11 @@ export interface MCPServerPluginOptions {
  */
 export class MCPServerPlugin implements Plugin {
   name = 'com.objectstack.mcp';
+  /**
+   * Services init() registers on every path (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one before it inits.
+   */
+  providesServices = ['mcp'];
   version = '1.0.0';
   type = 'standard' as const;
   dependencies: string[] = [];

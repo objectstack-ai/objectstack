@@ -961,74 +961,92 @@ describe('HttpDispatcher', () => {
                 expect(mockAuth.handleRequest).toHaveBeenCalled();
             });
 
-            it('should fallback to mock auth when async auth service has no handleRequest', async () => {
+            // [#4113] Was: "should fallback to mock auth when async auth
+            // service has no handleRequest", asserting 200 + a fabricated user.
+            // A wrong-shaped occupant is the sharpest case for the retired
+            // mock — the slot is FILLED, so discovery advertises `routes.auth`
+            // and reports auth available, while the request got a fabricated
+            // session. It now takes the same 501 an empty slot takes.
+            it('answers 501 when the async auth service does not implement the contract', async () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue({});
 
                 const result = await dispatcher.handleAuth('/login', 'POST', { email: 'test@example.com' }, { request: {} });
                 expect(result.handled).toBe(true);
-                // Falls through to mock auth fallback (sign-in behavior)
-                expect(result.response?.status).toBe(200);
-                expect(result.response?.body?.user).toBeDefined();
+                expect(result.response?.status).toBe(501);
+                expect(result.response?.body?.user).toBeUndefined();
+                expect(result.response?.body?.session).toBeUndefined();
             });
 
-            it('should return unhandled when auth service not registered and no legacy match', async () => {
+            // [#4113] Was: "should return unhandled …" — with the mock gone
+            // every /auth path answers 501 rather than falling through, so the
+            // domain gives one answer for "no auth here" instead of two that
+            // differ by path.
+            it('answers 501 for any auth path when no service is registered', async () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue(null);
                 (kernel as any).services = new Map();
 
                 const result = await dispatcher.handleAuth('/profile', 'GET', {}, { request: {} });
-                expect(result.handled).toBe(false);
+                expect(result.handled).toBe(true);
+                expect(result.response?.status).toBe(501);
             });
         });
 
-        describe('handleAuth mock fallback (MSW/test mode)', () => {
+        // [#4113] The mock this block used to pin is GONE. It answered
+        // sign-up/sign-in/get-session/sign-out with 200 + a fabricated user and
+        // a 24h `mock_token_*` session for ANY email and ANY password (the
+        // password was never read), from `packages/runtime` — not a dev-only
+        // plugin — gated on nothing but an empty `auth` slot. ADR-0115 retired
+        // this class inside plugin-dev; this was its last member and the only
+        // one that shipped to production.
+        describe('no auth service: 501, never a fabricated session (#4113)', () => {
             beforeEach(() => {
-                // No auth service — simulates MSW/mock mode
                 (kernel as any).getService = vi.fn().mockResolvedValue(null);
                 (kernel as any).services = new Map();
             });
 
-            it('should mock sign-up/email endpoint', async () => {
-                const result = await dispatcher.handleAuth('/sign-up/email', 'POST', { email: 'test@example.com', name: 'Test' }, { request: {} });
+            // Every path the mock used to answer 200 on. Parametrized so a
+            // re-introduction of any single one fails with its own name.
+            const FORMERLY_MOCKED = [
+                ['/sign-up/email', 'POST', { email: 'test@example.com', name: 'Test' }],
+                ['/register',      'POST', { email: 'test@example.com' }],
+                ['/sign-in/email', 'POST', { email: 'test@example.com', password: 'anything' }],
+                ['/login',         'POST', { email: 'test@example.com', password: 'anything' }],
+                ['/get-session',   'GET',  {}],
+                ['/sign-out',      'POST', {}],
+            ] as const;
+
+            it.each(FORMERLY_MOCKED)('%s %s answers 501 with no session', async (path, method, body) => {
+                const result = await dispatcher.handleAuth(path, method, body, { request: {} });
                 expect(result.handled).toBe(true);
-                expect(result.response?.status).toBe(200);
-                expect(result.response?.body.user).toBeDefined();
-                expect(result.response?.body.user.email).toBe('test@example.com');
-                expect(result.response?.body.session).toBeDefined();
+                expect(result.response?.status).toBe(501);
+                // The point of the issue: no user, no session, no token, ever.
+                const serialized = JSON.stringify(result.response?.body ?? {});
+                expect(serialized).not.toContain('mock_');
+                expect(result.response?.body?.user).toBeUndefined();
+                expect(result.response?.body?.session).toBeUndefined();
             });
 
-            it('should mock sign-in/email endpoint', async () => {
-                const result = await dispatcher.handleAuth('/sign-in/email', 'POST', { email: 'test@example.com' }, { request: {} });
-                expect(result.handled).toBe(true);
-                expect(result.response?.status).toBe(200);
-                expect(result.response?.body.user).toBeDefined();
-                expect(result.response?.body.session).toBeDefined();
+            it('names the remedy rather than just refusing', async () => {
+                const result = await dispatcher.handleAuth('/sign-in/email', 'POST', { email: 'a@b.c' }, { request: {} });
+                expect(JSON.stringify(result.response?.body)).toContain('plugin-auth');
             });
 
-            it('should mock get-session endpoint', async () => {
-                const result = await dispatcher.handleAuth('/get-session', 'GET', {}, { request: {} });
-                expect(result.handled).toBe(true);
-                expect(result.response?.status).toBe(200);
-                expect(result.response?.body).toEqual({ session: null, user: null });
+            // The honest answer must not depend on the credentials — a 501 that
+            // varied by password would be an oracle.
+            it('answers identically for any credentials', async () => {
+                const a = await dispatcher.handleAuth('/sign-in/email', 'POST', { email: 'real@user.com', password: 'correct' }, { request: {} });
+                const b = await dispatcher.handleAuth('/sign-in/email', 'POST', { email: 'nobody@nowhere', password: '' }, { request: {} });
+                expect(a.response?.status).toBe(b.response?.status);
+                expect(JSON.stringify(a.response?.body)).toBe(JSON.stringify(b.response?.body));
             });
 
-            it('should mock sign-out endpoint', async () => {
-                const result = await dispatcher.handleAuth('/sign-out', 'POST', {}, { request: {} });
+            it('still delegates to a registered auth service instead of 501ing', async () => {
+                const handleRequest = vi.fn().mockResolvedValue({ ok: true });
+                (kernel as any).getService = vi.fn().mockResolvedValue({ handleRequest });
+                const result = await dispatcher.handleAuth('/sign-in/email', 'POST', { email: 'a@b.c' }, { request: {} });
                 expect(result.handled).toBe(true);
-                expect(result.response?.status).toBe(200);
-                expect(result.response?.body).toEqual({ success: true });
-            });
-
-            it('should mock login fallback when no auth service registered', async () => {
-                const result = await dispatcher.handleAuth('/login', 'POST', { email: 'test@example.com' }, { request: {} });
-                expect(result.handled).toBe(true);
-                expect(result.response?.status).toBe(200);
-                expect(result.response?.body.user).toBeDefined();
-                expect(result.response?.body.session).toBeDefined();
-            });
-
-            it('should return unhandled for unknown auth path in mock mode', async () => {
-                const result = await dispatcher.handleAuth('/unknown', 'GET', {}, { request: {} });
-                expect(result.handled).toBe(false);
+                expect(handleRequest).toHaveBeenCalledTimes(1);
+                expect(result.response?.status).toBeUndefined();
             });
         });
 

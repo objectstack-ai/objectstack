@@ -3182,27 +3182,44 @@ export class ObjectStackProtocolImplementation implements
         }
 
         // Flat field filters: REST-style query params like ?id=abc&status=open
-        // After extracting all known query parameters, any remaining keys are
-        // treated as implicit field-level equality filters merged into `where`.
-        // Every one of them is a verified field name by this point.
+        // are implicit field-level equality predicates. Every leftover key is a
+        // verified field name by this point — the #4134 gate above runs FIRST,
+        // which is exactly what makes the merge below safe: an unknown name
+        // already 400'd, so nothing merged here can be a predicate that matches
+        // nothing.
         //
-        // The `!options.where` guard is #4134's deliberate scope edge: when an
-        // explicit filter won, a leftover REAL field name is still dropped
-        // silently (it rides on to `engine.find` as a stray AST key no driver
-        // reads). Same disease, opposite direction — over-returning rather than
-        // zeroing — and fixing it means choosing a semantics (AND-merge vs.
-        // reject the conflict), so it is filed as #4164 rather than smuggled in
-        // here. The UNKNOWN half is already loud: the gate above runs before
-        // this branch, so a bad name 400s either way.
-        if (!options.where) {
+        // [#4164] Implicit predicates now COMPOSE with an explicit `where`
+        // instead of being silently dropped. `?filter={...}&status=open` means
+        // what it says — both apply, `{ $and: [explicit, implicit] }` — the
+        // same composition the engine itself uses to fold the `$search`
+        // predicate or an expand's declared filter into an existing `where`,
+        // and a combinator the #3774 conformance suite pins across every
+        // FilterCondition backend. Contradictory sides need no special case:
+        // both predicates apply and the intersection is an HONEST zero (the
+        // filters ran), unlike the pre-#4134 zero (a filter that never ran).
+        // Consuming the keys here also stops them riding to `engine.find` as
+        // stray top-level AST junk, and count() below reads the same
+        // `options.where`, so pagination totals see the merged predicate too.
+        //
+        // Deliberately NOT merged: a non-object truthy `where` — the parse
+        // tolerance above keeps an unparseable `filter` JSON string as-is
+        // (#4181), and folding real predicates into that garbage would neither
+        // apply them nor surface the actual bug. That path keeps its pre-#4164
+        // shape until the tolerance itself is fixed at the source.
+        const explicitWhere = options.where;
+        const whereIsMergeable = !explicitWhere || typeof explicitWhere === 'object';
+        if (leftoverParams.length > 0 && whereIsMergeable) {
             const implicitFilters: Record<string, unknown> = {};
             for (const key of leftoverParams) {
                 implicitFilters[key] = options[key];
                 delete options[key];
             }
-            if (Object.keys(implicitFilters).length > 0) {
-                options.where = implicitFilters;
-            }
+            // An absent or empty explicit filter (`?filter={}`, `?filter=`) is
+            // vacuous — the implicit predicates stand alone rather than being
+            // wrapped in a one-armed `$and`.
+            options.where = !explicitWhere || Object.keys(explicitWhere).length === 0
+                ? implicitFilters
+                : { $and: [explicitWhere, implicitFilters] };
         }
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
