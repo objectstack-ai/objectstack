@@ -9,7 +9,7 @@
 //
 // Scope (deliberately the dataset-query subset, not a general engine):
 //   • Mongo-style `where` filters ($eq implicit, $ne/$gt/$gte/$lt/$lte/
-//     $in/$nin/$contains, $and/$or/$not)
+//     $between/$in/$nin/$contains, $and/$or/$not)
 //   • timeDimensions date-range filtering + granularity bucketing
 //     (day/week/month/quarter/year)
 //   • group-by dimensions; count / countDistinct / sum / avg / min / max
