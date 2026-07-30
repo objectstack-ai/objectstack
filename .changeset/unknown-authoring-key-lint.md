@@ -42,13 +42,17 @@ in the protocol, so flipping them rejects metadata that parses today: a migratio
 event for every consumer, and one that deserves to be scheduled on evidence
 rather than guessed at. This produces that evidence and costs nobody a migration.
 
-Wired into the two layers that perform the discard, both **pre-parse** (the parse
-is what eats the key, so after it there is nothing left to report):
+Wired into every layer that performs the discard, all **pre-parse** (the parse is
+what eats the key, so after it there is nothing left to report):
 
 - **`defineStack`** — warns on the console, once per distinct path, in strict
   *and* non-strict mode, since the key is dropped either way.
 - **`os validate`** — a non-blocking warning, and included in `--json` output
   rather than computed and discarded.
+- **`os build` / `os compile`** — the same non-blocking warning. `defineStack`
+  already covers configs authored through it; this catches the ones that skip it
+  (a plain object default-export, `strict: false`), which would otherwise emit an
+  artifact with the key quietly gone.
 
 Verified against the three first-party example apps (`app-todo`, `app-crm`,
 `app-showcase`): all clean, no false positives.
