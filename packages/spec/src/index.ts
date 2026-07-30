@@ -98,6 +98,7 @@ export { defineObjectExtension } from './data/object.zod';
 // tables and finding shape stay in data/ (frontend-safe).
 export {
   lintUnknownAuthoringKeys,
+  lintUnknownStackKeys,
   listLintableAuthoringCollections,
 } from './kernel/metadata-authoring-lint';
 export type { LintableAuthoringCollection } from './kernel/metadata-authoring-lint';
@@ -105,6 +106,7 @@ export {
   formatUnknownAuthoringKey,
   FIELD_KEY_GUIDANCE,
   OBJECT_KEY_GUIDANCE,
+  STACK_KEY_GUIDANCE,
 } from './data/authoring-key-lint';
 export type {
   UnknownAuthoringKeyFinding,

@@ -22,24 +22,30 @@ path and disappeared silently everywhere else. A host writing
   env root; the production warning stops naming `config.storage` and names the
   two channels that work — `OS_STORAGE_*` and Setup → Settings, the latter being
   the one with proper credential handling.
-- **`lintUnknownAuthoringKeys` now covers top-level stack keys**, not just object
-  and field keys. `storage` gets a prescriptive entry naming both channels and
-  why a stack definition is the wrong home for a credential — it would commit it
-  to git and to any published artifact. An ordinary misspelling still gets the
-  edit-distance suggestion (`datasource` → `datasources`), and the rule now runs
-  even on a stack with no `objects` at all, which previously exited early.
+- **The undeclared-key lint now covers the stack's own top-level keys.** New
+  `lintUnknownStackKeys(rawStack, stackSchema)`, wired into `defineStack`,
+  `os validate` and `os compile` beside the existing walker. `storage` gets a
+  prescriptive entry naming both channels and why a stack definition is the
+  wrong home for a credential — it would commit it to git and to any published
+  artifact. An ordinary misspelling still gets the edit-distance suggestion
+  (`datasource` → `datasources`).
 - **`os migrate files-to-references` shares the resolver.** It built
   `{ driver: 'local', root }` — the same dead keys — so its adapter used
   `./storage` while the server writes under `.objectstack/data/uploads` since
   #4096. That command reconciles what records claim against what storage holds,
   so a disagreeing root reconciled against the wrong tree.
 
-`lintUnknownAuthoringKeys(rawStack)` becomes
-`lintUnknownAuthoringKeys(rawStack, stackSchema)`. The parameter is required
-rather than optional so a caller that forgets it fails to compile instead of
-silently losing the check — the exact failure this rule reports. It is injected
-rather than imported because `stack.zod.ts` imports this module, and importing
-back would close a cycle.
+Additive: `lintUnknownAuthoringKeys` keeps its signature. The new pass is a
+separate export rather than a fold into that walker for two reasons. The walker
+iterates metadata COLLECTIONS, so a stack whose only mistake is at the envelope
+level — no objects, no pages, nothing to iterate — walks clean; and the stack
+schema has to be INJECTED, because `stack.zod.ts` imports the lint module and
+importing back would close a cycle. A separate export keeps that requirement
+visible: a call site either asks for the coverage or does not, and its absence
+shows up in a diff. An optional parameter would be the same silent-loss shape
+this rule family exists to report. It follows the walker's posture rule — only a
+schema that STRIPS unknown keys is linted, so if the stack schema ever graduates
+to `.strict()` the parse takes over and this goes quiet.
 
 Verified end to end: authoring `storage:` through `defineStack` warns at load,
 and `os compile` reports it for configs that skip `defineStack`.

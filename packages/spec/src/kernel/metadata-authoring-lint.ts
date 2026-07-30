@@ -53,6 +53,7 @@ import {
   isPlainRecord,
   FIELD_KEY_GUIDANCE,
   OBJECT_KEY_GUIDANCE,
+  STACK_KEY_GUIDANCE,
   type UnknownAuthoringKeyFinding,
 } from '../data/authoring-key-lint';
 import { FieldSchema } from '../data/field.zod';
@@ -216,5 +217,46 @@ export function lintUnknownAuthoringKeys(rawStack: unknown): UnknownAuthoringKey
       }
     }
   }
+  return out;
+}
+
+/**
+ * Report every TOP-LEVEL key an authored stack sets that
+ * `ObjectStackDefinitionSchema` does not declare (#4167).
+ *
+ * The walker above covers every metadata COLLECTION; this covers the envelope
+ * those collections sit in. Same silence, one level up — and the level where it
+ * is hardest to notice, because an undeclared top-level key reads as
+ * configuration that took effect rather than as a typo. `storage` is the worked
+ * example: `os serve` honoured it only on the one boot path that skips
+ * `defineStack`, so a stack asking for S3 could silently get local disk.
+ *
+ * Separate from {@link lintUnknownAuthoringKeys} rather than folded into it
+ * because the stack schema has to be INJECTED: `stack.zod.ts` imports this
+ * module, so importing `ObjectStackDefinitionSchema` back would close a cycle.
+ * A separate export keeps that requirement visible — a call site either asks
+ * for this coverage or does not, and its absence shows up in a diff. An
+ * optional parameter on the walker would be the same silent-loss shape this
+ * whole rule family exists to report.
+ *
+ * @param rawStack The authored stack, after `normalizeStackInput` and before
+ *   `ObjectStackDefinitionSchema.parse`.
+ * @param stackSchema `ObjectStackDefinitionSchema`, injected — see above.
+ */
+export function lintUnknownStackKeys(
+  rawStack: unknown,
+  stackSchema: unknown,
+): UnknownAuthoringKeyFinding[] {
+  if (!isPlainRecord(rawStack)) return [];
+
+  // Same posture rule the walker applies per collection: only a schema that
+  // STRIPS unknown keys has a silence worth reporting. If the stack schema is
+  // ever made strict, the parse rejects loudly on its own and this must go
+  // quiet rather than become a second, possibly disagreeing voice.
+  const posture = keyPosture(stackSchema);
+  if (!posture || posture.mode !== 'strip' || posture.keys.size === 0) return [];
+
+  const out: UnknownAuthoringKeyFinding[] = [];
+  lintAuthoredRecordKeys(rawStack, posture.keys, STACK_KEY_GUIDANCE, 'stack', 'stack', out);
   return out;
 }

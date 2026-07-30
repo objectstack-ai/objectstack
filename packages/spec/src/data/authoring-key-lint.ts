@@ -135,6 +135,30 @@ export const OBJECT_KEY_GUIDANCE: Readonly<
   tableName: { why: 'removed — the table name always equals the object `name`.' },
 });
 
+/**
+ * Semantic near-misses on the stack's own TOP-LEVEL keys
+ * (`ObjectStackDefinitionSchema`).
+ *
+ * Same silent-drop mechanism as the two tables above, one level up. The walker
+ * covers every metadata COLLECTION; this covers the envelope those collections
+ * sit in, which is where the silence is easiest to miss — an undeclared
+ * top-level key reads as configuration that took effect.
+ *
+ * `storage` is the worked example (#4167): `os serve` honoured it only on the
+ * one boot path that skips `defineStack`, so the same key configured a backend
+ * in one place and vanished in every other. A stack asking for S3 could
+ * silently get local disk.
+ */
+export const STACK_KEY_GUIDANCE: Readonly<
+  Record<string, { to?: string; why?: string }>
+> = Object.freeze({
+  storage: {
+    why: 'the file-storage backend is a deployment concern, not an application declaration. '
+      + 'Configure it with the OS_STORAGE_* environment variables, or per-deployment in Setup → Settings → Storage '
+      + '(which also holds credentials — a stack definition would commit them to git and to any published artifact).',
+  },
+});
+
 /** A plain object — the only shape an authored metadata item can take. */
 export function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
