@@ -484,6 +484,14 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const opMap: Record<string, string> = {
       equals: '=', notEquals: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=',
       contains: 'LIKE', notContains: 'NOT LIKE',
+      startsWith: 'LIKE', endsWith: 'LIKE',
+    };
+    /** The LIKE pattern each string operator wraps its comparand in. */
+    const likePattern: Record<string, (v: string) => string> = {
+      contains: (v) => `%${v}%`,
+      notContains: (v) => `%${v}%`,
+      startsWith: (v) => `${v}%`,
+      endsWith: (v) => `%${v}`,
     };
 
     // Null predicates and the LIKE family read the column as stored — the former
@@ -504,8 +512,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const sqlOp = opMap[operator];
     if (!sqlOp || !values || values.length === 0) return null;
 
-    if (operator === 'contains' || operator === 'notContains') {
-      params.push(`%${values[0]}%`);
+    // The LIKE family reads the column as stored — a substring/prefix/suffix
+    // match is on the raw text — so it keeps the un-normalised reference.
+    const pattern = likePattern[operator];
+    if (pattern) {
+      params.push(pattern(values[0]));
       return `${rawCol} ${sqlOp} $${params.length}`;
     }
 
