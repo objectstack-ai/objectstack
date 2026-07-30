@@ -3,7 +3,7 @@
 import type { IAnalyticsService, AnalyticsResult, CubeMeta } from '@objectstack/spec/contracts';
 import type { Cube, AnalyticsQuery } from '@objectstack/spec/data';
 import type { InMemoryDriver } from './memory-driver.js';
-import { Logger, createLogger } from '@objectstack/core';
+import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 
 /**
  * Configuration for MemoryAnalyticsService
@@ -91,6 +91,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
             matchStage[fieldPath] = { $in: coerced };
           } else if (mongoOp === '$nin') {
             matchStage[fieldPath] = { $nin: coerced };
+          } else if (mongoOp === '$lte') {
+            // A bare-day `lte` bound means "through that whole day" (#4042;
+            // the SQL twin is #3777): compile half-open so timestamp values on
+            // the final day stay in. Order-equivalent to `$lte` for plain
+            // `YYYY-MM-DD` values.
+            const nextDay = nextUtcCalendarDay(coerced[0]);
+            matchStage[fieldPath] = nextDay != null ? { $lt: nextDay } : { $lte: coerced[0] };
           } else {
             matchStage[fieldPath] = { [mongoOp]: coerced[0] };
           }
@@ -108,17 +115,39 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       for (const timeDim of query.timeDimensions) {
         const fieldPath = this.resolveFieldPath(cube, timeDim.dimension);
         if (timeDim.dateRange) {
-          const range = Array.isArray(timeDim.dateRange) 
-            ? timeDim.dateRange 
+          const range = Array.isArray(timeDim.dateRange)
+            ? timeDim.dateRange
             : this.parseDateRangeString(timeDim.dateRange);
-          
+
           if (range.length === 2) {
+            // The window matches BOTH stored forms of a datetime value — the
+            // in-memory table holds whatever the writer produced: `Date`
+            // objects from direct JS callers AND ISO strings (the driver's own
+            // `created_at` default, every REST/JSON write). Mingo compares
+            // cross-type as never-equal, so a single-form bound silently
+            // empties the other half — the same disease driver-sql's
+            // mixed-storage CASE repair cures, expressed as the `$or` a
+            // schemaless store allows.
+            //
+            // Both spellings are half-open on a bare-day end (#4042; the SQL
+            // twin is #3777): a `$lte`-at-midnight upper bound dropped the
+            // final day's rows for `Date` values and the string spelling
+            // inherits `<= day`'s whole-day intent via `< nextDay`.
+            const start = String(range[0]);
+            const end = String(range[1]);
+            const nextDay = nextUtcCalendarDay(end);
+            const stringBounds = nextDay != null
+              ? { $gte: start, $lt: nextDay }
+              : { $gte: start, $lte: end };
+            const dateBounds = nextDay != null
+              ? { $gte: new Date(start), $lt: new Date(`${nextDay}T00:00:00.000Z`) }
+              : { $gte: new Date(start), $lte: new Date(end) };
             pipeline.push({
               $match: {
-                [fieldPath]: {
-                  $gte: new Date(range[0]),
-                  $lte: new Date(range[1])
-                }
+                $or: [
+                  { [fieldPath]: stringBounds },
+                  { [fieldPath]: dateBounds },
+                ],
               }
             });
           }

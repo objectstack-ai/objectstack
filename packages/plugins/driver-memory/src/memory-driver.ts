@@ -3,7 +3,7 @@
 import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
-import { Logger, createLogger } from '@objectstack/core';
+import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
 
@@ -777,8 +777,15 @@ export class InMemoryDriver implements IDataDriver {
         return { [field]: { $gte: value } };
       case '<':
         return { [field]: { $lt: value } };
-      case '<=':
-        return { [field]: { $lte: value } };
+      case '<=': {
+        // A bare-day upper bound means "through that whole day" (#4042, the
+        // driver-sql twin is #3777): `<= 2026-07-28` on an ISO-timestamp value
+        // compiles half-open (`< 2026-07-29`), which is also order-equivalent
+        // to `<=` for plain `YYYY-MM-DD` date values — so no field-type lookup
+        // is needed, exactly the argument the preview evaluator uses.
+        const nextDay = nextUtcCalendarDay(value);
+        return { [field]: nextDay != null ? { $lt: nextDay } : { $lte: value } };
+      }
       case 'in':
         return { [field]: { $in: value } };
       case 'nin': case 'not_in': case 'notin': case 'not in':
@@ -806,7 +813,13 @@ export class InMemoryDriver implements IDataDriver {
         return { [field]: { $ne: null } };
       case 'between':
         if (Array.isArray(value) && value.length === 2) {
-          return { [field]: { $gte: value[0], $lte: value[1] } };
+          // Bare-day max → half-open, inheriting `<=`'s whole-day rule (#4042).
+          const nextDay = nextUtcCalendarDay(value[1]);
+          return {
+            [field]: nextDay != null
+              ? { $gte: value[0], $lt: nextDay }
+              : { $gte: value[0], $lte: value[1] },
+          };
         }
         throw new Error(
           `[driver-memory] "between" on field "${field}" needs a two-element array, got ` +
@@ -916,9 +929,21 @@ export class InMemoryDriver implements IDataDriver {
         case '$between':
           if (Array.isArray(val) && val.length === 2) {
             result.$gte = val[0];
-            result.$lte = val[1];
+            // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
+            const betweenNextDay = nextUtcCalendarDay(val[1]);
+            if (betweenNextDay != null) result.$lt = betweenNextDay;
+            else result.$lte = val[1];
           }
           break;
+        case '$lte': {
+          // A bare-day upper bound means "through that whole day" (#4042; the
+          // driver-sql twin is #3777). Order-equivalent to `<=` for plain
+          // `YYYY-MM-DD` values, so it applies without a field-type lookup.
+          const nextDay = nextUtcCalendarDay(val);
+          if (nextDay != null) result.$lt = nextDay;
+          else result.$lte = val;
+          break;
+        }
         case '$null':
           // $null: true → field is null, $null: false → field is not null
           // Use $eq/$ne null for Mingo compatibility
