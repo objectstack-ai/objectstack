@@ -36,7 +36,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { BaseResponseSchema } from '@objectstack/spec/api';
+import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import type { RouteHandler } from '@objectstack/spec/contracts';
 import { registerPackageRoutes } from './package-routes.js';
 
@@ -164,9 +164,15 @@ describe('packages envelope (#3843) — success bodies', () => {
       const { status, body } = await c.run();
       expect(status).toBe(c.status);
 
-      // The contract itself, imported — not a restatement of it.
+      // The envelope SKELETON, imported. It is not the whole contract: it declares
+      // no `data` and strips unknown keys, so on its own it passes `{ success: true }`
+      // and passes a payload duplicated into a stray top-level key. What it DOES
+      // catch is the missing `success` flag — the drift this line was added for.
       const parsed = BaseResponseSchema.safeParse(body);
       expect(parsed.success, `body is not a BaseResponse: ${JSON.stringify(body)}`).toBe(true);
+      // The declared envelope in full — `safeParse` alone passes a body with no
+      // `data`, or a payload duplicated into a stray top-level key (#4049).
+      expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
       expect(body.success).toBe(true);
       expect(body.error).toBeUndefined();
 
@@ -297,6 +303,9 @@ describe('packages envelope (#3843) — error bodies', () => {
 
       const parsed = BaseResponseSchema.safeParse(body);
       expect(parsed.success, `body is not a BaseResponse: ${JSON.stringify(body)}`).toBe(true);
+      // The declared envelope in full — `safeParse` alone passes a body with no
+      // `data`, or a payload duplicated into a stray top-level key (#4049).
+      expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
 
       expect(body.success).toBe(false);
       expect(body.error.code).toBe(c.code);

@@ -20,6 +20,7 @@
  */
 
 import { CoreServiceName } from '@objectstack/spec/system';
+import { isServiceServeable } from '../service-serveable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -41,7 +42,14 @@ export async function handleNotificationRequest(
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
     const service = await deps.resolveService(CoreServiceName.enum.notification, context.environmentId) as any;
-    if (!service || typeof service.listInbox !== 'function') return { handled: false };
+    // [#4058] Three ways to have no inbox capability, one answer. The
+    // `listInbox` duck-type was already here and, by accident, kept the known
+    // fabricating stub off this surface (the dev one implements `send` /
+    // `sendBatch` only). `isServiceServeable` makes that explicit rather than
+    // incidental: a self-declared non-handler (`handlerReady: false`, ADR-0076
+    // D12) is an empty slot even if it grows a `listInbox` later. A `degraded`
+    // inbox that really serves keeps serving.
+    if (!isServiceServeable(service) || typeof service.listInbox !== 'function') return { handled: false };
 
     const userId: string | undefined = context.executionContext?.userId;
     if (!userId) {

@@ -2,6 +2,9 @@
 
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
+import { ProtectionSchema } from '../shared/protection.zod';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
 
 /**
  * Position Schema — the flat capability-distribution group (ADR-0090 D3).
@@ -39,6 +42,40 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
  * - 'Region East VP' (spaces and uppercase)
  */
 import { lazySchema } from '../shared/lazy-schema';
+
+/** Keys {@link PositionSchema} declares (drift-guarded by position.test.ts). */
+const POSITION_KEYS = [
+  'name', 'label', 'description', 'delegatable', 'protection',
+  // ADR-0010 runtime protection envelope (MetadataProtectionFields spread).
+  '_lock', '_lockReason', '_lockSource', '_provenance', '_packageId',
+  '_packageVersion', '_lockDocsUrl',
+] as const;
+
+const positionUnknownKeyError = strictUnknownKeyError({
+  surface: 'this position',
+  knownKeys: POSITION_KEYS,
+  aliases: { title: 'label' },
+  guidance: {
+    permissionSets:
+      '`permissionSets` is not a Position field — a position is only the named ' +
+      'distribution point (ADR-0090 D3); capability arrives via runtime bindings ' +
+      '(`sys_position_permission_set` rows, created in Setup or by an app\'s ' +
+      'kernel:ready binder). Packages SUGGEST bindings via `isDefault` on a ' +
+      'permission set, never by declaring them on the position.',
+    users:
+      '`users` is not a Position field — assignment is a runtime binding ' +
+      '(`sys_user_position` rows), never authored on the position (ADR-0090).',
+    parent:
+      '`parent` is not a Position field — positions are deliberately FLAT (ADR-0090 ' +
+      'D3, finalizing ADR-0057 D5): the visibility hierarchy is the business-unit ' +
+      'tree (`sys_business_unit`) and the manager chain (`sys_user.manager_id`), ' +
+      'never a position tree.',
+  },
+  history:
+    'Until #4001 these were dropped silently — the position still parsed, so the ' +
+    'author believed a distribution property was declared that the runtime never saw.',
+});
+
 export const PositionSchema = lazySchema(() => z.object({
   /** Identity */
   name: SnakeCaseIdentifierSchema.describe('Unique position name (lowercase snake_case)'),
@@ -62,7 +99,26 @@ export const PositionSchema = lazySchema(() => z.object({
   delegatable: z.boolean().default(false).describe(
     'ADR-0091 D3: holders may self-service delegate this position, time-boxed (default false).',
   ),
-}));
+
+  /**
+   * ADR-0010 §3.7 — Package-level protection envelope. Package authors declare
+   * lock policy here; the loader translates it into the private `_lock`
+   * envelope at registration time and strips this block before persistence.
+   * See `shared/protection.zod.ts`.
+   */
+  protection: ProtectionSchema.optional().describe(
+    'Package author protection block — lock policy for this position.',
+  ),
+
+  // ADR-0010 — runtime protection envelope (internal — set by loader).
+  //
+  // Declared in #4001 step 2, closing the sibling gap the #4071 ledger flagged:
+  // `MetadataPlugin`'s artifact loader calls `applyProtection` on EVERY
+  // registered metadata type, so a position has always carried these keys at
+  // runtime — the schema just could not represent them (the same ADR-0078 §3
+  // inverse-drift class the permission schema had).
+  ...MetadataProtectionFields,
+}, { error: positionUnknownKeyError }).strict());
 
 /**
  * [ADR-0090 D5/D9] Built-in AUDIENCE ANCHOR positions. `everyone` is held

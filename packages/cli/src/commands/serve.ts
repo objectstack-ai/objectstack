@@ -2471,21 +2471,22 @@ export default class Serve extends Command {
       } catch { /* auth service not present — nothing to show */ }
 
       // ── Automation wiring summary (2026-07-17 third-party eval) ─────
-      // Flow registration + trigger binding happen entirely inside the
-      // boot-quiet stdout window above, so the engine's own info/warn logs
-      // never reach the terminal. Collect the live binding state here (after
-      // restore) and surface it in the banner: declared-but-engine-missing,
-      // unbound triggered flows, and bound-but-dead (unknown object) flows.
+      // A flow that silently failed to arm logs nothing at all, so no amount of
+      // log plumbing answers "did my flows arm?" — the binding STATE has to be
+      // read off the live engine. Collect it here (after restore) and surface it
+      // in the banner: declared-but-engine-missing, unbound triggered flows, and
+      // bound-but-dead (unknown object) flows.
       const automationSummary = collectAutomationSummary(
         kernel,
         Array.isArray((config as any)?.flows) ? (config as any).flows.length : 0,
       );
 
       // ── Seed outcome summary (#3415/#3430) ─────────────────────────
-      // Seeds run inside the boot-quiet window too, and SeedLoader's own
-      // logs sit under the default warn level — a fixture could lose 90%
-      // of its rows, or a marketplace package rehydrate onto a fresh DB
-      // with zero rows, all with zero terminal signal. AppPlugin and the
+      // SeedLoader's own result logs are `info`, under the default warn
+      // level — a fixture could lose 90% of its rows, or a marketplace
+      // package rehydrate onto a fresh DB with zero rows, all with zero
+      // terminal signal. (The boot-quiet window hid them at every level on
+      // top of that until #4012.) AppPlugin and the
       // marketplace rehydrate/heal path stash a per-source entry on the
       // kernel; print them here, loudly when rows dropped or an install
       // came up empty.
@@ -2624,8 +2625,8 @@ export function describeRegisteredDriver(kernel: any): { label: string; url: str
 
 /**
  * Collect the automation wiring facts for the startup banner (2026-07-17
- * third-party eval: flow registration/binding logs fall inside the boot-quiet
- * stdout window, so the banner is the one channel a developer reliably sees).
+ * third-party eval: a flow that failed to arm emits no log line to find, so the
+ * banner reads the binding state off the engine instead).
  *
  * Every probe is feature-detected so an older `@objectstack/service-automation`
  * (without `getTriggerBindingAudit` / extended runtime states) degrades to the

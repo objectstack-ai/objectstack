@@ -37,6 +37,24 @@ export const ApiErrorSchema = lazySchema(() => z.object({
   requestId: z.string().optional().describe('Request ID for tracking'),
 }));
 
+/**
+ * The envelope SKELETON — deliberately not the whole response contract.
+ *
+ * It does not declare `data`: each response type adds its own via
+ * `BaseResponseSchema.extend({ data: … })` (see `export.zod.ts`,
+ * `automation-api.zod.ts`). It is also a plain `z.object`, so unknown keys are
+ * stripped and pass rather than failing.
+ *
+ * Both are intentional, and both mean `safeParse` alone does NOT prove a body is
+ * envelope-conformant. It catches the big one — a missing or non-boolean
+ * `success`, which is what `ObjectStackClient.unwrapResponse` keys on and what
+ * #3675 / #3689 / #3843 were about — but it accepts `{ success: true }` with no
+ * payload at all, and it accepts a payload duplicated into a stray top-level key
+ * (`{ success: true, data: link, link }`, the drift #4038 / #4049 removed).
+ *
+ * Use {@link envelopeViolations} when you mean "is this actually the declared
+ * envelope"; use this schema when you mean "does it parse as one".
+ */
 export const BaseResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe('Operation success status'),
   error: ApiErrorSchema.optional().describe('Error details if success is false'),
@@ -47,6 +65,69 @@ export const BaseResponseSchema = lazySchema(() => z.object({
     traceId: z.string().optional(),
   }).optional().describe('Response metadata'),
 }));
+
+/** The only keys a declared REST body may carry at its top level. */
+const ENVELOPE_KEYS = new Set(['success', 'data', 'error', 'meta']);
+
+/**
+ * Every way `body` departs from the declared envelope, as readable reasons.
+ * Empty array ⇒ conformant.
+ *
+ * This is the check {@link BaseResponseSchema} cannot express on its own, and it
+ * exists because the gap was not theoretical: the `/share-links` dispatcher
+ * domain shipped `{ success: true, data: link, link }` for as long as nobody
+ * looked, and `safeParse` passed it the whole time (#4038). The conformance
+ * suites each hand-wrote their own version of the missing assertions; this is
+ * that check, once, so a new module inherits it instead of depending on whoever
+ * writes the suite remembering to.
+ *
+ * The rules, and why each one:
+ *
+ *   • `success` must be a **boolean** — the flag `unwrapResponse` keys on. A body
+ *     without it is handed to callers raw, which is how one SDK method returned
+ *     two different shapes depending on which surface served the route (#3636).
+ *   • a success body must carry `data` — `{ success: true }` alone tells a caller
+ *     nothing and parses fine today.
+ *   • a failure body must carry `error` with a string `code` and `message` — the
+ *     nested form, not the pre-#3675 bare string.
+ *   • no top-level key outside `success` / `data` / `error` / `meta` — this is the
+ *     general form of the duplicate-payload drift. A second spelling of the
+ *     payload beside `data` is how a producer keeps two dialects alive at once.
+ *
+ * Deliberately NOT checked: the shape of `data` itself. That is each route's own
+ * payload schema, and conflating the two is what let `SettingsNamespacePayload`
+ * describe a whole body before #3843 and only `data` after it.
+ */
+export function envelopeViolations(body: unknown): string[] {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    return [`body is ${Array.isArray(body) ? 'an array' : String(body === null ? 'null' : typeof body)}, not an envelope object`];
+  }
+  const b = body as Record<string, unknown>;
+  const out: string[] = [];
+
+  if (typeof b.success !== 'boolean') {
+    out.push(`success is ${b.success === undefined ? 'missing' : `\`${typeof b.success}\``}, must be a boolean`);
+  } else if (b.success) {
+    if (b.data === undefined) out.push('success body carries no `data`');
+    if (b.error !== undefined) out.push('success body carries an `error`');
+  } else {
+    const err = b.error;
+    if (err === undefined || typeof err !== 'object' || err === null) {
+      out.push(`failure body's \`error\` is ${err === undefined ? 'missing' : `a ${typeof err}`}, must be an object`);
+    } else {
+      const e = err as Record<string, unknown>;
+      if (typeof e.code !== 'string') out.push('error.code is missing or not a string');
+      if (typeof e.message !== 'string') out.push('error.message is missing or not a string');
+    }
+  }
+
+  for (const key of Object.keys(b)) {
+    if (!ENVELOPE_KEYS.has(key)) {
+      out.push(`stray top-level key \`${key}\` — the payload belongs under \`data\``);
+    }
+  }
+  return out;
+}
 
 // ==========================================
 // 2. Request Payloads (Inputs)

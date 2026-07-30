@@ -53,9 +53,11 @@ Two follow-on corrections keep `declared === enforced`:
   every other path under it — service-storage's protocol above all — got the
   bridge's own 404 rather than falling through. Storage is ordinary catch-all
   traffic now.
-- Discovery advertises `routes.storage` only when the `file-storage` slot's
-  occupant actually mounts HTTP handlers (`handlerReady`, the predicate #4000
-  gave analytics), and plugin-dev's in-memory implementation now self-declares
-  `handlerReady: false` — with the bridge gone, nothing routes HTTP to it. It
-  keeps working for in-process callers; it is simply no longer advertised as a
-  reachable HTTP capability.
+- Discovery keeps gating `routes.storage` on `isServiceServeable` — the shared
+  `handlerReady` predicate #4058 step 2 introduced — and plugin-dev's in-memory
+  implementation now self-declares `handlerReady: false`. #4058 deliberately
+  left that one serving because the `/storage` bridge was still there to serve
+  it; with the bridge retired nothing routes HTTP to that slot, so `false` is
+  the honest value — the position `realtime` has held since ADR-0076 D12. The
+  implementation keeps working for in-process callers; it is simply no longer
+  advertised as a reachable HTTP capability.

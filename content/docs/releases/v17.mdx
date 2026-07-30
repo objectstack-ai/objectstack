@@ -307,7 +307,7 @@ model), while `url` platform-wide means an HTTP endpoint to call (`http` node,
 webhooks). The singular `input` on `map` / `subflow` / `connector_action` is
 those nodes' own canonical key and is untouched.
 
-### Flow and permission schemas reject unknown keys (#4001)
+### Flow, permission, RLS, sharing and position schemas reject unknown keys (#4001)
 
 Zod's default is `.strip`: a key a schema does not declare is silently
 discarded and the instance keeps parsing. On an authorable surface that is the
@@ -327,6 +327,20 @@ schema to the two highest-risk authorable surfaces, per the triage in
   `FlowVariableSchema`. A node's `config` stays an **open** record: it is
   per-node-type, owned by the executor's `configSchema` and the conversion
   layer (see the alias table above).
+- **RLS policies** — `RowLevelSecurityPolicySchema`. A silently dropped key
+  here meant a row-level restriction the author wrote was never compiled into
+  the filter (the pre-ADR-0090 D3 vocabulary → `positions`,
+  `withCheck` → `check`, `condition`/`filter`/`where` → `using`). The runtime
+  evaluation shapes stay tolerant.
+- **Sharing rules** — the rule, its criteria extension, and the `sharedWith`
+  recipient (`criteria` → `condition`, `access` → `accessLevel`,
+  `recipient` → `sharedWith`; `ownedBy` carries the removed owner-type-rule
+  prescription).
+- **Positions** — `PositionSchema`, including the guidance that
+  `permissionSets`/`users` are runtime bindings and `parent` has no meaning on
+  a deliberately flat position (ADR-0090 D3). Position also gains the
+  `protection` block and ADR-0010 runtime envelope every sibling registered
+  type already declared.
 
 Every rejection is written to be self-fixing: it names the offending key and,
 where recognisable, the canonical spelling (`steps` → `nodes`, edge
