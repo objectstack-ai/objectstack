@@ -67,9 +67,12 @@ describe.skipIf(!sharedMongod)('driver-mongodb — temporal conformance', () => 
     }
   }, 90_000);
 
+  // Only this suite's own connection — the SERVER is shared with the time
+  // suite below and is stopped once, at file level, after both have run.
+  // Stopping it here left `getUri()` throwing `Incorrect State … gotState:
+  // 'new'` for the second suite, whose cases then never executed at all.
   afterAll(async () => {
     if (driver) await driver.disconnect();
-    if (mongod) await mongod.stop();
   });
 
   for (const c of TEMPORAL_CASES) {
@@ -123,4 +126,10 @@ describe.skipIf(!sharedMongod)('driver-mongodb — Field.time conformance', () =
       expect(got, c.note).toEqual([...c.expected].sort());
     });
   }
+});
+
+// The shared server outlives both suites, so it is torn down once here rather
+// than by whichever suite happens to finish first.
+afterAll(async () => {
+  if (sharedMongod) await sharedMongod.stop();
 });

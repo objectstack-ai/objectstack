@@ -27,6 +27,7 @@ import {
   indexTemporalFields,
   storageTimeValue,
 } from './mongodb-temporal.js';
+import { translateFilter } from './mongodb-filter.js';
 
 describe('storageTimeValue — the canonical wall clock (D-C1)', () => {
   it('keeps a canonical value byte-identical', () => {
@@ -109,5 +110,50 @@ describe('the time kind reaches the coercion seam', () => {
   it('leaves an undeclared field alone — the driver never guesses from a value', () => {
     const value = new Date('1970-01-01T09:00:00Z');
     expect(coerceTemporalValue(value, undefined)).toBe(value);
+  });
+});
+
+describe('the time canon reaches the FILTER path, not just the write path', () => {
+  // The two halves must apply the same rule or they disagree again — the
+  // #3912/#4047 lesson. The end-to-end sweep needs a real server
+  // (`mongodb-temporal-conformance.test.ts`); this pins the comparand
+  // translation, which is pure, so the filter half is verified everywhere.
+  const timeKind = (field: string) => (field === 'at' ? ('time' as const) : undefined);
+
+  it('canonicalises a bound comparand on both sides of a window', () => {
+    expect(
+      translateFilter(
+        { at: { $gte: new Date('1970-01-01T09:00:00Z'), $lte: new Date('1970-01-01T18:00:00Z') } },
+        timeKind,
+      ),
+    ).toEqual({ at: { $gte: '09:00:00', $lte: '18:00:00' } });
+  });
+
+  it('completes a minutes-only comparand so it can match a stored wall clock', () => {
+    expect(translateFilter({ at: { $eq: '14:30' } }, timeKind)).toEqual({ at: { $eq: '14:30:00' } });
+  });
+
+  it('leaves an inclusive upper bound EXACT — the calendar-day rule must not reach a time', () => {
+    // `nextUtcCalendarDay` widens only a bare `YYYY-MM-DD`; a wall clock never
+    // matches that shape, so `$lte` stays `$lte` rather than becoming `$lt`.
+    expect(translateFilter({ at: { $lte: '14:30:00' } }, timeKind)).toEqual({
+      at: { $lte: '14:30:00' },
+    });
+  });
+
+  it('canonicalises every element of an $in set', () => {
+    expect(
+      translateFilter({ at: { $in: ['09:00', new Date('1970-01-01T18:00:00Z')] } }, timeKind),
+    ).toEqual({ at: { $in: ['09:00:00', '18:00:00'] } });
+  });
+
+  it('canonicalises an implicit-equality comparand', () => {
+    expect(translateFilter({ at: new Date('1970-01-01T14:30:00.500Z') }, timeKind)).toEqual({
+      at: '14:30:00.500',
+    });
+  });
+
+  it('does not touch a field the resolver does not call temporal', () => {
+    expect(translateFilter({ why: '14:30' }, timeKind)).toEqual({ why: '14:30' });
   });
 });
