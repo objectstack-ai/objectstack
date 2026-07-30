@@ -67,6 +67,15 @@ export class SharingRuleService implements ISharingRuleService {
   private readonly engine: SharingEngine;
   private readonly sharing: SharingService;
   private readonly logger?: SharingRuleServiceOptions['logger'];
+  /**
+   * [#3929 follow-up] Inert (criteria-less) rules seen this process, for
+   * once-per-rule warn dedup + the boot aggregate. Pre-dedup the evaluator
+   * warned on EVERY pass — findMatchingRecords per evaluation AND
+   * recordMatches per reconciled write — so one legacy row could dominate a
+   * deployment's log. The enforcement is unchanged (such a rule still
+   * matches NOTHING); only the repetition is gone.
+   */
+  private readonly inertRuleSeen = new Set<string>();
 
   constructor(opts: SharingRuleServiceOptions) {
     this.engine = opts.engine;
@@ -301,11 +310,21 @@ export class SharingRuleService implements ISharingRuleService {
    */
   private isInertMatchAll(rule: SharingRuleRow): boolean {
     if (!isMatchAllCriteria(rule.criteria)) return false;
-    this.logger?.warn?.(
-      '[sharing-rule] rule has no usable criteria — matching NO records instead of every record (ADR-0049)',
-      { rule: rule.name, object: rule.object_name },
-    );
+    const key = String(rule.id ?? rule.name);
+    if (!this.inertRuleSeen.has(key)) {
+      this.inertRuleSeen.add(key);
+      this.logger?.warn?.(
+        '[sharing-rule] rule has no usable criteria — matching NO records instead of every record ' +
+          '(ADR-0049; logged once per rule per process — fix the criteria or set active: false)',
+        { rule: rule.name, object: rule.object_name },
+      );
+    }
     return true;
+  }
+
+  /** Names of inert (criteria-less) rules seen so far — the boot aggregate reads this. */
+  get inertRuleNames(): readonly string[] {
+    return [...this.inertRuleSeen];
   }
 
   private async findMatchingRecords(rule: SharingRuleRow): Promise<string[]> {
