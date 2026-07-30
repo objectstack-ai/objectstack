@@ -4089,6 +4089,7 @@ export class ObjectStackProtocolImplementation implements
             organizationId: args.organizationId ?? null,
             operation: args.operation,
             outcome: 'denied',
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             code: 'item_locked',
             lockState: state.lock,
             actor: args.actor,
@@ -4127,6 +4128,7 @@ export class ObjectStackProtocolImplementation implements
             organizationId: args.organizationId ?? null,
             operation: 'delete',
             outcome: 'denied',
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             code: 'item_locked',
             lockState: state.lock,
             actor: args.actor,

@@ -210,6 +210,7 @@ describe('ADR-0010 L3 lock enforcement — audit trail', () => {
             // Lowercase on purpose: the audit column is its own persisted
             // vocabulary, not the ADR-0112 error catalog the thrown code above
             // now follows. See sys-metadata-audit.object.ts.
+            // adr0112-ok: D6b — persisted audit column, not the error catalog
             code: 'item_locked',
             lock_state: 'full',
             actor: 'user_42',

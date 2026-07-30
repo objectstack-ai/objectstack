@@ -44,13 +44,13 @@ describe('protocol.discardPackageDrafts', () => {
             { type: 'view', name: 'course_list' },
         ]);
         (deleteMetaItem as any).mockImplementation(async (req: any) => {
-            if (req.name === 'course_list') throw Object.assign(new Error('locked'), { code: 'locked' });
+            if (req.name === 'course_list') throw Object.assign(new Error('ITEM_LOCKED'), { code: 'ITEM_LOCKED' });
             return { success: true };
         });
         const res = await protocol.discardPackageDrafts({ packageId: 'app.edu' });
         expect(res.discardedCount).toBe(1);
         expect(res.failedCount).toBe(1);
-        expect(res.failed[0]).toMatchObject({ name: 'course_list', code: 'locked' });
+        expect(res.failed[0]).toMatchObject({ name: 'course_list', code: 'ITEM_LOCKED' });
         expect(res.success).toBe(false);
     });
 

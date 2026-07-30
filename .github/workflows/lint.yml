@@ -114,6 +114,15 @@ jobs:
       - name: Response-envelope guard
         run: pnpm check:route-envelope
 
+      # Error-code casing guard (ADR-0112, #4003). The ledger's admission test
+      # enforces casing on every code someone REGISTERS; this catches the ones
+      # nobody registers — an unregistered lowercase literal in a code position
+      # is invisible to both the ledger and to the schema on any route that does
+      # not parse its own response. That is how 208 of them accumulated across
+      # 10 packages before batch 2. Runs its own --self-test first.
+      - name: Error-code casing guard
+        run: pnpm check:error-code-casing
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that

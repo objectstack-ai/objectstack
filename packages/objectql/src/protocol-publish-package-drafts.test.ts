@@ -121,7 +121,7 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
       { type: 'view', name: 'course_list' },
     ]);
     promote.mockImplementation(async (req: any) => {
-      if (req.name === 'student') throw Object.assign(new Error('locked'), { code: 'locked' });
+      if (req.name === 'student') throw Object.assign(new Error('ITEM_LOCKED'), { code: 'ITEM_LOCKED' });
       return promoteOk(req);
     });
 
@@ -137,7 +137,7 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
     expect(res.publishedCount).toBe(0);
     expect(res.published).toEqual([]);
     expect(res.failedCount).toBe(3);
-    expect(res.failed.find((f) => f.name === 'student')).toMatchObject({ code: 'locked', error: 'locked' });
+    expect(res.failed.find((f) => f.name === 'student')).toMatchObject({ code: 'ITEM_LOCKED', error: 'ITEM_LOCKED' });
     expect(res.failed.find((f) => f.name === 'course')).toMatchObject({ code: 'BATCH_ABORTED' });
     expect(res.failed.find((f) => f.name === 'course_list')).toMatchObject({ code: 'BATCH_ABORTED' });
   });
