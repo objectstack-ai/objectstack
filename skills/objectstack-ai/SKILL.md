@@ -302,9 +302,12 @@ Tools are the atomic operations that skills expose to agents.
 
 A tool authored as metadata (`type: 'tool'`, `*.tool.ts`) is validated by
 `ToolSchema`: required `name` / `label` / `description`, a **JSON Schema**
-`parameters` object, plus optional `category`, `objectName`, `outputSchema`,
-`permissions`, `active`. `ToolSchema` is **strict** — an unknown key (a typo, or
-the retired `requiresConfirmation`) is a parse error, not a silent strip.
+`parameters` object, plus optional `objectName` and `outputSchema`. `ToolSchema`
+is **strict** — an unknown key (a typo, or a retired key) is a parse error, not
+a silent strip. Retired in the #3896 close-out: `category`, `permissions`,
+`active` and `builtIn` (all were authorable and inert; `permissions` gated
+nothing and `active: false` withdrew nothing — the rejection message carries
+each key's replacement), joining `requiresConfirmation` (#3715).
 
 <!-- os:check -->
 ```typescript
@@ -314,7 +317,6 @@ export default defineTool({
   name: 'create_case',
   label: 'Create Support Case',
   description: 'Creates a new support case record',
-  category: 'action',
   parameters: {
     type: 'object',
     properties: {
@@ -327,17 +329,11 @@ export default defineTool({
 });
 ```
 
-The optional `category` classifies the tool's operational domain:
-
-| Category | Purpose |
-|:---------|:--------|
-| `data` | CRUD / query operations |
-| `action` | Side-effect actions (send email, create record) |
-| `flow` | Trigger a visual flow |
-| `integration` | External API / webhook calls |
-| `vector_search` | RAG / vector search |
-| `analytics` | Aggregation & reporting |
-| `utility` | Formatters, parsers, helpers |
+To gate what a tool can do, gate the underlying action
+(`action.requiredPermissions`, ADR-0066) or the objects it touches; to withdraw
+a tool, remove it from the skills/agents that reference it. Categorization, if
+you need it, belongs on the action side (`action.ai.category` — a live,
+enforced surface).
 
 > **Tool metadata is a read-only projection — not an execution entry point.**
 > `ToolSchema` has no `handler` / `implementation` field, and no framework
