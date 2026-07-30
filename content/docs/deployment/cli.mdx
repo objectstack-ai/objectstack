@@ -323,6 +323,16 @@ os start
 **Resolution priority (artifact):** `--artifact` > `OS_ARTIFACT_PATH` > `<cwd>/dist/objectstack.json` > `<home>/dist/objectstack.json` > auto-compile from `objectstack.config.ts` (when present) > empty kernel.
 **Resolution priority (database):** `--database` > `OS_DATABASE_URL` > `DATABASE_URL` (legacy) > `file:<home>/data/objectstack.db`.
 
+<Callout type="warn">
+A **named** artifact (`--artifact` or `OS_ARTIFACT_PATH`) does *not* participate
+in that fall-through: it is used as given, and a local path that does not exist
+**fails the boot** — naming the path and which of the two named it — instead of
+quietly continuing down the list. You asked for a specific artifact, so booting
+something else (or an empty kernel) would hide the typo behind a running server.
+The fall-through applies to the **conventional** locations only. Remote
+(`http(s)://`) sources cannot be checked up front and are validated when fetched.
+</Callout>
+
 **What it boots:**
 - Reads the artifact's `manifest`, `objects`, `views`, `flows`, …
 - Auto-registers the platform services declared in `requires: [...]` (e.g. `ai`, `automation`, `analytics`, `auth`, `ui`). Declaring a **service** capability (`automation`, `analytics`, `ai`, `audit`, …) is a *requirement*: if its provider package isn't installed, boot **fails fast** with a clear error instead of silently starting without a capability you asked for. (`auth` and `ui` are tier-gated with their own opt-in rules — `auth`'s secret-gated skip is described below.)

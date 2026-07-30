@@ -16,6 +16,7 @@
 import type { FlowParsed } from '../automation/flow.zod';
 import type { ExecutionLog } from '../automation/execution.zod';
 import type { ActionDescriptor } from '../automation/node-executor.zod';
+import type { ConnectorDescriptor } from '../integration/connector-descriptor';
 
 /**
  * Context passed to a flow/script execution
@@ -255,6 +256,30 @@ export interface ResumeSignal {
     [RESUME_AUTHORITY_SERVICE]?: true;
 }
 
+/**
+ * One flow's deployment + trigger-binding state, as
+ * {@link IAutomationService.getFlowRuntimeStates} reports it (#4127).
+ */
+export interface FlowRuntimeState {
+    /** Flow name (snake_case) — the key {@link IAutomationService.execute} takes. */
+    name: string;
+    /** Whether the flow is enabled; a disabled flow stays registered and never runs. */
+    enabled: boolean;
+    /**
+     * Whether a trigger is actually wired to this flow. `false` for a flow with
+     * no declared trigger (manual / screen flows) AND for one whose declared
+     * trigger type has no registered trigger — `triggerType` distinguishes the
+     * two.
+     */
+    bound: boolean;
+    /** Persisted deployment status, when the flow carries one. */
+    status?: string;
+    /** Declared trigger type, when the flow declares one. */
+    triggerType?: string;
+    /** Object the trigger binds to, for object-bound trigger types. */
+    object?: string;
+}
+
 export interface IAutomationService {
     /**
      * Execute a named flow or script
@@ -321,6 +346,43 @@ export interface IAutomationService {
      * @returns Array of registered action descriptors
      */
     getActionDescriptors?(): ActionDescriptor[];
+
+    /**
+     * The connector registry, as designer-facing descriptors (ADR-0022).
+     *
+     * [#4127] Declared because `GET /automation/connectors` already called it —
+     * the sibling of {@link getActionDescriptors}, which the contract HAS
+     * declared since ADR-0018, serving the same designer with the other half of
+     * the `connector_action` node's pickers (node type ← actions, connector /
+     * action / input ← this). Undeclared, the route had to probe for the method
+     * and then re-type its own result as `any` to filter on `type`.
+     *
+     * Optional for the same reason `getActionDescriptors` is: a connector
+     * registry is a capability of the flow-engine implementation, not of every
+     * automation slot — a script-runner implementation of this contract has no
+     * connectors to describe, and answers an empty registry rather than 404.
+     *
+     * @returns One entry per registered connector; empty when none are registered
+     */
+    getConnectorDescriptors?(): ConnectorDescriptor[];
+
+    /**
+     * Per-flow deployment + binding state, for operator surfaces.
+     *
+     * [#4127] Declared because the dispatcher's `GET /automation/_status`
+     * already called it (as did the CLI boot summary and the
+     * `kernel:bootstrapped` audit), while the contract stopped at
+     * {@link listFlows} — a bare `string[]` that cannot say whether a flow is
+     * enabled, or bound to a trigger, or why it is not.
+     *
+     * `bound: false` is the answer the operator surfaces exist for: a flow with
+     * no trigger (manually-invoked / screen flows) or whose declared trigger
+     * type has no registered trigger. `triggerType` / `object` expose the
+     * declared binding so the caller can say WHY, rather than only that.
+     *
+     * @returns One entry per registered flow
+     */
+    getFlowRuntimeStates?(): FlowRuntimeState[];
 
     /**
      * Resume a run that suspended at a pausing node (ADR-0019). The run must

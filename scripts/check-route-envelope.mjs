@@ -232,11 +232,11 @@ const DISPATCHER_DOMAINS = {
     note: "bridges better-auth, whose client parses ITS shapes (`{ user, session }`, `{ session: null, user: null }`, `{ success: true }`) — BaseResponseSchema does not govern them",
   },
 
-  // Kind 4 — real drift, tracked.
+  // Kind 2 — the `{ agents: [] }` fallback moved onto `deps.success` in #4053;
+  // what remains is the passthrough of the AI service's own result.
   'ai.ts': {
-    handBuilt: 2,
-    ratchet: '#4053',
-    note: 'one passthrough of the AI service result (kind 2); one is the unenveloped `{ agents: [] }` fallback for GET /ai/agents — an SDK-addressable route whose conversion must land with cloud and the SDK together or `ai.agents.list()` silently returns []',
+    handBuilt: 1,
+    note: "passthrough of the AI service result (status and body are the service's, streaming included)",
   },
 };
 

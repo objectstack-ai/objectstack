@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { HonoServerPlugin } from './hono-plugin';
+import { registerCurrentUserEndpoints } from './current-user-endpoints';
 
 const REST_API_PLUGIN = 'com.objectstack.rest.api';
 const RUNTIME_DISPATCHER_PLUGIN = 'com.objectstack.runtime.dispatcher';
@@ -40,9 +41,10 @@ function bootStandardEndpoints(installedPlugins: string[] = []) {
     // the CRUD + discovery surface only under `registerStandardEndpoints`.
     // Discovery is computed from what is really mounted, so a boot that skipped
     // the `/auth/me/*` helpers would under-report `routes.auth`.
-    (plugin as any).registerCurrentUserEndpoints(ctx);
+    const rawApp = (plugin as any).server.getRawApp();
+    registerCurrentUserEndpoints({ rawApp, ctx });
     (plugin as any).registerDiscoveryAndCrudEndpoints(ctx);
-    return (plugin as any).server.getRawApp();
+    return rawApp;
 }
 
 async function discoveryRoutes(app: any): Promise<Record<string, string>> {

@@ -16,6 +16,7 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
+import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
 import {
   printHeader,
@@ -474,11 +475,19 @@ export default class Serve extends Command {
         // Ignore — fall through and try the requested port.
       }
     } else if (!(await isPortAvailable(requestedPort))) {
-      console.log('');
-      printError(`Port ${requestedPort} is already in use.`);
-      console.log(chalk.dim('  ObjectStack does not auto-select a different port in production mode:'));
-      console.log(chalk.dim('  a drifted port silently breaks reverse-proxy, OAuth callback, and CORS config.'));
-      console.log(chalk.dim('  Free the port, or pick another via PORT=<port> (or --port <port>).'));
+      // One write, for the reason spelled out at the "Nothing to serve" exit
+      // below: `this.exit(1)` reaches `process.exit` without draining a piped
+      // stdout, so a multi-call diagnostic loses its tail. Same defect, same
+      // shape — this one is fixed by construction (the e2e that measured the
+      // truncation drives the other exit; reaching this one needs a busy port in
+      // production mode).
+      console.log(
+        '\n'
+        + chalk.red(`  ✗ Port ${requestedPort} is already in use.\n`)
+        + chalk.dim('     ObjectStack does not auto-select a different port in production mode:\n')
+        + chalk.dim('     a drifted port silently breaks reverse-proxy, OAuth callback, and CORS config.\n')
+        + chalk.dim('     Free the port, or pick another via PORT=<port> (or --port <port>).'),
+      );
       this.exit(1);
     }
 
@@ -516,10 +525,35 @@ export default class Serve extends Command {
         if (process.env.OS_BOOT_EMPTY === '1') {
           useEmptyBoot = true;
         } else {
-          printError(`Configuration file not found: ${absolutePath}`);
-          console.log(chalk.dim('  Hint: Run `objectstack init` to create a new project,'));
-          console.log(chalk.dim('        `objectstack start` to boot an empty kernel against your marketplace,'));
-          console.log(chalk.dim('        or run `objectstack build` first / set OS_ARTIFACT_PATH.'));
+          // Say WHERE it looked. "Not found" alone cannot distinguish the two
+          // things that actually happen — a typo'd filename and the wrong cwd
+          // (running from a monorepo root instead of the app folder) — and the
+          // second is the common one, which listing the searched paths makes
+          // self-evident. This stays an ERROR rather than degrading into an
+          // empty boot: `os serve` was told to load something, and inventing a
+          // zero-object platform instead would hide the mistake behind a
+          // running server. Booting with no app at all is a real, supported
+          // thing (`os serve` on a config with no metadata, or `os start`) —
+          // but it is a stated intent, not a guess made on the user's behalf.
+          // ONE write, deliberately. `this.exit(1)` unwinds to oclif's
+          // `process.exit`, which does NOT wait for a piped stdout to drain — so
+          // a diagnostic split across several `console.log` calls gets
+          // truncated mid-message, and the reader loses exactly the part that
+          // says where to look. (Measured: as separate calls, only the first two
+          // lines survived a pipe.) An error whose tail can vanish is the #4012
+          // shape all over again; assembling it into a single write keeps it
+          // inside one pipe-buffer flush.
+          console.log(
+            chalk.red('  ✗ Nothing to serve — no config and no compiled artifact.') + '\n'
+            + chalk.dim(`     Looked for a config at:    ${absolutePath}\n`)
+            + chalk.dim(`     Looked for an artifact at: ${path.resolve(process.cwd(), 'dist/objectstack.json')}\n`)
+            + chalk.dim('     OS_ARTIFACT_PATH is not set.\n')
+            + '\n'
+            + chalk.dim('     Hint: `objectstack init` scaffolds a new project;\n')
+            + chalk.dim('           `objectstack start` boots an app-less kernel against your marketplace;\n')
+            + chalk.dim('           `objectstack build` (or OS_ARTIFACT_PATH) supplies a compiled artifact.\n')
+            + chalk.dim('           Already have a project? Check your working directory.'),
+          );
           this.exit(1);
         }
       }
@@ -1014,9 +1048,7 @@ export default class Serve extends Command {
       // To avoid double-registration when the host already wraps itself with
       // an AppPlugin (e.g. apps/objectos's dev-workspace stack), we skip if
       // any plugin in `plugins[]` is already an AppPlugin instance.
-      const hasAppPluginAlready = plugins.some(
-        (p: any) => p && (p.type === 'app' || p.constructor?.name === 'AppPlugin' || (p.name && typeof p.name === 'string' && p.name.startsWith('plugin.app.')))
-      );
+      const hasAppPluginAlready = plugins.some(isAppPluginLike);
       const configHasMetadata = !!(
         config.objects || config.manifest || config.apps || config.flows || config.apis
       );
@@ -1051,6 +1083,30 @@ export default class Serve extends Command {
               `  ⚠ Skipped registering the app defined in this config: ${e?.message ?? e}\n`
               + '    Its objects/flows will NOT be served. Fix the config (or pin an AppPlugin in `plugins`).',
             ));
+        }
+      } else if (hasAppPluginAlready) {
+        // #4095 — skipping the wrap above also discards the authored module's
+        // CODE. On the config-boot path the bundle already in `plugins[]` came
+        // from `createStandaloneStack()` reading `dist/objectstack.json`, and a
+        // JSON artifact cannot carry a function: the app booted with every
+        // `script` action DECLARED and no handler registered, so each one 404'd
+        // at dispatch. Move the executable members onto that bundle (the
+        // bundle's own value always wins, so a host that wrapped itself on
+        // purpose is untouched) and say so out loud when they have nowhere to go
+        // — that silent drop is what hid this.
+        // Success is silent: on the config-boot path this is now the normal
+        // route by which handlers reach the engine, and the observable proof is
+        // that the actions dispatch.
+        const graft = graftAuthoredRuntimeMembers(plugins, config);
+        if (graft.orphaned.length > 0) {
+          console.warn(chalk.yellow(
+            `  ⚠ ${relativeConfig} exports ${graft.orphaned.join(' / ')} but no app bundle claimed `
+            + `${graft.orphaned.length === 1 ? 'it' : 'them'}`
+            + `${graft.reason === 'ambiguous-app-plugin'
+              ? ' — several apps are registered and the config declares no manifest.id to match'
+              : ' — no registered app bundle has a matching manifest.id'}`
+            + '. Action handlers registered there will NOT be reachable (they 404 at dispatch).',
+          ));
         }
       }
 

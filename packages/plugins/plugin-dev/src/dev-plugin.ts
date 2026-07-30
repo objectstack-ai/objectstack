@@ -1,407 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, createMemoryCache, createMemoryQueue, createMemoryJob, createMemoryI18n } from '@objectstack/core';
+import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveMultiOrgEnabled } from '@objectstack/types';
-import { SERVICE_SELF_INFO_KEY } from '@objectstack/spec/api';
-
-/**
- * All 17 core kernel service names as defined in CoreServiceName.
- * @see packages/spec/src/system/core-services.zod.ts
- */
-const CORE_SERVICE_NAMES = [
-  'metadata', 'data', 'auth',
-  'file-storage', 'search', 'cache', 'queue',
-  'automation', 'analytics', 'realtime',
-  'job', 'notification', 'ai', 'i18n', 'ui', 'workflow',
-] as const;
-
-/**
- * Security sub-services registered by the SecurityPlugin — and, deliberately,
- * by NOTHING ELSE (#4093).
- *
- * This plugin used to stub all three when SecurityPlugin was absent. Each fake
- * inverted the decision it stood in for: `checkObjectPermission()` answered
- * `true` for everything, `compileFilter()` returned `null` so no row-level
- * predicate was applied, and `maskResults()` handed rows back unmasked.
- *
- * That is the one thing ADR-0076 D12 says a fallback may never do. Its rule,
- * learned from #3891's analytics shim: **a fallback may degrade features, never
- * security semantics** — and the shim only dropped the caller's RLS scoping,
- * where these three answered "allowed" outright. The contract agrees from the
- * other side: `packages/spec/src/contracts/security-service.ts` calls these
- * three "implementation internals and deliberately NOT part of this contract",
- * and specifies that access-narrowing answers **fail CLOSED** — "a consumer
- * must never treat a thrown error or a deny filter as 'no restriction'".
- * Fakes registered under those names by a *different* package are the exact
- * opposite of failing closed.
- *
- * Triggering it took no exotic setup: this plugin loads SecurityPlugin through
- * the same optional dynamic import as everything else, so `@objectstack/
- * plugin-security` merely not being installed swapped real RBAC/RLS/masking for
- * allow-all, behind one `warn` line.
- *
- * The slots now stay empty, which is what production has without SecurityPlugin,
- * and the consumers already handle: the enforcement paths live inside the plugin
- * itself (registered hooks), and the only reader of a slot —
- * `plugin-hono-server`'s `/auth/me/permissions` + `/me/apps` — resolves it
- * defensively and fails open on *presentation* only, over data the read path has
- * already enforced. Kept as a named list because the registration loop must
- * still skip these slots and say why.
- */
-const SECURITY_SERVICE_NAMES = [
-  'security.permissions', 'security.rls', 'security.fieldMasker',
-] as const;
-
-/**
- * Contract-compliant dev stub implementations.
- *
- * Each stub implements the interface defined in `packages/spec/src/contracts/`
- * (e.g. ICacheService, IQueueService, IAutomationService, …) so that
- * downstream code calling these services in dev mode receives the correct
- * return types — not just `undefined`.
- *
- * Where an interface method is optional (marked with `?`), the stub only
- * implements the required methods plus any optional ones that have
- * a trivially useful implementation.
- */
-
-/** IStorageService — in-memory file storage stub */
-function createStorageStub() {
-  const files = new Map<string, { data: Buffer; meta: any }>();
-  return {
-    _serviceName: 'file-storage',
-    async upload(key: string, data: any, options?: any): Promise<void> {
-      files.set(key, { data: Buffer.from(data), meta: { contentType: options?.contentType, metadata: options?.metadata } });
-    },
-    async download(key: string): Promise<Buffer> { return files.get(key)?.data ?? Buffer.alloc(0); },
-    async delete(key: string): Promise<void> { files.delete(key); },
-    async exists(key: string): Promise<boolean> { return files.has(key); },
-    async getInfo(key: string) {
-      const f = files.get(key);
-      return { key, size: f?.data?.length ?? 0, contentType: f?.meta?.contentType, lastModified: new Date(), metadata: f?.meta?.metadata };
-    },
-    async list(prefix: string) {
-      return [...files.entries()].filter(([k]) => k.startsWith(prefix)).map(([key, f]) =>
-        ({ key, size: f.data.length, contentType: f.meta?.contentType, lastModified: new Date() }));
-    },
-  };
-}
-
-/** ISearchService — in-memory full-text search stub */
-function createSearchStub() {
-  const indexes = new Map<string, Map<string, Record<string, unknown>>>();
-  return {
-    _serviceName: 'search',
-    async index(object: string, id: string, document: Record<string, unknown>): Promise<void> {
-      if (!indexes.has(object)) indexes.set(object, new Map());
-      indexes.get(object)!.set(id, document);
-    },
-    async remove(object: string, id: string): Promise<void> { indexes.get(object)?.delete(id); },
-    async search(object: string, query: string) {
-      const docs = indexes.get(object) ?? new Map();
-      const q = query.toLowerCase();
-      const hits = [...docs.entries()]
-        .filter(([, doc]) => JSON.stringify(doc).toLowerCase().includes(q))
-        .map(([id, doc]) => ({ id, score: 1, document: doc }));
-      return { hits, totalHits: hits.length, processingTimeMs: 0 };
-    },
-    async bulkIndex(object: string, documents: Array<{ id: string; document: Record<string, unknown> }>): Promise<void> {
-      if (!indexes.has(object)) indexes.set(object, new Map());
-      for (const d of documents) {
-        indexes.get(object)!.set(d.id, d.document);
-      }
-    },
-    async deleteIndex(object: string): Promise<void> { indexes.delete(object); },
-  };
-}
-
-/** IAutomationService — no-op flow execution stub */
-function createAutomationStub() {
-  const flows = new Map<string, unknown>();
-  return {
-    _serviceName: 'automation',
-    async execute(_flowName: string) { return { success: true, output: undefined, durationMs: 0 }; },
-    async listFlows(): Promise<string[]> { return [...flows.keys()]; },
-    registerFlow(name: string, definition: unknown) { flows.set(name, definition); },
-    unregisterFlow(name: string) { flows.delete(name); },
-  };
-}
-
-
-/** IRealtimeService — in-memory pub/sub stub */
-function createRealtimeStub() {
-  const subs = new Map<string, Function>();
-  let subId = 0;
-  return {
-    _serviceName: 'realtime',
-    async publish(event: any): Promise<void> { for (const fn of subs.values()) fn(event); },
-    async subscribe(_channel: string, handler: Function): Promise<string> {
-      const id = `dev-sub-${++subId}`; subs.set(id, handler); return id;
-    },
-    async unsubscribe(subscriptionId: string): Promise<void> { subs.delete(subscriptionId); },
-  };
-}
-
-/** INotificationService — in-memory log stub */
-function createNotificationStub() {
-  const sent: any[] = [];
-  return {
-    _serviceName: 'notification',
-    async send(message: any) { sent.push(message); return { success: true, messageId: `dev-notif-${sent.length}` }; },
-    async sendBatch(messages: any[]) { return messages.map(m => { sent.push(m); return { success: true, messageId: `dev-notif-${sent.length}` }; }); },
-    getChannels() { return ['email', 'in-app'] as const; },
-  };
-}
-
-/** IAIService — dev stub returning placeholder responses */
-function createAIStub() {
-  return {
-    _serviceName: 'ai',
-    async chat() { return { content: '[dev-stub] AI not available in development mode', model: 'dev-stub' }; },
-    async complete() { return { content: '[dev-stub] AI not available in development mode', model: 'dev-stub' }; },
-    async embed() { return [[0]]; },
-    async listModels() { return ['dev-stub']; },
-  };
-}
-
-/** II18nService — delegates to createMemoryI18n from core with locale fallback */
-function createI18nStub() {
-  const base = createMemoryI18n();
-  return {
-    ...base,
-    _serviceName: 'i18n',
-  };
-}
-
-/** IWorkflowService — in-memory workflow state stub */
-function createWorkflowStub() {
-  const states = new Map<string, string>(); // recordKey → currentState
-  const key = (obj: string, id: string) => `${obj}:${id}`;
-  return {
-    _serviceName: 'workflow',
-    async transition(t: any) {
-      states.set(key(t.object, t.recordId), t.targetState);
-      return { success: true, currentState: t.targetState };
-    },
-    async getStatus(object: string, recordId: string) {
-      return { recordId, object, currentState: states.get(key(object, recordId)) ?? 'draft', availableTransitions: [] };
-    },
-    async getHistory() { return []; },
-  };
-}
-
-/** IMetadataService — in-memory metadata registry stub (fallback) */
-function createMetadataStub() {
-  const store = new Map<string, Map<string, unknown>>(); // type → (name → def)
-  return {
-    _serviceName: 'metadata',
-    register(type: string, nameOrDef: string | Record<string, any>, data?: unknown) {
-      if (!store.has(type)) store.set(type, new Map());
-      if (typeof nameOrDef === 'object' && nameOrDef !== null) {
-        const key = nameOrDef.name ?? nameOrDef.id ?? 'unknown';
-        store.get(type)!.set(key, nameOrDef);
-      } else {
-        store.get(type)!.set(nameOrDef, data);
-      }
-    },
-    // Mirror MetadataManager.registerInMemory — AppPlugin gates code-defined
-    // datasource / stack-RBAC registration on its presence (see
-    // packages/core/src/fallbacks/memory-metadata.ts).
-    registerInMemory(type: string, nameOrDef: string | Record<string, any>, data?: unknown) {
-      if (!store.has(type)) store.set(type, new Map());
-      if (typeof nameOrDef === 'object' && nameOrDef !== null) {
-        const key = nameOrDef.name ?? nameOrDef.id ?? 'unknown';
-        store.get(type)!.set(key, nameOrDef);
-      } else {
-        store.get(type)!.set(nameOrDef, data);
-      }
-    },
-    get(type: string, name: string) { return store.get(type)?.get(name); },
-    list(type: string) { return [...(store.get(type)?.values() ?? [])]; },
-    unregister(type: string, name: string) { store.get(type)?.delete(name); },
-    exists(type: string, name: string) { return store.get(type)?.has(name) ?? false; },
-    listNames(type: string) { return [...(store.get(type)?.keys() ?? [])]; },
-    getObject(name: string) { return store.get('object')?.get(name); },
-    listObjects() { return [...(store.get('object')?.values() ?? [])]; },
-    unregisterPackage() {},
-  };
-}
-
-/** IAuthService — dev auth stub returning success for all */
-function createAuthStub() {
-  return {
-    _serviceName: 'auth',
-    async handleRequest() { return new Response(JSON.stringify({ success: true }), { status: 200 }); },
-    async verify() { return { success: true, user: { id: 'dev-admin', email: 'admin@dev.local', name: 'Admin', roles: ['admin'] } }; },
-    async logout() {},
-    async getCurrentUser() { return { id: 'dev-admin', email: 'admin@dev.local', name: 'Admin', roles: ['admin'] }; },
-  };
-}
-
-/** IDataEngine — minimal no-op data stub (fallback) */
-function createDataStub() {
-  return {
-    _serviceName: 'data',
-    async find() { return []; },
-    async findOne() { return undefined; },
-    async insert(_obj: string, params: any) { return { id: `dev-${Date.now()}`, ...params?.data }; },
-    async update(_obj: string, _id: string, params: any) { return params?.data ?? {}; },
-    async delete() { return true; },
-    async count() { return 0; },
-    async aggregate() { return []; },
-  };
-}
-
-// [#4093] The three security sub-service stubs are GONE — see
-// SECURITY_SERVICE_NAMES below for why. They were:
-//
-//   security.permissions → checkObjectPermission() { return true; }   // allow-all
-//   security.rls         → compileFilter()        { return null; }    // no predicate
-//   security.fieldMasker → maskResults(r)         { return r; }       // unmasked
-//
-// Nothing replaces them: an empty slot is what production has when
-// SecurityPlugin isn't installed, and every consumer already handles it.
-
-/**
- * Map of service names → contract-compliant stub factory functions.
- * Each factory creates a new instance implementing the protocol interface
- * from `packages/spec/src/contracts/`.
- */
-const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
-  'cache':       () => createMemoryCache(),
-  'queue':       () => createMemoryQueue(),
-  'job':         () => createMemoryJob(),
-  'file-storage': createStorageStub,
-  'search':      createSearchStub,
-  'automation':  createAutomationStub,
-  'realtime':    createRealtimeStub,
-  'notification': createNotificationStub,
-  'ai':          createAIStub,
-  'i18n':        createI18nStub,
-  'workflow':    createWorkflowStub,
-  'metadata':    createMetadataStub,
-  'data':        createDataStub,
-  'auth':        createAuthStub,
-};
-
-/**
- * How each dev implementation describes ITSELF (ADR-0076 D12 `__serviceInfo`),
- * in one reviewable table — the point of #4058.
- *
- * Every stub used to carry the same `_dev: true`, which `readServiceSelfInfo`
- * normalizes to `{ status: 'stub', handlerReady: false }`. That single marker
- * declared all of these equally fake, and so could not tell apart the two
- * kinds actually in here:
- *
- * - **`degraded`** — the implementation really does the work, with reduced
- *   capability (no persistence, no cross-process scope, no validation). Its
- *   answers are true answers. `storage` really stores and returns the bytes;
- *   `search` really indexes and matches; `metadata` really registers and lists.
- *   Calling these "stub" understated them and pushed consumers to ignore a
- *   capability that works.
- * - **`stub`** — the answer is fabricated. `ai.chat` returns invented text,
- *   `automation.execute` reports success without running the flow,
- *   `notification.send` claims delivery and delivers nothing, `data` accepts
- *   writes and stores none, `auth.verify` waves everyone through as an admin,
- *   and the `security.*` trio answers allow-all. These must never be mistaken
- *   for a capability — the AI stub already misled an agent (ADR-0076 D12).
- *
- * `handlerReady` answers a different question: does an HTTP handler genuinely
- * serve this? It stays `false` for every `stub`, and also for `degraded`
- * services with no HTTP surface at all (`realtime` — the D12 precedent, joined
- * by `file-storage` in #4087: the dispatcher's `/storage` bridge — the one
- * thing that ever routed HTTP to this slot — was retired, and the surface it
- * claimed belongs to `@objectstack/service-storage`, which mounts its own
- * routes and does not use this implementation).
- *
- * Entries are only needed for plugin-dev's OWN fakes. The wrapped kernel
- * fallbacks (`cache` / `queue` / `job` / `i18n`) already carry their own
- * `__serviceInfo`, and {@link applySelfInfo} never overwrites one.
- */
-const DEV_STUB_SELF_INFO: Record<string, { status: 'stub' | 'degraded'; handlerReady?: boolean; message: string }> = {
-  'file-storage': { status: 'degraded', handlerReady: false, message: 'Dev in-memory file storage — really stores and returns bytes to in-process callers, but nothing survives a restart and no HTTP surface is mounted. Register @objectstack/service-storage for durable files and the upload/download protocol.' },
-  'search':       { status: 'degraded', message: 'Dev in-memory index — real substring matching over indexed documents, no ranking, analyzers, or persistence. Register a search plugin for the real engine.' },
-  'metadata':     { status: 'degraded', message: 'Dev in-memory metadata registry — real reads and writes, no persistence. Register MetadataPlugin for a persisted registry.' },
-  'workflow':     { status: 'degraded', message: 'Dev in-memory workflow state — transitions are recorded and read back, but NOTHING is validated: every transition is accepted and availableTransitions is always empty.' },
-  'realtime':     { status: 'degraded', handlerReady: false, message: 'Dev in-process pub/sub — real delivery to in-process subscribers, but no HTTP or WebSocket surface is mounted.' },
-  'automation':   { status: 'stub', message: 'Dev stub — execute() reports success WITHOUT running the flow. Register an automation plugin to actually run flows.' },
-  'notification': { status: 'stub', message: 'Dev stub — messages are recorded in memory and reported as sent; nothing is delivered. Register a notification plugin to actually send.' },
-  'ai':           { status: 'stub', message: 'Dev stub — replies are placeholder text, not model output. Register AIServicePlugin from @objectstack/service-ai for real completions.' },
-  'data':         { status: 'stub', message: 'Dev stub — find() always returns [], insert() mints an id and stores nothing. Register ObjectQLPlugin for a real engine.' },
-  'auth':         { status: 'stub', message: 'Dev stub — verify() accepts EVERY request as a fixed dev admin. Never use outside local development; register plugin-auth for real authentication.' },
-};
-
-/** Self-description for a slot with no factory at all (see the registration loop). */
-const SHAPELESS_STUB_SELF_INFO = {
-  status: 'stub' as const,
-  handlerReady: false,
-  message: 'Dev placeholder with no implementation — the slot is occupied so lookups do not throw, and nothing else.',
-};
-
-/**
- * Attach the D12 self-description, without ever overwriting one the
- * implementation already carries: the kernel fallbacks this plugin wraps
- * (`createMemoryCache` & co.) describe themselves, and their own account of
- * what they do beats anything this table could restate.
- */
-function applySelfInfo(svc: Record<string, any>, info: Record<string, unknown>): Record<string, any> {
-  if (SERVICE_SELF_INFO_KEY in svc) return svc;
-  return Object.assign(svc, { [SERVICE_SELF_INFO_KEY]: info });
-}
-
-/**
- * Core service slots that deliberately get NO dev stub — not even the
- * shapeless placeholder the registration loop uses for slots
- * without a factory.
- *
- * `analytics` (#4000): #3891/#3989 retired the degraded analytics shim, making
- * an unoccupied slot the honest signal — `/analytics/*` is not mounted, the
- * request 404s, and discovery reports `unavailable`. Registering a dev stub
- * re-filled that slot and re-created the retired shape one layer down: the
- * dispatcher gates on service presence, so a stub was called like a real
- * engine and answered 200 with fabricated rows. Dev mode is explicit opt-in
- * and the fake was empty, so this was never the security hole the shim was —
- * but "the capability is present" must mean the same thing in dev as in
- * production. To use analytics locally, install the real engine:
- * `@objectstack/service-analytics` runs an InMemory strategy.
- */
-const NO_DEV_STUB_SERVICES = new Set<string>(['analytics']);
-
-/**
- * Escape hatch for {@link assertNotProduction} — deliberately ungrouped and
- * scary-looking per the `OS_ALLOW_{X}` convention (AGENTS.md Prime Directive #9).
- */
-const ALLOW_IN_PRODUCTION_ENV = 'OS_ALLOW_DEV_PLUGIN' as const;
-
-/**
- * [#4093] Refuse to initialize under `NODE_ENV=production`.
- *
- * This plugin's whole purpose is to make a local stack work without installing
- * anything: it fills unclaimed service slots with fakes. Several of those
- * fabricate their answers (`data` discards writes and reports success), and it
- * ships as a published package with no environment check of its own — so an
- * `objectstack.config.ts` that carries `new DevPlugin()` into a production
- * deploy got the whole fake slate silently, with only a boot log to say so.
- *
- * Failing the boot is the right response rather than degrading quietly: a
- * production process that reaches this line is misconfigured in a way no
- * runtime behaviour can make safe, and the fakes are exactly the kind of thing
- * that looks like it works. `OS_ALLOW_DEV_PLUGIN=1` overrides it for the
- * deliberate cases (a staging box mimicking prod, a smoke test that pins
- * `NODE_ENV`), and says at the call site that someone chose this.
- */
-function assertNotProduction(): void {
-  if (process.env.NODE_ENV !== 'production') return;
-  if (process.env[ALLOW_IN_PRODUCTION_ENV] === '1') return;
-  throw new Error(
-    '@objectstack/plugin-dev refuses to initialize with NODE_ENV=production. '
-    + 'It registers development fakes for every unclaimed core service slot — including ones that '
-    + 'report success for work they never did — so a production process must not load it. '
-    + 'Remove DevPlugin from this deployment\'s plugin list and install the real services '
-    + `(the boot log names each fake it would have registered), or set ${ALLOW_IN_PRODUCTION_ENV}=1 `
-    + 'if you deliberately want the dev slate under a production NODE_ENV.',
-  );
-}
 
 /**
  * Dev Plugin Options
@@ -442,12 +42,15 @@ export interface DevPluginOptions {
   verbose?: boolean;
 
   /**
-   * Override which services to enable. By default all core services are enabled.
-   * Set a service name to `false` to skip it.
+   * Override which parts of the assembly to enable. By default everything
+   * this plugin can wire is enabled. Set a name to `false` to skip it.
    *
-   * Available services: 'objectql', 'driver', 'auth', 'server', 'rest',
-   * 'dispatcher', 'security', plus any of the 17 CoreServiceName values
-   * (e.g. 'cache', 'queue', 'job', 'ui', 'automation', 'workflow', …).
+   * Available toggles: 'objectql', 'driver', 'auth', 'server', 'rest',
+   * 'dispatcher', 'security', 'i18n', 'file-storage', 'realtime'.
+   *
+   * Toggles for the retired dev stubs (ADR-0115 — 'cache', 'queue', 'ai',
+   * 'automation', …) are accepted and ignored: those slots are no longer
+   * filled by this plugin at all.
    */
   services?: Partial<Record<string, boolean>>;
 
@@ -477,12 +80,38 @@ export interface DevPluginOptions {
 }
 
 /**
- * Development Mode Plugin for ObjectStack
+ * Escape hatch for {@link assertNotProduction} — deliberately ungrouped and
+ * scary-looking per the `OS_ALLOW_{X}` convention (AGENTS.md Prime Directive #9).
+ */
+const ALLOW_IN_PRODUCTION_ENV = 'OS_ALLOW_DEV_PLUGIN' as const;
+
+/**
+ * [ADR-0115 D6] Refuse to initialize under `NODE_ENV=production`.
  *
- * A convenience plugin that auto-configures the **entire** platform stack
- * for local development, simulating **all 17+ kernel services** so developers
- * can work in a full-featured API environment without external dependencies.
+ * The stack this plugin assembles is built around a well-known default auth
+ * secret and a seeded dev admin; nothing about it belongs in production, and
+ * failing the boot beats degrading quietly — a production process that reaches
+ * this line is misconfigured in a way no runtime behaviour can make safe.
+ * The escape hatch covers the deliberate cases (a staging box mimicking prod,
+ * a smoke test that pins `NODE_ENV`), and says at the call site that someone
+ * chose this.
+ */
+function assertNotProduction(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (process.env[ALLOW_IN_PRODUCTION_ENV] === '1') return;
+  throw new Error(
+    '@objectstack/plugin-dev refuses to initialize with NODE_ENV=production. '
+    + 'It assembles a development stack around a well-known default auth secret and a seeded '
+    + 'dev admin, so a production process must not load it. Remove DevPlugin from this '
+    + `deployment's plugin list, or set ${ALLOW_IN_PRODUCTION_ENV}=1 if you deliberately want `
+    + 'the dev assembly under a production NODE_ENV.',
+  );
+}
+
+/**
+ * Development Assembly Plugin for ObjectStack
  *
+ * One plugin that wires the **real** platform stack for local development.
  * Instead of manually wiring:
  *
  * ```ts
@@ -504,7 +133,7 @@ export interface DevPluginOptions {
  * plugins: [new DevPlugin()]
  * ```
  *
- * ## Core services (real implementations)
+ * ## What it assembles (all real implementations)
  *
  * | Service      | Package                           | Description                               |
  * |--------------|-----------------------------------|-------------------------------------------|
@@ -514,24 +143,34 @@ export interface DevPluginOptions {
  * | Security     | `@objectstack/plugin-security`    | RBAC, RLS, field-level masking            |
  * | HTTP Server  | `@objectstack/plugin-hono-server` | HTTP server on configured port            |
  * | REST API     | `@objectstack/rest`               | Auto-generated CRUD + metadata endpoints  |
- * | Dispatcher   | `@objectstack/runtime`            | Auth, GraphQL, analytics, packages, etc.  |
+ * | Dispatcher   | `@objectstack/runtime`            | Auth, GraphQL, packages, storage, etc.    |
  * | App/Metadata | `@objectstack/runtime`            | Project metadata (objects, views, apps)   |
+ * | Storage      | `@objectstack/service-storage`    | file-storage service (local-disk adapter) |
+ * | Realtime     | `@objectstack/service-realtime`   | realtime service (in-memory adapter)      |
+ * | I18n         | `@objectstack/service-i18n`       | When the stack declares translations      |
  *
- * ## Stub services (contract-compliant in-memory implementations)
+ * Every part is loaded via dynamic import and skipped (with a log line) when
+ * its package is not installed, and can be disabled via `options.services`.
  *
- * Any core service not provided by a real plugin is automatically registered
- * as a contract-compliant dev stub that implements the interface from
- * `packages/spec/src/contracts/`. Each stub returns correct types:
+ * ## Empty slots stay empty (ADR-0115)
  *
- * `cache` (Map-backed), `queue` (in-memory pub/sub), `job` (no-op scheduler),
- * `file-storage` (Map-backed), `search` (in-memory text search),
- * `automation` (no-op flows), `analytics` (empty results),
- * `realtime` (in-memory pub/sub), `notification` (log), `ai` (placeholder),
- * `i18n` (Map-backed translations), `ui` (Map-backed views/dashboards),
- * `workflow` (Map-backed state machine)
+ * This plugin registers **no service implementations of its own**. A
+ * capability whose plugin is not installed is absent, exactly as in
+ * production: its routes answer 404/501 and discovery reports it
+ * `unavailable`. The retired stub table used to fill every empty slot with a
+ * fabricated implementation — allow-all security answers, success reports
+ * for work that never ran — which made "the capability is present" mean
+ * different things in dev and production, and twice shipped answers a
+ * consumer trusted (ADR-0076 D12). To use a capability locally, install its
+ * real service (e.g. `@objectstack/service-analytics` for `/analytics` — it
+ * runs an InMemory strategy).
  *
- * All services can be individually disabled via `options.services`.
- * Peer packages are loaded via dynamic import and silently skipped if missing.
+ * ## Production guard (ADR-0115 D6)
+ *
+ * `init()` refuses to run when `NODE_ENV === 'production'`: the assembly is
+ * built around a well-known default auth secret and a seeded dev admin.
+ * Escape hatch for the rare deliberate case:
+ * `OS_ALLOW_DEV_PLUGIN=1`.
  */
 export class DevPlugin implements Plugin {
   name = 'com.objectstack.plugin.dev';
@@ -564,7 +203,8 @@ export class DevPlugin implements Plugin {
    */
   async init(ctx: PluginContext): Promise<void> {
     assertNotProduction();
-    ctx.logger.info('🚀 DevPlugin initializing — auto-configuring all services for development');
+
+    ctx.logger.info('🚀 DevPlugin initializing — assembling the development stack');
 
     const enabled = (name: string) => this.options.services?.[name] !== false;
 
@@ -640,6 +280,32 @@ export class DevPlugin implements Plugin {
     // 3c. Setup App registration is now handled inside plugin-auth (it
     //     registers the static SETUP_APP from @objectstack/platform-objects/apps
     //     as part of its manifest), so no separate child plugin is needed.
+
+    // 3d. Optional capability services (ADR-0115 D4) — the slots the retired
+    //     dev stubs used to fake are filled by the REAL service packages when
+    //     they are installed, following the same auto-detect pattern as 3b:
+    //     `service-storage` registers `file-storage` (local-disk adapter, real
+    //     files under ./storage), `service-realtime` registers `realtime`
+    //     (its default in-memory adapter). Not installed → the slot stays
+    //     empty, exactly as in production.
+    if (enabled('file-storage')) {
+      try {
+        const { StorageServicePlugin } = await import('@objectstack/service-storage') as any;
+        this.childPlugins.push(new StorageServicePlugin());
+        ctx.logger.info('  ✔ Storage service enabled (@objectstack/service-storage, local adapter)');
+      } catch {
+        ctx.logger.info('  ℹ @objectstack/service-storage not installed — the file-storage slot stays empty');
+      }
+    }
+    if (enabled('realtime')) {
+      try {
+        const { RealtimeServicePlugin } = await import('@objectstack/service-realtime') as any;
+        this.childPlugins.push(new RealtimeServicePlugin());
+        ctx.logger.info('  ✔ Realtime service enabled (@objectstack/service-realtime, in-memory adapter)');
+      } catch {
+        ctx.logger.info('  ℹ @objectstack/service-realtime not installed — the realtime slot stays empty');
+      }
+    }
 
     // 4. Auth Plugin
     let authMounted = false;
@@ -773,49 +439,20 @@ export class DevPlugin implements Plugin {
       }
     }
 
-    // ── Register contract-compliant dev stubs for remaining services ────
-    // The kernel defines 17 core services + 3 security services.
-    // Real plugins (ObjectQL, Auth, Security, etc.) already registered some.
-    // For any service NOT yet registered, we create a contract-compliant
-    // dev stub (implementing the interface from packages/spec/src/contracts/)
-    // so that the full kernel service map is populated and downstream code
-    // receives correct return types (arrays, booleans, objects — not undefined).
-    // Exception: NO_DEV_STUB_SERVICES slots stay empty on purpose (#4000).
-    //
-    // Each registered implementation carries its D12 self-description from
-    // DEV_STUB_SELF_INFO (#4058), so discovery reports what it actually is —
-    // `degraded` for the ones that really work, `stub` for the ones that
-    // fabricate — instead of one blanket `_dev: true` for all of them.
+    // ── No stub registration (ADR-0115 D1) ──────────────────────────────
+    // The stub table that used to fill every remaining slot is retired. A
+    // slot no child plugin filled stays EMPTY — the honest production
+    // semantic: routes answer 404/501, discovery reports `unavailable`, and
+    // in-process consumers handle absence exactly as they already must in
+    // production. To use a capability locally, install its real service.
 
-    const stubNames: string[] = [];
-
-    /** Build + self-describe one slot's dev implementation. */
-    const makeStub = (svc: string) => {
-      const factory = DEV_STUB_FACTORIES[svc];
-      const info = DEV_STUB_SELF_INFO[svc] ?? SHAPELESS_STUB_SELF_INFO;
-      return applySelfInfo(factory ? factory() : { _serviceName: svc }, info);
-    };
-
-    for (const svc of CORE_SERVICE_NAMES) {
-      if (!enabled(svc)) continue;
-      if (NO_DEV_STUB_SERVICES.has(svc)) continue;
-      try {
-        ctx.getService(svc);
-        // Already registered by a real plugin — skip
-      } catch {
-        ctx.registerService(svc, makeStub(svc));
-        stubNames.push(svc);
-      }
-    }
-
-    // Security sub-services get NO stub (#4093, see SECURITY_SERVICE_NAMES):
-    // faking an authorization decision is the one thing ADR-0076 D12 forbids a
-    // fallback to do, and all three former stubs decided "allowed". An empty
-    // slot is what production has without SecurityPlugin. Say so once, loudly,
-    // because "no RBAC/RLS/masking is being enforced" is worth a line in the
-    // boot log of a stack that expected them.
+    // The security slots deserve one loud line when empty (#4126): faking an
+    // authorization decision is the one thing ADR-0076 D12 forbids a fallback
+    // to do, so the slots stay empty rather than stubbed — but "no RBAC/RLS/
+    // masking is being enforced" is worth saying in the boot log of a stack
+    // that expected them.
     if (enabled('security')) {
-      const missing = SECURITY_SERVICE_NAMES.filter((svc) => {
+      const missing = ['security.permissions', 'security.rls', 'security.fieldMasker'].filter((svc) => {
         try { ctx.getService(svc); return false; } catch { return true; }
       });
       if (missing.length > 0) {
@@ -828,11 +465,7 @@ export class DevPlugin implements Plugin {
       }
     }
 
-    if (stubNames.length > 0) {
-      ctx.logger.info(`  ✔ Contract-compliant dev stubs registered for: ${stubNames.join(', ')}`);
-    }
-
-    ctx.logger.info(`DevPlugin initialized ${this.childPlugins.length} plugin(s) + ${stubNames.length} dev stub(s)`);
+    ctx.logger.info(`DevPlugin initialized ${this.childPlugins.length} plugin(s)`);
   }
 
   /**

@@ -19,6 +19,10 @@ export * from './connector.zod';
 export * from './connector-provider';
 export * from './connector-provider-errors';
 
+// Connector registry vocabulary — origin/state and the descriptor
+// `GET /automation/connectors` serves (ADR-0022, ADR-0097 §4, #3017)
+export * from './connector-descriptor';
+
 // Connector Templates
 export * from './connector/saas.zod';
 export * from './connector/database.zod';

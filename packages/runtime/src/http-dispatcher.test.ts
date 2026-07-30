@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { ObjectKernel } from '@objectstack/core';
 import { ApiErrorSchema } from '@objectstack/spec/api';
+import type { ConnectorDescriptor } from '@objectstack/spec/integration';
 
 describe('HttpDispatcher', () => {
     let kernel: ObjectKernel;
@@ -179,11 +180,18 @@ describe('HttpDispatcher', () => {
                     { type: 'http_request', name: 'HTTP Request', category: 'io', paradigms: ['flow', 'approval'], source: 'builtin' },
                     { type: 'send_sms', name: 'Send SMS', category: 'io', paradigms: ['flow'], source: 'plugin' },
                 ]),
+                // [#4127] Typed as `ConnectorDescriptor[]` now that the contract
+                // declares `getConnectorDescriptors`, so this fixture cannot
+                // drift from the shape the route serves. The previous untyped
+                // literal was already missing `origin` and `state` — both
+                // REQUIRED, and both the fields a designer reads to tell a
+                // declarative instance from a plugin one, or a degraded
+                // connector from a live one (#3017).
                 getConnectorDescriptors: vi.fn().mockReturnValue([
-                    { name: 'rest', label: 'REST', type: 'api', actions: [{ key: 'request', label: 'Request' }] },
-                    { name: 'slack', label: 'Slack', type: 'api', actions: [{ key: 'chat.postMessage', label: 'Post Message' }] },
-                    { name: 'pg', label: 'Postgres', type: 'database', actions: [] },
-                ]),
+                    { name: 'rest', label: 'REST', type: 'api', origin: 'plugin', state: 'ready', actions: [{ key: 'request', label: 'Request' }] },
+                    { name: 'slack', label: 'Slack', type: 'api', origin: 'plugin', state: 'ready', actions: [{ key: 'chat.postMessage', label: 'Post Message' }] },
+                    { name: 'pg', label: 'Postgres', type: 'database', origin: 'declarative', state: 'degraded', degradedReason: 'upstream unreachable', actions: [] },
+                ] satisfies ConnectorDescriptor[]),
                 getFlowRuntimeStates: vi.fn().mockReturnValue([
                     { name: 'flow_a', enabled: true, bound: true },
                     { name: 'flow_b', enabled: false, bound: false },
@@ -416,10 +424,31 @@ describe('HttpDispatcher', () => {
             expect(result.response?.status).toBe(404);
         });
 
-        it('should handle legacy trigger path POST /trigger/:name', async () => {
+        /**
+         * [#4127] This used to assert `trigger('flow_a', { data: 1 }, { request })`
+         * — a method the mock invented. Nothing in the repo implements `trigger`
+         * on the automation slot and `IAutomationService` never declared it, so
+         * the branch it pinned was dead on every deployment while the "fallback"
+         * to `execute` was the actual route. Same test shape that let #4087 sit
+         * green on a `/storage` handler calling `upload` with the wrong
+         * arguments: mock what the handler wants, and the handler always agrees.
+         *
+         * The route goes through the CONTRACT method now, with the body
+         * translated into an AutomationContext. Identity forwarding is covered
+         * in domain-handler-registry.test.ts, which can seed an
+         * executionContext without dispatch() overwriting it.
+         */
+        it('routes the legacy POST /trigger/:name through execute, never a non-contract trigger()', async () => {
             const result = await dispatcher.handleAutomation('trigger/flow_a', 'POST', { data: 1 }, { request: {} });
             expect(result.handled).toBe(true);
-            expect(mockAutomationService.trigger).toHaveBeenCalledWith('flow_a', { data: 1 }, { request: {} });
+            expect(mockAutomationService.trigger).not.toHaveBeenCalled();
+            expect(mockAutomationService.execute).toHaveBeenCalledTimes(1);
+            const [name, ctx] = mockAutomationService.execute.mock.calls[0];
+            expect(name).toBe('flow_a');
+            // A flat body survives as flow params rather than being handed to
+            // the engine as an AutomationContext it cannot read anything from.
+            expect(ctx.params).toEqual({ data: 1 });
+            expect(ctx.event).toBe('manual');
         });
 
         // ── GET /actions — action descriptor registry (ADR-0018) ──────────
@@ -487,6 +516,25 @@ describe('HttpDispatcher', () => {
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.total).toBe(1);
             expect(result.response?.body?.data?.connectors[0].name).toBe('pg');
+        });
+
+        // [#4127] The route serves the WHOLE descriptor. `origin` and `state`
+        // are what the designer reads to distinguish a live declarative
+        // instance from a plugin connector, and a dispatchable one from a
+        // degraded one (ADR-0097 §4, #3017) — while the contract did not
+        // declare the method, nothing pinned that they survive the hop.
+        it('should preserve origin / state / degradedReason on GET /connectors', async () => {
+            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            const byName = Object.fromEntries(
+                result.response?.body?.data?.connectors.map((c: ConnectorDescriptor) => [c.name, c]),
+            );
+            expect(byName.rest).toMatchObject({ origin: 'plugin', state: 'ready' });
+            expect(byName.pg).toMatchObject({
+                origin: 'declarative',
+                state: 'degraded',
+                degradedReason: 'upstream unreachable',
+            });
         });
 
         it('should return an empty registry when the service lacks getConnectorDescriptors', async () => {
@@ -2603,7 +2651,14 @@ describe('HttpDispatcher', () => {
             const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, { request: {} });
             expect(agents.handled).toBe(true);
             expect(agents.response?.status).toBe(200);
-            expect(agents.response?.body).toEqual({ agents: [] });
+            // #4053 enveloped this body while #4058 was in flight. The courtesy
+            // this test pins is unchanged — an empty list rather than a fault —
+            // it just travels under `data` now. `AiAgentsResponseSchema`'s
+            // `{ agents }` is RELOCATED, not flattened to the bare array, so
+            // `client.ai.agents.list()` still reads `.agents` off what
+            // `unwrapResponse` returns.
+            expect(agents.response?.body).toEqual({ success: true, data: { agents: [] }, meta: undefined });
+            expect(agents.response?.body?.agents).toBeUndefined();
         });
 
         // Discovery must say exactly what the domains do — one predicate feeds

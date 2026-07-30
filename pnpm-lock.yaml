@@ -1387,6 +1387,12 @@ importers:
       '@objectstack/service-i18n':
         specifier: workspace:^
         version: link:../../services/service-i18n
+      '@objectstack/service-realtime':
+        specifier: workspace:^
+        version: link:../../services/service-realtime
+      '@objectstack/service-storage':
+        specifier: workspace:^
+        version: link:../../services/service-storage
       '@objectstack/setup':
         specifier: workspace:^
         version: link:../../apps/setup

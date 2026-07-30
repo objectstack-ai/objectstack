@@ -5,7 +5,7 @@ import {
   annotateEffectiveApiOperations,
   seedSuperUserRestrictedObjects,
   type ApiExposureSchemaLike,
-} from './hono-plugin.js';
+} from './current-user-endpoints.js';
 
 /**
  * #3391 — the `/me/permissions` per-object map carries the server-resolved

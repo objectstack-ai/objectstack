@@ -155,6 +155,48 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
     240_000,
   );
 
+  // The other side of the same principle. "The platform boots with no app" is a
+  // statement about CAPABILITY, and it does not license guessing that a missing
+  // input meant "boot empty". `os serve` was told to load something; the two
+  // things that actually happen here are a typo'd filename and the wrong working
+  // directory, and inventing a zero-object platform would hide both behind a
+  // running server — the exact failure class #4085 was. So it errors, and it says
+  // where it looked, which is what makes "wrong cwd" self-evident.
+  it(
+    'refuses, and names where it looked, when there is no config and no artifact',
+    async () => {
+      const emptyDir = mkdtempSync(join(tmpdir(), 'os-nothing-to-serve-'));
+      try {
+        const { stdout, stderr } = await runServe(emptyDir, ['--port', randomPort()], {
+          // It never boots, so wait on something that can only appear on the way
+          // down; the harness resolves on exit regardless.
+          waitFor: /Nothing to serve/,
+          timeoutMs: 120_000,
+          // An inherited OS_ARTIFACT_PATH would send this down the
+          // artifact-fallback branch instead. Unset it for the child.
+          env: { OS_ARTIFACT_PATH: undefined, OS_BOOT_EMPTY: undefined },
+        });
+        const out = stdout + stderr;
+        const seen = `\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`;
+
+        expect(out, `did not refuse${seen}`).toContain('Nothing to serve');
+        // Both searched locations, by absolute path.
+        expect(out, `config location not named${seen}`).toContain(
+          join(emptyDir, 'objectstack.config.ts'),
+        );
+        expect(out, `artifact location not named${seen}`).toContain('dist/objectstack.json');
+        // And it points at the command that DOES boot an app-less platform,
+        // instead of silently becoming it.
+        expect(out).toContain('objectstack start');
+        // It must not have booted.
+        expect(out).not.toContain('Server is ready');
+      } finally {
+        rmSync(emptyDir, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
   it(
     'serves on, and says why, when the config carries an app it cannot register',
     async () => {

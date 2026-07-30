@@ -40,7 +40,11 @@ export interface ServeRun {
 export function runServe(
   cwd: string,
   args: string[],
-  opts: { waitFor: RegExp; timeoutMs?: number; config?: string; env?: Record<string, string> },
+  // `env` values may be `undefined` to UNSET a variable for the child (Node
+  // omits undefined entries), which is how a test asserts behaviour that depends
+  // on a variable being absent — `''` would not do it, since the resolvers this
+  // exercises use `??` and an empty string is not nullish.
+  opts: { waitFor: RegExp; timeoutMs?: number; config?: string; env?: Record<string, string | undefined> },
 ): Promise<ServeRun> {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...args], {

@@ -344,10 +344,10 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 ### @objectstack/plugin-dev
 
-**Local Development Plugin** — one-line local stack: wires ObjectQL, the in-memory driver, auth, security, the HTTP server, REST and the dispatcher, then fills any still-unclaimed core service slot with an in-memory dev implementation.
+**Development Assembly Plugin** — one plugin that wires the real platform stack for zero-config local development.
 
-- **Features**: Composes the real plugins above; registers dev implementations for unclaimed slots, each declaring what kind of fake it is (`__serviceInfo` — `degraded` when it really does the work in memory, `stub` when it fabricates). Slots that would fabricate an answer over HTTP get no implementation at all: `analytics` and the three `security.*` handles stay empty on purpose.
-- **When to use**: Local development only. **`init()` throws under `NODE_ENV=production`** — set `OS_ALLOW_DEV_PLUGIN=1` only if you deliberately want the dev slate under a production `NODE_ENV`.
+- **Features**: Auto-assembles ObjectQL + in-memory driver + auth + security + Hono server + REST + dispatcher + app metadata, plus optional real services when installed (storage, realtime, i18n); registers no stubs — a slot no plugin fills stays empty, as in production (ADR-0115); refuses to boot with `NODE_ENV=production` (`OS_ALLOW_DEV_PLUGIN` escape hatch)
+- **When to use**: Zero-config local development and playgrounds
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/plugin-dev/README.md)
 
 ### @objectstack/plugin-approvals

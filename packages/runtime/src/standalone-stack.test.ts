@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createStandaloneStack } from './standalone-stack.js';
-import { createDefaultHostConfig } from './default-host.js';
+import { createDefaultHostConfig, resolveDefaultArtifactPath } from './default-host.js';
 
 // A minimal `objectstack build` artifact carrying an app-declared default
 // profile with a hierarchy read scope, an add-on permission set, app roles,
@@ -253,12 +253,114 @@ describe('createStandaloneStack — default datasource declared, built via the s
     expect(r.titles).toContain('hello-driver');
   }, BOOT_TIMEOUT);
 
-  it('the DefaultDatasourcePlugin precedes ObjectQLPlugin (schema sync needs the driver)', async () => {
+  // The composition ships both plugins, with the datasource ahead of the engine
+  // in the array. That LIST SHAPE is all this asserts — it is NOT what orders
+  // them, and this test's previous title ("…precedes ObjectQLPlugin (schema sync
+  // needs the driver)") claimed otherwise. The kernel resolves init and start
+  // order from the dependency graph, which HOISTS ObjectQLPlugin ahead of the
+  // datasource plugin on a real boot (measured: objectql inits 6 slots earlier).
+  // Pinning an array index as if it were the guarantee is how #4085 happened —
+  // a reader trusts the index, moves a plugin, and nothing fails.
+  it('composes the default datasource alongside the engine', async () => {
     const stack = await createStandaloneStack({ databaseUrl: 'memory://default-order' });
     const names = stack.plugins.map((p: any) => String(p?.name ?? p?.constructor?.name ?? ''));
     const dsIdx = names.indexOf('com.objectstack.runtime.default-datasource');
     const qlIdx = names.findIndex((n: string) => /objectql/i.test(n));
     expect(dsIdx).toBeGreaterThanOrEqual(0);
-    expect(qlIdx).toBeGreaterThan(dsIdx);
+    expect(qlIdx).toBeGreaterThanOrEqual(0);
   }, BOOT_TIMEOUT);
+
+  // …and THIS is the guarantee. The driver exists before boot schema-sync
+  // because the datasource plugin connects in `init()` (Phase 1 completes before
+  // ANY `start()` runs) and declares a hard dependency on ObjectQL, so the engine
+  // is registered by the time that init runs. Delete the declaration and the
+  // kernel stops ordering the two inits — which the array cannot notice, and
+  // this does.
+  it('declares the ObjectQL dependency that actually orders the two inits', async () => {
+    const stack = await createStandaloneStack({ databaseUrl: 'memory://default-order-deps' });
+    const ds = stack.plugins.find(
+      (p: any) => p?.name === 'com.objectstack.runtime.default-datasource',
+    ) as any;
+    expect(ds).toBeDefined();
+    expect(ds.dependencies).toContain('com.objectstack.engine.objectql');
+  }, BOOT_TIMEOUT);
+});
+
+// #4110 follow-up — a NAMED artifact that does not exist is a broken
+// instruction, and `createDefaultHostConfig` is the boot with no
+// `objectstack.config.ts`: the artifact IS the deployment, so there is nothing
+// else to serve.
+//
+// #4110 made an absent artifact non-fatal all the way down (`loadArtifactBundle`
+// logs and returns null; `MetadataPlugin` starts empty) — correct for the
+// CONVENTIONAL `<cwd>/dist/objectstack.json`, which is simply "not compiled
+// yet". But `OS_ARTIFACT_PATH` / `{ artifactPath }` skip the existence check by
+// design, so that tolerance reached them too and turned a typo into a silent
+// empty boot: `OS_ARTIFACT_PATH=/nope os serve` reached "Server is ready" with
+// the missing path named NOWHERE in its output. The distinction that matters is
+// named vs conventional, not the errno.
+describe('createDefaultHostConfig — a named-but-missing artifact fails loudly (#4110 follow-up)', () => {
+  const originalArtifactPath = process.env.OS_ARTIFACT_PATH;
+
+  afterAll(() => {
+    if (originalArtifactPath === undefined) delete process.env.OS_ARTIFACT_PATH;
+    else process.env.OS_ARTIFACT_PATH = originalArtifactPath;
+  });
+
+  it('rejects an OS_ARTIFACT_PATH that does not exist, naming the path and the source', async () => {
+    const missing = join(tmpdir(), `os-named-missing-${process.pid}`, 'objectstack.json');
+    process.env.OS_ARTIFACT_PATH = missing;
+    try {
+      await expect(createDefaultHostConfig({ requireArtifact: true })).rejects.toThrow(
+        /OS_ARTIFACT_PATH does not exist/,
+      );
+      await expect(createDefaultHostConfig({ requireArtifact: true })).rejects.toThrow(missing);
+    } finally {
+      delete process.env.OS_ARTIFACT_PATH;
+    }
+  });
+
+  it('rejects an explicit `artifactPath` that does not exist', async () => {
+    const missing = join(tmpdir(), `os-named-missing-opt-${process.pid}`, 'objectstack.json');
+    delete process.env.OS_ARTIFACT_PATH;
+    await expect(
+      createDefaultHostConfig({ requireArtifact: true, artifactPath: missing }),
+    ).rejects.toThrow(/`artifactPath` does not exist/);
+  });
+
+  // …and it stays loud in empty-boot mode too: `requireArtifact: false` means
+  // "an artifact is optional", not "ignore the one I named".
+  it('rejects a named-but-missing artifact even when requireArtifact is false', async () => {
+    const missing = join(tmpdir(), `os-named-missing-empty-${process.pid}`, 'objectstack.json');
+    delete process.env.OS_ARTIFACT_PATH;
+    await expect(
+      createDefaultHostConfig({ requireArtifact: false, artifactPath: missing }),
+    ).rejects.toThrow(/does not exist/);
+  });
+
+  // The control: nothing NAMED an artifact, so the conventional path being
+  // absent keeps its own pre-existing message — this guard must not swallow it.
+  it('keeps the "no artifact source" error when nothing named one', async () => {
+    delete process.env.OS_ARTIFACT_PATH;
+    const emptyDir = mkdtempSync(join(tmpdir(), 'os-no-artifact-source-'));
+    const cwd = process.cwd();
+    process.chdir(emptyDir);
+    try {
+      await expect(createDefaultHostConfig({ requireArtifact: true })).rejects.toThrow(
+        /No artifact source available/,
+      );
+    } finally {
+      process.chdir(cwd);
+      rmSync(emptyDir, { recursive: true, force: true });
+    }
+  });
+
+  // A remote artifact is never stat'ed — a URL cannot be cheaply checked, and
+  // the loader owns that failure.
+  it('passes an http(s) artifact source through without a filesystem check', () => {
+    delete process.env.OS_ARTIFACT_PATH;
+    expect(resolveDefaultArtifactPath('https://example.com/objectstack.json')).toBe(
+      'https://example.com/objectstack.json',
+    );
+  });
 });
