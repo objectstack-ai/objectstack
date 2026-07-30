@@ -37,6 +37,18 @@ export interface ExportFieldMeta {
   readonly?: boolean;
   /** Field declares a `defaultValue` the engine applies on insert (satisfies required). */
   hasDefault?: boolean;
+  // The bounds below drive the import path's field-constraint pre-check
+  // (import-coerce.ts `firstConstraintViolation`), mirroring the engine's
+  // `validateRecord` so a dry run predicts a range/length rejection instead of
+  // green-lighting a row the real write then fails (framework#3956).
+  /** Lower bound for numeric fields. */
+  min?: number;
+  /** Upper bound for numeric fields. */
+  max?: number;
+  /** Minimum character count for string fields. */
+  minLength?: number;
+  /** Maximum character count for string fields. */
+  maxLength?: number;
 }
 
 /**
@@ -137,6 +149,10 @@ export function buildFieldMetaMap(schema: unknown): Map<string, ExportFieldMeta>
       // ⇒ no default): any non-null default — literal, expression object, or the
       // `current_user` token — counts as satisfying a required field.
       hasDefault: f.defaultValue != null,
+      min: typeof f.min === 'number' ? f.min : undefined,
+      max: typeof f.max === 'number' ? f.max : undefined,
+      minLength: typeof f.minLength === 'number' ? f.minLength : undefined,
+      maxLength: typeof f.maxLength === 'number' ? f.maxLength : undefined,
     });
   }
   return map;

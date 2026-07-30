@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { randomUUID } from 'node:crypto';
-import { coerceRow, firstMissingRequiredField, type RefResolver, type RefMatch } from './import-coerce.js';
+import { coerceRow, firstMissingRequiredField, firstConstraintViolation, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './export-format.js';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
 
@@ -601,9 +601,23 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               skipped++;
               results[i] = { row: rowNo, ok: true, action: 'skipped', code: 'NO_MATCH' };
             } else if (dryRun) {
-              okCount++;
-              if (willUpdate) { updated++; results[i] = { row: rowNo, ok: true, action: 'updated', id: String((existing as any).id ?? '') || undefined }; }
-              else { created++; results[i] = { row: rowNo, ok: true, action: 'created' }; }
+              // Field-constraint pre-check — DRY RUN ONLY (framework#3956).
+              // The write path is already covered: the engine's own
+              // `validateRecord` runs there (after beforeInsert hooks) and
+              // produces this exact message, so re-checking here would only add
+              // a pre-hook copy that could reject a row a hook would have made
+              // legal. The dry run has no such backstop — without this it
+              // reported `ok: true` for a row the very same endpoint then
+              // failed with `VALIDATION_FAILED`.
+              const violation = firstConstraintViolation(data, metaMap);
+              if (violation) {
+                errCount++;
+                results[i] = { row: rowNo, ok: false, action: 'failed', field: violation.field, code: violation.code, error: violation.message };
+              } else {
+                okCount++;
+                if (willUpdate) { updated++; results[i] = { row: rowNo, ok: true, action: 'updated', id: String((existing as any).id ?? '') || undefined }; }
+                else { created++; results[i] = { row: rowNo, ok: true, action: 'created' }; }
+              }
             } else if (willUpdate) {
               const target = existing as Record<string, any>;
               let res2: unknown;

@@ -125,6 +125,9 @@ const MEMBER = {
       name: 'tier', type: 'select' as const, label: 'Tier', required: true, defaultValue: 'standard',
       options: [{ label: 'Standard', value: 'standard' }, { label: 'Gold', value: 'gold' }],
     },
+    // framework#3956 — bounded fields. The dry run used to ignore both.
+    penalty_amount: { name: 'penalty_amount', type: 'number' as const, label: '处罚金额', min: 0, max: 9999999.99 },
+    nickname: { name: 'nickname', type: 'text' as const, label: 'Nickname', maxLength: 5 },
   },
 };
 
@@ -433,6 +436,52 @@ describe('import route — required-field dry-run fidelity', () => {
     ] });
     expect(res._json).toMatchObject({ ok: 0, errors: 2 });
     for (const r of res._json.results) expect(r).toMatchObject({ field: 'member_name', code: 'required' });
+  });
+
+  // framework#3956 — the dry run reported `ok:1, created:1` for a row the very
+  // same endpoint then rejected with `penalty_amount must be ≥ 0`, because the
+  // dry-run branch returned before any field-constraint check ran. Unlike the
+  // required pre-check above, this one is NOT gated on `runAutomations`: it runs
+  // on the dry run only, where the engine's own validation is never reached.
+  it('dry run fails a row that violates min/max — same verdict, same message as the real write', async () => {
+    const rows = [{ id: 'p1', member_name: 'Eve', status: 'active', penalty_amount: -500 }];
+
+    const dry = await imp({ format: 'json', dryRun: true, rows });
+    expect(dry._json).toMatchObject({ dryRun: true, total: 1, ok: 0, errors: 1, created: 0 });
+    expect(dry._json.results[0]).toMatchObject({
+      row: 1, ok: false, action: 'failed', field: 'penalty_amount',
+      code: 'min_value', error: 'penalty_amount must be ≥ 0',
+    });
+
+    // The real write reaches the engine's validateRecord and says the same.
+    const real = await imp({ format: 'json', rows });
+    expect(real._json).toMatchObject({ total: 1, ok: 0, errors: 1, created: 0 });
+    expect(real._json.results[0].error).toContain('penalty_amount must be ≥ 0');
+    expect(await engine.findOne('member', { where: { id: 'p1' } })).toBeNull();
+  });
+
+  it('dry run fails an over-long string too (maxLength), and passes in-range rows', async () => {
+    const over = await imp({ format: 'json', dryRun: true, rows: [
+      { id: 'p2', member_name: 'Fay', status: 'active', nickname: 'toolongname' },
+    ] });
+    expect(over._json).toMatchObject({ ok: 0, errors: 1 });
+    expect(over._json.results[0]).toMatchObject({
+      field: 'nickname', code: 'max_length', error: 'nickname must be ≤ 5 characters (got 11)',
+    });
+
+    // Boundary values are legal — the pre-check must not over-reject.
+    const ok = await imp({ format: 'json', dryRun: true, rows: [
+      { id: 'p3', member_name: 'Gus', status: 'active', penalty_amount: 0, nickname: 'exact' },
+    ] });
+    expect(ok._json).toMatchObject({ ok: 1, errors: 0, created: 1 });
+  });
+
+  it('bound-checks update rows as well as creates', async () => {
+    await engine.insert('member', { id: 'p4', member_name: 'Hana', status: 'active', penalty_amount: 10 });
+    const res = await imp({ format: 'json', dryRun: true, writeMode: 'update', matchFields: ['id'],
+      rows: [{ id: 'p4', penalty_amount: -1 }] });
+    expect(res._json).toMatchObject({ ok: 0, errors: 1, updated: 0 });
+    expect(res._json.results[0]).toMatchObject({ field: 'penalty_amount', code: 'min_value' });
   });
 
   it('required check does not apply to update-mode rows (only the touched fields matter)', async () => {
