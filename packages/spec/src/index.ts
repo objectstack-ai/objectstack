@@ -107,6 +107,7 @@ export {
   FIELD_KEY_GUIDANCE,
   OBJECT_KEY_GUIDANCE,
   STACK_KEY_GUIDANCE,
+  STACK_RUNTIME_MEMBERS,
 } from './data/authoring-key-lint';
 export type {
   UnknownAuthoringKeyFinding,

@@ -35,6 +35,19 @@ path and disappeared silently everywhere else. A host writing
   #4096. That command reconciles what records claim against what storage holds,
   so a disagreeing root reconciled against the wrong tree.
 
+**`onEnable` is exempt, and the exemption has one owner.** `onEnable` is a
+function, so `ObjectStackDefinitionSchema` cannot declare it and
+`dist/objectstack.json` cannot carry it — but it is not lost: `AppPlugin` calls
+it off the authored bundle, and the artifact-boot path grafts it back (#4095).
+"Not declared" and "dropped at load" are different claims, and this is the
+surface where they come apart. New `STACK_RUNTIME_MEMBERS` in `@objectstack/spec`
+names the members the runtime honours off the bundle; the lint treats them as
+declared, and the CLI's `GRAFTABLE_RUNTIME_MEMBERS` is now **derived** from it
+rather than restating it, so the list that decides what gets grafted and the
+list that decides what the lint stays quiet about cannot drift. `onDisable` is
+deliberately not on it — nothing calls it, so a value written there really does
+go nowhere and the lint should say so.
+
 Additive: `lintUnknownAuthoringKeys` keeps its signature. The new pass is a
 separate export rather than a fold into that walker for two reasons. The walker
 iterates metadata COLLECTIONS, so a stack whose only mistake is at the envelope

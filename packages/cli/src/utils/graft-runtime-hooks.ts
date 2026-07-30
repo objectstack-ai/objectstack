@@ -28,6 +28,8 @@
 // invisible for so long.
 // ---------------------------------------------------------------------------
 
+import { STACK_RUNTIME_MEMBERS } from '@objectstack/spec';
+
 /**
  * Bundle members `AppPlugin` executes, and which therefore cannot survive a
  * trip through JSON:
@@ -40,8 +42,16 @@
  * `onDisable` is deliberately absent: it is declared in `packages/spec` but no
  * kernel, runtime or service ever calls it, so grafting it would wire a hook
  * nothing runs.
+ *
+ * **Derived, not restated** (framework#4167). The same list decides what the
+ * undeclared-top-level-key lint stays quiet about: these members are not
+ * declared by `ObjectStackDefinitionSchema`, but they are honoured off the
+ * authored bundle, so reporting them as "dropped at load" would be false. Two
+ * hand-written copies could disagree, and the disagreement would be silent in
+ * exactly the direction that lint exists to catch — so the protocol owns the
+ * list and this re-exports it.
  */
-export const GRAFTABLE_RUNTIME_MEMBERS = ['onEnable', 'functions'] as const;
+export const GRAFTABLE_RUNTIME_MEMBERS = STACK_RUNTIME_MEMBERS;
 
 export type GraftableRuntimeMember = (typeof GRAFTABLE_RUNTIME_MEMBERS)[number];
 

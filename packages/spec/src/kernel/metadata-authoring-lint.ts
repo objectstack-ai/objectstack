@@ -54,6 +54,7 @@ import {
   FIELD_KEY_GUIDANCE,
   OBJECT_KEY_GUIDANCE,
   STACK_KEY_GUIDANCE,
+  STACK_RUNTIME_MEMBERS,
   type UnknownAuthoringKeyFinding,
 } from '../data/authoring-key-lint';
 import { FieldSchema } from '../data/field.zod';
@@ -256,7 +257,12 @@ export function lintUnknownStackKeys(
   const posture = keyPosture(stackSchema);
   if (!posture || posture.mode !== 'strip' || posture.keys.size === 0) return [];
 
+  // The runtime members are honoured OFF the authored bundle, so the parse
+  // dropping them costs nothing — treating them as declared is what keeps the
+  // lint from calling a working `onEnable` discarded. See STACK_RUNTIME_MEMBERS.
+  const declared = new Set([...posture.keys, ...STACK_RUNTIME_MEMBERS]);
+
   const out: UnknownAuthoringKeyFinding[] = [];
-  lintAuthoredRecordKeys(rawStack, posture.keys, STACK_KEY_GUIDANCE, 'stack', 'stack', out);
+  lintAuthoredRecordKeys(rawStack, declared, STACK_KEY_GUIDANCE, 'stack', 'stack', out);
   return out;
 }

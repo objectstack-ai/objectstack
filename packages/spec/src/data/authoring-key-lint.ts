@@ -159,6 +159,35 @@ export const STACK_KEY_GUIDANCE: Readonly<
   },
 });
 
+/**
+ * Authored TOP-LEVEL members the **runtime executes off the bundle**, which the
+ * stack schema therefore does not — and cannot — declare.
+ *
+ * `onEnable` is a function. It cannot survive `ObjectStackDefinitionSchema`
+ * (which does not declare it) and it cannot survive `dist/objectstack.json`
+ * (JSON has no functions), yet it is not lost: `AppPlugin` reads it straight
+ * off the authored bundle and calls it at `start()`, and on the artifact-boot
+ * path the CLI grafts it back (#4095). It is the documented place to register
+ * action handlers, and `examples/app-todo` and `examples/app-showcase` both
+ * ship it.
+ *
+ * So the lint must stay SILENT here. "Not declared" and "dropped at load" are
+ * different claims, and this is the one surface where they come apart — telling
+ * an author their working `onEnable` is being discarded would be a confident
+ * lie about the pattern we ship in our own examples.
+ *
+ * `functions` is listed for the same reason (a name → handler map the runtime
+ * resolves string-named hooks against); the schema happens to declare it too,
+ * so it self-excludes. `onDisable` is deliberately ABSENT: it is declared in
+ * the protocol but no kernel, runtime or service ever calls it, so a value
+ * written there really does go nowhere and the lint should say so.
+ *
+ * Single source of truth — the CLI's `GRAFTABLE_RUNTIME_MEMBERS` is derived
+ * from this, so the list that decides what gets grafted and the list that
+ * decides what the lint stays quiet about cannot drift apart.
+ */
+export const STACK_RUNTIME_MEMBERS = Object.freeze(['onEnable', 'functions'] as const);
+
 /** A plain object — the only shape an authored metadata item can take. */
 export function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);

@@ -18,7 +18,7 @@ import {
   lintUnknownStackKeys,
   listLintableAuthoringCollections,
 } from './metadata-authoring-lint';
-import { STACK_KEY_GUIDANCE } from '../data/authoring-key-lint';
+import { STACK_KEY_GUIDANCE, STACK_RUNTIME_MEMBERS } from '../data/authoring-key-lint';
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
 import { getMetadataTypeSchema } from './metadata-type-schemas';
@@ -174,6 +174,24 @@ describe('top-level stack keys (#4167)', () => {
     expect(lint({ objects: [], pages: [], manifest: { name: 'app' }, _packageId: 'p' })).toEqual([]);
   });
 
+  it('stays silent on the runtime members the schema cannot declare', () => {
+    // The regression that shipped in review: `onEnable` is a function, so the
+    // schema does not declare it — but `AppPlugin` calls it off the authored
+    // bundle, and `examples/app-todo` and `examples/app-showcase` both ship it.
+    // The first version of this lint told both of them their working handler
+    // registration was "dropped at load".
+    expect(lint({ onEnable: () => {}, functions: { doThing: () => {} } })).toEqual([]);
+  });
+
+  it('still reports `onDisable`, which really does go nowhere', () => {
+    // The distinction the exclusion list has to preserve: `onDisable` is
+    // declared in the protocol but no kernel, runtime or service calls it, so
+    // a value written there IS lost and the author should hear about it.
+    const [finding, ...rest] = lint({ onDisable: () => {} });
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({ path: 'stack.onDisable', key: 'onDisable' });
+  });
+
   it('agrees with the injected schema posture instead of asserting its own', () => {
     // Guarding the day `ObjectStackDefinitionSchema` graduates to `.strict()`
     // (ADR-0049 / #4001): the parse becomes loud, and this lint must go quiet
@@ -203,6 +221,18 @@ describe('STACK_KEY_GUIDANCE does not rot', () => {
     for (const key of Object.keys(STACK_KEY_GUIDANCE)) {
       expect(declared, `STACK_KEY_GUIDANCE has an entry for the LIVE key '${key}'`).not.toContain(key);
     }
+  });
+
+  it('no runtime member is silently excluded for a key the schema declares', () => {
+    // `functions` legitimately appears in both lists. But if a member ever
+    // exists ONLY here while the schema also declares it and the runtime has
+    // stopped reading it, the exclusion is dead weight hiding a real finding.
+    // Pin the one that carries the exclusion's whole weight instead of trusting
+    // the list's shape: `onEnable` must be excluded AND undeclared.
+    expect(STACK_RUNTIME_MEMBERS).toContain('onEnable');
+    expect(declared, 'onEnable became a declared key — the exclusion is now dead').not.toContain('onEnable');
+    expect(STACK_RUNTIME_MEMBERS, 'onDisable is honoured nowhere; excluding it would hide a real drop')
+      .not.toContain('onDisable');
   });
 
   it('every entry carries a rename target that exists, or a reason', () => {
