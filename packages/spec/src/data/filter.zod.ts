@@ -346,23 +346,134 @@ export type NormalizedFilter = z.infer<typeof NormalizedFilterSchema>;
 // ============================================================================
 
 /**
+ * Operator mapping from AST infix operators to FilterCondition `$`-prefixed
+ * operators. **This is the single source of truth for the AST vocabulary** —
+ * {@link VALID_AST_OPERATORS} is derived from its keys, so an operator cannot be
+ * accepted by `isFilterAST()` without also having a lowering, which is how the
+ * two lists silently disagreed before (#3948).
+ *
+ * Keys are matched case-insensitively (`convertComparison` lowercases), so only
+ * lowercase spellings belong here — but underscores are NOT stripped, so a
+ * spelling that exists in both `snake_case` and squashed form needs both.
+ *
+ * Must lower every member of `VIEW_FILTER_OPERATORS` and every key of
+ * `VIEW_FILTER_OPERATOR_ALIASES` (`ui/view.zod.ts`) — those are the spellings an
+ * author can declare on a `ViewFilterRule` and that stored view metadata
+ * carries. `ui/` imports `data/`, so this file cannot import that vocabulary to
+ * derive from it; `filter-view-operator-parity.test.ts` asserts the coverage
+ * instead. Do not hand-add a view operator without running it.
+ */
+const AST_OPERATOR_MAP: Record<string, string> = {
+  '=': '$eq',
+  '==': '$eq',
+  'equals': '$eq',
+  'eq': '$eq',
+  '!=': '$ne',
+  '<>': '$ne',
+  'ne': '$ne',
+  'neq': '$ne',
+  'not_equals': '$ne',
+  'notequals': '$ne',
+  '>': '$gt',
+  'gt': '$gt',
+  'greater_than': '$gt',
+  'greaterthan': '$gt',
+  '>=': '$gte',
+  'gte': '$gte',
+  'greater_than_or_equal': '$gte',
+  'greaterthanorequal': '$gte',
+  'greaterorequal': '$gte',
+  '<': '$lt',
+  'lt': '$lt',
+  'less_than': '$lt',
+  'lessthan': '$lt',
+  '<=': '$lte',
+  'lte': '$lte',
+  'less_than_or_equal': '$lte',
+  'lessthanorequal': '$lte',
+  'lessorequal': '$lte',
+  // Date comparisons. Canonical `VIEW_FILTER_OPERATORS` members with no infix
+  // spelling of their own; a stored view legitimately carries them, and before
+  // #3948 they had no lowering, so `isFilterAST()` refused the filter and it was
+  // dropped rather than applied.
+  'before': '$lt',
+  'after': '$gt',
+  'in': '$in',
+  'nin': '$nin',
+  'not_in': '$nin',
+  'notin': '$nin',
+  'contains': '$contains',
+  'notcontains': '$notContains',
+  'not_contains': '$notContains',
+  'like': '$contains',
+  'startswith': '$startsWith',
+  'starts_with': '$startsWith',
+  'endswith': '$endsWith',
+  'ends_with': '$endsWith',
+  'between': '$between',
+  'is_null': '$null',
+  'is_not_null': '$null',
+  'isnull': '$null',
+  'isnotnull': '$null',
+  'is_empty': '$null',
+  'is_not_empty': '$null',
+  'isempty': '$null',
+  'isnotempty': '$null',
+};
+
+/**
  * Set of valid AST comparison operators (case-insensitive).
  * Used by `isFilterAST()` to validate AST structure beyond `Array.isArray`.
+ *
+ * Derived from {@link AST_OPERATOR_MAP} rather than restated. The two were
+ * separate hand-written lists that happened to agree; nothing enforced it, and
+ * an operator in one but not the other is invisible — a name in the Set with no
+ * lowering hits `convertComparison`'s `$${op}` fallback and reaches the driver
+ * as an unknown `$`-operator, while a name in the Map but not the Set makes
+ * `isFilterAST()` refuse the filter entirely. #3948.
  */
-export const VALID_AST_OPERATORS = new Set([
-  '=', '==', '!=', '<>', '>', '>=', '<', '<=',
-  'in', 'nin', 'not_in',
-  'contains', 'notcontains', 'not_contains', 'like',
-  'startswith', 'starts_with',
-  'endswith', 'ends_with',
-  'between',
-  // Null / empty predicates. `is_null` / `is_not_null` are canonical; `isnull`,
-  // `isnotnull`, `is_empty`, `is_not_empty` are the alias spellings the ObjectUI
-  // `data-objectstack` adapter emits and the driver-sql/#2704 fix accepts — kept
-  // in sync here so `parseFilterAST()` never treats them as an unknown operator.
-  'is_null', 'is_not_null',
-  'isnull', 'isnotnull', 'is_empty', 'is_not_empty',
-]);
+export const VALID_AST_OPERATORS = new Set(Object.keys(AST_OPERATOR_MAP));
+
+/**
+ * Canonical infix spelling for every accepted AST operator.
+ *
+ * `VALID_AST_OPERATORS` accepts many spellings of one comparison (`>`, `gt`,
+ * `greater_than`, `greaterthan`, `after`). A driver's array-format handler wants
+ * to `switch` on ONE of them, and each driver growing its own alias list is how
+ * the vocabularies drifted apart in the first place. Fold here instead.
+ *
+ * Returns the input lowercased and unchanged when it is not a known operator, so
+ * a caller's own `default:` still reports it.
+ */
+const CANONICAL_INFIX: Record<string, string> = {
+  '$eq': '=', '$ne': '!=', '$gt': '>', '$gte': '>=', '$lt': '<', '$lte': '<=',
+  '$in': 'in', '$nin': 'nin', '$contains': 'contains',
+  '$notContains': 'not_contains', '$startsWith': 'starts_with',
+  '$endsWith': 'ends_with', '$between': 'between',
+};
+
+export function canonicalAstOperator(op: string): string {
+  const lower = String(op).toLowerCase();
+  // Null predicates carry a DIRECTION that the shared `$null` lowering erases,
+  // so they cannot round-trip through CANONICAL_INFIX — fold them by name.
+  if (lower === 'is_null' || lower === 'isnull' || lower === 'is_empty' || lower === 'isempty') {
+    return 'is_null';
+  }
+  if (
+    lower === 'is_not_null' || lower === 'isnotnull'
+    || lower === 'is_not_empty' || lower === 'isnotempty'
+  ) {
+    return 'is_not_null';
+  }
+  // `like`/`ilike` share the `$contains` lowering but are NOT substring matches
+  // at the driver: driver-sql passes them to SQL verbatim, so the caller binds
+  // the wildcards. Folding them onto `contains` would silently wrap the value in
+  // `%…%` and change what the query means.
+  if (lower === 'like' || lower === 'ilike') return lower;
+  const dollar = AST_OPERATOR_MAP[lower];
+  if (!dollar) return lower;
+  return CANONICAL_INFIX[dollar] ?? lower;
+}
 
 /**
  * Detect whether a value is a valid Filter AST array structure.
@@ -414,56 +525,29 @@ export function isFilterAST(filter: unknown): boolean {
 // ============================================================================
 
 /**
- * Operator mapping from AST infix operators to FilterCondition `$`-prefixed operators.
- */
-const AST_OPERATOR_MAP: Record<string, string> = {
-  '=': '$eq',
-  '==': '$eq',
-  '!=': '$ne',
-  '<>': '$ne',
-  '>': '$gt',
-  '>=': '$gte',
-  '<': '$lt',
-  '<=': '$lte',
-  'in': '$in',
-  'nin': '$nin',
-  'not_in': '$nin',
-  'contains': '$contains',
-  'notcontains': '$notContains',
-  'not_contains': '$notContains',
-  'like': '$contains',
-  'startswith': '$startsWith',
-  'starts_with': '$startsWith',
-  'endswith': '$endsWith',
-  'ends_with': '$endsWith',
-  'between': '$between',
-  'is_null': '$null',
-  'is_not_null': '$null',
-  'isnull': '$null',
-  'isnotnull': '$null',
-  'is_empty': '$null',
-  'is_not_empty': '$null',
-};
-
-/**
  * Convert a single AST comparison node `[field, operator, value]` to a FilterCondition object.
  */
 function convertComparison(node: [string, string, unknown]): FilterCondition {
   const [field, operator, value] = node;
   const op = operator.toLowerCase();
 
-  // Special case: equality shorthand
-  if (op === '=' || op === '==') {
+  // Special case: equality shorthand. `equals`/`eq` are the view vocabulary's
+  // spellings of the same thing and must produce the same output, or one filter
+  // would compile two different ways depending on how the author spelled it.
+  if (op === '=' || op === '==' || op === 'equals' || op === 'eq') {
     return { [field]: value } as FilterCondition;
   }
 
   // Null / empty predicates — direction comes from the operator NAME, not the
   // (filler) value: the ObjectUI client sends a truthy placeholder value for
   // both `isnull` and `isnotnull`, so keying off `value` would collapse them.
-  if (op === 'is_null' || op === 'isnull' || op === 'is_empty') {
+  if (op === 'is_null' || op === 'isnull' || op === 'is_empty' || op === 'isempty') {
     return { [field]: { $null: true } } as FilterCondition;
   }
-  if (op === 'is_not_null' || op === 'isnotnull' || op === 'is_not_empty') {
+  if (
+    op === 'is_not_null' || op === 'isnotnull'
+    || op === 'is_not_empty' || op === 'isnotempty'
+  ) {
     return { [field]: { $null: false } } as FilterCondition;
   }
 

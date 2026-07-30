@@ -11,8 +11,10 @@
  *
  * Rules applied (in order, stop at first error per field):
  *
- *  - `required`     missing/null/empty-string is rejected (insert only;
- *                   PATCH validates only fields actually supplied)
+ *  - `required`     ADR-0113 write contract: on INSERT a missing/null/empty
+ *                   value is rejected; on UPDATE a SUPPLIED missing value is
+ *                   rejected (a PATCH may not null out a required field) while
+ *                   an omitted field never 400s — legacy null rows rest.
  *  - `maxLength` / `minLength`            (text/textarea/email/url/phone/password)
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
  *  - format         email / url / phone   (lightweight RFC-aware regex)
@@ -37,10 +39,8 @@ import {
   REFERENCE_VALUE_TYPES,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
-  type FieldValidationCode,
-  type FieldValidationError,
-  type FieldValidationParams,
 } from '@objectstack/spec/data';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 import {
   renderValidationMessage,
   objectFieldLabelKey,
@@ -82,11 +82,38 @@ const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 const URL_RE = /^(?:[a-z][a-z0-9+.\-]*:\/\/[^\s]+|\/[^\s]*|data:[^\s]+|blob:[^\s]+)$/i;
 const PHONE_RE = /^[+()\-\s\d.]{5,}$/;
 
-// The per-field error envelope is a PROTOCOL, not a local shape: REST ships it
-// verbatim and clients match on `code`. It lives in `@objectstack/spec/data`
-// (`validation-error.zod.ts`) — Zod-first, one definition — and is re-exported
-// here because every existing importer reaches for it through this module.
-export type { FieldValidationCode, FieldValidationError, FieldValidationParams };
+export interface FieldValidationError {
+  field: string;
+  /**
+   * Which constraint the value violated — the spec's field-level catalog
+   * (ADR-0114), not a union maintained here.
+   *
+   * This was a hand-listed literal union, which is the shape that drifts
+   * silently: adding a validator case meant remembering to widen it, and a
+   * consumer's `switch` over it went non-exhaustive in a package the change never
+   * touched. The catalog is the single list, and `FieldErrorSchema.code` validates
+   * against it on the way out.
+   */
+  code: FieldErrorCode;
+  /** Rendered in the caller's locale (#3957) — see `renderValidationMessage`. */
+  message: string;
+  /**
+   * The field's display name in the caller's locale — what `message` names it
+   * by. `field` keeps the API name so a form can still focus the right input
+   * (#3957).
+   */
+  label?: string;
+  /**
+   * The violated constraint as discrete values (`{ min: 0 }`,
+   * `{ maxLength: 512, actual: 3000 }`), so a client can format its own text
+   * instead of parsing `message`. Mirrors `FieldErrorSchema.constraint`.
+   */
+  constraint?: Record<string, unknown>;
+  /** The offending value, where it is short and safe to echo (options, states). */
+  value?: string | number | boolean;
+  /** Allowed values for select/multiselect, when applicable. */
+  options?: string[];
+}
 
 export class ValidationError extends Error {
   readonly code = 'VALIDATION_FAILED';
@@ -184,12 +211,14 @@ export function resolveFieldLabel(
 }
 
 /**
- * Build one per-field error: the machine triple (`code` + `params` + `field`)
- * plus its rendering in the caller's locale.
+ * Build one per-field error: the machine triple (`code` + `constraint` +
+ * `field`) plus its rendering in the caller's locale.
  *
  * `messageKey` defaults to `code` and is only set explicitly where one wire code
  * needs more than one sentence (a multiselect's `invalid_option` names the
- * offending element; a `datetime` reads differently from a `date`).
+ * offending element; a `datetime` reads differently from a `date`). The catalog
+ * is keyed by message, the wire by `code` — ADR-0114's vocabulary does not split
+ * just because a sentence differs.
  *
  * Exported because the object-level rule evaluator (`rule-validator.ts`) emits
  * into the SAME envelope and must localize its built-in messages the same way —
@@ -198,10 +227,13 @@ export function resolveFieldLabel(
 export function buildFieldError(
   args: {
     field: string;
-    code: FieldValidationCode;
+    code: FieldErrorCode;
     /** Field definition, for its declared `label`. */
     def?: { label?: string };
-    params?: FieldValidationParams;
+    /** Discrete constraint values — interpolated into the message AND shipped. */
+    constraint?: Record<string, unknown>;
+    /** The offending value, when short and safe to echo. */
+    value?: string | number | boolean;
     /** Catalog key; defaults to `code`. */
     messageKey?: string;
     options?: string[];
@@ -210,7 +242,14 @@ export function buildFieldError(
 ): FieldValidationError {
   const label = resolveFieldLabel(args.field, args.def, ctx);
   const message = renderValidationMessage(
-    { messageKey: args.messageKey ?? args.code, label, field: args.field, params: args.params },
+    {
+      messageKey: args.messageKey ?? args.code,
+      label,
+      field: args.field,
+      // `value` rides the same interpolation namespace as the constraint keys,
+      // so a template can say `{{value}}` without a second parameter channel.
+      params: { ...(args.constraint ?? {}), ...(args.value !== undefined ? { value: args.value } : {}) },
+    },
     { locale: ctx?.locale, translate: ctx?.translate },
   );
   return {
@@ -218,7 +257,8 @@ export function buildFieldError(
     code: args.code,
     message,
     label,
-    ...(args.params && Object.keys(args.params).length > 0 ? { params: args.params } : {}),
+    ...(args.constraint && Object.keys(args.constraint).length > 0 ? { constraint: args.constraint } : {}),
+    ...(args.value !== undefined ? { value: args.value } : {}),
     ...(args.options ? { options: args.options } : {}),
   };
 }
@@ -314,11 +354,12 @@ function validateOne(
   ctx?: ValidationMessageContext,
 ): FieldValidationError | null {
   const fail = (
-    code: FieldValidationCode,
-    params?: FieldValidationParams,
+    code: FieldErrorCode,
+    constraint?: Record<string, unknown>,
     messageKey?: string,
     options?: string[],
-  ) => buildFieldError({ field: name, code, def, params, messageKey, options }, ctx);
+    value?: string | number | boolean,
+  ) => buildFieldError({ field: name, code, def, constraint, messageKey, options, value }, ctx);
 
   // ── required ────────────────────────────────────────────────────
   // `autonumber` is runtime-owned: the value is generated by the engine /
@@ -431,9 +472,10 @@ function validateOne(
       if (!allowed.includes(String(v))) {
         return fail(
           'invalid_option',
-          { value: String(v), allowed: allowed.join(', ') },
+          { allowed: allowed.join(', ') },
           'invalid_option_value',
           allowed,
+          String(v),
         );
       }
     }
@@ -594,12 +636,28 @@ export function validateRecord(
       if (err) errors.push(err);
     }
   } else {
-    // Update — validate only supplied fields, skip required check.
+    // Update — validate only supplied fields; an OMITTED field never 400s.
     for (const [name, value] of Object.entries(data)) {
       if (SKIP_FIELDS.has(name)) continue;
       const def = fields[name];
       if (!def) continue;
       if (def.system || def.readonly) continue;
+      // ADR-0113 non-regression: a PATCH may not null OUT a required field.
+      // The key is in the payload (we are iterating it), so a missing value
+      // is an explicit clear, not an omission — the write would take the
+      // record from compliant to violating. Legacy null rows still rest: a
+      // write that does not touch the field never reaches this check. (The
+      // one over-approximation — explicit null onto an already-null legacy
+      // row — is rejected too; that write was a no-op plus a false claim.)
+      if (def.required && isMissing(value) && def.type !== 'autonumber') {
+        // Same catalog as every other built-in message (#3957) — one wire code
+        // (`required`), a distinct sentence for the clear-out case.
+        errors.push(buildFieldError(
+          { field: name, code: 'required', def, messageKey: 'required_cleared' },
+          messages,
+        ));
+        continue;
+      }
       // skipRequired: PATCH-omitted fields must not 400. (No def clone — the
       // registry's own field object flows through so the ADR-0104 value-shape
       // schema cache, keyed on def identity, hits.)

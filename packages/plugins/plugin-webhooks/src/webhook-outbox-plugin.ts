@@ -246,7 +246,7 @@ export class WebhookOutboxPlugin implements Plugin {
             const userId = await this.resolveSessionUserId(ctx, c);
             if (!userId) {
                 return c.json(
-                    { success: false, error: 'unauthenticated', message: 'Sign in to redeliver webhook deliveries.' },
+                    { success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to redeliver webhook deliveries.' } },
                     401,
                 );
             }
@@ -254,12 +254,12 @@ export class WebhookOutboxPlugin implements Plugin {
             try {
                 body = await c.req.json();
             } catch {
-                return c.json({ success: false, error: 'invalid_body', message: 'Request body must be JSON.' }, 400);
+                return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Request body must be JSON.' } }, 400);
             }
             const deliveryId = typeof body?.deliveryId === 'string' ? body.deliveryId.trim() : '';
             if (!deliveryId) {
                 return c.json(
-                    { success: false, error: 'missing_delivery_id', message: 'Body must include `deliveryId: string`.' },
+                    { success: false, error: { code: 'MISSING_REQUIRED_FIELD', message: 'Body must include `deliveryId: string`.' } },
                     400,
                 );
             }
@@ -269,15 +269,15 @@ export class WebhookOutboxPlugin implements Plugin {
                 return c.json({ success: true, data: { id: row.id, status: row.status } });
             } catch (err: any) {
                 const code = err?.code;
-                if (code === 'not_found') {
-                    return c.json({ success: false, error: 'not_found', message: err.message }, 404);
+                if (code === 'RESOURCE_NOT_FOUND') {
+                    return c.json({ success: false, error: { code, message: err.message } }, 404);
                 }
-                if (code === 'not_eligible') {
-                    return c.json({ success: false, error: 'not_eligible', message: err.message }, 409);
+                if (code === 'DELIVERY_NOT_ELIGIBLE') {
+                    return c.json({ success: false, error: { code, message: err.message } }, 409);
                 }
                 ctx.logger.error?.('[webhook-outbox] redeliver failed', err as Error);
                 return c.json(
-                    { success: false, error: 'internal_error', message: err?.message ?? String(err) },
+                    { success: false, error: { code: 'INTERNAL_ERROR', message: err?.message ?? String(err) } },
                     500,
                 );
             }

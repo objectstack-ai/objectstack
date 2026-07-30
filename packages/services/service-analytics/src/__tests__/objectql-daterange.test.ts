@@ -345,7 +345,7 @@ describe('DatasetExecutor compareTo over the ObjectQL path (#3650)', () => {
 });
 
 describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
-  it('renders the window as a parameterised BETWEEN', async () => {
+  it('renders the window as a parameterised half-open pair', async () => {
     const seen: AggOpts[] = [];
     const svc = makeService(seen);
 
@@ -360,11 +360,14 @@ describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
 
     // The preview used to omit the window deliberately, because `execute()`
     // dropped it. Now that the window applies, omitting it would be the lie in
-    // the other direction.
-    expect(sql).toContain('close_date BETWEEN $1 AND $2');
+    // the other direction — and since #3777 the render is half-open, because
+    // that is what execute()'s driver actually runs for a bare-day `$lte` on a
+    // datetime column; a BETWEEN would hand a debugger SQL that drops the
+    // final day's rows.
+    expect(sql).toContain('(close_date >= $1 AND close_date < $2)');
     expect(sql).toContain("date_trunc('month', close_date)");
     // Bounds bind as parameters — the echoed string travels to the browser.
-    expect(params).toEqual(['2026-01-01', '2026-02-28']);
+    expect(params).toEqual(['2026-01-01', '2026-03-01']);
     expect(sql).not.toContain('2026-01-01');
   });
 
@@ -380,8 +383,8 @@ describe('ObjectQLStrategy.generateSql — window rendering (#3650)', () => {
       timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-01', '2026-01-31'] }],
     });
 
-    expect(sql).toContain('close_date BETWEEN $2 AND $3');
-    expect(params).toEqual(['won', '2026-01-01', '2026-01-31']);
+    expect(sql).toContain('(close_date >= $2 AND close_date < $3)');
+    expect(params).toEqual(['won', '2026-01-01', '2026-02-01']);
   });
 });
 

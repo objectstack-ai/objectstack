@@ -180,7 +180,7 @@ describe('engine write path — validation messages honour ExecutionContext.loca
     expect(msg).toBe('处罚金额不得小于 0 元');
   });
 
-  it('a client can format its own text from code + params', async () => {
+  it('a client can format its own text from code + constraint', async () => {
     const ql = await makeEngine(makeDriver());
     try {
       await ql.insert('mes_settlement', { penalty_amount: -1 }, { context: zhCN });
@@ -192,7 +192,7 @@ describe('engine write path — validation messages honour ExecutionContext.loca
           field: 'penalty_amount',
           code: 'min_value',
           label: '处罚金额',
-          params: { min: 0 },
+          constraint: { min: 0 },
         }),
       ]);
     }

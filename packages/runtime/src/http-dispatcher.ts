@@ -6,7 +6,8 @@ import {
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName } from '@objectstack/spec/system';
-import { readServiceSelfInfo } from '@objectstack/spec/api';
+import { readServiceSelfInfo, DispatcherErrorCode } from '@objectstack/spec/api';
+import { apiErrorResponse } from './error-envelope.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
 import * as actionExec from './action-execution.js';
@@ -138,14 +139,6 @@ export interface HttpDispatcherOptions {
      * called on every scoped request so idle projects are evicted after TTL.
      */
     scopeManager?: EnvironmentScopeManager;
-    /**
-     * Reject anonymous requests to `auth: true` service routes (AI) and to the
-     * metadata catch-all with HTTP 401, mirroring the REST API's `requireAuth`
-     * gate. Matches {@link DispatcherPluginConfig.requireAuth}; the dispatcher
-     * plugin threads the host's `api.requireAuth` here. Defaults to `false`
-     * (backward-compatible — nothing enforced `RouteDefinition.auth` before).
-     */
-    requireAuth?: boolean;
 }
 
 /**
@@ -189,12 +182,6 @@ export class HttpDispatcher {
      */
     private enforceMembership: boolean;
     /**
-     * When `true`, `auth: true` AI routes and the metadata catch-all reject
-     * anonymous callers with 401 (mirrors the REST `requireAuth` gate). Set
-     * from {@link HttpDispatcherOptions.requireAuth}. Defaults to `false`.
-     */
-    private requireAuth: boolean;
-    /**
      * In-memory cache of positive membership checks, keyed by
      * `${environmentId}:${userId}`. Entries expire 60 seconds after insertion
      * — a short TTL is acceptable because a user whose access was just
@@ -220,7 +207,6 @@ export class HttpDispatcher {
             try { return (kernel as any).getService?.(name); } catch { return undefined; }
         };
         this.enforceMembership = options?.enforceProjectMembership ?? true;
-        this.requireAuth = options?.requireAuth ?? false;
         // ADR-0006 kernel-resolution seam — the host's resolver owns env
         // resolution + kernel selection. Optional service so single-environment
         // hosts that register none are unchanged.
@@ -277,9 +263,21 @@ export class HttpDispatcher {
             } catch { /* fall back to defaultKernel resolution downstream */ }
             return null;
         },
-        isAuthRequired: () => this.requireAuth,
         getRegisteredAiRoutes: () => (this.kernel as any)?.__aiRoutes,
     };
+
+    /**
+     * Whether this dispatcher serves a multi-tenant host (a `kernel-resolver`
+     * is wired, so each request may resolve to a different per-project
+     * kernel). Consulted by the dispatcher plugin's capability-conditional
+     * route mounting (#3891 follow-through): on a multi-tenant host, route
+     * mounts are host-global while optional services live per project kernel,
+     * so "is the capability installed" is a per-request question the domain
+     * handler answers — never a mount-time one.
+     */
+    isMultiTenantHost(): boolean {
+        return !!this.kernelResolver;
+    }
 
     /**
      * ADR-0076 D11 step ③ — seed the domain registry with the domains lifted
@@ -465,33 +463,43 @@ export class HttpDispatcher {
      * Scoped to 5xx: a 4xx message is a deliberate business/validation answer
      * (`Path must be /actions/:object/:action`, a hook's own `throw`, a
      * `saveMetaItem` field error) and must reach the caller intact. `details`
-     * is left alone — it carries structured `code`/`issues` the UI maps to
-     * fields, never free-form driver prose.
+     * is left alone apart from the code promotion below — it carries structured
+     * `issues`/`fields` the UI maps to fields, never free-form driver prose.
      *
      * The unsanitised error is not lost: callers that THREW still hand the
      * original to `errorReporter` via `__obsRecordedError`, and every 5xx is
      * logged server-side.
+     *
+     * [#3842] The second parameter is the HTTP status and always was — it is now
+     * named for what it is, and lands in `error.httpStatus` instead of
+     * `error.code`, which goes back to being the semantic string
+     * `ApiErrorSchema` declares. Call sites are unchanged: a site that already
+     * expressed its real code as `details.code` gets it promoted into
+     * `error.code` by the shared builder, and a site that has none gets one
+     * derived from the status. See `./error-envelope.ts`.
      */
-    private error(message: string, code: number = 500, details?: any) {
+    private error(message: string, httpStatus: number = 500, details?: any) {
         const safe =
-            code >= 500 && looksLikeInternalErrorLeak(message)
+            httpStatus >= 500 && looksLikeInternalErrorLeak(message)
                 ? INTERNAL_ERROR_MESSAGE
                 : message;
-        return {
-            status: code,
-            body: { success: false, error: { message: safe, code, details } }
-        };
+        return apiErrorResponse({ message: safe, httpStatus, details });
     }
 
     /**
      * Build an error response from a THROWN service/protocol error, preserving
      * the error's own HTTP `status` and — critically — any structured `issues`
      * array (e.g. spec-validation `{ path, message, code }[]` from
-     * `protocol.saveMetaItem`). The plain `error(msg, code)` path collapses a
+     * `protocol.saveMetaItem`). The plain `error(msg, status)` path collapses a
      * validation failure to a single message, so the UI can only show a generic
-     * banner; carrying `issues` (and the semantic `code`) in `details` lets it
-     * map each error back to the offending field. Falls back to `fallbackStatus`
-     * and behaves exactly like `error()` for errors that carry neither.
+     * banner; carrying `issues` in `details` lets it map each error back to the
+     * offending field. Falls back to `fallbackStatus` and behaves exactly like
+     * `error()` for errors that carry neither.
+     *
+     * [#3842] The error's own `.code` still travels as `details.code` from here,
+     * which is the carrier `buildApiError` promotes into `error.code` — so it
+     * ends up in the declared field without this method needing to know how the
+     * envelope is assembled.
      *
      * [#3918] A record-level `ValidationError` is the third structured shape,
      * and it used to fall through BOTH branches: it carries no `.status` (so a
@@ -526,21 +534,24 @@ export class HttpDispatcher {
 
     /**
      * 404 Route Not Found — no route is registered for this path.
+     *
+     * [#3842] `ROUTE_NOT_FOUND` used to sit in `error.type` — a THIRD spelling,
+     * sibling to a numeric `error.code` — because `code` was taken by the status.
+     * It is now the `code`, spelled from the spec's own `DispatcherErrorCode` so
+     * the string has exactly one definition. `route` and `hint` stay siblings:
+     * `DispatcherErrorResponseSchema` declares them as part of this error, not as
+     * `details` context.
      */
     private routeNotFound(route: string) {
-        return {
-            status: 404,
-            body: {
-                success: false,
-                error: {
-                    code: 404,
-                    message: `Route Not Found: ${route}`,
-                    type: 'ROUTE_NOT_FOUND' as const,
-                    route,
-                    hint: 'No route is registered for this path. Check the API discovery endpoint for available routes.',
-                },
+        return apiErrorResponse({
+            code: DispatcherErrorCode.enum.ROUTE_NOT_FOUND,
+            message: `Route Not Found: ${route}`,
+            httpStatus: 404,
+            extra: {
+                route,
+                hint: 'No route is registered for this path. Check the API discovery endpoint for available routes.',
             },
-        };
+        });
     }
 
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
@@ -798,10 +809,15 @@ export class HttpDispatcher {
                 return null;
             }
 
+            // [#3842] `PROJECT_MEMBERSHIP_REQUIRED` was parked in `details.type`
+            // — the fourth site, and the only one to use that spelling — because
+            // `error.code` held the status. It travels as `details.code` now, the
+            // one carrier `buildApiError` promotes into `error.code`; the two
+            // genuine context fields stay in `details`.
             return this.error(
                 `Forbidden: user ${userId} is not a member of project ${environmentId}`,
                 403,
-                { environmentId, userId, type: 'PROJECT_MEMBERSHIP_REQUIRED' },
+                { code: 'PROJECT_MEMBERSHIP_REQUIRED', environmentId, userId },
             );
         } catch (err) {
             // Control-plane lookup failure — log and fail open rather than
@@ -824,7 +840,7 @@ export class HttpDispatcher {
         const [
             authSvc, searchSvc, realtimeSvc, filesSvc,
             analyticsSvc, workflowSvc, aiSvc, notificationSvc, i18nSvc,
-            uiSvc, automationSvc, cacheSvc, queueSvc, jobSvc,
+            uiSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
         ] = await Promise.all([
             this.resolveService(CoreServiceName.enum.auth),
             this.resolveService(CoreServiceName.enum.search),
@@ -840,6 +856,9 @@ export class HttpDispatcher {
             this.resolveService(CoreServiceName.enum.cache),
             this.resolveService(CoreServiceName.enum.queue),
             this.resolveService(CoreServiceName.enum.job),
+            // Not a CoreServiceName — plugin-mcp registers under the bare
+            // 'mcp' key, the same string handleMcpRequest resolves.
+            this.resolveService('mcp'),
         ]);
 
         const hasAuth         = !!authSvc;
@@ -855,6 +874,11 @@ export class HttpDispatcher {
         const hasCache        = !!cacheSvc;
         const hasQueue        = !!queueSvc;
         const hasJob          = !!jobSvc;
+        // Mirrors handleMcpRequest's OWN guard byte for byte (domains/mcp.ts):
+        // it 501s on `!mcp || typeof mcp.handleHttpRequest !== 'function'`, so
+        // advertising on mere service presence would still over-promise when a
+        // wrong-shaped service is registered. Same predicate ⇒ same answer.
+        const hasMcp          = typeof mcpSvc?.handleHttpRequest === 'function';
 
         // Routes are only exposed when a plugin provides the service
         const routes = {
@@ -876,21 +900,22 @@ export class HttpDispatcher {
                 notifications: hasNotification ? `${prefix}/notifications` : undefined,
                 ai:            hasAi ? `${prefix}/ai` : undefined,
                 i18n:          hasI18n ? `${prefix}/i18n` : undefined,
-                // MCP (Streamable HTTP) is a default-on core capability —
-                // advertised unless OS_MCP_SERVER_ENABLED=false opts the env
-                // out. The objectui Integrations page reads this.
+                // MCP (Streamable HTTP) is a default-on core capability — but
+                // "enabled" and "serveable" are two different facts and both
+                // must hold. The objectui Integrations page reads this.
                 //
-                // `declared === enforced` here is guaranteed by a LOCKSTEP, not
-                // by service-presence gating like the routes above (#3369 /
-                // #2698): `os serve` auto-loads plugin-mcp from the SAME
-                // `isMcpServerEnabled()` flag that gates this advertisement, so
-                // whenever `/mcp` is advertised the handler is mounted (a key /
-                // token yields 401, never a 404/501). Kept flag-based on purpose
-                // — `@objectstack/rest` advertises `mcp` from the identical
-                // single source (rest-server.ts), so the two discovery producers
-                // stay symmetric. The route-parity gate asserts the lockstep
-                // holds (advertised ⇒ reachable, never 501).
-                mcp:           isMcpServerEnabled() ? `${prefix}/mcp` : undefined,
+                // Service-presence gated like every other optional route above
+                // (#3369 / #2698), NOT flag-only (#4024). This used to trust a
+                // LOCKSTEP instead: `os serve` auto-loads plugin-mcp from the
+                // same `isMcpServerEnabled()` flag, so on that path advertised
+                // did imply mounted. But the lockstep is a property of the CLI,
+                // not of the dispatcher — an embedder that mounts the dispatcher
+                // (or `@objectstack/rest`) without plugin-mcp got `/mcp`
+                // advertised here and 501 from handleMcpRequest, which is
+                // exactly the `declared ≠ enforced` failure #3369 forbids.
+                // Gating on the handler's own predicate makes the invariant hold
+                // by construction on every host instead of by convention on one.
+                mcp:           isMcpServerEnabled() && hasMcp ? `${prefix}/mcp` : undefined,
         };
 
         // Build per-service status map

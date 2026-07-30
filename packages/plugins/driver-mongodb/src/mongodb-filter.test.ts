@@ -42,6 +42,44 @@ describe('MongoDB Filter Translator', () => {
     });
   });
 
+  describe('calendar-day upper bounds (#4042; the SQL twin is #3777)', () => {
+    it('a bare-day $lte compiles half-open — through the whole day', () => {
+      expect(translateFilter({ created_at: { $lte: '2026-07-28' } })).toEqual({
+        created_at: { $lt: '2026-07-29' },
+      });
+    });
+
+    it('a full-ISO $lte keeps instant semantics — only the bare day is widened', () => {
+      expect(translateFilter({ created_at: { $lte: '2026-07-28T12:00:00.000Z' } })).toEqual({
+        created_at: { $lte: '2026-07-28T12:00:00.000Z' },
+      });
+    });
+
+    it('bare-day $gte / $gt / $lt keep their midnight anchoring', () => {
+      expect(translateFilter({ created_at: { $gte: '2026-07-28' } })).toEqual({
+        created_at: { $gte: '2026-07-28' },
+      });
+      expect(translateFilter({ created_at: { $lt: '2026-07-28' } })).toEqual({
+        created_at: { $lt: '2026-07-28' },
+      });
+    });
+
+    it('$between with a bare-day max decomposes half-open, rolling the month', () => {
+      expect(translateFilter({ created_at: { $between: ['2026-04-29', '2026-07-31'] } })).toEqual({
+        created_at: { $gte: '2026-04-29', $lt: '2026-08-01' },
+      });
+    });
+
+    it('array-style `<=` takes the same rule', () => {
+      expect(translateFilter([['created_at', '<=', '2026-07-28']])).toEqual({
+        created_at: { $lt: '2026-07-29' },
+      });
+      expect(translateFilter([['created_at', '<=', '2026-07-28T12:00:00.000Z']])).toEqual({
+        created_at: { $lte: '2026-07-28T12:00:00.000Z' },
+      });
+    });
+  });
+
   describe('string operators', () => {
     it('translates $contains to $regex', () => {
       const result = translateFilter({ name: { $contains: 'test' } });

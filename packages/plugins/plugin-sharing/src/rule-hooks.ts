@@ -90,11 +90,17 @@ export function unbindAllRuleHooks(engine: MinimalEngine): number {
  * (ADR-0078). Failing the write instead tells the admin the criteria is
  * missing while they are still looking at the form.
  *
- * Update semantics are deliberately narrower than insert: only a patch that
- * SUPPLIES `criteria_json` is checked. An existing row left over from before
- * this guard has a null criteria, and an admin must still be able to
- * `active: false` it — demanding a criteria to switch off an over-broad rule
- * would be exactly backwards.
+ * LAYERING since ADR-0113: the field now declares `required: true` (write
+ * contract), so the record validator already rejects a missing/null criteria
+ * on insert and an explicit null-out on update — with the same non-regression
+ * update semantics this hook pioneered (only a patch that SUPPLIES
+ * `criteria_json` is checked; a legacy null row can still be `active: false`d).
+ * This hook remains for what `required` cannot express: the NON-null
+ * match-all shapes — `'{}'`, an all-vacuous `$and`/`$or`, unparsable JSON, a
+ * bare scalar — where `isMatchAllCriteria` is the judge and the rejection
+ * names the offending shape instead of saying "required". Defense in depth on
+ * the null cases costs one property check and keeps this guard's better
+ * message on paths where hooks fire before validation.
  */
 export function bindRuleCriteriaGuard(engine: MinimalEngine, logger?: MinimalLogger): void {
   if (typeof engine.registerHook !== 'function') return;

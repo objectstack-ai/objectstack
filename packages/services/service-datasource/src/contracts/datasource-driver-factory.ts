@@ -38,6 +38,19 @@ export interface DatasourceConnectionSpec {
 }
 
 /**
+ * Who owns the TEARDOWN of the driver instance behind a handle (ADR-0062 D5,
+ * #3993):
+ *  - `'factory'` (the default when absent) — the factory built this instance
+ *    for this connect; the connection service may disconnect it when the
+ *    kernel tears down.
+ *  - `'host'` — an adopted, pre-built instance (`createPrebuiltDriverFactory`)
+ *    whose lifecycle outlives the kernel (a pool shared across environment
+ *    kernels, a control-plane driver doubling as a proxy base). Kernel
+ *    teardown must NEVER disconnect it; the host does, on its own schedule.
+ */
+export type DatasourceDriverOwnership = 'factory' | 'host';
+
+/**
  * A live (or lazily-connecting) driver handle. Intentionally structural and
  * fully optional so any concrete driver satisfies it — the admin service uses
  * whatever capabilities are present and skips the rest.
@@ -47,6 +60,8 @@ export interface DatasourceDriverHandle {
   connect?(): Promise<void>;
   /** Close the connection / pool. */
   disconnect?(): Promise<void>;
+  /** Teardown ownership of the underlying instance — see {@link DatasourceDriverOwnership}. */
+  ownership?: DatasourceDriverOwnership;
   /** Cheap liveness round-trip (preferred for probes). */
   ping?(): Promise<unknown>;
   /** Introspect the live schema (fallback probe when `ping` is absent). */

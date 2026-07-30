@@ -7,6 +7,7 @@ import {
   type DispatcherRoute,
   type DispatcherConfig,
 } from './dispatcher.zod';
+import { ApiErrorSchema } from './contract.zod';
 
 describe('DispatcherRouteSchema', () => {
   it('should accept valid route with all fields', () => {
@@ -128,14 +129,23 @@ describe('DispatcherConfigSchema', () => {
 // ============================================================================
 
 describe('DispatcherErrorCode', () => {
-  it('should accept all valid error codes', () => {
-    ['404', '405', '501', '503'].forEach(code => {
+  it('should accept all four route-resolution failure modes', () => {
+    ['ROUTE_NOT_FOUND', 'METHOD_NOT_ALLOWED', 'NOT_IMPLEMENTED', 'SERVICE_UNAVAILABLE'].forEach(code => {
       expect(() => DispatcherErrorCode.parse(code)).not.toThrow();
     });
   });
 
   it('should reject invalid codes', () => {
-    expect(() => DispatcherErrorCode.parse('200')).toThrow();
+    expect(() => DispatcherErrorCode.parse('SOMETHING_ELSE')).toThrow();
+  });
+
+  it('should reject the HTTP-status spellings it used to hold (#3842)', () => {
+    // The members were `'404' | '405' | '501' | '503'` while `error.code`
+    // carried the numeric status. `code` is semantic now, so a status is not a
+    // code — it belongs in `httpStatus`.
+    ['404', '405', '501', '503'].forEach(status => {
+      expect(() => DispatcherErrorCode.parse(status)).toThrow();
+    });
   });
 });
 
@@ -144,9 +154,9 @@ describe('DispatcherErrorResponseSchema', () => {
     expect(() => DispatcherErrorResponseSchema.parse({
       success: false,
       error: {
-        code: 404,
+        code: 'ROUTE_NOT_FOUND',
         message: 'Route Not Found: /api/v1/unknown',
-        type: 'ROUTE_NOT_FOUND',
+        httpStatus: 404,
         route: '/api/v1/unknown',
       },
     })).not.toThrow();
@@ -156,9 +166,9 @@ describe('DispatcherErrorResponseSchema', () => {
     expect(() => DispatcherErrorResponseSchema.parse({
       success: false,
       error: {
-        code: 501,
+        code: 'NOT_IMPLEMENTED',
         message: 'Not Implemented',
-        type: 'NOT_IMPLEMENTED',
+        httpStatus: 501,
         service: 'workflow',
         hint: 'Install plugin-workflow',
       },
@@ -169,11 +179,34 @@ describe('DispatcherErrorResponseSchema', () => {
     expect(() => DispatcherErrorResponseSchema.parse({
       success: false,
       error: {
-        code: 503,
+        code: 'SERVICE_UNAVAILABLE',
         message: 'Service Unavailable: ai',
-        type: 'SERVICE_UNAVAILABLE',
+        httpStatus: 503,
         service: 'ai',
       },
     })).not.toThrow();
+  });
+
+  it('should reject the numeric `code` it used to declare (#3842)', () => {
+    // The regression this whole change exists to prevent: a producer putting the
+    // HTTP status back into the field callers branch on.
+    expect(() => DispatcherErrorResponseSchema.parse({
+      success: false,
+      error: { code: 404, message: 'Route Not Found: /api/v1/unknown' },
+    })).toThrow();
+  });
+
+  it('agrees with the base ApiErrorSchema on what a dispatcher error is', () => {
+    // The two schemas used to disagree about `code` — number here, string there
+    // — which is what legitimised the dispatcher's deviation. A body valid under
+    // one must now be valid under the other.
+    const error = {
+      code: 'ROUTE_NOT_FOUND',
+      message: 'Route Not Found: /api/v1/unknown',
+      httpStatus: 404,
+      route: '/api/v1/unknown',
+    };
+    expect(() => DispatcherErrorResponseSchema.parse({ success: false, error })).not.toThrow();
+    expect(ApiErrorSchema.safeParse(error).success).toBe(true);
   });
 });

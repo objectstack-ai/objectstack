@@ -3,7 +3,7 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { IAnalyticsService } from '@objectstack/spec/contracts';
+import type { IAnalyticsService, IDataDriver } from '@objectstack/spec/contracts';
 import { AnalyticsService } from './analytics-service.js';
 import type { AnalyticsServiceConfig } from './analytics-service.js';
 import type { DriverCapabilities } from './strategies/types.js';
@@ -45,31 +45,27 @@ interface DataEngineLike {
   } | undefined;
   /**
    * Resolve the storage driver backing an object (public ObjectQL accessor).
-   * Used to delegate temporal filter-value coercion to the driver, which is the
+   * Used to delegate temporal storage-form coercion to the driver, which is the
    * single source of truth for how a `Field.date`/`Field.datetime` is stored on
-   * the active dialect. The driver may expose `temporalFilterValue(object, field,
-   * value)` (SqlDriver does); when absent we leave the value untouched.
+   * the active dialect. When the hooks are absent, values and column SQL pass
+   * through untouched — the contract's identity semantics.
    */
-  getDriverForObject?(objectName: string): DriverLike | undefined;
+  getDriverForObject?(objectName: string): TemporalDriverSurface | undefined;
 }
 
-/** Minimal driver surface the analytics layer probes for temporal coercion. */
-interface DriverLike {
-  /**
-   * Coerce a filter comparand to the column's on-disk storage form
-   * (SQLite `Field.datetime` → epoch ms; `Field.date` → YYYY-MM-DD; native
-   * timestamp / non-temporal → unchanged). Optional — only SqlDriver implements it.
-   */
-  temporalFilterValue?(objectName: string, field: string, value: unknown): unknown;
-  /**
-   * Normalise the column reference to that same storage form. Required alongside
-   * `temporalFilterValue` on any dialect whose column is mixed-form — a SQLite
-   * `Field.datetime` holds an INTEGER epoch and ISO TEXT at once, so coercing
-   * only the value fixes one half and leaves the other empty (#3912). Optional —
-   * only SqlDriver implements it.
-   */
-  temporalFilterColumnSql?(objectName: string, field: string, columnSql: string): string;
-}
+/**
+ * The slice of the `IDataDriver` CONTRACT the analytics layer consumes —
+ * `temporalFilterValue` / `temporalFilterColumnSql` are first-class contract
+ * members since ADR-0053 D-A2, no longer a duck-typed local invention. Picked
+ * (rather than using `IDataDriver` whole) because `getDriverForObject` hands
+ * back whatever the engine registered, and this seam only needs the temporal
+ * surface; the runtime `typeof` guards below remain the correct way to consume
+ * an optional contract member.
+ */
+type TemporalDriverSurface = Pick<
+  IDataDriver,
+  'temporalFilterValue' | 'temporalFilterColumnSql'
+>;
 
 /**
  * Configuration for AnalyticsServicePlugin.

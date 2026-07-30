@@ -473,7 +473,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 } catch (e) { caught = e; }
 
                 expect(caught).toBeDefined();
-                expect(caught.code).toBe('invalid_metadata');
+                expect(caught.code).toBe('INVALID_METADATA');
                 expect(caught.status).toBe(422);
                 expect(caught.message).toMatch(/invalid_metadata/);
                 expect(Array.isArray(caught.issues)).toBe(true);
@@ -495,7 +495,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     });
                 } catch (e) { caught = e; }
 
-                expect(caught?.code).toBe('invalid_metadata');
+                expect(caught?.code).toBe('INVALID_METADATA');
                 expect(caught?.status).toBe(422);
                 expect(mockEngine.insert).not.toHaveBeenCalled();
             });
@@ -513,7 +513,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     });
                 } catch (e) { caught = e; }
 
-                expect(caught?.code).toBe('invalid_metadata');
+                expect(caught?.code).toBe('INVALID_METADATA');
                 expect(caught?.status).toBe(422);
                 expect(mockEngine.insert).not.toHaveBeenCalled();
             });
@@ -1273,7 +1273,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
-                code: 'not_overridable',
+                code: 'NOT_OVERRIDABLE',
                 status: 403,
             });
         });
@@ -1351,7 +1351,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
-                code: 'not_creatable',
+                code: 'NOT_CREATABLE',
                 status: 403,
             });
         });

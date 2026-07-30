@@ -21,6 +21,7 @@ export {
   diffManagedIndexes,
   expectedIndexes,
   isIndexDriftOp,
+  isInPlaceSchemaWork,
   isManagedIndexName,
   legacyUniqueIndexNames,
   legacyUniqueReplacements,
@@ -38,6 +39,7 @@ export type {
   ExpectedIndex,
   LegacyUniqueReplacement,
   PendingSchemaWork,
+  PendingSchemaWorkKind,
   FieldDef as DriftFieldDef,
 } from './schema-drift.js';
 

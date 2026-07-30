@@ -91,14 +91,14 @@ describe('objectstack verify: localized field-validation messages (#3957)', () =
     expect(body.fields[0].message).not.toContain('penalty_amount');
   });
 
-  it('carries label + code + params so a client can format its own text', async () => {
+  it('carries label + code + constraint so a client can format its own text', async () => {
     const body = await reject('zh-CN', { name: 'S1', remark: 'x'.repeat(3000) });
     expect(body.code).toBe('VALIDATION_FAILED');
     expect(body.fields[0]).toMatchObject({
       field: 'remark',
       code: 'max_length',
       label: '备注',
-      params: { maxLength: 512, actual: 3000 },
+      constraint: { maxLength: 512, actual: 3000 },
     });
     expect(body.fields[0].message).toBe('备注长度不能超过 512 个字符(当前 3000 个)');
   });

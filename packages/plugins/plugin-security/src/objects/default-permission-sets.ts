@@ -82,7 +82,7 @@ const denyWritesOnManagedObjects = (): Record<string, {
  * permission set name appears in the request `ExecutionContext.permissions[]`.
  *
  * Each entry is run through `PermissionSetSchema.parse(...)` so Zod fills
- * in the boolean/`priority`/`enabled` defaults — keeping the literal
+ * in the boolean/`enabled` defaults — keeping the literal
  * source readable while still satisfying the strict output type.
  *
  * `objects: { '*': … }` uses the wildcard sentinel honoured by
@@ -121,6 +121,9 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       'manage_users',
       'manage_metadata',
       'manage_platform_settings',
+      // [ADR-0111 D9] Sharing administration — gates the sharing-rule surface
+      // and (in the DEPTH extension) non-owner share management.
+      'manage_sharing',
       'setup.access',
       'setup.write',
       'studio.access',

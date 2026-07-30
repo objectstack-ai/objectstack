@@ -290,11 +290,23 @@ Four error dialects were live in-repo at the time:
 | `settings-routes.ts`, `share-link-routes.ts` | `{ error: { code, message } }` — no `success` |
 | service-i18n, service-storage | `{ error: <string> }`, sometimes `+ code` at the top level |
 
-#3675 moved the last row to the contract. The rest are unchanged, and the
-dispatcher's deviation is now pinned to exactly one field (`error.code` carries
-the HTTP status where a semantic string is declared) by a test rather than by
-prose — it parks the real code in `details` to work around its own occupied
-field, which is the tell.
+#3675 moved the last row to the contract, and #3842 moved the dispatcher row:
+`error.code` is the declared semantic string, the HTTP status has its own
+`httpStatus`, and the three parking spots the occupied field forced
+(`details.code`, `details.type`, `error.type`) are gone. Its guard is
+`error-envelope.conformance.test.ts` in `packages/runtime`, built the same two
+ways as the storage/i18n suites — drive every branch, then scan the source so a
+new branch cannot reintroduce the drift. `rest-server.ts` and the two sibling
+services keep their dialects; the remaining envelope gaps are tracked in #3843.
+
+Note what the pin bought. #3687 wrote the deviation down as an executable
+assertion (`issues.map(path)` `toEqual(['code'])`) instead of a comment, with
+the instruction to DELETE rather than update it once the dispatcher was fixed.
+That is exactly how it played out: the assertion failed the moment the fix
+landed, named the one field to look at, and its replacement asserts the positive
+(`safeParse` succeeds). A pin is worth writing when a known deviation cannot be
+fixed yet — it dates the debt and fails loudly when either the debt grows or
+someone pays it off.
 
 The generalisable lesson matches §11's: a guard only covers the question it
 asks. "The route exists" and "the route answers in the declared shape" are two

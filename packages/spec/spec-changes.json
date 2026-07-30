@@ -97,6 +97,42 @@
         "to": "sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`)",
         "conversionId": "sharing-rule-access-level-full-to-edit",
         "toMajor": 17
+      },
+      {
+        "surface": "flow.node.config.objectName",
+        "to": "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+        "conversionId": "flow-node-crud-object-alias",
+        "toMajor": 17
+      },
+      {
+        "surface": "flow.node.notify.config",
+        "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
+        "conversionId": "flow-node-notify-config-aliases",
+        "toMajor": 17
+      },
+      {
+        "surface": "flow.node.script.config",
+        "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+        "conversionId": "flow-node-script-config-aliases",
+        "toMajor": 17
+      },
+      {
+        "surface": "permission.rowLevelSecurity.priority",
+        "to": "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+        "conversionId": "permission-rls-priority-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "tool.category / tool.permissions / tool.active / tool.builtIn",
+        "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+        "conversionId": "tool-inert-authoring-keys-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "object.fields.*.required / object.fields.*.storage.notNull",
+        "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
+        "conversionId": "field-required-notnull-explicit",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -169,6 +205,20 @@
         "migrationId": "dashboard-widget-strict-unknown-keys",
         "toMajor": 16,
         "rationale": "The `.strict()` flip turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: bind a `dataset` and select `dimensions`/`values`, move a renderer setting under `options`, or delete the dead key."
+      },
+      {
+        "surface": "api.analyticsQueryRequest.query",
+        "replacement": "bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)",
+        "migrationId": "analytics-query-request-envelope-retired",
+        "toMajor": 17,
+        "rationale": "The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves."
+      },
+      {
+        "surface": "api.analyticsQueryRequest.format",
+        "replacement": "(removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)",
+        "migrationId": "analytics-query-request-format-retired",
+        "toMajor": 17,
+        "rationale": "The `format` key was declared but never implemented (declared ≠ enforced): every response is the JSON envelope regardless of the requested value, so there is no behaviour to preserve and nothing stored to rewrite."
       }
     ],
     "removed": []
@@ -395,9 +445,60 @@
           "to": "sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`)",
           "conversionId": "sharing-rule-access-level-full-to-edit",
           "toMajor": 17
+        },
+        {
+          "surface": "flow.node.config.objectName",
+          "to": "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+          "conversionId": "flow-node-crud-object-alias",
+          "toMajor": 17
+        },
+        {
+          "surface": "flow.node.notify.config",
+          "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
+          "conversionId": "flow-node-notify-config-aliases",
+          "toMajor": 17
+        },
+        {
+          "surface": "flow.node.script.config",
+          "to": "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+          "conversionId": "flow-node-script-config-aliases",
+          "toMajor": 17
+        },
+        {
+          "surface": "permission.rowLevelSecurity.priority",
+          "to": "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+          "conversionId": "permission-rls-priority-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "tool.category / tool.permissions / tool.active / tool.builtIn",
+          "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+          "conversionId": "tool-inert-authoring-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "object.fields.*.required / object.fields.*.storage.notNull",
+          "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
+          "conversionId": "field-required-notnull-explicit",
+          "toMajor": 17
         }
       ],
-      "migrated": [],
+      "migrated": [
+        {
+          "surface": "api.analyticsQueryRequest.query",
+          "replacement": "bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)",
+          "migrationId": "analytics-query-request-envelope-retired",
+          "toMajor": 17,
+          "rationale": "The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves."
+        },
+        {
+          "surface": "api.analyticsQueryRequest.format",
+          "replacement": "(removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)",
+          "migrationId": "analytics-query-request-format-retired",
+          "toMajor": 17,
+          "rationale": "The `format` key was declared but never implemented (declared ≠ enforced): every response is the JSON envelope regardless of the requested value, so there is no behaviour to preserve and nothing stored to rewrite."
+        }
+      ],
       "removed": []
     }
   ]

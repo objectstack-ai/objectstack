@@ -268,11 +268,11 @@ describe('registry shadow — scoped-kernel lock enforcement is shadow-immune', 
         await expect(protocol.saveMetaItem({
             type: 'app', name: 'setup', organizationId: 'org_a',
             item: { ...overlayBody },
-        })).rejects.toMatchObject({ code: 'item_locked', status: 403 });
+        })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
 
         await expect(protocol.deleteMetaItem({
             type: 'app', name: 'setup', organizationId: 'org_a',
-        })).rejects.toMatchObject({ code: 'item_locked', status: 403 });
+        })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
     });
 });
 

@@ -62,7 +62,11 @@ async function dispatchWith(method: string, path: string, err: unknown, body: an
     };
     const objectql = { registry: {} };
     const resolve = (name: string) =>
-        name === 'protocol' ? protocol : name === 'objectql' ? objectql : undefined;
+        name === 'protocol' ? protocol : name === 'objectql' ? objectql
+        // Authenticated caller so the dispatch reaches the error path instead of
+        // 401ing at the anonymous-deny gate (#3963).
+        : name === 'auth' ? { api: { getSession: async () => ({ user: { id: 'u1' } }) } }
+        : undefined;
     const kernel: any = {
         getService: resolve,
         getServiceAsync: async (name: string) => resolve(name),
@@ -86,17 +90,16 @@ describe('#3918 follow-up — domain catches honour `status` instead of forcing 
             expect(res.status).toBe(404);
             // A 4xx message is a deliberate answer and must reach the caller.
             expect(res.body.error.message).toContain("Object 'ghost' is not registered");
-            expect(res.body.error.details?.code).toBe('OBJECT_NOT_FOUND');
+            // [#3842] Was `details.code` — the parking spot the status forced.
+            expect(res.body.error.code).toBe('OBJECT_NOT_FOUND');
         });
 
         it(`${label}: a ValidationError keeps its 400 and its fields[]`, async () => {
             const res = await dispatchWith(method, path, validationError());
 
             expect(res.status).toBe(400);
-            expect(res.body.error.details).toEqual({
-                code: 'VALIDATION_FAILED',
-                fields: FIELDS,
-            });
+            expect(res.body.error.code).toBe('VALIDATION_FAILED');
+            expect(res.body.error.details).toEqual({ fields: FIELDS });
         });
 
         it(`${label}: an ordinary error still falls back to 500`, async () => {
@@ -130,7 +133,10 @@ describe('#3918 follow-up — deliberate per-route fallbacks are preserved', () 
     /** `/meta` PUT with a metadata service (no `saveMetaItem`) → the 501 branch. */
     async function putMetaViaMetadataService(err: unknown) {
         const metadata = { saveItem: async () => { throw err; } };
-        const resolve = (name: string) => (name === 'metadata' ? metadata : undefined);
+        const resolve = (name: string) =>
+            name === 'metadata' ? metadata
+            : name === 'auth' ? { api: { getSession: async () => ({ user: { id: 'u1' } }) } }
+            : undefined;
         const kernel: any = {
             getService: resolve,
             getServiceAsync: async (name: string) => resolve(name),

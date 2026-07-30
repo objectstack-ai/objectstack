@@ -558,7 +558,7 @@ function evaluateOptionVisibility(
           field: name,
           code: 'invalid_option',
           def,
-          params: { value: String(value) },
+          value: String(value),
           messageKey: 'option_unavailable',
         }, messages));
       }
@@ -609,6 +609,15 @@ export function evaluateValidationRules(
   // record must have a value — enforced server-side so the rule can't be
   // bypassed. (`readonlyWhen` is handled by stripReadonlyWhenFields on the
   // write path, not here.) A broken predicate is fail-open (logged, skipped).
+  //
+  // ADR-0113 non-regression: reject iff the MERGED state violates AND the
+  // PRE state complied. A write may not take the record from compliant to
+  // violating — nulling the field, or flipping the condition true without
+  // providing it — but a pre-existing violation (a legacy row from before
+  // the rule tightened) does not block writes that leave it in place. This
+  // is the same invariant `required` enforces, with the condition
+  // generalized from "always true"; it is what makes tightening a
+  // conditional contract on a deployed object safe (#3929's objection).
   if (hasFieldRules && fields) {
     for (const [name, def] of Object.entries(fields)) {
       const pred = def?.requiredWhen ?? def?.conditionalRequired;
@@ -619,6 +628,15 @@ export function evaluateValidationRules(
         continue;
       }
       if (res.value === true && isMissing(merged[name])) {
+        // Pre-state check (update only; on insert the pre state complies
+        // vacuously). If the predicate cannot be evaluated over the previous
+        // record, treat the pre state as COMPLIANT — enforcement stays on
+        // unless a legacy violation is proven.
+        if (mode === 'update' && previous) {
+          const pre = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: previous, previous });
+          const preViolated = pre.ok && pre.value === true && isMissing(previous[name]);
+          if (preViolated) continue; // legacy rows rest
+        }
         errors.push(buildFieldError({ field: name, code: 'required', def }, opts.messages));
       }
     }
@@ -719,7 +737,8 @@ function checkStateMachine(
   // language its author chose. Only the FALLBACK is ours to localize (#3957).
   const fallback = (
     code: 'invalid_initial_state' | 'invalid_transition',
-    params: Record<string, unknown>,
+    constraint: Record<string, unknown>,
+    value?: string,
   ): FieldValidationError => {
     const def = ctx?.fields?.[rule.field];
     if (rule.message) {
@@ -730,7 +749,7 @@ function checkStateMachine(
         label: resolveFieldLabel(rule.field, def, ctx?.messages),
       };
     }
-    return buildFieldError({ field: rule.field, code, def, params }, ctx?.messages);
+    return buildFieldError({ field: rule.field, code, def, constraint, value }, ctx?.messages);
   };
   if (mode === 'insert') {
     const initial = rule.initialStates;
@@ -739,10 +758,7 @@ function checkStateMachine(
     const value = data[rule.field];
     if (value === undefined || value === null || value === '') return null; // empty → not an initial state to check
     if (!initial.includes(String(value))) {
-      return fallback('invalid_initial_state', {
-        value: String(value),
-        allowed: initial.join(', '),
-      });
+      return fallback('invalid_initial_state', { allowed: initial.join(', ') }, String(value));
     }
     return null;
   }

@@ -1,24 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   ToolSchema,
-  ToolCategorySchema,
   defineTool,
   type Tool,
 } from './tool.zod';
-
-describe('ToolCategorySchema', () => {
-  it('should accept all tool categories', () => {
-    const categories = ['data', 'action', 'flow', 'integration', 'vector_search', 'analytics', 'utility'] as const;
-
-    categories.forEach(category => {
-      expect(ToolCategorySchema.parse(category)).toBe(category);
-    });
-  });
-
-  it('should reject invalid category', () => {
-    expect(() => ToolCategorySchema.parse('unknown')).toThrow();
-  });
-});
 
 describe('ToolSchema', () => {
   it('should accept minimal tool', () => {
@@ -37,8 +22,6 @@ describe('ToolSchema', () => {
 
     const result = ToolSchema.parse(tool);
     expect(result.name).toBe('list_records');
-    expect(result.active).toBe(true);
-    expect(result.builtIn).toBe(false);
   });
 
   it('should accept full tool', () => {
@@ -46,7 +29,6 @@ describe('ToolSchema', () => {
       name: 'create_case',
       label: 'Create Support Case',
       description: 'Creates a new support case record',
-      category: 'action' as const,
       parameters: {
         type: 'object',
         properties: {
@@ -63,16 +45,11 @@ describe('ToolSchema', () => {
         },
       },
       objectName: 'support_case',
-      permissions: ['case.create', 'support.agent'],
-      active: true,
-      builtIn: false,
     };
 
     const result = ToolSchema.parse(tool);
     expect(result.name).toBe('create_case');
-    expect(result.category).toBe('action');
     expect(result.objectName).toBe('support_case');
-    expect(result.permissions).toEqual(['case.create', 'support.agent']);
   });
 
   it('should enforce snake_case for tool name', () => {
@@ -114,17 +91,6 @@ describe('ToolSchema', () => {
       objectName: 'support_case',
     })).not.toThrow();
   });
-
-  it('should accept built-in tool flag', () => {
-    const tool = ToolSchema.parse({
-      name: 'describe_object',
-      label: 'Describe Object',
-      description: 'Get object schema and field metadata',
-      parameters: { type: 'object', properties: { objectName: { type: 'string' } } },
-      builtIn: true,
-    });
-    expect(tool.builtIn).toBe(true);
-  });
 });
 
 describe('defineTool', () => {
@@ -133,7 +99,6 @@ describe('defineTool', () => {
       name: 'query_records',
       label: 'Query Records',
       description: 'Search and filter records',
-      category: 'data',
       parameters: {
         type: 'object',
         properties: {
@@ -145,20 +110,6 @@ describe('defineTool', () => {
     });
 
     expect(tool.name).toBe('query_records');
-    expect(tool.category).toBe('data');
-    expect(tool.active).toBe(true);
-  });
-
-  it('should apply defaults', () => {
-    const tool = defineTool({
-      name: 'simple_tool',
-      label: 'Simple Tool',
-      description: 'A simple tool',
-      parameters: {},
-    });
-
-    expect(tool.active).toBe(true);
-    expect(tool.builtIn).toBe(false);
   });
 
   it('should throw on invalid tool name', () => {
@@ -206,5 +157,54 @@ describe('defineTool', () => {
     expect(() => ToolSchema.parse({
       name: 't', label: 'T', description: 'd', parameters: {}, notAToolField: 1,
     })).toThrow(/notAToolField/);
+  });
+
+  // ── #3896 audit close-out — the four inert authoring keys are retired ──
+  // `permissions` promised an invocation gate nothing enforced; `active: false`
+  // read as "withdrawn" while the tool kept reaching the LLM set; `category` /
+  // `builtIn` were display-only. Each rejection must carry its own
+  // prescription, and the two dangerous ones must name the REAL mechanism.
+
+  it.each([
+    ['permissions', ['case.create']],
+    ['active', false],
+    ['category', 'action'],
+    ['builtIn', true],
+  ])('REJECTS the retired `%s` with its prescription', (key, value) => {
+    let message = '';
+    try {
+      ToolSchema.parse({
+        name: 't', label: 'T', description: 'd', parameters: {}, [key]: value,
+      });
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    expect(message).toContain(key);
+    expect(message).toMatch(/#3896/);
+  });
+
+  it('the `permissions` rejection points at the gate the middleware actually runs', () => {
+    let message = '';
+    try {
+      ToolSchema.parse({
+        name: 't', label: 'T', description: 'd', parameters: {}, permissions: ['x'],
+      });
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    expect(message).toMatch(/requiredPermissions/);
+    expect(message).toMatch(/ADR-0066/);
+  });
+
+  it('the `active` rejection says how to actually withdraw a tool', () => {
+    let message = '';
+    try {
+      ToolSchema.parse({
+        name: 't', label: 'T', description: 'd', parameters: {}, active: false,
+      });
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    expect(message).toMatch(/skills?\/agents|skill\/agent/i);
   });
 });

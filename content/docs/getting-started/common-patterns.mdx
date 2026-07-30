@@ -276,10 +276,10 @@ export const assignmentNotification = defineFlow({
       label: 'Notify Assignee',
       config: {
         // String fields use single-brace {…} templates, not {{…}}.
-        // `to` takes recipient USER IDs — a lookup value interpolates to the id.
-        to: '{record.assigned_to}',
-        subject: 'Task Assigned: {record.title}',
-        body: 'You have been assigned to task "{record.title}".'
+        // `recipients` takes recipient USER IDs — a lookup value interpolates to the id.
+        recipients: '{record.assigned_to}',
+        title: 'Task Assigned: {record.title}',
+        message: 'You have been assigned to task "{record.title}".'
       }
     },
     { id: 'end', type: 'end', label: 'End' }
@@ -354,9 +354,9 @@ Define a multi-step approval flow for records.
         type: 'notify',
         label: 'Request Approval',
         config: {
-          to: '{record.submitted_by}',
-          subject: 'Expense approval needed: {record.title}',
-          body: 'Expense "{record.title}" needs manual approval.'
+          recipients: '{record.submitted_by}',
+          title: 'Expense approval needed: {record.title}',
+          message: 'Expense "{record.title}" needs manual approval.'
         }
       },
       { id: 'end', type: 'end', label: 'End' }

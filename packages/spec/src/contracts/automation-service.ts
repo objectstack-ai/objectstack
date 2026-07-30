@@ -180,7 +180,7 @@ export interface AutomationResult {
      * Both refuse before consuming the suspension: the run stays parked and the
      * legitimate continuation still lands.
      */
-    code?: 'forbidden' | 'invalid_signal';
+    code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL';
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be
@@ -331,7 +331,7 @@ export interface IAutomationService {
      * **Gated by the suspended node (#3801).** When the run is parked on a node
      * whose descriptor declares `resumeAuthority: 'service'`, only that node's
      * owning service may continue it — the call is refused with
-     * `{ success: false, code: 'forbidden' }` unless `signal` carries
+     * `{ success: false, code: 'PERMISSION_DENIED' }` unless `signal` carries
      * {@link RESUME_AUTHORITY_SERVICE}. The gate follows a subflow pause down
      * to the child the signal would actually land on, so a parent parked on a
      * `subflow` node is no way around it.

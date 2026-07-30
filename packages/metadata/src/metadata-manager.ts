@@ -1395,23 +1395,53 @@ export class MetadataManager implements IMetadataService {
   /**
    * Load a single metadata item from loaders.
    * Iterates through registered loaders until found.
+   *
+   * Returns `null` both when no loader HAS the item and when every loader
+   * FAILED — see {@link loadDiagnosed} when the caller must tell those apart.
    */
   async load<T = any>(
     type: string,
     name: string,
     options?: MetadataLoadOptions
   ): Promise<T | null> {
+    return (await this.loadDiagnosed<T>(type, name, options)).data;
+  }
+
+  /**
+   * `load`, plus whether the answer can be trusted as complete.
+   *
+   * [ADR-0110 D3] A miss and an outage are different facts with opposite
+   * security meanings, and plain `load` cannot express the difference: a
+   * loader that throws is warn-logged and skipped, so a database the metadata
+   * plane cannot reach returns the same `null` as a name that was never
+   * declared. Callers that gate on a declaration MUST NOT read that `null` as
+   * "the author declared no gate" — an availability failure would silently
+   * widen access (the REST `/actions` route's fail-open branch, #3935).
+   *
+   * `degraded` is true when at least one loader threw AND no loader answered
+   * with the item. The posture is deliberately conservative: with a loader
+   * down we cannot prove the item is absent, so we decline to claim it is.
+   * A clean miss (every loader answered, none had it) is NOT degraded.
+   */
+  async loadDiagnosed<T = any>(
+    type: string,
+    name: string,
+    options?: MetadataLoadOptions
+  ): Promise<{ data: T | null; degraded: boolean; errors: string[] }> {
+    const errors: string[] = [];
     for (const loader of this.loaders.values()) {
         try {
             const result = await loader.load(type, name, options);
             if (result.data) {
-                return result.data as T;
+                return { data: result.data as T, degraded: false, errors };
             }
         } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            errors.push(`${loader.contract.name}: ${message}`);
             this.logger.warn(`Loader ${loader.contract.name} failed to load ${type}:${name}`, { error: e });
         }
     }
-    return null;
+    return { data: null, degraded: errors.length > 0, errors };
   }
 
   /**

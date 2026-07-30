@@ -153,6 +153,98 @@ describe('SqlDriver index drift (#3728)', () => {
     });
   });
 
+  // ── #3955: a DECLARED single-column unique is not legacy debt ─────────────
+  //
+  // An object may declare both a tenant-scoped field-level `unique: true` and
+  // an object-level single-column unique index on the same column (HotCRM's
+  // `crm_contact` does exactly this: `email: { unique: true }` plus
+  // `indexes: [{ fields: ['email'], unique: true }]`). The declared index
+  // materializes under `buildIndexName` — `uniq_<table>_<col>` — which is also
+  // one of the two spellings the legacy detector looks for. It was therefore
+  // reported as pre-#3696 debt to be dropped, and the plan never converged.
+  describe('a currently-declared single-column unique index is never called legacy (#3955)', () => {
+    const contactMeta = [
+      {
+        name: 'hp_contact',
+        fields: {
+          organization_id: { type: 'string' },
+          email: { type: 'string', unique: true },
+          last_name: { type: 'string' },
+        },
+        indexes: [
+          { fields: ['email'], unique: true },
+          { fields: ['last_name'] },
+        ],
+      },
+    ];
+
+    it('builds both indexes and then reports NO drift on a fresh table', async () => {
+      const driver = makeDriver();
+      await driver.initObjects(contactMeta);
+
+      // Both are current intent: the tenant composite from the field-level
+      // `unique: true`, and the verbatim declared global unique.
+      const uniques = await uniqueIndexColumns('hp_contact');
+      expect(uniques['uniq_hp_contact_organization_id_email']).toEqual(['organization_id', 'email']);
+      expect(uniques['uniq_hp_contact_email']).toEqual(['email']);
+
+      // Before the fix this reported `replace_unique_index` — proposing to drop
+      // the index the very same sync had just created from metadata.
+      expect(await driver.detectManagedDrift()).toHaveLength(0);
+    });
+
+    it('does not ping-pong: applying the plan converges instead of recreating work', async () => {
+      const driver = makeDriver();
+      await driver.initObjects(contactMeta);
+
+      // Round 1: nothing to do. Round 2 (the old loop's second half) likewise —
+      // the declared index is still there, so nothing reports it missing.
+      for (let round = 0; round < 3; round++) {
+        const drift = await driver.detectManagedDrift();
+        expect(drift, `round ${round + 1} should be clean`).toHaveLength(0);
+        await driver.applyMigrationEntries(drift, { allowDestructive: false });
+      }
+
+      const uniques = await uniqueIndexColumns('hp_contact');
+      expect(Object.keys(uniques).sort()).toEqual([
+        'uniq_hp_contact_email',
+        'uniq_hp_contact_organization_id_email',
+      ]);
+    });
+
+    it('still retires a genuinely legacy index when metadata declares no such index', async () => {
+      // The #3728 behaviour must survive the filter: the same `uniq_<table>_<col>`
+      // spelling IS legacy when nothing in metadata declares it.
+      const driver = makeDriver();
+      await seedLegacyGlobalUnique('uniq_product_code');
+      await driver.initObjects(productMeta); // no declared `indexes[]`
+
+      const drift = await driver.detectManagedDrift();
+      const entry = drift.find((d) => d.op.type === 'replace_unique_index');
+      expect(entry, 'a legacy index nobody declares must still be retired').toBeDefined();
+      expect((entry!.op as any).dropIndexNames).toEqual(['uniq_product_code']);
+    });
+
+    it('retires the knex-spelled legacy index even when the buildIndexName spelling is declared', async () => {
+      // Only the declared spelling is exempt. A pre-#3696 `<table>_<col>_unique`
+      // left over from the old createColumn path is still debt.
+      const driver = makeDriver();
+      await knexInstance.schema.createTable('hp_contact', (t: any) => {
+        t.string('id').primary();
+        t.string('organization_id');
+        t.string('email');
+        t.string('last_name');
+      });
+      await knexInstance.raw('CREATE UNIQUE INDEX hp_contact_email_unique ON hp_contact (email)');
+      await driver.initObjects(contactMeta);
+
+      const drift = await driver.detectManagedDrift();
+      const entry = drift.find((d) => d.op.type === 'replace_unique_index');
+      expect(entry).toBeDefined();
+      expect((entry!.op as any).dropIndexNames).toEqual(['hp_contact_email_unique']);
+    });
+  });
+
   // ── Applying it through `os migrate apply` ────────────────────────────────
 
   describe('applyMigrationEntries', () => {

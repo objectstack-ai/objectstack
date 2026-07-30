@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { scanSource, resolveProperty, checkEmptyState } from './empty-state.mts';
+import { scanSource, resolveProperty, checkEmptyState, maxPropertyDistanceFor } from './empty-state.mts';
 import { EMPTY_STATE_REGISTRY } from './empty-state-registry.mts';
 import type { EmptyStateEntry } from './empty-state-registry.mts';
 
@@ -110,6 +110,70 @@ describe('resolveProperty — direction matters', () => {
 
   it('prefers the property on the matched line itself', () => {
     expect(resolveProperty(["  inline: z.string().describe('empty = all'),"], 0)).toBe('inline');
+  });
+});
+
+describe('resolveProperty — platform-object field blocks', () => {
+  // The shape that broke the first attempt. A field is a nested call, so its
+  // prose sits several keys below the name it belongs to, and both of those keys
+  // look exactly like property declarations.
+  const field = [
+    '    organization_id: Field.lookup(\'sys_organization\', {', // 0
+    "      label: 'Organization',", // 1
+    '      required: false,', // 2
+    "      description: 'Optional organization scope. NULL = applies in every org context.',", // 3
+    '    }),', // 4
+  ];
+
+  it('skips the documentation slot the statement lives in', () => {
+    // Answering `description` would key every entry in a file to one string.
+    expect(resolveProperty(field, 3, 24)).not.toBe('description');
+  });
+
+  it('skips SIBLING config keys too, and lands on the field', () => {
+    // `required:` is not a doc slot and not the field — it is a sibling at the
+    // same indent. Only nesting separates them, which is why the resolver
+    // compares indentation rather than keeping a list of key names.
+    expect(resolveProperty(field, 3, 24)).toBe('organization_id');
+  });
+
+  it('reaches a field name further away than the .zod.ts window allows', () => {
+    const long = [
+      '    criteria_json: Field.textarea({', // 0
+      ...Array.from({ length: 12 }, (_, i) => `      opt${i}: true,`), // 1..12
+      "      description: 'Which records to share (empty = all).',", // 13
+    ];
+    expect(resolveProperty(long, 13, 24)).toBe('criteria_json');
+    // With the tight schema-surface window it is simply out of reach — which is
+    // why the distance is chosen per surface rather than globally widened.
+    expect(resolveProperty(long, 13, 8)).toBeNull();
+  });
+
+  it('picks the window from the file extension', () => {
+    expect(maxPropertyDistanceFor('packages/x/y.object.ts')).toBeGreaterThan(
+      maxPropertyDistanceFor('packages/spec/src/x.zod.ts'),
+    );
+  });
+});
+
+describe('scanSource — repudiated prose must not fire the gate', () => {
+  it('ignores a phrase the comment explicitly disowns', () => {
+    // This is #3929's own comment on sys_sharing_rule.criteria_json. Flagging it
+    // would make the gate fire on the sentence recording why the gate exists.
+    const src = [
+      '      // Deliberately NOT "leave empty to share everything" (#3896): an empty',
+      '      // criteria never shared everything on purpose, it just failed open.',
+      "      description: 'Which records to share. Required.',",
+    ].join('\n');
+    expect(scanSource('x.object.ts', src)).toEqual([]);
+  });
+
+  it('still catches a permissive claim that merely CONTAINS a negation earlier', () => {
+    // The escape must stay attached to the phrase. "not set" here negates
+    // nothing about the consequence, and a false negative is a missed
+    // over-share — strictly worse than a false positive.
+    const src = "      description: 'If not set, leave empty to share every record.',";
+    expect(scanSource('x.object.ts', src)).toHaveLength(1);
   });
 });
 

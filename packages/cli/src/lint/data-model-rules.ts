@@ -69,6 +69,92 @@ function refOf(def: any): string | undefined {
   return def?.reference || def?.reference_to;
 }
 
+// ─── Uniqueness declarations ────────────────────────────────────────
+
+export const UNIQUE_DOUBLE_DECLARATION = 'unique/double-declaration';
+
+/** Is `unique` declared at all? Mirrors `isUniqueDeclared` in @objectstack/spec/data. */
+function uniqueDeclared(u: unknown): boolean {
+  return u === true || u === 'global';
+}
+
+/**
+ * R10 — the same column carries BOTH a field-level `unique: true` and an
+ * object-level single-column unique index (#3991).
+ *
+ * The two spellings are deliberately different (see `IndexSchema`): field-level
+ * `unique: true` is tenant-scoped since #3696 — it materializes as
+ * `(organization_id, col)`, unique *within* the tenant — while a declared index
+ * is materialized over exactly the columns listed, i.e. platform-wide. Both are
+ * legitimate on their own; together on one column they are never right:
+ *
+ *   - On a tenant-scoped object they CONTRADICT. The stricter one wins
+ *     physically, so the global index enforces uniqueness and the tenant
+ *     composite becomes a constraint nothing can ever trip. One of the two
+ *     intents the author wrote is silently discarded.
+ *   - On a tenancy-less object they are exactly REDUNDANT — both describe the
+ *     same single-column unique index, under the same generated name.
+ *
+ * Tenancy is deliberately NOT inferred here: `organization_id` is injected by
+ * the kernel at registration rather than authored, so an authoring-time guess
+ * would be wrong half the time. The combination is worth flagging either way,
+ * and the message names both readings so the author picks the one they meant.
+ *
+ * A field declared `unique: 'global'` is exempt: it already says
+ * platform-wide, so the declared index restates the same intent rather than
+ * contradicting it (still redundant, but not a silent loss of meaning).
+ *
+ * Advisory. The resulting stack is well-defined — the cost is an intent that
+ * never takes effect, not a broken artifact — so this never fails a build.
+ */
+export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
+  const issues: LintIssue[] = [];
+  if (!Array.isArray(objects) || objects.length === 0) return issues;
+
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
+    if (!obj?.name) continue;
+    const declaredIndexes = Array.isArray(obj.indexes) ? obj.indexes : [];
+    if (declaredIndexes.length === 0) continue;
+
+    // Columns covered by a declared SINGLE-column unique index. A composite
+    // (`['organization_id', 'email']`) is the explicit tenant-scoped spelling —
+    // it agrees with the field-level default rather than fighting it.
+    const singleColumnUniqueIndexes = new Map<string, any>();
+    for (const idx of declaredIndexes) {
+      if (!uniqueDeclared(idx?.unique)) continue;
+      const cols = Array.isArray(idx?.fields) ? idx.fields.filter((f: unknown) => typeof f === 'string') : [];
+      if (cols.length !== 1) continue;
+      if (!singleColumnUniqueIndexes.has(cols[0])) singleColumnUniqueIndexes.set(cols[0], idx);
+    }
+    if (singleColumnUniqueIndexes.size === 0) continue;
+
+    for (const { name, def } of fieldEntries(obj.fields)) {
+      if (!uniqueDeclared(def?.unique)) continue;
+      if (def.unique === 'global') continue; // already says platform-wide — no lost intent
+      const idx = singleColumnUniqueIndexes.get(name);
+      if (!idx) continue;
+      const indexLabel = typeof idx?.name === 'string' && idx.name.trim() ? ` '${idx.name.trim()}'` : '';
+      issues.push({
+        severity: 'warning',
+        rule: UNIQUE_DOUBLE_DECLARATION,
+        message:
+          `"${obj.name}.${name}" declares field-level \`unique: true\` AND a single-column unique index${indexLabel} on the same column. ` +
+          `Since #3696 the field-level form is scoped per tenant — \`(tenant, ${name})\` — while a declared index is materialized ` +
+          `over exactly its \`fields\`, i.e. platform-wide. On a tenant-scoped object the global index wins and the per-tenant ` +
+          `constraint can never be reached; on a tenancy-less object the two are the same index declared twice. Either way one of ` +
+          `the two declarations has no effect.`,
+        path: `objects[${i}]`,
+        fix:
+          `Pick the intent: for platform-wide uniqueness set \`unique: 'global'\` on '${name}' and drop the duplicate index; ` +
+          `for per-tenant uniqueness drop the index (the field-level declaration already builds the tenant composite), ` +
+          `or spell the index out as \`fields: ['organization_id', '${name}']\` if you want it explicit.`,
+      });
+    }
+  }
+  return issues;
+}
+
 // ─── Rule engine ────────────────────────────────────────────────────
 
 /**
@@ -77,7 +163,9 @@ function refOf(def: any): string | undefined {
  * metadata-generation scorer.
  */
 export function lintDataModel(objects: any[]): LintIssue[] {
-  const issues: LintIssue[] = [];
+  // R10 lives in its own exported function so `os build` can run that ONE rule
+  // without pulling in the whole best-practice sweep (#3991).
+  const issues: LintIssue[] = lintUniqueDeclarations(objects);
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
   // Index: parent object name → child relationships pointing at it.

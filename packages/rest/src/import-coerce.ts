@@ -41,6 +41,7 @@ import {
   REFERENCE_VALUE_TYPES,
   isMultiValueField as specIsMultiValueField,
 } from '@objectstack/spec/data';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 import {
   renderValidationMessage,
   type ValidationMessageTranslator,
@@ -124,7 +125,13 @@ export interface CoerceContext {
 /** A per-field coercion failure, shaped like the engine's validation errors. */
 export interface FieldCoerceError {
   field: string;
-  code: string;
+  /**
+   * Which constraint the value violated — the spec's field-level catalog
+   * (ADR-0114). Was a bare `string`, so a typo here reached the wire and the
+   * "shaped like the engine's validation errors" claim above was a comment rather
+   * than a type.
+   */
+  code: FieldErrorCode;
   message: string;
 }
 
@@ -138,7 +145,7 @@ export interface FieldCoerceError {
 function coerceError(
   meta: ExportFieldMeta | undefined,
   field: string,
-  code: string,
+  code: FieldErrorCode,
   messageKey: string,
   value: unknown,
   ctx: CoerceContext,
@@ -465,6 +472,106 @@ export function firstMissingRequiredField(
     if (meta.type === 'autonumber') continue;
     if (REQUIRED_CHECK_SKIP.has(meta.name)) continue;
     if (isBlankValue(data[meta.name])) return meta.name;
+  }
+  return null;
+}
+
+// ── field-constraint pre-check ─────────────────────────────────────
+
+/**
+ * Number field types the engine bound-checks with `min` / `max`, and string
+ * field types it bound-checks with `minLength` / `maxLength`.
+ *
+ * These are the engine's OWN lists (objectql `record-validator.ts`
+ * `validateOne`), deliberately NOT the spec's `NUMERIC_VALUE_TYPES` /
+ * `STRING_VALUE_TYPES` — those are wider (`progress`, `summary`, `color`,
+ * `signature`, …) and the engine leaves their values unchecked. Using the
+ * wider sets here would make the dry run reject rows the real write accepts,
+ * trading a false all-clear for a false alarm.
+ */
+const BOUNDED_NUMBER_TYPES = new Set(['number', 'currency', 'percent', 'rating', 'slider']);
+const BOUNDED_STRING_TYPES = new Set([
+  'text', 'textarea', 'email', 'url', 'phone', 'password', 'markdown', 'html', 'richtext', 'code',
+]);
+
+/**
+ * The first declared bound a coerced row violates, or `null` when every
+ * supplied value is in range.
+ *
+ * Mirrors the numeric-range and string-length rules of the engine's
+ * `validateRecord` — same type applicability, same comparison, same `code` and
+ * `message` text — so the import's dry run predicts the verdict the real write
+ * produces (framework#3956). Before this, a dry run only reported *coercion*
+ * failures (a cell that isn't a number at all), so `-500` in a `min: 0` column
+ * was reported valid and then rejected by the write with
+ * `penalty_amount must be ≥ 0`.
+ *
+ * Applies to CREATE and UPDATE alike: the engine validates every supplied
+ * value on both, and a value the row doesn't carry is skipped here exactly as
+ * `validateOne` skips a missing one.
+ *
+ * NOT a complete mirror of `validateRecord`, and not meant to be — format
+ * checks (email/url/phone), object-level `validations` rules, uniqueness and
+ * the state machine still surface only on the real write. Closing those means
+ * validating through the engine itself rather than growing this copy.
+ */
+export function firstConstraintViolation(
+  data: Record<string, unknown>,
+  metaMap: Map<string, ExportFieldMeta>,
+  // Optional so existing callers keep working; supplied by the runner so a dry
+  // run's verdict reads in the same language as the real rejection (#3957).
+  ctx: Pick<CoerceContext, 'locale' | 'translate'> = {},
+): FieldCoerceError | null {
+  // Mirrors the engine's own rendering — same catalog, same label resolution —
+  // so a predicted violation and the real one are the SAME sentence.
+  const bound = (
+    meta: ExportFieldMeta,
+    code: FieldErrorCode,
+    constraint: Record<string, unknown>,
+  ): FieldCoerceError => ({
+    field: meta.name,
+    code,
+    message: renderValidationMessage(
+      {
+        messageKey: code,
+        label: meta.label?.trim() || meta.name,
+        field: meta.name,
+        params: constraint,
+      },
+      { locale: ctx.locale, translate: ctx.translate },
+    ),
+  });
+  for (const meta of metaMap.values()) {
+    if (meta.system || meta.readonly) continue;
+    if (REQUIRED_CHECK_SKIP.has(meta.name)) continue;
+    const value = data[meta.name];
+    if (isBlankValue(value)) continue; // absent → nothing to bound-check
+    const t = meta.type ?? '';
+
+    if (BOUNDED_NUMBER_TYPES.has(t)) {
+      const n = typeof value === 'number' ? value : Number(value);
+      if (!Number.isFinite(n)) continue; // a non-number is coerceRow's verdict, not ours
+      if (meta.min !== undefined && n < meta.min) {
+        return bound(meta, 'min_value', { min: meta.min });
+      }
+      if (meta.max !== undefined && n > meta.max) {
+        return bound(meta, 'max_value', { max: meta.max });
+      }
+      continue;
+    }
+
+    if (BOUNDED_STRING_TYPES.has(t)) {
+      // `String(value)` matches the engine, which stringifies a non-string
+      // (e.g. a `multiple` text cell joined by the export separator) before
+      // measuring it.
+      const s = typeof value === 'string' ? value : String(value);
+      if (meta.maxLength !== undefined && s.length > meta.maxLength) {
+        return bound(meta, 'max_length', { maxLength: meta.maxLength, actual: s.length });
+      }
+      if (meta.minLength !== undefined && s.length < meta.minLength) {
+        return bound(meta, 'min_length', { minLength: meta.minLength, actual: s.length });
+      }
+    }
   }
   return null;
 }

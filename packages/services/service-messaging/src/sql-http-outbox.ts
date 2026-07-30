@@ -222,12 +222,12 @@ export class SqlHttpOutbox implements IHttpOutbox {
     async redeliver(id: string): Promise<HttpDelivery> {
         const current = (await this.engine.findOne(this.objectName, { where: { id } })) as DeliveryRow | null;
         if (!current) {
-            throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'not_found');
+            throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'RESOURCE_NOT_FOUND');
         }
         if (current.status !== 'success' && current.status !== 'failed' && current.status !== 'dead') {
             throw new HttpRedeliverError(
                 `Delivery row '${id}' is '${current.status}', expected one of: success, failed, dead`,
-                'not_eligible',
+                'DELIVERY_NOT_ELIGIBLE',
             );
         }
         const now = Date.now();
@@ -249,7 +249,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
         );
         const after = (await this.engine.findOne(this.objectName, { where: { id } })) as DeliveryRow | null;
         if (!after || after.status !== 'pending') {
-            throw new HttpRedeliverError(`Delivery row '${id}' state changed during redeliver`, 'not_eligible');
+            throw new HttpRedeliverError(`Delivery row '${id}' state changed during redeliver`, 'DELIVERY_NOT_ELIGIBLE');
         }
         return this.toDelivery(after);
     }

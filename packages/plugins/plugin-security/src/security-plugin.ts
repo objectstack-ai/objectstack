@@ -660,6 +660,49 @@ export class SecurityPlugin implements Plugin {
         // reaches the middleware as a plain `find` and `allowExport` would never
         // be consulted — the REST export route asks HERE before it streams.
         canExport: (object: string, context?: any) => this.canExport(object, context),
+        // [ADR-0111 D2] Super-user WRITE bypass probe — the management-authority
+        // primitive behind `ISharingService.canManageShares`. Explicit
+        // `modifyAllRecords` only (NOT the effective write scope, whose
+        // unmatched-object case fails open to 'org'); fails CLOSED on
+        // resolution errors, principal-less contexts, and on-behalf-of
+        // contexts (no D10 delegator intersection on this path).
+        hasWriteBypass: async (object: string, context?: any): Promise<boolean> => {
+          if (context?.isSystem) return true;
+          if (!context?.userId) return false;
+          if (context?.onBehalfOf?.userId) return false;
+          try {
+            const meta = await this.getObjectSecurityMeta(object);
+            const sets = await this.resolvePermissionSetsForContext(context);
+            return this.permissionEvaluator.hasSuperuserWriteBypass(object, sets, { isPrivate: meta.isPrivate });
+          } catch (e) {
+            this.logger.warn?.(
+              `[security] hasWriteBypass failed for object '${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
+              e instanceof Error ? e : new Error(String(e)),
+            );
+            return false;
+          }
+        },
+        // [ADR-0111 D1 DEPTH] Effective WRITE scope — the DEPTH primitive behind
+        // canManageShares' hierarchy-manager branch. Same evaluator the CRUD
+        // write path uses; fails CLOSED to 'own' on error / principal-less /
+        // on-behalf-of. Returns 'org' for system and for Modify-All holders —
+        // AND for the fail-open unmatched-object case, which is why the sharing
+        // gate treats 'org' from here as non-authoritative on its own.
+        resolveWriteScope: async (object: string, context?: any): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'> => {
+          if (context?.isSystem) return 'org';
+          if (!context?.userId || context?.onBehalfOf?.userId) return 'own';
+          try {
+            const meta = await this.getObjectSecurityMeta(object);
+            const sets = await this.resolvePermissionSetsForContext(context);
+            return this.permissionEvaluator.getEffectiveScope('write', object, sets, { isPrivate: meta.isPrivate });
+          } catch (e) {
+            this.logger.warn?.(
+              `[security] resolveWriteScope failed for object '${object}' (user ${context?.userId ?? 'unknown'}) — narrowing to 'own' (fail-closed)`,
+              e instanceof Error ? e : new Error(String(e)),
+            );
+            return 'own';
+          }
+        },
         // [ADR-0046 §6.7] Effective permission-set NAMES for a caller — the
         // primitive the REST read layer needs to evaluate a permission-set-
         // gated book/doc audience ({ permissionSet: '…' }). Same resolution
@@ -728,7 +771,7 @@ export class SecurityPlugin implements Plugin {
       // form's declared target (set by the rest-server form-submit route). It
       // authorizes ONLY create + the immediate read-back on THAT object — never
       // anything else, and never the anonymous fall-open. This lets public forms
-      // work under secure-by-default (requireAuth) WITHOUT a deployment-configured
+      // work under secure-by-default (anonymous-deny) WITHOUT a deployment-configured
       // `guest_portal`, scoped to exactly the declared object (the field
       // allow-list is enforced at the route; the context is request-scoped).
       const formGrant = opCtx.context?.publicFormGrant;
@@ -2179,10 +2222,21 @@ export class SecurityPlugin implements Plugin {
           ? { sharingReadFilter: (o: string, c: any) => sharing.buildReadFilter(o, c) }
           : {}),
         ...(sharing && typeof sharing.listShares === 'function'
-          ? { listRecordShares: (o: string, rid: string, c: any) => sharing.listShares(o, rid, c) }
+          // [ADR-0111 D5] listShares is now management-gated in the sharing
+          // service, but explain's own caller authorization already ran
+          // (explaining ANOTHER user requires `manage_users` — D12). Read the
+          // stored rows under system context so the record story keeps its
+          // share attribution when the EXPLAINED principal isn't a share
+          // manager — the exact behaviour this binding had before the gate.
+          ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
           : {}),
         ...(sharing && typeof sharing.canEdit === 'function'
           ? { canEditRecord: (o: string, rid: string, c: any) => sharing.canEdit(o, rid, c) }
+          : {}),
+        // [ADR-0111 D3] The narrower delete gate — an edit share opens update
+        // but not delete, so a delete explanation must consult this.
+        ...(sharing && typeof sharing.canDelete === 'function'
+          ? { canDeleteRecord: (o: string, rid: string, c: any) => sharing.canDelete(o, rid, c) }
           : {}),
       },
       { object, operation, context: targetContext, recordId },

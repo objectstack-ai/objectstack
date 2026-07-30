@@ -633,3 +633,62 @@ describe('#3896 — missing criteria never becomes "share every record" (ADR-004
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// [ADR-0111 D6] Sharing-rule administration requires `manage_sharing`.
+// The #3902 widened finding: every /sharing/rules verb ran under
+// SYSTEM_CTX with no caller check, so any signed-in user could define a
+// broad-criteria rule naming themself and evaluate it into org-wide
+// grants. The gate lives in the SERVICE so every caller is covered.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[ADR-0111 D6] sharing-rule management gate', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let rules: SharingRuleService;
+  const MALLORY = { userId: 'mallory', systemPermissions: [] } as any;
+  const RULE_ADMIN = { userId: 'admin', systemPermissions: ['manage_sharing'] } as any;
+  const LEGACY_ADMIN = { userId: 'admin', systemPermissions: ['manage_platform_settings'] } as any;
+
+  const input = {
+    name: 'self_grant',
+    label: 'Self grant',
+    object: 'opportunity',
+    criteria: { amount: { $gt: 0 } },
+    recipientType: 'user' as const,
+    recipientId: 'mallory',
+    accessLevel: 'edit' as const,
+  };
+
+  beforeEach(() => {
+    engine = makeEngine();
+    engine._tables.opportunity = [{ id: 'opp1', amount: 100, owner_id: 'someone' }];
+    rules = new SharingRuleService({ engine: engine as any, sharing: new SharingService({ engine: engine as any }) });
+  });
+
+  it('an ordinary user can neither define, list, get, delete, nor evaluate rules', async () => {
+    await expect(rules.defineRule(input, MALLORY)).rejects.toThrow(/PERMISSION_DENIED/);
+    await expect(rules.listRules({}, MALLORY)).rejects.toThrow(/PERMISSION_DENIED/);
+    await expect(rules.getRule('anything', MALLORY)).rejects.toThrow(/PERMISSION_DENIED/);
+    await expect(rules.deleteRule('anything', MALLORY)).rejects.toThrow(/PERMISSION_DENIED/);
+    await expect(rules.evaluateRule('anything', MALLORY)).rejects.toThrow(/PERMISSION_DENIED/);
+    expect(engine._tables.sys_sharing_rule ?? []).toHaveLength(0);
+  });
+
+  it('manage_sharing authorizes the full surface', async () => {
+    const r = await rules.defineRule(input, RULE_ADMIN);
+    expect(r.id).toBeTruthy();
+    expect((await rules.listRules({}, RULE_ADMIN)).length).toBe(1);
+    await rules.deleteRule(r.id, RULE_ADMIN);
+    expect((await rules.listRules({}, RULE_ADMIN)).length).toBe(0);
+  });
+
+  it('the legacy manage_platform_settings gate is honoured', async () => {
+    const r = await rules.defineRule(input, LEGACY_ADMIN);
+    expect(r.id).toBeTruthy();
+  });
+
+  it('system contexts (boot seeding, hooks, backfills) bypass the gate', async () => {
+    const r = await rules.defineRule(input, { isSystem: true } as any);
+    expect(r.id).toBeTruthy();
+  });
+});

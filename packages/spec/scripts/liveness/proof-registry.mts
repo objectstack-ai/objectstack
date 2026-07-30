@@ -342,8 +342,24 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
       + 'bind.',
   },
   {
+    id: 'scope-depth-write',
+    label: 'Scope-depth write grants',
+    summary:
+      'writeScope widens the owner-set an owner-scoped object accepts EDITS from, independently of '
+      + "readScope: a co-member row can be readable yet not editable (absent writeScope defaults to 'own' "
+      + "under a 'unit' read), 'unit' widens to BU co-members without descending into child BUs, and the "
+      + 'hierarchy seam fails CLOSED to owner-only when the enterprise resolver is absent. Added by the '
+      + '2026-07-30 #3896 security-subset re-verification: the entry was live on two confirmed readers '
+      + 'but was the only scope axis with no runtime proof — its sibling readScope has carried one since '
+      + 'ADR-0054 phase 1.',
+    proofId: 'showcase-scope-depth-write',
+    proofRef: 'packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts#showcase-scope-depth-write',
+    bound: true,
+    ledgerBindings: [{ type: 'permission', path: 'objects.writeScope' }],
+  },
+  {
     id: 'app-tab-permissions',
-    label: 'GET /me/apps + anchor-bindable baseline',
+    label: 'Tab visibility (/me/apps) + anchor-bindable baseline',
     summary:
       '/me/apps used to read `metadata.list(\'app\')` while stack apps live in the ENGINE REGISTRY, '
       + 'returning [] for every principal — leaving `tabPermissions` and `AppSchema.requiredPermissions` '
@@ -352,11 +368,17 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
       + 'every boot and the baseline flowed only through the fallback channel ADR-0090 D5 rejected.',
     proofId: 'me-apps-and-everyone-baseline',
     proofRef: 'packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts#me-apps-and-everyone-baseline',
-    bound: false,
-    ledgerBindings: [],
-    blockedReason:
-      'the properties it enforces (`app.requiredPermissions`, `app.tabPermissions`) belong to the '
-      + '`app` type, which is not yet governed by the ledger (rollout). Bind when `app` lands.',
+    // Bound 2026-07-30 (the #3896 security-subset re-verification). The proof
+    // originally only MENTIONED tabPermissions while exercising the route and
+    // `app.requiredPermissions` — binding then would have been the
+    // owner-anchor/allowTransfer mistake (a proof cited for a property it never
+    // authors). It now authors the property on the PERMISSION-SET side — a set
+    // whose only content is `tabPermissions: { showcase_app: 'hidden' }` drops
+    // the app from /me/apps for its holder, and a second, more-visible grant
+    // wins it back (the tabRank most-visible-wins merge) — which is the
+    // governed surface (`permission.tabPermissions`; `app` remains ungoverned).
+    bound: true,
+    ledgerBindings: [{ type: 'permission', path: 'tabPermissions' }],
   },
   {
     id: 'agent-delegator-intersection',

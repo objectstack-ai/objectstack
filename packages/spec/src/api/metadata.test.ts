@@ -77,14 +77,14 @@ describe('ObjectDefinitionResponseSchema', () => {
   it('should accept optional meta and error fields', () => {
     const result = ObjectDefinitionResponseSchema.parse({
       success: false,
-      error: { code: 'not_found', message: 'Object not found' },
+      error: { code: 'NOT_FOUND', message: 'Object not found' },
       meta: { timestamp: '2025-01-01T00:00:00Z' },
       data: {
         name: 'account',
         fields: {},
       },
     });
-    expect(result.error?.code).toBe('not_found');
+    expect(result.error?.code).toBe('NOT_FOUND');
     expect(result.meta?.timestamp).toBe('2025-01-01T00:00:00Z');
   });
 });
@@ -844,7 +844,7 @@ describe('Cross-Framework Metadata API Contracts', () => {
     it('error response conforms to BaseResponseSchema', () => {
       const response = MetadataItemResponseSchema.safeParse({
         success: false,
-        error: { code: 'not_found', message: 'Object account not found' },
+        error: { code: 'NOT_FOUND', message: 'Object account not found' },
       });
       // This should fail validation because data is required in the schema
       expect(response.success).toBe(false);

@@ -122,6 +122,16 @@ It also removes the sharing-rule access level `full` (#3865): declared as "Full 
 
 Finally it removes agent `tools` (#3894): the legacy inline `{type,name,description}[]` fallback, which the runtime resolved against the FULL tool registry with no surface check — the one seam that broke ADR-0064's "an agent reaches exactly its surface-compatible skills' tools, nothing falls through to the global registry". Unlike the renames above this has NO lossless target: each entry has to become a reference inside a skill, which is a human decision about which skill. The conversion therefore drops the dead key (the runtime stopped reading it in cloud#910, so it already contributes nothing) and emits a notice per agent so the author knows where capability must be re-declared; the schema tombstones the key with a fix-it error naming `skills`.
 
+Beyond those spec-surface removals, it graduates the seven flow-node config key aliases the executors still tolerated (#3796): the CRUD nodes' `object` (use `objectName`) — the last tenant of the `readAliasedConfig` executor shim, which is deleted with it — plus the six open-coded fallbacks that never went through that shim: notify `to`/`subject`/`body`/`url` (use `recipients`/`title`/`message`/`actionUrl`) and script `functionName`/`input` (use `function`/`inputs`). All are pure key renames with unchanged values and replay losslessly. Like the sharing-rule access level above they keep a load-path acceptance window: none carried a prior deprecation warning, and `FlowNodeSchema.config` is an unconstrained record, so no schema tombstone can reject them — the conversion layer is the only seam that can declare, convert, and retire them.
+
+And it removes the RLS-policy key `priority` (#3896 security audit): promised "conflict resolution" that cannot exist, because applicable policies OR-combine (most permissive wins) — there is never a conflict to order, and nothing ever read the key (call graph closed across the collection site, the projection round-trip and the compiler). A pure lossless delete: outcomes are identical with or without it; the schema tombstones the key with the same prescription.
+
+The same close-out retires the four inert tool authoring keys (`category`, `permissions`, `active`, `builtIn`): none is part of AIToolDefinition and no execution path read them. Two were misleading in the dangerous direction — `permissions` promised an invocation gate nothing enforced, and `active: false` read as "withdrawn" while the tool kept reaching the LLM tool set. Lossless deletes; the strict ToolSchema rejects each with its prescription.
+
+ADR-0113 splits the `required` tri-binding: post-17, `required` is ONLY the write-time contract (insert must provide; update may not null out; legacy null rows rest), and the physical NOT NULL is the explicit `storage.notNull`. The `field-required-notnull-explicit` conversion preserves every pre-17 source verbatim-in-meaning by stamping `storage.notNull: true` onto each required field — under the old semantics that column WAS created NOT NULL, so the rewrite writes down what the text already meant. Migration-chain-only (retired from the load path): this is a default flip, not a rename, and a loader that auto-applied it would stamp the constraint onto 17-authored sources that deliberately omit it.
+
+On the wire contract it also retires the `/analytics/query` request ENVELOPE (#3878): `AnalyticsQueryRequestSchema` used to describe `{ cube, query: {...}, format }` — the dialect of the retired degraded analytics shim (#3891) that the real engine never understood (an envelope body inferred a column-less cube and died as an SQL syntax error). The canonical request body is now the BARE AnalyticsQuery — `cube` + `measures` at the top level — which is what every real caller already sends; the schema tombstones `query`/`format`, and the dispatcher entry validates bodies and answers 400 with the prescription. No stored metadata carries this shape (it was HTTP-only), so the change is two semantic TODOs for API callers rather than a stack conversion.
+
 ### Mechanical (applied for you)
 
 | Conversion | Surface | Change | Load window |
@@ -131,6 +141,21 @@ Finally it removes agent `tools` (#3894): the legacy inline `{type,name,descript
 | `agent-knowledge-topics-to-sources` | `agent.knowledge.topics` | agent knowledge key 'topics' → 'sources' (the deprecated RAG-source alias, #1891) | retired — `migrate meta` only |
 | `agent-tools-to-skills` | `agent.tools` | agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894) | retired — `migrate meta` only |
 | `sharing-rule-access-level-full-to-edit` | `sharingRule.accessLevel` | sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`) | live — protocol 17 loader accepts the old shape |
+| `flow-node-crud-object-alias` | `flow.node.config.objectName` | CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation) | live — protocol 17 loader accepts the old shape |
+| `flow-node-notify-config-aliases` | `flow.node.notify.config` | notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045) | live — protocol 17 loader accepts the old shape |
+| `flow-node-script-config-aliases` | `flow.node.script.config` | script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796) | live — protocol 17 loader accepts the old shape |
+| `permission-rls-priority-removed` | `permission.rowLevelSecurity.priority` | RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome) | retired — `migrate meta` only |
+| `tool-inert-authoring-keys-removed` | `tool.category / tool.permissions / tool.active / tool.builtIn` | tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing) | retired — `migrate meta` only |
+| `field-required-notnull-explicit` | `object.fields.*.required / object.fields.*.storage.notNull` | required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract) | retired — `migrate meta` only |
+
+### Semantic (delegated to you, with acceptance criteria)
+
+- **`analytics-query-request-envelope-retired`** — `api.analyticsQueryRequest.query` → bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)
+  - Why not automatic: The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves.
+  - Done when: Every /analytics/query and /analytics/sql call sends the bare AnalyticsQuery shape and succeeds; no request answers 400 VALIDATION_FAILED with the envelope prescription.
+- **`analytics-query-request-format-retired`** — `api.analyticsQueryRequest.format` → (removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)
+  - Why not automatic: The `format` key was declared but never implemented (declared ≠ enforced): every response is the JSON envelope regardless of the requested value, so there is no behaviour to preserve and nothing stored to rewrite.
+  - Done when: No /analytics/query or /analytics/sql call sends `format`; exports go through the export surface.
 
 ---
 

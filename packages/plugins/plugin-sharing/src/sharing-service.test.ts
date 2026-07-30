@@ -209,8 +209,9 @@ describe('SharingService.buildReadFilter', () => {
   });
 
   it('returns owner OR shared-record filter when grants exist', async () => {
-    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'alice' }, { userId: 'admin' });
-    await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'alice', accessLevel: 'edit' }, { userId: 'admin' });
+    // Setup grants run as system — grant authorization has its own suite below.
+    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'alice' }, { isSystem: true });
+    await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'alice', accessLevel: 'edit' }, { isSystem: true });
     const f: any = await svc.buildReadFilter('account', { userId: 'alice' });
     expect(f.$or).toBeDefined();
     expect(f.$or[0]).toEqual({ owner_id: 'alice' });
@@ -260,12 +261,12 @@ describe('SharingService.canEdit', () => {
   });
 
   it('returns false for read-only share', async () => {
-    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'read' }, { userId: 'admin' });
+    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'read' }, { isSystem: true });
     expect(await svc.canEdit('account', 'a1', { userId: 'bob' })).toBe(false);
   });
 
   it('returns true for edit share', async () => {
-    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' }, { userId: 'admin' });
+    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' }, { isSystem: true });
     expect(await svc.canEdit('account', 'a1', { userId: 'bob' })).toBe(true);
   });
 
@@ -297,12 +298,73 @@ describe('SharingService.canEdit', () => {
   });
 });
 
+describe('[ADR-0111 D3] SharingService.canDelete — the verb boundary', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+  beforeEach(() => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,
+      lead: LEAD_SCHEMA,
+      task: EXPLICIT_PUBLIC_SCHEMA,
+      note: ORPHAN_SCHEMA,
+      sys_record_share: { name: 'sys_record_share' },
+    });
+    svc = new SharingService({ engine });
+    engine._tables.account = [
+      { id: 'a1', name: 'Acme', owner_id: 'alice' },
+      { id: 'a2', name: 'Beta', owner_id: 'bob' },
+    ];
+  });
+
+  it('system context, public objects, and owner-less objects all allow delete (matches canEdit)', async () => {
+    expect(await svc.canDelete('account', 'a1', { isSystem: true })).toBe(true);
+    expect(await svc.canDelete('task', 'anything', { userId: 'carol' })).toBe(true);
+    engine._tables.note = [{ id: 'n1', body: 'x' }];
+    expect(await svc.canDelete('note', 'n1', { userId: 'carol' })).toBe(true);
+  });
+
+  it('the record owner may delete', async () => {
+    expect(await svc.canDelete('account', 'a1', { userId: 'alice' })).toBe(true);
+  });
+
+  it('a non-owner without ownership may NOT delete', async () => {
+    expect(await svc.canDelete('account', 'a1', { userId: 'bob' })).toBe(false);
+  });
+
+  it('an EDIT share grants canEdit but NOT canDelete', async () => {
+    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' }, { isSystem: true });
+    expect(await svc.canEdit('account', 'a1', { userId: 'bob' })).toBe(true);
+    expect(await svc.canDelete('account', 'a1', { userId: 'bob' })).toBe(false);
+  });
+
+  it("a legacy 'full' share likewise grants edit but not delete", async () => {
+    engine._tables.sys_record_share = [{
+      id: 'shr_legacy', object_name: 'account', record_id: 'a1',
+      recipient_type: 'user', recipient_id: 'bob', access_level: 'full',
+    }];
+    expect(await svc.canEdit('account', 'a1', { userId: 'bob' })).toBe(true);
+    expect(await svc.canDelete('account', 'a1', { userId: 'bob' })).toBe(false);
+  });
+
+  it('Modify All (writeScope=org) may delete a record it does not own', async () => {
+    expect(await svc.canDelete('account', 'a1', { userId: 'admin', __writeScope: 'org' } as any)).toBe(true);
+  });
+
+  it('a principal-less context may not delete a private record', async () => {
+    expect(await svc.canDelete('account', 'a1', {})).toBe(false);
+  });
+});
+
 describe('SharingService.grant / listShares / revoke', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: SharingService;
   beforeEach(() => {
     engine = makeFakeEngine({ account: ACCOUNT_SCHEMA, sys_record_share: {} });
     svc = new SharingService({ engine });
+    // [ADR-0111 D1] admin OWNS a1 — the grants below exercise the legitimate
+    // owner path through the management gate (unauthorized paths have their
+    // own suite below).
+    engine._tables.account = [{ id: 'a1', name: 'Acme', owner_id: 'admin' }];
   });
 
   it('creates a new grant on first call', async () => {
@@ -447,18 +509,76 @@ describe('buildSharingMiddleware (engine integration)', () => {
     expect(nextCalled).toBe(true);
   });
 
-  it('allows delete after explicit edit grant', async () => {
-    await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'alice', accessLevel: 'edit' }, { userId: 'admin' });
+  // [ADR-0111 D3] The verb boundary: an edit-level share opens UPDATE but NOT
+  // delete. alice holds an edit share on a2 (owned by bob) — update passes,
+  // delete is refused (delete needs ownership / write depth / Modify All).
+  it('an edit share allows update but NOT delete (ADR-0111 D3)', async () => {
+    await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'alice', accessLevel: 'edit' }, { isSystem: true });
+    const mw = buildSharingMiddleware(svc);
+
+    let updateNext = false;
+    await mw(
+      { object: 'account', operation: 'update', data: { id: 'a2', name: 'X' }, context: { userId: 'alice' } } as any,
+      async () => { updateNext = true; },
+    );
+    expect(updateNext).toBe(true);
+
+    await expect(
+      mw(
+        { object: 'account', operation: 'delete', options: { where: { id: 'a2' } }, context: { userId: 'alice' } } as any,
+        async () => {},
+      ),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 });
+  });
+
+  it('the record owner may delete their own record', async () => {
+    const mw = buildSharingMiddleware(svc);
+    let nextCalled = false;
+    await mw(
+      { object: 'account', operation: 'delete', options: { where: { id: 'a1' } }, context: { userId: 'alice' } } as any,
+      async () => { nextCalled = true; },
+    );
+    expect(nextCalled).toBe(true);
+  });
+
+  it('Modify All (writeScope=org) may delete a record it does not own', async () => {
+    const mw = buildSharingMiddleware(svc);
+    let nextCalled = false;
+    await mw(
+      { object: 'account', operation: 'delete', options: { where: { id: 'a2' } }, context: { userId: 'admin', __writeScope: 'org' } } as any,
+      async () => { nextCalled = true; },
+    );
+    expect(nextCalled).toBe(true);
+  });
+
+  it('bulk delete scopes to owned rows ALONE — an edit share does not widen it (ADR-0111 D3)', async () => {
+    await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'bob', accessLevel: 'edit' }, { isSystem: true });
     const mw = buildSharingMiddleware(svc);
     const ctx: any = {
       object: 'account',
       operation: 'delete',
-      options: { where: { id: 'a2' } },
-      context: { userId: 'alice' },
+      options: { multi: true, where: {} },
+      ast: {},
+      context: { userId: 'bob' },
     };
-    let nextCalled = false;
-    await mw(ctx, async () => { nextCalled = true; });
-    expect(nextCalled).toBe(true);
+    await mw(ctx, async () => {});
+    // bob's edit share on a2 widens a bulk UPDATE but NOT a bulk delete.
+    expect(ctx.ast.where).toEqual({ owner_id: 'bob' });
+  });
+
+  it('bulk update DOES widen by the edit share (contrast with delete)', async () => {
+    await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'bob', accessLevel: 'edit' }, { isSystem: true });
+    const mw = buildSharingMiddleware(svc);
+    const ctx: any = {
+      object: 'account',
+      operation: 'update',
+      options: { multi: true, where: {} },
+      ast: {},
+      data: { status: 'x' },
+      context: { userId: 'bob' },
+    };
+    await mw(ctx, async () => {});
+    expect(ctx.ast.where).toEqual({ $or: [{ owner_id: 'bob' }, { id: { $in: ['a2'] } }] });
   });
 
   it('does not block insert', async () => {
@@ -518,7 +638,7 @@ describe('buildSharingMiddleware (engine integration)', () => {
   });
 
   it('bulk update: edit-shared records widen the editable set', async () => {
-    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' }, { userId: 'admin' });
+    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' }, { isSystem: true });
     const mw = buildSharingMiddleware(svc);
     const ctx: any = {
       object: 'account',
@@ -576,5 +696,362 @@ describe('buildSharingMiddleware (engine integration)', () => {
     };
     await mw(ctx, async () => {});
     expect(ctx.ast.where).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// [ADR-0111] Share-management authority — the #3902 reproduction.
+// mallory: an ordinary signed-in user with no grants of any kind.
+// alice:   owner of account a1.  admin: holds Modify All via the probe.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[ADR-0111 D1] SharingService.canManageShares', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  beforeEach(() => {
+    engine = makeFakeEngine({ account: ACCOUNT_SCHEMA, sys_record_share: {} });
+    engine._tables.account = [{ id: 'a1', name: 'Acme', owner_id: 'alice' }];
+  });
+
+  it('system context manages everything', async () => {
+    const svc = new SharingService({ engine });
+    expect(await svc.canManageShares('account', 'a1', { isSystem: true })).toBe(true);
+  });
+
+  it('the record owner manages their record', async () => {
+    const svc = new SharingService({ engine });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'alice' })).toBe(true);
+  });
+
+  it('a non-owner without Modify All does NOT manage (fail closed, no security plugin)', async () => {
+    const svc = new SharingService({ engine });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'mallory' })).toBe(false);
+  });
+
+  it('Modify All Data (security probe) manages a record it does not own', async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({ hasWriteBypass: async () => true }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'admin' })).toBe(true);
+  });
+
+  it('a throwing probe fails CLOSED to deny', async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({ hasWriteBypass: async () => { throw new Error('boom'); } }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'admin' })).toBe(false);
+  });
+
+  it('a missing record and a principal-less context both deny', async () => {
+    const svc = new SharingService({ engine });
+    expect(await svc.canManageShares('account', 'nope', { userId: 'alice' })).toBe(false);
+    expect(await svc.canManageShares('account', 'a1', {})).toBe(false);
+  });
+
+  // ── [ADR-0111 D1 DEPTH] hierarchy-manager authority ──────────────────
+  // a1 is owned by alice. bob is alice's manager (own_and_reports covers alice);
+  // carol is an unrelated peer. The enterprise resolver is stubbed.
+  it('a hierarchy manager whose write DEPTH covers the owner may manage the record', async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false,
+        resolveWriteScope: async () => 'own_and_reports',
+      }),
+      hierarchyResolver: () => ({
+        // bob manages alice; nobody else in bob's reports.
+        resolveOwnerIds: async (ctx: any) => ctx.userId === 'bob' ? ['bob', 'alice'] : [ctx.userId],
+      }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'bob' })).toBe(true);
+  });
+
+  it('a peer with the same DEPTH scope but NOT covering the owner is denied', async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false,
+        resolveWriteScope: async () => 'unit',
+      }),
+      hierarchyResolver: () => ({
+        resolveOwnerIds: async (ctx: any) => [ctx.userId], // carol's unit owner-set excludes alice
+      }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'carol' })).toBe(false);
+  });
+
+  it("a probe reporting 'org' does NOT widen management (fail-open guard — only Modify All via hasWriteBypass grants org)", async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false, // NOT a real Modify-All holder
+        resolveWriteScope: async () => 'org', // the fail-open unmatched-object default
+      }),
+      // A resolver that would (wrongly) return everyone if consulted.
+      hierarchyResolver: () => ({ resolveOwnerIds: async () => ['alice', 'bob', 'carol'] }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'stranger' })).toBe(false);
+  });
+
+  it("'own' scope adds nothing beyond the ownership check (non-owner denied)", async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false,
+        resolveWriteScope: async () => 'own',
+      }),
+      hierarchyResolver: () => ({ resolveOwnerIds: async (ctx: any) => [ctx.userId] }),
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'mallory' })).toBe(false);
+  });
+
+  it('DEPTH branch needs the enterprise resolver — a manager scope with no resolver falls back to owner-only', async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => false,
+        resolveWriteScope: async () => 'unit',
+      }),
+      // No hierarchyResolver → resolveOwnerScopeIds fails closed to [me], which
+      // excludes alice, so bob cannot manage alice's record.
+    });
+    expect(await svc.canManageShares('account', 'a1', { userId: 'bob' })).toBe(false);
+  });
+});
+
+describe('[ADR-0111 D1/D4/D5] the #3902 Mallory reproduction', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+  beforeEach(() => {
+    engine = makeFakeEngine({ account: ACCOUNT_SCHEMA, sys_record_share: {} });
+    svc = new SharingService({ engine });
+    engine._tables.account = [{ id: 'a1', name: 'Acme', owner_id: 'alice' }];
+  });
+
+  it('① Mallory cannot revoke a share alice granted (was: 204, silent revoke)', async () => {
+    const share = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'colleague', accessLevel: 'edit' },
+      { userId: 'alice' },
+    );
+    await expect(
+      svc.revoke(share.id, { userId: 'mallory' }, { object: 'account', recordId: 'a1' }),
+    ).rejects.toThrow(/PERMISSION_DENIED/);
+    expect(engine._tables.sys_record_share.length).toBe(1); // still there
+    // alice (owner) still can — symmetric with grant.
+    await svc.revoke(share.id, { userId: 'alice' }, { object: 'account', recordId: 'a1' });
+    expect(engine._tables.sys_record_share.length).toBe(0);
+  });
+
+  it('② Mallory cannot enumerate the shares on alice\'s record (was: 200, full list)', async () => {
+    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'colleague' }, { userId: 'alice' });
+    await expect(
+      svc.listShares('account', 'a1', { userId: 'mallory' }),
+    ).rejects.toThrow(/PERMISSION_DENIED/);
+    // The owner keeps the list.
+    expect((await svc.listShares('account', 'a1', { userId: 'alice' })).length).toBe(1);
+  });
+
+  it('③ Mallory cannot grant herself access (was: 201, row persisted with granted_by=mallory)', async () => {
+    await expect(
+      svc.grant(
+        { object: 'account', recordId: 'a1', recipientId: 'mallory', accessLevel: 'edit' },
+        { userId: 'mallory' },
+      ),
+    ).rejects.toThrow(/PERMISSION_DENIED/);
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  it('missing/invisible record reads as NOT_FOUND, not as a permission verdict', async () => {
+    await expect(
+      svc.listShares('account', 'ghost', { userId: 'mallory' }),
+    ).rejects.toThrow(/NOT_FOUND/);
+  });
+});
+
+describe('[ADR-0111 D4] revoke ownership + source validation', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+  beforeEach(() => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,
+      lead: LEAD_SCHEMA,
+      sys_record_share: {},
+    });
+    svc = new SharingService({ engine });
+    engine._tables.account = [{ id: 'a1', owner_id: 'alice' }];
+    engine._tables.lead = [{ id: 'l1', owner_id: 'alice' }];
+  });
+
+  it('a share id cannot be revoked through an unrelated record path (scope mismatch → NOT_FOUND)', async () => {
+    const share = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob' },
+      { userId: 'alice' },
+    );
+    await expect(
+      svc.revoke(share.id, { userId: 'alice' }, { object: 'lead', recordId: 'l1' }),
+    ).rejects.toThrow(/NOT_FOUND/);
+    expect(engine._tables.sys_record_share.length).toBe(1);
+  });
+
+  it('a rule-materialised share refuses manual revoke (CONFLICT — the reconcile would resurrect it)', async () => {
+    engine._tables.sys_record_share = [{
+      id: 'shr_rule', object_name: 'account', record_id: 'a1',
+      recipient_type: 'user', recipient_id: 'bob', access_level: 'read',
+      source: 'rule', source_id: 'srule_1',
+    }];
+    await expect(
+      svc.revoke('shr_rule', { userId: 'alice' }, { object: 'account', recordId: 'a1' }),
+    ).rejects.toThrow(/CONFLICT/);
+    // The system path (rule reconciliation) still deletes by id.
+    await svc.revoke('shr_rule', { isSystem: true });
+    expect(engine._tables.sys_record_share.length).toBe(0);
+  });
+
+  it('a missing share id is NOT_FOUND for a user, a no-op for system', async () => {
+    await expect(
+      svc.revoke('shr_ghost', { userId: 'alice' }, { object: 'account', recordId: 'a1' }),
+    ).rejects.toThrow(/NOT_FOUND/);
+    await svc.revoke('shr_ghost', { isSystem: true }); // no throw
+  });
+});
+
+describe('[ADR-0111 D7] no inert grants', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+  beforeEach(() => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,
+      whiteboard: CANON_PUBLIC_RW_SCHEMA,
+      note: ORPHAN_SCHEMA,
+      detail_item: {
+        name: 'detail_item',
+        sharingModel: 'controlled_by_parent',
+        fields: { id: {}, owner_id: {} },
+      },
+      sys_record_share: {},
+    });
+    svc = new SharingService({ engine });
+    engine._tables.account = [{ id: 'a1', owner_id: 'alice' }];
+    engine._tables.whiteboard = [{ id: 'w1', owner_id: 'alice' }];
+    engine._tables.note = [{ id: 'n1' }];
+    engine._tables.detail_item = [{ id: 'd1', owner_id: 'alice' }];
+  });
+
+  it('refuses non-user recipient types instead of persisting rows no gate reads', async () => {
+    for (const recipientType of ['group', 'position', 'unit_and_subordinates', 'guest'] as const) {
+      await expect(
+        svc.grant(
+          { object: 'account', recordId: 'a1', recipientId: 'g1', recipientType: recipientType as any },
+          { userId: 'alice' },
+        ),
+      ).rejects.toThrow(/VALIDATION_FAILED/);
+    }
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  it('refuses a grant on a public object (no gate would ever consult it)', async () => {
+    await expect(
+      svc.grant({ object: 'whiteboard', recordId: 'w1', recipientId: 'bob' }, { userId: 'alice' }),
+    ).rejects.toThrow(/SHARING_NOT_ENABLED/);
+  });
+
+  it('refuses a grant on an owner-less object', async () => {
+    await expect(
+      svc.grant({ object: 'note', recordId: 'n1', recipientId: 'bob' }, { userId: 'alice' }),
+    ).rejects.toThrow(/SHARING_NOT_ENABLED/);
+  });
+
+  it('refuses a grant on a controlled_by_parent detail (share the master instead)', async () => {
+    await expect(
+      svc.grant({ object: 'detail_item', recordId: 'd1', recipientId: 'bob' }, { userId: 'alice' }),
+    ).rejects.toThrow(/SHARING_NOT_ENABLED.*master/);
+  });
+
+  it('refuses a grant on a bypass object', async () => {
+    await expect(
+      svc.grant({ object: 'sys_user', recordId: 'u1', recipientId: 'bob' }, { userId: 'alice' }),
+    ).rejects.toThrow(/SHARING_NOT_ENABLED/);
+  });
+
+  it('a manual grant coexists with a rule-materialised row instead of clobbering it', async () => {
+    engine._tables.sys_record_share = [{
+      id: 'shr_rule', object_name: 'account', record_id: 'a1',
+      recipient_type: 'user', recipient_id: 'bob', access_level: 'read',
+      source: 'rule', source_id: 'srule_1',
+    }];
+    const manual = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' },
+      { userId: 'alice' },
+    );
+    expect(manual.id).not.toBe('shr_rule');
+    expect(engine._tables.sys_record_share.length).toBe(2);
+    const rule = engine._tables.sys_record_share.find(r => r.id === 'shr_rule');
+    expect(rule?.source).toBe('rule'); // untouched
+  });
+});
+
+describe('[ADR-0111 D5] sys_record_share read self-scope (middleware)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+  beforeEach(() => {
+    engine = makeFakeEngine({ account: ACCOUNT_SCHEMA, sys_record_share: {} });
+    svc = new SharingService({ engine });
+  });
+
+  const findCtx = (context: any): any => ({
+    object: 'sys_record_share',
+    operation: 'find',
+    ast: {},
+    context,
+  });
+
+  it('a plain user is scoped to rows that NAME them (recipient or grantor)', async () => {
+    const mw = buildSharingMiddleware(svc);
+    const ctx = findCtx({ userId: 'mallory', systemPermissions: [] });
+    await mw(ctx, async () => {});
+    expect(ctx.ast.where).toEqual({
+      $or: [{ recipient_id: 'mallory' }, { granted_by: 'mallory' }],
+    });
+  });
+
+  it('manage_sharing (and the legacy manage_platform_settings) keeps the tenant-wide list', async () => {
+    const mw = buildSharingMiddleware(svc);
+    for (const cap of ['manage_sharing', 'manage_platform_settings']) {
+      const ctx = findCtx({ userId: 'admin', systemPermissions: [cap] });
+      await mw(ctx, async () => {});
+      expect(ctx.ast.where).toBeUndefined();
+    }
+  });
+
+  it('a principal-less caller sees nothing (deny-all)', async () => {
+    const mw = buildSharingMiddleware(svc);
+    const ctx = findCtx({});
+    await mw(ctx, async () => {});
+    expect(ctx.ast.where).toEqual({ id: '__deny_all__' });
+  });
+
+  it('system context is untouched', async () => {
+    const mw = buildSharingMiddleware(svc);
+    const ctx = findCtx({ isSystem: true });
+    await mw(ctx, async () => {});
+    expect(ctx.ast.where).toBeUndefined();
+  });
+
+  it('composes with a caller-provided filter instead of replacing it', async () => {
+    const mw = buildSharingMiddleware(svc);
+    const ctx: any = {
+      object: 'sys_record_share',
+      operation: 'find',
+      ast: { where: { object_name: 'account' } },
+      context: { userId: 'bob', systemPermissions: [] },
+    };
+    await mw(ctx, async () => {});
+    expect(ctx.ast.where).toEqual({
+      $and: [
+        { object_name: 'account' },
+        { $or: [{ recipient_id: 'bob' }, { granted_by: 'bob' }] },
+      ],
+    });
   });
 });

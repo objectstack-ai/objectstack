@@ -52,7 +52,7 @@ describe('runRegisterSamlProviderFromForm (ADR-0069 P3)', () => {
     const handle = vi.fn();
     const res = await runRegisterSamlProviderFromForm(handle, makeReq({ providerId: 'x', domain: 'acme.com' }));
     expect(res.status).toBe(400);
-    expect(res.body.error?.code).toBe('invalid_request');
+    expect(res.body.error?.code).toBe('INVALID_REQUEST');
     expect(handle).not.toHaveBeenCalled();
   });
 
@@ -62,7 +62,7 @@ describe('runRegisterSamlProviderFromForm (ADR-0069 P3)', () => {
       providerId: 'p', issuer: 'i', domain: 'd.com', entryPoint: 'e', cert: 'c',
     }));
     expect(res.status).toBe(400);
-    expect(res.body.error?.code).toBe('saml_register_failed');
+    expect(res.body.error?.code).toBe('SAML_REGISTER_FAILED');
     expect(res.body.error?.message).toBe('bad cert');
   });
 });

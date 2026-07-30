@@ -7,9 +7,10 @@ import net from 'net';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
+import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from '../utils/storage-driver.js';
-import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, resolveSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
@@ -655,7 +656,10 @@ export default class Serve extends Command {
           // can later install marketplace apps at runtime.
           const { createDefaultHostConfig } = await import('@objectstack/runtime');
           const bootResult = await createDefaultHostConfig({ requireArtifact: !useEmptyBoot, dev: isDev });
-          config = { ...originalConfig, ...bootResult } as any;
+          // [#4002] `api` merges per key — see mergeBootConfig. A shallow spread
+          // let the boot builder's two scoping keys wipe the author's whole `api`
+          // block, silently dropping `requireAuth` / `enforceProjectMembership`.
+          config = mergeBootConfig(originalConfig as any, bootResult as any) as any;
         } else if (resolvedMode === 'standalone') {
           const { createStandaloneStack } = await import('@objectstack/runtime');
           // Anchor the default sqlite database under the project folder
@@ -669,7 +673,8 @@ export default class Serve extends Command {
             dev: isDev,
           };
           const bootResult = await createStandaloneStack(standaloneInput);
-          config = { ...originalConfig, ...bootResult } as any;
+          // [#4002] Per-key `api` merge — see mergeBootConfig.
+          config = mergeBootConfig(originalConfig as any, bootResult as any) as any;
         } else {
           throw new Error(
             `Boot mode '${resolvedMode}' is not available in the open-core CLI.\n`
@@ -726,22 +731,16 @@ export default class Serve extends Command {
       }
       // Pinyin search recall (#2486): locale-gated platform capability. When
       // `OS_SEARCH_PINYIN_ENABLED` is unset, the default derives from the
-      // stack's configured locales (any `zh-*` → on). This is the ONE place
-      // that sees the stack config, so the resolved decision is stamped back
-      // into the env var — every later consumer (each engine's SchemaRegistry
-      // provisioning the `__search` companion column, the plugin's own gate)
-      // reads the same answer via the no-arg `resolveSearchPinyinEnabled()`.
-      {
-        const i18nCfg = (config as any).i18n ?? {};
-        const configuredLocales = [
-          i18nCfg.defaultLocale,
-          i18nCfg.fallbackLocale,
-          ...(Array.isArray(i18nCfg.supportedLocales) ? i18nCfg.supportedLocales : []),
-        ].filter((l: unknown): l is string => typeof l === 'string');
-        if (resolveSearchPinyinEnabled({ locales: configuredLocales })) {
-          process.env.OS_SEARCH_PINYIN_ENABLED = 'true';
-          if (!requires.includes('pinyin-search')) requires.push('pinyin-search');
-        }
+      // stack's configured locales (any `zh-*` → on), and the resolved
+      // decision is stamped back into the env var — every later consumer
+      // (each engine's SchemaRegistry provisioning the `__search` companion
+      // column, the plugin's own gate) reads the same answer via the no-arg
+      // `resolveSearchPinyinEnabled()`. The shared `stampSearchPinyinEnabled`
+      // helper is also what `createStandaloneStack` stamps from the compiled
+      // artifact, so serve/dev and `os migrate plan`/`apply` cannot compute
+      // different schema views of the same source tree (#3955).
+      if (stampSearchPinyinEnabled((config as any).i18n)) {
+        if (!requires.includes('pinyin-search')) requires.push('pinyin-search');
       }
       // Default capability slate — every preset except `minimal` gets the
       // foundational services (queue + job + cache + settings + email +
@@ -1729,26 +1728,34 @@ export default class Serve extends Command {
         // (env-native auth IS the membership — ADR-0024 D9) by setting
         // `api.enforceProjectMembership: false`. Undefined → dispatcher default.
         const enforceProjectMembership = apiConfig.enforceProjectMembership;
-        // `requireAuth: true` rejects anonymous requests on `/api/v1/data/*`
-        // with HTTP 401 before they reach ObjectQL. The platform default is
-        // now secure-by-default (ADR-0056 D2): deny anonymous. The CLI keeps
-        // one deliberate carve-out — a stack with NO `auth` tier has no way
-        // to authenticate anyone, so denying would brick its data API
-        // entirely; such auth-less playgrounds get an EXPLICIT `false`
-        // (fail-open), which the REST plugin surfaces with a boot warning.
-        // Apps can always override via stack `api.requireAuth`.
-        // Auth availability = tier auto-registers it OR the stack mounts
-        // AuthPlugin explicitly (hasAuthPlugin, computed above). Keying only on
-        // the tier would hand an explicit fail-open to a stack that ships auth
-        // via `plugins:` under a minimal tier set — re-opening the very hole
-        // the flip closes. Only a stack with NO auth at all gets the carve-out.
-        const requireAuth = apiConfig.requireAuth
-          ?? ((tierEnabled('auth') || hasAuthPlugin) ? true : false);
+        // [#3963] Anonymous access to object data is denied unconditionally —
+        // there is no `api.requireAuth` opt-out any more (auth is a kernel
+        // concern; every legitimately session-less surface derives its own narrow
+        // authorization from a declaration instead).
+        //
+        // The CLI used to hand an EXPLICIT fail-open to a stack with no auth at
+        // all, reasoning that nobody could authenticate against it so denying
+        // would brick its data API. Under A1 that inverts the conclusion: a stack
+        // with no auth has no security model, so it must not serve a data API —
+        // and it should say so at boot instead of quietly serving object data to
+        // the internet. Auth availability = the tier auto-registers it OR the
+        // stack mounts AuthPlugin explicitly.
+        if (flags.server && !(tierEnabled('auth') || hasAuthPlugin)) {
+          throw new Error(
+            'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
+            + 'data is always denied (#3963), which would leave the data API unusable.\n'
+            + 'Fix it one of two ways:\n'
+            + `  • enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`);\n`
+            + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
+            + "Publishing a genuinely public surface does not need anonymous data access: use a public form "
+            + "view, a share link, or `book.audience: 'public'`.",
+          );
+        }
 
         try {
           const { createRestApiPlugin } = await import('@objectstack/rest');
           await kernel.use(
-            createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution, requireAuth } } as any }),
+            createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
           );
           trackPlugin('RestAPI');
         } catch (e: any) {
@@ -1768,9 +1775,6 @@ export default class Serve extends Command {
             createDispatcherPlugin({
               scoping: { enableProjectScoping, projectResolution },
               enforceProjectMembership,
-              // Keep the dispatcher's `auth: true` service routes (AI) in
-              // lockstep with the REST `/data` gate above — same `requireAuth`.
-              requireAuth,
               observability,
             }),
           );

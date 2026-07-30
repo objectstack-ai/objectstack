@@ -170,6 +170,18 @@ export interface ShareLinkServiceOptions {
    * without `publicSharing.enabled=true` are rejected with 422.
    */
   permissive?: boolean;
+  /**
+   * [ADR-0111 D8] Late-bound record-share management probe (the sharing
+   * service's `canManageShares`). Lets a record's OWNER / Modify-All admin
+   * revoke a link someone else minted on their record — not just the link's
+   * creator. Absent → only the creator (and system) may revoke, the pre-D8
+   * behaviour, so a deployment without the sharing service degrades safely.
+   */
+  canManageShares?: (
+    object: string,
+    recordId: string,
+    context: ShareLinkExecutionContext,
+  ) => Promise<boolean>;
 }
 
 /**
@@ -186,12 +198,18 @@ export class ShareLinkService implements IShareLinkService {
   private readonly permissive: boolean;
   private readonly hashPassword: (plain: string) => Promise<string>;
   private readonly verifyPassword: (plain: string, hash: string) => Promise<boolean>;
+  private readonly canManageShares?: (
+    object: string,
+    recordId: string,
+    context: ShareLinkExecutionContext,
+  ) => Promise<boolean>;
 
   constructor(opts: ShareLinkServiceOptions) {
     this.engine = opts.engine;
     this.permissive = opts.permissive ?? false;
     this.hashPassword = opts.hashPassword ?? defaultHashPassword;
     this.verifyPassword = opts.verifyPassword ?? defaultVerifyPassword;
+    this.canManageShares = opts.canManageShares;
   }
 
   async createLink(
@@ -204,6 +222,11 @@ export class ShareLinkService implements IShareLinkService {
     const schema = this.engine.getSchema?.(input.object);
     const policy = getPolicy(schema);
 
+    // [ADR-0111 D8] Mint authority = the object's `publicSharing` opt-in (this
+    // check) AND the caller's visibility of the record (the RLS-scoped read
+    // below). An object that opts into publicSharing deliberately delegates
+    // re-share power to anyone who can SEE the record — a stated decision, not
+    // an accident. Objects that do not opt in cannot be link-shared at all.
     if (!policy.enabled && !this.permissive && !context.isSystem) {
       throw makeError(
         422,
@@ -289,16 +312,29 @@ export class ShareLinkService implements IShareLinkService {
     const filter = idOrToken.startsWith('shl_') ? { id: idOrToken } : { token: idOrToken };
     const rows = await this.engine.find('sys_share_link', {
       where: filter,
-      fields: ['id', 'revoked_at', 'created_by'],
+      // object_name / record_id are needed for the [ADR-0111 D8] record-manager
+      // revoke path below.
+      fields: ['id', 'revoked_at', 'created_by', 'object_name', 'record_id'],
       limit: 1,
       context: SYSTEM_CTX,
     } as any);
     const row = Array.isArray(rows) ? (rows[0] as any) : undefined;
     if (!row) return; // No-op when missing
-    // [Finding-2] Only the link's creator may revoke it (internal/system callers
-    // bypass). Previously the caller context was ignored, so any client could
-    // revoke any user's link by id/token (sharing DoS).
-    if (!context.isSystem && row.created_by !== context.userId) {
+
+    // Who may revoke this link:
+    //   - system / internal callers (bypass),
+    //   - the link's CREATOR ([Finding-2]: the caller context used to be
+    //     ignored, so any client could revoke any user's link — a sharing DoS),
+    //   - [ADR-0111 D8] a record SHARE-MANAGER (the record's owner or a
+    //     Modify-All admin): a link someone else minted on your record is your
+    //     record's exposure to kill, not only its creator's. Probed via the
+    //     late-bound sharing service; absent → creator-only (pre-D8 behaviour).
+    let permitted = context.isSystem === true || row.created_by === context.userId;
+    if (!permitted && this.canManageShares && row.object_name && row.record_id) {
+      permitted = await this.canManageShares(String(row.object_name), String(row.record_id), context)
+        .catch(() => false);
+    }
+    if (!permitted) {
       throw makeError(403, 'FORBIDDEN', 'Not permitted to revoke this share link');
     }
     if (row.revoked_at) return; // Already revoked

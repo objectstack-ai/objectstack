@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lintDataModel } from '../src/lint/data-model-rules';
+import { lintDataModel, lintUniqueDeclarations } from '../src/lint/data-model-rules';
 import { lintConfig } from '../src/commands/lint';
 
 const rulesOf = (issues: { rule: string }[]) => issues.map((i) => i.rule);
@@ -171,5 +171,121 @@ describe('lintConfig integration', () => {
     });
     const dataModel = issues.filter((i) => i.rule.startsWith('relationship/') || i.rule.startsWith('rollup/') || i.rule.startsWith('field/') || i.rule.startsWith('object/'));
     expect(dataModel.filter((i) => i.severity !== 'suggestion')).toEqual([]);
+  });
+});
+
+// #3991 — the same column declared unique twice, in two spellings that mean
+// different things. One of the two intents is always discarded.
+describe('lintUniqueDeclarations — contradictory uniqueness (#3991)', () => {
+  const RULE = 'unique/double-declaration';
+
+  const withBoth = [
+    {
+      name: 'crm_contact',
+      fields: { email: { type: 'email', unique: true } },
+      indexes: [{ fields: ['email'], unique: true }],
+    },
+  ];
+
+  it('returns [] for empty input', () => {
+    expect(lintUniqueDeclarations([])).toEqual([]);
+    expect(lintUniqueDeclarations(undefined as any)).toEqual([]);
+  });
+
+  it('flags field-level unique + a single-column unique index on the same column', () => {
+    const issues = lintUniqueDeclarations(withBoth);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rule).toBe(RULE);
+    expect(issues[0].severity).toBe('warning'); // advisory — never fails a build
+    expect(issues[0].message).toContain('crm_contact.email');
+    // The message must name BOTH readings, since tenancy is not inferred here.
+    expect(issues[0].message).toMatch(/per tenant|tenant/i);
+    expect(issues[0].message).toMatch(/platform-wide/i);
+    // And the fix must spell out both ways to resolve it.
+    expect(issues[0].fix).toContain("unique: 'global'");
+    expect(issues[0].fix).toContain('organization_id');
+  });
+
+  it('surfaces through lintDataModel too, so `os lint` reports it', () => {
+    expect(has(lintDataModel(withBoth), RULE)).toBe(true);
+  });
+
+  // ── Shapes that must stay quiet ──────────────────────────────────────
+
+  it("exempts unique: 'global' — the index restates the intent, it does not lose it", () => {
+    const issues = lintUniqueDeclarations([
+      {
+        name: 'runtime',
+        fields: { hostname: { type: 'text', unique: 'global' } },
+        indexes: [{ fields: ['hostname'], unique: true }],
+      },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it('exempts an explicit tenant COMPOSITE index — that agrees with the field-level default', () => {
+    const issues = lintUniqueDeclarations([
+      {
+        name: 'crm_contact',
+        fields: { email: { type: 'email', unique: true } },
+        indexes: [{ fields: ['organization_id', 'email'], unique: true }],
+      },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it('ignores a NON-unique index on the same column', () => {
+    const issues = lintUniqueDeclarations([
+      {
+        name: 'crm_contact',
+        fields: { email: { type: 'email', unique: true } },
+        indexes: [{ fields: ['email'] }],
+      },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it('ignores a unique index on a DIFFERENT column', () => {
+    const issues = lintUniqueDeclarations([
+      {
+        name: 'crm_contact',
+        fields: { email: { type: 'email', unique: true }, code: { type: 'text' } },
+        indexes: [{ fields: ['code'], unique: true }],
+      },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it('is quiet when only one of the two spellings is used', () => {
+    expect(lintUniqueDeclarations([
+      { name: 'a', fields: { email: { type: 'email', unique: true } } },
+    ])).toEqual([]);
+    expect(lintUniqueDeclarations([
+      { name: 'b', fields: { email: { type: 'email' } }, indexes: [{ fields: ['email'], unique: true }] },
+    ])).toEqual([]);
+  });
+
+  it('names the declared index when it carries an explicit name', () => {
+    const issues = lintUniqueDeclarations([
+      {
+        name: 'crm_product',
+        fields: { sku: { type: 'text', unique: true } },
+        indexes: [{ name: 'uniq_product_sku', fields: ['sku'], unique: true }],
+      },
+    ]);
+    expect(issues[0].message).toContain("'uniq_product_sku'");
+  });
+
+  it('reports each offending column once, across several objects', () => {
+    const issues = lintUniqueDeclarations([
+      ...withBoth,
+      {
+        name: 'crm_lead',
+        fields: { email: { type: 'email', unique: true }, sku: { type: 'text', unique: true } },
+        indexes: [{ fields: ['email'], unique: true }, { fields: ['sku'], unique: true }],
+      },
+    ]);
+    expect(issues.map((i) => i.message.match(/"([^"]+)"/)?.[1]).sort())
+      .toEqual(['crm_contact.email', 'crm_lead.email', 'crm_lead.sku']);
   });
 });

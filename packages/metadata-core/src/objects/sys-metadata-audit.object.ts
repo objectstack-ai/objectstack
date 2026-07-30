@@ -125,6 +125,16 @@ export const SysMetadataAuditObject = ObjectSchema.create({
      *    `'item_locked'` | `'invalid_metadata'` | `'destructive_change'` |
      *    `'metadata_conflict'`
      *  - on `forced`: `'lock_override'` (Phase 3)
+     *
+     * Deliberately lowercase, and deliberately NOT the `error.code` vocabulary
+     * (ADR-0112) even though the denial values are spelled the same as the
+     * codes the protocol throws. This column is persisted audit history: rows
+     * written before ADR-0112 carry these spellings forever, and the field also
+     * holds outcomes that are not errors at all (`ok`, `lock_override`). Making
+     * it follow the error catalog would mean either a data migration or a
+     * column with two vocabularies mixed by write date. Leave it as its own
+     * closed set; the protocol's thrown `code` is SCREAMING and the two
+     * intentionally diverge.
      */
     code: Field.text({
       label: 'Code',

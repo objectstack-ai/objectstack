@@ -10,16 +10,19 @@
 import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, isGlobalUnique, isUniqueDeclared, type AutonumberToken } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import { resolveMultiOrgEnabled } from '@objectstack/types';
+import { nextUtcCalendarDay } from '@objectstack/core';
 import {
   buildIndexName,
   diffManagedIndexes,
   diffManagedTable,
   driftKey,
   expectedIndexes,
+  fieldHasColumn,
   isIndexDriftOp,
   legacyUniqueReplacements,
   uniqueIndexesFromFields,
@@ -300,6 +303,81 @@ function mysqlDatetimeLiteral(canonical: unknown): unknown {
   return m ? `${m[1]} ${m[2]}` : canonical;
 }
 
+/**
+ * The CANONICAL form of a `Field.time` value: a timezone-naive wall-clock
+ * time-of-day — `HH:MM:SS`, with a `.fff` millisecond suffix only when the
+ * milliseconds are non-zero (#3994).
+ *
+ * `Field.time` is a time-of-day, not an instant (#2004), so unlike
+ * {@link canonicalUtcDatetime} there is no zone marker — but the same
+ * write-unnormalised / repair-on-read drift produced the same broken window
+ * filters as #3912: a bound `Date` stored INTEGER epoch ms on SQLite (sorts
+ * before every TEXT row), a full ISO string stored as text beginning `'2026-…'`
+ * (sorts after every bare time-of-day), and `09:00 <= t <= 18:00` silently
+ * dropped both. This function is applied on write
+ * ({@link SqlDriver.formatInput}), to filter comparands
+ * ({@link SqlDriver.coerceFilterValue}) and on read
+ * ({@link SqlDriver.toTimeOnly}), so both sides of every comparison — and the
+ * presented value — are one shape.
+ *
+ * Why THIS form:
+ *   - `.` sorts below every digit, so lexicographic order is chronological
+ *     order even with the variable-width suffix (`'14:30:00.100' <
+ *     '14:30:01'`), and a SQLite TEXT column range-compares through an index.
+ *   - Deterministic per time-of-day: `'14:30'` and `'14:30:00'` are the same
+ *     wall clock and canonicalise identically, so equality filters and
+ *     `distinct()` cannot split one time into several values.
+ *   - The zero-millisecond spelling is `HH:MM:SS` — the shape every dialect's
+ *     native TIME emits and the field-zoo round-trip (#2022) already asserts —
+ *     so converged common-case data never changes presentation.
+ *   - Every dialect parses it: SQLite stores the text verbatim, Postgres
+ *     `time` and MySQL `TIME(3)` both accept `HH:MM:SS[.fff]` literals — which
+ *     the full-ISO spelling is precisely NOT (measured: `invalid input syntax
+ *     for type time` on PG 16, `Incorrect time value` on MariaDB 10.11).
+ *
+ * A `Date` / epoch-ms / full-timestamp string folds to its **UTC** time-of-day
+ * (ADR-0053): the platform's instants are UTC everywhere else, and it matches
+ * what the SQLite read repair and `nowColumnDefault` already produced —
+ * crucially it does NOT depend on the Node process's local timezone, which is
+ * exactly what binding a raw `Date` to a Postgres TIME column did (pg
+ * serialised `14:30Z` as `09:30-05:00` on an America/New_York host). Fractions
+ * beyond milliseconds are truncated, matching `Date` resolution.
+ *
+ * Total: `null`/`undefined`, empty strings, out-of-range wall clocks (`'25:00'`)
+ * and unparseable junk pass through untouched — a value the driver cannot
+ * interpret is never silently rewritten.
+ */
+function canonicalTimeOfDay(value: unknown): unknown {
+  if (value == null) return value;
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (s === '') return value;
+    const m = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/.exec(s);
+    if (m) {
+      const [, hh, mm, ss = '00', frac] = m;
+      if (Number(hh) > 23 || Number(mm) > 59 || Number(ss) > 59) return value;
+      const ms = frac ? `${frac}000`.slice(0, 3) : '000';
+      return ms === '000' ? `${hh}:${mm}:${ss}` : `${hh}:${mm}:${ss}.${ms}`;
+    }
+  }
+  // Everything that is not a bare time-of-day — `Date`, epoch ms, full ISO or
+  // zone-naive timestamp strings — is an instant: delegate its interpretation
+  // to the ONE function that owns instants, then keep the UTC time-of-day.
+  const instant = canonicalUtcDatetime(value);
+  if (typeof instant === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(instant)) {
+    const time = instant.slice(11, 23);
+    return time.endsWith('.000') ? time.slice(0, 8) : time;
+  }
+  return value;
+}
+
+/**
+ * How many times {@link SqlDriver.sqliteCanonicalTimeSql} spells its column
+ * reference — the binding count a caller must supply per use of the expression.
+ * (1 `typeof` + 3 per `strftime` CASE branch pair × 2 + 1 `coalesce` fallback.)
+ */
+const SQLITE_TIME_EXPR_REFS = 8;
+
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 export interface IntrospectedColumn {
@@ -347,7 +425,7 @@ export interface IntrospectedSchema {
  * read paths that bypass `formatOutput` (`aggregate`, `distinct`) name the rule
  * per column instead. See {@link SqlDriver.readPresentationKind}.
  */
-export type ReadPresentationKind = 'datetime' | 'date' | 'boolean' | 'number';
+export type ReadPresentationKind = 'datetime' | 'date' | 'time' | 'boolean' | 'number';
 
 export type SqlDriverConfig = Knex.Config & {
   schemaMode?: SchemaMode;
@@ -449,6 +527,13 @@ export class SqlDriver implements IDataDriver {
    */
   protected canonicalDatetimeFields: Record<string, Set<string>> = {};
   protected timeFields: Record<string, Set<string>> = {};
+  /**
+   * The `Field.time` twin of {@link canonicalDatetimeFields} (#3994): columns
+   * known to hold only canonical `HH:MM:SS[.fff]` text — backfilled by
+   * {@link backfillCanonicalTimes} or created empty in this process. Read by
+   * {@link needsLegacyTimeRepair} to drop the repair expression.
+   */
+  protected canonicalTimeFields: Record<string, Set<string>> = {};
   /**
    * Federation read path (ADR-0015). For external objects whose physical
    * remote table differs from the object name, these map between the two so
@@ -2637,8 +2722,12 @@ export class SqlDriver implements IDataDriver {
       // UTC-text storage form. A table this call just CREATED has no rows, so it
       // is canonical by construction — record that without touching the disk.
       await this.backfillCanonicalDatetimes(tableName, exists);
+      // #3994: the `Field.time` twin of the line above.
+      await this.backfillCanonicalTimes(tableName, exists);
       // #3942: the MySQL twin — widen legacy `TIMESTAMP` columns to `DATETIME(3)`.
       if (exists) await this.migrateMysqlDatetimeColumns(tableName, obj.fields ?? {});
+      // #3994: widen legacy MySQL `TIME` columns to `TIME(3)`.
+      if (exists) await this.migrateMysqlTimeColumns(tableName, obj.fields ?? {});
     }
 
     // Pre-create the auto_number counter table now, while we hold a fresh pooled
@@ -2732,6 +2821,101 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Converge one table's `Field.time` columns on the canonical time-of-day text
+   * form (#3994) — the `Field.time` twin of {@link backfillCanonicalDatetimes},
+   * built the same way for the same reasons.
+   *
+   * SQLite only: Postgres/MySQL store a native TIME, so their rows are already
+   * one shape. ONE `UPDATE` per column whose SET expression IS
+   * {@link sqliteCanonicalTimeSql} — the very expression the read paths use —
+   * with the null-safe, type-aware `IS NOT` guard as the whole `WHERE`. It
+   * converts INTEGER/REAL epoch ms, full-timestamp text (ISO or zone-naive) and
+   * under-specified `HH:MM` in one pass; canonical rows compare equal and cost
+   * nothing; unparseable values fall through the expression's `coalesce`
+   * unchanged and are left alone.
+   *
+   * What it CANNOT repair, exactly like the datetime backfill: a wall clock the
+   * old write path never recorded correctly. An epoch row folds to its UTC
+   * time-of-day — the same answer reads have always given for it.
+   *
+   * Failures are logged and swallowed: the column stays un-marked, the read and
+   * filter paths keep their repair expression, and queries stay correct (just
+   * unindexed). A migration must never take boot down.
+   */
+  protected async backfillCanonicalTimes(table: string, tableExisted: boolean): Promise<void> {
+    const fields = this.timeFields[table];
+    if (!this.isSqlite || !fields || fields.size === 0) return;
+
+    const clean = (this.canonicalTimeFields[table] ??= new Set<string>());
+    if (!tableExisted) {
+      for (const field of fields) clean.add(field);
+      return;
+    }
+
+    const canonical = this.sqliteCanonicalTimeSql('??');
+    const exprBindings = (field: string) => Array(SQLITE_TIME_EXPR_REFS).fill(field);
+    for (const field of fields) {
+      try {
+        const res = await this.knex.raw(
+          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical}`,
+          [table, field, ...exprBindings(field), field, field, ...exprBindings(field)],
+        );
+        const converted = (res as any)?.changes ?? 0;
+        if (converted) {
+          this.logger.info?.(
+            `[sql-driver] canonicalised time-of-day storage (#3994) for ${table}.${field}`,
+            { rowsConverted: converted },
+          );
+        }
+        clean.add(field);
+      } catch (err) {
+        this.logger.warn(
+          `[sql-driver] could not canonicalise time storage for ${table}.${field}; ` +
+          `queries stay correct via the read-side repair`,
+          { error: err instanceof Error ? err.message : String(err) },
+        );
+      }
+    }
+  }
+
+  /**
+   * The `Field.datetime` (and audit) columns of `table` that MySQL still stores
+   * as a legacy `TIMESTAMP`, with the nullability each must keep.
+   *
+   * Shared by {@link migrateMysqlDatetimeColumns}, which widens them, and
+   * {@link previewDatetimeConvergence}, which reports them into `os migrate
+   * plan` (#3954) — so what the plan lists and what apply does are the same set
+   * by construction, not by two filters that agree today.
+   *
+   * `[]` on any dialect but MySQL, and on a table declaring no datetime column.
+   */
+  protected async legacyMysqlTimestampColumns(
+    table: string,
+    fields: Record<string, any>,
+  ): Promise<Array<{ name: string; nullable: boolean }>> {
+    if (!this.isMysql) return [];
+    const candidates = new Set<string>(AUDIT_TIMESTAMP_COLUMNS);
+    for (const [name, field] of Object.entries(fields)) {
+      if ((field?.type ?? 'string') === 'datetime' && !field?.multiple) candidates.add(name);
+    }
+    if (candidates.size === 0) return [];
+
+    const res: any = await this.knex.raw(
+      `select column_name, is_nullable from information_schema.columns
+       where table_schema = database() and table_name = ? and data_type = 'timestamp'`,
+      [table],
+    );
+    // mysql2 returns [rows, fields]; column names vary in case by server.
+    const rows: any[] = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
+    return rows
+      .map((r) => ({
+        name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
+        nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
+      }))
+      .filter((c) => c.name && candidates.has(c.name));
+  }
+
+  /**
    * Widen a table's legacy MySQL `TIMESTAMP` datetime columns to `DATETIME(3)`
    * (#3942) — the MySQL counterpart of {@link backfillCanonicalDatetimes}.
    *
@@ -2758,26 +2942,8 @@ export class SqlDriver implements IDataDriver {
     fields: Record<string, any>,
   ): Promise<void> {
     if (!this.isMysql) return;
-    const candidates = new Set<string>(AUDIT_TIMESTAMP_COLUMNS);
-    for (const [name, field] of Object.entries(fields)) {
-      if ((field?.type ?? 'string') === 'datetime' && !field?.multiple) candidates.add(name);
-    }
-    if (candidates.size === 0) return;
-
     try {
-      const res: any = await this.knex.raw(
-        `select column_name, is_nullable from information_schema.columns
-         where table_schema = database() and table_name = ? and data_type = 'timestamp'`,
-        [table],
-      );
-      // mysql2 returns [rows, fields]; column names vary in case by server.
-      const rows: any[] = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
-      const legacy = rows
-        .map((r) => ({
-          name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
-          nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
-        }))
-        .filter((c) => c.name && candidates.has(c.name));
+      const legacy = await this.legacyMysqlTimestampColumns(table, fields);
       if (legacy.length === 0) return;
 
       for (const col of legacy) {
@@ -2800,6 +2966,86 @@ export class SqlDriver implements IDataDriver {
       this.logger.warn(
         `[sql-driver] could not widen MySQL datetime columns on ${table}; ` +
         `writes stay correct, but the 2038 ceiling and millisecond truncation remain`,
+        { error: err instanceof Error ? err.message : String(err) },
+      );
+    }
+  }
+
+  /**
+   * The declared `Field.time` columns of `table` that MySQL still stores as a
+   * zero-precision `TIME`, with the nullability each must keep. Shared by
+   * {@link migrateMysqlTimeColumns} and {@link previewTimeConvergence} — the
+   * plan and the migration are the same set by construction (#3954 pattern).
+   */
+  protected async legacyMysqlTimeColumns(
+    table: string,
+    fields: Record<string, any>,
+  ): Promise<Array<{ name: string; nullable: boolean }>> {
+    if (!this.isMysql) return [];
+    const candidates = new Set<string>();
+    for (const [name, field] of Object.entries(fields)) {
+      if ((field?.type ?? 'string') === 'time' && !field?.multiple) candidates.add(name);
+    }
+    if (candidates.size === 0) return [];
+
+    const res: any = await this.knex.raw(
+      `select column_name, is_nullable from information_schema.columns
+       where table_schema = database() and table_name = ? and data_type = 'time'
+         and coalesce(datetime_precision, 0) = 0`,
+      [table],
+    );
+    const rows: any[] = Array.isArray(res) ? res[0] : (res?.rows ?? []);
+    return rows
+      .map((r) => ({
+        name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
+        nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
+      }))
+      .filter((c) => c.name && candidates.has(c.name));
+  }
+
+  /**
+   * Widen a table's legacy MySQL `TIME` columns to `TIME(3)` (#3994) — the
+   * `Field.time` twin of {@link migrateMysqlDatetimeColumns}.
+   *
+   * A zero-precision `TIME` does not truncate a fractional literal — it ROUNDS
+   * it, so the canonical `'14:30:00.500'` would land as `14:30:01`: the write
+   * path would be changing the wall clock it was asked to store. `TIME(3)`
+   * keeps the milliseconds instead, matching the canonical form's resolution
+   * and the `DATETIME(3)` precedent (#3942).
+   *
+   * Failures are logged and swallowed for the usual reason; the only cost of a
+   * `TIME(0)` column that could not be widened is second-rounding of fractional
+   * writes — which is today's behaviour.
+   */
+  protected async migrateMysqlTimeColumns(
+    table: string,
+    fields: Record<string, any>,
+  ): Promise<void> {
+    if (!this.isMysql) return;
+    try {
+      const legacy = await this.legacyMysqlTimeColumns(table, fields);
+      if (legacy.length === 0) return;
+
+      for (const col of legacy) {
+        // MODIFY drops a default it does not restate. A `defaultValue: 'NOW()'`
+        // column gets the canonical UTC expression default (`nowColumnDefault`);
+        // its legacy `current_timestamp()` default read the SESSION's zone, so
+        // dropping-and-replacing it is a fix, not collateral.
+        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
+        const defaultClause = isNowDefault ? ' default (cast(utc_timestamp(3) as time(3)))' : '';
+        await this.knex.raw(
+          `alter table ?? modify column ?? time(3) ${col.nullable ? 'null' : 'not null'}${defaultClause}`,
+          [table, col.name],
+        );
+      }
+      this.logger.info?.(
+        `[sql-driver] widened MySQL TIME → TIME(3) (#3994) on ${table}`,
+        { columns: legacy.map((c) => c.name) },
+      );
+    } catch (err) {
+      this.logger.warn(
+        `[sql-driver] could not widen MySQL time columns on ${table}; ` +
+        `fractional-second writes keep rounding to whole seconds`,
         { error: err instanceof Error ? err.message : String(err) },
       );
     }
@@ -2835,15 +3081,34 @@ export class SqlDriver implements IDataDriver {
   /**
    * What the deferred sync *would* do, without doing it.
    *
-   * Read-only: `hasTable` + `columnInfo`, the same two probes the additive sync
-   * uses to decide between create and alter. Tables and columns that already
-   * match metadata produce no entry, so an in-sync database returns `[]`.
+   * Read-only: `hasTable` + `columnInfo` decide between create and alter (the
+   * same two probes the additive sync uses), then
+   * {@link previewDatetimeConvergence} asks whether the datetime storage steps
+   * have anything left to do. Tables that already match metadata and hold
+   * canonical data produce no entry, so an in-sync database returns `[]`.
+   *
+   * The convergence probe COUNTS rows, so this is more than metadata lookups on
+   * a database that has not been migrated yet. That is the right trade for a
+   * command the operator ran to be told the size of the job — and it is paid
+   * once, by `plan`/`apply`, never on a normal boot.
+   *
+   * The obligation runs both ways (#3978). #3954 closed "the plan understates
+   * what apply does"; this closes its mirror image — the plan must not promise
+   * work apply CANNOT do. Only fields that materialize a column are listed,
+   * decided by {@link fieldHasColumn}, the same helper `createColumn` and the
+   * column differ use. A virtual `formula` field has no column, so listing it
+   * produced an `add_columns` entry `apply` reported as performed without doing
+   * anything and the next `plan` reported again: a finding no invocation could
+   * ever clear, making a freshly-applied database look un-migrated.
    */
   async previewDeferredSchemaWork(): Promise<PendingSchemaWork[]> {
     const out: PendingSchemaWork[] = [];
     for (const [tableName, obj] of this.deferredSchemaObjects) {
-      const declared = Object.keys(obj.fields ?? {});
+      const declared = Object.entries<any>(obj.fields ?? {})
+        .filter(([, field]) => fieldHasColumn(field ?? {}))
+        .map(([name]) => name);
       if (!(await this.knex.schema.hasTable(tableName))) {
+        // A table that does not exist yet is created empty, so nothing to converge.
         out.push({ table: tableName, kind: 'create_table', columns: declared });
         continue;
       }
@@ -2852,9 +3117,119 @@ export class SqlDriver implements IDataDriver {
       if (missing.length > 0) {
         out.push({ table: tableName, kind: 'add_columns', columns: missing });
       }
+      out.push(...(await this.previewDatetimeConvergence(tableName, obj.fields ?? {}, existing)));
+      out.push(...(await this.previewTimeConvergence(tableName, obj.fields ?? {}, existing)));
     }
-    out.sort((a, b) => a.table.localeCompare(b.table));
+    out.sort((a, b) => a.table.localeCompare(b.table) || a.kind.localeCompare(b.kind));
     return out;
+  }
+
+  /**
+   * The datetime storage-convergence work {@link backfillCanonicalDatetimes} and
+   * {@link migrateMysqlDatetimeColumns} would do for `table` — measured, not
+   * performed (#3954).
+   *
+   * Both steps run inside `initObjects` alongside the create/alter path, so
+   * `apply` performs them; without an entry here `plan` would show a two-column
+   * change and `apply` would additionally rewrite every row of a datetime column
+   * or rebuild one on a large table. The plan promises to show what apply does.
+   *
+   * Each probe reuses the very predicate its migration uses, so the preview
+   * cannot claim work the migration will not do (or miss work it will):
+   *   - SQLite counts rows matching `col IS NOT <canonical>` — the backfill's
+   *     entire `WHERE`.
+   *   - MySQL lists the candidate columns still typed `timestamp` — the
+   *     migration's own `information_schema` filter.
+   *
+   * Failures are swallowed to `[]`, matching the migrations themselves: a probe
+   * that cannot run must not fail the plan, and under-reporting here costs an
+   * unlisted step rather than a wrong one.
+   */
+  protected async previewDatetimeConvergence(
+    table: string,
+    fields: Record<string, any>,
+    existingColumns: Set<string>,
+  ): Promise<PendingSchemaWork[]> {
+    try {
+      if (this.isSqlite) {
+        const declared = [...(this.datetimeFields[table] ?? [])].filter((c) => existingColumns.has(c));
+        if (declared.length === 0) return [];
+        const canonical = this.sqliteCanonicalDatetimeSql('??');
+        const columns: string[] = [];
+        let rows = 0;
+        for (const field of declared) {
+          const res: any = await this.knex.raw(
+            `select count(*) as n from ?? where ?? is not null and ?? is not ${canonical}`,
+            [table, field, field, field, field, field, field],
+          );
+          const n = Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
+          if (n > 0) { columns.push(field); rows += n; }
+        }
+        return columns.length === 0
+          ? []
+          : [{ table, kind: 'normalize_datetime_storage', columns, rows }];
+      }
+
+      if (this.isMysql) {
+        const legacy = await this.legacyMysqlTimestampColumns(table, fields);
+        if (legacy.length === 0) return [];
+        const res: any = await this.knex.raw(`select count(*) as n from ??`, [table]);
+        const counted = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
+        const rows = Number((counted[0] as any)?.n ?? (counted as any)?.n ?? 0);
+        return [{ table, kind: 'widen_datetime_columns', columns: legacy.map((c) => c.name), rows }];
+      }
+
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * The `Field.time` storage-convergence work {@link backfillCanonicalTimes} and
+   * {@link migrateMysqlTimeColumns} would do for `table` — measured, not
+   * performed. The time twin of {@link previewDatetimeConvergence}, with the
+   * same probe-reuses-the-migration's-predicate construction and the same
+   * swallow-to-`[]` failure policy.
+   */
+  protected async previewTimeConvergence(
+    table: string,
+    fields: Record<string, any>,
+    existingColumns: Set<string>,
+  ): Promise<PendingSchemaWork[]> {
+    try {
+      if (this.isSqlite) {
+        const declared = [...(this.timeFields[table] ?? [])].filter((c) => existingColumns.has(c));
+        if (declared.length === 0) return [];
+        const canonical = this.sqliteCanonicalTimeSql('??');
+        const columns: string[] = [];
+        let rows = 0;
+        for (const field of declared) {
+          const res: any = await this.knex.raw(
+            `select count(*) as n from ?? where ?? is not null and ?? is not ${canonical}`,
+            [table, field, field, ...Array(SQLITE_TIME_EXPR_REFS).fill(field)],
+          );
+          const n = Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
+          if (n > 0) { columns.push(field); rows += n; }
+        }
+        return columns.length === 0
+          ? []
+          : [{ table, kind: 'normalize_time_storage', columns, rows }];
+      }
+
+      if (this.isMysql) {
+        const legacy = await this.legacyMysqlTimeColumns(table, fields);
+        if (legacy.length === 0) return [];
+        const res: any = await this.knex.raw(`select count(*) as n from ??`, [table]);
+        const counted = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
+        const rows = Number((counted[0] as any)?.n ?? (counted as any)?.n ?? 0);
+        return [{ table, kind: 'widen_time_columns', columns: legacy.map((c) => c.name), rows }];
+      }
+
+      return [];
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -2940,7 +3315,9 @@ export class SqlDriver implements IDataDriver {
     return diffManagedIndexes({
       table: tableName,
       expected: expectedIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }),
-      legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns }),
+      // `declaredIndexes` goes to BOTH: it is what the table should have, and
+      // therefore also what must never be mistaken for legacy debt (#3955).
+      legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns, declaredIndexes }),
       physical: await this.introspectIndexes(tableName),
     });
   }
@@ -3812,32 +4189,18 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Read-side repair for a `Field.time` value to its wall-clock time-of-day
-   * (`Field.time` is a tz-naive time-of-day, not an instant — #2004). This is a
-   * deliberately NARROW, read-only normalization (no write/filter counterpart):
-   * it only strips a leading `YYYY-MM-DD` date — exactly what a legacy
-   * `defaultValue: 'NOW()'` column took when the default was still the full
-   * `CURRENT_TIMESTAMP` (or a full ISO datetime that leaked into the column) —
-   * and any trailing zone, leaving the time portion. A value that is ALREADY a
-   * bare time-of-day (`HH:MM[:SS[.fff]]`, with or without `Z`/offset) is returned
-   * untouched, so the common case never changes and no write/read asymmetry is
-   * introduced. A `Date`/epoch-ms (defensive — a Date bound to a time column)
-   * maps to its UTC time-of-day. `null`/unrecognised shapes pass through.
+   * Present a `Field.time` value as its canonical wall-clock time-of-day
+   * (`HH:MM:SS[.fff]` — {@link canonicalTimeOfDay}). Shared by the filter
+   * (`coerceFilterValue`), write (`formatInput`) and read (`formatOutput`,
+   * `presentReadValue`) paths, exactly like {@link toDateOnly} for `Field.date`
+   * — one definition of what a time *is* on all three, which is the #3994 fix.
+   * On read it transparently repairs legacy rows (full-timestamp text from the
+   * old `CURRENT_TIMESTAMP` default, epoch ms from a bound `Date`) with no data
+   * migration, and re-pads a dialect's trimmed fraction (Postgres returns
+   * `.5` for the stored `.500`).
    */
   protected toTimeOnly(value: any): any {
-    if (value == null) return value;
-    if (value instanceof Date) {
-      return Number.isNaN(value.getTime()) ? value : value.toISOString().slice(11, 19);
-    }
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      const d = new Date(value);
-      return Number.isNaN(d.getTime()) ? value : d.toISOString().slice(11, 19);
-    }
-    if (typeof value !== 'string') return value;
-    // Legacy full date+time → keep just the time-of-day (strip date + any zone).
-    // A bare time-of-day is left exactly as stored.
-    const m = /^\d{4}-\d{2}-\d{2}[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(?:[Zz]|[+-]\d{2}:?\d{2})?$/.exec(value.trim());
-    return m ? m[1] : value;
+    return canonicalTimeOfDay(value);
   }
 
   /**
@@ -3867,7 +4230,91 @@ export class SqlDriver implements IDataDriver {
 
     const kind = this.temporalFieldKind(table, field);
     if (!kind) return value;
-    return kind === 'datetime' ? this.storageDatetimeValue(value) : this.toDateOnly(value);
+    if (kind === 'datetime') return this.storageDatetimeValue(value);
+    // `Field.time` (#3994) takes the same treatment for the same reason: the
+    // comparand must be the canonical time-of-day text the column stores.
+    if (kind === 'time') return canonicalTimeOfDay(value);
+    return this.toDateOnly(value);
+  }
+
+  /**
+   * The exclusive upper-bound instant for a bare calendar-day comparand on a
+   * `datetime` column — next day's midnight UTC, in this dialect's storage
+   * form — or `null` when the calendar-day reading does not apply.
+   *
+   * This is the missing half of the calendar-day convention (#3777). A bare
+   * `YYYY-MM-DD` anchors to midnight UTC ({@link storageDatetimeValue}), which
+   * is exactly right for a LOWER bound (`>= {today}` means "from the moment
+   * the day starts") and exactly wrong for an UPPER bound: `<= {today}` from a
+   * dashboard's date-range filter means "including today", but midnight
+   * anchoring turns it into "up to the first instant of today", silently
+   * dropping every row created after 00:00 — with `created_at` (a system
+   * `Field.datetime`) as the filter's default field, the default dashboard
+   * configuration loses the current day.
+   *
+   * The translation is operator-sensitive, so it lives at the comparison
+   * emitters (which know their operator) rather than inside the operator-blind
+   * {@link coerceFilterValue}: an upper-bound `$lte`/`<=`/`between`-max with a
+   * bare-day comparand compiles to the half-open `< next-day-midnight` — the
+   * same `[gte, lt)` shape the analytics drill ranges emit — never to an
+   * inclusive `23:59:59.999`, which re-opens the gap at whatever precision the
+   * dialect stores beyond milliseconds.
+   *
+   * Deliberately narrow, mirroring the semantics table on #3777:
+   *   - `date` / `time` / non-temporal columns → null (a bare day on a `date`
+   *     column is already whole-day-correct under `<=`);
+   *   - full ISO timestamps and `Date` objects → null (an instant comparand
+   *     keeps instant semantics — only the day-granular STRING carries
+   *     calendar-day intent);
+   *   - `$gte` / `$gt` / `$lt` keep their midnight anchoring (correct today).
+   */
+  protected calendarDayExclusiveUpperBound(
+    table: string | null,
+    field: string,
+    value: unknown,
+  ): unknown | null {
+    if (this.temporalFieldKind(table, field) !== 'datetime') return null;
+    const next = nextUtcCalendarDay(value);
+    if (next == null) return null;
+    return this.storageDatetimeValue(`${next}T00:00:00.000Z`);
+  }
+
+  /**
+   * Rewrite one upper-bound comparison for calendar-day intent: `$lte`/`<=`
+   * with a bare `YYYY-MM-DD` on a `datetime` column becomes `$lt`/`<` against
+   * {@link calendarDayExclusiveUpperBound}. Returns `null` — "not applicable,
+   * compile as-is" — for every other operator/comparand/column combination.
+   */
+  protected calendarDayUpperBoundRewrite(
+    table: string | null,
+    field: string,
+    op: string,
+    value: unknown,
+  ): { op: string; value: unknown } | null {
+    if (op !== '$lte' && op !== '<=') return null;
+    const upper = this.calendarDayExclusiveUpperBound(table, field, value);
+    if (upper == null) return null;
+    return { op: op === '$lte' ? '$lt' : '<', value: upper };
+  }
+
+  /**
+   * The `between` companion of {@link calendarDayUpperBoundRewrite}: a
+   * `[min, max]` range whose max is a bare calendar day on a `datetime` column
+   * decomposes into the half-open pair `>= min AND < next-day(max)` — knex's
+   * `whereBetween` is inclusive on both ends, so it inherits the same
+   * midnight-anchored upper bound `$lte` had. Returns `null` when the range is
+   * malformed (caller keeps its descriptive error) or the rewrite does not
+   * apply.
+   */
+  protected calendarDayBetweenRewrite(
+    table: string | null,
+    field: string,
+    value: unknown,
+  ): { lower: unknown; upper: unknown } | null {
+    if (!Array.isArray(value) || value.length !== 2) return null;
+    const upper = this.calendarDayExclusiveUpperBound(table, field, value[1]);
+    if (upper == null) return null;
+    return { lower: this.coerceFilterValue(table, field, value[0]), upper };
   }
 
   /**
@@ -3940,16 +4387,58 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * The `Field.time` twin of {@link needsLegacyDatetimeRepair} (#3994): might
+   * this SQLite `Field.time` column still hold pre-canonical values and
+   * therefore need {@link sqliteCanonicalTimeSql} wrapped around it?
+   */
+  protected needsLegacyTimeRepair(table: string | null | undefined, field: string): boolean {
+    if (!table || !this.isSqlite) return false;
+    if (this.timeFields[table]?.has(field) !== true) return false;
+    return this.canonicalTimeFields[table]?.has(field) !== true;
+  }
+
+  /**
+   * Read a possibly-legacy SQLite `Field.time` column as canonical time-of-day
+   * text — the SQL twin of {@link canonicalTimeOfDay}, for rows written before
+   * the convention existed and not yet backfilled.
+   *
+   * `strftime` parses every legacy text shape in one call — bare `HH:MM`,
+   * full-ISO, zone-naive `CURRENT_TIMESTAMP` output — and the `typeof()`
+   * dispatch converts epoch INTEGER/REAL through `'unixepoch'`, exactly as in
+   * {@link sqliteCanonicalDatetimeSql}. The extra `like '%.000'` CASE trims the
+   * zero-millisecond suffix `%f` always emits, so the SQL spelling of
+   * "canonical" is byte-identical to the JS one — the property the backfill's
+   * `IS NOT` guard and the plan's row count both lean on.
+   *
+   * `coalesce(…, col)` preserves uninterpretable junk, matching
+   * `canonicalTimeOfDay`'s totality. The column reference appears
+   * {@link SQLITE_TIME_EXPR_REFS} times; callers bind accordingly.
+   */
+  protected sqliteCanonicalTimeSql(columnSql: string): string {
+    const canonText = (args: string) =>
+      `case when strftime('%H:%M:%f', ${args}) like '%.000' ` +
+      `then strftime('%H:%M:%S', ${args}) ` +
+      `else strftime('%H:%M:%f', ${args}) end`;
+    return (
+      `(case when typeof(${columnSql}) in ('integer','real') ` +
+      `then ${canonText(`${columnSql}/1000.0, 'unixepoch'`)} ` +
+      `else coalesce(${canonText(columnSql)}, ${columnSql}) end)`
+    );
+  }
+
+  /**
    * Which temporal presentation rule, if any, a declared field takes —
-   * `null` for everything that is not a `Field.datetime` / `Field.date`.
+   * `null` for everything that is not a `Field.datetime` / `Field.date` /
+   * `Field.time`.
    */
   protected temporalFieldKind(
     table: string | null | undefined,
     field: string,
-  ): 'datetime' | 'date' | null {
+  ): 'datetime' | 'date' | 'time' | null {
     if (!table) return null;
     if (this.datetimeFields[table]?.has(field)) return 'datetime';
     if (this.dateFields[table]?.has(field)) return 'date';
+    if (this.timeFields[table]?.has(field)) return 'time';
     return null;
   }
 
@@ -3992,6 +4481,11 @@ export class SqlDriver implements IDataDriver {
     switch (kind) {
       case 'date':
         return this.toDateOnly(value);
+      case 'time':
+        // Every dialect, like `date`: canonicalising also re-pads the fraction
+        // Postgres trims (`.5` → `.500`), so `distinct()`/`aggregate()` present
+        // exactly what `find()` presents (#3994, the F6 gap of the #3849 fix).
+        return this.toTimeOnly(value);
       case 'datetime':
         return this.isSqlite ? normalizeSqliteDatetimeOutput(value) : value;
       case 'boolean':
@@ -4070,11 +4564,19 @@ export class SqlDriver implements IDataDriver {
     field: string,
     column: string,
   ): { sql: string; bindings: any[] } | null {
-    if (!this.needsLegacyDatetimeRepair(table, field)) return null;
-    return {
-      sql: this.sqliteCanonicalDatetimeSql('??'),
-      bindings: [column, column, column, column],
-    };
+    if (this.needsLegacyDatetimeRepair(table, field)) {
+      return {
+        sql: this.sqliteCanonicalDatetimeSql('??'),
+        bindings: [column, column, column, column],
+      };
+    }
+    if (this.needsLegacyTimeRepair(table, field)) {
+      return {
+        sql: this.sqliteCanonicalTimeSql('??'),
+        bindings: Array(SQLITE_TIME_EXPR_REFS).fill(column),
+      };
+    }
+    return null;
   }
 
   /**
@@ -4157,6 +4659,15 @@ export class SqlDriver implements IDataDriver {
    * This is a thin, intentionally narrow wrapper over the same `coerceFilterValue`
    * the driver already uses, so there is exactly one source of truth for the
    * storage convention and the analytics path can never drift from CRUD.
+   *
+   * Deliberately operator-blind — it translates FORM, never bound semantics.
+   * A caller compiling an upper bound from a bare calendar day (`<= {today}`,
+   * a `dateRange` end) must apply `nextUtcCalendarDay` from `@objectstack/core`
+   * and emit `<` — the half-open translation the driver's own `find()` path
+   * performs via {@link calendarDayUpperBoundRewrite} (#3777). Folding that in
+   * here would silently widen every `<=`-bound value whether or not the caller
+   * flips its operator, which is exactly the ambiguity the emitter-side rule
+   * avoids.
    */
   public temporalFilterValue(objectName: string, field: string, value: any): any {
     return this.coerceFilterValue(objectName, field, value);
@@ -4177,8 +4688,13 @@ export class SqlDriver implements IDataDriver {
    * must wrap its column with this too, or it keeps half the bug.
    */
   public temporalFilterColumnSql(objectName: string, field: string, columnSql: string): string {
-    if (!this.needsLegacyDatetimeRepair(objectName, field)) return columnSql;
-    return this.sqliteCanonicalDatetimeSql(columnSql);
+    if (this.needsLegacyDatetimeRepair(objectName, field)) {
+      return this.sqliteCanonicalDatetimeSql(columnSql);
+    }
+    if (this.needsLegacyTimeRepair(objectName, field)) {
+      return this.sqliteCanonicalTimeSql(columnSql);
+    }
+    return columnSql;
   }
 
   protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
@@ -4216,9 +4732,23 @@ export class SqlDriver implements IDataDriver {
 
     for (const item of filters) {
       if (typeof item === 'string') {
-        if (item.toLowerCase() === 'or') nextJoin = 'or';
-        else if (item.toLowerCase() === 'and') nextJoin = 'and';
-        continue;
+        const lower = item.toLowerCase();
+        if (lower === 'or') { nextJoin = 'or'; continue; }
+        if (lower === 'and') { nextJoin = 'and'; continue; }
+        // Anything else is not a join keyword, and the only way a bare string
+        // reaches here is a comparison triple that `isFilterAST()` refused —
+        // its operator is outside `VALID_AST_OPERATORS`, so `parseFilterAST()`
+        // never converted it and the raw array arrived as `where`. Skipping it
+        // (the old behaviour) emitted NO predicate at all: the caller asked to
+        // filter and silently got every row. Fail loudly instead. #3948.
+        throw new Error(
+          `[sql-driver] Unrecognized filter operator "${item}" in a comparison triple. ` +
+            `A filter array is either a logical node (["and"|"or", …]) or nested ` +
+            `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
+            `reaches the driver when its operator is outside @objectstack/spec ` +
+            `VALID_AST_OPERATORS, which leaves the filter unparsed. ` +
+            `Filter was: ${JSON.stringify(filters)}`,
+        );
       }
 
       if (Array.isArray(item)) {
@@ -4228,11 +4758,30 @@ export class SqlDriver implements IDataDriver {
         if (isCriterion) {
           const localField = this.mapSortField(fieldRaw);
           const field = this.remoteColumn(table, fieldRaw, localField);
-          const coerced = this.coerceFilterValue(table, localField, value);
-          this.applyAstComparison(
-            builder, nextJoin, field, op, value, coerced,
-            this.filterColumnExpr(table, localField, field),
-          );
+          const opLower = String(op).toLowerCase();
+          const columnExpr = this.filterColumnExpr(table, localField, field);
+          // Calendar-day upper bounds (#3777) — same translation the
+          // Mongo-operator path applies, for the array (`[field, op, value]`)
+          // spelling of the identical comparison.
+          const dayRange = opLower === 'between'
+            ? this.calendarDayBetweenRewrite(table, localField, value) : null;
+          if (dayRange) {
+            (builder as any)[nextJoin === 'or' ? 'orWhere' : 'where']((qb: any) => {
+              if (columnExpr) {
+                this.applyNormalizedComparison(qb, 'and', columnExpr, '$gte', dayRange.lower);
+                this.applyNormalizedComparison(qb, 'and', columnExpr, '$lt', dayRange.upper);
+              } else {
+                qb.where(field, '>=', dayRange.lower).andWhere(field, '<', dayRange.upper);
+              }
+            });
+          } else {
+            const rewrite = this.calendarDayUpperBoundRewrite(table, localField, opLower, value);
+            const coerced = rewrite ? rewrite.value : this.coerceFilterValue(table, localField, value);
+            this.applyAstComparison(
+              builder, nextJoin, field, rewrite?.op ?? op, value, coerced,
+              columnExpr,
+            );
+          }
         } else {
           const method = nextJoin === 'or' ? 'orWhere' : 'where';
           (builder as any)[method]((qb: any) => {
@@ -4241,7 +4790,18 @@ export class SqlDriver implements IDataDriver {
         }
 
         nextJoin = 'and';
+        continue;
       }
+
+      // Neither a join keyword nor a condition. Previously fell out of both
+      // branches and was dropped, so a malformed element silently narrowed
+      // nothing. Same reasoning as above: an unapplied filter must not look
+      // like a satisfied one. #3948.
+      throw new Error(
+        `[sql-driver] Unrecognized filter element of type "${item === null ? 'null' : typeof item}" — ` +
+          `expected a logical keyword ("and"/"or") or a condition array. ` +
+          `Filter was: ${JSON.stringify(filters)}`,
+      );
     }
   }
 
@@ -4316,7 +4876,12 @@ export class SqlDriver implements IDataDriver {
     const where = join === 'or' ? 'orWhere' : 'where';
     const whereNull = join === 'or' ? 'orWhereNull' : 'whereNull';
     const whereNotNull = join === 'or' ? 'orWhereNotNull' : 'whereNotNull';
-    const opLower = String(op).toLowerCase();
+    // Fold every accepted spelling of one comparison onto a single infix form so
+    // the switch below has one case per comparison rather than one per spelling.
+    // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
+    // `after` for the same thing; growing a private alias list here is how this
+    // driver and driver-memory drifted apart. #3948.
+    const opLower = canonicalAstOperator(String(op));
 
     // Value comparisons on a mixed-storage column read it through the CASE; every
     // other operator (null predicates, the LIKE family, a malformed `between`)
@@ -4470,9 +5035,29 @@ export class SqlDriver implements IDataDriver {
         // Non-null only for a SQLite `Field.datetime`, whose two stored forms
         // (INTEGER epoch / ISO TEXT) must be unified before comparing (#3912).
         const columnExpr = this.filterColumnExpr(table, localField, field);
-        for (const [op, opValue] of Object.entries(value as Record<string, any>)) {
+        for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
-          const coerced = this.coerceFilterValue(table, localField, opValue);
+          // Calendar-day upper bounds first (#3777): `$lte` on a bare
+          // `YYYY-MM-DD` against a datetime column compiles half-open, and a
+          // `$between` whose max is a bare day decomposes into the same pair —
+          // grouped, so an `$or` branch stays one predicate.
+          if (rawOp === '$between') {
+            const dayRange = this.calendarDayBetweenRewrite(table, localField, opValue);
+            if (dayRange) {
+              (builder as any)[method]((qb: any) => {
+                if (columnExpr) {
+                  this.applyNormalizedComparison(qb, 'and', columnExpr, '$gte', dayRange.lower);
+                  this.applyNormalizedComparison(qb, 'and', columnExpr, '$lt', dayRange.upper);
+                } else {
+                  qb.where(field, '>=', dayRange.lower).andWhere(field, '<', dayRange.upper);
+                }
+              });
+              continue;
+            }
+          }
+          const rewrite = this.calendarDayUpperBoundRewrite(table, localField, rawOp, opValue);
+          const op = rewrite?.op ?? rawOp;
+          const coerced = rewrite ? rewrite.value : this.coerceFilterValue(table, localField, opValue);
           if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;
           switch (op) {
             case '$eq':
@@ -4670,10 +5255,46 @@ export class SqlDriver implements IDataDriver {
    * reads are uniform without a schema migration.
    */
   protected nowColumnDefault(type: string): Knex.Raw {
-    if (!this.isSqlite) return this.knex.fn.now();
+    if (!this.isSqlite) {
+      // A `time` column deserves the same reasoning on the native dialects
+      // (#3994): `knex.fn.now()` compiles to CURRENT_TIMESTAMP, which a TIME
+      // column resolves in the SERVER's timezone on Postgres and the INSERTING
+      // session's timezone on MySQL — measured as three different wall clocks
+      // for one instant across the three dialects. Pin the default to the UTC
+      // time-of-day, matching what the driver's own writes and the SQLite
+      // branch below produce. (MySQL 8.0 additionally REJECTS a plain
+      // CURRENT_TIMESTAMP default on a TIME column — only the parenthesised
+      // expression form, MySQL 8.0.13+/MariaDB 10.2+, is legal there at all.)
+      if (type === 'time') {
+        if (this.isMysql) return this.knex.raw('(cast(utc_timestamp(3) as time(3)))');
+        if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::time(3))");
+      }
+      // `date` has the same two problems one type over (#4022): a bare
+      // CURRENT_TIMESTAMP default resolves the calendar day in the SERVER's
+      // timezone on Postgres (measured: a UTC-12 server records YESTERDAY),
+      // and MySQL 8.0 rejects it on a DATE column outright (MariaDB is merely
+      // permissive; the driver's UTC-pinned session masked the semantic half
+      // there). Same fix as `time`: an expression default reading the UTC
+      // clock, which is also what `formatInput`'s NOW() safety-net and the
+      // SQLite branch below store.
+      if (type === 'date') {
+        if (this.isMysql) return this.knex.raw('(cast(utc_timestamp() as date))');
+        if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::date)");
+      }
+      return this.knex.fn.now();
+    }
     switch (type) {
       case 'date': return this.knex.raw("(strftime('%Y-%m-%d', 'now'))");
-      case 'time': return this.knex.raw("(strftime('%H:%M:%f', 'now'))");
+      // The CASE trims a zero-millisecond `.000` so a defaulted row is
+      // byte-canonical ({@link canonicalTimeOfDay}) — `%f` alone would store
+      // `'01:55:08.000'` once in a thousand inserts, and that row would then
+      // miss an equality filter against the canonical `'01:55:08'`. SQLite
+      // fixes `'now'` per statement, so the three calls cannot straddle a
+      // millisecond boundary.
+      case 'time': return this.knex.raw(
+        "(case when strftime('%H:%M:%f', 'now') like '%.000' " +
+        "then strftime('%H:%M:%S', 'now') else strftime('%H:%M:%f', 'now') end)",
+      );
       // datetime (and any non-temporal field that opts into NOW()): canonical instant.
       default:     return this.knex.raw("(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))");
     }
@@ -4765,7 +5386,12 @@ export class SqlDriver implements IDataDriver {
         col = this.isMysql ? table.datetime(name, { precision: 3 }) : table.timestamp(name);
         break;
       case 'time':
-        col = table.time(name);
+        // MySQL's bare `TIME` is zero-precision and ROUNDS a fractional literal
+        // (`'14:30:00.500'` → `14:30:01`), so the canonical form's milliseconds
+        // would change the stored wall clock. `TIME(3)` keeps them — the
+        // `DATETIME(3)` precedent (#3942) applied to time-of-day (#3994). Knex's
+        // `time()` takes no precision, hence the explicit type.
+        col = this.isMysql ? table.specificType(name, 'time(3)') : table.time(name);
         break;
       // `user` is a lookup specialized to sys_user (ADR: lookup → sys_user). Same
       // physical storage as any lookup: a string column holding the related row id
@@ -4809,7 +5435,15 @@ export class SqlDriver implements IDataDriver {
       // {@link syncDeclaredIndexes} — which runs after the table exists and can
       // therefore build composites. `createColumn` owns type/nullability/
       // defaults only.
-      if (field.required) col.notNullable();
+      //
+      // ADR-0113: the physical NOT NULL comes from the EXPLICIT storage
+      // constraint, not from `required` — `required` is the write-time
+      // contract enforced by the record validator at the engine seam, and
+      // binding the DDL to it made every post-deploy tightening a
+      // destructive migration. Sources authored before protocol 17 carry
+      // `storage.notNull` explicitly via the `field-required-notnull-explicit`
+      // conversion, so their columns come out exactly as they always did.
+      if ((field as { storage?: { notNull?: boolean } }).storage?.notNull) col.notNullable();
       // `defaultValue: 'NOW()'` is a framework convention for "use the
       // database clock at insert time". Translate it to the driver-native
       // canonical default (`nowColumnDefault`) so the column gets a real,
@@ -4994,6 +5628,28 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
+    // #3994: a `Field.time` is a wall-clock time-of-day. Collapse every accepted
+    // input shape (bare `HH:MM[:SS[.fff]]`, JS `Date`, epoch number, full ISO or
+    // zone-naive timestamp) to the canonical `HH:MM:SS[.fff]` before it hits the
+    // wire — the write half of the same fix `coerceFilterValue` applies to
+    // comparands. On SQLite this ends the mixed TEXT/INTEGER storage that broke
+    // window filters and ORDER BY; on Postgres/MySQL it turns shapes the native
+    // TIME type rejects outright (full ISO — measured failing on both) or
+    // resolves against the process's local timezone (a bound `Date` on pg) into
+    // the one literal every dialect parses the same way.
+    const timeFields = this.timeFields[object];
+    if (timeFields && timeFields.size > 0 && copy && typeof copy === 'object') {
+      for (const field of timeFields) {
+        const v = copy[field];
+        if (v == null) continue;
+        const normalized = canonicalTimeOfDay(v);
+        if (normalized !== v) {
+          if (!copied) { copy = { ...copy }; copied = true; }
+          copy[field] = normalized;
+        }
+      }
+    }
+
     // JSON field serialisation: PostgreSQL native jsonb columns require
     // valid JSON for ALL values (strings, numbers, booleans, objects).
     // SQLite stores JSON as plain TEXT so only objects/arrays need
@@ -5138,13 +5794,13 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    // Present `Field.time` as a wall-clock time-of-day (#2004), repairing a
-    // legacy row stored as a full timestamp — what a `defaultValue: 'NOW()'`
-    // column took when the SQLite default was still the full `CURRENT_TIMESTAMP`
-    // — to just its time portion. A value already stored as a bare time-of-day
-    // is left untouched, so this is read-only and asymmetry-free. Runs for every
-    // dialect (a native TIME column already returns a time-of-day → no-op). See
-    // `toTimeOnly`.
+    // Present `Field.time` as the canonical wall-clock time-of-day (#2004,
+    // #3994) — the same `canonicalTimeOfDay` the write and filter paths apply,
+    // so storage, comparand and presentation are one shape. On read this
+    // transparently repairs legacy rows (full-timestamp text from the old
+    // `CURRENT_TIMESTAMP` default, epoch ms from a bound `Date`) with no data
+    // migration, and re-pads the fraction Postgres trims (`.5` → `.500`). Runs
+    // for every dialect. See `toTimeOnly`.
     const timeFields = this.timeFields[object];
     if (timeFields && timeFields.size > 0) {
       for (const field of timeFields) {

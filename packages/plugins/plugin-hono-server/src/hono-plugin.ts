@@ -813,29 +813,16 @@ export class HonoServerPlugin implements Plugin {
         // failing. Gating here makes the deny decision a property of THIS entry
         // point too, so security no longer depends on who registered first.
         //
-        // Secure-by-default: `requireAuth` mirrors `rest-server.ts`'s `?? true`
-        // (ADR-0056 D2). A deployment that intentionally serves data publicly
-        // sets `restConfig.api.requireAuth = false` (a boot warning is logged, as
-        // in the REST plugin). No-op in that case — the previously-public surface
-        // is unchanged. An authenticated / system caller always passes.
-        //
-        // `requireAuth` is not in the typed `api` shape (rest-server.ts reads it
-        // via the same `as any` cast), so widen locally.
-        const requireAuth =
-            (this.options.restConfig?.api as { requireAuth?: boolean } | undefined)?.requireAuth ?? true;
-        if (!requireAuth) {
-            ctx.logger.warn(
-                'Hono standard /data endpoints: requireAuth is OFF — anonymous callers can read/write object data. ' +
-                'This is a deliberate opt-out; set restConfig.requireAuth=true to deny anonymous access (ADR-0056 D2, #2567).',
-            );
-        }
-        // Returns a 401 Response when the caller is anonymous under the deny
-        // posture, else null (caller proceeds). Delegates the decision to the
+        // [#3963] Anonymous access to object data is denied unconditionally —
+        // the `requireAuth` opt-out is retired, so there is no posture to read
+        // or warn about here. An authenticated / system caller always passes.
+        // Returns a 401 Response when the caller is anonymous, else null
+        // (caller proceeds). Delegates the decision to the
         // shared `shouldDenyAnonymous` (#2567) so every HTTP seam stays in
         // lockstep. `isSystem` is never set on inbound HTTP (internal-only), so
         // it cannot be forged to bypass this.
         const denyAnonymous = (c: any, execCtx: any): Response | null =>
-            shouldDenyAnonymous({ requireAuth, userId: execCtx?.userId, isSystem: execCtx?.isSystem })
+            shouldDenyAnonymous({ userId: execCtx?.userId, isSystem: execCtx?.isSystem })
                 ? c.json(ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS)
                 : null;
 

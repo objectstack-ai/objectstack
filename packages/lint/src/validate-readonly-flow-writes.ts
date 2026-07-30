@@ -103,9 +103,11 @@ function buildReadonlyIndex(objects: AnyRec[]): Map<string, Map<string, FieldRea
 
 /**
  * The target object of an `update_record` node, when statically knowable. Reads
- * the canonical `objectName` and its historical `object` alias (the same pair
- * `readAliasedConfig` resolves at run time). A templated value (contains `{`) is
- * dynamic — return undefined so the node is skipped rather than guessed.
+ * the canonical `objectName` and its historical `object` alias — a pre-parse
+ * source may still carry the alias during the protocol-17 window, until the
+ * 'flow-node-crud-object-alias' conversion (#3796) canonicalizes it at load. A
+ * templated value (contains `{`) is dynamic — return undefined so the node is
+ * skipped rather than guessed.
  */
 function readLiteralObjectName(config: AnyRec): string | undefined {
   const raw = config.objectName ?? config.object;

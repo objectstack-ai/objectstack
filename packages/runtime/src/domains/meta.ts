@@ -5,7 +5,7 @@
  * the terminal cut). The metadata read/write surface: type listing, item
  * CRUD (ADR-0033 draft-aware via the protocol service), the ADR-0046 doc
  * slimming, and org-scoped reads. The anonymous gate keys off the
- * deployment's requireAuth posture through the deps seam.
+ * anonymous-deny gate (unconditional since #3963).
  */
 
 import {
@@ -51,13 +51,13 @@ function slimDocList(type: string, data: any, query?: Record<string, string>): a
  */
 export async function handleMetadataRequest(deps: DomainHandlerDeps, path: string, _context: HttpProtocolContext, method?: string, body?: any, query?: any): Promise<HttpDispatcherResult> {
     // Defense-in-depth: the metadata catch-all must honour the same
-    // `requireAuth` gate as the REST `/meta` routes (which serve `/meta` on
+    // anonymous-deny (#2567) as the REST `/meta` routes (which serve `/meta` on
     // the cloud runtime). Object/field schemas — SYSTEM-object schemas on a
     // tenant-less host — must not be readable by anonymous callers when the
-    // deployment requires auth. No-op when `requireAuth` is off.
+    // an anonymous, non-system caller. Unconditional since #3963.
     {
         const ec: any = _context.executionContext;
-        if (shouldDenyAnonymous({ requireAuth: deps.isAuthRequired(), userId: ec?.userId, isSystem: ec?.isSystem })) {
+        if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem })) {
             return {
                 handled: true,
                 response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),

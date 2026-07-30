@@ -3,8 +3,16 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
+import { isMcpServerEnabled } from '@objectstack/types';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+
+/**
+ * The statuses that mean "advertised but not actually served" — 404 (route not
+ * mounted), 405 (wrong-method sink), 501 (no backing handler/service). Shared
+ * by the probe loop and the #4024 MCP pairing check.
+ */
+const DEAD_MCP_STATUSES = new Set([404, 405, 501]);
 
 /**
  * Route-parity gate — `declared === enforced` for HTTP routes (issue #3369).
@@ -156,7 +164,6 @@ describe('Route parity: discovery-advertised routes are reachable on os serve (#
      * declared ≠ enforced. An anonymous caller legitimately gets 401/403; that
      * still proves the route is mounted.
      */
-    const DEAD_STATUSES = new Set([404, 405, 501]);
     const probes: Array<{ method: string; path: string; note: string }> = [
         { method: 'GET', path: '/api/v1/health', note: 'liveness probe' },
         { method: 'GET', path: '/api/v1/ready', note: 'readiness probe' },
@@ -170,7 +177,7 @@ describe('Route parity: discovery-advertised routes are reachable on os serve (#
         for (const { method, path, note } of probes) {
             const res = await fetch(`${baseUrl}${path}`, { method });
             expect(
-                DEAD_STATUSES.has(res.status),
+                DEAD_MCP_STATUSES.has(res.status),
                 `${method} ${path} (${note}) returned ${res.status} — declared but not enforced`,
             ).toBe(false);
         }
@@ -180,7 +187,7 @@ describe('Route parity: discovery-advertised routes are reachable on os serve (#
         for (const { method, path, note } of probes) {
             const res = await fetch(`${baseUrl}${path}`, { method, headers: { 'x-test-user': 'admin1' } });
             expect(
-                DEAD_STATUSES.has(res.status),
+                DEAD_MCP_STATUSES.has(res.status),
                 `${method} ${path} (${note}) returned ${res.status} for admin — declared but not enforced`,
             ).toBe(false);
         }
@@ -234,5 +241,64 @@ describe('Route parity: discovery is service-aware — no dead advertisement (#3
         // advertised in discovery yet 404 on the listener.
         const res = await fetch(`${baseUrl}/api/v1/notifications`, { headers: { 'x-test-user': 'admin1' } });
         expect(res.status).toBe(404);
+    });
+});
+
+/**
+ * The MCP half of the same invariant (#4024).
+ *
+ * `stubServicesPlugin` has carried an `mcp` opt-out since it was written, and
+ * NOTHING ever passed it: `bootServe()` was called with no args and with
+ * `{ notification: false }`, never `{ mcp: false }`. So the one capability whose
+ * advertisement was NOT service-presence gated was also the one whose absence
+ * was never tested — the sibling test above ("MCP is advertised AND reachable")
+ * stubs the service in unconditionally, proving the lockstep only under the
+ * condition where it cannot fail.
+ *
+ * That gap hid a real exposure. `/mcp` was advertised on `isMcpServerEnabled()`
+ * alone, justified by `os serve` auto-loading plugin-mcp from the same flag —
+ * but that lockstep is a property of the CLI, not of the dispatcher. Any host
+ * that mounts the dispatcher (or `@objectstack/rest`, which has no
+ * `@objectstack/mcp` dependency and no auto-load) without plugin-mcp advertised
+ * `/mcp` and then 501'd on it.
+ *
+ * With the flag ON and the service ABSENT, the honest answer is: don't
+ * advertise it. Note the flag stays untouched here — this is specifically the
+ * enabled-but-unserveable case, not the opted-out one.
+ */
+describe('Route parity: MCP is service-aware — enabled but unserveable is not advertised (#4024)', () => {
+    let kernel: LiteKernel;
+    let baseUrl: string;
+
+    beforeAll(async () => {
+        // Boot WITHOUT the mcp service, flag left at its default-on value.
+        ({ kernel, baseUrl } = await bootServe({ mcp: false }));
+    }, 30_000);
+
+    afterAll(async () => { if (kernel) await shutdown(kernel); }, 30_000);
+
+    it('does NOT advertise mcp when the service is absent, even though the flag is on', async () => {
+        expect(isMcpServerEnabled(), 'precondition: the default-on flag must still be on').toBe(true);
+        const disc = await (await fetch(`${baseUrl}/api/v1/discovery`)).json();
+        expect(
+            disc.data.routes.mcp,
+            'mcp must NOT be advertised when no mcp service is registered (declared === enforced)',
+        ).toBeFalsy();
+    });
+
+    it('never advertises mcp while the route 501s — the exact declared-vs-enforced pair', async () => {
+        // The pairing IS the invariant, so assert it as a pair rather than
+        // pinning the un-provisioned status on its own: whatever /mcp answers,
+        // discovery must not be promising it. This is the assertion that would
+        // have caught #4024, and it holds under either resolution (stop
+        // advertising, or start serving).
+        const disc = await (await fetch(`${baseUrl}/api/v1/discovery`)).json();
+        const res = await fetch(`${baseUrl}/api/v1/mcp`, { method: 'POST', body: '{}' });
+        const advertised = Boolean(disc.data.routes.mcp);
+        const dead = DEAD_MCP_STATUSES.has(res.status);
+        expect(
+            advertised && dead,
+            `discovery advertised mcp (${advertised}) while POST /mcp returned ${res.status} — declared ≠ enforced`,
+        ).toBe(false);
     });
 });

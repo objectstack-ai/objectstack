@@ -319,7 +319,7 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
           return c.json({
             success: false,
             error: {
-              code: 'auth_config_error',
+              code: 'AUTH_CONFIG_ERROR',
               message: looksLikeInternalErrorLeak(err.message)
                 ? INTERNAL_ERROR_MESSAGE
                 : err.message,

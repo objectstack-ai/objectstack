@@ -2,8 +2,10 @@
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { DispatcherErrorCode } from '@objectstack/spec/api';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
+import { buildApiError } from './error-envelope.js';
 import {
     buildSecurityHeaders,
     type SecurityHeadersOptions,
@@ -49,22 +51,6 @@ export interface DispatcherPluginConfig {
      * where membership has not been seeded.
      */
     enforceProjectMembership?: boolean;
-
-    /**
-     * Reject anonymous requests to `auth: true` service routes (AI, etc.), the
-     * `/meta` catch-all with HTTP 401, mirroring the
-     * REST API's `requireAuth` gate. Must match the REST plugin's
-     * `api.requireAuth` so `/ai` and `/meta` stay in lockstep with
-     * `/data` — otherwise the AI routes' declared `auth: true` contract is never
-     * enforced and anonymous callers reach adapter/model status routes or read
-     *
-     * Defaults to `true` — secure-by-default, matching the REST plugin's
-     * `api.requireAuth` default (ADR-0056 D2). Hosts pass their `api.requireAuth`
-     * through (the framework `serve` command and the cloud apps do so from the
-     * same stack `api` config the REST plugin reads); a deployment that serves
-     * these surfaces publicly sets `requireAuth: false` explicitly.
-     */
-    requireAuth?: boolean;
 
     /**
      * Security response headers. When provided, every response routed
@@ -134,7 +120,6 @@ function mountRouteOnServer(
     routePath: string,
     securityHeaders?: Record<string, string>,
     resolveUser?: (headers: Record<string, any>) => Promise<any | undefined>,
-    requireAuth = false,
 ): boolean {
     const handler = async (req: any, res: any) => {
         try {
@@ -154,16 +139,17 @@ function mountRouteOnServer(
             // Enforce the route's declared `auth` contract. This used to be
             // assumed to run "separately"/upstream, but nothing did: an
             // anonymous caller reached `auth: true` handlers (e.g.
-            // `GET /ai/status`) and got adapter/model config back. Gate here
-            // when the deployment requires auth. Off (or `auth: false`) → the
-            // handler runs as before.
-            if (requireAuth && route.auth !== false && !user) {
+            // `GET /ai/status`) and got adapter/model config back. [#3963] The
+            // gate is unconditional now — the deployment-wide `requireAuth`
+            // opt-out is retired, so only a route declaring `auth: false` opens
+            // itself, and it does so by declaration.
+            if (route.auth !== false && !user) {
                 res.status(401);
                 if (securityHeaders) {
                     for (const [k, v] of Object.entries(securityHeaders)) res.header(k, v);
                 }
                 res.json({
-                    error: 'unauthenticated',
+                    error: 'UNAUTHENTICATED',
                     message: 'Authentication is required to access this endpoint.',
                 });
                 return;
@@ -340,12 +326,14 @@ function sendResultBase(
     applySecurityHeaders();
     res.json({
         success: false,
-        error: {
+        error: buildApiError({
+            code: DispatcherErrorCode.enum.ROUTE_NOT_FOUND,
             message: 'Not Found',
-            code: 404,
-            type: 'ROUTE_NOT_FOUND',
-            hint: 'No handler matched this request. Check the API discovery endpoint for available routes.',
-        },
+            httpStatus: 404,
+            extra: {
+                hint: 'No handler matched this request. Check the API discovery endpoint for available routes.',
+            },
+        }),
     });
 }
 
@@ -390,11 +378,11 @@ function sendResultBase(
  */
 function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, string>): void {
     const validation = validationFailureDetails(err);
-    const code =
+    const httpStatus =
         (typeof err?.status === 'number' ? err.status : undefined) ??
         (typeof err?.statusCode === 'number' ? err.statusCode : undefined) ??
         (validation ? VALIDATION_FAILED_STATUS : 500);
-    res.status(code);
+    res.status(httpStatus);
     if (securityHeaders) {
         for (const [k, v] of Object.entries(securityHeaders)) {
             res.header(k, v);
@@ -404,7 +392,7 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
     // wrapper can hand it to errorReporter on 5xx. Handlers catch the
     // error and call us here instead of re-throwing, so this is the
     // only place we still have it.
-    if (code >= 500) {
+    if (httpStatus >= 500) {
         try {
             (res as any).__obsRecordedError = err;
         } catch {
@@ -413,12 +401,23 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
     }
     const raw = err?.message;
     const message =
-        code >= 500 && looksLikeInternalErrorLeak(raw)
+        httpStatus >= 500 && looksLikeInternalErrorLeak(raw)
             ? INTERNAL_ERROR_MESSAGE
             : raw || 'Internal Server Error';
+    // [#3842] A thrown error's own `.code` finally has somewhere to go. This
+    // exit used to drop it outright — `HttpDispatcher.errorFromThrown` at least
+    // parked it in `details` — because `error.code` was occupied by the status.
+    // Both exits now put it in the declared field, so the same SDK method
+    // reports the same code whichever one answered. `validation` last, so
+    // `VALIDATION_FAILED` wins for an error matched by `name` alone, exactly as
+    // it does in `errorFromThrown`.
+    const details =
+        err?.code || validation
+            ? { ...(err?.code ? { code: err.code } : {}), ...(validation ?? {}) }
+            : undefined;
     res.json({
         success: false,
-        error: { message, code, ...(validation ? { details: validation } : {}) },
+        error: buildApiError({ message, httpStatus, details }),
     });
 }
 
@@ -465,31 +464,14 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // Tests / single-tenant deploys can opt out via the explicit flag.
             const enforceMembership =
                 config.enforceProjectMembership ?? (config.scoping?.enableProjectScoping ?? false);
-            // Secure-by-default alignment with the REST plugin's `requireAuth`.
-            // The cloud apps pass the whole stack `api` block as `scoping`
-            // (which carries `requireAuth`), so honour it there too; an explicit
-            // top-level `requireAuth` wins.
-            //
-            // Defaults to `true` — matching `rest-server.ts`'s `?? true`
-            // (ADR-0056 D2). The dispatcher gates the same object data as REST
-            // through sibling surfaces (`/ai`, the `/meta`
-            // catch-all, service routes); defaulting it OFF while REST defaults
-            // ON is exactly the by-surface inconsistency #2567 closes — a bare
-            // host would deny anonymous `/data` yet serve the same rows over
-            // A deployment that intentionally serves these surfaces
-            // publicly opts out with an explicit `requireAuth: false` (a
-            // boot warning is logged, mirroring the REST plugin).
-            const requireAuth =
-                config.requireAuth ?? (config.scoping as { requireAuth?: boolean } | undefined)?.requireAuth ?? true;
-            if (!requireAuth) {
-                ctx.logger?.warn?.(
-                    '[dispatcher] requireAuth is OFF — /ai and the /meta catch-all serve anonymous callers. ' +
-                    'This is a deliberate opt-out; set api.requireAuth=true to deny anonymous access (ADR-0056 D2, #2567).',
-                );
-            }
+            // [#3963] Anonymous callers are denied unconditionally on every
+            // surface that reaches object data — the deployment-wide opt-out is
+            // retired, so there is nothing to resolve or warn about here. The
+            // dispatcher gates the same data as REST through sibling surfaces
+            // (`/ai`, the `/meta` catch-all, service routes), and by-surface
+            // consistency is exactly what #2567 established.
             const dispatcher = new HttpDispatcher(kernel, undefined, {
                 enforceProjectMembership: enforceMembership,
-                requireAuth,
             });
             const prefix = config.prefix || '/api/v1';
 
@@ -651,35 +633,67 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
 
             // ── Analytics ───────────────────────────────────────────────
+            // [#3891 follow-through / ADR-0076 D11] The /analytics wire
+            // surface exists only when the capability does. Phase-1 init has
+            // completed by the time this start() runs, so in single-kernel
+            // mode "is the `analytics` service registered" is authoritative:
+            // absent ⇒ the routes are NOT mounted and the path answers the
+            // adapter's shared not-found contract — no route-table entry, no
+            // 405 Allow hint for an API that isn't there. A multi-tenant host
+            // (kernel-resolver wired) mounts unconditionally: mounts are
+            // host-global while the analytics service lives in the per-project
+            // kernel, so presence is a per-request question — answered by the
+            // analytics domain's existing `handled:false` → 404.
+            //
             // Route via dispatch() (not handleAnalytics directly) so the host
-            // dispatcher's project-aware kernel swap runs first — the per-project
-            // kernel owns the `analytics` service (registered by ObjectQLPlugin).
-            server.post(`${prefix}/analytics/query`, async (req: any, res: any) => {
+            // dispatcher's project-aware kernel swap runs first — the
+            // per-project kernel owns the `analytics` service.
+            const analyticsInstalled = dispatcher.isMultiTenantHost() || await (async () => {
+                const k: any = kernel;
                 try {
-                    const result = await dispatcher.dispatch('POST', '/analytics/query', req.body, req.query, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
+                    if (k && typeof k.getServiceAsync === 'function') {
+                        const svc = await k.getServiceAsync('analytics').catch(() => undefined);
+                        if (svc) return true;
+                    }
+                    return !!k?.getService?.('analytics');
+                } catch {
+                    return false;
                 }
-            });
+            })();
 
-            server.get(`${prefix}/analytics/meta`, async (req: any, res: any) => {
-                try {
-                    const result = await dispatcher.dispatch('GET', '/analytics/meta', undefined, req.query, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
-                }
-            });
+            if (analyticsInstalled) {
+                server.post(`${prefix}/analytics/query`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', '/analytics/query', req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
 
-            server.post(`${prefix}/analytics/sql`, async (req: any, res: any) => {
-                try {
-                    const result = await dispatcher.dispatch('POST', '/analytics/sql', req.body, req.query, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
-                }
-            });
+                server.get(`${prefix}/analytics/meta`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/analytics/meta', undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                server.post(`${prefix}/analytics/sql`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', '/analytics/sql', req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            } else {
+                ctx.logger?.info?.(
+                    '[dispatcher] /analytics not mounted — no `analytics` service is registered. ' +
+                    'Install @objectstack/service-analytics to enable the analytics API.',
+                );
+            }
 
             // ── MCP (Streamable HTTP) + API keys (ADR-0036) ─────────────
             // Mounted explicitly (there is no catch-all) and routed through
@@ -1038,6 +1052,30 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // `req.params` and is picked up by `prepareResolverHints`, exactly as
             // the automation routes handle it.
             const registerActionRoutes = (base: string) => {
+                // [#3913 follow-up] The OBJECT-LESS shape, with the object
+                // segment left empty: `POST /actions//:action`. This is the URL
+                // an SDK that has no object to name emits, and it is the exact
+                // one #3913 was filed against. `handleActionsRequest` has
+                // routed it at the canonical `'global'` key since #3913 — but
+                // ONLY when something delivers the path, and nothing did:
+                // `:object` does not match an empty segment, so the request
+                // fell through to Hono's `notFound` and answered a bare
+                // `{error: 'Not found'}` without the domain ever running. The
+                // unit tests call `handleActions()` / `dispatch()` directly,
+                // which is precisely why they could not catch this — found by
+                // dogfooding the real HTTP surface.
+                //
+                // Registered FIRST and with the empty segment spelled out.
+                // Hono matches the literal `//` and does not let this shadow
+                // the two-segment route below (verified against the router).
+                server!.post(`${base}/actions//:action`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', `/actions//${req.params.action}`, req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
                 server!.post(`${base}/actions/:object/:action`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}`, req.body, req.query, { request: req });
@@ -1142,11 +1180,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 let count = 0;
                 if (enableProjectScoping && projectResolution === 'required') {
-                    if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser, requireAuth)) count++;
+                    if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser)) count++;
                 } else {
-                    if (mountRouteOnServer(route, server, routePath, securityHeaders, resolveRequestUser, requireAuth)) count++;
+                    if (mountRouteOnServer(route, server, routePath, securityHeaders, resolveRequestUser)) count++;
                     if (enableProjectScoping) {
-                        if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser, requireAuth)) count++;
+                        if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser)) count++;
                     }
                 }
                 return count;

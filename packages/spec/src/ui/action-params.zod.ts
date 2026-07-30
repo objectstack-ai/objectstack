@@ -18,6 +18,7 @@
  */
 
 import { valueSchemaFor } from '../data/field-value.zod';
+import type { FieldErrorCode } from '../api/errors.zod';
 
 /**
  * A declared action param resolved to its effective value-shape inputs. A
@@ -41,7 +42,17 @@ export interface ResolvedActionParam {
 export interface ActionParamIssue {
   /** The offending param key. */
   param: string;
-  code: 'required' | 'invalid_shape' | 'unknown_param';
+  /**
+   * Which constraint the value violated, from the field-level catalog
+   * (ADR-0114). Typed as `FieldErrorCode` rather than a local literal union so
+   * an action param and a record field cannot drift into two vocabularies for
+   * the same three conditions — `required` and `invalid_shape` were already
+   * shared verbatim before the catalog existed.
+   *
+   * `unknown_param` folded into `unknown_field` (ADR-0114 D2): the `param` key
+   * beside it already says what was addressed, so the code did not need to.
+   */
+  code: FieldErrorCode;
   message: string;
 }
 
@@ -101,7 +112,7 @@ export function validateActionParams(
     if (declared.has(key) || allow.has(key)) continue;
     issues.push({
       param: key,
-      code: 'unknown_param',
+      code: 'unknown_field',
       message: `Unknown action param "${key}" — not declared on this action`,
     });
   }

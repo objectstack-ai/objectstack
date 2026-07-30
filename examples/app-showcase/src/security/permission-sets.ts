@@ -64,7 +64,6 @@ export const ContributorPermissionSet = definePermissionSet({
       using: 'assignee == current_user.email',
       positions: ['contributor'],
       enabled: true,
-      priority: 10,
     },
     // Owner RLS on the MASTER invoice. Because `showcase_invoice_line` is
     // `controlled_by_parent`, a contributor seeing only their own invoices also
@@ -80,7 +79,6 @@ export const ContributorPermissionSet = definePermissionSet({
       using: 'owner == current_user.email',
       positions: ['contributor'],
       enabled: true,
-      priority: 10,
     },
     // [ADR-0058 D4] RLS `check` — write-side post-image validation (NOT a read
     // filter). On UPDATE the new row must still be owned by the caller, so a
@@ -97,7 +95,6 @@ export const ContributorPermissionSet = definePermissionSet({
       check: 'owner == current_user.email',
       positions: ['contributor'],
       enabled: true,
-      priority: 10,
     },
   ],
 });

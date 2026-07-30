@@ -1,6 +1,6 @@
 # ADR-0053: `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone
 
-**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 (`temporalFilterValue` promotion onto the `IDataDriver` contract) still open as the ADR predicted. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942).
+**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
 **Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
@@ -387,6 +387,19 @@ that is not on the driver contract. Promote it to a first-class
 retire it)** once the contract method is universal. (If an in-flight
 `IDataDriver`-interface change is open, align this with it; do not block on it.)
 
+> **Resolved (2026-07-30).** Both hooks — `temporalFilterValue` and the D-B
+> column-side companion `temporalFilterColumnSql` — are optional members of
+> `IDataDriver` (`spec/contracts/data-driver.ts`), documented as a PAIR:
+> implementing one without the other reintroduces half of #3912, so the
+> contract says implement both or neither, with "absent = identity" semantics
+> for drivers whose storage form is the wire form. `SqlDriver implements
+> IDataDriver`, so its signatures are compile-checked; analytics derives its
+> driver seam by `Pick`-ing the contract instead of a local duck type, keeping
+> the runtime `typeof` guards as the (correct) way to consume an optional
+> member. `coerceFilterValueForSql` already sits behind the hook as the
+> last-resort boolean/number recovery for non-temporal columns — the demotion
+> this decision asked for — and is retained for exactly that role.
+
 **D-A3 — Add a temporal conformance matrix as the runtime regression backstop.**
 Cover `field-type {date, datetime} × operator {eq, gte/lte/gt/lt, in, dateRange} ×
 relative-token {today, N_days_ago, N_months_ago, …} × driver {SQLite, Postgres at
@@ -400,8 +413,9 @@ time, the matrix proves runtime correctness across drivers.
 - The `datetime`-on-raw-SQL filter bug is closed at the driver boundary, mirroring
   Phase 1's "align the consumer with the driver's existing contract rather than
   inventing a semantic" stance. No change to Phase 2's reference-timezone plan.
-- Until D-A2 lands, the hook depends on a duck-typed driver method — a known,
-  intentionally-temporary seam tracked here.
+- ~~Until D-A2 lands, the hook depends on a duck-typed driver method — a known,
+  intentionally-temporary seam tracked here.~~ Landed 2026-07-30; see the
+  resolution note under D-A2.
 
 ---
 
@@ -503,7 +517,8 @@ is clean.
   companion threaded to analytics as
   `StrategyContext.coerceTemporalFilterColumn`. Coercing the value alone is not
   sufficient on a mixed-form column, so any surface that binds a comparand into
-  raw SQL must wrap its column reference too. Both remain duck-typed until D-A2.
+  raw SQL must wrap its column reference too. Both promoted onto the contract
+  2026-07-30 — see the resolution note under D-A2.
 - D-A3's conformance matrix should gain a **storage-form** axis (canonical,
   legacy-epoch, legacy-naive) and a **server-timezone** axis, since both are now
   known to have produced dialect-divergent row results.
@@ -559,3 +574,146 @@ The same caveat as Postgres applies and is worth stating plainly: the migration
 Regression cover is `sql-driver-datetime-mysql-storage.test.ts`, opt-in via
 `OS_TEST_MYSQL_URL` (CI provisions no server), asserting a non-UTC server so it
 cannot pass vacuously. 10 of its 13 cases fail without this change.
+
+---
+
+## Addendum (2026-07-30) — `Field.time` gets the same storage convention (D-C1..D-C3, #3994)
+
+`Field.time` was the last temporal field type with **no storage convention at
+all** — the exact meta-problem #3912 exposed for `Field.datetime`. `formatInput`
+never touched it, `coerceFilterValue` returned its comparands unchanged, and the
+read paths papered over the drift so well (`toTimeOnly`) that `find()` always
+looked right. Measured on real servers (SQLite; PG 16 at `Asia/Shanghai`;
+MariaDB 10.11 / MySQL 8.0 at `+08:00`; Node at `America/New_York`), the same
+failure family followed: a business-hours window filter silently dropped 4 of 7
+rows on SQLite (INTEGER epoch rows fail `>= '09:00'` because `INTEGER < TEXT`;
+full-timestamp text fails `<= '18:00'` lexicographically), ORDER BY put 14:30
+before 08:00, a full-ISO write failed the statement outright on PG **and**
+MySQL, a bound `Date` stored a process-timezone wall clock on pg, MySQL's bare
+`TIME` rounded `…00.500` up to `…01`, and a `NOW()` default resolved against
+three different clocks on the three dialects.
+
+### D-C1 — The canonical form is `HH:MM:SS`, `.fff` only when non-zero
+
+A `Field.time` is a **timezone-naive wall-clock time-of-day** (#2004), so the
+canonical text carries no zone: `HH:MM:SS`, extended to `HH:MM:SS.fff` exactly
+when the milliseconds are non-zero. One function (`canonicalTimeOfDay`) produces
+it and is applied on write (`formatInput`), to filter comparands
+(`coerceFilterValue`/`temporalFilterValue`) and on read (`toTimeOnly`), the
+D-B1 construction transplanted.
+
+Why variable-width rather than datetime's fixed `.sss`: `.` sorts below every
+digit, so lexicographic order is still chronological order across mixed widths
+(`'14:30:00.100' < '14:30:01'`), and the zero-millisecond spelling `HH:MM:SS`
+is what every dialect's native TIME emits — the field-zoo `f_time` round-trip
+(#2022) keeps holding byte-for-byte. Determinism is what matters for equality
+and `distinct()`, and each wall clock has exactly one spelling. A minutes-only
+`'14:30'` completes to `'14:30:00'`.
+
+A `Date` / epoch-ms / full-timestamp value folds to its **UTC** time-of-day —
+matching the platform's instant semantics, the SQLite read repair's historical
+behaviour, and `nowColumnDefault`; never the process or server timezone.
+Uninterpretable values (including out-of-range wall clocks like `'25:00'`) pass
+through untouched.
+
+### D-C2 — Physical form per dialect
+
+- **SQLite**: canonical TEXT (no native type). Legacy columns converge at
+  schema sync via `backfillCanonicalTimes` — one `UPDATE` per column whose SET
+  expression IS the read-repair SQL (`sqliteCanonicalTimeSql`), `IS NOT` guard,
+  log-and-swallow failure policy, `os migrate plan` row-counted entry
+  (`normalize_time_storage`) — D-B3 verbatim. Until it runs, filters wrap the
+  column in the repair expression: correct, just unindexed.
+- **Postgres**: native `time` (µs precision). The canonical literal binds
+  unambiguously; the pre-fix failures were the *input* shapes, not the column.
+- **MySQL**: `TIME(3)` — the `DATETIME(3)` precedent applied: bare `TIME` is
+  zero-precision and **rounds** fractional literals, changing the stored wall
+  clock. Legacy `TIME(0)` columns widen at schema sync
+  (`migrateMysqlTimeColumns`, plan kind `widen_time_columns`), restating a
+  `NOW()` expression default where declared.
+
+### D-C3 — `NOW()` defaults are the UTC wall clock on every dialect
+
+`knex.fn.now()` compiles to `CURRENT_TIMESTAMP`, which a TIME column resolves
+in the **server's** zone on Postgres and the **inserting session's** zone on
+MySQL (so the same column's default depended on who inserted). MySQL 8.0
+additionally rejects a plain `CURRENT_TIMESTAMP` default on TIME. The defaults
+are now expression-spelled per dialect — `strftime('%H:%M:%f','now')` with a
+canonical `.000` trim on SQLite, `timezone('utc', now())::time(3)` on Postgres,
+`(cast(utc_timestamp(3) as time(3)))` on MySQL (8.0.13+/MariaDB 10.2+ for the
+expression-default syntax) — all reading the UTC clock.
+
+The same construction closes the `Field.date` half of the gap (#4022):
+`nowColumnDefault('date')` emits `timezone('utc', now())::date` on Postgres and
+`(cast(utc_timestamp() as date))` on MySQL. Measured: the bare
+`CURRENT_TIMESTAMP` default recorded YESTERDAY's calendar day on a UTC-12
+Postgres server, and MySQL 8.0 rejects it on a DATE column outright (the
+driver's UTC-pinned session masked the semantic half on MariaDB). Legacy
+columns keep their old default — defaults only govern newly created columns,
+the standing policy since D-B3.
+
+The D-B3 caveat applies unchanged: the backfill converges *shapes*; a wall
+clock the old path never recorded correctly (a pg `Date` bind serialised in the
+host's zone) is not recoverable. Regression cover:
+`sql-driver-time-canonical-storage.test.ts`, `sql-driver-time-of-day.test.ts`
+(SQLite), `sql-driver-time-live-dialects.test.ts` (live PG + MySQL, in the CI
+temporal-conformance job's non-UTC matrix).
+
+---
+
+## Addendum (2026-07-30) — a bare-day UPPER bound means the whole day (#3777)
+
+> **Status:** landed. Extends Phase 1's calendar-day semantics with the
+> operator-sensitive half the original decision left implicit — and the default
+> dashboard configuration hit it: the date-range filter's default field is
+> `created_at`, a system-injected `Field.datetime`, and 7 of 13 presets end
+> "today", so `{ $lte: <today> }` anchored to midnight silently dropped every
+> row created after 00:00 of the final day.
+
+### D-D1 — Operator-sensitive translation lives at the comparison EMITTERS
+
+`YYYY-MM-DD` anchors to midnight UTC (D-B1). That instant is the correct
+comparand for `$gte`/`$gt`/`$lt` — and the wrong one for `$lte`, whose author
+means "through the whole of that day". The translation is therefore a property
+of the *comparison*, not of the value: `temporalFilterValue` stays
+operator-blind (form only), and each emitter that owns an operator compiles a
+bare-day upper bound half-open:
+
+- **`SqlDriver` filter compiler** (`calendarDayUpperBoundRewrite` /
+  `calendarDayBetweenRewrite`): `$lte`/`<=` → `< next-day-midnight` in storage
+  form; `$between [min, max]` with a bare-day max decomposes to
+  `>= min AND < next-day(max)`. Applies on both the plain and the
+  CASE-normalised (D-B2) column paths, and to the Mongo-style and array
+  `where` spellings. `driver-sqlite-wasm` inherits.
+- **`NativeSQLStrategy`** windows and `lte` filters bind `< next-day` instead
+  of `BETWEEN`/`<=` when the bound is a bare day.
+- **`ObjectQLStrategy`** leaves its lowered `{$gte, $lte}` bounds bare — the
+  driver rewrite is the single execution-path authority — and renders
+  `/analytics/sql` half-open so the echoed SQL reproduces execution.
+- **The dataset preview evaluator** applies the same rule in memory, replacing
+  its `'~'`-suffix string hack, so draft numbers match published numbers.
+
+One primitive backs all of them: `nextUtcCalendarDay` (`@objectstack/core`),
+which rejects instants, `Date`s and impossible days (`2026-02-30`) rather than
+inventing a bound. Half-open — never an inclusive `23:59:59.999`, which
+re-opens the gap at whatever precision the dialect stores beyond milliseconds
+(Postgres keeps microseconds), and is the same `[gte, lt)` shape the drill
+ranges (#1752) already emit. `< next-day` is also order-equivalent to `<= day`
+for `Field.date` text, which is what lets the type-blind emitters (raw SQL,
+preview) apply it unconditionally; the driver, which knows the column type,
+scopes the rewrite to `datetime` so `date`/`time` columns compile byte-identical
+to before.
+
+The filter-token resolver (`filter-tokens.ts`) keeps its documented refusal to
+widen: a resolver-side fix would change what a token *is*; the emitter-side fix
+changes what a comparison *does* with it, per column type — which is the layer
+that owns that knowledge.
+
+### D-D2 — Consequences for D-A3
+
+The conformance matrix gains a **bound-semantics** axis (`point`, `whole-day`):
+row-result coverage for the `$lte`/`$between` upper-bound cells now lives in
+`sql-driver-calendar-day-upper-bound.test.ts` (canonical + legacy-mixed
+storage, dialect physical forms, boundary rollovers) and the strategy/preview
+suites; the full matrix program (relative-token × live-driver × timezone)
+remains open under D-A3.

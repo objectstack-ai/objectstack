@@ -24,6 +24,7 @@ import { validateFlowTriggerReadiness } from '@objectstack/lint';
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
+import { lintUniqueDeclarations } from '../lint/data-model-rules.js';
 import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
 import { lintViewRefs } from '../utils/lint-view-refs.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
@@ -592,12 +593,24 @@ export default class Validate extends Command {
       const viewRefErrors = viewRefLint.filter((f) => f.severity === 'error');
       const viewRefWarnings = viewRefLint.filter((f) => f.severity !== 'error');
 
+      // Contradictory uniqueness declarations (#3991) — a column carrying both a
+      // field-level `unique: true` and a single-column declared unique index has
+      // two intents, of which exactly one takes effect. Advisory. Mapped into the
+      // `{ where, hint }` shape the shared renderer below expects; the rule lives
+      // in `lint/data-model-rules.ts` so `os lint` reports the same finding.
+      const uniqueLintWarnings = lintUniqueDeclarations(
+        Array.isArray((result.data as Record<string, unknown>).objects)
+          ? ((result.data as Record<string, unknown>).objects as any[])
+          : [],
+      ).map((f) => ({ where: f.path, message: f.message, hint: f.fix ?? '', rule: f.rule, severity: 'warning' as const }));
+
       const authoringLintErrors = [...flowLintErrors, ...autonumberErrors, ...viewRefErrors];
       const authoringLintWarnings = [
         ...flowLintWarnings,
         ...livenessLint,
         ...autonumberWarnings,
         ...viewRefWarnings,
+        ...uniqueLintWarnings,
       ];
       if (authoringLintErrors.length > 0) {
         if (flags.json) {

@@ -255,12 +255,12 @@ export async function runAdminImportUsers(
   // temporary. `none` is still available for identity-only imports.
   const policy: ImportPasswordPolicy = body?.passwordPolicy === undefined ? 'auto' : body.passwordPolicy;
   if (policy !== 'auto' && policy !== 'none' && policy !== 'invite' && policy !== 'temporary') {
-    return fail(400, 'invalid_request', 'passwordPolicy must be "auto" (default), "none", "invite", or "temporary"');
+    return fail(400, 'INVALID_REQUEST', 'passwordPolicy must be "auto" (default), "none", "invite", or "temporary"');
   }
   const mode = body?.mode === 'upsert' ? 'upsert' : body?.mode === 'insert' || body?.mode === undefined ? 'insert' : undefined;
-  if (!mode) return fail(400, 'invalid_request', 'mode must be "insert" or "upsert"');
+  if (!mode) return fail(400, 'INVALID_REQUEST', 'mode must be "insert" or "upsert"');
   const matchBy = body?.matchBy === 'phone' ? 'phone' : body?.matchBy === 'email' || body?.matchBy === undefined ? 'email' : undefined;
-  if (!matchBy) return fail(400, 'invalid_request', 'matchBy must be "email" or "phone"');
+  if (!matchBy) return fail(400, 'INVALID_REQUEST', 'matchBy must be "email" or "phone"');
   if (matchBy === 'phone' && !deps.phoneNumberEnabled()) {
     return fail(400, 'PHONE_NOT_ENABLED', 'matchBy "phone" requires the phoneNumber auth plugin (auth.plugins.phoneNumber)');
   }
@@ -280,7 +280,7 @@ export async function runAdminImportUsers(
   }
 
   const engine = deps.getDataEngine();
-  if (!engine) return fail(503, 'unavailable', 'Data engine unavailable');
+  if (!engine) return fail(503, 'SERVICE_UNAVAILABLE', 'Data engine unavailable');
 
   // ── Payload parsing (shared generic-import parser) ───────────────────
   const prep = await prepareImportRequest(
@@ -332,7 +332,7 @@ export async function runAdminImportUsers(
   const inviteTargets = new Map<string, { channel: 'email' | 'sms'; email: string; phone?: string }>();
   const authApi = await deps.getAuthApi();
   if (typeof authApi.createUser !== 'function') {
-    return fail(501, 'not_supported', 'The better-auth admin plugin is not enabled (auth.plugins.admin)');
+    return fail(501, 'NOT_IMPLEMENTED', 'The better-auth admin plugin is not enabled (auth.plugins.admin)');
   }
 
   const protocol: ImportProtocolLike = {

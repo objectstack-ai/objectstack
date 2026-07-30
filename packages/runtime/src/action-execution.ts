@@ -18,6 +18,26 @@
 import { validateActionParams, type ResolvedActionParam } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { checkApiExposure } from './api-exposure.js';
+import {
+    GLOBAL_ACTION_OBJECT_KEY,
+    actionHandlerObjectKeys,
+    isObjectLessActionKey,
+    reconcileActionRegistrations as reconcileActionRegistrationsPure,
+    resolveActionHandlerKeys,
+} from '@objectstack/objectql';
+
+// [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
+// @objectstack/objectql (the engine owns the map they describe, and its
+// plugin now runs the boot inventory — AppPlugin, the previous host, is
+// registered conditionally and never ran it on the `os dev` path). Runtime
+// re-exports them so dispatch, the MCP bridge and existing importers keep
+// reading the ONE implementation.
+export {
+    GLOBAL_ACTION_OBJECT_KEY,
+    actionHandlerObjectKeys,
+    isObjectLessActionKey,
+    resolveActionHandlerKeys,
+};
 
 /** A `sys_`-prefixed object is a system table — off-limits to external MCP agents. */
 export function isSystemObjectName(name: string): boolean {
@@ -28,6 +48,7 @@ export function isSystemObjectName(name: string): boolean {
 function actionParamsStrict(): boolean {
     return typeof process !== 'undefined' && process.env?.OS_ACTION_PARAMS_STRICT_ENABLED === '1';
 }
+
 
 const _warnedActionParams = new Set<string>();
 function warnActionParamsOnce(key: string, message: string): void {
@@ -429,11 +450,14 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         params: seedFlowActionParams(deps, action, { objectName, record, params, recordId }),
     });
     if (result && typeof result === 'object' && 'success' in result && result.success === false) {
-        // The flow RAN and rejected — a business outcome, so the REST route
-        // reports it in the payload (`{success: false, error}`, HTTP 200), the
-        // same as a script body that throws. Only a route that never dispatched
-        // gets a status (#3913).
-        throw new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
+        // The flow RAN and rejected — a deliberate business rejection, served
+        // as a 400 (#3962). Tagging the status/code here (rather than relying
+        // on the route's name heuristic) keeps the semantic `FLOW_FAILED` on
+        // the wire for callers that branch on `err.code`.
+        const err: any = new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);
+        err.status = 400;
+        err.code = 'FLOW_FAILED';
+        throw err;
     }
     return result ?? null;
 }
@@ -813,25 +837,15 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         executionContext: buildActionExecutionContext(ec),
         params: { ...params, recordId, objectName },
     };
-    // Handler key: body-based actions register under `name` (AppPlugin);
-    // target-bound script actions register under `target` (user code).
-    // Probe both, then the object-less keys (#3913), distinguishing the
-    // engine's "action not registered" miss from a genuine handler error.
-    const primary = action.body ? action.name : (action.target || action.name);
-    const candidates = [primary, action.target, action.name].filter(
-        (k: unknown, i: number, a: unknown[]): k is string => typeof k === 'string' && a.indexOf(k) === i,
+    // [ADR-0110 D2] Handler-key derivation + the probe rotation are shared with
+    // the REST `/actions` route — one addressing algorithm, not two.
+    const dispatch = await executeRegisteredAction(
+        deps, ql, objectName, resolveActionHandlerKeys(action), actionContext,
     );
-    for (const obj of actionHandlerObjectKeys(objectName)) {
-        for (const key of candidates) {
-            try {
-                const result = await ql.executeAction(obj, key, actionContext);
-                return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: result ?? null };
-            } catch (err: any) {
-                if (!isActionNotRegisteredError(err)) throw err; // real handler failure → surface
-            }
-        }
+    if (!dispatch.dispatched) {
+        throw new Error(`No handler registered for action '${name}' on '${objectName}'`);
     }
-    throw new Error(`No handler registered for action '${name}' on '${objectName}'`);
+    return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: dispatch.result ?? null };
 }
 
 /**
@@ -914,6 +928,7 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
     return out;
 }
 
+
 /**
  * Owning object of a standalone `action` item — must stay in lockstep with
  * the ObjectQL plugin's `actionObjectKey` (the engine registration key), so
@@ -927,32 +942,7 @@ export function standaloneActionObjectName(deps: ActionExecutionDeps, action: an
     return GLOBAL_ACTION_OBJECT_KEY;
 }
 
-/**
- * The engine object key an object-LESS ("global") action registers under.
- *
- * Canonical since #3913, and it is `'global'` because that is what the two
- * writers have always written: `AppPlugin` (`action.object || 'global'`) and
- * `ObjectQLPlugin.actionObjectKey`. `engine.executeAction` is an exact-string
- * `Map` lookup with no wildcard semantics, so the READERS have to probe the
- * same literal — before this, the REST route and the MCP bridge both rotated
- * to `'*'`, which nothing ever registers, and every global action came back as
- * `Action '<name>' on object '*' not found`.
- */
-export const GLOBAL_ACTION_OBJECT_KEY = 'global';
 
-/**
- * The engine object keys to probe, in order, for a route's action handler.
- *
- * The routed object first, then the canonical object-less key (#3913), then
- * the legacy `'*'` — kept last so a handler that user code registered directly
- * against the wildcard still resolves. Deduped, so a request routed AT
- * `/actions/global/:action` probes `'global'` exactly once.
- */
-export function actionHandlerObjectKeys(objectName: string): string[] {
-    return [objectName, GLOBAL_ACTION_OBJECT_KEY, '*'].filter(
-        (k, i, all) => all.indexOf(k) === i,
-    );
-}
 
 /**
  * True when the error is `executeAction`'s "no such key in the registry" miss
@@ -968,16 +958,45 @@ export function isActionNotRegisteredError(err: any): boolean {
     return /Action '.+' on object '.+' not found/i.test(String(err?.message ?? err));
 }
 
+
 /**
- * True when the routed "object" is the object-less placeholder rather than a
- * real object — the canonical `'global'`, the legacy `'*'`, or nothing at all
- * (`POST /actions//:action`). Callers use it to skip work that only makes
- * sense for a record-scoped action: loading `ctx.record`, and naming an
- * `object` on the flow-automation context.
+ * [ADR-0110 D2] Run a script/body action through the engine's handler
+ * registry: rotate the derived key candidates across the object-key rotation
+ * (`actionHandlerObjectKeys`), telling an "unregistered key" miss apart from
+ * a genuine handler failure.
+ *
+ * Shared by the REST `/actions` route and the MCP `run_action` bridge so both
+ * surfaces address handlers identically. Before it was shared, REST rotated
+ * only the OBJECT and used the URL segment verbatim as the key — strictly
+ * weaker than MCP, and the reason the documented
+ * `POST /api/v1/actions/todo_task/complete_task` curl 404ed for every
+ * target-bound action while the Console's `target`-addressed call worked
+ * (and skipped the D4 gate on the way past).
+ *
+ * Reports a total miss as `{ dispatched: false }` rather than throwing, so
+ * neither surface has to pattern-match this function's own error message to
+ * tell "no handler anywhere" (a routing miss — 404) from "the handler ran and
+ * failed" (a business outcome, which propagates). Each surface words its own
+ * miss: REST 404s naming the routed object, MCP throws naming the action.
  */
-export function isObjectLessActionKey(objectName: string | undefined | null): boolean {
-    return !objectName || objectName === GLOBAL_ACTION_OBJECT_KEY || objectName === '*';
+export async function executeRegisteredAction(deps: ActionExecutionDeps,
+    ql: any,
+    objectName: string,
+    candidates: string[],
+    actionContext: any,
+): Promise<{ dispatched: boolean; result?: any }> {
+    for (const obj of actionHandlerObjectKeys(objectName)) {
+        for (const key of candidates) {
+            try {
+                return { dispatched: true, result: await ql.executeAction(obj, key, actionContext) };
+            } catch (err: any) {
+                if (!isActionNotRegisteredError(err)) throw err; // real handler failure → surface
+            }
+        }
+    }
+    return { dispatched: false };
 }
+
 
 /**
  * Resolve the DECLARATION behind a `<object>/<action>` route pair — the
@@ -1004,7 +1023,7 @@ export function isObjectLessActionKey(objectName: string | undefined | null): bo
  */
 export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     args: { ql: any; objectName: string; actionName: string; envId?: string },
-): Promise<{ action: any; obj: any } | undefined> {
+): Promise<{ action: any; obj: any; degraded?: boolean; reason?: string }> {
     const { ql, objectName, actionName, envId } = args;
 
     let obj: any;
@@ -1032,13 +1051,47 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
         /* registry without an item lookup → fall through to the metadata service */
     }
 
+    // [ADR-0110 D3] A miss and an OUTAGE are different facts. `load` answers
+    // `null` for both — a loader that throws is warn-logged and skipped — so
+    // reading its `null` as "no declaration, hence no gate to enforce" lets an
+    // unreachable metadata plane silently ungate every action it can't see.
+    // `loadDiagnosed` reports whether the answer is trustworthy; a service
+    // that predates it (or a test double) simply reports nothing degraded.
+    let degraded = false;
+    let reason: string | undefined;
     try {
         const meta: any = await deps.resolveService('metadata', envId);
-        const fromMeta: any = await meta?.load?.('action', actionName);
-        if (fromMeta && ownsRoute(fromMeta)) return { action: fromMeta, obj };
-    } catch {
-        /* no metadata service on this kernel → no declaration to resolve */
+        if (meta && typeof meta.loadDiagnosed === 'function') {
+            const diag: any = await meta.loadDiagnosed('action', actionName);
+            if (diag?.data && ownsRoute(diag.data)) return { action: diag.data, obj };
+            if (diag?.degraded) {
+                degraded = true;
+                reason = Array.isArray(diag.errors) && diag.errors.length > 0
+                    ? diag.errors.join('; ')
+                    : 'the metadata plane reported a loader failure';
+            }
+        } else {
+            const fromMeta: any = await meta?.load?.('action', actionName);
+            if (fromMeta && ownsRoute(fromMeta)) return { action: fromMeta, obj };
+        }
+    } catch (err: any) {
+        // `resolveService` swallows its own resolution failures, so reaching
+        // here means the metadata service itself threw while answering.
+        degraded = true;
+        reason = err?.message ?? String(err);
     }
 
-    return obj ? { action: undefined, obj } : undefined;
+    return { action: undefined, obj, degraded, reason };
+}
+
+/**
+ * [ADR-0110 D5] Back-compat wrapper over the engine-owned reconciliation —
+ * the `deps` parameter was never read; kept so existing call sites and tests
+ * are source-compatible. New code should import from `@objectstack/objectql`.
+ */
+export function reconcileActionRegistrations(_deps: ActionExecutionDeps,
+    registered: Array<{ objectName: string; actionName: string; package?: string }>,
+    declarations: Array<{ action: any; objectName: string }>,
+): ReturnType<typeof reconcileActionRegistrationsPure> {
+    return reconcileActionRegistrationsPure(registered, declarations);
 }

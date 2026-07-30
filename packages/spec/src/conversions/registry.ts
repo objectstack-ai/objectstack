@@ -887,10 +887,542 @@ const sharingRuleAccessLevelFullToEdit: MetadataConversion = {
   },
 };
 
+/** Rename each `[from, to]` config pair on flow nodes of the given types. */
+function renameFlowConfigAliases(
+  stack: Dict,
+  nodeTypes: ReadonlySet<string>,
+  pairs: ReadonlyArray<readonly [string, string]>,
+  emit: Emit,
+): Dict {
+  return mapFlowNodes(stack, (node, path) => {
+    if (typeof node.type !== 'string' || !nodeTypes.has(node.type)) return node;
+    let next = node;
+    for (const [from, to] of pairs) {
+      const renamed = renameConfigKey(next, from, to);
+      if (!renamed) continue;
+      emit({ from, to, path: `${path}.config.${to}` });
+      next = renamed;
+    }
+    return next;
+  });
+}
+
+/**
+ * CRUD flow-node `config.object` → `config.objectName` (protocol 17, #3796).
+ *
+ * The last tenant of the `readAliasedConfig` executor shim
+ * (`service-automation/src/builtin/config-aliases.ts`) graduates into the
+ * conversion layer, completing the PD #12 retirement path that
+ * {@link flowNodeFilterAlias} pioneered: the alias is rewritten to the
+ * canonical key at load — including the `AutomationEngine.registerFlow`
+ * rehydration seam — so the CRUD executors read `cfg.objectName` directly and
+ * the shim is deleted. **Live window**: stored flows authored with `object`
+ * keep loading through this major; retires at 18.
+ */
+const flowNodeCrudObjectAlias: MetadataConversion = {
+  id: 'flow-node-crud-object-alias',
+  toMajor: 17,
+  surface: 'flow.node.config.objectName',
+  summary: "CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation)",
+  apply(stack, emit) {
+    const crudTypes = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
+    return renameFlowConfigAliases(stack, crudTypes, [['object', 'objectName']], emit);
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'lead_lookup',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'get_record', config: { object: 'lead', recordId: '{leadId}' } },
+            // canonical already present → the shadowed alias is left alone (no notice)
+            { id: 'n3', type: 'create_record', config: { objectName: 'task', object: 'ignored' } },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'lead_lookup',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'get_record', config: { objectName: 'lead', recordId: '{leadId}' } },
+            { id: 'n3', type: 'create_record', config: { objectName: 'task', object: 'ignored' } },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * Lift `notify`'s nested `config.source: { object, id }` onto the canonical flat
+ * `sourceObject` / `sourceId` keys (#4045).
+ *
+ * The fifth notify alias, and the only one that is not a 1:1 rename — it is a
+ * 1→2 destructuring, so {@link renameFlowConfigAliases}' pair mechanism cannot
+ * express it. Semantics mirror the `??` precedence the executor used to carry:
+ * a canonical key already present WINS and its nested counterpart is left
+ * shadowed, exactly as {@link renameConfigKey} treats a shadowed alias.
+ *
+ * `source` is dropped once at least one part was lifted — every part is by then
+ * either lifted or shadowed by a canonical key, so nothing observable is lost
+ * (the executor only ever read `.object` / `.id`). A `source` that is not a dict,
+ * or carries neither key, is left untouched rather than silently deleted.
+ */
+function liftNotifySourceShape(stack: Dict, emit: Emit): Dict {
+  return mapFlowNodes(stack, (node, path) => {
+    if (node.type !== 'notify') return node;
+    const config = node.config;
+    if (!isDict(config)) return node;
+    const source = config.source;
+    if (!isDict(source)) return node;
+
+    const nextConfig: Dict = { ...config };
+    let lifted = false;
+    for (const [from, to] of [['object', 'sourceObject'], ['id', 'sourceId']] as const) {
+      if (source[from] == null) continue;
+      if (nextConfig[to] != null) continue; // canonical already wins
+      nextConfig[to] = source[from];
+      emit({ from: `source.${from}`, to, path: `${path}.config.${to}` });
+      lifted = true;
+    }
+    if (!lifted) return node;
+    delete nextConfig.source;
+    return { ...node, config: nextConfig };
+  });
+}
+
+/**
+ * Notify flow-node config key aliases → canonical (protocol 17, #3796 / #4045).
+ *
+ * The `notify` executor carried five open-coded `??` fallbacks that never went
+ * through the deprecation shim — an author who wrote the email-idiom keys got
+ * a flow that worked forever and was never steered to the canonical spelling.
+ * Four are pure key renames with unchanged values; the fifth
+ * (`source: { object, id }`, #4045) is a destructuring handled by
+ * {@link liftNotifySourceShape}.
+ *
+ * `actionUrl` is the deliberate canonical of its pair (the executor's own
+ * `configSchema` used to claim the opposite): the entire downstream chain
+ * already uses it — `sys_notification.action_url`, the channel-dispatch
+ * contract, the REST notification read model — and `url` elsewhere in the
+ * platform means "HTTP endpoint to call" (`http` node, webhooks), a different
+ * concept from this in-app click-through target. The executor precedence
+ * already put `actionUrl` first, so the choice is behaviour-preserving.
+ * **Live window**; retires at 18.
+ */
+const flowNodeNotifyConfigAliases: MetadataConversion = {
+  id: 'flow-node-notify-config-aliases',
+  toMajor: 17,
+  surface: 'flow.node.notify.config',
+  summary:
+    "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), " +
+    "and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
+  apply(stack, emit) {
+    const renamed = renameFlowConfigAliases(
+      stack,
+      new Set(['notify']),
+      [
+        ['to', 'recipients'],
+        ['subject', 'title'],
+        ['body', 'message'],
+        ['url', 'actionUrl'],
+      ],
+      emit,
+    );
+    return liftNotifySourceShape(renamed, emit);
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'task_assigned',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            {
+              id: 'n2',
+              type: 'notify',
+              config: {
+                to: ['{record.assignee}'],
+                subject: 'New task: {record.title}',
+                body: 'You have been assigned "{record.title}".',
+                url: '/task/{record.id}',
+                channels: ['inbox'],
+                // #4045 — the nested click-through target, lifted to the flat pair.
+                source: { object: 'showcase_task', id: '{record.id}' },
+              },
+            },
+            // A canonical `sourceObject` WINS: only the unshadowed `id` is
+            // lifted, and `source` is dropped since every part is accounted for.
+            {
+              id: 'n3',
+              type: 'notify',
+              config: {
+                recipients: ['{record.owner}'],
+                sourceObject: 'showcase_project',
+                source: { object: 'ignored', id: '{record.project}' },
+              },
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'task_assigned',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            {
+              id: 'n2',
+              type: 'notify',
+              config: {
+                recipients: ['{record.assignee}'],
+                title: 'New task: {record.title}',
+                message: 'You have been assigned "{record.title}".',
+                actionUrl: '/task/{record.id}',
+                channels: ['inbox'],
+                sourceObject: 'showcase_task',
+                sourceId: '{record.id}',
+              },
+            },
+            {
+              id: 'n3',
+              type: 'notify',
+              config: {
+                recipients: ['{record.owner}'],
+                sourceObject: 'showcase_project',
+                sourceId: '{record.project}',
+              },
+            },
+          ],
+        },
+      ],
+    },
+    // 4 renames on n2 + `source.object`/`source.id` lifted on n2 + the single
+    // unshadowed `source.id` on n3 (its `source.object` is shadowed → no notice).
+    expectedNotices: 7,
+  },
+};
+
+/**
+ * Script flow-node config key aliases → canonical (protocol 17, #3796).
+ *
+ * `function` is the canonical callable reference (#1870); `functionName` was
+ * the AI/template-emitted alias. `inputs` is the canonical input map; the
+ * `input` alias almost certainly leaked from `connector_action`, whose
+ * `connectorConfig.input` (singular) is a *different, canonical* surface and is
+ * deliberately not touched here. Both are pure key renames with unchanged
+ * values. **Live window**; retires at 18.
+ */
+const flowNodeScriptConfigAliases: MetadataConversion = {
+  id: 'flow-node-script-config-aliases',
+  toMajor: 17,
+  surface: 'flow.node.script.config',
+  summary: "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796)",
+  apply(stack, emit) {
+    return renameFlowConfigAliases(
+      stack,
+      new Set(['script']),
+      [
+        ['functionName', 'function'],
+        ['input', 'inputs'],
+      ],
+      emit,
+    );
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'score_lead',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            {
+              id: 'n2',
+              type: 'script',
+              config: {
+                actionType: 'invoke_function',
+                functionName: 'score_lead',
+                input: { leadId: '{record.id}' },
+                outputVariable: 'score',
+              },
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'score_lead',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            {
+              id: 'n2',
+              type: 'script',
+              config: {
+                actionType: 'invoke_function',
+                function: 'score_lead',
+                inputs: { leadId: '{record.id}' },
+                outputVariable: 'score',
+              },
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * RLS-policy `priority` removed (protocol 17, #3896 security audit).
+ *
+ * A pure DELETE with no rename target, because the promised semantics never
+ * existed: applicable policies OR-combine (any match allows access — most
+ * permissive wins), so there is no conflict for a priority to resolve and
+ * evaluation order cannot change an outcome. The 2026-07-30 security-subset
+ * liveness re-verification closed the call graph — collection site, projection
+ * round-trip, compiler — and found NO reader, ever. Dropping the key is
+ * therefore strictly lossless: outcomes are identical with or without it.
+ *
+ * `retiredFromLoadPath`: the schema tombstones the key (`retiredKey`, tsc
+ * `never` + a parse-time prescription), same posture as its step-17 siblings.
+ */
+const permissionRlsPriorityRemoved: MetadataConversion = {
+  id: 'permission-rls-priority-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'permission.rowLevelSecurity.priority',
+  summary: "RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'permissions', (ps, path) => {
+      const rls = (ps as { rowLevelSecurity?: unknown }).rowLevelSecurity;
+      if (!Array.isArray(rls)) return ps;
+      let touched = false;
+      const next = rls.map((policy, i) => {
+        if (!isDict(policy) || !('priority' in policy)) return policy;
+        const { priority: _dropped, ...rest } = policy;
+        emit({ from: 'priority', to: '(removed)', path: `${path}.rowLevelSecurity[${i}].priority` });
+        touched = true;
+        return rest;
+      });
+      return touched ? { ...ps, rowLevelSecurity: next } : ps;
+    });
+  },
+  fixture: {
+    before: {
+      permissions: [{
+        name: 'contributor',
+        label: 'Contributor',
+        rowLevelSecurity: [{
+          name: 'own_tasks',
+          object: 'crm_task',
+          operation: 'select',
+          using: 'assignee == current_user.email',
+          enabled: true,
+          priority: 10,
+        }],
+      }],
+    },
+    after: {
+      permissions: [{
+        name: 'contributor',
+        label: 'Contributor',
+        rowLevelSecurity: [{
+          name: 'own_tasks',
+          object: 'crm_task',
+          operation: 'select',
+          using: 'assignee == current_user.email',
+          enabled: true,
+        }],
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * Tool inert authoring keys removed (protocol 17, #3896 audit close-out).
+ *
+ * `category`, `permissions`, `active` and `builtIn` were authorable and inert —
+ * none is part of `AIToolDefinition` and no execution path read them. Two were
+ * misleading in the dangerous direction: `permissions` promised a capability
+ * gate on invocation that nothing enforced (a tool "requiring" capabilities ran
+ * for everyone), and `active: false` read as "withdrawn" while the tool kept
+ * reaching the LLM tool set and `POST /ai/tools/:name/execute` kept running it.
+ * A pure lossless delete: dropping the keys changes no runtime behaviour,
+ * because they never had any.
+ *
+ * `retiredFromLoadPath`: ToolSchema is `.strict()` and rejects each key with
+ * its prescription (`TOOL_RETIRED_KEY_GUIDANCE`), the #3715 pattern.
+ */
+const toolInertAuthoringKeysRemoved: MetadataConversion = {
+  id: 'tool-inert-authoring-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'tool.category / tool.permissions / tool.active / tool.builtIn',
+  summary: "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
+  apply(stack, emit) {
+    const RETIRED = ['category', 'permissions', 'active', 'builtIn'] as const;
+    return mapCollection(stack, 'tools', (tool, path) => {
+      let touched = false;
+      const next: Record<string, unknown> = { ...tool };
+      for (const key of RETIRED) {
+        if (!(key in next)) continue;
+        delete next[key];
+        emit({ from: key, to: '(removed)', path: `${path}.${key}` });
+        touched = true;
+      }
+      return touched ? next : tool;
+    });
+  },
+  fixture: {
+    before: {
+      tools: [{
+        name: 'create_case',
+        label: 'Create Case',
+        description: 'Creates a support case',
+        parameters: { type: 'object' },
+        category: 'action',
+        permissions: ['case.create'],
+        active: true,
+        builtIn: false,
+      }],
+    },
+    after: {
+      tools: [{
+        name: 'create_case',
+        label: 'Create Case',
+        description: 'Creates a support case',
+        parameters: { type: 'object' },
+      }],
+    },
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * `required: true` gains its explicit `storage.notNull` (protocol 17,
+ * ADR-0113).
+ *
+ * Before protocol 17, `field.required` bound THREE meanings to one knob: the
+ * write-time contract, the physical NOT NULL DDL, and the drift expectation.
+ * ADR-0113 splits them: `required` keeps the write contract, and the column
+ * constraint becomes the explicit `storage: { notNull: true }`. Under the OLD
+ * semantics every required field's column was created NOT NULL, so this
+ * conversion preserves each old source's full meaning by WRITING IT DOWN —
+ * a pure semantic explicitization, lossless by construction.
+ *
+ * `retiredFromLoadPath` is load-bearing here in a way it is not for renames:
+ * a rename is idempotent on canonical input, but this is a DEFAULT FLIP — a
+ * protocol-17-authored `required: true` deliberately means "nullable column,
+ * write-gated", and a loader that auto-applied this transform would stamp
+ * NOT NULL onto it, silently restoring the tri-binding the ADR removed. Only
+ * `os migrate meta --from <16 or lower>` may apply it, where "this source
+ * predates the split" is a fact, not a guess.
+ */
+const fieldRequiredNotNullExplicit: MetadataConversion = {
+  id: 'field-required-notnull-explicit',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'object.fields.*.required / object.fields.*.storage.notNull',
+  summary: "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) => {
+      const fields = (obj as { fields?: Record<string, Record<string, unknown>> }).fields;
+      if (!fields || typeof fields !== 'object') return obj;
+      let touched = false;
+      const nextFields: Record<string, unknown> = { ...fields };
+      for (const [fieldName, def] of Object.entries(fields)) {
+        if (!def || typeof def !== 'object') continue;
+        if (def.required !== true) continue;
+        if (def.storage !== undefined) continue; // an explicit storage block wins
+        nextFields[fieldName] = { ...def, storage: { notNull: true } };
+        emit({ from: 'required: true (implied NOT NULL)', to: 'storage.notNull: true', path: `${path}.fields.${fieldName}.storage.notNull` });
+        touched = true;
+      }
+      return touched ? { ...obj, fields: nextFields } : obj;
+    });
+  },
+  fixture: {
+    before: {
+      objects: [{
+        name: 'crm_lead',
+        label: 'Lead',
+        fields: {
+          name: { type: 'text', required: true },
+          status: { type: 'select', required: true },
+          notes: { type: 'textarea' },
+        },
+      }],
+    },
+    after: {
+      objects: [{
+        name: 'crm_lead',
+        label: 'Lead',
+        fields: {
+          name: { type: 'text', required: true, storage: { notNull: true } },
+          status: { type: 'select', required: true, storage: { notNull: true } },
+          notes: { type: 'textarea' },
+        },
+      }],
+    },
+    expectedNotices: 2,
+  },
+};
+
 /**
  * All conversions, keyed by the protocol major that introduced the canonical
  * shape. Newest majors last; ordering within a major is application order.
  */
+/**
+ * Stack `api.requireAuth` → dropped (protocol 18, #3963).
+ *
+ * NOT a rename — there is no key to move the value to. The deployment-wide
+ * anonymous-access opt-out is retired: auth is a kernel concern, and anonymous
+ * access to object data is now always denied. A surface that legitimately
+ * serves a session-less caller derives its own narrow authorization from a
+ * declaration (a public form view, a share link, or `book.audience: 'public'`),
+ * so there is nothing for the old boolean to control.
+ *
+ * Dropping is safe at load time: the runtime no longer reads the key (its
+ * plumbing was removed in the same change), so a surviving `api.requireAuth`
+ * would otherwise be silently stripped by the non-strict schema — the exact
+ * quiet-failure this conversion + the `retiredKey` tombstone exist to prevent.
+ * The notice tells the author their intent was dropped and where to re-declare
+ * public access.
+ */
+const stackApiRequireAuthRemoved: MetadataConversion = {
+  id: 'stack-api-require-auth-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'stack.api.requireAuth',
+  summary: "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
+  apply(stack, emit) {
+    const api = stack.api;
+    if (!isDict(api) || !('requireAuth' in api)) return stack;
+    const nextApi: Dict = { ...api };
+    delete nextApi.requireAuth;
+    emit({ from: 'requireAuth', to: '(removed)', path: 'api' });
+    return { ...stack, api: nextApi };
+  },
+  fixture: {
+    before: {
+      api: { requireAuth: false, enableProjectScoping: false },
+    },
+    after: {
+      api: { enableProjectScoping: false },
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -902,6 +1434,15 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     agentKnowledgeTopicsToSources,
     agentToolsToSkills,
     sharingRuleAccessLevelFullToEdit,
+    flowNodeCrudObjectAlias,
+    flowNodeNotifyConfigAliases,
+    flowNodeScriptConfigAliases,
+    permissionRlsPriorityRemoved,
+    toolInertAuthoringKeysRemoved,
+    fieldRequiredNotNullExplicit,
+  ],
+  18: [
+    stackApiRequireAuthRemoved,
   ],
 };
 

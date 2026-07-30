@@ -109,7 +109,7 @@ describe('resume authorization gate (#3801)', () => {
     const refused = await engine.resume(paused.runId!, { branchLabel: 'approve', output: { decision: 'approve' } });
 
     expect(refused.success).toBe(false);
-    expect(refused.code).toBe('forbidden');
+    expect(refused.code).toBe('PERMISSION_DENIED');
     expect(refused.error).toMatch(/only its owning service may resume/i);
     // Refused, not consumed: downstream never ran and the pause is still live,
     // so the real decision can still land.
@@ -166,7 +166,7 @@ describe('resume authorization gate (#3801)', () => {
     const paused = await engine.execute('alias_flow');
 
     const refused = await engine.resume(paused.runId!, { branchLabel: 'approve' });
-    expect(refused.code).toBe('forbidden');
+    expect(refused.code).toBe('PERMISSION_DENIED');
     expect(downstream).toEqual([]);
   });
 
@@ -198,7 +198,7 @@ describe('resume authorization gate (#3801)', () => {
     engineB.registerFlow('gated_flow', pauseFlow('gated_flow', 'gated_pause') as never);
 
     const refused = await engineB.resume(paused.runId!, { branchLabel: 'approve' });
-    expect(refused.code).toBe('forbidden');
+    expect(refused.code).toBe('PERMISSION_DENIED');
     // Still resumable by the service that owns it.
     const ok = await engineB.resume(paused.runId!, { branchLabel: 'approve', [RESUME_AUTHORITY_SERVICE]: true });
     expect(ok.success).toBe(true);
@@ -219,7 +219,7 @@ describe('resume authorization gate (#3801)', () => {
     await store.save(stored!);
 
     const refused = await e.resume(paused.runId!, { branchLabel: 'approve' });
-    expect(refused.code).toBe('forbidden');
+    expect(refused.code).toBe('PERMISSION_DENIED');
   });
 
   // ── subflow chains: the signal lands on the CHILD ─────────────────────
@@ -254,7 +254,7 @@ describe('resume authorization gate (#3801)', () => {
       // signal is DELEGATED to the child, so the gate has to judge the child.
       const refused = await engine.resume(paused.runId!, { branchLabel: 'approve' });
 
-      expect(refused.code).toBe('forbidden');
+      expect(refused.code).toBe('PERMISSION_DENIED');
       expect(downstream).toEqual([]);
       // Neither run was consumed — parent and child are both still suspended.
       expect(engine.listSuspendedRuns()).toHaveLength(2);
@@ -317,7 +317,7 @@ describe('resume authorization gate (#3801)', () => {
       // Exactly what the route builds from an empty body.
       const refused = await engine.resume(paused.runId!, {});
 
-      expect(refused.code).toBe('forbidden');
+      expect(refused.code).toBe('PERMISSION_DENIED');
       expect(refused.error).toMatch(/waiting on run/);
       // The map did NOT advance past item 1, and nothing was consumed.
       expect(mapState(engine, paused.runId!)).toEqual({ started: 1, results: [] });
@@ -370,7 +370,7 @@ describe('resume authorization gate (#3801)', () => {
 
       const refused = await engine.resume(paused.runId!, signal as any);
 
-      expect(refused.code).toBe('invalid_signal');
+      expect(refused.code).toBe('INVALID_SIGNAL');
       expect(refused.error).toMatch(/reserved by the flow engine/);
       // Nothing applied, nothing consumed: the map has not advanced and the
       // pause is still live.
@@ -403,7 +403,7 @@ describe('resume authorization gate (#3801)', () => {
       variables: { new_assignee: 'ada', $runId: 'someone_elses_run' },
     });
 
-    expect(refused.code).toBe('invalid_signal');
+    expect(refused.code).toBe('INVALID_SIGNAL');
     // All-or-nothing: the legitimate key was not applied either.
     expect(downstream).toEqual([]);
     expect(engine.listSuspendedRuns()).toHaveLength(1);

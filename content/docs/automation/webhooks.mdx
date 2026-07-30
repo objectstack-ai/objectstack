@@ -304,16 +304,16 @@ same time.
 
 ## 5. Payload format
 
-The POST body is the realtime event payload with a small fixed prefix merged
+The POST body is the realtime event payload with a small fixed envelope merged
 on top:
 
 ```json
 {
+  // ...fields from the originating event payload
   "object": "account",
   "recordId": "acc_123",
   "action": "updated",
   "timestamp": "2024-10-27T00:00:00.000Z"
-  // ...remaining fields from the originating event payload
 }
 ```
 
@@ -326,7 +326,11 @@ Notes:
   unchanged from the originating realtime event's `timestamp` field — not
   an epoch-ms number).
 - Any additional fields the event carried (e.g. record snapshot data) are
-  spread in after these four.
+  spread in first. These four are written **last**, so the envelope always
+  describes the event even if a publisher's payload happens to carry a field
+  with one of these names (#3946). The platform's own `data.record.*` events
+  nest the record under `after` / `changes`, so nothing collides in practice —
+  the ordering is what guarantees it.
 
 Idempotency and event correlation are carried in **headers**, not the body.
 Every attempt sends:
@@ -395,10 +399,11 @@ The plugin mounts exactly **one** custom endpoint:
 | POST   | `/api/v1/webhooks/redeliver` | `{ deliveryId }`  | Re-queue a previously failed/dead delivery.      |
 
 It delegates to `messaging.redeliverHttp(deliveryId)` and is guarded by the
-better-auth session (any authenticated user). Responses: `200` on success,
-`401` unauthenticated, `400` missing/invalid body, `404` `not_found`, `409`
-`not_eligible`. There are no `/webhooks/:id/test`, `/rotate`,
-`/deliveries`, or per-delivery redeliver routes.
+better-auth session (any authenticated user). Failures answer in the declared
+envelope — `{ success: false, error: { code, message } }` — with `401`
+`UNAUTHENTICATED`, `400` `INVALID_REQUEST` or `MISSING_REQUIRED_FIELD`, `404`
+`RESOURCE_NOT_FOUND`, `409` `DELIVERY_NOT_ELIGIBLE` (ADR-0112). There are no
+`/webhooks/:id/test`, `/rotate`, `/deliveries`, or per-delivery redeliver routes.
 
 ## 9. Concurrency & rate-limiting
 

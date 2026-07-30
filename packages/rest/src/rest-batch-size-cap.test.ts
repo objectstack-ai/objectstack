@@ -52,6 +52,7 @@ function setup(maxBatchSize?: number) {
     undefined, undefined, undefined, undefined, // kernelManager, envRegistry, defaultEnvIdProvider, authServiceProvider
     async () => ql,                             // objectQLProvider (positional arg #8)
   );
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
   return { rest, ql, ...spies };
 }

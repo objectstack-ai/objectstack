@@ -34,9 +34,15 @@ function makeDispatcher(saveError: unknown) {
     const protocol = {
         saveMetaItem: async () => { throw saveError; },
     };
+    // An auth service that resolves an authenticated caller — otherwise the
+    // dispatch would 401 at the anonymous-deny gate (#3963) before reaching the
+    // error path this test covers.
+    const auth = { api: { getSession: async () => ({ user: { id: 'u1' } }) } };
+    const svc = (name: string) =>
+        name === 'protocol' ? protocol : name === 'auth' ? auth : undefined;
     const kernel: any = {
-        getService: (name: string) => (name === 'protocol' ? protocol : undefined),
-        getServiceAsync: async (name: string) => (name === 'protocol' ? protocol : undefined),
+        getService: svc,
+        getServiceAsync: async (name: string) => svc(name),
     };
     return new HttpDispatcher(kernel);
 }
@@ -48,7 +54,7 @@ async function putMeta(saveError: unknown) {
         '/meta/object/widget',
         { name: 'widget' },
         {},
-        {} as any,
+        { executionContext: { userId: 'u1' } } as any,
     );
 }
 
@@ -83,10 +89,10 @@ describe('#3867 follow-up — HttpDispatcher.error() does not return raw driver 
         expect(result.response.body.error.message).toBe('metadata store is unavailable');
     });
 
-    it('preserves structured `details` (code / issues) while sanitising the message', async () => {
-        // `details` carries the semantic code and per-field `issues` the UI maps
-        // back to inputs; it is never free-form driver prose, so the guard must
-        // not touch it.
+    it('preserves the structured code / issues while sanitising the message', async () => {
+        // The semantic code and the per-field `issues` the UI maps back to inputs
+        // are never free-form driver prose, so the 5xx guard must not touch them
+        // — it only ever replaces `message`.
         const err = Object.assign(new Error(SQL_DUMP), {
             status: 500,
             code: 'STORAGE_FAILURE',
@@ -95,8 +101,9 @@ describe('#3867 follow-up — HttpDispatcher.error() does not return raw driver 
         const result: any = await putMeta(err);
 
         expect(result.response.body.error.message).toBe('Internal server error');
+        // [#3842] The code is in the declared field; `details` keeps the issues.
+        expect(result.response.body.error.code).toBe('STORAGE_FAILURE');
         expect(result.response.body.error.details).toMatchObject({
-            code: 'STORAGE_FAILURE',
             issues: [{ path: 'name', message: 'taken', code: 'duplicate' }],
         });
     });

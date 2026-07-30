@@ -33,8 +33,8 @@
  *
  * ## Message keys are finer-grained than wire codes
  *
- * `FieldValidationCode` is the stable machine vocabulary and must not split
- * (clients match on it). But one code can need several sentences — an
+ * `FieldErrorCode` (ADR-0114) is the stable machine vocabulary and must not
+ * split (clients match on it). But one code can need several sentences — an
  * `invalid_option` on a single select reads "must be one of …" while the same
  * code on a multiselect must name the offending element. So the catalog is
  * keyed by MESSAGE key, of which a code is the default; extra variants
@@ -52,9 +52,10 @@
  *
  * ## Interpolation
  *
- * `{{name}}` placeholders, matching `II18nService.t()`'s convention, filled
- * from `FieldValidationParams` plus `{{label}}` (the field's display name in
- * the caller's locale) and `{{field}}` (its API name). An unknown placeholder
+ * `{{name}}` placeholders, matching `II18nService.t()`'s convention, filled from
+ * the error's `constraint` values (`min`, `maxLength`, `actual`, `allowed`, …)
+ * plus `{{value}}` (the offending value), `{{label}}` (the field's display name
+ * in the caller's locale) and `{{field}}` (its API name). An unknown placeholder
  * is left verbatim so a broken override is visible rather than silently blank.
  */
 
@@ -83,6 +84,7 @@ export function validationMessageTranslationKey(messageKey: string): string {
 export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
     required: '{{label}} is required',
+    required_cleared: '{{label}} is required and cannot be cleared',
     min_length: '{{label}} must be ≥ {{minLength}} characters (got {{actual}})',
     max_length: '{{label}} must be ≤ {{maxLength}} characters (got {{actual}})',
     min_value: '{{label}} must be ≥ {{min}}',
@@ -113,6 +115,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
   },
   'zh-CN': {
     required: '{{label}}不能为空',
+    required_cleared: '{{label}}是必填项,不能清空',
     min_length: '{{label}}长度不能少于 {{minLength}} 个字符(当前 {{actual}} 个)',
     max_length: '{{label}}长度不能超过 {{maxLength}} 个字符(当前 {{actual}} 个)',
     // Wording mirrors the browser's native range message ("值必须大于或等于 0。")
@@ -146,6 +149,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
   },
   'ja-JP': {
     required: '{{label}}は必須です',
+    required_cleared: '{{label}}は必須項目のため、空にできません',
     min_length: '{{label}}は {{minLength}} 文字以上で入力してください(現在 {{actual}} 文字)',
     max_length: '{{label}}は {{maxLength}} 文字以内で入力してください(現在 {{actual}} 文字)',
     min_value: '{{label}}は {{min}} 以上で入力してください',
@@ -176,6 +180,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
   },
   'es-ES': {
     required: '{{label}} es obligatorio',
+    required_cleared: '{{label}} es obligatorio y no puede vaciarse',
     min_length: '{{label}} debe tener al menos {{minLength}} caracteres (actual: {{actual}})',
     max_length: '{{label}} no debe superar {{maxLength}} caracteres (actual: {{actual}})',
     min_value: '{{label}} debe ser mayor o igual que {{min}}',

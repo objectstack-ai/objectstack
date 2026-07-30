@@ -37,6 +37,17 @@ describe('data.batchTransaction (live Hono, #1604)', () => {
     beforeAll(async () => {
         kernel = new LiteKernel();
         kernel.use(new ObjectQLPlugin());
+        // [#3963] The anonymous-deny gate is unconditional now, so the live-server
+        // client suites need an authenticated session. Register a minimal auth
+        // service that resolves a fixed user for every request.
+        kernel.use({
+            metadata: { name: 'test-auth', version: '1.0.0' },
+            async init(ctx: any) {
+                ctx.registerService('auth', {
+                    api: { getSession: async () => ({ user: { id: 'test-user' } }) },
+                });
+            },
+        } as any);
 
         kernel.use(
             new HonoServerPlugin({

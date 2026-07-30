@@ -509,6 +509,37 @@ describe('validateRecord — media value shapes gate on the deployment flag (#36
 });
 
 /**
+ * ADR-0113 — `required` is a write-time contract with non-regression update
+ * semantics: an insert must provide the value; an update may not null it OUT;
+ * an update that omits the field entirely never 400s (legacy null rows rest).
+ */
+describe('validateRecord — ADR-0113 required write contract on update', () => {
+  const schema: any = {
+    fields: {
+      title: { type: 'text', required: true },
+      notes: { type: 'textarea' },
+    },
+  };
+
+  it('rejects an explicit null-out of a required field on update', () => {
+    expect(() => validateRecord(schema, { title: null }, 'update')).toThrow(/required and cannot be cleared/);
+  });
+  it('rejects an explicit empty-string clear too', () => {
+    expect(() => validateRecord(schema, { title: '' }, 'update')).toThrow(/required and cannot be cleared/);
+  });
+  it('an update that omits the required field passes — legacy rows rest', () => {
+    expect(() => validateRecord(schema, { notes: 'touched only this' }, 'update')).not.toThrow();
+  });
+  it('an update that provides a value passes', () => {
+    expect(() => validateRecord(schema, { title: 'fixed' }, 'update')).not.toThrow();
+  });
+  it('autonumber stays exempt on update as on insert', () => {
+    const s: any = { fields: { rec_no: { type: 'autonumber', required: true, format: 'R-{0000}' } } };
+    expect(() => validateRecord(s, { rec_no: null }, 'update')).not.toThrow();
+  });
+});
+
+/**
  * #3957 — a rejected write must name the field the way the USER knows it, in
  * the language they read, and must hand a client the constraint as data.
  *
@@ -564,16 +595,17 @@ describe('validateRecord — messages name the field by its label (#3957)', () =
 
   /**
    * Option 2 of the issue: the bound as a discrete value, so a custom client
-   * formats its own text instead of parsing the sentence.
+   * formats its own text instead of parsing the sentence. Rides ADR-0114's
+   * `constraint` position rather than a second parallel bag.
    */
-  it('carries the constraint as structured params', () => {
+  it('carries the constraint as discrete values', () => {
     expect(fieldsOf({ penalty_amount: -5 })[0]).toMatchObject({
       code: 'min_value',
-      params: { min: 0 },
+      constraint: { min: 0 },
     });
     expect(fieldsOf({ remark: 'x'.repeat(3000) })[0]).toMatchObject({
       code: 'max_length',
-      params: { maxLength: 512, actual: 3000 },
+      constraint: { maxLength: 512, actual: 3000 },
     });
   });
 

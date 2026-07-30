@@ -187,7 +187,10 @@ describe('#3770 — data-plane object-existence gate (real ObjectQL engine)', ()
             ['updateManyData', () => protocol.updateManyData({ object: UNREGISTERED, records: [{ id: 'r1', data: {} }] } as any)],
             ['deleteManyData', () => protocol.deleteManyData({ object: UNREGISTERED, ids: ['r1'] } as any)],
             ['batchData', () => protocol.batchData({ object: UNREGISTERED, request: { operation: 'create', records: [{ data: {} }] } as any })],
-            ['analyticsQuery', () => protocol.analyticsQuery({ cube: UNREGISTERED, query: { measures: ['count'] } })],
+            // `analyticsQuery` is gone from this list because the method itself
+            // was retired with the degraded analytics shim (#3891) — the
+            // analytics-side twin of this gate lives in service-analytics'
+            // `ensureCube` (#3867/#3875).
         ];
         for (const [name, call] of calls) {
             await expect(call(), `${name} must reject`).rejects.toMatchObject(OBJECT_NOT_FOUND);

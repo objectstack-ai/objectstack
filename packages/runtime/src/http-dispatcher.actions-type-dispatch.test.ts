@@ -40,6 +40,8 @@ function makeDispatcher(opts: {
     standaloneAction?: any;
     registryAction?: any;
     record?: any;
+    /** Simulate a metadata plane that cannot answer (ADR-0110 D3). */
+    metadataDegraded?: string;
 } = {}) {
     const executeAction = vi.fn(async () => ({ ran: 'script' }));
     const objectDef = opts.objectDef ?? { name: 'crm_lead', actions: [] };
@@ -57,6 +59,14 @@ function makeDispatcher(opts: {
     const metadata: any = {
         load: vi.fn(async (type: string, name: string) =>
             type === 'action' && opts.standaloneAction?.name === name ? opts.standaloneAction : null),
+        // The real MetadataManager reports whether a `null` is a clean miss or
+        // an unanswerable one (every loader threw) — the D3 trichotomy needs
+        // that distinction, so the double carries it too.
+        loadDiagnosed: vi.fn(async (type: string, name: string) => ({
+            data: type === 'action' && opts.standaloneAction?.name === name ? opts.standaloneAction : null,
+            degraded: Boolean(opts.metadataDegraded),
+            errors: opts.metadataDegraded ? [opts.metadataDegraded] : [],
+        })),
         listObjects: vi.fn(async () => [objectDef]),
         getObject: vi.fn(async () => objectDef),
     };
@@ -106,7 +116,8 @@ describe('REST /actions — flow dispatch (#3915)', () => {
             }),
         );
         expect(res.response.status).toBe(200);
-        expect(res.response.body.data).toEqual({ success: true, data: { success: true, output: { converted: true } } });
+        // Single wrap (#3962): `data` is the automation engine's own result.
+        expect(res.response.body.data).toEqual({ success: true, output: { converted: true } });
     });
 
     // ── params seeding ── the half a mocked automation service could not
@@ -247,8 +258,10 @@ describe('REST /actions — flow dispatch (#3915)', () => {
 
         const res = await dispatcher.handleActions('/crm_lead/convert_lead', 'POST', {}, ctxFor());
 
-        expect(res.response.body.data.success).toBe(false);
-        expect(res.response.body.data.error).toMatch(/crm_convert_lead_wizard.*lead already converted/i);
+        // A rejected flow is a 400 with the semantic code (#3962).
+        expect(res.response.status).toBe(400);
+        expect(res.response.body.error.message).toMatch(/crm_convert_lead_wizard.*lead already converted/i);
+        expect(res.response.body.error.code).toBe('FLOW_FAILED');
     });
 
     it('reports a missing automation service as 503, not as a business failure', async () => {
@@ -337,18 +350,63 @@ describe('REST /actions — script dispatch is unchanged (#3915 regression guard
         const res = await dispatcher.handleActions('/crm_lead/mark_done', 'POST', {}, ctxFor());
 
         expect(executeAction).toHaveBeenCalledTimes(1);
-        expect(res.response.body.data).toEqual({ success: true, data: { ran: 'script' } });
+        expect(res.response.body.data).toEqual({ ran: 'script' });
     });
 
-    it('still runs an UNDECLARED action through the handler registry (handler-only actions)', async () => {
-        // `engine.registerAction(...)` with no metadata declaration anywhere —
-        // the type dispatch must not turn these into a 400.
+    // [ADR-0110 D3] An UNDECLARED action used to run here, ungated — this test
+    // asserted exactly that. A handler with no declaration has no
+    // `requiredPermissions` to enforce, no param contract, and materialises no
+    // `action_<name>` tool, yet it executes TRUSTED; it now refuses.
+    it('refuses an UNDECLARED action with a prescriptive error instead of running it ungated', async () => {
         const { dispatcher, executeAction } = makeDispatcher({ objectDef: { name: 'crm_lead', actions: [] } });
 
         const res = await dispatcher.handleActions('/crm_lead/handler_only', 'POST', {}, ctxFor());
 
-        expect(executeAction).toHaveBeenCalledTimes(1);
-        expect(res.response.body.data.success).toBe(true);
+        expect(res.response.status).toBe(404);
+        expect(res.response.body.error.message).toMatch(/has no declaration/i);
+        expect(res.response.body.error.message).toMatch(/defineAction\(\{ name: 'handler_only'/);
+        // The way out is the boot inventory, not a flag.
+        expect(res.response.body.error.message).toMatch(/\[action-governance\]/);
+        expect(executeAction).not.toHaveBeenCalled();
+    });
+
+    // The refusal has NO opt-out. A draft of ADR-0110 shipped
+    // `OS_ALLOW_UNDECLARED_ACTIONS` as a migration valve; it was dropped before
+    // 17 went out, because a flag that runs an ungoverned handler IS the
+    // fail-open the ruling closes. This pins that no environment variable
+    // resurrects the old behaviour — the failure a stale deployment script
+    // would otherwise produce is silent re-opening, not a loud error.
+    it('refuses regardless of the retired OS_ALLOW_UNDECLARED_ACTIONS flag', async () => {
+        const prev = process.env.OS_ALLOW_UNDECLARED_ACTIONS;
+        process.env.OS_ALLOW_UNDECLARED_ACTIONS = '1';
+        try {
+            const { dispatcher, executeAction } = makeDispatcher({ objectDef: { name: 'crm_lead', actions: [] } });
+
+            const res = await dispatcher.handleActions('/crm_lead/handler_only', 'POST', {}, ctxFor());
+
+            expect(res.response.status).toBe(404);
+            expect(executeAction).not.toHaveBeenCalled();
+        } finally {
+            if (prev === undefined) delete process.env.OS_ALLOW_UNDECLARED_ACTIONS;
+            else process.env.OS_ALLOW_UNDECLARED_ACTIONS = prev;
+        }
+    });
+
+    // [ADR-0110 D3] An unreachable metadata plane must not read as "no
+    // declaration, hence no gate" — an availability failure would silently
+    // widen access. Same posture as v17's datasource-that-cannot-connect.
+    it('503s rather than running ungated when the metadata plane cannot answer', async () => {
+        const { dispatcher, executeAction } = makeDispatcher({
+            objectDef: { name: 'crm_lead', actions: [] },
+            metadataDegraded: 'database-loader: ECONNREFUSED',
+        });
+
+        const res = await dispatcher.handleActions('/crm_lead/mark_done', 'POST', {}, ctxFor());
+
+        expect(res.response.status).toBe(503);
+        expect(res.response.body.error.message).toMatch(/metadata plane is unavailable/i);
+        expect(res.response.body.error.message).toContain('ECONNREFUSED');
+        expect(executeAction).not.toHaveBeenCalled();
     });
 });
 
@@ -394,10 +452,15 @@ describe('REST /actions — standalone declarations (#3915)', () => {
             automation: { execute },
         });
 
-        await dispatcher.handleActions('/crm_contact/convert_lead', 'POST', {}, ctxFor());
+        const res = await dispatcher.handleActions('/crm_contact/convert_lead', 'POST', {}, ctxFor());
 
+        // Another object's declaration must not gate or dispatch this route.
         expect(execute).not.toHaveBeenCalled();
-        expect(executeAction).toHaveBeenCalledTimes(1); // falls through to the registry, as before
+        // [ADR-0110 D3] It used to fall through to the registry and run
+        // ungated; with no declaration OWNED BY THIS ROUTE there is nothing to
+        // enforce, so it refuses.
+        expect(res.response.status).toBe(404);
+        expect(executeAction).not.toHaveBeenCalled();
     });
 
     it('enforces the ADR-0066 D4 capability gate on a standalone declaration too', async () => {

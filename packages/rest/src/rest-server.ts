@@ -9,7 +9,9 @@ import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/obs
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
+import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import type { ISecurityService } from '@objectstack/spec/contracts';
@@ -55,7 +57,7 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
 
 /**
  * Map a data-layer error to a clean HTTP response. Unknown-object errors are
- * surfaced as a 404 with `code: 'object_not_found'` so clients can distinguish
+ * surfaced as a 404 with `code: 'OBJECT_NOT_FOUND'` so clients can distinguish
  * "object isn't registered" from real server faults. Anything else becomes a
  * 400 (bad request) preserving prior behavior. Genuine 500s are still logged.
  *
@@ -78,6 +80,78 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
  * returns a misleading 404.
  */
 /**
+ * A Zod issue → the field-level catalog (ADR-0114 D3).
+ *
+ * Zod's issue codes are Zod's API, not ours, and this used to pass them straight
+ * through. Two things were wrong with that. The wire carried two vocabularies on
+ * one position — `too_small` from a route that parses with Zod, `min_length` from
+ * the validators — so a client could not read a field code without knowing which
+ * route served it. And Zod's own codes are ambiguous alone: `too_small` covers a
+ * short string, a small number AND a short array.
+ *
+ * `origin` and `format` disambiguate every case, so the mapping is total rather
+ * than best-effort. The one row that fixes a user-visible bug rather than tidying
+ * a name: Zod reports a MISSING required property as `invalid_type` (expected
+ * string, received undefined), so passing it through marked a missing input as a
+ * type error.
+ */
+function zodIssueToFieldCode(issue: any, input?: unknown, inputProvided = false): FieldErrorCode {
+    const origin = issue?.origin;
+    switch (issue?.code) {
+        case 'too_small':
+            return origin === 'number' || origin === 'bigint' || origin === 'date' ? 'min_value'
+                : origin === 'array' || origin === 'set' ? 'min_items'
+                : 'min_length';
+        case 'too_big':
+            return origin === 'number' || origin === 'bigint' || origin === 'date' ? 'max_value'
+                : origin === 'array' || origin === 'set' ? 'max_items'
+                : 'max_length';
+        case 'invalid_format':
+            return issue?.format === 'email' ? 'invalid_email'
+                : issue?.format === 'url' ? 'invalid_url'
+                : 'invalid_format';
+        case 'invalid_type': {
+            // Zod spells "absent" as a type mismatch against `undefined`, so a
+            // MISSING required property arrives here rather than as its own code.
+            // The issue itself cannot tell the two apart — v4 carries `expected`
+            // and a message but not the offending value — so the only honest
+            // discriminator is the parsed input, walked to `path`. Without it we
+            // keep `invalid_type`: reading "received undefined" out of the message
+            // would make the wire contract depend on Zod's phrasing, which is the
+            // leak this mapping exists to stop.
+            if (!inputProvided) return 'invalid_type';
+            return valueAtPath(input, issue?.path) === undefined ? 'required' : 'invalid_type';
+        }
+        case 'invalid_value':
+            // A closed set (`z.enum`, `z.literal`) the value is not a member of.
+            return 'invalid_option';
+        case 'unrecognized_keys':
+            return 'unknown_field';
+        case 'invalid_union':
+        case 'invalid_element':
+        case 'invalid_key':
+            return 'invalid_shape';
+        case 'not_multiple_of':
+        case 'custom':
+        default:
+            // A catalog member, not a leak: an unmapped Zod code still lands on a
+            // code the client can read, and `message` carries the specifics.
+            return 'invalid_value';
+    }
+}
+
+/** Walk a Zod issue `path` into the value that was parsed. */
+function valueAtPath(input: unknown, path: unknown): unknown {
+    if (!Array.isArray(path)) return undefined;
+    let cur: any = input;
+    for (const seg of path) {
+        if (cur === null || cur === undefined) return undefined;
+        cur = cur[seg as any];
+    }
+    return cur;
+}
+
+/**
  * Zod issues → the data surface's `fields[]` validation envelope
  * (`{ field, code, message }`, docs/api/wire-format §7).
  *
@@ -85,13 +159,18 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
  * a validator-thrown `VALIDATION_FAILED` does through {@link mapDataError}
  * (#3918) — otherwise a client keying on `fields` has to learn a second shape
  * per route, and `code: 'VALIDATION_FAILED'` stops meaning one thing on the
- * wire.
+ * wire. Since ADR-0114 that sameness covers the `code` VALUE too, not just the
+ * shape: see {@link zodIssueToFieldCode}.
  */
-export function zodIssuesToFields(issues: unknown): Array<{ field: string; code: string; message: string }> {
+export function zodIssuesToFields(
+    issues: unknown,
+    ...input: [] | [unknown]
+): Array<{ field: string; code: FieldErrorCode; message: string }> {
     if (!Array.isArray(issues)) return [];
+    const inputProvided = input.length > 0;
     return issues.map((i: any) => ({
         field: Array.isArray(i?.path) ? i.path.join('.') : String(i?.path ?? ''),
-        code: String(i?.code ?? 'invalid'),
+        code: zodIssueToFieldCode(i, input[0], inputProvided),
         message: String(i?.message ?? 'Invalid value'),
     }));
 }
@@ -233,8 +312,8 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // [#3770] Object does not exist — thrown by the protocol's registry gate
     // (`assertObjectRegistered`, which covers every data entry point) and by
     // `cloneData`. Mapped to the SAME envelope the driver-string branch below
-    // produces, so one condition has exactly one wire code (`object_not_found`,
-    // the canonical `ApiErrorCode`) no matter which layer detected it — the
+    // produces, so one condition has exactly one wire code (`OBJECT_NOT_FOUND`,
+    // a `StandardErrorCode` member) no matter which layer detected it — the
     // point of #3770 is that this 404 no longer depends on a driver erroring
     // on a missing table. Must precede the generic 4xx passthrough, which
     // would otherwise ship the internal SCREAMING_CASE code verbatim.
@@ -244,7 +323,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             status: 404,
             body: {
                 error: name ? `Object '${name}' is not registered` : 'Object not found',
-                code: 'object_not_found',
+                code: 'OBJECT_NOT_FOUND',
                 ...(name ? { object: name } : {}),
             },
         };
@@ -413,7 +492,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             status: 404,
             body: {
                 error: object ? `Object '${object}' is not registered` : 'Object not found',
-                code: 'object_not_found',
+                code: 'OBJECT_NOT_FOUND',
                 object,
             },
         };
@@ -462,7 +541,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
 function sendError(res: any, error: any, object?: string): void {
     // [#3770] `OBJECT_NOT_FOUND` is deliberately excluded from this
     // status-passthrough: `mapDataError` owns its canonical envelope
-    // (`object_not_found`), and short-circuiting here would ship a second wire
+    // (`OBJECT_NOT_FOUND`), and short-circuiting here would ship a second wire
     // code for the same condition depending on which route caught it.
     const passThroughStatus = error?.code !== 'OBJECT_NOT_FOUND'
         && typeof error?.status === 'number' && error.status >= 400 && error.status < 600;
@@ -782,7 +861,6 @@ type NormalizedRestServerConfig = {
         enableSearch?: boolean;
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
-        requireAuth: boolean;
         documentation: RestApiConfig['documentation'];
         responseFormat: RestApiConfig['responseFormat'];
     };
@@ -1145,8 +1223,9 @@ export class RestServer {
     }
 
     /**
-     * Reject anonymous requests with HTTP 401 when `api.requireAuth` is set.
-     * Returns `true` if the response was sent and the caller should stop
+     * Reject anonymous requests with HTTP 401 — unconditionally (#3963: the
+     * `api.requireAuth` opt-out is retired). Returns `true` if the response was
+     * sent and the caller should stop
      * processing. Returns `false` to continue.
      *
      * The check is intentionally narrow: only `context?.userId` counts as
@@ -1155,7 +1234,7 @@ export class RestServer {
      */
     private enforceAuth(req: any, res: any, context: any): boolean {
         // ADR-0069 — authentication-policy gate (password expiry, enforced MFA).
-        // Independent of `requireAuth`: a gated session (carrying `authGate`) is
+        // Independent of the anonymous-deny: a gated session (carrying `authGate`) is
         // blocked from protected resources, while the core allow-list keeps auth
         // + remediation reachable. Runs before the anonymous check.
         const gate = context?.authGate;
@@ -1169,7 +1248,6 @@ export class RestServer {
         // exactly as before (the allowlist is reserved for a future umbrella
         // seam). `isSystem` is never set on inbound HTTP, so it cannot bypass.
         if (shouldDenyAnonymous({
-            requireAuth: this.config.api.requireAuth,
             userId: context?.userId,
             isSystem: context?.isSystem,
             method: req?.method,
@@ -1411,6 +1489,57 @@ export class RestServer {
         } catch {
             return { authenticated }; // unresolved holdings → gated audiences deny
         }
+    }
+
+    /**
+     * Canonical SINGULAR form of the `:type` path segment.
+     *
+     * The metadata routes accept either spelling — the protocol's `getMetaItems`
+     * normalizes singular↔plural and serves both — and Prime Directive #3 makes
+     * PLURAL the canonical REST spelling (`/api/v1/meta/books`). So every gate
+     * keyed on the type must compare against the normalized form. The three
+     * ADR-0046 §6.7 audience gates below each tested `req.params.type === 'book'`
+     * literally, which meant `GET /meta/books` served the list with the gate
+     * never running: a `{ permissionSet }`-gated book (an *Admin Guide*) came
+     * back to a caller who does not hold the set, and an `org` book came back to
+     * an anonymous reader on a publicly-served deployment. Same route, gate
+     * enforced on one spelling of it.
+     */
+    private static metaTypeSingular(type: unknown): string {
+        const t = typeof type === 'string' ? type : '';
+        return PLURAL_TO_SINGULAR[t] ?? t;
+    }
+
+    /**
+     * [#3963] Is this request a READ of the audience-gated book/doc surface —
+     * the one metadata surface whose own declaration (`book.audience`) can
+     * authorize an anonymous caller?
+     *
+     * Used by the `/meta` umbrella gate to grant an anonymous caller
+     * REACHABILITY of these three routes, so `audience: 'public'` works on a
+     * secure-by-default deployment instead of only on one that opened its whole
+     * data plane. Authorization stays with the handler's §6.7 gate, which admits
+     * `'public'` only.
+     *
+     * The predicate is keyed on the REGISTERED route path plus the normalized
+     * `:type` param — not on `req.path` string-matching — so a route added later
+     * cannot accidentally fall inside it, and the plural spelling cannot fall
+     * outside it (#3984).
+     */
+    private static isPublicAudienceRead(
+        entry: Readonly<Record<string, unknown>>,
+        req: { method?: unknown; params?: Record<string, unknown> },
+    ): boolean {
+        const method = String(req?.method ?? entry?.method ?? '').toUpperCase();
+        if (method !== 'GET') return false; // reads only — never a write or a publish
+        const path = typeof entry?.path === 'string' ? entry.path : '';
+        // `GET /meta/book/:name/tree` — the type segment is literal here.
+        if (path.endsWith('/book/:name/tree')) return true;
+        // `GET /meta/:type` and `GET /meta/:type/:name` — book/doc only. Every
+        // other type (object, field, view, flow, …) keeps the anonymous deny.
+        if (!/\/:type(\/:name)?$/.test(path)) return false;
+        const type = RestServer.metaTypeSingular(req?.params?.type);
+        return type === 'book' || type === 'doc';
     }
 
     /** Whether any of these books carries a `{ permissionSet }` audience. */
@@ -1954,7 +2083,6 @@ export class RestServer {
                 enableSearch: (api as any).enableSearch ?? true,
                 enableProjectScoping: api.enableProjectScoping ?? false,
                 projectResolution: api.projectResolution ?? 'auto',
-                requireAuth: (api as any).requireAuth ?? true, // secure-by-default (ADR-0056 D2; mirrors RestApiConfigSchema)
                 documentation: api.documentation,
                 responseFormat: api.responseFormat,
             },
@@ -2101,6 +2229,41 @@ export class RestServer {
     }
     
     /**
+     * Is `/mcp` actually serveable — i.e. is the MCP service registered with
+     * the shape `handleMcpRequest` needs?
+     *
+     * `true`/`false` are answers; `null` means "could not probe". The route
+     * itself is served by the runtime dispatcher (`domains/mcp.ts`), which
+     * 501s on `!mcp || typeof mcp.handleHttpRequest !== 'function'` — so this
+     * probe exists to keep our `/discovery` from advertising a route that
+     * would 501 (#4024).
+     *
+     * Same two probe paths as {@link resolveRegisteredServices} (ADR-0057
+     * D10): the per-request kernel for multi-env hosts, else the single-env
+     * `serviceExistsProvider` — which `rest-api-plugin` always wires. Via the
+     * kernel we can check the SHAPE; the single-env provider answers existence
+     * only, which is the dominant case (the dispatcher's own service-aware
+     * discovery covers the wrong-shape case).
+     */
+    private async probeMcpServeable(req: any): Promise<boolean | null> {
+        try {
+            let environmentId: string | undefined = req?.params?.environmentId;
+            if ((!environmentId || environmentId === ':environmentId') && this.defaultEnvironmentIdProvider) {
+                try { environmentId = this.defaultEnvironmentIdProvider() || undefined; } catch { /* ignore */ }
+            }
+            if (environmentId && environmentId !== 'platform' && this.kernelManager) {
+                const kernel: any = await this.kernelManager.getOrCreate(environmentId);
+                if (kernel && typeof kernel.getServiceAsync === 'function') {
+                    const svc: any = await kernel.getServiceAsync('mcp').catch(() => undefined);
+                    return typeof svc?.handleHttpRequest === 'function';
+                }
+            }
+            if (this.serviceExistsProvider) return this.serviceExistsProvider('mcp') === true;
+        } catch { /* fall through to "cannot probe" */ }
+        return null;
+    }
+
+    /**
      * Register discovery endpoints
      */
     private registerDiscoveryEndpoints(basePath: string): void {
@@ -2139,8 +2302,22 @@ export class RestServer {
                         // project-scoped), so point at the unscoped base. This
                         // `/discovery` (served by @objectstack/rest) is separate
                         // from the dispatcher's getDiscoveryInfo — both must
-                        // advertise `mcp` (single source: isMcpServerEnabled).
-                        if (isMcpServerEnabled()) {
+                        // advertise `mcp` on the same terms.
+                        //
+                        // Enabled is NOT the same as serveable (#4024). The flag
+                        // alone used to gate this, on the reasoning that `os serve`
+                        // auto-loads plugin-mcp from the same flag. But that
+                        // lockstep belongs to the CLI: `@objectstack/rest` has no
+                        // `@objectstack/mcp` dependency, mounts no /mcp route and
+                        // performs no auto-load, so an embedder that skips
+                        // plugin-mcp had `mcp` advertised here while the route
+                        // 501'd — the `declared ≠ enforced` failure #3369 forbids.
+                        // A `null` probe means we genuinely cannot tell; keep the
+                        // old flag-only answer there rather than hiding a working
+                        // endpoint (fail-open, ADR-0057 D10) — the dispatcher's own
+                        // discovery is service-aware and stays authoritative.
+                        const mcpServeable = await this.probeMcpServeable(req);
+                        if (isMcpServerEnabled() && mcpServeable !== false) {
                             const unscopedBase = isScoped
                                 ? basePath.replace(/\/(environments|projects)\/:environmentId$/, '')
                                 : basePath;
@@ -2244,8 +2421,7 @@ export class RestServer {
                 if (!spec) {
                     res.status?.(503);
                     res.json({
-                        error: 'openapi_unavailable',
-                        message: 'OpenAPI spec is not bundled with this runtime.',
+                        error: { code: 'OPENAPI_UNAVAILABLE', message: 'OpenAPI spec is not bundled with this runtime.' },
                     });
                     return;
                 }
@@ -2394,23 +2570,22 @@ export class RestServer {
     }
     
     /**
-     * Register the metadata routes behind the SAME `requireAuth` gate the
+     * Register the metadata routes behind the SAME anonymous-deny gate the
      * `/data` routes use.
      *
      * `registerMetadataEndpoints` builds ~17 `/meta/*` routes but — unlike the
      * `/data` handlers — never calls {@link enforceAuth}: its handlers assumed
-     * the `requireAuth` gate rejected anonymous callers "upstream", yet nothing
-     * upstream covers `/meta`, so on a `requireAuth` deployment an anonymous
-     * caller could read object / field schemas. On a tenant-less runtime host
-     * those are SYSTEM-object schemas and the host is publicly reachable — a
-     * real leak.
+     * the anonymous-deny rejected anonymous callers "upstream", yet nothing
+     * upstream covers `/meta`, so an anonymous caller could read object / field
+     * schemas. On a tenant-less runtime host those are SYSTEM-object schemas and
+     * the host is publicly reachable — a real leak.
      *
      * Rather than add the gate to every handler (and have the next new route
      * forget it — the exact failure mode that caused this), wrap the route
      * registrar for the duration of registration so every meta route, present
-     * and future, inherits it. The check is a no-op when `requireAuth` is off
-     * (demo / single-tenant), so the previously-public metadata surface there
-     * is unchanged; an authenticated user passes exactly as on `/data`.
+     * and future, inherits it. An authenticated user passes exactly as on
+     * `/data`; the one exception is the declaration-derived public-book read
+     * (#3963), handled just below.
      */
     private registerMetadataEndpoints(basePath: string): void {
         const realRouteManager = this.routeManager;
@@ -2427,7 +2602,30 @@ export class RestServer {
                         // each `/data` handler derives.
                         const environmentId = req?.params?.environmentId;
                         const context = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                        if (this.enforceAuth(req, res, context)) return;
+                        // [#3963] `audience: 'public'` is a DECLARED capability, so it
+                        // must not depend on a deployment flipping its whole data plane
+                        // open. An anonymous read of the
+                        // book/doc surface skips the anonymous-deny and is authorized
+                        // instead by the ADR-0046 §6.7 audience gate inside the handler
+                        // — the same declaration-derived shape ADR-0056 Option A chose
+                        // for public form submission (`publicFormGrant`).
+                        //
+                        // Deliberately narrow, in three independent ways:
+                        //  1. only when NO context resolved. An authenticated caller
+                        //     still goes through `enforceAuth` unchanged, so the
+                        //     ADR-0069 auth-policy gate (expired password, enforced
+                        //     MFA) keeps applying to a gated session's book reads;
+                        //  2. only GET, and only the book/doc routes (see
+                        //     {@link isPublicAudienceRead}) — `/meta/object` stays 401
+                        //     for anonymous, which is the whole point of the umbrella
+                        //     gate;
+                        //  3. the handler still decides. `audienceAllows` returns true
+                        //     for `'public'` ONLY; `org` and `{ permissionSet }` books
+                        //     require `caller.authenticated`, and unresolvable holdings
+                        //     fail closed. This grants REACHABILITY, not authorization.
+                        const anonymousPublicRead = !context?.userId
+                            && RestServer.isPublicAudienceRead(entry, req);
+                        if (!anonymousPublicRead && this.enforceAuth(req, res, context)) return;
                         return (inner as (rq: any, rs: any) => unknown)(req, res);
                     },
                 } as any);
@@ -2490,8 +2688,7 @@ export class RestServer {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).getMetaDiagnostics !== 'function') {
                             res.status(501).json({
-                                error: 'not_implemented',
-                                message: 'protocol.getMetaDiagnostics() is not available in this kernel',
+                                error: { code: 'NOT_IMPLEMENTED', message: 'protocol.getMetaDiagnostics() is not available in this kernel' },
                             });
                             return;
                         }
@@ -2534,8 +2731,7 @@ export class RestServer {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).listDrafts !== 'function') {
                             res.status(501).json({
-                                error: 'not_implemented',
-                                message: 'protocol.listDrafts() is not available in this kernel',
+                                error: { code: 'NOT_IMPLEMENTED', message: 'protocol.listDrafts() is not available in this kernel' },
                             });
                             return;
                         }
@@ -2585,7 +2781,7 @@ export class RestServer {
                         // privileged apps (Studio, Setup, etc.) and gated nav
                         // items are stripped before reaching the client. We
                         // intentionally leave anonymous responses untouched —
-                        // the existing `requireAuth` gate (when enabled) blocks
+                        // the anonymous-deny gate blocks
                         // them upstream; when disabled, the demo / public
                         // surface keeps its prior behaviour.
                         //
@@ -2593,7 +2789,7 @@ export class RestServer {
                         // objectql implementation actually returns the raw
                         // array. Handle both shapes defensively.
                         let visible: any = items;
-                        if (req.params.type === 'app') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'app') {
                             const raw = items as unknown;
                             const list: any[] | null = Array.isArray(raw)
                                 ? (raw as any[])
@@ -2620,7 +2816,7 @@ export class RestServer {
 
                         // ADR-0057 D10: gate dashboard widgets by `requiresService`
                         // the same way app nav entries are gated above.
-                        if (req.params.type === 'dashboard') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'dashboard') {
                             const raw = visible as unknown;
                             const list: any[] | null = Array.isArray(raw)
                                 ? (raw as any[])
@@ -2648,7 +2844,7 @@ export class RestServer {
                         // excluded. Runtime `shared` / `personal` views
                         // (sys_view_definition) are merged client-side via the
                         // generic data API.
-                        if (req.params.type === 'view' && req.query?.object) {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'view' && req.query?.object) {
                             const obj = String(req.query.object);
                             const raw = visible as unknown;
                             const list: any[] | null = Array.isArray(raw)
@@ -2670,7 +2866,7 @@ export class RestServer {
                         // callers see only `public` books; `{ permissionSet }`-gated
                         // books require the caller to hold the named set (resolved
                         // through the security service; unresolvable → fail closed).
-                        if (req.params.type === 'book') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'book') {
                             const raw = visible as unknown;
                             const list = RestServer.metaItemsArray(raw);
                             if (list.length > 0) {
@@ -2689,7 +2885,7 @@ export class RestServer {
                         // claim it; unclaimed docs default to `org`). Runs on the
                         // raw items (before locale collapse) so `_packageId`
                         // provenance is still present for membership scoping.
-                        if (req.params.type === 'doc') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'doc') {
                             const raw = visible as unknown;
                             const list = RestServer.metaItemsArray(raw);
                             if (list.length > 0) {
@@ -2730,7 +2926,7 @@ export class RestServer {
                         // ADR-0046 i18n: collapse each doc to the request
                         // locale (localized label/description, `translations`
                         // map dropped) before the content-strip step below.
-                        if (req.params.type === 'doc') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'doc') {
                             const locale = this.extractLocale(req);
                             const { resolveDocLocale } = await import('@objectstack/spec/system');
                             const raw = visible as unknown;
@@ -2752,7 +2948,7 @@ export class RestServer {
                         // name + label. `?include=content` opts back in; the
                         // single-item GET /meta/doc/:name always returns the
                         // full body.
-                        if (req.params.type === 'doc' && req.query?.include !== 'content') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'doc' && req.query?.include !== 'content') {
                             const raw = visible as unknown;
                             const list: any[] | null = Array.isArray(raw)
                                 ? (raw as any[])
@@ -2860,7 +3056,7 @@ export class RestServer {
                         });
                         if (!audienceAllows((book as any).audience, caller)) {
                             if (!caller.authenticated) {
-                                sendError(res, { code: 'unauthorized', message: 'This documentation requires sign-in', status: 401 });
+                                sendError(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
                             } else {
                                 sendError(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
                             }
@@ -2951,7 +3147,7 @@ export class RestServer {
                         // viewers of the same app schema. Drafts also
                         // bypass cache: the cache is keyed on the
                         // published checksum and drafts are out-of-band.
-                        const isAppType = req.params.type === 'app';
+                        const isAppType = RestServer.metaTypeSingular(req.params.type) === 'app';
                         const isDraftRead = typeof req.query?.state === 'string'
                             && req.query.state.toLowerCase() === 'draft';
                         // ADR-0033/0037 — `?preview=draft` overlays a pending
@@ -3057,8 +3253,7 @@ export class RestServer {
                                     visible = this.filterAppForUser(item, sysPerms, serviceGate);
                                     if (visible == null) {
                                         res.status(404).json({
-                                            error: 'not_found',
-                                            message: 'Metadata item not found or access denied.',
+                                            error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
                                         });
                                         return;
                                     }
@@ -3068,7 +3263,7 @@ export class RestServer {
                             // ADR-0057 D10: gate dashboard widgets by `requiresService`
                             // (mirrors the app-nav gate above) so the console never
                             // renders a tile bound to an absent optional service.
-                            if (req.params.type === 'dashboard' && visible) {
+                            if (RestServer.metaTypeSingular(req.params.type) === 'dashboard' && visible) {
                                 const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                                 const registered = await this.resolveRegisteredServices((ctx as any)?.__kernel, [visible]);
                                 const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
@@ -3081,13 +3276,14 @@ export class RestServer {
                             // it, unclaimed → org). 401 for anonymous, 403 for an
                             // authenticated non-holder; fail closed when holdings
                             // cannot be resolved (ADR-0049).
-                            if ((req.params.type === 'book' || req.params.type === 'doc') && visible) {
+                            const audienceGatedType = RestServer.metaTypeSingular(req.params.type);
+                            if ((audienceGatedType === 'book' || audienceGatedType === 'doc') && visible) {
                                 const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
                                     await import('@objectstack/spec/system');
                                 const target = isMetaEnvelope(visible) ? (visible as any).item : visible;
                                 let caller: { authenticated: boolean; permissionSets?: string[] };
                                 let allowed: boolean;
-                                if (req.params.type === 'book') {
+                                if (audienceGatedType === 'book') {
                                     caller = await this.resolveAudienceCaller(environmentId, req, {
                                         needPermissionSets: RestServer.anyPermissionSetAudience([target]),
                                     });
@@ -3118,7 +3314,7 @@ export class RestServer {
                                 }
                                 if (!allowed) {
                                     if (!caller.authenticated) {
-                                        sendError(res, { code: 'unauthorized', message: 'This documentation requires sign-in', status: 401 });
+                                        sendError(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
                                     } else {
                                         sendError(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
                                     }
@@ -3129,7 +3325,7 @@ export class RestServer {
                             // ADR-0046 i18n: collapse the doc to the request
                             // locale (label/description/content) and drop the
                             // `translations` map so consumers get one body.
-                            if (req.params.type === 'doc' && visible) {
+                            if (audienceGatedType === 'doc' && visible) {
                                 const locale = this.extractLocale(req);
                                 const { resolveDocLocale } = await import('@objectstack/spec/system');
                                 visible = isMetaEnvelope(visible)
@@ -3435,7 +3631,7 @@ export class RestServer {
                     if (!Number.isFinite(toVersion) || toVersion < 1) {
                         res.status(400).json({
                             error: `'toVersion' (positive integer) is required`,
-                            code: 'invalid_request',
+                            code: 'INVALID_REQUEST',
                         });
                         return;
                     }
@@ -4929,14 +5125,14 @@ export class RestServer {
      *   GET  {basePath}/forms/:slug          → resolved form spec
      *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required)
      *
-     * Both routes bypass `enforceAuth` even when `requireAuth=true` on the
+     * Both routes bypass `enforceAuth` even though anonymous-deny is on for the
      * deployment (e.g. ObjectOS multi-tenant). Security is delegated to the
      * `guest_portal` permission set carried on the execution context — the
      * SecurityPlugin enforces INSERT-only access to the target object. If
      * the deployment hasn't registered a `guest_portal` profile, the
      * security middleware falls open with `permissions: []` (no userId),
      * matching the existing anonymous-access semantics; deployers must
-     * keep `requireAuth=true` deployments paired with a `guest_portal`
+     * keep secure-by-default deployments paired with a `guest_portal`
      * profile (the CRM example does this) to enforce the INSERT-only
      * contract.
      *
@@ -5208,7 +5404,7 @@ export class RestServer {
                     // form — a narrow create grant scoped to exactly this form's target
                     // object. The SecurityPlugin honors `publicFormGrant` (create + the
                     // immediate read-back, that object ONLY), so public forms work under
-                    // secure-by-default (requireAuth) WITHOUT a deployment-configured
+                    // secure-by-default (anonymous-deny) WITHOUT a deployment-configured
                     // `guest_portal`. `guest_portal` + `anonymous` are kept for back-compat
                     // with object hooks (guest detection via falsy `ctx.user?.id`).
                     const context: any = {
@@ -5566,8 +5762,8 @@ export class RestServer {
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (!context?.userId) {
-                    // Even on requireAuth=false deployments the explain surface
-                    // stays authenticated-only — it is an admin diagnosis tool.
+                    // The explain surface stays authenticated-only — it is an
+                    // admin diagnosis tool. (Anonymous is already 401ed above.)
                     return res.status(401).json({
                         code: 'UNAUTHORIZED',
                         message: 'The access-explanation endpoint requires an authenticated caller.',
@@ -5701,8 +5897,32 @@ export class RestServer {
             code: 'NOT_IMPLEMENTED',
             message: 'Sharing service is not configured on this deployment',
         });
+        // [ADR-0111] The service enforces authorization (D1/D4/D5/D7) and
+        // signals the verdict via message prefixes, the plugin's established
+        // error idiom — this maps them onto HTTP. Returns true when handled.
+        const respondSharingError = (res: any, error: any): boolean => {
+            const msg = String(error?.message ?? error ?? '');
+            const map: Array<[string, number]> = [
+                ['VALIDATION_FAILED', 400],
+                ['PERMISSION_DENIED', 403],
+                ['NOT_FOUND', 404],
+                ['CONFLICT', 409],
+                ['SHARING_NOT_ENABLED', 422],
+            ];
+            for (const [code, status] of map) {
+                if (msg.startsWith(code)) {
+                    res.status(status).json({
+                        code,
+                        error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                    });
+                    return true;
+                }
+            }
+            return false;
+        };
 
-        // GET — list shares on a record.
+        // GET — list shares on a record. [ADR-0111 D5] Management-gated in the
+        // service: invisible record → 404, visible-but-not-manager → 403.
         this.routeManager.register({
             method: 'GET',
             path: `${dataPath}/:object/:id/shares`,
@@ -5716,6 +5936,7 @@ export class RestServer {
                     const rows = await svc.listShares(req.params.object, req.params.id, context ?? {});
                     res.json({ data: rows });
                 } catch (error: any) {
+                    if (respondSharingError(res, error)) return;
                     logError('[REST] List shares error:', error);
                     res.status(500).json({ code: 'SHARES_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
                 }
@@ -5723,7 +5944,8 @@ export class RestServer {
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
         });
 
-        // POST — grant access.
+        // POST — grant access. [ADR-0111 D1/D7] Authorization + posture live
+        // in the service; this route only maps verdicts (403/404/422/400).
         this.routeManager.register({
             method: 'POST',
             path: `${dataPath}/:object/:id/shares`,
@@ -5745,21 +5967,10 @@ export class RestServer {
                         sourceId: body.sourceId ?? body.source_id,
                         reason: body.reason,
                     };
-                    try {
-                        const row = await svc.grant(input, context ?? {});
-                        res.status(201).json(row);
-                    } catch (err: any) {
-                        const msg = String(err?.message ?? err ?? '');
-                        if (msg.startsWith('VALIDATION_FAILED')) {
-                            res.status(400).json({
-                                code: 'VALIDATION_FAILED',
-                                error: msg.replace(/^VALIDATION_FAILED:\s*/, ''),
-                            });
-                            return;
-                        }
-                        throw err;
-                    }
+                    const row = await svc.grant(input, context ?? {});
+                    res.status(201).json(row);
                 } catch (error: any) {
+                    if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
                     res.status(500).json({ code: 'SHARE_GRANT_FAILED', error: String(error?.message ?? error).slice(0, 500) });
                 }
@@ -5767,7 +5978,10 @@ export class RestServer {
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
         });
 
-        // DELETE — revoke a share by id.
+        // DELETE — revoke a share by id. [ADR-0111 D4] The URL's
+        // (object, id) is forwarded as the revoke scope so a share id can only
+        // be revoked through the record it belongs to; the service enforces
+        // management authority and the manual-source rule (409).
         this.routeManager.register({
             method: 'DELETE',
             path: `${dataPath}/:object/:id/shares/:shareId`,
@@ -5778,9 +5992,14 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
-                    await svc.revoke(req.params.shareId, context ?? {});
+                    await svc.revoke(
+                        req.params.shareId,
+                        context ?? {},
+                        { object: req.params.object, recordId: req.params.id },
+                    );
                     res.status(204).end();
                 } catch (error: any) {
+                    if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
                     res.status(500).json({ code: 'SHARE_REVOKE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
                 }
@@ -5823,6 +6042,12 @@ export class RestServer {
             const msg = String(err?.message ?? err ?? '');
             if (msg.startsWith('VALIDATION_FAILED')) {
                 return res.status(400).json({ code: 'VALIDATION_FAILED', error: msg.replace(/^VALIDATION_FAILED:\s*/, '') });
+            }
+            // [ADR-0111 D6] The service gates every verb on `manage_sharing`
+            // (enforced there so non-REST callers are covered too) — map its
+            // verdict rather than burying it in a 500.
+            if (msg.startsWith('PERMISSION_DENIED')) {
+                return res.status(403).json({ code: 'PERMISSION_DENIED', error: msg.replace(/^PERMISSION_DENIED:\s*/, '') });
             }
             if (msg.startsWith('RULE_NOT_FOUND')) {
                 return res.status(404).json({ code: 'RULE_NOT_FOUND', error: msg.replace(/^RULE_NOT_FOUND:?\s*/, '') });
@@ -6934,17 +7159,15 @@ export class RestServer {
                         // (ADR-0049) was enforced on A while B was written. Zod also
                         // strips unknown keys, which keeps a body `context` from
                         // becoming the execution context on a deployment where none
-                        // resolves (anonymous-reachable `requireAuth: false`).
+                        // resolves (e.g. an anonymous public-book read, #3963).
                         const { UpdateManyDataRequestSchema } = await import('@objectstack/spec/api');
-                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse({
-                            ...(req.body ?? {}),
-                            object: req.params.object,
-                        });
+                        const updateManyInput = { ...(req.body ?? {}), object: req.params.object };
+                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse(updateManyInput);
                         if (!parsedUpdate.success) {
                             res.status(400).json({
                                 error: 'Invalid updateMany request',
                                 code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsedUpdate.error?.issues),
+                                fields: zodIssuesToFields(parsedUpdate.error?.issues, updateManyInput),
                                 object: req.params?.object,
                             });
                             return;
@@ -7000,15 +7223,13 @@ export class RestServer {
                         // so a body `object` would move the delete to an object
                         // whose exposure policy was never checked.
                         const { DeleteManyDataRequestSchema } = await import('@objectstack/spec/api');
-                        const parsed = (DeleteManyDataRequestSchema as any).safeParse({
-                            ...(req.body ?? {}),
-                            object: req.params.object,
-                        });
+                        const deleteManyInput = { ...(req.body ?? {}), object: req.params.object };
+                        const parsed = (DeleteManyDataRequestSchema as any).safeParse(deleteManyInput);
                         if (!parsed.success) {
                             res.status(400).json({
                                 error: 'Invalid deleteMany request',
                                 code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsed.error?.issues),
+                                fields: zodIssuesToFields(parsed.error?.issues, deleteManyInput),
                                 object: req.params?.object,
                             });
                             return;

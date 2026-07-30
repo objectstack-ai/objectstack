@@ -39,6 +39,24 @@ export class LegacyStorageDriver extends SqlDriver {
     this.canonicalDatetimeFields[table]?.delete(field);
   }
 
+  /**
+   * The `Field.time` twin (#3994): insert raw pre-canonical time values and
+   * clear the column's canonical marker.
+   */
+  async seedLegacyTimeRows(
+    table: string,
+    field: string,
+    rows: Array<Record<string, unknown>>,
+  ): Promise<void> {
+    await this.knex(table).insert(rows);
+    this.forgetCanonicalTime(table, field);
+  }
+
+  /** Drop the "already backfilled" marker for one `Field.time` column. */
+  forgetCanonicalTime(table: string, field: string): void {
+    this.canonicalTimeFields[table]?.delete(field);
+  }
+
   /** Raw stored form of a column, for asserting on the fixture's premise. */
   async storedForms(table: string, field: string): Promise<Array<{ id: string; type: string; value: unknown }>> {
     const res: any = await this.knex.raw(

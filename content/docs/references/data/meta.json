@@ -28,7 +28,6 @@
     "seed-loader",
     "---More---",
     "context-tokens",
-    "field-value",
-    "validation-error"
+    "field-value"
   ]
 }

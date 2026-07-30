@@ -138,8 +138,8 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         try {
             await scoped.saveMetaItem({ type: 'agent', name: 'my_agent', item: { name: 'my_agent' } });
         } catch (err: any) {
-            expect(err.code).not.toBe('not_overridable');
-            expect(err.code).not.toBe('not_creatable');
+            expect(err.code).not.toBe('NOT_OVERRIDABLE');
+            expect(err.code).not.toBe('NOT_CREATABLE');
         }
     });
 

@@ -138,8 +138,8 @@ See also: ../../[automation/trigger-registry.zod.ts](/docs/references/automation
 ## TypeScript Usage
 
 ```typescript
-import { CircuitBreakerConfig, Connector, ConnectorAction, ConnectorHealth, ConnectorStatus, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorCategory, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RateLimitStrategy, RetryConfig, RetryStrategy, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
-import type { CircuitBreakerConfig, Connector, ConnectorAction, ConnectorHealth, ConnectorStatus, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorCategory, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RateLimitStrategy, RetryConfig, RetryStrategy, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
+import { CircuitBreakerConfig, Connector, ConnectorAction, ConnectorErrorCategory, ConnectorHealth, ConnectorRetryStrategy, ConnectorStatus, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RateLimitStrategy, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
+import type { CircuitBreakerConfig, Connector, ConnectorAction, ConnectorErrorCategory, ConnectorHealth, ConnectorRetryStrategy, ConnectorStatus, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RateLimitStrategy, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
 
 // Validate data
 const result = CircuitBreakerConfig.parse(data);
@@ -213,6 +213,24 @@ Circuit breaker configuration
 
 ---
 
+## ConnectorErrorCategory
+
+Standard error category
+
+### Allowed Values
+
+* `validation`
+* `authorization`
+* `not_found`
+* `conflict`
+* `rate_limit`
+* `timeout`
+* `server_error`
+* `integration_error`
+
+
+---
+
 ## ConnectorHealth
 
 Connector health configuration
@@ -223,6 +241,20 @@ Connector health configuration
 | :--- | :--- | :--- | :--- |
 | **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number; endpoint?: string; … }` | optional | Health check configuration |
 | **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutMs: number; halfOpenMaxRequests: number; … }` | optional | Circuit breaker configuration |
+
+
+---
+
+## ConnectorRetryStrategy
+
+Retry strategy
+
+### Allowed Values
+
+* `exponential_backoff`
+* `linear_backoff`
+* `fixed_delay`
+* `no_retry`
 
 
 ---
@@ -324,24 +356,6 @@ Connector type
 
 ---
 
-## ErrorCategory
-
-Standard error category
-
-### Allowed Values
-
-* `validation`
-* `authorization`
-* `not_found`
-* `conflict`
-* `rate_limit`
-* `timeout`
-* `server_error`
-* `integration_error`
-
-
----
-
 ## ErrorMappingConfig
 
 Error mapping configuration
@@ -425,20 +439,6 @@ Rate limiting strategy
 | **retryableStatusCodes** | `number[]` | ✅ | HTTP status codes to retry |
 | **retryOnNetworkError** | `boolean` | ✅ | Retry on network errors |
 | **jitter** | `boolean` | ✅ | Add jitter to retry delays |
-
-
----
-
-## RetryStrategy
-
-Retry strategy
-
-### Allowed Values
-
-* `exponential_backoff`
-* `linear_backoff`
-* `fixed_delay`
-* `no_retry`
 
 
 ---

@@ -17,17 +17,39 @@ import { checkEmptyState } from './empty-state.mts';
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
 const repoRoot = resolve(specRoot, '../..');
-const srcRoot = join(specRoot, 'src');
+const packagesRoot = resolve(repoRoot, 'packages');
 
-/** The authorable spec surface: the schema files an author (or a model) reads. */
-function collectSchemaFiles(dir: string, out: string[] = []): string[] {
+// Build output, dependencies and caches are copies — scanning them would report
+// the same statement several times and flag paths nobody edits.
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.turbo', 'coverage', '.git']);
+
+/**
+ * The authorable surface: everything an author — very often a model — reads as
+ * the contract.
+ *
+ * TWO kinds of file, and the second is the reason this gate exists at all:
+ *
+ * - `packages/spec/src/**\/*.zod.ts` — the schema surface.
+ * - `**\/*.object.ts` — platform-object definitions, wherever they live (plugins,
+ *   `platform-objects`, `metadata-core`, the `create-objectstack` templates).
+ *   The sentence that shipped #3896 — *"leave empty to share every record"* — was
+ *   the `description` of `sys_sharing_rule.criteria_json`, which lives in
+ *   `plugin-sharing`. A gate scoped to `packages/spec` could not see the crime
+ *   scene. Templates are included deliberately: a starter file is the highest-
+ *   leverage thing a model copies from.
+ */
+function collectAuthorableFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      collectSchemaFiles(full, out);
-    } else if (entry.name.endsWith('.zod.ts') && !entry.name.endsWith('.test.ts')) {
-      out.push(full);
+      if (SKIP_DIRS.has(entry.name)) continue;
+      collectAuthorableFiles(join(dir, entry.name), out);
+      continue;
     }
+    if (entry.name.endsWith('.test.ts')) continue;
+    const full = join(dir, entry.name);
+    const rel = relative(repoRoot, full);
+    if (entry.name.endsWith('.object.ts')) out.push(full);
+    else if (entry.name.endsWith('.zod.ts') && rel.startsWith(join('packages', 'spec', 'src'))) out.push(full);
   }
   return out;
 }
@@ -36,7 +58,7 @@ const args = process.argv.slice(2);
 const asJson = args.includes('--json');
 const dump = args.includes('--dump');
 
-const files = collectSchemaFiles(srcRoot).sort();
+const files = collectAuthorableFiles(packagesRoot).sort();
 const sources = new Map<string, string>(
   files.map((f) => [relative(repoRoot, f), readFileSync(f, 'utf8')]),
 );

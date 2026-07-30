@@ -86,11 +86,12 @@ export function registerTaskActionHandlers(engine: {
   engine.registerAction('todo_task', 'deleteCompletedTasks', deleteCompletedTasks);
   engine.registerAction('todo_task', 'exportTasksToCSV', exportTasksToCSV);
 
-  // ─── Modal-type actions (server-side form submission handlers) ─────
-  // These process the params collected by the modal UI before the
-  // engine updates the record. The modal target (e.g. 'defer_task_modal')
-  // tells the UI which modal page to open; the handler below processes
-  // the submitted form data.
+  // ─── Param-collecting script actions ───────────────────────────────
+  // `defer_task` / `set_reminder` declare `params`, so the runner collects
+  // them in a dialog and these handlers run with the values. They were
+  // `type: 'modal'` until #3959 — a modal action has no server dispatch, so
+  // the targets named modal pages that did not exist and neither handler had
+  // ever executed. They are `type: 'script'` targeting these keys now.
   engine.registerAction('todo_task', 'deferTask', deferTask);
   engine.registerAction('todo_task', 'setReminder', setReminder);
 }

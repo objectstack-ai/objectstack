@@ -164,7 +164,7 @@ describe('saveMetaItem — repository write path against real ObjectQL (PR-10d.4
                 item: viewBody('Should not land'),
                 parentVersion: 'sha256:stale',
             }),
-        ).rejects.toMatchObject({ code: 'metadata_conflict', status: 409 });
+        ).rejects.toMatchObject({ code: 'METADATA_CONFLICT', status: 409 });
 
         const rows = await engine.find('sys_metadata', {
             where: { type: 'view', organization_id: 'org_x' },

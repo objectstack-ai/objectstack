@@ -224,137 +224,32 @@ export const DynamicPluginResultSchema = lazySchema(() => z.object({
 }).describe('Result of a dynamic plugin operation'));
 
 /**
- * Plugin Discovery Source
- * Defines where to discover available plugins at runtime
+ * REMOVED — the plugin DISCOVERY + DYNAMIC-LOADING config surface (#3896 follow-up).
+ *
+ * `DynamicLoadingConfigSchema`, `PluginDiscoveryConfigSchema` and
+ * `PluginDiscoverySourceSchema` declared a plugin sandboxing / integrity /
+ * source-allow-list / approval-before-load control set. None of it was ever
+ * composed into a parent schema, exported from the package root, or read by any
+ * runtime: the three schemas were an ISLAND, reachable only from their own
+ * round-trip tests — yet still published into `json-schema/` and the authorable
+ * key surface, where an author (very often an AI, ADR-0033) would read them as a
+ * capability this platform has.
+ *
+ * That is the ADR-0049 false-compliance shape, and the precedent for a
+ * SAFETY-shaped one is to REMOVE rather than mark dead: `tool.requiresConfirmation`
+ * was pruned in #3715 for exactly this reason — "unenforced on every path, so it
+ * was false compliance, not merely dead".
+ *
+ * No `retiredKey()` tombstones. A tombstone earns its keep by making the removal
+ * audible at a parse the author actually reaches, and NOTHING parses these
+ * schemas — a prescription nobody can receive is noise, and the silent-strip the
+ * key-vanish guard protects against was already these keys' permanent condition,
+ * not something this change introduces. The guard's baseline entries are dropped
+ * deliberately in this PR instead; see the changeset.
+ *
+ * Rebuilding this surface is a design job, not a schema job: write the runtime
+ * first, then declare only what it enforces.
  */
-export const PluginDiscoverySourceSchema = lazySchema(() => z.object({
-  /**
-   * Discovery source type
-   */
-  type: z.enum([
-    'registry',        // ObjectStack plugin registry API
-    'npm',             // npm registry search
-    'directory',       // Local filesystem directory scan
-    'url',             // Remote manifest URL
-  ]).describe('Discovery source type'),
-  
-  /**
-   * Source endpoint or path
-   */
-  endpoint: z.string().describe('Registry URL, directory path, or manifest URL'),
-  
-  /**
-   * Polling interval in milliseconds (0 = manual only)
-   */
-  pollInterval: z.number().int().min(0).default(0)
-    .describe('How often to re-scan for new plugins (0 = manual)'),
-  
-  /**
-   * Filter criteria for discovered plugins
-   */
-  filter: z.object({
-    /**
-     * Only discover plugins matching these tags
-     */
-    tags: z.array(z.string()).optional(),
-    
-    /**
-     * Only discover plugins from these vendors
-     */
-    vendors: z.array(z.string()).optional(),
-    
-    /**
-     * Minimum trust level
-     */
-    minTrustLevel: z.enum(['verified', 'trusted', 'community', 'untrusted']).optional(),
-  }).optional(),
-}).describe('Source for runtime plugin discovery'));
-
-/**
- * Plugin Discovery Configuration
- * Controls how the kernel discovers available plugins at runtime
- */
-export const PluginDiscoveryConfigSchema = lazySchema(() => z.object({
-  /**
-   * Enable runtime plugin discovery
-   */
-  enabled: z.boolean().default(false),
-  
-  /**
-   * Discovery sources
-   */
-  sources: z.array(PluginDiscoverySourceSchema).default([]),
-  
-  /**
-   * Auto-load discovered plugins matching criteria
-   */
-  autoLoad: z.boolean().default(false)
-    .describe('Automatically load newly discovered plugins'),
-  
-  /**
-   * Require approval before loading discovered plugins
-   */
-  requireApproval: z.boolean().default(true)
-    .describe('Require admin approval before loading discovered plugins'),
-}).describe('Runtime plugin discovery configuration'));
-
-/**
- * Dynamic Loading Configuration
- * Top-level configuration for the dynamic plugin loading subsystem
- */
-export const DynamicLoadingConfigSchema = lazySchema(() => z.object({
-  /**
-   * Enable dynamic loading/unloading at runtime
-   */
-  enabled: z.boolean().default(false)
-    .describe('Enable runtime load/unload of plugins'),
-  
-  /**
-   * Maximum number of dynamically loaded plugins
-   */
-  maxDynamicPlugins: z.number().int().min(1).default(50)
-    .describe('Upper limit on runtime-loaded plugins'),
-  
-  /**
-   * Plugin discovery configuration
-   */
-  discovery: PluginDiscoveryConfigSchema.optional(),
-  
-  /**
-   * Default sandbox policy for dynamically loaded plugins
-   */
-  defaultSandbox: z.boolean().default(true)
-    .describe('Sandbox dynamically loaded plugins by default'),
-  
-  /**
-   * Allowed plugin sources — three-state, the same contract as
-   * `object.apiMethods` (#3391/#3543): `undefined` = no source policy declared,
-   * `[]` = deny-all, a subset = exactly those source types.
-   *
-   * The empty ARRAY is closed; only ABSENCE is open. The previous wording
-   * collapsed the two, making this a vacuous allow-list — one where the value an
-   * author reaches by mistake is also the widest grant. That is the shape #3896
-   * turned into an over-share, and this is a supply-chain gate.
-   *
-   * Nothing enforces this field yet (hence the marker), which is precisely why
-   * the wording mattered: an unimplemented property's description is the
-   * specification whoever implements it builds to.
-   */
-  allowedSources: z.array(z.enum(['npm', 'local', 'url', 'registry', 'git'])).optional()
-    .describe('[EXPERIMENTAL — not enforced] Restrict which plugin source types are permitted: undefined = any source, [] = deny-all, a subset = exactly those types'),
-  
-  /**
-   * Require integrity verification for remote plugins
-   */
-  requireIntegrity: z.boolean().default(true)
-    .describe('Require integrity hash verification for remote sources'),
-  
-  /**
-   * Global timeout for dynamic operations in milliseconds
-   */
-  operationTimeout: z.number().int().min(1000).default(60000)
-    .describe('Default timeout for load/unload operations in ms'),
-}).describe('Dynamic plugin loading subsystem configuration'));
 
 // Export types
 export type DynamicPluginOperation = z.infer<typeof DynamicPluginOperationSchema>;
@@ -363,11 +258,7 @@ export type ActivationEvent = z.infer<typeof ActivationEventSchema>;
 export type DynamicLoadRequest = z.infer<typeof DynamicLoadRequestSchema>;
 export type DynamicUnloadRequest = z.infer<typeof DynamicUnloadRequestSchema>;
 export type DynamicPluginResult = z.infer<typeof DynamicPluginResultSchema>;
-export type PluginDiscoverySource = z.infer<typeof PluginDiscoverySourceSchema>;
-export type PluginDiscoveryConfig = z.infer<typeof PluginDiscoveryConfigSchema>;
-export type DynamicLoadingConfig = z.infer<typeof DynamicLoadingConfigSchema>;
 
 // Export input types for schemas with defaults
 export type DynamicLoadRequestInput = z.input<typeof DynamicLoadRequestSchema>;
 export type DynamicUnloadRequestInput = z.input<typeof DynamicUnloadRequestSchema>;
-export type DynamicLoadingConfigInput = z.input<typeof DynamicLoadingConfigSchema>;

@@ -85,12 +85,13 @@ describe('raw-hono /data — anonymous-deny gate (#2567)', () => {
         expect(res.status).toBe(200);
     });
 
-    it('explicit opt-out (requireAuth:false) keeps the surface anonymously reachable', async () => {
+    it('there is no opt-out — an anonymous read is 401 regardless of config (#3963)', async () => {
+        // `api.requireAuth: false` is retired: it no longer opens the surface.
         const app = bootStandardEndpoints({
-            restConfig: { api: { requireAuth: false } },
+            restConfig: { api: { requireAuth: false } as any },
             services: { objectql, auth },
         });
         const res = await app.request(REQ, { method: 'GET' });
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(401);
     });
 });

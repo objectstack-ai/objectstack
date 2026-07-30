@@ -8,22 +8,19 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // Tool Category
 // ==========================================
 
-/**
- * Tool Category
- * Classifies the tool by its operational domain.
- */
 import { lazySchema } from '../shared/lazy-schema';
-export const ToolCategorySchema = lazySchema(() => z.enum([
-  'data',           // CRUD / query operations
-  'action',         // Side-effect actions (send email, create record)
-  'flow',           // Trigger a visual flow
-  'integration',    // External API / webhook calls
-  'vector_search',  // RAG / vector search
-  'analytics',      // Aggregation & reporting
-  'utility',        // Formatters, parsers, helpers
-]).describe('Tool operational category'));
 
-export type ToolCategory = z.infer<typeof ToolCategorySchema>;
+/*
+ * REMOVED — `ToolCategorySchema` / `ToolCategory` (#3896 audit close-out).
+ *
+ * The enum existed to type `tool.category`, which was removed with the other
+ * inert authoring keys: nothing ever grouped, filtered or routed tools by it
+ * (the only reader was a serializer pass-through). With the key gone the
+ * exported enum had zero consumers — `action.zod.ts` deliberately keeps its
+ * own INLINE copy of the vocabulary rather than importing this one, and says
+ * so. Removing rather than orphaning per the #3950 precedent: an exported
+ * schema with no consumer is read as a capability by whoever finds it.
+ */
 
 // ==========================================
 // Tool Schema
@@ -36,6 +33,28 @@ export type ToolCategory = z.infer<typeof ToolCategorySchema>;
  * `UNKNOWN_KEY_GUIDANCE`, ADR-0049 enforce-or-remove).
  */
 const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
+  permissions:
+    '`tool.permissions` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it ' +
+    'promised a capability gate on tool invocation that nothing ever enforced: the key is not ' +
+    'part of AIToolDefinition and no execution path read it, so a tool "requiring" capabilities ' +
+    'ran for everyone. Delete the key. To gate what a tool can DO, gate the underlying action ' +
+    '(`action.requiredPermissions`, ADR-0066) or the object it touches (permission sets) — those ' +
+    'are the checks the middleware actually runs.',
+  active:
+    '`tool.active` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    '`active: false` read as "withdrawn" but withdrew nothing: AIToolDefinition has no such ' +
+    'field, ToolRegistry.getAll() returns everything, and the tool kept reaching the LLM tool ' +
+    'set and `POST /ai/tools/:name/execute` kept running it (unlike agent.active / skill.active, ' +
+    'which ARE enforced). Delete the key. To withdraw a tool, remove it from the skills/agents ' +
+    'that reference it.',
+  category:
+    '`tool.category` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing ' +
+    'groups, filters or routes tools by it; the only reader was a serializer pass-through. ' +
+    'Delete the key. Organizational grouping belongs in the skill that carries the tool.',
+  builtIn:
+    '`tool.builtIn` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no ' +
+    'runtime branches on it; it never affected registration, selection or execution. Delete ' +
+    'the key.',
   requiresConfirmation:
     '`tool.requiresConfirmation` was removed from @objectstack/spec in the 16.x line ' +
     '(#3715, ADR-0033 §2) — it never had a consumer, and a SAFETY flag that is merely ' +
@@ -90,7 +109,6 @@ const strictToolError: z.core.$ZodErrorMap = (issue) => {
  *   name: 'create_case',
  *   label: 'Create Support Case',
  *   description: 'Creates a new support case record',
- *   category: 'action',
  *   parameters: {
  *     type: 'object',
  *     properties: {
@@ -112,9 +130,6 @@ export const ToolSchema = lazySchema(() => z.object({
 
   /** Detailed description for LLM consumption (the model reads this to decide when to call the tool) */
   description: z.string().describe('Tool description for LLM function calling'),
-
-  /** Operational category */
-  category: ToolCategorySchema.optional().describe('Tool category for grouping and filtering'),
 
   /**
    * JSON Schema describing the tool input parameters.
@@ -139,14 +154,15 @@ export const ToolSchema = lazySchema(() => z.object({
    */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object name (snake_case)'),
 
-  /** Permission-set capabilities required to use this tool */
-  permissions: z.array(z.string()).optional().describe('Required permission-set capabilities'),
-
-  /** Whether the tool is enabled */
-  active: z.boolean().default(true).describe('Whether the tool is enabled'),
-
-  /** Whether this is a platform built-in tool (vs. user-defined) */
-  builtIn: z.boolean().default(false).describe('Platform built-in tool flag'),
+  // `category`, `permissions`, `active` and `builtIn` were REMOVED by the
+  // 2026-07 #3896 security-audit close-out — all four were authorable and
+  // inert, and two were misleading in the dangerous direction: `permissions`
+  // promised a capability gate on invocation that nothing enforced, and
+  // `active: false` read as "withdrawn" while the tool kept reaching the LLM
+  // set and `POST /ai/tools/:name/execute` kept running it. The `.strict()`
+  // parse rejects each with its prescription (TOOL_RETIRED_KEY_GUIDANCE), and
+  // the `tool-inert-authoring-keys-removed` conversion strips them from
+  // authored sources.
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here; the loader translates it
@@ -180,7 +196,6 @@ export type Tool = z.infer<typeof ToolSchema>;
  *   name: 'query_orders',
  *   label: 'Query Orders',
  *   description: 'Search and filter customer orders',
- *   category: 'data',
  *   parameters: {
  *     type: 'object',
  *     properties: {

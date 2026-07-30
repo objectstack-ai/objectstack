@@ -1,24 +1,25 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Read-side time-of-day normalization for `Field.time` on SQLite.
+ * `Field.time` canonical presentation (#2004, #3994).
  *
- * `Field.time` is a wall-clock time-of-day, not an instant (#2004). A
- * `defaultValue: 'NOW()'` time column historically took the full
- * `CURRENT_TIMESTAMP` default, so a defaulted row read back a full
- * `'YYYY-MM-DD HH:MM:SS'` timestamp instead of a time-of-day. `formatOutput` now
- * repairs such legacy/raw rows to just the time portion (`toTimeOnly`), while
- * leaving a value already stored as a bare time-of-day untouched — read-only, so
- * no write/read asymmetry is introduced and the field-zoo round-trip
- * (`f_time: '14:30:00'`, #2022) is unaffected.
+ * `Field.time` is a wall-clock time-of-day, not an instant. Since #3994 the
+ * driver stores, filters and presents ONE canonical shape — `HH:MM:SS`, with a
+ * `.fff` suffix only when the milliseconds are non-zero — via the same
+ * `canonicalTimeOfDay` on all three paths. On read that transparently repairs
+ * legacy rows (full-timestamp text from the old `CURRENT_TIMESTAMP` default,
+ * epoch ms from a bound `Date`) with no data migration; `HH:MM:SS` writes
+ * round-trip identically (the field-zoo `f_time` contract, #2022), while a
+ * minutes-only `HH:MM` gains its `:00` so equality filters and `distinct()`
+ * cannot split one wall clock into several presented values.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 
-const TIME_OF_DAY = /^\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+const TIME_OF_DAY = /^\d{2}:\d{2}:\d{2}(\.\d{3})?$/;
 
-describe('Field.time read normalization (time-of-day, SQLite)', () => {
+describe('Field.time canonical presentation (time-of-day, SQLite)', () => {
   let driver: SqlDriver;
   let raw: any;
 
@@ -58,11 +59,20 @@ describe('Field.time read normalization (time-of-day, SQLite)', () => {
     expect(row.starts_at).toBe('14:30:00.500');
   });
 
-  it('leaves a bare time-of-day untouched (field-zoo parity — no write/read asymmetry)', async () => {
-    for (const [id, v] of [['a', '14:30'], ['b', '14:30:00'], ['c', '09:05:30']] as const) {
-      await driver.create('shift', { id, label: id, starts_at: v }, { bypassTenantAudit: true });
+  it('round-trips HH:MM:SS identically (field-zoo parity, #2022) and completes HH:MM', async () => {
+    // `HH:MM:SS[.fff]` IS the canonical shape — written, stored and presented
+    // byte-identically. A minutes-only `HH:MM` is the same wall clock as its
+    // `HH:MM:00` spelling and must canonicalise to it (#3994): leaving both
+    // forms in one column made `=` filters and `distinct()` treat them as two.
+    for (const [id, written, presented] of [
+      ['a', '14:30', '14:30:00'],
+      ['b', '14:30:00', '14:30:00'],
+      ['c', '09:05:30', '09:05:30'],
+      ['d', '09:05:30.250', '09:05:30.250'],
+    ] as const) {
+      await driver.create('shift', { id, label: id, starts_at: written }, { bypassTenantAudit: true });
       const row: any = await driver.findOne('shift', id, { bypassTenantAudit: true });
-      expect(row.starts_at).toBe(v); // unchanged — round-trips identically
+      expect(row.starts_at).toBe(presented);
     }
   });
 
@@ -80,7 +90,7 @@ describe('Field.time read normalization (time-of-day, SQLite)', () => {
     const rows = await driver.find('shift', { orderBy: [{ field: 'id', order: 'asc' }] });
     const byId = Object.fromEntries(rows.map((r: any) => [r.id, r]));
     expect(byId.l1.starts_at).toBe('08:15:00'); // legacy full-timestamp repaired
-    expect(byId.l2.starts_at).toBe('08:15:00'); // bare time-of-day preserved
+    expect(byId.l2.starts_at).toBe('08:15:00'); // canonical write round-trips
   });
 
   it('leaves null untouched', async () => {

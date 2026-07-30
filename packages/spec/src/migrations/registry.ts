@@ -367,18 +367,111 @@ const step17: MigrationStep = {
     'decision about which skill. The conversion therefore drops the dead key (the ' +
     'runtime stopped reading it in cloud#910, so it already contributes nothing) and ' +
     'emits a notice per agent so the author knows where capability must be ' +
-    're-declared; the schema tombstones the key with a fix-it error naming `skills`.',
+    're-declared; the schema tombstones the key with a fix-it error naming `skills`.\n\n' +
+    'Beyond those spec-surface removals, it graduates the seven flow-node config key ' +
+    'aliases the executors still ' +
+    'tolerated (#3796): the CRUD nodes\' `object` (use `objectName`) — the last tenant ' +
+    'of the `readAliasedConfig` executor shim, which is deleted with it — plus the six ' +
+    'open-coded fallbacks that never went through that shim: notify `to`/`subject`/' +
+    '`body`/`url` (use `recipients`/`title`/`message`/`actionUrl`) and script ' +
+    '`functionName`/`input` (use `function`/`inputs`). All are pure key renames with ' +
+    'unchanged values and replay losslessly. Like the sharing-rule access level above ' +
+    'they keep a load-path acceptance window: none carried a prior deprecation ' +
+    'warning, and `FlowNodeSchema.config` is an unconstrained record, so no schema ' +
+    'tombstone can reject them — the conversion layer is the only seam that can ' +
+    'declare, convert, and retire them.\n\n' +
+    'And it removes the RLS-policy key `priority` (#3896 security audit): promised ' +
+    '"conflict resolution" that cannot exist, because applicable policies OR-combine ' +
+    '(most permissive wins) — there is never a conflict to order, and nothing ever ' +
+    'read the key (call graph closed across the collection site, the projection ' +
+    'round-trip and the compiler). A pure lossless delete: outcomes are identical ' +
+    'with or without it; the schema tombstones the key with the same prescription.\n\n' +
+    'The same close-out retires the four inert tool authoring keys (`category`, ' +
+    '`permissions`, `active`, `builtIn`): none is part of AIToolDefinition and no ' +
+    'execution path read them. Two were misleading in the dangerous direction — ' +
+    '`permissions` promised an invocation gate nothing enforced, and `active: false` ' +
+    'read as "withdrawn" while the tool kept reaching the LLM tool set. Lossless ' +
+    'deletes; the strict ToolSchema rejects each with its prescription.\n\n' +
+    'ADR-0113 splits the `required` tri-binding: post-17, `required` is ONLY the ' +
+    'write-time contract (insert must provide; update may not null out; legacy null ' +
+    'rows rest), and the physical NOT NULL is the explicit `storage.notNull`. The ' +
+    '`field-required-notnull-explicit` conversion preserves every pre-17 source ' +
+    'verbatim-in-meaning by stamping `storage.notNull: true` onto each required ' +
+    'field — under the old semantics that column WAS created NOT NULL, so the ' +
+    'rewrite writes down what the text already meant. Migration-chain-only ' +
+    '(retired from the load path): this is a default flip, not a rename, and a ' +
+    'loader that auto-applied it would stamp the constraint onto 17-authored ' +
+    'sources that deliberately omit it.\n\n' +
+    'On the wire contract it also retires the `/analytics/query` request ENVELOPE ' +
+    '(#3878): `AnalyticsQueryRequestSchema` used to describe `{ cube, query: {...}, ' +
+    'format }` — the dialect of the retired degraded analytics shim (#3891) that the ' +
+    'real engine never understood (an envelope body inferred a column-less cube and ' +
+    'died as an SQL syntax error). The canonical request body is now the BARE ' +
+    'AnalyticsQuery — `cube` + `measures` at the top level — which is what every ' +
+    'real caller already sends; the schema tombstones `query`/`format`, and the ' +
+    'dispatcher entry validates bodies and answers 400 with the prescription. No ' +
+    'stored metadata carries this shape (it was HTTP-only), so the change is two ' +
+    'semantic TODOs for API callers rather than a stack conversion.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
     'agent-knowledge-topics-to-sources',
     'agent-tools-to-skills',
     'sharing-rule-access-level-full-to-edit',
+    'flow-node-crud-object-alias',
+    'flow-node-notify-config-aliases',
+    'flow-node-script-config-aliases',
+    'permission-rls-priority-removed',
+    'tool-inert-authoring-keys-removed',
+    'field-required-notnull-explicit',
   ],
-  semantic: [],
+  semantic: [
+    {
+      id: 'analytics-query-request-envelope-retired',
+      surface: 'api.analyticsQueryRequest.query',
+      replacement: 'bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)',
+      reason:
+        'The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded ' +
+        'analytics shim (#3891), never stored in stack metadata — there is no source for the ' +
+        'chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the ' +
+        'query.* fields to the body top level themselves.',
+      acceptanceCriteria:
+        'Every /analytics/query and /analytics/sql call sends the bare AnalyticsQuery shape and ' +
+        'succeeds; no request answers 400 VALIDATION_FAILED with the envelope prescription.',
+    },
+    {
+      id: 'analytics-query-request-format-retired',
+      surface: 'api.analyticsQueryRequest.format',
+      replacement: '(removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)',
+      reason:
+        'The `format` key was declared but never implemented (declared ≠ enforced): every ' +
+        'response is the JSON envelope regardless of the requested value, so there is no ' +
+        'behaviour to preserve and nothing stored to rewrite.',
+      acceptanceCriteria:
+        'No /analytics/query or /analytics/sql call sends `format`; exports go through the ' +
+        'export surface.',
+    },
+  ],
 };
 
 /** All migration steps, keyed by the major they migrate into. */
+const step18: MigrationStep = {
+  toMajor: 18,
+  rationale:
+    'Protocol 18 retires `api.requireAuth` (#3963): the deployment-wide opt-out that let a '
+    + 'stack serve its ENTIRE data plane anonymously with one boolean. Auth is a kernel '
+    + 'concern, not a deployment posture — anonymous access to object data is now denied '
+    + 'unconditionally on every HTTP surface. Every surface that legitimately serves a '
+    + 'session-less caller derives its own narrow authorization from a DECLARATION instead: '
+    + 'the control-plane allowlist, `publicFormGrant` (public form views), share-link tokens '
+    + "(read as SYSTEM), and `book.audience: 'public'` (ADR-0046 §6.7). The key is dropped "
+    + 'with a notice rather than mapped — there is no replacement value, only a different '
+    + 'way to publish (by declaration). A stack that mounts no auth at all now fails at boot '
+    + 'when it would serve a data API, instead of receiving an implicit fail-open.',
+  conversionIds: ['stack-api-require-auth-removed'],
+  semantic: [],
+};
+
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   11: step11,
   12: step12,
@@ -387,6 +480,7 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   15: step15,
   16: step16,
   17: step17,
+  18: step18,
 };
 
 /** The majors that have a step, ascending. */

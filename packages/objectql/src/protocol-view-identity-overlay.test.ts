@@ -186,7 +186,7 @@ describe('view overlay identity (#2555)', () => {
                     config: { type: 'kanban', columns: ['name'], kanban: { summarizeField: 'amount', columns: ['name'] } },
                 },
             }),
-        ).rejects.toMatchObject({ code: 'invalid_metadata', status: 422 });
+        ).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
     });
 
     it('write path accepts a well-formed ViewItem record', async () => {

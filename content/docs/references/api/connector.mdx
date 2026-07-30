@@ -12,41 +12,12 @@ description: Connector protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { ErrorCategory, RetryStrategy, WebhookConfig, WebhookEvent } from '@objectstack/spec/api';
-import type { ErrorCategory, RetryStrategy, WebhookConfig, WebhookEvent } from '@objectstack/spec/api';
+import { WebhookConfig, WebhookEvent } from '@objectstack/spec/api';
+import type { WebhookConfig, WebhookEvent } from '@objectstack/spec/api';
 
 // Validate data
-const result = ErrorCategory.parse(data);
+const result = WebhookConfig.parse(data);
 ```
-
----
-
-## ErrorCategory
-
-### Allowed Values
-
-* `validation`
-* `authentication`
-* `authorization`
-* `not_found`
-* `conflict`
-* `rate_limit`
-* `server`
-* `external`
-* `maintenance`
-
-
----
-
-## RetryStrategy
-
-### Allowed Values
-
-* `no_retry`
-* `retry_immediate`
-* `retry_backoff`
-* `retry_after`
-
 
 ---
 

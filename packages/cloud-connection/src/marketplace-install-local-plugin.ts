@@ -376,7 +376,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private handleInstall = async (c: any, ctx: PluginContext): Promise<Response> => {
         const userId = await this.requireAuthenticatedUser(c, ctx);
         if (!userId) {
-            return c.json({ success: false, error: { code: 'unauthorized', message: 'Authentication required to install packages.' } }, 401);
+            return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required to install packages.' } }, 401);
         }
 
         let body: any = {};
@@ -411,16 +411,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             version = String(manifest.version ?? 'unknown');
             resolvedVersionId = String(body?.versionId ?? version);
             if (!packageId) {
-                return c.json({ success: false, error: { code: 'invalid_manifest', message: 'Inline manifest must have an "id" or "name".' } }, 400);
+                return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: 'Inline manifest must have an "id" or "name".' } }, 400);
             }
         } else {
             if (!this.cloudUrl) {
-                return c.json({ success: false, error: { code: 'marketplace_unavailable', message: 'OS_CLOUD_URL not configured.' } }, 503);
+                return c.json({ success: false, error: { code: 'MARKETPLACE_UNAVAILABLE', message: 'OS_CLOUD_URL not configured.' } }, 503);
             }
             packageId = String(body?.packageId ?? '').trim();
             const versionId = String(body?.versionId ?? 'latest').trim() || 'latest';
             if (!packageId) {
-                return c.json({ success: false, error: { code: 'bad_request', message: 'packageId is required.' } }, 400);
+                return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'packageId is required.' } }, 400);
             }
 
             // 1. Fetch manifest snapshot — prefer public R2 fast-path so
@@ -480,14 +480,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     }
                     return c.json({
                         success: false,
-                        error: { code: 'cloud_fetch_failed', message: err?.message ?? String(err) },
+                        error: { code: 'CLOUD_FETCH_FAILED', message: err?.message ?? String(err) },
                     }, 502);
                 }
             }
             if (!payload) {
                 return c.json({
                     success: false,
-                    error: { code: 'cloud_fetch_failed', message: `Cloud returned ${lastErrStatus}: ${lastErrText}` },
+                    error: { code: 'CLOUD_FETCH_FAILED', message: `Cloud returned ${lastErrStatus}: ${lastErrText}` },
                 }, lastErrStatus === 404 ? 404 : 502);
             }
 
@@ -499,7 +499,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         const manifestId = String(manifest?.id ?? manifest?.name ?? '');
         if (!manifest || !manifestId) {
-            return c.json({ success: false, error: { code: 'invalid_manifest', message: 'Invalid manifest payload.' } }, inlineManifest ? 400 : 502);
+            return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: 'Invalid manifest payload.' } }, inlineManifest ? 400 : 502);
         }
 
         // 2. Conflict check — refuse to overwrite user-authored apps
@@ -508,7 +508,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return c.json({
                 success: false,
                 error: {
-                    code: 'manifest_conflict',
+                    code: 'MANIFEST_CONFLICT',
                     message: `manifest_id "${manifestId}" is already defined by this runtime's local code. Refusing to overwrite. Uninstall the local definition first.`,
                 },
             }, 409);
@@ -531,7 +531,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             if (inlineManifest) {
                 return c.json({
                     success: false,
-                    error: { code: 'register_failed', message: `Failed to register imported manifest: ${err?.message ?? err}` },
+                    error: { code: 'PLUGIN_REGISTER_FAILED', message: `Failed to register imported manifest: ${err?.message ?? err}` },
                 }, 422);
             }
             ctx.logger?.warn?.(`[MarketplaceInstallLocal] hot-register failed for ${manifestId} (will load on next restart): ${err?.message ?? err}`);
@@ -553,7 +553,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         } catch (err: any) {
             return c.json({
                 success: false,
-                error: { code: 'storage_failed', message: `Failed to persist manifest: ${err?.message ?? err}` },
+                error: { code: 'MARKETPLACE_STORAGE_FAILED', message: `Failed to persist manifest: ${err?.message ?? err}` },
             }, 500);
         }
 
@@ -629,19 +629,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private handleUninstall = async (c: any, ctx: PluginContext): Promise<Response> => {
         const userId = await this.requireAuthenticatedUser(c, ctx);
         if (!userId) {
-            return c.json({ success: false, error: { code: 'unauthorized', message: 'Authentication required.' } }, 401);
+            return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' } }, 401);
         }
         const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
         if (!manifestId) {
-            return c.json({ success: false, error: { code: 'bad_request', message: 'manifestId path param required.' } }, 400);
+            return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
         }
         if (!this.ledger.has(manifestId)) {
-            return c.json({ success: false, error: { code: 'not_found', message: `No marketplace install for ${manifestId}.` } }, 404);
+            return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
         }
         try {
             this.ledger.remove(manifestId);
         } catch (err: any) {
-            return c.json({ success: false, error: { code: 'storage_failed', message: err?.message ?? String(err) } }, 500);
+            return c.json({ success: false, error: { code: 'MARKETPLACE_STORAGE_FAILED', message: err?.message ?? String(err) } }, 500);
         }
         ctx.logger?.info?.(`[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; restart runtime to unload from running kernel)`);
         return c.json({
@@ -726,18 +726,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private handleReseed = async (c: any, ctx: PluginContext): Promise<Response> => {
         const userId = await this.requireAuthenticatedUser(c, ctx);
         if (!userId) {
-            return c.json({ success: false, error: { code: 'unauthorized', message: 'Authentication required.' } }, 401);
+            return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' } }, 401);
         }
         const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
         if (!manifestId) {
-            return c.json({ success: false, error: { code: 'bad_request', message: 'manifestId path param required.' } }, 400);
+            return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
         }
         if (!this.ledger.has(manifestId)) {
-            return c.json({ success: false, error: { code: 'not_found', message: `No marketplace install for ${manifestId}.` } }, 404);
+            return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
         }
         const entry: InstalledEntry | null = this.ledger.read(manifestId);
         if (!entry) {
-            return c.json({ success: false, error: { code: 'storage_failed', message: 'Failed to read manifest cache.' } }, 500);
+            return c.json({ success: false, error: { code: 'MARKETPLACE_STORAGE_FAILED', message: 'Failed to read manifest cache.' } }, 500);
         }
 
         const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c });
@@ -745,7 +745,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return c.json({
                 success: false,
                 error: {
-                    code: 'reseed_skipped',
+                    code: 'RESEED_SKIPPED',
                     message: `Reseed did not run: ${summary.seeded.reason ?? 'unknown reason'}`,
                 },
             }, 400);
@@ -766,7 +766,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return c.json({
                 success: false,
                 error: {
-                    code: 'reseed_no_rows',
+                    code: 'RESEED_NO_ROWS',
                     message: errors > 0
                         ? `Reseed wrote no rows (${errors} error${errors === 1 ? '' : 's'}).${summary.seeded.errorSample ? ` First error: ${summary.seeded.errorSample}` : ''}`
                         : 'Reseed wrote no rows. The package declares no seedable records for this runtime.',
@@ -806,18 +806,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private handlePurge = async (c: any, ctx: PluginContext): Promise<Response> => {
         const userId = await this.requireAuthenticatedUser(c, ctx);
         if (!userId) {
-            return c.json({ success: false, error: { code: 'unauthorized', message: 'Authentication required.' } }, 401);
+            return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' } }, 401);
         }
         const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
         if (!manifestId) {
-            return c.json({ success: false, error: { code: 'bad_request', message: 'manifestId path param required.' } }, 400);
+            return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
         }
         if (!this.ledger.has(manifestId)) {
-            return c.json({ success: false, error: { code: 'not_found', message: `No marketplace install for ${manifestId}.` } }, 404);
+            return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
         }
         const entry: InstalledEntry | null = this.ledger.read(manifestId);
         if (!entry) {
-            return c.json({ success: false, error: { code: 'storage_failed', message: 'Failed to read manifest cache.' } }, 500);
+            return c.json({ success: false, error: { code: 'MARKETPLACE_STORAGE_FAILED', message: 'Failed to read manifest cache.' } }, 500);
         }
 
         const datasets = Array.isArray(entry.manifest?.data)
@@ -827,7 +827,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (datasets.length === 0) {
             return c.json({
                 success: false,
-                error: { code: 'nothing_to_purge', message: 'This package declares no seed datasets.' },
+                error: { code: 'NOTHING_TO_PURGE', message: 'This package declares no seed datasets.' },
             }, 400);
         }
 
@@ -836,7 +836,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!driver || typeof driver.delete !== 'function') {
             return c.json({
                 success: false,
-                error: { code: 'driver_missing', message: 'driver service unavailable — cannot purge.' },
+                error: { code: 'DRIVER_UNAVAILABLE', message: 'driver service unavailable — cannot purge.' },
             }, 500);
         }
 

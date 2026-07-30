@@ -99,6 +99,30 @@ jobs:
       - name: Single authz resolver guard
         run: pnpm check:authz-resolver
 
+      # #3843 response-envelope guard. The route ledgers audit which routes EXIST;
+      # nothing audited what comes back, so six route modules emitted bodies
+      # outside BaseResponseSchema while carrying green `sdk` rows. Counts the
+      # response write sites per module via the TS AST: when every body goes
+      # through the module's sendOk/sendError pair that count is fixed, so a NEW
+      # route hand-rolling a body fails here — coverage a driven test cannot give.
+      #
+      # Repo-wide on purpose. The three predecessors were per-package, which is
+      # structurally unable to notice a module nobody thought to convert; both
+      # ratcheted modules in the script's table were found by this scan and are
+      # absent from #3843's hand survey. An undeclared route module is an error,
+      # never a default. Runs its own --self-test first.
+      - name: Response-envelope guard
+        run: pnpm check:route-envelope
+
+      # Error-code casing guard (ADR-0112, #4003). The ledger's admission test
+      # enforces casing on every code someone REGISTERS; this catches the ones
+      # nobody registers — an unregistered lowercase literal in a code position
+      # is invisible to both the ledger and to the schema on any route that does
+      # not parse its own response. That is how 208 of them accumulated across
+      # 10 packages before batch 2. Runs its own --self-test first.
+      - name: Error-code casing guard
+        run: pnpm check:error-code-casing
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that

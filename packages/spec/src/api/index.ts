@@ -25,6 +25,7 @@ export * from './odata.zod';
 export * from './batch.zod';
 export * from './http-cache.zod';
 export * from './errors.zod';
+export * from './error-code-ledger.zod';
 export * from './protocol.zod';
 export * from './rest-server.zod';
 export * from './registry.zod';

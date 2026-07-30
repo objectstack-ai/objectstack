@@ -53,6 +53,7 @@ function setup() {
     deleteManyData,
   };
   const rest = new RestServer(createMockServer() as any, protocol, { api: { requireAuth: false } } as any);
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
   return { rest, updateManyData, deleteManyData };
 }
@@ -101,16 +102,19 @@ describe('bulk writes bind to the object in the PATH (#3933)', () => {
 });
 
 describe('updateMany ingress validation (#3933)', () => {
-  it('strips a body-supplied context so the principal cannot be forged', async () => {
+  it('never forwards a body-supplied context — the caller cannot forge the principal', async () => {
     const { rest, updateManyData } = setup();
-    // `requireAuth: false` → no execution context resolves, so a body `context`
-    // used to be the only one the protocol (and then the engine) ever saw.
+    // An authenticated caller (the harness resolves `test-user`) tries to
+    // escalate by putting `isSystem: true` in the body. The protocol must see
+    // the RESOLVED context, never the body's — the body `context` is stripped.
     await post(rest, UPDATE_MANY, 'open', {
       records: ONE_UPDATE,
       context: { userId: 'nobody', isSystem: true, roles: ['admin'] },
     });
 
-    expect(updateManyData.mock.calls[0][0].context).toBeUndefined();
+    const forwarded = updateManyData.mock.calls[0][0].context;
+    expect(forwarded?.userId).toBe('test-user');
+    expect(forwarded?.isSystem).toBeUndefined();
   });
 
   it('forwards a well-formed request unchanged', async () => {
@@ -134,8 +138,14 @@ describe('updateMany ingress validation (#3933)', () => {
     expect(res.body.code).toBe('VALIDATION_FAILED');
     // The documented data-surface envelope (`fields[]`, wire-format §7), not a
     // second per-route shape.
+    //
+    // `required`, not `invalid_type` (ADR-0114 D3): `id` is ABSENT here, and Zod
+    // spells absent as a type mismatch against `undefined`. This assertion used to
+    // pin that passthrough, so it pinned a form marking a MISSING input as the
+    // wrong TYPE — the message below still says "received undefined", which is
+    // what the old code was reporting as a type error.
     expect(res.body.fields).toEqual([
-      { field: 'records.0.id', code: 'invalid_type', message: expect.any(String) },
+      { field: 'records.0.id', code: 'required', message: expect.any(String) },
     ]);
     expect(updateManyData).not.toHaveBeenCalled();
   });

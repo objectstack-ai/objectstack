@@ -109,7 +109,7 @@ describe('ADR-0010 L3 lock enforcement — artifact-backed item', () => {
         await expect(protocol.deleteMetaItem({
             type: 'view', name: 'case_grid', organizationId: 'org_alpha',
         })).rejects.toMatchObject({
-            code: 'item_locked',
+            code: 'ITEM_LOCKED',
             status: 403,
         });
     });
@@ -122,7 +122,7 @@ describe('ADR-0010 L3 lock enforcement — artifact-backed item', () => {
             type: 'view', name: 'case_grid', item: validView,
             organizationId: 'org_alpha',
         })).rejects.toMatchObject({
-            code: 'item_locked',
+            code: 'ITEM_LOCKED',
             status: 403,
         });
 
@@ -139,19 +139,19 @@ describe('ADR-0010 L3 lock enforcement — artifact-backed item', () => {
         await expect(protocol.saveMetaItem({
             type: 'view', name: 'case_grid', item: validView,
             organizationId: 'org_alpha',
-        })).rejects.toMatchObject({ code: 'item_locked', status: 403 });
+        })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
 
         await expect(protocol.deleteMetaItem({
             type: 'view', name: 'case_grid', organizationId: 'org_alpha',
-        })).rejects.toMatchObject({ code: 'item_locked', status: 403 });
+        })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
 
         await expect(protocol.publishMetaItem({
             type: 'view', name: 'case_grid', organizationId: 'org_alpha',
-        })).rejects.toMatchObject({ code: 'item_locked', status: 403 });
+        })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
 
         await expect(protocol.rollbackMetaItem({
             type: 'view', name: 'case_grid', toVersion: 1, organizationId: 'org_alpha',
-        })).rejects.toMatchObject({ code: 'item_locked', status: 403 });
+        })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
     });
 });
 
@@ -195,7 +195,7 @@ describe('ADR-0010 L3 lock enforcement — audit trail', () => {
             type: 'view', name: 'case_grid', item: validView,
             organizationId: 'org_alpha',
             actor: 'user_42',
-        })).rejects.toMatchObject({ code: 'item_locked' });
+        })).rejects.toMatchObject({ code: 'ITEM_LOCKED' });
 
         // The denial path must have inserted a sys_metadata_audit row.
         const auditCalls = mockEngine.insert.mock.calls.filter(
@@ -207,6 +207,10 @@ describe('ADR-0010 L3 lock enforcement — audit trail', () => {
             name: 'case_grid',
             operation: 'save',
             outcome: 'denied',
+            // Lowercase on purpose: the audit column is its own persisted
+            // vocabulary, not the ADR-0112 error catalog the thrown code above
+            // now follows. See sys-metadata-audit.object.ts.
+            // adr0112-ok: D6b — persisted audit column, not the error catalog
             code: 'item_locked',
             lock_state: 'full',
             actor: 'user_42',

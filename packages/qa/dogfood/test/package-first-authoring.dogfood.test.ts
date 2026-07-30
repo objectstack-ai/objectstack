@@ -58,7 +58,7 @@ describe('dogfood: package-first authoring rejects runtime creates into read-onl
         packageId: codePkgId,
         mode: 'draft',
       }),
-    ).rejects.toMatchObject({ code: 'writable_package_required' });
+    ).rejects.toMatchObject({ code: 'WRITABLE_PACKAGE_REQUIRED' });
   });
 
   it('the same create into a fresh writable base id is NOT rejected (control)', async () => {

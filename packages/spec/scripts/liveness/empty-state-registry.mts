@@ -16,7 +16,7 @@
 // "restricts" something — carries opposite meanings when it is empty:
 //
 //   object.apiMethods       `undefined` = unrestricted, `[]` = deny-all   (closed on empty)
-//   allowedSources          "(empty = all allowed)"                       (open on empty)
+//   allowedSources          "(empty = all allowed)"  — REMOVED with its schema (#3896 follow-up)
 //   sharing criteria        was match-all, now matches nothing            (closed on empty)
 //
 // Nothing in the metadata distinguishes them. A maintainer knows by memory which
@@ -99,20 +99,22 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     evidence: 'packages/spec/src/data/api-derivation.ts',
   },
   {
-    file: 'packages/spec/src/kernel/plugin-runtime.zod.ts',
-    property: 'allowedSources',
-    semantics: 'open',
-    rationale:
-      'A source allow-list for dynamically loaded plugins — a supply-chain gate. Corrected to the `apiMethods` three-state: absence stays open (no policy declared, matching how every other config default behaves and how the runtime behaves today), but `[]` now DENIES instead of admitting everything. The vacuous allow-list was the whole defect: emptiness was both the likeliest authoring slip and the widest grant. Registered `open` rather than `closed` because absence really is permissive here — evading the scanner with softer wording would be the same silence this gate exists to break. NOTE it has no runtime consumer at all: the whole DynamicLoadingConfig block (with `requireIntegrity`, `defaultSandbox`) is declared-but-unenforced, ADR-0049 false compliance, tracked separately — an unimplemented gate is read as the specification by whoever implements it.',
-    evidence: 'packages/spec/src/kernel/plugin-runtime.zod.ts',
-  },
-  {
     file: 'packages/spec/src/security/sharing.zod.ts',
     property: 'condition',
     semantics: 'closed',
     rationale:
-      "The #3896 outcome, recorded so the answer is findable: a sharing rule's criteria is REQUIRED, and a rule that reaches storage without one grants nothing. There is no 'share every record' rule — object-wide read is the object's organization-wide default (`sharingModel`); the match-all shape only ever existed as a failure mode. Carries no permissive statement to scan (that is what being closed means), so it is exempt from the staleness check and exists purely as the catalogue answer to 'what does an empty criteria do?'.",
-    evidence: 'packages/spec/src/security/sharing.zod.ts',
+      "The #3896 outcome, recorded so the answer is findable: a sharing rule's criteria is REQUIRED, and a rule that reaches storage without one grants nothing. There is no 'share every record' rule — object-wide read is the object's organization-wide default (`sharingModel`); the match-all shape only ever existed as a failure mode. Since ADR-0113 the requirement is DECLARATIVE too: `sys_sharing_rule.criteria_json` carries `required: true` (write contract — legacy null rows rest, no NOT NULL migration), with the hook guard narrowed to the non-null match-all shapes `required` cannot express. Carries no permissive statement to scan (that is what being closed means), so it is exempt from the staleness check and exists purely as the catalogue answer to 'what does an empty criteria do?'.",
+    evidence: 'packages/spec/src/security/sharing.zod.ts; packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts (criteria_json required: true, ADR-0113); packages/plugins/plugin-sharing/src/rule-hooks.ts (shape guard)',
+  },
+
+  {
+    file: 'packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts',
+    property: 'organization_id',
+    semantics: 'open',
+    rationale:
+      "A NULL organization scope on a user↔permission-set grant means the grant is UNSCOPED — it applies in every org context. Deliberate and load-bearing rather than an oversight: ADR-0095 D3 / ADR-0068 D2 DERIVE the platform_admin posture from an unscoped `admin_full_access` user grant specifically, and an org-SCOPED grant of the same set must not confer it. So the empty state is not merely wider, it is the distinguishing input to the highest privilege in the system — which is exactly why it belongs on this list rather than being left to memory. `explain-engine.ts` recomputes the identical predicate on purpose so the explain panel's posture cannot sit higher than enforcement's.",
+    evidence:
+      'packages/core/src/security/resolve-authz-context.ts (resolveAuthzContext.hasPlatformAdminGrant — the single source of truth) and packages/plugins/plugin-security/src/explain-engine.ts (the identical predicate, replicated so the panel cannot overstate)',
   },
 
   // ---- Scope selectors ---------------------------------------------------

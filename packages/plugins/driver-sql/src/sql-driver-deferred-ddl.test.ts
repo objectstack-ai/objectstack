@@ -136,4 +136,79 @@ describe('SqlDriver deferred schema DDL (#3917)', () => {
     expect(driver.deferredSchemaObjectCount).toBe(0);
     expect(await driver.previewDeferredSchemaWork()).toEqual([]);
   });
+
+  // ── #3978: the plan may only promise work the flush can deliver ───────────
+  //
+  // The mirror image of #3954. That one closed "the plan understates what apply
+  // does"; this closes "the plan promises what apply cannot do". `createColumn`
+  // returns early for a virtual `formula` field — no column is ever created —
+  // but the preview listed every declared field name regardless, so a formula
+  // field showed up as pending `add_columns` that `apply` reported as performed
+  // without doing anything, and the next `plan` reported it again, forever.
+  // Both sides must answer "does this field become a column?" the same way.
+  describe('virtual fields are never promised as pending work (#3978)', () => {
+    const CONTACT = {
+      name: 'contacts',
+      fields: {
+        first_name: { type: 'text' },
+        last_name: { type: 'text' },
+        // Virtual — computed on read, no physical column (see createColumn).
+        full_name: { type: 'formula', expression: 'record.first_name' },
+        // `multiple` is NOT virtual: it materializes as a JSON column.
+        tags: { type: 'text', multiple: true },
+      },
+    };
+
+    it('omits the formula field from a create_table preview, keeps the JSON column', async () => {
+      driver = makeDriver();
+      driver.setDeferredDdl(true);
+      await driver.initObjects([CONTACT]);
+
+      expect(await driver.previewDeferredSchemaWork()).toEqual([
+        { table: 'contacts', kind: 'create_table', columns: ['first_name', 'last_name', 'tags'] },
+      ]);
+    });
+
+    it('omits it from an add_columns preview too', async () => {
+      driver = makeDriver();
+      await driver.initObjects([{ name: 'contacts', fields: { first_name: { type: 'text' } } }]);
+
+      driver.setDeferredDdl(true);
+      await driver.initObjects([CONTACT]);
+
+      expect(await driver.previewDeferredSchemaWork()).toEqual([
+        { table: 'contacts', kind: 'add_columns', columns: ['last_name', 'tags'] },
+      ]);
+    });
+
+    it('converges: after a flush the next preview is empty', async () => {
+      // The defect proper. Pre-fix the second preview still reported
+      // `add_columns: ['full_name']` — a freshly-applied database looking
+      // permanently un-migrated, with no apply able to clear it.
+      driver = makeDriver();
+      driver.setDeferredDdl(true);
+      await driver.initObjects([CONTACT]);
+      await driver.flushDeferredSchemaDdl();
+
+      driver.setDeferredDdl(true);
+      await driver.initObjects([CONTACT]);
+      expect(await driver.previewDeferredSchemaWork()).toEqual([]);
+    });
+
+    it('what flush REPORTS having done matches the columns it actually created', async () => {
+      driver = makeDriver();
+      driver.setDeferredDdl(true);
+      await driver.initObjects([CONTACT]);
+
+      const performed = await driver.flushDeferredSchemaDdl();
+      const create = performed.find((p) => p.kind === 'create_table')!;
+      const physical = new Set(Object.keys(await (driver as any).knex('contacts').columnInfo()));
+
+      // Every promised column exists...
+      for (const c of create.columns) expect(physical.has(c)).toBe(true);
+      // ...and the virtual one was neither promised nor created.
+      expect(create.columns).not.toContain('full_name');
+      expect(physical.has('full_name')).toBe(false);
+    });
+  });
 });

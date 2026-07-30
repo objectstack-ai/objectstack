@@ -55,7 +55,7 @@ export async function runSetInitialPassword(
   if (typeof newPassword !== 'string' || newPassword.length === 0) {
     return {
       status: 400,
-      body: { success: false, error: { code: 'invalid_request', message: 'newPassword is required' } },
+      body: { success: false, error: { code: 'INVALID_REQUEST', message: 'newPassword is required' } },
     };
   }
 
@@ -84,7 +84,7 @@ function mapSetPasswordError(error: unknown): SetInitialPasswordResult {
     message?: string;
   } | null;
 
-  const code = e?.body?.code ?? 'internal';
+  const code = e?.body?.code ?? 'INTERNAL_ERROR';
   const message = e?.body?.message ?? e?.message ?? 'set-initial-password failed';
   const rawStatus =
     typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;

@@ -1285,7 +1285,7 @@ export class AuthPlugin implements Plugin {
         return c.json({ success: true, data: config });
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        return c.json({ success: false, error: { code: 'auth_config_error', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'AUTH_CONFIG_ERROR', message: err.message } }, 500);
       }
     });
 
@@ -1337,7 +1337,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] set-initial-password failed', err);
-        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
 
@@ -1367,16 +1367,16 @@ export class AuthPlugin implements Plugin {
         const clientId: unknown = body?.client_id;
         const disabled: unknown = body?.disabled;
         if (typeof clientId !== 'string' || clientId.length === 0) {
-          return c.json({ success: false, error: { code: 'invalid_request', message: 'client_id is required' } }, 400);
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'client_id is required' } }, 400);
         }
         if (typeof disabled !== 'boolean') {
-          return c.json({ success: false, error: { code: 'invalid_request', message: 'disabled must be a boolean' } }, 400);
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'disabled must be a boolean' } }, 400);
         }
 
         const authApi = await this.authManager!.getApi();
         const session = await authApi.getSession({ headers: c.req.raw.headers });
         if (!session?.user?.id) {
-          return c.json({ success: false, error: { code: 'unauthorized', message: 'Sign in first' } }, 401);
+          return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
         }
         // Platform-admin gate. ADR-0068 removed the `user.role = 'admin'`
         // synthesis, so a stale `role === 'admin'` check now rejects even
@@ -1390,7 +1390,7 @@ export class AuthPlugin implements Plugin {
           (Array.isArray(u?.positions) && u.positions.includes('platform_admin')) ||
           u?.role === 'admin';
         if (!isAdmin) {
-          return c.json({ success: false, error: { code: 'forbidden', message: 'Admin role required' } }, 403);
+          return c.json({ success: false, error: { code: 'PERMISSION_DENIED', message: 'Admin role required' } }, 403);
         }
 
         // Write through the same ObjectQL data engine that better-auth's
@@ -1403,14 +1403,14 @@ export class AuthPlugin implements Plugin {
         // / authorize time, so the toggle is fully honoured.
         const dataEngine: any = this.authManager!.getDataEngine();
         if (!dataEngine) {
-          return c.json({ success: false, error: { code: 'unavailable', message: 'Data engine unavailable' } }, 503);
+          return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'Data engine unavailable' } }, 503);
         }
 
         const existing = await dataEngine.findOne('sys_oauth_application', {
           where: { client_id: clientId },
         });
         if (!existing) {
-          return c.json({ success: false, error: { code: 'not_found', message: 'OAuth client not found' } }, 404);
+          return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'OAuth client not found' } }, 404);
         }
 
         const updated = await dataEngine.update('sys_oauth_application', {
@@ -1419,7 +1419,7 @@ export class AuthPlugin implements Plugin {
           updated_at: new Date(Math.floor(Date.now() / 1000) * 1000),
         });
         if (!updated) {
-          return c.json({ success: false, error: { code: 'internal', message: 'Unable to update OAuth client' } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Unable to update OAuth client' } }, 500);
         }
 
         return c.json({
@@ -1432,7 +1432,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] toggle-disabled failed', err);
-        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
 
@@ -1461,7 +1461,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/register bridge failed', err);
-        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
 
@@ -1477,13 +1477,13 @@ export class AuthPlugin implements Plugin {
         try { body = await c.req.json(); } catch { body = {}; }
         const userId: unknown = body?.userId ?? body?.user_id;
         if (typeof userId !== 'string' || userId.length === 0) {
-          return c.json({ success: false, error: { code: 'invalid_request', message: 'userId is required' } }, 400);
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'userId is required' } }, 400);
         }
 
         const authApi = await this.authManager!.getApi();
         const session = await authApi.getSession({ headers: c.req.raw.headers });
         if (!session?.user?.id) {
-          return c.json({ success: false, error: { code: 'unauthorized', message: 'Sign in first' } }, 401);
+          return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
         }
         // Platform-admin gate. Accept any of the equivalent signals the
         // customSession plugin may carry (ADR-0068): the derived
@@ -1495,18 +1495,18 @@ export class AuthPlugin implements Plugin {
           (Array.isArray(u?.positions) && u.positions.includes('platform_admin')) ||
           u?.role === 'admin';
         if (!isAdmin) {
-          return c.json({ success: false, error: { code: 'forbidden', message: 'Admin role required' } }, 403);
+          return c.json({ success: false, error: { code: 'PERMISSION_DENIED', message: 'Admin role required' } }, 403);
         }
 
         const ok = await this.authManager!.unlockUser(userId);
         if (!ok) {
-          return c.json({ success: false, error: { code: 'not_found', message: 'User not found or data engine unavailable' } }, 404);
+          return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'User not found or data engine unavailable' } }, 404);
         }
         return c.json({ success: true, data: { userId } });
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] unlock-user failed', err);
-        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
 
@@ -1545,7 +1545,7 @@ export class AuthPlugin implements Plugin {
         const authApi = await this.authManager!.getApi();
         const session = await (authApi as any).getSession({ headers: c.req.raw.headers });
         if (!session?.user?.id) {
-          return c.json({ success: false, error: { code: 'unauthorized', message: 'Sign in first' } }, 401);
+          return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
         }
         const u: any = session.user;
         const isAdmin =
@@ -1553,7 +1553,7 @@ export class AuthPlugin implements Plugin {
           (Array.isArray(u?.positions) && u.positions.includes('platform_admin')) ||
           u?.role === 'admin';
         if (!isAdmin) {
-          return c.json({ success: false, error: { code: 'forbidden', message: 'Admin role required' } }, 403);
+          return c.json({ success: false, error: { code: 'PERMISSION_DENIED', message: 'Admin role required' } }, 403);
         }
         return { id: String(u.id), email: typeof u.email === 'string' ? u.email : undefined };
       };
@@ -1565,7 +1565,7 @@ export class AuthPlugin implements Plugin {
           const authApi: any = await this.authManager!.getApi();
           if (typeof authApi.createUser !== 'function') {
             return c.json(
-              { success: false, error: { code: 'not_supported', message: 'The better-auth admin plugin is not enabled (auth.plugins.admin)' } },
+              { success: false, error: { code: 'NOT_IMPLEMENTED', message: 'The better-auth admin plugin is not enabled (auth.plugins.admin)' } },
               501,
             );
           }
@@ -1575,7 +1575,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/create-user failed', err);
-          return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
         }
       });
 
@@ -1589,7 +1589,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/set-user-password failed', err);
-          return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
         }
       });
 
@@ -1630,7 +1630,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/import-users failed', err);
-          return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
         }
       });
     }
@@ -1651,7 +1651,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/register-saml bridge failed', err);
-        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
 
@@ -1672,7 +1672,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/request-domain-verification bridge failed', err);
-        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
 
@@ -1686,7 +1686,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/verify-domain bridge failed', err);
-        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
 
@@ -1719,10 +1719,10 @@ export class AuthPlugin implements Plugin {
         const type: unknown = body?.type;
 
         if (typeof name !== 'string' || name.trim().length === 0) {
-          return c.json({ success: false, error: { code: 'invalid_request', message: 'name is required' } }, 400);
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'name is required' } }, 400);
         }
         if (typeof redirectUrlsInput !== 'string' || redirectUrlsInput.trim().length === 0) {
-          return c.json({ success: false, error: { code: 'invalid_request', message: 'redirectURLs is required' } }, 400);
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'redirectURLs is required' } }, 400);
         }
 
         const redirectUris = redirectUrlsInput
@@ -1730,7 +1730,7 @@ export class AuthPlugin implements Plugin {
           .map((line) => line.trim())
           .filter((line) => line.length > 0);
         if (redirectUris.length === 0) {
-          return c.json({ success: false, error: { code: 'invalid_request', message: 'redirectURLs must contain at least one URL' } }, 400);
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'redirectURLs must contain at least one URL' } }, 400);
         }
 
         const allowedTypes = new Set(['web', 'native', 'user-agent-based']);
@@ -1738,7 +1738,7 @@ export class AuthPlugin implements Plugin {
 
         const authApi: any = await this.authManager!.getApi();
         if (!authApi?.createOAuthClient) {
-          return c.json({ success: false, error: { code: 'unavailable', message: 'OIDC provider is not enabled on this environment' } }, 503);
+          return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'OIDC provider is not enabled on this environment' } }, 503);
         }
 
         // Forward request headers so better-auth can resolve the caller's
@@ -1757,9 +1757,20 @@ export class AuthPlugin implements Plugin {
           });
         } catch (err: any) {
           const status = typeof err?.status === 'number' ? err.status : 500;
-          const code = err?.body?.error ?? 'oauth_register_failed';
+          // better-auth's `body.error` is an arbitrary upstream string, so it
+          // cannot be `error.code` — that field is a closed set (ADR-0112) and
+          // an unbounded source defeats it. Keep the code ours and carry the
+          // upstream discriminator in `details` where it stays inspectable.
+          const upstream = typeof err?.body?.error === 'string' ? err.body.error : undefined;
           const message = err?.body?.error_description ?? err?.message ?? 'Unable to register OAuth client';
-          return c.json({ success: false, error: { code, message } }, status);
+          return c.json({
+            success: false,
+            error: {
+              code: 'OAUTH_REGISTER_FAILED',
+              message,
+              ...(upstream ? { details: { upstreamError: upstream } } : {}),
+            },
+          }, status);
         }
 
         // Mirror the response shape consumed by the action's resultDialog
@@ -1768,7 +1779,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sys-oauth-application/register failed', err);
-        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
 
@@ -1796,7 +1807,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] send-verification-email failed', err);
-        return c.json({ success: false, error: { code: 'internal', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
 

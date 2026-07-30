@@ -83,7 +83,7 @@ describe('runResendVerificationEmail', () => {
     const res = await runResendVerificationEmail(handle, makeRequest({}));
 
     expect(res.status).toBe(400);
-    expect((res.body as any).error?.code).toBe('invalid_request');
+    expect((res.body as any).error?.code).toBe('INVALID_REQUEST');
     // Never re-dispatched — nothing to send to.
     expect(sent).toHaveLength(0);
   });

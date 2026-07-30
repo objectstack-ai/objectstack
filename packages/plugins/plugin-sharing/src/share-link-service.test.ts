@@ -189,6 +189,54 @@ describe('ShareLinkService', () => {
       expect(engine._tables.sys_share_link[0].revoked_at).not.toBeNull();
     });
 
+    // [ADR-0111 D8] A record's share-manager (owner / Modify All) may revoke a
+    // link someone ELSE minted on their record — the manage probe is consulted
+    // when the caller is neither the creator nor system.
+    it('a record share-manager may revoke a link another user minted', async () => {
+      const seen: Array<[string, string, string]> = [];
+      const svc = new ShareLinkService({
+        engine: engine as any,
+        canManageShares: async (object, recordId, ctx: any) => {
+          seen.push([object, recordId, ctx.userId]);
+          return ctx.userId === 'manager'; // manager can manage c1; nobody else
+        },
+      });
+      const link = await svc.createLink(
+        { object: 'ai_conversations', recordId: 'c1', audience: 'link_only', permission: 'view' },
+        { userId: 'creator' },
+      );
+      // A bystander who cannot manage the record is still denied.
+      await expect(svc.revokeLink(link.id, { userId: 'bystander' })).rejects.toMatchObject({ status: 403 });
+      expect(engine._tables.sys_share_link[0].revoked_at).toBeNull();
+      // The record's manager can, though they did not create the link.
+      await expect(svc.revokeLink(link.id, { userId: 'manager' })).resolves.toBeUndefined();
+      expect(engine._tables.sys_share_link[0].revoked_at).not.toBeNull();
+      // The probe was asked about the LINK's (object, record), not anything else.
+      expect(seen).toContainEqual(['ai_conversations', 'c1', 'manager']);
+    });
+
+    it('without a manage probe (pre-D8 / probe-less deployment), only creator and system revoke', async () => {
+      // Default service has no canManageShares — a non-creator is denied even
+      // if they would be a manager, because the deployment cannot ask.
+      const link = await service.createLink(
+        { object: 'ai_conversations', recordId: 'c1', audience: 'link_only', permission: 'view' },
+        { userId: 'creator' },
+      );
+      await expect(service.revokeLink(link.id, { userId: 'someone_else' })).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('a throwing manage probe fails CLOSED (denies a non-creator)', async () => {
+      const svc = new ShareLinkService({
+        engine: engine as any,
+        canManageShares: async () => { throw new Error('probe down'); },
+      });
+      const link = await svc.createLink(
+        { object: 'ai_conversations', recordId: 'c1', audience: 'link_only', permission: 'view' },
+        { userId: 'creator' },
+      );
+      await expect(svc.revokeLink(link.id, { userId: 'bystander' })).rejects.toMatchObject({ status: 403 });
+    });
+
     it('an HTTP caller cannot mint a link for a record it cannot see (403, not 404)', async () => {
       // The record-access re-read runs under the caller context; a record the
       // caller cannot see (here: does not exist) yields a fail-closed 403 for an

@@ -171,9 +171,10 @@ export interface AIToolDefinition {
     /** JSON Schema describing the tool parameters */
     parameters: Record<string, unknown>;
     /**
-     * Optional tool category (mirrors `ToolSchema.category`). Carried by
-     * action-backed tools from `action.ai.category`; surfaced by tool-listing
-     * routes. Not sent to the model.
+     * Optional tool category. Carried by action-backed tools from
+     * `action.ai.category` — the live source; the metadata `ToolSchema.category`
+     * was removed in the #3896 close-out. Surfaced by tool-listing routes.
+     * Not sent to the model.
      */
     category?: string;
     /**

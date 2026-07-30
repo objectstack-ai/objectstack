@@ -151,7 +151,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
                 parentVersion: 'sha256:notTheCurrentHead',
             }),
         ).rejects.toMatchObject({
-            code: 'metadata_conflict',
+            code: 'METADATA_CONFLICT',
             status: 409,
         });
     });
@@ -230,7 +230,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
                     effective: null,
                 },
             }),
-        ).rejects.toMatchObject({ code: 'invalid_metadata', status: 422 });
+        ).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
         // Nothing was persisted.
         expect(rows.size).toBe(0);
     });
@@ -257,7 +257,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
                 item: { name: 'cases', type: 'grid', label: 'Mutated (should not land)', columns: ['id'] },
                 parentVersion: 'sha256:stale',
             }),
-        ).rejects.toMatchObject({ code: 'metadata_conflict', status: 409 });
+        ).rejects.toMatchObject({ code: 'METADATA_CONFLICT', status: 409 });
 
         const afterBody = (Array.from(rows.values())[0] as any).metadata;
         expect(afterBody).toBe(beforeBody);
@@ -301,7 +301,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
                 mode: 'draft',
                 item: { name: 'maint_asset', label: 'Asset', fields: { name: { type: 'text', label: 'Name' } } },
             }),
-        ).rejects.toMatchObject({ code: 'writable_package_required', status: 422 });
+        ).rejects.toMatchObject({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
         // The orphan is never created — nothing was persisted.
         expect(inserts.find((d) => d.type === 'object' && d.name === 'maint_asset')).toBeUndefined();
     });
@@ -324,7 +324,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
                 mode: 'draft',
                 item: { name: 'maint_asset', label: 'Asset', fields: { name: { type: 'text', label: 'Name' } } },
             }),
-        ).rejects.toMatchObject({ code: 'writable_package_required', status: 422 });
+        ).rejects.toMatchObject({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
         expect(inserts.find((d) => d.type === 'object' && d.name === 'maint_asset')).toBeUndefined();
     });
 

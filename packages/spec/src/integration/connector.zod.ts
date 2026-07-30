@@ -341,16 +341,21 @@ export const RateLimitConfigSchema = lazySchema(() => z.object({
 export type RateLimitConfig = z.infer<typeof RateLimitConfigSchema>;
 
 /**
- * Retry Strategy
+ * Retry Strategy — connector-side.
+ *
+ * `Connector`-prefixed because `api/errors.zod.ts` exports a different
+ * `RetryStrategy` (`no_retry`, `retry_immediate`, `retry_backoff`,
+ * `retry_after`) for HTTP error responses. The two value sets are not
+ * interchangeable, so they may not share a name (ADR-0112 D9a).
  */
-export const RetryStrategySchema = lazySchema(() => z.enum([
+export const ConnectorRetryStrategySchema = lazySchema(() => z.enum([
   'exponential_backoff',
   'linear_backoff',
   'fixed_delay',
   'no_retry',
 ]).describe('Retry strategy'));
 
-export type RetryStrategy = z.infer<typeof RetryStrategySchema>;
+export type ConnectorRetryStrategy = z.infer<typeof ConnectorRetryStrategySchema>;
 
 /**
  * Retry Configuration
@@ -359,7 +364,7 @@ export const RetryConfigSchema = lazySchema(() => z.object({
   /**
    * Retry strategy
    */
-  strategy: RetryStrategySchema.optional().default('exponential_backoff'),
+  strategy: ConnectorRetryStrategySchema.optional().default('exponential_backoff'),
   
   /**
    * Maximum retry attempts
@@ -404,9 +409,16 @@ export type RetryConfig = z.infer<typeof RetryConfigSchema>;
 // ============================================================================
 
 /**
- * Error Category
+ * Error Category — connector-side: what an external system's failure maps TO
+ * when a connector normalises it.
+ *
+ * `Connector`-prefixed because `api/errors.zod.ts` exports a different
+ * `ErrorCategory` for HTTP error responses. They overlap but disagree
+ * (`server_error`/`integration_error`/`timeout` here vs
+ * `server`/`external`/`maintenance`/`authentication` there), so a value valid
+ * for one is invalid for the other — they may not share a name (ADR-0112 D9a).
  */
-export const ErrorCategorySchema = lazySchema(() => z.enum([
+export const ConnectorErrorCategorySchema = lazySchema(() => z.enum([
   'validation',
   'authorization',
   'not_found',
@@ -417,7 +429,7 @@ export const ErrorCategorySchema = lazySchema(() => z.enum([
   'integration_error',
 ]).describe('Standard error category'));
 
-export type ErrorCategory = z.infer<typeof ErrorCategorySchema>;
+export type ConnectorErrorCategory = z.infer<typeof ConnectorErrorCategorySchema>;
 
 /**
  * Error Mapping Rule
@@ -428,7 +440,7 @@ export const ErrorMappingRuleSchema = lazySchema(() => z.object({
   sourceCode: z.union([z.string(), z.number()]).describe('External system error code'),
   sourceMessage: z.string().optional().describe('Pattern to match against error message'),
   targetCode: z.string().describe('ObjectStack standard error code'),
-  targetCategory: ErrorCategorySchema.describe('Error category'),
+  targetCategory: ConnectorErrorCategorySchema.describe('Error category'),
   severity: z.enum(['low', 'medium', 'high', 'critical']).describe('Error severity level'),
   retryable: z.boolean().describe('Whether the error is retryable'),
   userMessage: z.string().optional().describe('Human-readable message to show users'),
@@ -443,7 +455,7 @@ export type ErrorMappingRule = z.infer<typeof ErrorMappingRuleSchema>;
  */
 export const ErrorMappingConfigSchema = lazySchema(() => z.object({
   rules: z.array(ErrorMappingRuleSchema).describe('Error mapping rules'),
-  defaultCategory: ErrorCategorySchema.optional().default('integration_error').describe('Default category for unmapped errors'),
+  defaultCategory: ConnectorErrorCategorySchema.optional().default('integration_error').describe('Default category for unmapped errors'),
   unmappedBehavior: z.enum(['passthrough', 'generic_error', 'throw']).describe('What to do with unmapped errors'),
   logUnmapped: z.boolean().optional().default(true).describe('Log unmapped errors'),
 }).describe('Error mapping configuration'));

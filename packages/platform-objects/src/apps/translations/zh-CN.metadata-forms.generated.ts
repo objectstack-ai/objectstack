@@ -1650,10 +1650,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       schemas: {
         label: "参数 / 返回结构",
         description: "工具接收的输入与输出形态"
-      },
-      declarative_metadata_not_enforced: {
-        label: "Declarative metadata (not enforced)",
-        description: "Recorded on the tool definition but read by no execution path — see the per-field notes for where the real gates live."
       }
     },
     fields: {
@@ -1669,21 +1665,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "描述",
         helpText: "告诉 AI 何时使用此工具——请尽量具体！"
       },
-      category: {
-        label: "分类",
-        helpText: "工具类别（data、action、flow、integration 等）"
-      },
       objectName: {
         label: "对象名称",
         helpText: "相关对象（若工具针对特定对象）"
-      },
-      active: {
-        label: "启用",
-        helpText: "启用或禁用此工具"
-      },
-      builtIn: {
-        label: "内置",
-        helpText: "平台内置工具（区别于用户自定义）"
       },
       parameters: {
         label: "参数",
@@ -1692,10 +1676,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       outputSchema: {
         label: "输出 Schema",
         helpText: "用于校验的输出结构（可选）"
-      },
-      permissions: {
-        label: "权限",
-        helpText: "使用此工具所需的权限"
       }
     }
   },

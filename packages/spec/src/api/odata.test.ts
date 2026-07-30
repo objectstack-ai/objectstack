@@ -402,19 +402,19 @@ describe('ODataErrorSchema', () => {
   it('should accept basic error', () => {
     const error = ODataErrorSchema.parse({
       error: {
-        code: 'validation_error',
+        code: 'VALIDATION_ERROR',
         message: 'Invalid input data',
       },
     });
 
-    expect(error.error.code).toBe('validation_error');
+    expect(error.error.code).toBe('VALIDATION_ERROR');
     expect(error.error.message).toBe('Invalid input data');
   });
 
   it('should accept error with target', () => {
     const error = ODataErrorSchema.parse({
       error: {
-        code: 'invalid_field',
+        code: 'INVALID_FIELD',
         message: 'Field is required',
         target: 'email',
       },
@@ -426,7 +426,7 @@ describe('ODataErrorSchema', () => {
   it('should accept error with details', () => {
     const error = ODataErrorSchema.parse({
       error: {
-        code: 'validation_error',
+        code: 'VALIDATION_ERROR',
         message: 'Multiple validation errors',
         details: [
           { code: 'required', message: 'Email is required', target: 'email' },

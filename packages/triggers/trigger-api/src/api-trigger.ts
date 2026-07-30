@@ -182,26 +182,26 @@ export class ApiTrigger implements FlowTrigger {
         // Unknown flow and wrong hookId answer identically — no oracle for
         // probing which flows exist.
         if (!hook || !safeEqual(hook.hookId, input.hookId)) {
-            return { status: 404, body: { error: 'not_found' } };
+            return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'No such hook.' } } };
         }
         if (hook.secret && !verifySignature(hook.secret, input.rawBody, input.signatureHeader)) {
-            return { status: 401, body: { error: 'invalid_signature' } };
+            return { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
         }
 
         let payload: Record<string, unknown>;
         try {
             const parsed: unknown = input.rawBody.trim() ? JSON.parse(input.rawBody) : {};
             if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                return { status: 400, body: { error: 'invalid_body', message: 'Body must be a JSON object.' } };
+                return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Body must be a JSON object.' } } };
             }
             payload = parsed as Record<string, unknown>;
         } catch {
-            return { status: 400, body: { error: 'invalid_body', message: 'Body must be valid JSON.' } };
+            return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Body must be valid JSON.' } } };
         }
 
         const q = this.getQueue();
         if (!q) {
-            return { status: 503, body: { error: 'queue_unavailable', message: 'No queue service is registered.' } };
+            return { status: 503, body: { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'No queue service is registered.' } } };
         }
         try {
             const messageId = await q.publish(hook.queue, { payload }, {
@@ -210,7 +210,7 @@ export class ApiTrigger implements FlowTrigger {
             return { status: 202, body: { accepted: true, messageId } };
         } catch (err: any) {
             this.logger.warn(`[trigger-api] enqueue failed for '${hook.queue}': ${err?.message ?? err}`);
-            return { status: 503, body: { error: 'enqueue_failed' } };
+            return { status: 503, body: { success: false, error: { code: 'ENQUEUE_FAILED', message: 'Could not enqueue the trigger message.' } } };
         }
     }
 }

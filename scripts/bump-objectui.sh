@@ -48,8 +48,16 @@ for arg in "$@"; do
   esac
 done
 
-if [[ -z "${OBJECTUI_ROOT}" || ! -d "${OBJECTUI_ROOT}/.git" ]]; then
-  echo "✗ Cannot find objectui checkout at ${FRAMEWORK_ROOT}/../objectui"
+# `-e`, not `-d`: in a git WORKTREE `.git` is a regular file holding a `gitdir:`
+# pointer, so a `-d` test rejected every linked worktree — and AGENTS.md requires
+# one per task, so this rejected the mandated workflow and only ever worked from a
+# primary clone.
+if [[ -z "${OBJECTUI_ROOT}" || ! -e "${OBJECTUI_ROOT}/.git" ]]; then
+  if [[ -n "${OBJECTUI_ROOT}" ]]; then
+    echo "✗ ${OBJECTUI_ROOT} is not a git checkout (no .git)"
+  else
+    echo "✗ Cannot find objectui checkout at ${FRAMEWORK_ROOT}/../objectui"
+  fi
   echo "  Override with: OBJECTUI_ROOT=/path/to/objectui scripts/bump-objectui.sh"
   exit 1
 fi

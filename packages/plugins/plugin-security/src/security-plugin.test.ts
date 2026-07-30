@@ -2760,6 +2760,55 @@ describe('RLSCompiler', () => {
     expect(contactFind).toHaveLength(2); // contact all + * all
   });
 
+  // `enabled` — "Disabled policies are not evaluated" (the schema's promise).
+  // Found unread by the 2026-07 security-subset liveness re-verification:
+  // applicable policies OR-combine (any match ALLOWS access), so a disabled
+  // policy kept granting the rows an admin believed they had switched off.
+  // These pin the gate in both directions.
+  it('excludes a policy explicitly disabled with enabled:false', () => {
+    const compiler = new RLSCompiler();
+    const policies: any[] = [
+      { object: 'task', operation: 'select', using: 'owner_id = current_user.id' },
+      { object: 'task', operation: 'select', using: "visibility = 'public'", enabled: false },
+    ];
+    const applicable = compiler.getApplicablePolicies('task', 'find', policies);
+    expect(applicable).toHaveLength(1);
+    expect(applicable[0]!.using).toBe('owner_id = current_user.id');
+  });
+
+  it('treats enabled:true and an ABSENT enabled key as active (schema default)', () => {
+    // Rows round-tripped through sys_permission_set may omit the key entirely —
+    // absent must mean active, or every legacy row would silently stop enforcing.
+    const compiler = new RLSCompiler();
+    const policies: any[] = [
+      { object: 'task', operation: 'select', using: 'owner_id = current_user.id', enabled: true },
+      { object: 'task', operation: 'select', using: "status = 'open'" },
+    ];
+    expect(compiler.getApplicablePolicies('task', 'find', policies)).toHaveLength(2);
+  });
+
+  it('a disabled policy no longer contributes its OR-branch to the compiled filter', () => {
+    // The over-share this closes: owner-only policy + a disabled public-read
+    // policy must compile to owner-only, not owner-OR-public.
+    const compiler = new RLSCompiler();
+    const policies: any[] = [
+      { object: 'task', operation: 'select', using: 'owner_id = current_user.id' },
+      { object: 'task', operation: 'select', using: "visibility = 'public'", enabled: false },
+    ];
+    const ctx: any = { userId: 'user-42', positions: [] };
+    const applicable = compiler.getApplicablePolicies('task', 'find', policies);
+    const filter = compiler.compileFilter(applicable, ctx);
+    expect(filter).toEqual({ owner_id: 'user-42' });
+  });
+
+  it('disabling the ONLY policy leaves no applicable policies (caller decides posture, not a silent grant)', () => {
+    const compiler = new RLSCompiler();
+    const policies: any[] = [
+      { object: 'task', operation: 'select', using: "visibility = 'public'", enabled: false },
+    ];
+    expect(compiler.getApplicablePolicies('task', 'find', policies)).toHaveLength(0);
+  });
+
   // §7.3.1 dynamic membership — arbitrary pre-resolved sets in rlsMembership
   it('should resolve IN against a §7.3.1 pre-resolved rlsMembership set', () => {
     // Manager hierarchy: the runtime resolved the manager's reports into

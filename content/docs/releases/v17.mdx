@@ -58,13 +58,25 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
   `listRequests` / `countRequests` applied only the tenant half of the
   visibility rule, so any authenticated user could read any request in their
   tenant — payload snapshot, decision history, and attachments.
+- **A sharing rule with no criteria shares nothing, and a disabled RLS policy
+  is disabled.** Both were documented contracts whose real behaviour was wider:
+  a rule stored without criteria evaluated as *every record of the object*
+  (reachable by a typo through three unvalidated write paths, #3896), and an
+  RLS policy switched off with `enabled: false` kept contributing its
+  OR-branch grant. Both now fail closed — found by re-verifying every
+  security-subset claim in the spec liveness ledger against the actual call
+  graph, a sweep that also removed the void RLS `priority` knob and the
+  never-wired plugin sandboxing/integrity config, and left two new CI gates
+  behind the whole class: a permissive empty state must be classified on
+  purpose, and the security entries now carry runtime proofs.
 - **Node.js 22 is the floor.** `engines.node` said `>=18` across all 50
   manifests while CI, the release pipeline and every shipped Docker image ran
   22. The promise now matches the evidence.
 - **The dead-metadata sweep continues.** GraphQL, `PortalSchema`, `AuditConfig`,
   the capabilities-descriptor cluster, `FeatureFlagSchema`, `SkillSchema.permissions`,
   `tool.requiresConfirmation`, `agent.tools[]`, `object.enable.trash`/`mru`,
-  report `aria`/`performance`, `DEFAULT_DISPATCHER_ROUTES` and the last three
+  report `aria`/`performance`, `DEFAULT_DISPATCHER_ROUTES`, the four inert tool
+  authoring keys (`category`/`permissions`/`active`/`builtIn`) and the last three
   deprecated authorable aliases are removed — each one had been parsed and
   ignored.
 
@@ -156,6 +168,52 @@ and flags whitelists the mapping would *widen* so every edit stays reviewable.
 `['upsert']`) strips to `[]`, which is **deny-all** — the object's API closes
 rather than widening.
 
+### An action must be declared to be invocable, and is identified by `name` (ADR-0110, #3935)
+
+Two halves of the `/api/v1/actions/:object/:action` contract were broken in
+complementary ways, which is why neither surfaced: the route resolved the
+**declaration** from the URL segment as a `name`, but dispatched the
+**handler** using that same segment as a registry key. For a target-bound
+action (`{ name: 'complete_task', target: 'completeTask' }`) those differ — so
+the documented `curl .../todo_task/complete_task` resolved the declaration and
+then 404ed, while the Console's `target`-addressed call dispatched fine and
+resolved **no** declaration, silently skipping the ADR-0066 D4 capability gate
+and the ADR-0104 param contract.
+
+Three changes land together:
+
+- **Identity is `name`.** The URL, MCP `run_action`, and every future surface
+  identify an action by its declarative `name`. `target` is a binding
+  expression — polymorphic per type, `${param.X}`-interpolatable, and legally
+  non-unique — so it never identifies anything. The server derives the handler
+  key from the declaration it resolved, using the rotation the MCP bridge
+  already used. The Console posts `name` (objectui ships in lockstep).
+- **An undeclared handler is refused.** `engine.registerAction` with no
+  matching declaration has no `requiredPermissions` to enforce and no param
+  contract to check, yet executes with system privileges. It now returns 404
+  naming the `defineAction` to add. Deleting a declaration used to *remove* an
+  action's gate while leaving it callable; removal now narrows.
+- **An unreachable metadata plane refuses instead of degrading.** A loader
+  failure used to be indistinguishable from "no declaration", so an outage
+  silently ungated every action it could not see. That is now a **503** — the
+  same posture as the datasource entry below.
+
+**Migration:** boot logs list every registered-but-undeclared handler under
+`[action-governance]`, alongside declared script actions bound to no handler.
+Declare each one with `defineAction`, or drop the registration if nothing should
+invoke it over HTTP. **There is no opt-out flag** — a switch that ran an
+ungoverned handler would be the same fail-open this change closes, and a sweep
+of the platform, every package and every example found zero undeclared handlers,
+so it would have shipped a way to reopen the gate for a case nobody has
+observed. The failure is bounded: the app still boots and every declared action
+still works; only an undeclared one returns 404, and it names the `defineAction`
+to add.
+
+Apps whose actions are all declared — anything with working Console buttons —
+need no changes, other than gaining enforcement of the `requiredPermissions`
+they already declared. Callers that hard-coded a `target` in an action URL
+switch to the action's `name`.
+
 ### A flow run with no trigger user may not touch data (#3760)
 
 An effective `runAs: 'user'` run that resolved **no trigger user** used to
@@ -219,6 +277,33 @@ existed to warn when an author declared both an alias and its canonical key,
 which the parse now rejects outright. Delete the import; there is no replacement
 because the condition can no longer occur.
 
+### Seven flow-node config key aliases graduate into the conversion layer (#3796)
+
+| Node type(s) | Deprecated | Use instead |
+|---|---|---|
+| `get_record` / `create_record` / `update_record` / `delete_record` | `config.object` | `config.objectName` |
+| `notify` | `config.to` / `config.subject` / `config.body` / `config.url` | `config.recipients` / `config.title` / `config.message` / `config.actionUrl` |
+| `script` | `config.functionName` / `config.input` | `config.function` / `config.inputs` |
+
+All are pure key renames with unchanged values. Unlike the three tombstoned
+aliases above, these **cannot** be rejected in the schema —
+`FlowNodeSchema.config` is an unconstrained record — so they keep a load-path
+acceptance window instead: a stored flow authored with an alias keeps loading
+through protocol 17, rewritten to the canonical key at load (including
+`AutomationEngine.registerFlow` rehydration) with a `ConversionNotice`; the
+window retires in 18. The executors read canonical keys only, and the
+`readAliasedConfig` executor shim (which covered `object` → `objectName` and
+warned at run time) is deleted — the conversion layer is now the single seam
+that declares, converts, and retires flow-config aliases.
+
+`os migrate meta --from <your current major>` rewrites all seven in your
+source; or rename the keys by hand. `actionUrl` is the deliberate canonical of
+its pair: the downstream chain already uses that name
+(`sys_notification.action_url`, the channel contract, the REST notification
+model), while `url` platform-wide means an HTTP endpoint to call (`http` node,
+webhooks). The singular `input` on `map` / `subflow` / `connector_action` is
+those nodes' own canonical key and is untouched.
+
 ### `agent.tools[]` is removed — capability comes from skills (ADR-0109, #3820)
 
 ADR-0064's invariant is "an agent's tool set is the union of its
@@ -264,6 +349,84 @@ the admin override).
   runtime already enforced it; only the enum omitted it.
 - `guest` and the owner-type rules are pruned. Every authorable recipient and
   rule type is now enforced.
+
+### Sharing rules: an empty criteria shares nothing (#3896)
+
+A rule stored without criteria — missing, `null`, `{}`, unparsable, or a
+misspelled key (`criterias`) — used to evaluate as `find(object, { filter: {} })`
+under the system context: **every record of the object, granted to the
+recipient**, up to the evaluator's 5000-record window. Three write paths
+accepted that shape without validation: `POST /api/v1/sharing/rules`, a direct
+`sys_sharing_rule` insert (what authoring in Setup issues), and the seed
+bootstrap's own match-all branch. The field description even advertised it —
+*"leave empty to share every record"* — which was never a feature, only a name
+for the bug.
+
+Now, in three layers:
+
+- **`defineRule` rejects** a match-all criteria with `VALIDATION_FAILED`.
+- **The evaluator matches nothing** for such a rule and logs why. This is the
+  layer that matters for already-deployed tenants: a row stored before this
+  gate **under-shares instead of over-sharing, and the next reconcile revokes
+  the grants it had materialised**. No data migration is needed.
+- **A `sys_sharing_rule` insert fails field-level** (`fields[].field =
+  'criteria_json'`), so Setup marks the Criteria input instead of saving a
+  rule that silently does nothing. The Console builder says so before you
+  save (objectui#2962) and renders the server's reason on the field
+  (objectui#2966).
+
+There is no "share every record" sharing rule: object-wide read is the
+object's organization-wide default (`sharingModel`). A rule that relied on the
+empty shape must state its predicate, or the object should use `sharingModel`.
+
+### RLS: `enabled` is enforced, `priority` is removed (#3980, #3990)
+
+- **`enabled: false` now actually disables a policy.** The schema always said
+  *"Disabled policies are not evaluated"*, but nothing read the property — and
+  because applicable policies OR-combine (any match allows access), a policy an
+  admin switched off **kept granting row access**. The gate is at the single
+  choke point both the find and analytics paths flow through; `enabled` absent
+  stays active, so no stored policy changes behaviour. Access-narrowing only —
+  but re-check any policy you set `enabled: false` on expecting no effect,
+  because until now it had none.
+- **`priority` is removed.** It promised "conflict resolution" that cannot
+  exist: with OR-combination there is never a conflict to order, and evaluation
+  order cannot change an outcome. Nothing ever read it. Authored values are
+  tombstoned with a fix-it prescription; `os migrate meta` deletes the key
+  mechanically, and policy outcomes are identical with or without it.
+
+### `required` is a write contract; the column constraint is `storage.notNull` (ADR-0113)
+
+`field.required` used to mean three things through one knob: the write check,
+the physical `NOT NULL`, and the drift expectation. Bound together, tightening
+any invariant on a deployed object was a destructive migration blocked by the
+very legacy nulls that motivated it — so real invariants ended up as imperative
+guards (three of them for `sys_sharing_rule.criteria_json`) or didn't happen.
+Split in v17:
+
+- **`required: true`** is the write-time contract, uniformly: an insert must
+  provide a non-null value, an update may not null it out — a PATCH clearing a
+  required field is now rejected (it silently passed before) — and legacy null
+  rows rest: a write that doesn't touch the field never blocks. The column
+  stays nullable.
+- **`storage: { notNull: true }`** is the explicit physical constraint. It owns
+  the `NOT NULL` DDL and the destructive-migration ceremony (backfill first).
+  Declaring it at field creation is free; declaring it over existing nulls is
+  loud.
+- **`requiredWhen` inherits the same non-regression rule**: a write that flips
+  the condition true without providing the field is rejected (it *creates* the
+  violation), while a row violating since before the rule tightened no longer
+  locks out unrelated edits. `storage.notNull` × `requiredWhen` is rejected at
+  parse — a conditional contract cannot be an unconditional constraint.
+- **Pre-17 sources keep their exact meaning**: `os migrate meta` stamps
+  `storage: { notNull: true }` onto every previously-required field
+  (`field-required-notnull-explicit`) — under the old semantics that column
+  *was* created `NOT NULL`, so the rewrite writes down what the text already
+  meant. Migration-chain-only: the loader never guesses.
+- **Drift**: nullability now compares against `storage.notNull`. A column
+  stricter than its declaration is `needs_confirm` (ratify or relax — dev
+  auto-reconcile no longer silently strips a stray `NOT NULL`), and silent when
+  the field is `required` (the write gate makes the constraint unreachable).
 
 ### Membership grade is not a capability channel (ADR-0108, #3723)
 
@@ -457,6 +620,47 @@ now tenant-scoped, matching the sequence.
   were declared, put on the query string by the SDK, and read by neither serving
   surface; passing `keys` shrank nothing and reported nothing.
 
+### The dispatcher's `error.code` is the semantic code, not the HTTP status (#3842)
+
+Everything the runtime dispatcher serves — `/meta/*`, `/actions/*`,
+`/packages/*`, `/automation/*`, `/analytics/*`, `/ready`, the route-not-found
+404 — used to answer with the HTTP status in `error.code`, the field
+`ApiErrorSchema` declares as a semantic string. The real code had to live
+somewhere else and did, in three different somewhere-elses: `error.details.code`,
+`error.details.type`, and a sibling `error.type`.
+
+```jsonc
+// before                                    // after
+{ "error": {                                 { "error": {
+    "message": "…",                              "code": "PERMISSION_DENIED",
+    "code": 403,                                 "message": "…",
+    "details": { "code": "PERMISSION_DENIED" }   "httpStatus": 403
+} }                                          } }
+```
+
+- **`error.code`** is the semantic string. **`error.httpStatus`** is the number.
+  **`error.details`** is context only. Replace a
+  `body.error.details?.code ?? body.error.type` read with `body.error.code`, and
+  a `body.error.code` read (for the status) with `body.error.httpStatus`.
+- **SDK callers need no change.** `ObjectStackClient` already normalised this —
+  `err.code` semantic, `err.httpStatus` numeric. The old-shape fallback read was
+  retired later in this same window (#4007): SDK and server ship on one release
+  train, and the ADR-0112 rename changed the code values a dug-out code would
+  need to match.
+- **No code was renamed.** `PERMISSION_DENIED`, `ROUTE_NOT_FOUND`,
+  `PASSWORD_EXPIRED`, `PROJECT_MEMBERSHIP_REQUIRED`, `VALIDATION_FAILED` and
+  `unauthenticated` all reach the wire spelled exactly as before; only their
+  field changed. Reconciling the platform's two code vocabularies is #3841.
+  A branch with no code of its own now derives a `StandardErrorCode` from the
+  status (`403` → `PERMISSION_DENIED`, post-rename spelling), spelled in one map in the spec.
+- **Spec:** `ApiErrorSchema` gains optional `httpStatus`; `StandardErrorCode`
+  gains `method_not_allowed` and `precondition_required` (both additive).
+  `DispatcherErrorCode` changes members from `'404' | '405' | '501' | '503'` to
+  the four semantic spellings the removed `error.type` declared, and
+  `DispatcherErrorResponseSchema.error.code` becomes a string — it had declared
+  the opposite of `ApiErrorSchema` for the same field, which is what let the
+  deviation stand.
+
 ### Dead spec clusters removed
 
 Each of these parsed and did nothing. None has a runtime consumer; delete the
@@ -474,6 +678,9 @@ import or the authored key.
 | `ReportColumnSchema` / `ReportGroupingSchema` + report chart `groupBy` | unread (#3463) |
 | Report `aria` / `performance` props | report-liveness close-out |
 | `DataQualityRulesSchema` / `ComputedFieldCacheSchema` | orphaned value schemas (#3726, #3733) |
+| `DynamicLoadingConfig` / `PluginDiscoveryConfig` / `PluginDiscoverySource` | promised plugin sandboxing / integrity verification / source allow-listing / load approval; none of it was ever wired (#3950) |
+| `RowLevelSecurityPolicy.priority` | conflict-resolution semantics that cannot exist under OR-combination (#3990) |
+| `tool.category` / `.permissions` / `.active` / `.builtIn` (+ `ToolCategorySchema`) | authorable and inert — `permissions` gated nothing, `active: false` withdrew nothing; strict-rejected with prescriptions (#3896 close-out) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
 | `ChartInteraction.zoom` / `.clickAction` | never implemented (#3752) |
@@ -701,6 +908,20 @@ most of its rows in silence.
 - Liveness entries gain a `verifiedAt` re-verification clock, and a batch of
   ledger claims were re-verified against the real Console consumer — eight of the
   last ten preview-only `live` claims were wrong.
+- **The ledger's security subset had its first full re-verification** (#3896
+  follow-up): all 44 permission/position/object-sharing entries call-graph-closed
+  by hand and dated. It found the unenforced RLS `enabled` (fixed the same day)
+  and the void `priority` (removed), refuted two standing suspicions
+  (`allowExport` *is* enforced server-side; the transfer/restore/purge gates are
+  pre-mapped fail-closed), and bound two new runtime proofs
+  (`permission.tabPermissions`, `permission.objects.writeScope`) so the claims
+  re-prove on every CI run.
+- **A new `check:empty-state` gate** scans the authorable surface — spec schemas
+  *and* platform-object field descriptions, where #3896's *"leave empty to share
+  every record"* actually lived — for statements declaring a permissive empty
+  state, and requires each to be classified (`scope` / `closed` / `open` /
+  `output`) with a rationale. Omission is the commonest authoring error a model
+  makes; it must not also be the widest grant.
 - Metadata-plane FLS (per-caller masking) is proposed as ADR-0106.
 
 ## New in Console (Studio) — bundled objectui 17.0
@@ -821,6 +1042,23 @@ objectui commits on top of the pin 16.1.0 shipped.
   instead of failing every later query.
 - **Sharing rules:** rewrite `sharedWith.type: 'group'` → `'team'`; drop `guest`
   and owner-type rules; expect `accessLevel: 'full'` to convert to `'edit'`.
+  **A rule must state its criteria** — authoring one without is rejected, and a
+  stored criteria-less rule stops granting (its materialised grants are revoked
+  on the next reconcile). State the predicate, or use the object's
+  `sharingModel` if everyone should read it.
+- **RLS policies:** delete `priority` (`os migrate meta` does it; outcomes are
+  unchanged). Re-check any policy you set `enabled: false` on — disabling now
+  actually withdraws its grant, which until v17 it silently did not.
+- **Tools:** delete `category` / `permissions` / `active` / `builtIn` from tool
+  metadata (`os migrate meta` does it; none ever had an effect). To gate a tool,
+  gate the underlying action (`action.requiredPermissions`); to withdraw one,
+  remove it from the skills/agents that reference it.
+- **Required fields:** run `os migrate meta` — it stamps
+  `storage: { notNull: true }` onto every pre-17 `required: true` field so your
+  columns keep their exact constraints. New fields: `required: true` alone
+  write-gates with a nullable column; add `storage.notNull` when you want the
+  DDL. Audit any client that PATCHes `null` into required fields — that write
+  is now rejected.
 - **Membership:** move business capability off `sys_member.role` and onto
   positions (`sys_user_position`).
 - **SDK callers:** remove calls to `client.permissions.*`, `client.realtime.*`,

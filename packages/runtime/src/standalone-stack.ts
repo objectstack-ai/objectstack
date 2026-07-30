@@ -33,7 +33,7 @@ import { resolve as resolvePath } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
-import { readEnvWithDeprecation } from '@objectstack/types';
+import { readEnvWithDeprecation, stampSearchPinyinEnabled } from '@objectstack/types';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
 
 /**
@@ -108,6 +108,16 @@ export interface StandaloneStackResult {
     requires?: string[];
     objects?: any[];
     manifest?: any;
+    /**
+     * The stack's `i18n` config as compiled into the artifact. Surfaced so a
+     * caller wrapping this result as a `defineStack()`-shaped config (the CLI
+     * artifact-serve path) drives the SAME locale-gated decisions the
+     * config-load path drives — notably the pinyin-search default
+     * (`stampSearchPinyinEnabled`, #3955). The boot itself already stamps the
+     * decision; this keeps the surfaced config shape complete for consumers
+     * that re-derive it.
+     */
+    i18n?: any;
     /**
      * App-declared RBAC metadata, surfaced so the CLI (`serve`/`dev`/`start`)
      * can wire it without a host `objectstack.config.ts`. The `serve` command
@@ -283,6 +293,18 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         unwrapEnvelope: true,
     });
 
+    // Locale-gated pinyin search (#2486 / #3955): the compiled artifact carries
+    // the stack's `i18n` config, and it is the ONLY config this boot ever sees —
+    // `os migrate plan`/`apply` and embedders never load `objectstack.config.ts`.
+    // Resolve the same locale-derived decision the CLI serve boot resolves and
+    // stamp it into `OS_SEARCH_PINYIN_ENABLED` BEFORE any plugin constructs a
+    // SchemaRegistry, so this boot provisions the same `__search` companion
+    // columns as the dev runtime. Without the stamp, `os migrate` diffed a
+    // dev-created database against a schema view missing every companion column
+    // and flagged the live columns as destructive orphans (#3955). No artifact →
+    // no locales → the env-first resolver decides, same as before.
+    stampSearchPinyinEnabled(artifactBundle?.i18n);
+
     const plugins: any[] = [
         // MUST precede ObjectQLPlugin: its start() connects the default driver
         // through the datasource connection service, and ObjectQLPlugin.start()
@@ -331,6 +353,8 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         Array.isArray(artifactBundle?.permissions) ? artifactBundle.permissions : undefined;
     const positions: any[] | undefined =
         Array.isArray(artifactBundle?.positions) ? artifactBundle.positions : undefined;
+    const i18n: any | undefined =
+        artifactBundle?.i18n && typeof artifactBundle.i18n === 'object' ? artifactBundle.i18n : undefined;
 
     return {
         plugins,
@@ -343,5 +367,6 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         ...(manifest ? { manifest } : {}),
         ...(permissions ? { permissions } : {}),
         ...(positions ? { positions } : {}),
+        ...(i18n ? { i18n } : {}),
     };
 }

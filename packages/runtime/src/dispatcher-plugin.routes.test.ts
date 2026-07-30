@@ -111,7 +111,62 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
     const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
     await plugin.start?.(makeCtx(server));
 
-    expect(routes).toContain('POST /api/v1/analytics/query');
+    expect(routes).toContain('GET /api/v1/i18n/locales');
+  });
+
+  // [#3891 follow-through] The /analytics wire surface exists only when the
+  // capability does: with no `analytics` service registered (and no
+  // kernel-resolver), the three routes are NOT mounted — the path answers the
+  // adapter's shared 404, with no 405 Allow hint for an API that isn't there.
+  describe('capability-conditional /analytics mounting', () => {
+    const ANALYTICS_ROUTES = [
+      'POST /api/v1/analytics/query',
+      'GET /api/v1/analytics/meta',
+      'POST /api/v1/analytics/sql',
+    ];
+
+    function ctxWithServices(fakeServer: any, services: Record<string, any>) {
+      const kernel = {
+        getService: (name: string) => services[name],
+        getServiceAsync: async (name: string) => services[name],
+      };
+      return {
+        getKernel: () => kernel,
+        getService: (name: string) => (name === 'http.server' ? fakeServer : undefined),
+        environmentId: undefined,
+        logger: { info() {}, warn() {}, error() {}, debug() {} },
+        hook: () => {}, on: () => {},
+      } as any;
+    }
+
+    it('does NOT mount /analytics when no analytics service is registered', async () => {
+      const { server, routes } = makeFakeServer();
+      const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+      await plugin.start?.(makeCtx(server));
+
+      for (const r of ANALYTICS_ROUTES) expect(routes).not.toContain(r);
+    });
+
+    it('mounts /analytics when the analytics service is registered', async () => {
+      const { server, routes } = makeFakeServer();
+      const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+      await plugin.start?.(ctxWithServices(server, { analytics: { query: async () => ({ rows: [] }) } }));
+
+      for (const r of ANALYTICS_ROUTES) expect(routes).toContain(r);
+    });
+
+    it('mounts /analytics unconditionally on a multi-tenant host (kernel-resolver wired)', async () => {
+      // Host-global mounts, per-project services: presence is a per-request
+      // question the analytics domain answers (`handled:false` → 404), so the
+      // mount must not depend on the DEFAULT kernel's service registry.
+      const { server, routes } = makeFakeServer();
+      const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+      await plugin.start?.(ctxWithServices(server, {
+        'kernel-resolver': { resolveKernel: async (_ctx: any, def: any) => def },
+      }));
+
+      for (const r of ANALYTICS_ROUTES) expect(routes).toContain(r);
+    });
   });
 
   it('honours a custom prefix', async () => {
@@ -160,5 +215,26 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
     expect(routes).toContain('GET /.well-known/objectstack');
     // Non-discovery routes are unaffected by the cession.
     expect(routes).toContain('GET /api/v1/packages');
+  });
+
+  // [#3913 follow-up] The exact bug this file's header describes, committed
+  // again: `handleActionsRequest` learned to route the OBJECT-LESS shape
+  // `POST /actions//:action` at the canonical 'global' key, and its unit tests
+  // called `handleActions()` / `dispatch()` DIRECTLY — so they passed while the
+  // path had no `server.post()` of its own. `:object` does not match an empty
+  // segment, so over real HTTP the request fell through to Hono's `notFound`
+  // and answered a bare `{error: 'Not found'}` with the domain never running.
+  // Found by dogfooding, not by the suite. Assert the registration, which is
+  // the only thing that makes the branch reachable.
+  it('mounts the object-less action shape /actions//:action so it reaches dispatch()', async () => {
+    const { server, routes } = makeFakeServer();
+    const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+    await plugin.start?.(makeCtx(server));
+
+    expect(routes).toContain('POST /api/v1/actions//:action');
+    // The object-scoped shapes must keep their registrations — the empty-segment
+    // route is additive and must not replace or shadow them.
+    expect(routes).toContain('POST /api/v1/actions/:object/:action');
+    expect(routes).toContain('POST /api/v1/actions/:object/:action/:recordId');
   });
 });
