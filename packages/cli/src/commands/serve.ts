@@ -474,11 +474,19 @@ export default class Serve extends Command {
         // Ignore — fall through and try the requested port.
       }
     } else if (!(await isPortAvailable(requestedPort))) {
-      console.log('');
-      printError(`Port ${requestedPort} is already in use.`);
-      console.log(chalk.dim('  ObjectStack does not auto-select a different port in production mode:'));
-      console.log(chalk.dim('  a drifted port silently breaks reverse-proxy, OAuth callback, and CORS config.'));
-      console.log(chalk.dim('  Free the port, or pick another via PORT=<port> (or --port <port>).'));
+      // One write, for the reason spelled out at the "Nothing to serve" exit
+      // below: `this.exit(1)` reaches `process.exit` without draining a piped
+      // stdout, so a multi-call diagnostic loses its tail. Same defect, same
+      // shape — this one is fixed by construction (the e2e that measured the
+      // truncation drives the other exit; reaching this one needs a busy port in
+      // production mode).
+      console.log(
+        '\n'
+        + chalk.red(`  ✗ Port ${requestedPort} is already in use.\n`)
+        + chalk.dim('     ObjectStack does not auto-select a different port in production mode:\n')
+        + chalk.dim('     a drifted port silently breaks reverse-proxy, OAuth callback, and CORS config.\n')
+        + chalk.dim('     Free the port, or pick another via PORT=<port> (or --port <port>).'),
+      );
       this.exit(1);
     }
 
@@ -516,10 +524,35 @@ export default class Serve extends Command {
         if (process.env.OS_BOOT_EMPTY === '1') {
           useEmptyBoot = true;
         } else {
-          printError(`Configuration file not found: ${absolutePath}`);
-          console.log(chalk.dim('  Hint: Run `objectstack init` to create a new project,'));
-          console.log(chalk.dim('        `objectstack start` to boot an empty kernel against your marketplace,'));
-          console.log(chalk.dim('        or run `objectstack build` first / set OS_ARTIFACT_PATH.'));
+          // Say WHERE it looked. "Not found" alone cannot distinguish the two
+          // things that actually happen — a typo'd filename and the wrong cwd
+          // (running from a monorepo root instead of the app folder) — and the
+          // second is the common one, which listing the searched paths makes
+          // self-evident. This stays an ERROR rather than degrading into an
+          // empty boot: `os serve` was told to load something, and inventing a
+          // zero-object platform instead would hide the mistake behind a
+          // running server. Booting with no app at all is a real, supported
+          // thing (`os serve` on a config with no metadata, or `os start`) —
+          // but it is a stated intent, not a guess made on the user's behalf.
+          // ONE write, deliberately. `this.exit(1)` unwinds to oclif's
+          // `process.exit`, which does NOT wait for a piped stdout to drain — so
+          // a diagnostic split across several `console.log` calls gets
+          // truncated mid-message, and the reader loses exactly the part that
+          // says where to look. (Measured: as separate calls, only the first two
+          // lines survived a pipe.) An error whose tail can vanish is the #4012
+          // shape all over again; assembling it into a single write keeps it
+          // inside one pipe-buffer flush.
+          console.log(
+            chalk.red('  ✗ Nothing to serve — no config and no compiled artifact.') + '\n'
+            + chalk.dim(`     Looked for a config at:    ${absolutePath}\n`)
+            + chalk.dim(`     Looked for an artifact at: ${path.resolve(process.cwd(), 'dist/objectstack.json')}\n`)
+            + chalk.dim('     OS_ARTIFACT_PATH is not set.\n')
+            + '\n'
+            + chalk.dim('     Hint: `objectstack init` scaffolds a new project;\n')
+            + chalk.dim('           `objectstack start` boots an app-less kernel against your marketplace;\n')
+            + chalk.dim('           `objectstack build` (or OS_ARTIFACT_PATH) supplies a compiled artifact.\n')
+            + chalk.dim('           Already have a project? Check your working directory.'),
+          );
           this.exit(1);
         }
       }
