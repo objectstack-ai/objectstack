@@ -11,6 +11,13 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'packages/**'
+      # The mapper and this workflow, so a change to the guard runs the guard. Without
+      # these, editing `affected-docs.mjs` was the one change its own self-test could
+      # never see — a `packages/**`-only trigger means the tool is unguarded exactly
+      # when it is being modified. A PR that touches only these gets the benign
+      # "0 changed package(s) ✅" comment, which is the correct answer.
+      - 'scripts/docs-audit/**'
+      - '.github/workflows/docs-drift-check.yml'
 
 permissions:
   contents: read
