@@ -84,4 +84,36 @@ export interface IAuthService {
      * @returns Authenticated user or undefined
      */
     getCurrentUser?(request: Request): Promise<AuthUser | undefined>;
+
+    /**
+     * The MCP resource identifier (RFC 8707 `resource` / token `aud`) —
+     * `<origin><apiPrefix>/mcp`.
+     *
+     * [#4127] Declared because `/mcp` already called it. The dispatcher's skill
+     * route needs the canonical value the auth service derives from its own
+     * `basePath`, precisely so the two cannot disagree about the API prefix;
+     * its own comment says "the auth service owns the canonical value". It was
+     * reached through `const authService: any` + `?.()`, which made the call
+     * invisible to the type system AND accidentally safe — an absent method
+     * returned `undefined` and the route silently fell back to deriving a URL
+     * from the request host, so a real disagreement would have looked like
+     * normal operation.
+     *
+     * @returns The absolute MCP resource URL
+     */
+    getMcpResourceUrl?(): string;
+
+    /**
+     * Absolute URL of the RFC 9728 protected-resource metadata document,
+     * advertised in `WWW-Authenticate` on 401s from the MCP endpoint so clients
+     * can bootstrap the OAuth flow. `null` when the OAuth track is off for this
+     * deployment (the embedded AS disabled, or the origin fails the OAuth 2.1
+     * transport rule) — API keys remain and nothing is advertised, fail-closed.
+     *
+     * [#4127] Same story as {@link getMcpResourceUrl}: called by `/mcp`,
+     * implemented by the auth manager, declared by nobody.
+     *
+     * @returns The metadata URL, or `null` when the OAuth track is off
+     */
+    getMcpResourceMetadataUrl?(): string | null;
 }
