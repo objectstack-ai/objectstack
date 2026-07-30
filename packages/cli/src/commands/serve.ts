@@ -2677,8 +2677,8 @@ export interface StorageCapabilityArg {
  * The storage backend is a deployment concern with two real channels: the
  * `OS_STORAGE_*` env vars (below) and the `storage` settings namespace, which
  * is also the one with proper credential handling. Authors who write `storage:`
- * anyway now get told so — `lintUnknownAuthoringKeys` reports undeclared
- * top-level keys, and `STACK_KEY_GUIDANCE` names both channels.
+ * anyway now get told so — `lintUnknownStackKeys` reports undeclared top-level
+ * keys, and `STACK_KEY_GUIDANCE` names both channels.
  */
 export function resolveStorageCapabilityArg(envRoot?: string): StorageCapabilityArg {
   const rootDir = envRoot?.trim() || '.objectstack/data/uploads';
