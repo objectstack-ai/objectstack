@@ -18,6 +18,26 @@
 import { validateActionParams, type ResolvedActionParam } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { checkApiExposure } from './api-exposure.js';
+import {
+    GLOBAL_ACTION_OBJECT_KEY,
+    actionHandlerObjectKeys,
+    isObjectLessActionKey,
+    reconcileActionRegistrations as reconcileActionRegistrationsPure,
+    resolveActionHandlerKeys,
+} from '@objectstack/objectql';
+
+// [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
+// @objectstack/objectql (the engine owns the map they describe, and its
+// plugin now runs the boot inventory — AppPlugin, the previous host, is
+// registered conditionally and never ran it on the `os dev` path). Runtime
+// re-exports them so dispatch, the MCP bridge and existing importers keep
+// reading the ONE implementation.
+export {
+    GLOBAL_ACTION_OBJECT_KEY,
+    actionHandlerObjectKeys,
+    isObjectLessActionKey,
+    resolveActionHandlerKeys,
+};
 
 /** A `sys_`-prefixed object is a system table — off-limits to external MCP agents. */
 export function isSystemObjectName(name: string): boolean {
@@ -908,71 +928,6 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
     return out;
 }
 
-/**
- * [ADR-0110 D5] Reconcile the two halves of the declaration↔executable
- * bijection and report the orphans on both sides.
- *
- * ADR-0078 outlaws a declaration nothing executes (silently *inert*); D3
- * outlaws an executable nothing declares (silently *ungoverned*). Together
- * they are one invariant — everything declared runs, everything that runs is
- * declared — and this is the mechanism that makes a violation visible instead
- * of waiting for someone to invoke the route.
- *
- * Two findings:
- *  - `undeclared_handler` — a registered key that reconciles to no
- *    declaration. Since D3 those are REFUSED at dispatch, so this list is the
- *    upgrade checklist: everything on it is an endpoint that stopped working
- *    and the exact `defineAction` that fixes it.
- *  - `unbound_declaration` — a declared `script` action with no `body` and no
- *    handler under any candidate key: a button wired to nothing.
- *
- * A handler reconciles when some declaration for its object (or an object-less
- * one) yields it among {@link resolveActionHandlerKeys} — the SAME derivation
- * dispatch uses, so the inventory cannot disagree with the router.
- */
-export function reconcileActionRegistrations(deps: ActionExecutionDeps,
-    registered: Array<{ objectName: string; actionName: string; package?: string }>,
-    declarations: Array<{ action: any; objectName: string }>,
-): {
-    undeclaredHandlers: Array<{ objectName: string; actionName: string; package?: string }>;
-    unboundDeclarations: Array<{ objectName: string; actionName: string }>;
-} {
-    // Every key any declaration can address, per owning object key.
-    const addressable = new Map<string, Set<string>>();
-    const addKey = (objectKey: string, handlerKey: string) => {
-        let set = addressable.get(objectKey);
-        if (!set) addressable.set(objectKey, (set = new Set<string>()));
-        set.add(handlerKey);
-    };
-    for (const { action, objectName } of declarations) {
-        for (const key of resolveActionHandlerKeys(action)) addKey(objectName, key);
-    }
-
-    const covers = (objectName: string, actionName: string): boolean => {
-        if (addressable.get(objectName)?.has(actionName)) return true;
-        // A handler registered under an object-less key is addressable by any
-        // object-less declaration, mirroring `actionHandlerObjectKeys`.
-        if (!isObjectLessActionKey(objectName)) return false;
-        for (const [objectKey, keys] of addressable) {
-            if (isObjectLessActionKey(objectKey) && keys.has(actionName)) return true;
-        }
-        return false;
-    };
-
-    const undeclaredHandlers = registered.filter((r) => !covers(r.objectName, r.actionName));
-
-    const registeredKeys = new Set(registered.map((r) => `${r.objectName}:${r.actionName}`));
-    const unboundDeclarations: Array<{ objectName: string; actionName: string }> = [];
-    for (const { action, objectName } of declarations) {
-        if ((action?.type ?? 'script') !== 'script') continue; // only script needs a handler
-        if (action?.body) continue;                            // its handler is synthesized
-        const bound = resolveActionHandlerKeys(action).some((key) =>
-            actionHandlerObjectKeys(objectName).some((obj) => registeredKeys.has(`${obj}:${key}`)));
-        if (!bound) unboundDeclarations.push({ objectName, actionName: action?.name });
-    }
-
-    return { undeclaredHandlers, unboundDeclarations };
-}
 
 /**
  * Owning object of a standalone `action` item — must stay in lockstep with
@@ -987,32 +942,7 @@ export function standaloneActionObjectName(deps: ActionExecutionDeps, action: an
     return GLOBAL_ACTION_OBJECT_KEY;
 }
 
-/**
- * The engine object key an object-LESS ("global") action registers under.
- *
- * Canonical since #3913, and it is `'global'` because that is what the two
- * writers have always written: `AppPlugin` (`action.object || 'global'`) and
- * `ObjectQLPlugin.actionObjectKey`. `engine.executeAction` is an exact-string
- * `Map` lookup with no wildcard semantics, so the READERS have to probe the
- * same literal — before this, the REST route and the MCP bridge both rotated
- * to `'*'`, which nothing ever registers, and every global action came back as
- * `Action '<name>' on object '*' not found`.
- */
-export const GLOBAL_ACTION_OBJECT_KEY = 'global';
 
-/**
- * The engine object keys to probe, in order, for a route's action handler.
- *
- * The routed object first, then the canonical object-less key (#3913), then
- * the legacy `'*'` — kept last so a handler that user code registered directly
- * against the wildcard still resolves. Deduped, so a request routed AT
- * `/actions/global/:action` probes `'global'` exactly once.
- */
-export function actionHandlerObjectKeys(objectName: string): string[] {
-    return [objectName, GLOBAL_ACTION_OBJECT_KEY, '*'].filter(
-        (k, i, all) => all.indexOf(k) === i,
-    );
-}
 
 /**
  * True when the error is `executeAction`'s "no such key in the registry" miss
@@ -1028,30 +958,6 @@ export function isActionNotRegisteredError(err: any): boolean {
     return /Action '.+' on object '.+' not found/i.test(String(err?.message ?? err));
 }
 
-/**
- * [ADR-0110 D2] Handler-key candidates for an action, most-specific first —
- * the *addressing* half of "resolve, then address".
- *
- * A registration key is NOT an action's identity. `app-plugin.ts`
- * auto-registers **body** actions under `name`, while user code registers a
- * **target-bound** script action under `target`
- * (`engine.registerAction('todo_task', 'completeTask', …)`). Identity is
- * always the declarative `name` (D1); which key the handler happens to live
- * under is derived HERE, from the already-resolved declaration, so no caller
- * ever has to know it.
- *
- * `fallbackKey` (the routed URL segment) is the last candidate and exists for
- * the UNDECLARED case, where there is no declaration to derive anything from.
- * It is deduped away whenever the declaration already yields it, so it never
- * widens what a declared action can reach.
- */
-export function resolveActionHandlerKeys(action: any, fallbackKey?: string): string[] {
-    const primary = action ? (action.body ? action.name : (action.target || action.name)) : undefined;
-    return [primary, action?.target, action?.name, fallbackKey].filter(
-        (k: unknown, i: number, a: unknown[]): k is string =>
-            typeof k === 'string' && k.length > 0 && a.indexOf(k) === i,
-    );
-}
 
 /**
  * [ADR-0110 D2] Run a script/body action through the engine's handler
@@ -1091,16 +997,6 @@ export async function executeRegisteredAction(deps: ActionExecutionDeps,
     return { dispatched: false };
 }
 
-/**
- * True when the routed "object" is the object-less placeholder rather than a
- * real object — the canonical `'global'`, the legacy `'*'`, or nothing at all
- * (`POST /actions//:action`). Callers use it to skip work that only makes
- * sense for a record-scoped action: loading `ctx.record`, and naming an
- * `object` on the flow-automation context.
- */
-export function isObjectLessActionKey(objectName: string | undefined | null): boolean {
-    return !objectName || objectName === GLOBAL_ACTION_OBJECT_KEY || objectName === '*';
-}
 
 /**
  * Resolve the DECLARATION behind a `<object>/<action>` route pair — the
@@ -1186,4 +1082,16 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     }
 
     return { action: undefined, obj, degraded, reason };
+}
+
+/**
+ * [ADR-0110 D5] Back-compat wrapper over the engine-owned reconciliation —
+ * the `deps` parameter was never read; kept so existing call sites and tests
+ * are source-compatible. New code should import from `@objectstack/objectql`.
+ */
+export function reconcileActionRegistrations(_deps: ActionExecutionDeps,
+    registered: Array<{ objectName: string; actionName: string; package?: string }>,
+    declarations: Array<{ action: any; objectName: string }>,
+): ReturnType<typeof reconcileActionRegistrationsPure> {
+    return reconcileActionRegistrationsPure(registered, declarations);
 }
