@@ -91,11 +91,17 @@ export { defineEmailTemplateDefinition } from './system/email-template.zod';
 export { defineReport } from './ui/report.zod';
 export { defineWebhook } from './automation/webhook.zod';
 export { defineObjectExtension } from './data/object.zod';
-// Pre-parse report of authored object/field keys the schemas would strip (#3786).
-// Exported from the ROOT, not only from `/data`: `defineStack` (this package) and
-// the CLI's `os validate` are the two callers, and both import from the root.
+// Pre-parse report of authored keys the metadata schemas would strip (#3786).
+// Exported from the ROOT: `defineStack` (this package) and the CLI's
+// `os validate`/`os build` are the callers, and all import from the root. The
+// walker lives in kernel/ (it imports every schema); the comparator, guidance
+// tables and finding shape stay in data/ (frontend-safe).
 export {
   lintUnknownAuthoringKeys,
+  listLintableAuthoringCollections,
+} from './kernel/metadata-authoring-lint';
+export type { LintableAuthoringCollection } from './kernel/metadata-authoring-lint';
+export {
   formatUnknownAuthoringKey,
   FIELD_KEY_GUIDANCE,
   OBJECT_KEY_GUIDANCE,

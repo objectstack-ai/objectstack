@@ -29,15 +29,28 @@
  * has to run **pre-parse**, on the authored input, which is the same seam the
  * ADR-0087 D2 conversion notices already use in `defineStack`.
  *
+ * ## Why this file is only the CORE
+ *
+ * This module carries the comparator, the finding shape and the curated guidance
+ * tables — deliberately nothing heavier. The stack WALKER
+ * (`lintUnknownAuthoringKeys`) lives in `kernel/metadata-authoring-lint.ts`,
+ * because covering every metadata type means importing every schema, and this
+ * file is re-exported from the `/data` subpath that frontend bundles consume
+ * (objectui reads `REFERENCE_VALUE_TYPES` and friends from it). Pulling the
+ * whole schema universe into that chunk to run a build-time lint would be its
+ * own regression. The kernel already is the everything-imports zone.
+ *
  * @see ADR-0049 enforce-or-remove · ADR-0104 · #4001 (the strict tiers)
  */
 
 import { findClosestMatches } from '../shared/suggestions.zod';
-import { ObjectSchema } from './object.zod';
-import { FieldSchema } from './field.zod';
 
-/** Which authoring surface a finding came from. */
-export type AuthoringKeySurface = 'object' | 'field';
+/**
+ * Which authoring surface a finding came from — a metadata type machine name
+ * (`'object'`, `'page'`, `'agent'`, …) or `'field'` for the one nested surface
+ * the walker descends into (an object's `fields` record).
+ */
+export type AuthoringKeySurface = string;
 
 /** One unknown key on one authored object or field. */
 export interface UnknownAuthoringKeyFinding {
@@ -122,40 +135,37 @@ export const OBJECT_KEY_GUIDANCE: Readonly<
   tableName: { why: 'removed — the table name always equals the object `name`.' },
 });
 
-/** Declared top-level keys of a Zod object schema, read off `.shape`. */
-function declaredKeys(schema: unknown): readonly string[] {
-  const shape = (schema as { shape?: Record<string, unknown> }).shape;
-  return shape ? Object.keys(shape) : [];
-}
-
-function isPlainRecord(v: unknown): v is Record<string, unknown> {
+/** A plain object — the only shape an authored metadata item can take. */
+export function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
 /**
- * Compare one authored record's keys against a declared key set.
+ * Compare one authored record's keys against a declared key set, appending a
+ * finding per unknown key. The single comparator behind every surface the
+ * walker covers.
  *
  * Keys starting with `_` are skipped: they are the packaging/provenance channel
  * (`_packageId`, `_lock`, `_provenance`) that tooling stamps onto artifacts, and
  * a stray one is a tooling concern, not an authoring mistake.
  */
-function lintRecord(
+export function lintAuthoredRecordKeys(
   record: Record<string, unknown>,
-  declared: readonly string[],
+  declared: ReadonlySet<string>,
   guidance: Readonly<Record<string, { to?: string; why?: string }>>,
   surface: AuthoringKeySurface,
   basePath: string,
   out: UnknownAuthoringKeyFinding[],
 ): void {
-  const known = new Set(declared);
+  const candidates = [...declared];
   for (const key of Object.keys(record)) {
-    if (known.has(key) || key.startsWith('_')) continue;
+    if (declared.has(key) || key.startsWith('_')) continue;
 
     const hint = guidance[key];
     // A retirement (`why`, no `to`) deliberately suppresses the edit-distance
     // fallback: there IS no successor, and the nearest declared key by spelling
     // is noise — `pii` is 3 edits from `min`, which would read as real advice.
-    const suggestion = hint?.to ?? (hint?.why ? undefined : findClosestMatches(key, declared, 3, 1)[0]);
+    const suggestion = hint?.to ?? (hint?.why ? undefined : findClosestMatches(key, candidates, 3, 1)[0]);
     out.push({
       path: `${basePath}.${key}`,
       surface,
@@ -164,51 +174,6 @@ function lintRecord(
       ...(hint?.why ? { guidance: hint.why } : {}),
     });
   }
-}
-
-/**
- * Report every key an authored stack sets on an object or field that the schema
- * does not declare — i.e. every value the parse is about to discard silently.
- *
- * Pure and side-effect free. Runs on the **raw** (normalized but unparsed)
- * stack: see the module note for why a parsed stack is too late.
- *
- * @param rawStack The authored stack, after `normalizeStackInput` and before
- *   `ObjectStackDefinitionSchema.parse`.
- */
-export function lintUnknownAuthoringKeys(rawStack: unknown): UnknownAuthoringKeyFinding[] {
-  if (!isPlainRecord(rawStack)) return [];
-  const objects = rawStack.objects;
-  if (!Array.isArray(objects)) return [];
-
-  const objectKeys = declaredKeys(ObjectSchema);
-  const fieldKeys = declaredKeys(FieldSchema);
-  // A schema that failed to expose a shape would make this rule silently pass on
-  // everything — the failure mode a lint must not have.
-  if (objectKeys.length === 0 || fieldKeys.length === 0) return [];
-
-  const out: UnknownAuthoringKeyFinding[] = [];
-  for (const obj of objects) {
-    if (!isPlainRecord(obj)) continue;
-    const objName = typeof obj.name === 'string' && obj.name ? obj.name : '<unnamed>';
-    const objPath = `objects.${objName}`;
-    lintRecord(obj, objectKeys, OBJECT_KEY_GUIDANCE, 'object', objPath, out);
-
-    const fields = obj.fields;
-    if (!isPlainRecord(fields)) continue;
-    for (const [fieldName, field] of Object.entries(fields)) {
-      if (!isPlainRecord(field)) continue;
-      lintRecord(
-        field,
-        fieldKeys,
-        FIELD_KEY_GUIDANCE,
-        'field',
-        `${objPath}.fields.${fieldName}`,
-        out,
-      );
-    }
-  }
-  return out;
 }
 
 /** One human-readable line for a finding — shared by `defineStack` and the CLI. */

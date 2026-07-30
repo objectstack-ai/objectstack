@@ -1,118 +1,71 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Tests for the unknown-authoring-key lint (#3786).
+ * Tests for the unknown-authoring-key CORE (#3786): the comparator and the
+ * curated guidance tables. The stack walker that applies them across every
+ * metadata collection is tested in `kernel/metadata-authoring-lint.test.ts`.
  *
- * Two jobs: prove the rule actually fires on the drifts that motivated it, and
- * hold the guidance tables to the same non-rotting discipline the #4045 / #4040
- * ledgers use — a `to` that names a key the schema no longer declares is advice
- * pointing into a void, which is worse than no advice.
+ * The guidance tables are held to the #4045 / #4040 non-rotting discipline — a
+ * `to` that names a key the schema no longer declares is advice pointing into a
+ * void, which is worse than no advice.
  */
 
 import { describe, it, expect } from 'vitest';
 
 import {
-  lintUnknownAuthoringKeys,
+  lintAuthoredRecordKeys,
   formatUnknownAuthoringKey,
   FIELD_KEY_GUIDANCE,
   OBJECT_KEY_GUIDANCE,
+  type UnknownAuthoringKeyFinding,
 } from './authoring-key-lint';
 import { ObjectSchema } from './object.zod';
 import { FieldSchema } from './field.zod';
 
 const shapeKeys = (s: unknown) => Object.keys((s as { shape: Record<string, unknown> }).shape);
 
-/** A minimal well-formed stack with one object and one field. */
-const stackWith = (obj: Record<string, unknown>, field: Record<string, unknown>) => ({
-  objects: [
-    { name: 'crm_case', label: 'Case', fields: { owner: { label: 'Owner', type: 'text', ...field } }, ...obj },
-  ],
-});
+function runComparator(
+  record: Record<string, unknown>,
+  declared: readonly string[],
+  guidance: Readonly<Record<string, { to?: string; why?: string }>> = {},
+): UnknownAuthoringKeyFinding[] {
+  const out: UnknownAuthoringKeyFinding[] = [];
+  lintAuthoredRecordKeys(record, new Set(declared), guidance, 'field', 'p', out);
+  return out;
+}
 
-describe('lintUnknownAuthoringKeys (#3786)', () => {
-  it('is silent on a clean stack', () => {
-    expect(lintUnknownAuthoringKeys(stackWith({}, {}))).toEqual([]);
+describe('lintAuthoredRecordKeys (#3786)', () => {
+  it('is silent when every key is declared', () => {
+    expect(runComparator({ a: 1, b: 2 }, ['a', 'b', 'c'])).toEqual([]);
   });
 
-  it('reports a field key the schema does not declare', () => {
-    const [finding, ...rest] = lintUnknownAuthoringKeys(stackWith({}, { pii: true }));
-    expect(rest).toEqual([]);
-    expect(finding).toMatchObject({
-      path: 'objects.crm_case.fields.owner.pii',
-      surface: 'field',
-      key: 'pii',
-    });
-    // A retired key gets a prescription, not a "did you mean" into a void.
-    expect(finding.guidance).toBeTruthy();
-    expect(finding.suggestion).toBeUndefined();
+  it('reports an undeclared key with an edit-distance suggestion for a typo', () => {
+    const [f] = runComparator({ requred: true }, ['required', 'label']);
+    expect(f).toMatchObject({ path: 'p.requred', key: 'requred', suggestion: 'required' });
   });
 
-  it('reports an object key the schema does not declare, with the rename', () => {
-    const [finding] = lintUnknownAuthoringKeys(stackWith({ capabilities: { trackHistory: true } }, {}));
-    expect(finding).toMatchObject({
-      path: 'objects.crm_case.capabilities',
-      surface: 'object',
-      key: 'capabilities',
-      suggestion: 'enable',
-    });
+  it('a retirement suppresses the edit-distance fallback', () => {
+    // `pii` is 3 edits from `min` — "did you mean min?" reads as advice while
+    // being nonsense. A `why` with no `to` must yield guidance and NO suggestion.
+    const [f] = runComparator({ pii: true }, ['min', 'max'], FIELD_KEY_GUIDANCE);
+    expect(f.guidance).toBeTruthy();
+    expect(f.suggestion).toBeUndefined();
   });
 
-  /**
-   * The exact set #4120 found rendering in `object.form.ts` while saving
-   * nothing. If the lint had existed, each of these would have been one warning
-   * rather than releases of a dead toggle.
-   */
-  const FORM_DRIFT_KEYS = [
-    'indexed', 'immutable', 'filterable', 'placeholder', 'validation', 'errorMessage',
-    'audit', 'pii', 'encrypted', 'startingNumber',
-    'referenceFilter', 'cascadeDelete', 'formula', 'displayFormat', 'summaryType', 'summaryField',
-  ] as const;
-
-  it.each(FORM_DRIFT_KEYS)('catches the #4120 drift key %s and says something actionable', (key) => {
-    const [finding, ...rest] = lintUnknownAuthoringKeys(stackWith({}, { [key]: 'x' }));
-    expect(finding, `${key} should be reported`).toBeDefined();
-    expect(rest).toEqual([]);
-    expect(finding.key).toBe(key);
-    // Either a rename target or a retirement reason — never a bare "unknown".
-    expect(
-      finding.suggestion ?? finding.guidance,
-      `${key} needs a rename target or a retirement reason`,
-    ).toBeTruthy();
-    expect(formatUnknownAuthoringKey(finding)).toContain(key);
+  it('a rename wins over edit distance', () => {
+    const [f] = runComparator({ capabilities: {} }, ['enable', 'label'], OBJECT_KEY_GUIDANCE);
+    expect(f.suggestion).toBe('enable');
   });
 
-  it('falls back to edit distance for a plain typo', () => {
-    const [finding] = lintUnknownAuthoringKeys(stackWith({}, { requred: true }));
-    expect(finding.suggestion).toBe('required');
+  it('skips the underscore-prefixed packaging channel', () => {
+    expect(runComparator({ _packageId: 'p', _lock: true, _provenance: 'x' }, ['label'])).toEqual([]);
   });
 
-  it('ignores the underscore-prefixed packaging channel', () => {
-    const findings = lintUnknownAuthoringKeys(
-      stackWith({ _packageId: 'p', _lock: true }, { _provenance: 'x' }),
-    );
-    expect(findings).toEqual([]);
-  });
-
-  it('reports every offending key, across objects and fields', () => {
-    const findings = lintUnknownAuthoringKeys({
-      objects: [
-        { name: 'a', label: 'A', capabilities: {}, fields: { x: { type: 'text', pii: true } } },
-        { name: 'b', label: 'B', fields: { y: { type: 'text', indexed: true } } },
-      ],
-    });
-    expect(findings.map((f) => f.path).sort()).toEqual([
-      'objects.a.capabilities',
-      'objects.a.fields.x.pii',
-      'objects.b.fields.y.indexed',
-    ]);
-  });
-
-  it('survives malformed input rather than throwing', () => {
-    // The lint runs before the parse, so it is handed whatever the author wrote.
-    for (const junk of [undefined, null, 42, 'x', {}, { objects: 'nope' }, { objects: [null, 7] }]) {
-      expect(() => lintUnknownAuthoringKeys(junk)).not.toThrow();
-    }
-    expect(lintUnknownAuthoringKeys({ objects: [{ name: 'a', fields: 'nope' }] })).toEqual([]);
+  it('formats guidance over suggestion over bare', () => {
+    const base = { path: 'p.k', surface: 'field', key: 'k' } as UnknownAuthoringKeyFinding;
+    expect(formatUnknownAuthoringKey({ ...base, guidance: 'gone.' })).toContain('gone.');
+    expect(formatUnknownAuthoringKey({ ...base, suggestion: 's' })).toContain("did you mean 's'");
+    expect(formatUnknownAuthoringKey(base)).toMatch(/dropped at load\.$/);
   });
 });
 
