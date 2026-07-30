@@ -15,7 +15,6 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/kernel/manifest.zod.ts` — Structured permission grants requested by a plugin (ADR-0025 §3.2).
 - `node_modules/@objectstack/spec/src/kernel/metadata-plugin.zod.ts` — Metadata Plugin Protocol
 - `node_modules/@objectstack/spec/src/kernel/plugin-capability.zod.ts` — Plugin Capability Protocol
-- `node_modules/@objectstack/spec/src/kernel/plugin-lifecycle-events.zod.ts` — Plugin Lifecycle Events Protocol
 - `node_modules/@objectstack/spec/src/kernel/plugin-loading.zod.ts` — Plugin Loading Protocol
 - `node_modules/@objectstack/spec/src/kernel/plugin.zod.ts` — Shared Plugin Types
 - `node_modules/@objectstack/spec/src/kernel/service-registry.zod.ts` — Service Registry Protocol
