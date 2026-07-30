@@ -14,7 +14,9 @@ The executor nevertheless also read six loose `config` keys behind `wec.X ?? loo
 two of them (`duration`, `signal`) spellings the spec never declared anywhere. That is
 the `notify.source` shape #4050 retired: a second de-facto contract announced only by a
 code comment, so an author who wrote it got a flow that worked forever and was never
-steered to the declared spelling (PD #12).
+steered to the declared spelling (PD #12). Not hypothetical: the showcase's own
+`wait_revision` node authored it (`config: { eventType: 'signal', signalName: … }`) and
+moves to the declared block here.
 
 - New ADR-0087 D2 conversion `flow-node-wait-event-config-lift` lifts
   `config.{eventType,timerDuration,duration,timeoutMs,signalName,signal}` onto the

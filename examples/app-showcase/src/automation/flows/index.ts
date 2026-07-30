@@ -206,7 +206,10 @@ export const BudgetApprovalFlow = defineFlow({
       id: 'wait_revision',
       type: 'wait',
       label: 'Awaiting Revision',
-      config: { eventType: 'signal', signalName: 'budget_revision' },
+      // `waitEventConfig`, not a loose `config` — the latter is the undeclared
+      // back door retired in #4045. The conversion layer still rewrites it at
+      // load, but the showcase should demonstrate the declared spelling.
+      waitEventConfig: { eventType: 'signal', signalName: 'budget_revision' },
     },
     {
       id: 'needs_exec',

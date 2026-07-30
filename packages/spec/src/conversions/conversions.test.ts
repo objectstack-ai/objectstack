@@ -291,6 +291,24 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(waitNodeOf(stack).config).toEqual({ duration: 'PT2H' });
     });
 
+    /**
+     * The exact shape the showcase's `wait_revision` node carried before this
+     * change — the declared spelling sitting in the undeclared LOCATION, which is
+     * the combination the ledger's candidate order has to get right.
+     */
+    it('lifts the showcase shape: declared key names in a loose `config`', () => {
+      const { stack, notices } = collectConversionNotices(
+        waitFlow({ config: { eventType: 'signal', signalName: 'budget_revision' } }),
+      );
+      expect(waitNodeOf(stack).waitEventConfig).toEqual({
+        eventType: 'signal',
+        signalName: 'budget_revision',
+      });
+      expect(waitNodeOf(stack).config).toEqual({});
+      expect(notices).toHaveLength(2);
+      expect(() => FlowSchema.parse((stack.flows as any[])[0])).not.toThrow();
+    });
+
     it('leaves a wait node with nothing to lift completely untouched', () => {
       const before = waitFlow({ waitEventConfig: { eventType: 'manual' }, config: { note: 'keep me' } });
       const { stack, notices } = collectConversionNotices(structuredClone(before));

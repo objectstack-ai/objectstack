@@ -1117,7 +1117,12 @@ const WAIT_EVENT_CONFIG_LIFTS: ReadonlyArray<readonly [target: string, candidate
  * The executor nevertheless carried `wec.X ?? loose.X` for six `config` keys —
  * a second, undeclared de-facto contract of exactly the `notify.source` shape
  * (PD #12), announced only by the comment "for hand-authored flows that put the
- * same keys under config". Nothing in-repo authors it.
+ * same keys under config".
+ *
+ * The showcase's `wait_revision` node authored exactly that shape
+ * (`config: { eventType: 'signal', signalName: 'budget_revision' }`) until this
+ * change moved it to the declared block — so the back door was not hypothetical,
+ * and the example that demonstrates `wait` was itself on the retiring spelling.
  *
  * Precedence mirrors those `??` chains, so the rewrite is behaviour-preserving:
  * a value already on `waitEventConfig` WINS and its loose counterpart is left
