@@ -12,7 +12,6 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
-import { SERVICE_SELF_INFO_KEY } from '@objectstack/spec/api';
 import { createMetadataProtocolPlugin, ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQLPlugin } from './plugin';
 
@@ -34,12 +33,11 @@ describe('ADR-0076 Step 2 — delegated protocol assembly', () => {
     // getService('protocol') + the loadMetaFromDb type guard.
     expect(typeof (protocol as any).loadMetaFromDb).toBe('function');
 
-    // The lightweight analytics fallback rides with the protocol assembly and
-    // keeps its D12 honest-capabilities self-descriptor.
-    const analytics: any = kernel.getService('analytics');
-    expect(analytics).toBeDefined();
-    expect(analytics[SERVICE_SELF_INFO_KEY]?.status).toBe('degraded');
-    expect(typeof analytics.query).toBe('function');
+    // The degraded analytics fallback was retired (#3891): it dropped the
+    // caller's ExecutionContext (unscoped aggregates) and ignored the contract
+    // `where` filter. The slot stays EMPTY until service-analytics fills it —
+    // /analytics 404s honestly instead of answering with wrong numbers.
+    expect(() => kernel.getService('analytics')).toThrow();
   });
 
   it('registerProtocol:false WITHOUT the plugin boots protocol-free (consumers degrade)', async () => {
@@ -58,10 +56,10 @@ describe('ADR-0076 Step 2 — delegated protocol assembly', () => {
     await expect(kernel.bootstrap()).rejects.toThrow(/registerProtocol: false/);
   });
 
-  it('default assembly is unchanged (backward compatibility)', async () => {
+  it('default assembly registers protocol but leaves the analytics slot empty (#3891)', async () => {
     await kernel.use(new ObjectQLPlugin());
     await kernel.bootstrap();
     expect(kernel.getService('protocol')).toBeInstanceOf(ObjectStackProtocolImplementation);
-    expect((kernel.getService('analytics') as any)[SERVICE_SELF_INFO_KEY]?.status).toBe('degraded');
+    expect(() => kernel.getService('analytics')).toThrow();
   });
 });

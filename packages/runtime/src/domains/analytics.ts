@@ -2,10 +2,12 @@
 
 /**
  * `/analytics` domain — extracted dispatcher body (ADR-0076 D11 step ③,
- * PR-2). Bridges to whatever provides the `analytics` service slot: the
- * service-analytics engine when installed, or the ObjectQLPlugin degraded
- * fallback otherwise (deliberate fallback + `replaceService`, see ADR-0076
- * D10/D12) — which is exactly why route registration stays dispatcher-owned.
+ * PR-2). Bridges to whatever provides the `analytics` service slot — in
+ * practice the service-analytics engine, the slot's ONE implementation since
+ * the degraded ObjectQL fallback was retired (#3891: it dropped the caller's
+ * ExecutionContext and the contract `where` filter). Route registration stays
+ * dispatcher-owned so the URL contract is stable regardless of what occupies
+ * the slot; an empty slot answers the `handled: false` 404 below.
  */
 
 import { CoreServiceName } from '@objectstack/spec/system';
@@ -49,8 +51,8 @@ export async function handleAnalyticsRequest(
     // GET /analytics/meta[?cube=<name>]
     if (subPath === 'meta' && m === 'GET') {
         // [#3584] Optional single-cube filter. `AnalyticsService.getMeta`
-        // already accepts `cubeName?`; degraded fallbacks that ignore the
-        // argument keep returning the full listing, which is still correct.
+        // already accepts `cubeName?`; an implementation that ignores the
+        // argument keeps returning the full listing, which is still correct.
         const cube = typeof query?.cube === 'string' && query.cube !== '' ? query.cube : undefined;
         const result = await analyticsService.getMeta(cube);
         return { handled: true, response: deps.success(result) };

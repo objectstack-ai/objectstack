@@ -34,16 +34,16 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 ┌─────────────────────────────────────────────────────────┐
 │                     Kernel Layer                         │
 │  ┌──────────────────┐  ┌──────────────────────────────┐ │
-│  │  metadata (⚠️)   │  │  data + analytics (✅)       │ │
+│  │  metadata (⚠️)   │  │  data (✅)                   │ │
 │  │  In-memory only   │  │  ObjectQL example kernel     │ │
 │  │  DB persistence   │  │  Will be rebuilt as plugins  │ │
 │  │  pending          │  │                              │ │
 │  └──────────────────┘  └──────────────────────────────┘ │
 ├─────────────────────────────────────────────────────────┤
 │                    Plugin Layer                           │
-│  All other services: auth, automation, workflow, ui,     │
-│  realtime, notification, ai, i18n, search,              │
-│  file-storage, cache, queue, job                         │
+│  All other services: analytics, auth, automation,        │
+│  workflow, ui, realtime, notification, ai, i18n,         │
+│  search, file-storage, cache, queue, job                 │
 │                                                          │
 │  Discovery API reports: enabled/unavailable/degraded     │
 │  per service so clients adapt their UI accordingly       │
@@ -58,7 +58,7 @@ The ObjectStack protocol defines **16 kernel services** registered via the `Core
 |:--|:-------------|:------------|:--------|:-------|:---------|
 | 1 | **metadata** | `core` | 7 | ⚠️ Framework | Kernel (in-memory) |
 | 2 | **data** | `required` | 9 | ✅ Implemented | `@objectstack/objectql` |
-| 3 | **analytics** | `optional` | 2 | ✅ Implemented | `@objectstack/objectql` |
+| 3 | **analytics** | `optional` | 2 | ❌ Plugin Required | `@objectstack/service-analytics` |
 | 4 | **auth** | `core` | — | 🟡 In Development | `@objectstack/plugin-auth` |
 | 5 | **ui** | `optional` | 5 | ❌ Plugin Required | TBD plugin |
 | 6 | **workflow** | `optional` | 3 | ❌ Plugin Required | TBD plugin |
@@ -173,23 +173,26 @@ The discovery endpoint returns a `services` map so clients know what is availabl
 
 ---
 
-## 3. analytics Service ✅ Implemented
+## 3. analytics Service — Plugin Required
 
 **Service Name**: `analytics` · **Criticality**: `optional`  
-**Implementation**: `@objectstack/objectql` (driver-level capability)  
-**Route Mount**: `/api/v1/analytics`
+**Implementation**: `@objectstack/service-analytics` (the only implementation)  
+**Route Mount**: `/api/v1/analytics` — only served when the plugin registers the service
 
-### Protocol Methods
+<Callout type="warn">
+The kernel-level "degraded analytics fallback" (a lightweight ObjectQL adapter
+registered by the protocol assembly) was **retired** (#3891): it dropped the
+caller's `ExecutionContext` — aggregates ran without RLS/tenant scoping — and
+silently ignored the contract `where` filter. Without
+`@objectstack/service-analytics`, `/api/v1/analytics/*` now answers **404** and
+discovery reports `analytics: { enabled: false, status: "unavailable" }`.
+</Callout>
 
-| Method | Signature | Status |
-|:-------|:----------|:------:|
-| `analyticsQuery` | `AnalyticsQueryRequest → AnalyticsResultResponse` | ✅ |
-| `getAnalyticsMeta` | `GetAnalyticsMetaRequest → AnalyticsMetadataResponse` | ✅ |
+### Features (via `@objectstack/service-analytics`)
 
-### Features
-
-- Cube semantic queries: measures / dimensions / filters → ObjectQL aggregation
-- Auto-generated metadata from SchemaRegistry (numeric → sum/avg, date → time dimensions)
+- Cube semantic queries: measures / dimensions / `where` filter → SQL or ObjectQL aggregation
+- Context-aware read scoping: per-object RLS/tenant predicates resolved from the request's `ExecutionContext` (fail-closed)
+- Cube metadata (`/analytics/meta`), SQL preview (`/analytics/sql`), dataset queries (`/analytics/dataset/query`)
 
 ---
 

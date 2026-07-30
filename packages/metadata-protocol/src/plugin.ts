@@ -5,8 +5,9 @@
  *
  * Owns what `ObjectQLPlugin` historically assembled inline: the
  * `ObjectStackProtocolImplementation` construction + `protocol` service
- * registration, the metadata-storage platform objects, and the lightweight
- * `analytics` fallback. Registering it NEXT TO `ObjectQLPlugin` (with
+ * registration and the metadata-storage platform objects. (The lightweight
+ * `analytics` fallback that used to ride here was retired in #3891 — see
+ * {@link assembleMetadataProtocol}.) Registering it NEXT TO `ObjectQLPlugin` (with
  * `registerProtocol: false` on the engine plugin) makes `@objectstack/objectql`
  * effectively protocol-free at boot-assembly level — the engine plugin keeps
  * only protocol CONSUMERS (DB hydration + authored hook/action rebind, both of
@@ -22,7 +23,6 @@
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { SERVICE_SELF_INFO_KEY, type ServiceSelfInfo } from '@objectstack/spec/api';
 import {
     SysMetadataObject,
     SysMetadataHistoryObject,
@@ -73,11 +73,18 @@ export function createMetadataProtocolPlugin(options: MetadataProtocolPluginOpti
 
 /**
  * The ONE protocol assembly (ADR-0076 Step 2 PR-C): metadata-storage platform
- * objects + `ObjectStackProtocolImplementation` as the `protocol` service +
- * the D12 `degraded` analytics fallback. Called by
- * {@link createMetadataProtocolPlugin} (delegated mode) AND by
+ * objects + `ObjectStackProtocolImplementation` as the `protocol` service.
+ * Called by {@link createMetadataProtocolPlugin} (delegated mode) AND by
  * `ObjectQLPlugin`'s built-in convenience mode (`registerProtocol !== false`)
  * — single source, two mounts, identical result.
+ *
+ * The `analytics` slot is deliberately NOT filled here (#3891 / #3878,
+ * superseding the ADR-0076 D10/D12 "preserve the fallback" stance): the
+ * degraded shim dropped the caller's ExecutionContext (no RLS/tenant
+ * predicates) and ignored the contract `where` filter, returning full-table
+ * aggregates with a 200. An empty slot degrades honestly instead — the
+ * dispatcher's `/analytics` domain answers 404 and discovery reports
+ * `unavailable` until `AnalyticsServicePlugin` registers the real engine.
  *
  * @returns the protocol shim, so the engine-side caller can arm its
  * mutation-rebind subscription synchronously.
@@ -119,42 +126,13 @@ export function assembleMetadataProtocol(
             ctx.registerService('protocol', protocolShim);
             ctx.logger.info('Protocol service registered (MetadataProtocolPlugin)');
 
-            // Lightweight `analytics` fallback mapped onto the protocol shim's
-            // `analyticsQuery` — kept with the protocol assembly so `/analytics`
-            // keeps answering on installs without service-analytics. Honest
-            // capabilities (ADR-0076 D12): self-identifies as `degraded`;
-            // AnalyticsServicePlugin replaces it (ctx.replaceService) with the
-            // real engine.
-            ctx.registerService('analytics', {
-                [SERVICE_SELF_INFO_KEY]: {
-                    status: 'degraded',
-                    handlerReady: true,
-                    message: 'Lightweight ObjectQL analytics fallback — install @objectstack/service-analytics for the full engine',
-                } satisfies ServiceSelfInfo,
-                // HttpDispatcher passes the raw POST body (AnalyticsQuery
-                // shape); the shim's `analyticsQuery` expects the wrapped
-                // `{ cube, query }` envelope and returns its own `{ success,
-                // data }` — reshape in, unwrap out (one level), exactly as the
-                // historical inline adapter did.
-                query: async (body: any) => {
-                    const envelope = body && typeof body === 'object' && 'query' in body && 'cube' in body
-                        ? body
-                        : { cube: body?.cube, query: body };
-                    const result = await protocolShim.analyticsQuery(envelope);
-                    if (result && typeof result === 'object' && 'success' in result && 'data' in result) {
-                        return (result as any).data;
-                    }
-                    return result;
-                },
-                getMeta: async () => ({
-                    cubes: [],
-                    message: 'Analytics meta endpoint not implemented by ObjectQL adapter',
-                }),
-                generateSql: async (_body: any) => ({
-                    sql: null,
-                    message: 'Analytics SQL generation not implemented by ObjectQL adapter',
-                }),
-            });
+            // NO `analytics` fallback rides here anymore (#3891 / #3878). The
+            // degraded shim this assembly used to register dropped the request's
+            // ExecutionContext (aggregates ran without RLS/tenant predicates)
+            // and ignored the contract filter field `where` — a 200 with wrong
+            // numbers. The slot now stays empty: `/analytics/*` answers 404
+            // (ROUTE_NOT_FOUND) and discovery reports the service unavailable
+            // until @objectstack/service-analytics registers the real engine.
 
     return protocolShim;
 }
