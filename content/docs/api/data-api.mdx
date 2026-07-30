@@ -32,9 +32,12 @@ Query records with filtering, sorting, selection, and pagination.
 
 A query parameter the endpoint does not reserve is read as a field-level
 equality filter, so `?status=done` is shorthand for
-`?filter={"status":"done"}`. Because such a parameter *is* a predicate, one
-naming a field the object does not have could only ever match zero records —
-so the endpoint rejects it instead of returning an empty page:
+`?filter={"status":"done"}`. When an explicit `filter` is also present, the
+two compose by AND — `?filter={"amount":{"$gte":100}}&status=done` applies
+both predicates, the same way the `search` parameter composes with `filter`.
+Because such a parameter *is* a predicate, one naming a field the object does
+not have could only ever match zero records — so the endpoint rejects it
+instead of returning an empty page:
 
 ```http
 GET /api/v1/data/showcase_task?pageSize=5
