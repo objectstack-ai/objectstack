@@ -107,6 +107,21 @@ const MOUNTS = {
   // adapter's and plugin's own `*` middlewares). Terminal here would take down
   // the entire surface, not one namespace.
   'packages/cli/src/commands/serve.ts:use *': { yields: true },
+  // Fixed by #4117, found BY this scan (manual greps had missed it). A
+  // pre-processing shim that hands off to the env's auth service, not an owner:
+  // a path that service does not claim now continues to the `${prefix}/*`
+  // dispatcher below. Narrower than #4092 — it does not make a later Hono route
+  // reachable (the dispatcher catch-all is deliberately terminal and would
+  // swallow it anyway); it means an unowned path gets a real gated `dispatch()`
+  // attempt. Keyed on the dispatcher's own `handled` flag where one exists.
+  //
+  // Its `${prefix}/storage/*` twin was ratcheted here alongside it and is now
+  // gone entirely: #4087/#4112 deleted that bridge, having reached the same
+  // conclusion from the other direction — "the wildcard was wider than the two
+  // routes it served". Two independent reads landing on the same defect is the
+  // argument for enumerating the shape rather than finding it by eye each time.
+  "packages/adapters/hono/src/index.ts:all `${prefix}/auth/*`": { yields: true },
+
   'packages/plugins/plugin-hono-server/src/adapter.ts:use *': { yields: true },
   'packages/plugins/plugin-hono-server/src/hono-plugin.ts:use *': { yields: true },
 
@@ -147,17 +162,9 @@ const MOUNTS = {
 
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
   //
-  // Both are the #4088 shape in an adapter that no in-repo package depends on,
-  // so nothing is broken today — but it ships, and ADR-0076's own trigger is an
-  // out-of-tree embedder (`../objectbase`'s gateway). An embedder mounting a
-  // route under either prefix hits exactly #4088. Found BY this scan; manual
-  // greps for the pattern had missed both. Tracked by #4117.
-  'packages/adapters/hono/src/index.ts:all `${prefix}/auth/*`': {
-    ratchet: '#4117 — terminal, same shape as #4088; adapter has no in-repo consumer',
-  },
-  'packages/adapters/hono/src/index.ts:all `${prefix}/storage/*`': {
-    ratchet: '#4117 — terminal, same shape as #4088; adapter has no in-repo consumer',
-  },
+  // Empty as of #4117. The mechanism stays — it is how the next terminal wildcard
+  // gets recorded honestly instead of being either fixed on the spot or quietly
+  // skipped. Declare the current state plus a `ratchet` naming the issue.
 };
 
 /** HTTP-verb registrars plus `use`; anything that can claim a path pattern. */
@@ -229,9 +236,23 @@ function callsContinuation(fn, src) {
     // a call inside it is not this handler yielding.
     if (rebinds(node)) return;
     // `next()` — or `return next()` / `await next()`, same shape.
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === name) {
-      found = true;
-      return;
+    if (ts.isCallExpression(node)) {
+      // `next()` — or `return next()` / `await next()`, same shape.
+      if (ts.isIdentifier(node.expression) && node.expression.text === name) {
+        found = true;
+        return;
+      }
+      // …or HANDED to a helper that awaits it: `yieldUnowned(c, next, …)`.
+      // Counting this is deliberate (#4117). `adapters/hono` factors the yield
+      // into one helper precisely because the compose subtlety it encodes should
+      // be written once, and a checker that only recognised a direct call would
+      // push code toward duplicating it. The trade-off is a handler that passes
+      // the continuation somewhere that never awaits it — narrower than the false
+      // NEGATIVE it replaces, and the ledger still requires a human to classify.
+      if (node.arguments.some((a) => ts.isIdentifier(a) && a.text === name)) {
+        found = true;
+        return;
+      }
     }
     ts.forEachChild(node, visit);
   };
@@ -463,6 +484,14 @@ function selfTest() {
     !yieldsIn('app.all("/a/*", async (c, next) => { items.forEach((next) => next()); return r; });'),
     'an INNER binding shadowing the name must not count as yielding',
   );
+  assert(
+    yieldsIn('app.all("/a/*", async (c, next) => yieldUnowned(c, next, fb));'),
+    'handing the continuation to a helper that awaits it DOES count (#4117)',
+  );
+  assert(
+    !yieldsIn('app.all("/a/*", async (c, next) => { log("no next here"); return r; });'),
+    'a call that neither invokes nor receives the continuation must not count',
+  );
 
   // `resolveHandler` — a handler passed by name must still be analysed, or the
   // scan reports a yielding mount as terminal (cloud#923 mounts it that way).
@@ -486,7 +515,7 @@ function selfTest() {
     'method is part of the key',
   );
 
-  console.log('✓ self-test: 15 cases');
+  console.log('✓ self-test: 17 cases');
 }
 
 if (process.argv.includes('--self-test')) selfTest();
