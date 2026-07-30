@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { envelopeViolations } from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { DomainHandlerRegistry } from './domain-handler-registry.js';
 import type { DomainHandler } from './domain-handler-registry.js';
@@ -391,9 +392,15 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
     });
 
     it('every success body carries its payload under `data` and nowhere else', async () => {
-        // The general form of the two assertions above, over all four success
-        // routes: no key beside the envelope's own may hold the payload.
-        const ENVELOPE_KEYS = new Set(['success', 'data', 'meta']);
+        // The general form of the two assertions above, over all the success
+        // routes — and `envelopeViolations` (#4090) is now where that general form
+        // lives. This test hand-rolled it first, for #4038; extracting it into the
+        // spec meant the same rule stopped having two definitions that could drift
+        // apart, which is the failure this whole line has been closing.
+        //
+        // The shared one is also stricter than what stood here: the local set
+        // allowed any body whose keys were `success`/`data`/`meta`, so it passed a
+        // success body with no `data` at all and one carrying an `error`.
         const shareLinks = {
             createLink: vi.fn().mockResolvedValue(LINK),
             listLinks: vi.fn().mockResolvedValue([LINK]),
@@ -407,9 +414,7 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
         ];
         for (const body of bodies) {
             expect(body?.success).toBe(true);
-            for (const key of Object.keys(body ?? {})) {
-                expect(ENVELOPE_KEYS.has(key), `body carries a non-envelope top-level key: ${key}`).toBe(true);
-            }
+            expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
         }
     });
 
