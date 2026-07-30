@@ -47,6 +47,12 @@ describe('ChartTypeSchema', () => {
     });
   });
 
+  it('should accept the mixed chart type', () => {
+    // `combo` draws bar/line/area series together on left/right axes — the
+    // family `ChartSeriesSchema.type` and `ChartSeriesSchema.yAxis` configure.
+    expect(() => ChartTypeSchema.parse('combo')).not.toThrow();
+  });
+
   it('should accept all performance chart types', () => {
     const types = ['gauge', 'metric', 'kpi'] as const;
 

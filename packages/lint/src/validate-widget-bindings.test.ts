@@ -203,8 +203,22 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
   });
 
   it('(d) non-chart types do not warn on missing chartConfig', () => {
-    for (const type of ['metric', 'kpi', 'gauge', 'table']) {
+    for (const type of ['metric', 'kpi', 'gauge', 'solid-gauge', 'bullet', 'table', 'pivot']) {
       expect(validateWidgetBindings(chartStack({ type, chartConfig: undefined }))).toHaveLength(0);
+    }
+  });
+
+  it('(d) every multi-series family in the taxonomy warns — including a newly added one', () => {
+    // The set of chart families that need a measure mapping is derived from
+    // `ChartTypeSchema`, so a family added to the taxonomy is covered without
+    // editing a list here. `combo` is the case that proved it: as a hand-written
+    // list, an unlisted family read as "not a chart" and the missing mapping
+    // went unreported. objectui#2945.
+    for (const type of ['bar', 'horizontal-bar', 'column', 'line', 'area', 'pie',
+      'donut', 'funnel', 'scatter', 'treemap', 'sankey', 'radar', 'combo']) {
+      const findings = validateWidgetBindings(chartStack({ type, chartConfig: undefined }));
+      expect(findings, `expected a warning for chart type '${type}'`).toHaveLength(1);
+      expect(findings[0].rule).toBe(CHART_CONFIG_MISSING);
     }
   });
 

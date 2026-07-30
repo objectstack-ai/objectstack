@@ -7,6 +7,7 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, strictVisibilityError } from '../shared/visibility';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
+import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
 import { retiredKey } from '../shared/retired-key';
 import { FieldType, SelectOptionSchema } from '../data/field.zod';
@@ -467,7 +468,14 @@ export const KanbanConfigSchema = lazySchema(() => z.object({
  * `ChartConfigSchema` in `chart.zod.ts` (which is for embedded reports).
  */
 export const ListChartConfigSchema = lazySchema(() => z.object({
-  chartType: z.enum(['bar', 'line', 'pie', 'area', 'scatter']).default('bar').describe('Chart visualisation type'),
+  /**
+   * Narrowed from `ChartTypeSchema` with `.extract()` rather than retyped.
+   * Same five members as before — this is a de-duplication, not a widening —
+   * but a member renamed in the chart taxonomy now fails here at build time
+   * instead of leaving a second list quietly disagreeing with the first.
+   */
+  chartType: ChartTypeSchema.extract(['bar', 'line', 'pie', 'area', 'scatter'])
+    .default('bar').describe('Chart visualisation type'),
   /**
    * ADR-0021 — the semantic-layer `dataset` this chart binds to. Selects
    * dimensions/measures BY NAME so the chart's numbers stay consistent with

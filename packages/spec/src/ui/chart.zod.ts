@@ -37,6 +37,14 @@ export const ChartTypeSchema = lazySchema(() => z.enum([
   'treemap',
   'sankey',
 
+  // Mixed — bar/line/area series on shared dual axes. `ChartSeriesSchema.type`
+  // and `ChartSeriesSchema.yAxis` below exist precisely to configure this
+  // family (the former's own doc comment says "combo charts"), so the taxonomy
+  // was unable to name the one chart type the rest of the file is written for.
+  // objectui's renderer draws it distinctly — mixed marks, left/right axes,
+  // per-series type — and had to carry `combo` in a local fork of this list.
+  'combo',
+
   // Performance (single value — metric/kpi render a number; gauge/solid-gauge/
   // bullet are honest single-value variants pending a real dial/target renderer)
   'gauge',
