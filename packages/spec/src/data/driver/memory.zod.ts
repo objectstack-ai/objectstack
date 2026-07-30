@@ -218,13 +218,15 @@ export const MemoryConfigSchema = lazySchema(() => z.object({
    * new InMemoryDriver({ persistence: { adapter: upstashAdapter } })
    *
    * **A datasource declared with `driver: 'memory'` is ephemeral unless this
-   * key is set (#4083).** `'auto'` is the default for a driver you construct
-   * yourself; the shared datasource factory
+   * key is set (#4083).** `'auto'` is the default only for a driver you
+   * construct yourself. The shared datasource factory
    * (`createDefaultDatasourceDriverFactory`) passes `false` when the
    * declaration says nothing, so a declared memory datasource cannot silently
-   * become a file-backed store in the process's working directory. That
-   * matches `objectstack dev`, which already reads an explicit memory driver
-   * as the user opting out of persistence. Set this key to opt back in.
+   * become a file-backed store in the process's working directory — matching
+   * `objectstack dev`, which already reads an explicit memory driver as the
+   * user opting out of persistence. Set this key to opt back in; when you do
+   * without naming a `path`/`key`, the factory scopes the destination per
+   * datasource, so two memory datasources never share one file.
    */
   persistence: MemoryPersistenceConfigSchema.or(z.literal(false)).default('auto').describe('Persistence configuration (auto-detect by default; a declared memory datasource is ephemeral unless set)'),
 
