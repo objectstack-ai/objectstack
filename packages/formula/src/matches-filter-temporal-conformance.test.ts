@@ -15,7 +15,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TEMPORAL_CASES, TEMPORAL_ROWS } from '@objectstack/spec/data';
+import {
+  TEMPORAL_CASES,
+  TEMPORAL_ROWS,
+  TEMPORAL_TIME_CASES,
+  TEMPORAL_TIME_ROWS,
+} from '@objectstack/spec/data';
 
 import { matchesFilterCondition } from './matches-filter';
 
@@ -23,6 +28,18 @@ describe('matchesFilterCondition — temporal conformance', () => {
   for (const c of TEMPORAL_CASES) {
     it(c.name, () => {
       const got = TEMPORAL_ROWS.filter((r) => matchesFilterCondition(r, c.filter)).map((r) => r.id);
+      expect(got, c.note).toEqual(c.expected);
+    });
+  }
+});
+
+describe('matchesFilterCondition — Field.time conformance', () => {
+  // Type-blind, so the records carry the canonical wall-clock text a converged
+  // column presents. That the variable-width canon still orders correctly under
+  // a plain string comparison is the assertion.
+  for (const c of TEMPORAL_TIME_CASES) {
+    it(c.name, () => {
+      const got = TEMPORAL_TIME_ROWS.filter((r) => matchesFilterCondition(r, c.filter)).map((r) => r.id);
       expect(got, c.note).toEqual(c.expected);
     });
   }

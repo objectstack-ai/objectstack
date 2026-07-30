@@ -92,8 +92,58 @@ export function storageDateValue(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Collapse a `Field.time` value to a canonical timezone-naive wall clock —
+ * `HH:MM:SS`, extended to `HH:MM:SS.fff` exactly when the milliseconds are
+ * non-zero. Mirrors `SqlDriver`'s `canonicalTimeOfDay` (ADR-0053 D-C1).
+ *
+ * Text rather than a BSON `Date`, for the same reason `date` is text: a wall
+ * clock is not an instant (#2004), and storing one as a `Date` would invent a
+ * calendar day and a zone the author never wrote. The canon table at the top of
+ * this module has claimed this form since #3994 — but nothing implemented it,
+ * so a `time` column was left holding whatever each writer produced, and BSON
+ * type-bracket comparison made a text bound miss every `Date`-written row. The
+ * shared conformance table measures it: 8 of its 9 cases returned only the
+ * text-written half of the fixture.
+ *
+ * Why variable width: `.` sorts below every digit, so lexicographic order stays
+ * chronological across the two widths (`'14:30:00.100' < '14:30:01'`), and the
+ * zero-millisecond spelling stays the `HH:MM:SS` every dialect's native TIME
+ * emits.
+ *
+ * A `Date` / epoch-ms / full-timestamp value folds to its **UTC** time-of-day,
+ * never the server's. Total: an out-of-range wall clock (`'25:00'`) or
+ * unparseable junk passes through untouched.
+ */
+export function storageTimeValue(value: unknown): unknown {
+  if (value == null) return value;
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (s === '') return value;
+    const m = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/.exec(s);
+    if (m) {
+      const [, hh, mm, ss = '00', frac] = m;
+      if (Number(hh) > 23 || Number(mm) > 59 || Number(ss) > 59) return value;
+      const ms = frac ? `${frac}000`.slice(0, 3) : '000';
+      return ms === '000' ? `${hh}:${mm}:${ss}` : `${hh}:${mm}:${ss}.${ms}`;
+    }
+  }
+  // Not a bare wall clock — a `Date`, epoch ms, or a full/zone-naive timestamp.
+  // Delegate to the one function that owns instants, then keep its UTC
+  // time-of-day. (That one returns a BSON `Date` here, so read the parts off it
+  // rather than off an ISO string.)
+  const instant = storageDatetimeValue(value);
+  if (instant instanceof Date && !Number.isNaN(instant.getTime())) {
+    const p = (n: number, w = 2) => String(n).padStart(w, '0');
+    const base = `${p(instant.getUTCHours())}:${p(instant.getUTCMinutes())}:${p(instant.getUTCSeconds())}`;
+    const ms = instant.getUTCMilliseconds();
+    return ms === 0 ? base : `${base}.${p(ms, 3)}`;
+  }
+  return value;
+}
+
 /** Which temporal rule a declared field takes, if any. */
-export type TemporalFieldKind = 'datetime' | 'date';
+export type TemporalFieldKind = 'datetime' | 'date' | 'time';
 
 /**
  * Resolves the temporal kind of `field` on the object being queried, or
@@ -114,7 +164,9 @@ export function coerceTemporalValue(
 ): unknown {
   if (kind === undefined) return value;
   if (Array.isArray(value)) return value.map((v) => coerceTemporalValue(v, kind));
-  return kind === 'datetime' ? storageDatetimeValue(value) : storageDateValue(value);
+  if (kind === 'datetime') return storageDatetimeValue(value);
+  if (kind === 'time') return storageTimeValue(value);
+  return storageDateValue(value);
 }
 
 /**
@@ -129,6 +181,7 @@ export function indexTemporalFields(
   for (const [name, def] of Object.entries(fields ?? {})) {
     if (def?.type === 'datetime') out.set(name, 'datetime');
     else if (def?.type === 'date') out.set(name, 'date');
+    else if (def?.type === 'time') out.set(name, 'time');
   }
   return out;
 }
