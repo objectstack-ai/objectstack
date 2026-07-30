@@ -71,7 +71,9 @@ describe('unknown node config keys (#4045)', () => {
     // `visibleWhen` is edit-distance 4 against `nearestName`'s threshold of 3, so
     // this exact typo gets no did-you-mean. Printing the declared set is what
     // makes the diagnostic actionable regardless.
-    expect(hit).toContain('Declared here: name, label, type, required, visibleWhen.');
+    expect(hit).toContain(
+      'Declared here: name, label, type, required, options, defaultValue, placeholder, visibleWhen.',
+    );
   });
 
   it('adds a did-you-mean when the typo IS within edit distance', () => {

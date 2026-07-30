@@ -299,51 +299,57 @@ async function resolveDependencies(
 }
 ```
 
-### Plugin Lifecycle Hooks
+### Plugin Runtime Contract
 
-Plugins can define hooks that run at specific lifecycle events:
+Installation registers **metadata** — no plugin code runs at install time.
+Executable behaviour belongs to the runtime contract, which has exactly three
+methods (`packages/core/src/types.ts`), invoked by the kernel:
 
 ```typescript
-// plugin.ts — a plugin is a plain default-exported object (there is no
-// `definePlugin` helper). Lifecycle hooks are top-level methods, each
-// receiving a single PluginContext ({ ql, os, logger, config, pluginId }).
-export default {
-  name: '@vendor/salesforce',
-  version: '3.2.1',
+// plugin.ts — a runtime plugin implements Plugin: `name` plus
+// init / start / destroy. `init` is required; the other two are optional.
+export class SalesforceSyncPlugin implements Plugin {
+  name = 'plugin.salesforce-sync';
+  version = '3.2.1';
 
-  // Runs once, when the plugin is installed
-  onInstall: async (context) => {
-    // Validate environment. `config` is a plain record, not a store.
-    if (!context.config['salesforce.apiKey']) {
+  // Phase 1 — runs for every plugin, sequentially, in registration order.
+  // Register services, schemas and routes here; other plugins' services
+  // may not exist yet.
+  async init(ctx: PluginContext) {
+    if (!process.env.SALESFORCE_API_KEY) {
       throw new Error('Salesforce API key not configured');
     }
-    context.logger.info('Salesforce plugin installed');
-  },
+  }
 
-  // Runs when the plugin is enabled (at startup or manually)
-  onEnable: async (context) => {
-    context.logger.info('Salesforce sync enabled');
-  },
+  // Phase 2 — runs after EVERY plugin's init has completed, so every
+  // registered service is resolvable. Begin actual work here.
+  async start(ctx: PluginContext) {
+    ctx.logger.info('Salesforce sync started');
+  }
 
-  // Runs when the plugin is disabled (at shutdown or manually)
-  onDisable: async (context) => {
-    context.logger.info('Salesforce sync disabled');
-  },
-
-  // Runs once, when the plugin is uninstalled
-  onUninstall: async (context) => {
-    context.logger.info('Removing Salesforce plugin data');
-  },
-
-  // Runs when the plugin version changes. Receives an UpgradeContext with
-  // previousVersion, newVersion, and isMajorUpgrade.
-  onUpgrade: async (context) => {
-    context.logger.info(
-      `Salesforce ${context.previousVersion} → ${context.newVersion}`,
-    );
-  },
-};
+  // Shutdown — invoked in reverse registration order, and as rollback for
+  // plugins already started when a later plugin's start() fails.
+  async destroy() {
+    /* stop timers, close connections */
+  }
+}
 ```
+
+An **authored app bundle** (`objectstack.config.ts`) is not a kernel plugin
+and has its own single code seam: a module-level `export const onEnable`,
+which `AppPlugin` invokes at its own `start()` with the host context. That is
+the place apps register action handlers — see the worked examples in
+`examples/app-todo` and `examples/app-showcase`.
+
+<Callout type="warn">
+Earlier revisions of this page documented an `onInstall` / `onEnable` /
+`onDisable` / `onUninstall` / `onUpgrade` hook family on plugins. **The kernel
+never called any of them** — code written against them silently never ran —
+and the family was retired from the protocol (#4212, ADR-0049
+enforce-or-remove). Install/uninstall/upgrade are package-registry state
+transitions (this page, above), not code hooks; boot-time code goes in
+`init`/`start`.
+</Callout>
 
 ### Installation CLI
 

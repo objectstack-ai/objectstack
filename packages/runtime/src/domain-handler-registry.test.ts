@@ -351,14 +351,18 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
         expect(download).not.toHaveBeenCalled();
     });
 
-    it('/ui/view/:object serves the protocol getUiView result; 503 without a protocol service', async () => {
+    it('/ui/view/:object serves the protocol getUiView result; 501 without a protocol service', async () => {
         const getUiView = vi.fn().mockResolvedValue({ view: 'list-def' });
         const ok = await makeDispatcher({ protocol: { getUiView } }).dispatch('GET', '/ui/view/account/list', undefined, {}, {} as any);
         expect(ok.response?.status).toBe(200);
         expect(getUiView).toHaveBeenCalledWith({ object: 'account', type: 'list' });
 
+        // [#4093 follow-up] Was 503. The route is mounted and the
+        // implementation is absent — 501. 503 claimed the condition was
+        // temporary; an uninstalled MetadataPlugin does not install itself.
         const missing = await makeDispatcher().dispatch('GET', '/ui/view/account', undefined, {}, {} as any);
-        expect(missing.response?.status).toBe(503);
+        expect(missing.response?.status).toBe(501);
+        expect(missing.response?.body?.error?.message ?? '').toContain('MetadataPlugin');
     });
 });
 
@@ -702,9 +706,13 @@ describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
         expect(result.response?.body?.agents).toBeUndefined();
     });
 
-    it('/ai routes 404 (service missing) for non-agents paths', async () => {
+    // [#4093 follow-up] Was 404. `/ai/*` is mounted unconditionally, so a
+    // request with no AI service reached a handler that had nothing to
+    // delegate to — 501. (`GET /ai/agents` keeps its deliberate empty-list
+    // 200, asserted separately: the console polls it on every navigation.)
+    it('/ai routes 501 (service missing) for non-agents paths', async () => {
         const result = await makeDispatcher().dispatch('POST', '/ai/chat', { q: 'hi' }, {}, {} as any);
-        expect(result.response?.status).toBe(404);
+        expect(result.response?.status).toBe(501);
     });
 
     it('/ai dispatches to a matching cached kernel route with params + user threading', async () => {

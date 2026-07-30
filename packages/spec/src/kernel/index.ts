@@ -36,7 +36,6 @@ export * from './package-registry.zod';
 export * from './package-upgrade.zod';
 export * from './plugin-capability.zod';
 export * from './plugin-lifecycle-advanced.zod';
-export * from './plugin-lifecycle-events.zod';
 export * from './plugin-loading.zod';
 export * from './plugin-runtime.zod';
 export * from './plugin-security-advanced.zod';

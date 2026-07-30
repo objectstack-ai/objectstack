@@ -53,43 +53,34 @@ export const PluginContextSchema = lazySchema(() => z.object({
 export type PluginContextData = z.infer<typeof PluginContextSchema>;
 export type PluginContext = PluginContextData;
 
-/**
- * Upgrade Context Schema
- *
- * Provides version migration context to the `onUpgrade` lifecycle hook.
- * Enables developers to write conditional migration logic based on
- * the previous and new versions.
- */
-export const UpgradeContextSchema = lazySchema(() => z.object({
-  /** Version before upgrade */
-  previousVersion: z.string().describe('Version before upgrade'),
-
-  /** Version after upgrade */
-  newVersion: z.string().describe('Version after upgrade'),
-
-  /** Whether this is a major version bump */
-  isMajorUpgrade: z.boolean().describe('Whether this is a major version bump'),
-
-  /** Metadata snapshot before upgrade (for migration logic) */
-  previousMetadata: z.record(z.string(), z.unknown()).optional()
-    .describe('Metadata snapshot before upgrade'),
-}).describe('Version migration context for onUpgrade hook'));
-
-export type UpgradeContext = z.infer<typeof UpgradeContextSchema>;
-
-export const PluginLifecycleSchema = lazySchema(() => z.object({
-  onInstall: z.function().optional().describe('Called when plugin is installed'),
-  
-  onEnable: z.function().optional().describe('Called when plugin is enabled'),
-  
-  onDisable: z.function().optional().describe('Called when plugin is disabled'),
-  
-  onUninstall: z.function().optional().describe('Called when plugin is uninstalled'),
-  
-  onUpgrade: z.function().optional().describe('Called when plugin is upgraded. Receives UpgradeContext with previousVersion, newVersion, and isMajorUpgrade'),
-}));
-
-export type PluginLifecycleHooks = z.infer<typeof PluginLifecycleSchema>;
+// ---------------------------------------------------------------------------
+// RETIRED — the `onInstall` / `onEnable` / `onDisable` / `onUninstall` /
+// `onUpgrade` lifecycle family, and the `UpgradeContextSchema` that existed to
+// serve `onUpgrade` (#4212, ADR-0049 enforce-or-remove).
+//
+// The kernel never called any of them. Its plugin contract is `init(ctx)` /
+// `start(ctx)` / `destroy()` (`packages/core/src/types.ts`): `kernel.use()`
+// validates and stores, `bootstrap()` runs `init` then `start`, shutdown runs
+// `destroy` in reverse order. The five hooks were declared here with no
+// invocation site anywhere in the runtime — their only importer repo-wide was
+// this file's own test — so a plugin authoring them shipped code that never
+// ran, and the docs that recommended them sent authors at a dead seam
+// (the #4212 report: a plugin following the documented advice registered its
+// custom metadata types into nothing, with no error saying so).
+//
+// What owns each concern instead:
+//   - install-time work → the package-install subsystem
+//     (`registry.installPackage`, `sys_packages`, the marketplace flow);
+//   - boot-time code → `init`/`start`, or for authored app bundles the
+//     `onEnable` STACK runtime member `AppPlugin` invokes off the bundle
+//     (`STACK_RUNTIME_MEMBERS` — same name, different and real contract);
+//   - teardown → `destroy()`.
+//
+// Plain deletion, not `retiredKey()` tombstones: nothing parses plugin
+// objects through these schemas (`stack.zod` carries plugins as
+// `z.array(z.unknown())`), so a tombstone prescription could never be
+// received — the `plugin-runtime.zod.ts` precedent.
+// ---------------------------------------------------------------------------
 
 /**
  * Shared Plugin Types
@@ -125,7 +116,7 @@ export function isConsumerInstallable(type: string | undefined): boolean {
   return type != null && (CONSUMER_INSTALLABLE_TYPES as readonly string[]).includes(type);
 }
 
-export const PluginSchema = lazySchema(() => PluginLifecycleSchema.extend({
+export const PluginSchema = lazySchema(() => z.object({
   id: z.string().min(1).optional().describe('Unique Plugin ID (e.g. com.example.crm)'),
   type: z.enum([
     'standard',   // Default: General purpose backend logic (Service, Hook, etc.)

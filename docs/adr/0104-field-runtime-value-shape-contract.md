@@ -855,10 +855,29 @@ implementing PR's decision (candidates: the system seed that first creates
 requirement: it fires only for a store it is itself creating from empty,
 never for one it found.
 
+**Seam, as implemented.** Neither candidate survived contact: *"`sys_migration`
+is absent"* is precisely the 16→17 trap — an upgrading database lacks that
+table too — and the schema bootstrap runs identically on both. Nothing in the
+platform recorded datastore newness at all; the drivers knew it for one
+statement (`hasTable` → `createTable`) and discarded it. So the observation is
+now kept: each driver counts the tables it **created** against those it
+**found** since connect (`IDataDriver.getSchemaSyncStats`), and a store is
+attested only when the whole engine reports *created > 0 and existing = 0*.
+Every uncertainty resolves to "no" — a driver that cannot report, a deferred or
+skipped sync, a second datasource that was already there. Being strict here is
+cheap in the only direction that matters: a wrongly-withheld attestation costs
+a command someone can still run, a wrongly-granted one asserts a store's
+history on no evidence. The write lands at `kernel:ready` from the service that
+owns `sys_migration`, and never overwrites an existing row: a store with flag
+rows is by definition not one being created.
+
 Born-strict deployments also make the platform's own dogfood the standing
 canary for R2 (a codified shape stricter than some legitimate client's
 writes): showcase/CRM boots are fresh datastores, so they enforce from birth,
-and a false rejection fails our suites before any customer sees it.
+and a false rejection fails our suites before any customer sees it. Since
+#3459 that canary covers the collection path too — a born-attested dogfood run
+exercises release-time tombstoning and the reap guard's re-verify on every
+boot, so an over-eager delete fails our suites rather than a customer's data.
 
 ### D2 action params: the evidence cannot exist, so strict is the 17.0 default
 

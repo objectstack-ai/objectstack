@@ -4666,6 +4666,9 @@ export class RestServer {
         //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.)
         //   fields=a,b,c        (default: derive from object schema; falls back to keys of the first row)
         //   filter=<json>       ($filter as URL-encoded JSON, same shape as list endpoint)
+        //   search=<term>       (full-text term, same semantics as the list endpoint's
+        //                        $search; composes with `filter` rather than replacing it)
+        //   searchFields=a,b    (optional ADR-0061 override for which fields `search` scans)
         //   orderby=field:desc  (optional ordering, mirrors $orderby semantics)
         //   header=false        (omit the header row for csv / xlsx; default true)
         //   limit=<n>           (default 10000, hard cap 50000)
@@ -4739,6 +4742,25 @@ export class RestServer {
                     } else if (q.filter && typeof q.filter === 'object') {
                         filter = q.filter;
                     }
+
+                    // Full-text term, same semantics as the list endpoint's `$search`.
+                    // Without it this route could only ever mirror the FILTER half of a
+                    // list, so a user who searched and then exported downloaded the
+                    // unsearched superset — more rows than the screen showed, with
+                    // nothing to indicate it. `$search` composes with `$filter` inside
+                    // `findData`, so both halves apply.
+                    const search = typeof q.search === 'string' && q.search.trim().length > 0
+                        ? q.search.trim()
+                        : undefined;
+                    // ADR-0061 override for which fields the term scans. Only meaningful
+                    // alongside `search`; ignored on its own, exactly as in findData.
+                    let searchFields: string[] | undefined;
+                    if (typeof q.searchFields === 'string' && q.searchFields.length > 0) {
+                        searchFields = q.searchFields.split(',').map((s: string) => s.trim()).filter(Boolean);
+                    } else if (Array.isArray(q.searchFields)) {
+                        searchFields = q.searchFields.filter((s: any) => typeof s === 'string' && s.length > 0);
+                    }
+                    if (searchFields && searchFields.length === 0) searchFields = undefined;
 
                     let orderby: any = undefined;
                     if (typeof q.orderby === 'string' && q.orderby.length > 0) {
@@ -4880,6 +4902,8 @@ export class RestServer {
                             object: objectName,
                             query: {
                                 ...(filter ? { $filter: filter } : {}),
+                                ...(search ? { $search: search } : {}),
+                                ...(search && searchFields ? { $searchFields: searchFields } : {}),
                                 ...(orderby ? { $orderby: orderby } : {}),
                                 ...(expandFields.length > 0 ? { $expand: expandFields.join(',') } : {}),
                                 $top: take,

@@ -44,6 +44,10 @@ export default defineStack({
     type: 'app',
     name: 'CRM (minimal example)',
     description: 'Minimal CRM workspace used by the framework to validate the metadata loading pipeline end-to-end.',
+    // Protocol major this package is authored against (ADR-0087). The kernel
+    // checks the range at load time and refuses a major-incompatible runtime
+    // with a structured diagnostic instead of failing deep in a schema parse.
+    engines: { protocol: '^17' },
   },
 
   // Auto-resolved by the CLI; `ui` enables the Studio shell, `automation`

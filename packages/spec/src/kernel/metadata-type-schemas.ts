@@ -138,11 +138,11 @@ export function getMetadataTypeSchema(type: string): z.ZodType | undefined {
  * plugin's **`init(ctx)`**, so `GET /api/v1/meta` starts emitting a real JSON
  * Schema for them. Idempotent.
  *
- * This used to say "from their `onInstall` hook", pointing at a hook that does
- * not run (#4212). The kernel's `Plugin` contract is `init` / `start` /
+ * This used to say "from their `onInstall` hook", pointing at a hook that
+ * never ran (#4212). The kernel's `Plugin` contract is `init` / `start` /
  * `destroy` (`packages/core/src/types.ts`); the `onInstall` / `onEnable` /
- * `onDisable` / `onUninstall` / `onUpgrade` family declared on
- * `PluginLifecycleSchema` has no invocation site anywhere in the runtime, so a
+ * `onDisable` / `onUninstall` / `onUpgrade` family had no invocation site
+ * anywhere in the runtime and was retired from the protocol by #4212, so a
  * plugin that followed the old advice registered nothing and got no error.
  * `init` is what the one real caller of the sibling
  * {@link registerMetadataTypeActions} uses — see

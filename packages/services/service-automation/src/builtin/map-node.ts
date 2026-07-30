@@ -64,7 +64,11 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
           collection: { type: 'string', title: 'Collection', description: 'Expression resolving to the array to process, one item at a time.', xExpression: 'template' },
           flowName: { type: 'string', title: 'Per-item flow', description: 'Subflow run for each item — it may pause (e.g. an approval).', xRef: { kind: 'flow' } },
           iteratorVariable: { type: 'string', title: 'Item variable' },
+          // Declared in #4045 — both read by the executor, neither offered by
+          // any form (online or offline) until now.
+          indexVariable: { type: 'string', title: 'Index variable', description: 'Optional variable holding the current zero-based index.' },
           itemObject: { type: 'string', title: 'Item object', description: 'When items are records, the object they belong to (exposes each item as the child’s record).', xRef: { kind: 'object' } },
+          input: { type: 'object', additionalProperties: true, title: 'Item input', description: 'Params passed to each item’s subflow, interpolated per item (the item variable is in scope).' },
           outputVariable: { type: 'string', title: 'Output variable', description: 'Each item’s subflow output, collected in order.' },
         },
         required: ['collection', 'flowName'],
@@ -72,8 +76,12 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
     }),
     async execute(node, variables, context) {
       const cfg = (node.config ?? {}) as Record<string, unknown>;
-      const flowName =
-        typeof cfg.flowName === 'string' ? cfg.flowName : typeof cfg.flow === 'string' ? cfg.flow : undefined;
+      // The undeclared `flow` alias this used to accept via a bare `??` has
+      // graduated into the ADR-0087 D2 conversion layer as
+      // 'flow-node-map-flow-alias' (#4045), rewritten at load — including the
+      // `registerFlow` rehydration seam — so only the canonical key is read
+      // here (PD #12: no consumer-side fallbacks).
+      const flowName = typeof cfg.flowName === 'string' ? cfg.flowName : undefined;
       if (!flowName) {
         return refuseNode(`map '${node.id}': config.flowName (the per-item subflow) is required`);
       }

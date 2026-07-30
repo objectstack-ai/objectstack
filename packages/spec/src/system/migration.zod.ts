@@ -137,6 +137,48 @@ export const DATA_MIGRATION_FLAG_OBJECT = 'sys_migration';
  */
 export const FILE_REFERENCES_MIGRATION_ID = 'adr-0104-file-references';
 
+/**
+ * Well-known migration id: ADR-0104 D1 non-media value shapes — every stored
+ * reference (`lookup` / `master_detail` / `user` / `tree`) and structured-JSON
+ * (`location` / `address` / `composite` / `repeater` / `record` / `vector`)
+ * value scanned against `valueSchemaFor(field, 'stored')` with zero
+ * violations. Gates strict enforcement of those classes on this deployment
+ * (#3438).
+ *
+ * Deliberately SEPARATE from {@link FILE_REFERENCES_MIGRATION_ID}, which
+ * asserts a different fact. That flag says this deployment's file-field values
+ * were migrated and their ownership reconciled; it says nothing about whether a
+ * `lookup` id or a `location` payload is well formed. Gating these classes on
+ * it would be borrowing evidence for a fact it does not cover — the same error
+ * one layer down as an authority answering a question nobody asked (see the
+ * ADR's 2026-07-27 amendment).
+ *
+ * Unlike the file migration this one has no backfill: a malformed `location` is
+ * an application-data fix only its author can make, so the run reports and
+ * prescribes, and `--apply`'s only write is the flag row itself.
+ */
+export const VALUE_SHAPES_MIGRATION_ID = 'adr-0104-value-shapes';
+
+/**
+ * The migrations a datastore attests at CREATION rather than by scanning.
+ *
+ * Both facts these ids stand for — no legacy file value here, no malformed
+ * stored value here — are true by construction of an empty store, and true
+ * *observably*: the creator watched it come into being with no rows at all.
+ * That is the same observed-transition discipline the gates run on, not
+ * version-gating in disguise; a store that merely *looks* empty when found
+ * earns nothing, because "found empty" is an inference and "created empty" is
+ * an observation.
+ *
+ * Without this, every deployment born on a version that already ships the
+ * migrations would start lax and stay lax until someone ran a command that is,
+ * for them, a no-op — so the warn regime would never die out.
+ */
+export const CREATION_ATTESTED_MIGRATION_IDS = [
+  FILE_REFERENCES_MIGRATION_ID,
+  VALUE_SHAPES_MIGRATION_ID,
+] as const;
+
 export const DataMigrationFlagSchema = lazySchema(() => z.object({
   id: z.string().describe('Migration id (e.g. adr-0104-file-references) — one row per data migration'),
   last_run_at: z.string().datetime().describe('When this migration last completed a gated (apply-mode) run on this deployment'),

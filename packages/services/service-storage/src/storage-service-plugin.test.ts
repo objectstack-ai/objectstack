@@ -370,3 +370,83 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     await expect(ctx._flushReady()).resolves.toBeUndefined();
   });
 });
+
+describe('StorageServicePlugin: fresh-datastore attestation (#3438, ADR-0104)', () => {
+  /** Engine fake with a `sys_migration` table and a settable newness verdict. */
+  function engineWith(createdFromEmpty: boolean | undefined) {
+    const rows: Array<Record<string, unknown>> = [];
+    const engine: any = {
+      registerHook: () => {},
+      registerMiddleware: () => {},
+      getObject: (name: string) => (name === 'sys_migration' ? { name } : undefined),
+      find: async (_object: string, options: any) =>
+        rows.filter((r) => options?.where?.id === undefined || r.id === options.where.id),
+      findOne: async () => null,
+      insert: async (_object: string, data: any) => {
+        rows.push({ ...data });
+        return data;
+      },
+      update: async () => ({}),
+      rows,
+    };
+    if (createdFromEmpty !== undefined) {
+      engine.wasDatastoreCreatedFromEmpty = () => createdFromEmpty;
+    }
+    return engine;
+  }
+
+  async function boot(engine: unknown) {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'oss-attest-'));
+    const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });
+    const ctx = makeCtx();
+    ctx.registerService('objectql', engine);
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await ctx._flushReady();
+  }
+
+  it('attests a store this boot created from empty', async () => {
+    const engine = engineWith(true);
+
+    await boot(engine);
+
+    expect(engine.rows.map((r: any) => r.id).sort()).toEqual([
+      'adr-0104-file-references',
+      'adr-0104-value-shapes',
+    ]);
+    for (const row of engine.rows) {
+      expect(row.verified_at).toBeTruthy();
+      expect(row.blocking).toBe(0);
+    }
+  });
+
+  /**
+   * The property the whole design rests on: a store that was FOUND — an
+   * upgrade, a restart, anything with history — attests nothing and keeps
+   * producing its evidence by scan.
+   */
+  it('attests nothing on a store that already existed', async () => {
+    const engine = engineWith(false);
+
+    await boot(engine);
+
+    expect(engine.rows).toHaveLength(0);
+  });
+
+  it('attests nothing when the engine cannot say (older engine)', async () => {
+    const engine = engineWith(undefined);
+
+    await boot(engine);
+
+    expect(engine.rows).toHaveLength(0);
+  });
+
+  it('a failing attestation never breaks the boot', async () => {
+    const engine = engineWith(true);
+    engine.insert = async () => {
+      throw new Error('disk full');
+    };
+
+    await expect(boot(engine)).resolves.toBeUndefined();
+  });
+});

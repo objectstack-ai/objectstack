@@ -142,6 +142,19 @@ Served by the runtime dispatcher (`@objectstack/runtime`), not `@objectstack/res
 **Service Status Values**: `available` (fully operational), `registered` (route declared but handler unverified — may return 501), `degraded` (partial functionality), `unavailable` (not installed), `stub` (placeholder that throws errors)
 </Callout>
 
+### What an absent capability answers
+
+Discovery never advertises a route for a service it reports `unavailable`. If you call one anyway, the status tells you **which kind of absence** you hit:
+
+| You get | Meaning | Example |
+| :--- | :--- | :--- |
+| **404** | The route is not mounted. The server does not expose this path at all. | `/analytics/*` without an analytics service — the mount itself is gated; `/mcp` when the MCP server is disabled for the environment |
+| **501** | The route is mounted; nothing implements it. The request reached a handler that had nothing to delegate to. | `/automation`, `/notifications`, `/ui/*`, `/ai/*`, `/auth/*`, `/i18n/*`, `/graphql` without their backing service |
+
+A 501 body names the package that would provide the capability — the same sentence `services.<slot>.message` carries in discovery, so the wall and the discovery entry always agree. A 404 here means what 404 always means: check the path.
+
+Neither is retryable. Nothing answers **503** for a missing capability; that status is reserved for genuinely transient states (the kernel still booting, on `GET /ready`).
+
 ---
 
 ## Error Handling

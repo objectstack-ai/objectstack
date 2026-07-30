@@ -113,6 +113,8 @@ export default defineStack({
     version: '0.1.0',
     type: 'app',
     name: 'My App',
+    // Protocol major this app is authored against (ADR-0087 load-time check).
+    engines: { protocol: '^17' },
   },
   // `automation` runs flows and, per ADR-0097, materializes declarative
   // `connectors:` entries at boot. The three generic executors below register
