@@ -212,6 +212,15 @@ export const ActionParamGalleryAction = defineAction({
       name: 'p_account', type: 'lookup', reference: 'showcase_account', label: 'Related account',
       helpText: 'Inline lookup param — searchable record picker, no UUID typing.',
     },
+    // #3405 — the same inline picker aimed at a SYSTEM object. This is the
+    // shape the bug was reported against (PLAT-DEF-005: "assign an inspector"
+    // handed the supervisor a box wanting a pasted UUID), so it earns its own
+    // specimen: `sys_user` is not one of the app's own objects, and a person is
+    // the reference a human is least able to identify by id.
+    {
+      name: 'p_assignee', type: 'lookup', reference: 'sys_user', label: 'Assignee',
+      helpText: 'Inline lookup at a system object — searchable by name/email, never a UUID.',
+    },
     { name: 'p_color', type: 'color', label: 'Accent color', defaultValue: '#7C3AED' },
     // Spec `autonumber` param → the AutoNumber widget (read-only, auto-assigned).
     { name: 'p_reference', type: 'autonumber', label: 'Reference #' },

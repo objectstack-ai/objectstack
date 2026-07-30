@@ -134,16 +134,18 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // are still tolerated (JSON Schema allows additional properties) —
             // this is discoverability, not a lockdown.
             configSchema: {
-                // No `required` array: `recipients`/`title` each accept an alias
-                // (`to`/`subject`), which a strict required-check would reject.
-                // The node enforces "title + ≥1 recipient" at execute time.
+                // No `required` array: the execute-time guard ("title + ≥1
+                // recipient") owns enforcement, and a strict required-check on a
+                // RAW stored config would reject a pre-protocol-17 flow whose
+                // aliased keys (`to`/`subject`/`body`/`url`) are only rewritten
+                // at the load seam ('flow-node-notify-config-aliases', #3796).
                 type: 'object',
                 properties: {
                     recipients: {
-                        description: 'Recipient user id(s) / audience selector(s); alias: `to`',
+                        description: 'Recipient user id(s) / audience selector(s)',
                     },
-                    title: { type: 'string', description: 'Notification title; alias: `subject`' },
-                    message: { type: 'string', description: 'Notification body; alias: `body`' },
+                    title: { type: 'string', description: 'Notification title' },
+                    message: { type: 'string', description: 'Notification body' },
                     channels: {
                         type: 'array', items: { type: 'string' },
                         description: 'Channels to fan out to (default: inbox)',
@@ -163,9 +165,13 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                         type: 'string',
                         description: 'User id that caused the event (writes sys_notification.actor_id)',
                     },
-                    url: {
+                    // `actionUrl` (not `url`) is the deliberate canonical: it is the
+                    // name the whole downstream chain uses (sys_notification.action_url,
+                    // the channel contract, the REST read model), while `url` elsewhere
+                    // in the platform means "HTTP endpoint to call" (#3796).
+                    actionUrl: {
                         type: 'string',
-                        description: 'Explicit click-through URL; overrides the link synthesized from sourceObject/sourceId. Alias: `actionUrl`.',
+                        description: 'Explicit click-through URL; overrides the link synthesized from sourceObject/sourceId.',
                     },
                     payload: { type: 'object', description: 'Extra template inputs merged into the notification payload' },
                 },
@@ -174,17 +180,20 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
         async execute(node, variables, context) {
             const cfg = (node.config ?? {}) as Record<string, unknown>;
 
-            const recipientCfg = cfg.recipients ?? cfg.to ?? [];
+            // The historical aliases (`to`/`subject`/`body`/`url`) are canonicalized
+            // at load by the ADR-0087 D2 conversion 'flow-node-notify-config-aliases'
+            // (#3796), so only the canonical keys are read here.
+            const recipientCfg = cfg.recipients ?? [];
             const recipients = toStringList(interpolate(recipientCfg, variables, context));
             // stringifyForTemplate (not String()): a sole-token `{$error}` resolves
             // to the engine's error OBJECT, which String() would render as the
             // useless `[object Object]` (#3450). Serialize it readably instead.
-            const title = stringifyForTemplate(interpolate(cfg.title ?? cfg.subject ?? '', variables, context));
-            const body = stringifyForTemplate(interpolate(cfg.message ?? cfg.body ?? '', variables, context));
+            const title = stringifyForTemplate(interpolate(cfg.title ?? '', variables, context));
+            const body = stringifyForTemplate(interpolate(cfg.message ?? '', variables, context));
             const channels = toStringList(cfg.channels);
             const topic = cfg.topic ? String(cfg.topic) : undefined;
             const severity = cfg.severity ? String(cfg.severity) : undefined;
-            const urlCfg = cfg.actionUrl ?? cfg.url;
+            const urlCfg = cfg.actionUrl;
             const actionUrl = urlCfg
                 ? String(interpolate(urlCfg, variables, context) ?? '')
                 : undefined;
@@ -195,11 +204,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // Click-through target: forwarding `source` lets the messaging
             // service persist sys_notification.source_object/source_id and
             // synthesize a `/{object}/{id}` deep-link for the inbox (#2675). An
-            // explicit `actionUrl`/`url` still wins over the synthesized link.
+            // explicit `actionUrl` still wins over the synthesized link.
             const source = resolveSource(cfg, variables, context);
             const actorId = toStr(interpolate(cfg.actorId, variables, context));
 
-            if (!title) return { success: false, error: 'notify: title (or subject) is required' };
+            if (!title) return { success: false, error: 'notify: title is required' };
             if (recipients.length === 0) {
                 // Name the templates that came up empty (framework#3582). The
                 // dominant cause is a cross-object hop — `{record.owner.manager}`

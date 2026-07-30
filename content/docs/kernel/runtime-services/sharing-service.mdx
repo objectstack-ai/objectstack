@@ -13,6 +13,7 @@ description: Record-level sharing and editability checks.
 ```ts
 services.sharing.buildReadFilter(object: string, context: SharingExecutionContext): Promise<unknown | null>
 services.sharing.canEdit(object: string, recordId: string, context: SharingExecutionContext): Promise<boolean>
+services.sharing.canDelete(object: string, recordId: string, context: SharingExecutionContext): Promise<boolean>
 services.sharing.canManageShares(object: string, recordId: string, context: SharingExecutionContext): Promise<boolean>
 services.sharing.grant(input: GrantShareInput, context: SharingExecutionContext): Promise<RecordShare>
 services.sharing.revoke(shareId: string, context: SharingExecutionContext, scope?: { object: string; recordId: string }): Promise<void>
@@ -27,10 +28,19 @@ the record — its owner, a holder of Modify All Data on the object, or system
 context. A deployment without `@objectstack/plugin-security` fails closed to
 owner-only. Pass `{ isSystem: true }` only from platform-internal machinery.
 
+## The verb boundary (ADR-0111 D3)
+
+A share widens *which rows* a principal reaches, never *which verbs* they may
+use. `canEdit` (the **update** gate) accepts an `edit`-level share; `canDelete`
+(the **delete** gate) does **not** — delete is ownership (widened by write
+DEPTH) or the `modifyAllRecords` super-user bypass only. Delete is not a share
+level and never will be; a future per-record delete grant would be a capability
+mask AND-ed with object CRUD, not a fourth `access_level`.
+
 ## Returns
 
 - `buildReadFilter`: `null` means unrestricted read; otherwise returns an engine filter
-- `canEdit` / `canManageShares`: boolean decisions (they return `false` rather than throwing)
+- `canEdit` / `canDelete` / `canManageShares`: boolean decisions (they return `false` rather than throwing)
 - `grant`/`listShares`: normalized `RecordShare` rows
 
 ## Typical Errors

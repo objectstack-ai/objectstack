@@ -52,9 +52,8 @@ on every surface — `target` is never an identity key; **D2** every dispatch
 surface resolves the declaration *first* and derives handler-key candidates
 *from* it (the MCP order becomes the shared order); **D3** declaration
 resolution is a trichotomy — found → gate-then-dispatch, metadata plane
-unreachable → 503, genuinely undeclared → **refuse, fail-closed in 17**,
-with `OS_ALLOW_UNDECLARED_ACTIONS=1` as a documented migration valve slated
-for removal in 18; **D4** "declared but hidden" is the blessed pattern for
+unreachable → 503, genuinely undeclared → **refuse, fail-closed in 17,
+with no opt-out** (see the D3 revision note); **D4** "declared but hidden" is the blessed pattern for
 headless actions — "undeclared but executable" has no remaining legitimate
 use; **D5** a reconciliation lint + boot check: every `registerAction` key
 must reconcile to a declaration; **D6** security-gate strictness is
@@ -217,7 +216,7 @@ documented curl 404s.
 |---|---|
 | **Declaration found** | Gate against it, then dispatch (D2). |
 | **Metadata plane unreachable** | **503.** An availability failure is not an authorization decision; the gate an author declared must not evaporate during an outage. (The ADR-0096 posture — "no context" is a defect, never an authorization — applied to "no declaration source".) |
-| **Genuinely undeclared** | **Refuse** (404) with a prescriptive error: `Action 'x' on 'y' has no declaration — add defineAction({ name: 'x', … }) or register it under a declared action's target`. Migration valve: `OS_ALLOW_UNDECLARED_ACTIONS=1` executes it and warns per invocation. |
+| **Genuinely undeclared** | **Refuse** (404) with a prescriptive error: `Action 'x' on 'y' has no declaration — add defineAction({ name: 'x', … }) or register it under a declared action's target`. No opt-out — see the revision note below. |
 
 **Fail-closed in 17 — no cross-major staging.** An earlier draft staged this
 over two majors (warn → CI-only → flip). Protocol 17 is in RC *now*, so the
@@ -243,14 +242,30 @@ Three things must ship **together, in 17**, or the refusal is undiagnosable:
    one it is a checklist.
 
 Plus a `content/docs/releases/v17.mdx` migration entry, alongside its two
-siblings, naming the valve and its removal target.
+siblings, naming the inventory as the migration path.
 
-**The valve is temporary by construction.** `OS_ALLOW_UNDECLARED_ACTIONS=1`
-exists so an upgrade is never blocked at 3am, not so the old behaviour
-survives. It warns on every invocation (not just at boot), is documented as
-a migration aid rather than a supported mode, and is **slated for removal in
-18** — recorded here so it does not silently become permanent, which is the
-usual fate of escape hatches with no stated end.
+> **Revision (2026-07-30, before 17 shipped) — the migration valve is gone.**
+> As accepted, D3 shipped `OS_ALLOW_UNDECLARED_ACTIONS=1`: an opt-out that ran
+> the undeclared handler anyway, warning per invocation, "slated for removal in
+> 18". It was removed before the release on two grounds.
+>
+> **It contradicts the ruling it accompanies.** A flag that executes an
+> ungoverned, system-elevated handler *is* the fail-open D3 closes. Shipping it
+> would have preserved the hole in configurable form, and ADR-0049's trichotomy
+> does not have a "enforced unless a flag says otherwise" state.
+>
+> **It had no observed users.** A reconciliation sweep across the platform
+> packages, every example and every plugin found the only `engine.registerAction`
+> call sites are `app-todo`'s eight, all declared. The valve would have shipped
+> a documented way to reopen the gate for a population nobody has ever seen —
+> and escape hatches with no users are the ones that quietly become permanent,
+> which the removal-in-18 note was itself an admission of.
+>
+> What the valve was buying is covered without it: the app still boots, every
+> declared action still works, D5's inventory names each offender at startup,
+> and the 404 names the `defineAction` to add. The migration costs a code
+> change rather than an env var — which, for reopening an authorization gate,
+> is the correct price.
 
 The deletion inversion closes in 17: deleting a declaration moves the action
 from "gated" straight to "refused". Removal narrows, immediately.
@@ -288,12 +303,20 @@ agent can act on.
 
 `OS_ACTION_PARAMS_STRICT_ENABLED` (opt-**in** strict) is an acceptable
 shape for a *param-contract* ratchet (DX concern, warn-first). It is not an
-acceptable shape for an *authorization* gate: D3's refusal stages toward
-**strict-by-default with an opt-out escape hatch**, and any future gate
-follows the same direction. A flag spelled `OS_ALLOW_*` (opt out of
-enforcement) is the sanctioned shape for security; `OS_*_STRICT_ENABLED`
+acceptable shape for an *authorization* gate: an enforcement that ships off
+for everyone who never read the release notes is not enforcement. A flag
+spelled `OS_ALLOW_*` (opt **out** of enforcement) is the sanctioned shape
+where a security escape hatch is warranted at all; `OS_*_STRICT_ENABLED`
 (opt in to enforcement) is reserved for non-security contracts. Existing
 flags are not renamed by this ADR; new ones conform.
+
+**The strongest form of this rule is no flag at all.** D3 originally carried
+an `OS_ALLOW_UNDECLARED_ACTIONS` opt-out — correctly *spelled* under this
+ruling, and still wrong, because what it opted out of was the gate itself
+rather than a strictness dial around it (see the D3 revision note). So D6
+governs the naming and direction of a security flag *where one is
+justified*; it is not a licence to add one. An authorization boundary with a
+documented bypass is the boundary its bypass describes.
 
 ## Alternatives considered
 
@@ -361,8 +384,8 @@ ones); the engine-side aliasing alternative (deferred); any change to how
    non-breaking for every correctly-declared action.
 2. **D5** — reconciliation lint + boot inventory, so orphans are findable
    before the refusal exists.
-3. **D3/D6** — refusal ON by default, `OS_ALLOW_UNDECLARED_ACTIONS` as the
-   documented valve, plus the `v17.mdx` migration entry. Same PR flips this
+3. **D3/D6** — refusal ON by default with no opt-out, plus the `v17.mdx`
+   migration entry. Same PR flips this
    ADR to `Accepted — implemented` with evidence (the PRIORITIZATION
    status-hygiene rule).
 

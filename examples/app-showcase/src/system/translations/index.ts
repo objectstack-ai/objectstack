@@ -267,6 +267,23 @@ export const ShowcaseTranslationBundle = {
       showcase_field_zoo: {
         label: '字段动物园', pluralLabel: '字段动物园',
         fields: { f_lookups: { label: '查找 → 客户（多值）' } },
+        // #3405 — the inline system-object picker specimen. Translated at birth
+        // because `check-i18n-coverage` ratchets this example at its current
+        // untranslated count: a newly declared label that skips zh-CN pushes the
+        // count up and fails the gate. (The gallery's older params sit inside
+        // that baseline; this one is not allowed to widen it.) `负责人` matches
+        // what the bundle already renders for `showcase_task.assignee`, rather
+        // than introducing a second word for the same idea.
+        _actions: {
+          showcase_action_param_gallery: {
+            params: {
+              p_assignee: {
+                label: '负责人',
+                helpText: '指向系统对象的内联查找 —— 可按姓名或邮箱搜索,无需填写 UUID。',
+              },
+            },
+          },
+        },
       },
     },
   },

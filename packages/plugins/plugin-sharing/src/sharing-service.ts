@@ -214,6 +214,7 @@ export class SharingService implements ISharingService {
   async buildWriteFilter(
     object: string,
     context: SharingExecutionContext,
+    verb: 'update' | 'delete' = 'update',
   ): Promise<unknown | null> {
     if (this.shouldBypass(object, context)) return null;
 
@@ -233,6 +234,13 @@ export class SharingService implements ISharingService {
     const ownerMatch: Record<string, unknown> = ownerIds.length === 1
       ? { [OWNER_FIELD]: ownerIds[0] }
       : { [OWNER_FIELD]: { $in: ownerIds } };
+
+    // [ADR-0111 D3] The verb boundary applied to BULK writes: a share widens
+    // which rows a principal may *edit*, never which they may *delete*. So a
+    // `delete({multi:true})` scopes to the owner/DEPTH set ALONE — the shared
+    // record ids are NOT OR-ed in, exactly as the single-id `canDelete` gate
+    // drops the share branch. Update keeps the share widening.
+    if (verb === 'delete') return ownerMatch;
 
     const grants = await this.engine.find('sys_record_share', {
       where: {
@@ -254,9 +262,33 @@ export class SharingService implements ISharingService {
   }
 
   /**
-   * Return `true` if the caller may edit `(object, recordId)`. Always
-   * `true` for system context, public objects, and objects without an
-   * owner field.
+   * Does the caller own `(object, recordId)` within their write DEPTH? The
+   * shared ownership fast-path behind both {@link canEdit} and
+   * {@link canDelete}. Returns `false` when the record has no owner value.
+   */
+  private async matchesOwnerScope(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<boolean> {
+    const own = await this.engine.find(object, {
+      where: { id: recordId },
+      fields: ['id', OWNER_FIELD],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const owner = Array.isArray(own) && own[0] ? (own[0] as any)[OWNER_FIELD] : undefined;
+    if (owner == null) return false;
+    const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
+    if (writeScope === 'org') return true;
+    const owners = await this.resolveOwnerScopeIds(context, writeScope);
+    return owners.includes(String(owner));
+  }
+
+  /**
+   * Return `true` if the caller may UPDATE `(object, recordId)`: ownership
+   * (widened by write DEPTH) OR an explicit write-level share. Always `true`
+   * for system context, public objects, and objects without an owner field.
    */
   async canEdit(
     object: string,
@@ -273,19 +305,7 @@ export class SharingService implements ISharingService {
     if (!context.userId) return false;
 
     // 1) Ownership (write DEPTH widens the owner-set) — fast path.
-    const own = await this.engine.find(object, {
-      where: { id: recordId },
-      fields: ['id', OWNER_FIELD],
-      limit: 1,
-      context: SYSTEM_CTX,
-    });
-    const owner = Array.isArray(own) && own[0] ? (own[0] as any)[OWNER_FIELD] : undefined;
-    if (owner != null) {
-      const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
-      if (writeScope === 'org') return true;
-      const owners = await this.resolveOwnerScopeIds(context, writeScope);
-      if (owners.includes(String(owner))) return true;
-    }
+    if (await this.matchesOwnerScope(object, recordId, context)) return true;
 
     // 2) Explicit write-level share (`edit`, plus not-yet-normalised `full`).
     const editGrants = await this.engine.find('sys_record_share', {
@@ -301,6 +321,35 @@ export class SharingService implements ISharingService {
       context: SYSTEM_CTX,
     });
     return Array.isArray(editGrants) && editGrants.length > 0;
+  }
+
+  /**
+   * [ADR-0111 D3] Return `true` if the caller may DELETE `(object, recordId)`.
+   *
+   * Deliberately NARROWER than {@link canEdit}: ownership (widened by write
+   * DEPTH) or the `modifyAllRecords` super-user bypass — which reaches this
+   * gate as `__writeScope === 'org'`, set by plugin-security's evaluator — and
+   * NOTHING ELSE. An `edit` (or legacy `full`) share opens update but not
+   * delete: sharing widens rows, never verbs. Always `true` for system
+   * context, public objects, and objects without an owner field, matching
+   * {@link canEdit}.
+   */
+  async canDelete(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<boolean> {
+    if (this.shouldBypass(object, context)) return true;
+
+    const schema = this.engine.getSchema?.(object);
+    if (!schema) return true;
+    if (effectiveSharingModel(schema) === 'public') return true;
+    if (!hasOwnerField(schema)) return true;
+    if (!context.userId) return false;
+
+    // Ownership / write DEPTH / Modify All (as `__writeScope === 'org'`) only —
+    // no share branch. This is the whole difference from canEdit.
+    return this.matchesOwnerScope(object, recordId, context);
   }
 
   /**

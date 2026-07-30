@@ -298,6 +298,63 @@ describe('SharingService.canEdit', () => {
   });
 });
 
+describe('[ADR-0111 D3] SharingService.canDelete — the verb boundary', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+  beforeEach(() => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,
+      lead: LEAD_SCHEMA,
+      task: EXPLICIT_PUBLIC_SCHEMA,
+      note: ORPHAN_SCHEMA,
+      sys_record_share: { name: 'sys_record_share' },
+    });
+    svc = new SharingService({ engine });
+    engine._tables.account = [
+      { id: 'a1', name: 'Acme', owner_id: 'alice' },
+      { id: 'a2', name: 'Beta', owner_id: 'bob' },
+    ];
+  });
+
+  it('system context, public objects, and owner-less objects all allow delete (matches canEdit)', async () => {
+    expect(await svc.canDelete('account', 'a1', { isSystem: true })).toBe(true);
+    expect(await svc.canDelete('task', 'anything', { userId: 'carol' })).toBe(true);
+    engine._tables.note = [{ id: 'n1', body: 'x' }];
+    expect(await svc.canDelete('note', 'n1', { userId: 'carol' })).toBe(true);
+  });
+
+  it('the record owner may delete', async () => {
+    expect(await svc.canDelete('account', 'a1', { userId: 'alice' })).toBe(true);
+  });
+
+  it('a non-owner without ownership may NOT delete', async () => {
+    expect(await svc.canDelete('account', 'a1', { userId: 'bob' })).toBe(false);
+  });
+
+  it('an EDIT share grants canEdit but NOT canDelete', async () => {
+    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' }, { isSystem: true });
+    expect(await svc.canEdit('account', 'a1', { userId: 'bob' })).toBe(true);
+    expect(await svc.canDelete('account', 'a1', { userId: 'bob' })).toBe(false);
+  });
+
+  it("a legacy 'full' share likewise grants edit but not delete", async () => {
+    engine._tables.sys_record_share = [{
+      id: 'shr_legacy', object_name: 'account', record_id: 'a1',
+      recipient_type: 'user', recipient_id: 'bob', access_level: 'full',
+    }];
+    expect(await svc.canEdit('account', 'a1', { userId: 'bob' })).toBe(true);
+    expect(await svc.canDelete('account', 'a1', { userId: 'bob' })).toBe(false);
+  });
+
+  it('Modify All (writeScope=org) may delete a record it does not own', async () => {
+    expect(await svc.canDelete('account', 'a1', { userId: 'admin', __writeScope: 'org' } as any)).toBe(true);
+  });
+
+  it('a principal-less context may not delete a private record', async () => {
+    expect(await svc.canDelete('account', 'a1', {})).toBe(false);
+  });
+});
+
 describe('SharingService.grant / listShares / revoke', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: SharingService;
@@ -452,18 +509,76 @@ describe('buildSharingMiddleware (engine integration)', () => {
     expect(nextCalled).toBe(true);
   });
 
-  it('allows delete after explicit edit grant', async () => {
+  // [ADR-0111 D3] The verb boundary: an edit-level share opens UPDATE but NOT
+  // delete. alice holds an edit share on a2 (owned by bob) — update passes,
+  // delete is refused (delete needs ownership / write depth / Modify All).
+  it('an edit share allows update but NOT delete (ADR-0111 D3)', async () => {
     await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'alice', accessLevel: 'edit' }, { isSystem: true });
+    const mw = buildSharingMiddleware(svc);
+
+    let updateNext = false;
+    await mw(
+      { object: 'account', operation: 'update', data: { id: 'a2', name: 'X' }, context: { userId: 'alice' } } as any,
+      async () => { updateNext = true; },
+    );
+    expect(updateNext).toBe(true);
+
+    await expect(
+      mw(
+        { object: 'account', operation: 'delete', options: { where: { id: 'a2' } }, context: { userId: 'alice' } } as any,
+        async () => {},
+      ),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 });
+  });
+
+  it('the record owner may delete their own record', async () => {
+    const mw = buildSharingMiddleware(svc);
+    let nextCalled = false;
+    await mw(
+      { object: 'account', operation: 'delete', options: { where: { id: 'a1' } }, context: { userId: 'alice' } } as any,
+      async () => { nextCalled = true; },
+    );
+    expect(nextCalled).toBe(true);
+  });
+
+  it('Modify All (writeScope=org) may delete a record it does not own', async () => {
+    const mw = buildSharingMiddleware(svc);
+    let nextCalled = false;
+    await mw(
+      { object: 'account', operation: 'delete', options: { where: { id: 'a2' } }, context: { userId: 'admin', __writeScope: 'org' } } as any,
+      async () => { nextCalled = true; },
+    );
+    expect(nextCalled).toBe(true);
+  });
+
+  it('bulk delete scopes to owned rows ALONE — an edit share does not widen it (ADR-0111 D3)', async () => {
+    await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'bob', accessLevel: 'edit' }, { isSystem: true });
     const mw = buildSharingMiddleware(svc);
     const ctx: any = {
       object: 'account',
       operation: 'delete',
-      options: { where: { id: 'a2' } },
-      context: { userId: 'alice' },
+      options: { multi: true, where: {} },
+      ast: {},
+      context: { userId: 'bob' },
     };
-    let nextCalled = false;
-    await mw(ctx, async () => { nextCalled = true; });
-    expect(nextCalled).toBe(true);
+    await mw(ctx, async () => {});
+    // bob's edit share on a2 widens a bulk UPDATE but NOT a bulk delete.
+    expect(ctx.ast.where).toEqual({ owner_id: 'bob' });
+  });
+
+  it('bulk update DOES widen by the edit share (contrast with delete)', async () => {
+    await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'bob', accessLevel: 'edit' }, { isSystem: true });
+    const mw = buildSharingMiddleware(svc);
+    const ctx: any = {
+      object: 'account',
+      operation: 'update',
+      options: { multi: true, where: {} },
+      ast: {},
+      data: { status: 'x' },
+      context: { userId: 'bob' },
+    };
+    await mw(ctx, async () => {});
+    expect(ctx.ast.where).toEqual({ $or: [{ owner_id: 'bob' }, { id: { $in: ['a2'] } }] });
   });
 
   it('does not block insert', async () => {

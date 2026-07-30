@@ -169,7 +169,12 @@ describe('notify (baseline node)', () => {
             expect(messaging.emitted[0].source).toBeUndefined();
         });
 
-        it('accepts `url` as an alias for actionUrl', async () => {
+        // The deprecated aliases (`to`/`subject`/`body`/`url`) are rewritten to
+        // the canonical keys on rehydration — `registerFlow` runs the ADR-0087
+        // D2 conversion 'flow-node-notify-config-aliases' (#3796) — so a stored
+        // pre-protocol-17 flow keeps working while the executor reads canonical
+        // keys only.
+        it('canonicalizes a stored `url` key to `actionUrl` at load', async () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 recipients: ['user_1'],
                 title: 'Heads up',
@@ -183,7 +188,7 @@ describe('notify (baseline node)', () => {
             expect(messaging.emitted[0].payload).toMatchObject({ url: '/opps/7' });
         });
 
-        it('accepts a single recipient string and the subject/to aliases', async () => {
+        it('canonicalizes stored `to`/`subject` keys at load (single recipient string form)', async () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 to: 'user_9',
                 subject: 'Heads up',

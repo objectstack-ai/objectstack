@@ -128,6 +128,47 @@ export interface IDataDriver {
   deleteMany?(object: string, query: QueryAST, options?: DriverOptions): Promise<number>;
 
   // ===========================================================================
+  // Temporal Storage Convention (ADR-0053 D-A1/D-A2, #3912)
+  // ===========================================================================
+  //
+  // A driver is the single source of truth for how a `Field.date` /
+  // `Field.datetime` value is physically stored on its dialect. Any surface
+  // that builds queries OUTSIDE the driver's own find()/filter path — the
+  // analytics native-SQL strategy today, any future raw-query strategy — must
+  // route its temporal comparands AND its column references through these two
+  // hooks rather than re-deriving the storage form from the value's textual
+  // shape (the drift that produced #3912).
+  //
+  // The two hooks are a pair on purpose: #3912's lesson is that coercing the
+  // comparand alone is NOT sufficient on a dialect whose stored form can
+  // diverge from the bound form — the column side of the comparison has to be
+  // normalised by the same authority. A driver that implements one without
+  // the other reintroduces half the bug, so implement both or neither.
+  //
+  // Both are optional with identity semantics: a driver whose storage form IS
+  // the wire form (memory, mongo) simply omits them, and callers treat
+  // "absent" exactly like "returns the input unchanged".
+
+  /**
+   * Coerce a filter comparand to the on-disk storage form of `field` on
+   * `objectName` — e.g. an ISO instant for a canonical-text datetime column,
+   * `YYYY-MM-DD` text for a `Field.date`, a dialect-spelled datetime literal
+   * where the dialect cannot parse ISO-8601. Non-temporal fields and
+   * uninterpretable values are returned unchanged.
+   */
+  temporalFilterValue?(objectName: string, field: string, value: unknown): unknown;
+
+  /**
+   * The companion for the LEFT side of the same comparison: given the SQL the
+   * caller was going to emit for the column (an already-quoted, possibly
+   * qualified reference), return the SQL it must emit instead so the column
+   * reads in the same storage form {@link temporalFilterValue} coerces the
+   * comparand into. Returns `columnSql` verbatim for every column that needs
+   * no normalisation — which is every column on a fully-converged database.
+   */
+  temporalFilterColumnSql?(objectName: string, field: string, columnSql: string): string;
+
+  // ===========================================================================
   // Transaction Management
   // ===========================================================================
 

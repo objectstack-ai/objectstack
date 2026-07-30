@@ -367,13 +367,28 @@ const step17: MigrationStep = {
     'decision about which skill. The conversion therefore drops the dead key (the ' +
     'runtime stopped reading it in cloud#910, so it already contributes nothing) and ' +
     'emits a notice per agent so the author knows where capability must be ' +
-    're-declared; the schema tombstones the key with a fix-it error naming `skills`.',
+    're-declared; the schema tombstones the key with a fix-it error naming `skills`.\n\n' +
+    'Beyond those spec-surface removals, it graduates the seven flow-node config key ' +
+    'aliases the executors still ' +
+    'tolerated (#3796): the CRUD nodes\' `object` (use `objectName`) — the last tenant ' +
+    'of the `readAliasedConfig` executor shim, which is deleted with it — plus the six ' +
+    'open-coded fallbacks that never went through that shim: notify `to`/`subject`/' +
+    '`body`/`url` (use `recipients`/`title`/`message`/`actionUrl`) and script ' +
+    '`functionName`/`input` (use `function`/`inputs`). All are pure key renames with ' +
+    'unchanged values and replay losslessly. Like the sharing-rule access level above ' +
+    'they keep a load-path acceptance window: none carried a prior deprecation ' +
+    'warning, and `FlowNodeSchema.config` is an unconstrained record, so no schema ' +
+    'tombstone can reject them — the conversion layer is the only seam that can ' +
+    'declare, convert, and retire them.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
     'agent-knowledge-topics-to-sources',
     'agent-tools-to-skills',
     'sharing-rule-access-level-full-to-edit',
+    'flow-node-crud-object-alias',
+    'flow-node-notify-config-aliases',
+    'flow-node-script-config-aliases',
   ],
   semantic: [],
 };

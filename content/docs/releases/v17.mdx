@@ -188,11 +188,19 @@ Three changes land together:
 
 **Migration:** boot logs list every registered-but-undeclared handler under
 `[action-governance]`, alongside declared script actions bound to no handler.
-Declare each one. `OS_ALLOW_UNDECLARED_ACTIONS=1` runs them meanwhile, warning
-on every invocation; **it is removed in 18**. Apps whose actions are all
-declared — anything with working Console buttons — need no changes, other than
-gaining enforcement of the `requiredPermissions` they already declared. Callers
-that hard-coded a `target` in an action URL switch to the action's `name`.
+Declare each one with `defineAction`, or drop the registration if nothing should
+invoke it over HTTP. **There is no opt-out flag** — a switch that ran an
+ungoverned handler would be the same fail-open this change closes, and a sweep
+of the platform, every package and every example found zero undeclared handlers,
+so it would have shipped a way to reopen the gate for a case nobody has
+observed. The failure is bounded: the app still boots and every declared action
+still works; only an undeclared one returns 404, and it names the `defineAction`
+to add.
+
+Apps whose actions are all declared — anything with working Console buttons —
+need no changes, other than gaining enforcement of the `requiredPermissions`
+they already declared. Callers that hard-coded a `target` in an action URL
+switch to the action's `name`.
 
 ### A flow run with no trigger user may not touch data (#3760)
 
@@ -256,6 +264,33 @@ taking effect.
 existed to warn when an author declared both an alias and its canonical key,
 which the parse now rejects outright. Delete the import; there is no replacement
 because the condition can no longer occur.
+
+### Seven flow-node config key aliases graduate into the conversion layer (#3796)
+
+| Node type(s) | Deprecated | Use instead |
+|---|---|---|
+| `get_record` / `create_record` / `update_record` / `delete_record` | `config.object` | `config.objectName` |
+| `notify` | `config.to` / `config.subject` / `config.body` / `config.url` | `config.recipients` / `config.title` / `config.message` / `config.actionUrl` |
+| `script` | `config.functionName` / `config.input` | `config.function` / `config.inputs` |
+
+All are pure key renames with unchanged values. Unlike the three tombstoned
+aliases above, these **cannot** be rejected in the schema —
+`FlowNodeSchema.config` is an unconstrained record — so they keep a load-path
+acceptance window instead: a stored flow authored with an alias keeps loading
+through protocol 17, rewritten to the canonical key at load (including
+`AutomationEngine.registerFlow` rehydration) with a `ConversionNotice`; the
+window retires in 18. The executors read canonical keys only, and the
+`readAliasedConfig` executor shim (which covered `object` → `objectName` and
+warned at run time) is deleted — the conversion layer is now the single seam
+that declares, converts, and retires flow-config aliases.
+
+`os migrate meta --from <your current major>` rewrites all seven in your
+source; or rename the keys by hand. `actionUrl` is the deliberate canonical of
+its pair: the downstream chain already uses that name
+(`sys_notification.action_url`, the channel contract, the REST notification
+model), while `url` platform-wide means an HTTP endpoint to call (`http` node,
+webhooks). The singular `input` on `map` / `subflow` / `connector_action` is
+those nodes' own canonical key and is untouched.
 
 ### `agent.tools[]` is removed — capability comes from skills (ADR-0109, #3820)
 

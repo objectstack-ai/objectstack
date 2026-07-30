@@ -285,6 +285,17 @@ export class RLSCompiler {
     const rlsOp = this.mapOperationToRLS(operation);
 
     return allPolicies.filter(policy => {
+      // A policy switched off is not evaluated — the schema's exact promise
+      // ("Disabled policies are not evaluated", RowLevelSecurityPolicySchema).
+      // Formerly unread ANYWHERE: because applicable policies OR-combine (any
+      // match allows access), a disabled policy kept contributing its grant —
+      // an admin who switched off a too-permissive policy kept sharing the
+      // rows. Same enforce-or-remove shape as `positions` below (ADR-0049).
+      // Exact `=== false` on purpose: the schema defaults `enabled` to true,
+      // and rows round-tripped through sys_permission_set may omit the key —
+      // absent means active, only an explicit false disables.
+      if ((policy as { enabled?: boolean }).enabled === false) return false;
+
       // Check object match
       if (policy.object !== objectName && policy.object !== '*') return false;
 

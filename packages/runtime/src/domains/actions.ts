@@ -185,27 +185,29 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // A handler with no declaration is invisible to every governance
         // surface — ADR-0066 D4 has no `requiredPermissions` to read, ADR-0104
         // no param contract, ADR-0109 materialises no `action_<name>` tool —
-        // yet it executes TRUSTED. Refuse, and say what to add. The valve is
-        // for an upgrade that cannot stop to declare one at 3am; it warns on
-        // every invocation and is slated for removal in 18.
+        // yet it executes TRUSTED. Refuse, and say what to add.
+        //
+        // There is no opt-out. An earlier draft shipped
+        // `OS_ALLOW_UNDECLARED_ACTIONS` as a migration valve slated for removal
+        // in 18; it was dropped before 17 went out. A flag that runs an
+        // ungoverned handler IS the fail-open this ruling exists to close, so
+        // keeping one would have preserved the hole in configurable form —
+        // and a reconciliation sweep found the platform, every package and
+        // every example carry zero undeclared handlers, so it would have
+        // shipped a documented way to reopen the gate for a population nobody
+        // has ever observed. The boot inventory (D5) names the offenders and
+        // the 404 below names the fix, which is the whole migration path.
         if (!actionDef) {
-            if (!actionExec.undeclaredActionsAllowed(deps)) {
-                return {
-                    handled: true,
-                    response: deps.error(
-                        `Action '${actionName}' on '${objectName}' has no declaration — ` +
-                        `add \`defineAction({ name: '${actionName}', … })\`, or register the handler under a ` +
-                        `declared action's \`target\`. Undeclared handlers cannot be permission-gated ` +
-                        `(ADR-0110 D3); set OS_ALLOW_UNDECLARED_ACTIONS=1 to run it during migration.`,
-                        404,
-                    ),
-                };
-            }
-            console.warn(
-                `[action-governance] UNDECLARED action '${objectName}/${actionName}' executed under ` +
-                `OS_ALLOW_UNDECLARED_ACTIONS — it is ungated (no requiredPermissions, no param contract) ` +
-                `and invisible to the AI surface. Declare it; the valve is removed in 18.`,
-            );
+            return {
+                handled: true,
+                response: deps.error(
+                    `Action '${actionName}' on '${objectName}' has no declaration — ` +
+                    `add \`defineAction({ name: '${actionName}', … })\`, or register the handler under a ` +
+                    `declared action's \`target\`. Undeclared handlers cannot be permission-gated ` +
+                    `(ADR-0110 D3); startup logs every one of them under [action-governance].`,
+                    404,
+                ),
+            };
         }
 
         // ── 1/3: declared → gate against it ──

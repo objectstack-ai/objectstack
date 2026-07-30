@@ -721,9 +721,9 @@ export class AppPlugin implements Plugin {
                 );
                 if (undeclaredHandlers.length > 0) {
                     ctx.logger.warn(
-                        '[action-governance] registered handlers with NO declaration — these are refused ' +
-                        'at dispatch (ADR-0110 D3); declare each one with `defineAction`, or set ' +
-                        'OS_ALLOW_UNDECLARED_ACTIONS=1 to run them during migration (removed in 18)',
+                        '[action-governance] registered handlers with NO declaration — these are REFUSED ' +
+                        'at dispatch (ADR-0110 D3) and there is no opt-out; declare each one with ' +
+                        '`defineAction`, or drop the registration if nothing should invoke it over HTTP',
                         {
                             appId,
                             count: undeclaredHandlers.length,

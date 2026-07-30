@@ -2,6 +2,7 @@
 
 import { defineFlow } from '@objectstack/spec';
 import { DynamicApprovalFlow } from './dynamic-approval.flow';
+import { ApproverBindingsFlow } from './approver-bindings.flow';
 
 /**
  * Task Completed → Notify — an autolaunched, record-triggered flow that fires
@@ -1635,4 +1636,8 @@ export const allFlows = [
   InboundTaskWebhookFlow,
   // #3447 P2 dogfood: expression approvers + decision outputs, end to end.
   DynamicApprovalFlow,
+  // #3508 dogfood: one approval node per record-backed approver kind, so the
+  // designer's Value control has a specimen for each. Draft on purpose — see
+  // the module docstring.
+  ApproverBindingsFlow,
 ];
