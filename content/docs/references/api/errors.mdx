@@ -30,8 +30,8 @@ Industry alignment: Google Cloud Errors, AWS Error Codes, Stripe API Errors
 ## TypeScript Usage
 
 ```typescript
-import { EnhancedApiError, ErrorResponse, FieldError, StandardErrorCode } from '@objectstack/spec/api';
-import type { EnhancedApiError, ErrorResponse, FieldError, StandardErrorCode } from '@objectstack/spec/api';
+import { EnhancedApiError, ErrorCategory, ErrorResponse, FieldError, RetryStrategy, StandardErrorCode } from '@objectstack/spec/api';
+import type { EnhancedApiError, ErrorCategory, ErrorResponse, FieldError, RetryStrategy, StandardErrorCode } from '@objectstack/spec/api';
 
 // Validate data
 const result = EnhancedApiError.parse(data);
@@ -63,6 +63,23 @@ const result = EnhancedApiError.parse(data);
 
 ---
 
+## ErrorCategory
+
+### Allowed Values
+
+* `validation`
+* `authentication`
+* `authorization`
+* `not_found`
+* `conflict`
+* `rate_limit`
+* `server`
+* `external`
+* `maintenance`
+
+
+---
+
 ## ErrorResponse
 
 ### Properties
@@ -87,6 +104,18 @@ const result = EnhancedApiError.parse(data);
 | **message** | `string` | ✅ | Human-readable error message |
 | **value** | `any` | optional | The invalid value that was provided |
 | **constraint** | `any` | optional | The constraint that was violated (e.g., max length) |
+
+
+---
+
+## RetryStrategy
+
+### Allowed Values
+
+* `no_retry`
+* `retry_immediate`
+* `retry_backoff`
+* `retry_after`
 
 
 ---

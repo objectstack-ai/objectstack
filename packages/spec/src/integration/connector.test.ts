@@ -25,7 +25,7 @@ import {
   // Error Mapping
   ErrorMappingConfigSchema,
   ErrorMappingRuleSchema,
-  ErrorCategorySchema,
+  ConnectorErrorCategorySchema,
 
   // Health & Circuit Breaker
   HealthCheckConfigSchema,
@@ -479,7 +479,7 @@ describe('ErrorMappingConfigSchema', () => {
   it('should accept all error categories', () => {
     const categories = ['validation', 'authorization', 'not_found', 'conflict', 'rate_limit', 'timeout', 'server_error', 'integration_error'] as const;
     categories.forEach(cat => {
-      expect(() => ErrorCategorySchema.parse(cat)).not.toThrow();
+      expect(() => ConnectorErrorCategorySchema.parse(cat)).not.toThrow();
     });
   });
 
