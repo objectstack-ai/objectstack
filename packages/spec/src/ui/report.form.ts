@@ -67,15 +67,10 @@ export const reportForm = defineForm({
         { field: 'chart', type: 'composite', helpText: 'Chart config (type, legend, colors)' },
       ],
     },
-    {
-      label: 'Advanced',
-      description: 'Accessibility and performance tuning.',
-      collapsible: true,
-      collapsed: true,
-      fields: [
-        { field: 'aria', type: 'composite', helpText: 'Accessibility labels' },
-        { field: 'performance', type: 'composite', helpText: 'Caching and optimization' },
-      ],
-    },
+    // An "Advanced" section offering `aria` + `performance` used to sit here.
+    // #3496 pruned both keys from ReportSchema (dead in both layers) but left
+    // this form untouched, so the section rendered two controls whose values
+    // ReportSchema silently stripped on save. Removed with the keys they named;
+    // metadata-form-zod-reconciliation.test.ts fails on the next such prune.
   ],
 });

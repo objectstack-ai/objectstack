@@ -16,7 +16,37 @@ const CORE_SERVICE_NAMES = [
 ] as const;
 
 /**
- * Security sub-services registered by the SecurityPlugin.
+ * Security sub-services registered by the SecurityPlugin — and, deliberately,
+ * by NOTHING ELSE (#4093).
+ *
+ * This plugin used to stub all three when SecurityPlugin was absent. Each fake
+ * inverted the decision it stood in for: `checkObjectPermission()` answered
+ * `true` for everything, `compileFilter()` returned `null` so no row-level
+ * predicate was applied, and `maskResults()` handed rows back unmasked.
+ *
+ * That is the one thing ADR-0076 D12 says a fallback may never do. Its rule,
+ * learned from #3891's analytics shim: **a fallback may degrade features, never
+ * security semantics** — and the shim only dropped the caller's RLS scoping,
+ * where these three answered "allowed" outright. The contract agrees from the
+ * other side: `packages/spec/src/contracts/security-service.ts` calls these
+ * three "implementation internals and deliberately NOT part of this contract",
+ * and specifies that access-narrowing answers **fail CLOSED** — "a consumer
+ * must never treat a thrown error or a deny filter as 'no restriction'".
+ * Fakes registered under those names by a *different* package are the exact
+ * opposite of failing closed.
+ *
+ * Triggering it took no exotic setup: this plugin loads SecurityPlugin through
+ * the same optional dynamic import as everything else, so `@objectstack/
+ * plugin-security` merely not being installed swapped real RBAC/RLS/masking for
+ * allow-all, behind one `warn` line.
+ *
+ * The slots now stay empty, which is what production has without SecurityPlugin,
+ * and the consumers already handle: the enforcement paths live inside the plugin
+ * itself (registered hooks), and the only reader of a slot —
+ * `plugin-hono-server`'s `/auth/me/permissions` + `/me/apps` — resolves it
+ * defensively and fails open on *presentation* only, over data the read path has
+ * already enforced. Kept as a named list because the registration loop must
+ * still skip these slots and say why.
  */
 const SECURITY_SERVICE_NAMES = [
   'security.permissions', 'security.rls', 'security.fieldMasker',
@@ -222,28 +252,15 @@ function createDataStub() {
   };
 }
 
-/** Security sub-service stubs (PermissionEvaluator, RLSCompiler, FieldMasker) */
-function createSecurityPermissionsStub() {
-  return {
-    _serviceName: 'security.permissions',
-    resolvePermissionSets() { return []; },
-    checkObjectPermission() { return true; },
-    getFieldPermissions() { return {}; },
-  };
-}
-function createSecurityRLSStub() {
-  return {
-    _serviceName: 'security.rls',
-    compileFilter() { return null; },
-    getApplicablePolicies() { return []; },
-  };
-}
-function createSecurityFieldMaskerStub() {
-  return {
-    _serviceName: 'security.fieldMasker',
-    maskResults(results: any) { return results; },
-  };
-}
+// [#4093] The three security sub-service stubs are GONE — see
+// SECURITY_SERVICE_NAMES below for why. They were:
+//
+//   security.permissions → checkObjectPermission() { return true; }   // allow-all
+//   security.rls         → compileFilter()        { return null; }    // no predicate
+//   security.fieldMasker → maskResults(r)         { return r; }       // unmasked
+//
+// Nothing replaces them: an empty slot is what production has when
+// SecurityPlugin isn't installed, and every consumer already handles it.
 
 /**
  * Map of service names → contract-compliant stub factory functions.
@@ -265,10 +282,6 @@ const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
   'metadata':    createMetadataStub,
   'data':        createDataStub,
   'auth':        createAuthStub,
-  // Security sub-services
-  'security.permissions': createSecurityPermissionsStub,
-  'security.rls':         createSecurityRLSStub,
-  'security.fieldMasker': createSecurityFieldMaskerStub,
 };
 
 /**
@@ -316,9 +329,6 @@ const DEV_STUB_SELF_INFO: Record<string, { status: 'stub' | 'degraded'; handlerR
   'ai':           { status: 'stub', message: 'Dev stub — replies are placeholder text, not model output. Register AIServicePlugin from @objectstack/service-ai for real completions.' },
   'data':         { status: 'stub', message: 'Dev stub — find() always returns [], insert() mints an id and stores nothing. Register ObjectQLPlugin for a real engine.' },
   'auth':         { status: 'stub', message: 'Dev stub — verify() accepts EVERY request as a fixed dev admin. Never use outside local development; register plugin-auth for real authentication.' },
-  'security.permissions': { status: 'stub', message: 'Dev stub — every object permission check returns allowed. Register SecurityPlugin for real permission evaluation.' },
-  'security.rls':         { status: 'stub', message: 'Dev stub — compiles no row-level filter, so NO RLS predicate is applied. Register SecurityPlugin for real row-level security.' },
-  'security.fieldMasker':  { status: 'stub', message: 'Dev stub — returns results unmasked. Register SecurityPlugin for real field-level masking.' },
 };
 
 /** Self-description for a slot with no factory at all (see the registration loop). */
@@ -356,6 +366,42 @@ function applySelfInfo(svc: Record<string, any>, info: Record<string, unknown>):
  * `@objectstack/service-analytics` runs an InMemory strategy.
  */
 const NO_DEV_STUB_SERVICES = new Set<string>(['analytics']);
+
+/**
+ * Escape hatch for {@link assertNotProduction} — deliberately ungrouped and
+ * scary-looking per the `OS_ALLOW_{X}` convention (AGENTS.md Prime Directive #9).
+ */
+const ALLOW_IN_PRODUCTION_ENV = 'OS_ALLOW_DEV_PLUGIN' as const;
+
+/**
+ * [#4093] Refuse to initialize under `NODE_ENV=production`.
+ *
+ * This plugin's whole purpose is to make a local stack work without installing
+ * anything: it fills unclaimed service slots with fakes. Several of those
+ * fabricate their answers (`data` discards writes and reports success), and it
+ * ships as a published package with no environment check of its own — so an
+ * `objectstack.config.ts` that carries `new DevPlugin()` into a production
+ * deploy got the whole fake slate silently, with only a boot log to say so.
+ *
+ * Failing the boot is the right response rather than degrading quietly: a
+ * production process that reaches this line is misconfigured in a way no
+ * runtime behaviour can make safe, and the fakes are exactly the kind of thing
+ * that looks like it works. `OS_ALLOW_DEV_PLUGIN=1` overrides it for the
+ * deliberate cases (a staging box mimicking prod, a smoke test that pins
+ * `NODE_ENV`), and says at the call site that someone chose this.
+ */
+function assertNotProduction(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (process.env[ALLOW_IN_PRODUCTION_ENV] === '1') return;
+  throw new Error(
+    '@objectstack/plugin-dev refuses to initialize with NODE_ENV=production. '
+    + 'It registers development fakes for every unclaimed core service slot — including ones that '
+    + 'report success for work they never did — so a production process must not load it. '
+    + 'Remove DevPlugin from this deployment\'s plugin list and install the real services '
+    + `(the boot log names each fake it would have registered), or set ${ALLOW_IN_PRODUCTION_ENV}=1 `
+    + 'if you deliberately want the dev slate under a production NODE_ENV.',
+  );
+}
 
 /**
  * Dev Plugin Options
@@ -517,6 +563,7 @@ export class DevPlugin implements Plugin {
    * if a package isn't installed the service is silently skipped.
    */
   async init(ctx: PluginContext): Promise<void> {
+    assertNotProduction();
     ctx.logger.info('🚀 DevPlugin initializing — auto-configuring all services for development');
 
     const enabled = (name: string) => this.options.services?.[name] !== false;
@@ -761,15 +808,23 @@ export class DevPlugin implements Plugin {
       }
     }
 
-    // Security sub-services (if SecurityPlugin wasn't loaded)
+    // Security sub-services get NO stub (#4093, see SECURITY_SERVICE_NAMES):
+    // faking an authorization decision is the one thing ADR-0076 D12 forbids a
+    // fallback to do, and all three former stubs decided "allowed". An empty
+    // slot is what production has without SecurityPlugin. Say so once, loudly,
+    // because "no RBAC/RLS/masking is being enforced" is worth a line in the
+    // boot log of a stack that expected them.
     if (enabled('security')) {
-      for (const svc of SECURITY_SERVICE_NAMES) {
-        try {
-          ctx.getService(svc);
-        } catch {
-          ctx.registerService(svc, makeStub(svc));
-          stubNames.push(svc);
-        }
+      const missing = SECURITY_SERVICE_NAMES.filter((svc) => {
+        try { ctx.getService(svc); return false; } catch { return true; }
+      });
+      if (missing.length > 0) {
+        ctx.logger.warn(
+          `  ⚠ No security services (${missing.join(', ')}) — SecurityPlugin is not loaded, so RBAC, `
+          + 'row-level security and field masking are NOT enforced. The slots stay empty rather than '
+          + 'being stubbed: a fake that answers "allowed" is worse than an absent one. Install '
+          + '@objectstack/plugin-security to enforce them.',
+        );
       }
     }
 

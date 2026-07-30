@@ -181,6 +181,42 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.services.metadata.handlerReady).toBe(true);
   });
 
+  // #4130 — `data` was the last hardcoded entry in the kernel block. Its
+  // `available` happened to be true, but only because ObjectQL is the slot's
+  // sole producer and plugin-dev always loads it as a child, so its `data` stub
+  // never lands there. A convention in another package is not something this
+  // builder verifies — now it does.
+  it('should report a self-declared data stub as a stub, never available', async () => {
+    const mockServices = new Map<string, any>();
+    mockServices.set('data', {
+      __serviceInfo: { status: 'stub', message: 'Dev stub — find() always returns []. Register ObjectQLPlugin for a real engine.' },
+      find: async () => [],
+    });
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
+    expect(discovery.services.data.enabled).toBe(true);
+    expect(discovery.services.data.status).toBe('stub');
+    expect(discovery.services.data.handlerReady).toBe(false);
+    expect(discovery.services.data.message).toContain('ObjectQLPlugin');
+  });
+
+  it('should keep reporting a real (unmarked) data engine as available', async () => {
+    const mockServices = new Map<string, any>();
+    mockServices.set('data', { find: async () => [], insert: async () => ({ id: '1' }) });
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
+    // Byte-for-byte what the hardcode said, now derived from the slot.
+    expect(discovery.services.data.status).toBe('available');
+    expect(discovery.services.data.handlerReady).toBe(true);
+    expect(discovery.services.data.route).toBe('/api/v1/data');
+    expect(discovery.services.data.provider).toBe('objectql');
+    expect(discovery.services.data.message).toBeUndefined();
+  });
+
   // #3891 — the degraded ObjectQL fallback is retired. Analytics is an
   // ordinary optional service now: absent ⇒ unavailable, and the route must
   // NOT be advertised (an advertised route with no handler 404s — the exact

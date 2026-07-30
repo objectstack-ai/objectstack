@@ -48,6 +48,7 @@ export const actionForm = defineForm({
             { field: 'source', type: 'code', language: 'javascript', required: true, helpText: 'Function body source — no top-level imports' },
             { field: 'capabilities', type: 'tags', helpText: 'Allowed ctx APIs (api.read, api.write, crypto.uuid, log, …)' },
             { field: 'timeoutMs', type: 'number', helpText: 'Per-invocation timeout (ms)' },
+            { field: 'memoryMb', type: 'number', helpText: 'Per-invocation memory cap (MB, max 256)' },
           ],
         },
         { field: 'params', type: 'repeater', helpText: 'User input parameters (show form before executing)' },
