@@ -155,9 +155,6 @@ const MOUNTS = {
   'packages/adapters/hono/src/index.ts:all `${prefix}/auth/*`': {
     ratchet: '#4117 — terminal, same shape as #4088; adapter has no in-repo consumer',
   },
-  'packages/adapters/hono/src/index.ts:all `${prefix}/storage/*`': {
-    ratchet: '#4117 — terminal, same shape as #4088; adapter has no in-repo consumer',
-  },
 };
 
 /** HTTP-verb registrars plus `use`; anything that can claim a path pattern. */
