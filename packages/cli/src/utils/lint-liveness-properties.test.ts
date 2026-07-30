@@ -111,15 +111,20 @@ describe('lintLivenessProperties', () => {
     expect(paths(findings).some((m) => m.includes('`undoable`'))).toBe(false);
   });
 
-  it('warns on the security-shaped dead props (tool.permissions)', () => {
+  it('retired props leave the warn list with their ledger entries', () => {
     // tenancy.strategy/crossTenantAccess left this list after spec 15.0 (#2763):
     // the schema now REJECTS them (strict tenancy block), so the ledger entries
     // are gone and the live tenancy knobs must not warn.
     const tenancy = lintLivenessProperties(objStack({ tenancy: { enabled: true, tenantField: 'org_id' } }));
     expect(paths(tenancy).some((m) => m.includes('tenancy'))).toBe(false);
 
+    // tool.permissions left with the #3896 close-out: the key was REMOVED from
+    // ToolSchema (with category/active/builtIn), so enforcement moved a layer
+    // down — the strict parse now rejects it with its prescription before any
+    // lint could run, and the ledger entry this warn keyed on is gone. The
+    // advisory warn's job is done by a hard error; warning again would be noise.
     const tool = lintLivenessProperties({ tools: [{ name: 't1', permissions: ['crm.admin'] }] });
-    expect(paths(tool).some((m) => m.includes('`permissions`'))).toBe(true);
+    expect(paths(tool).some((m) => m.includes('`permissions`'))).toBe(false);
 
     // permission.contextVariables left this list with ADR-0105 D11: the prop was
     // REMOVED outright (enforce-or-remove), so its ledger entry is gone and the
