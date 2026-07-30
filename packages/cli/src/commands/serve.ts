@@ -11,7 +11,7 @@ import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from '../utils/storage-driver.js';
 import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
-import { PLATFORM_CAPABILITY_TOKENS } from '@objectstack/spec/kernel';
+import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
@@ -200,20 +200,19 @@ export default class Serve extends Command {
    *
    * Opt out: `objectstack serve --preset minimal`.
    *
-   * Cloud / multi-environment hosts (which live in a separate distribution)
-   * mirror this list on their per-project kernels.
+   * DERIVED from `@objectstack/spec`'s `PLATFORM_ALWAYS_ON_CAPABILITIES`, where
+   * the slate and its per-entry rationale now live. This used to BE the
+   * declaration, under a comment noting that cloud / multi-environment hosts
+   * "mirror this list on their per-project kernels" — with nothing making that
+   * true. They had diverged: the hosted slate was missing `sms`, `messaging` and
+   * `analytics`, so an app that worked under `objectstack serve` silently lost
+   * dataset previews and `notify` deliveries once hosted (cloud#925, #3786).
+   *
+   * Kept as a re-export rather than deleted so `Serve.ALWAYS_ON_CAPABILITIES`
+   * stays a stable handle for existing callers and tests — one declaration, two
+   * readers.
    */
-  static readonly ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze([
-    // The first six form the pinned foundational prefix (see
-    // serve-defaults.test.ts) — grow the slate AFTER them.
-    'queue', 'job', 'cache', 'settings', 'email', 'storage', 'sms', 'sharing', 'messaging',
-    // `analytics` is foundational post-ADR-0021: the AnalyticsService backs the
-    // dataset/cube query endpoints (`/api/v1/analytics/*`). It must exist even
-    // when an app declares no `analyticsCubes`, because a `dataset` can be
-    // authored/previewed inline (Studio) and compiled on the fly. Without it the
-    // dataset preview + dashboard/report analytics widgets silently no-op.
-    'analytics',
-  ]);
+  static readonly ALWAYS_ON_CAPABILITIES: readonly string[] = PLATFORM_ALWAYS_ON_CAPABILITIES;
 
   /**
    * Auto-registered plugin tiers. Plugins explicitly listed in

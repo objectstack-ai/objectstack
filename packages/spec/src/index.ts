@@ -135,6 +135,9 @@ export {
   PLATFORM_CAPABILITY_TOKENS,
   isKnownPlatformCapability,
   PLATFORM_CAPABILITY_PROVIDERS,
+  // The foundational slate every server-side runtime mounts (cloud#925, #3786) —
+  // one declaration for `objectstack serve` and cloud's per-tenant runtime alike.
+  PLATFORM_ALWAYS_ON_CAPABILITIES,
   classifyRequiredCapability,
   type CapabilityEdition,
   type PlatformCapabilityProvider,
