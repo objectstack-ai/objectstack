@@ -62,8 +62,8 @@ to the field name and is used as the request-body key).
 ## TypeScript Usage
 
 ```typescript
-import { Action, ActionAi, ActionLocation, ActionParam, ActionType } from '@objectstack/spec/ui';
-import type { Action, ActionAi, ActionLocation, ActionParam, ActionType } from '@objectstack/spec/ui';
+import { Action, ActionAi, ActionLocation, ActionParam, ActionType, InlineAction } from '@objectstack/spec/ui';
+import type { Action, ActionAi, ActionLocation, ActionParam, ActionType, InlineAction } from '@objectstack/spec/ui';
 
 // Validate data
 const result = Action.parse(data);
@@ -185,6 +185,28 @@ const result = Action.parse(data);
 * `flow`
 * `api`
 * `form`
+
+
+---
+
+## InlineAction
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Action functionality type |
+| **name** | `string` | optional | Machine name (lowercase snake_case) |
+| **label** | `string` | optional | Display label |
+| **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
+| **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
+| **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string; … }[]` | optional | Input parameters required from user |
+| **confirmText** | `string` | optional | Confirmation message before execution |
+| **successMessage** | `string` | optional | Success message to show after execution |
+| **errorMessage** | `string` | optional | Error message to show when the action fails (overrides the raw error). |
+| **refreshAfter** | `boolean` | optional | Refresh view after execution |
+| **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
 
 
 ---

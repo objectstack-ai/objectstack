@@ -152,8 +152,36 @@ export interface ExtractResult {
 
 // ─── Walk helpers ──────────────────────────────────────────────────────
 
+/**
+ * The object a view binds to.
+ *
+ * The last two arms cover the aggregated View CONTAINER (`{ list, listViews,
+ * formViews }`), which per spec carries no object of its own and is keyed
+ * implicitly by its inner data source — the same fallback chain objectql's
+ * `resolveMetadataItemName` uses to register it.
+ */
 function viewObjectName(view: any): string | undefined {
-  return view?.objectName ?? view?.object ?? view?.data?.object;
+  return (
+    view?.objectName ??
+    view?.object ??
+    view?.data?.object ??
+    view?.list?.data?.object ??
+    view?.form?.data?.object
+  );
+}
+
+/**
+ * Emit label / description / emptyState for ONE view under
+ * `objects.<object>._views.<viewName>.*` — the convention the runtime resolver
+ * reads (`viewLabel` / `viewDescription` / `viewEmptyState` in
+ * @object-ui/i18n) and the one the shipped platform bundles already carry
+ * (`en.objects.generated.ts`: `sys_user._views.all_users.label`).
+ */
+function pushViewEntries(out: ExpectedEntry[], objectName: string, viewName: string, view: any): void {
+  const root = ['objects', objectName, '_views', viewName];
+  pushDerived(out, [...root, 'label'], view?.label ?? viewName, inlineText(view?.label), 'view', { objectName });
+  pushOptional(out, [...root, 'description'], view?.description, 'view', { objectName });
+  pushViewEmptyState(out, root, view, objectName);
 }
 
 /**
@@ -367,10 +395,7 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
     // Object-nested listViews (object-protocol view bundle).
     if (obj.listViews && typeof obj.listViews === 'object') {
       for (const [viewName, raw] of Object.entries<any>(obj.listViews)) {
-        const view = raw ?? {};
-        pushDerived(out, ['objects', objectName, '_views', viewName, 'label'], view.label ?? viewName, inlineText(view.label), 'view', { objectName });
-        pushOptional(out, ['objects', objectName, '_views', viewName, 'description'], view.description, 'view', { objectName });
-        pushViewEmptyState(out, ['objects', objectName, '_views', viewName], view, objectName);
+        pushViewEntries(out, objectName, viewName, raw ?? {});
       }
     }
 
@@ -389,15 +414,50 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
     }
   }
 
-  // ── Top-level views (legacy / cross-object) ──────────────────────
+  // ── Top-level views ──────────────────────────────────────────────
+  // Two shapes reach `config.views`, and only one of them has a `name`:
+  //
+  //   1. An independent ViewItem — carries a top-level `name` and binds to its
+  //      object via `object`.
+  //
+  //   2. The aggregated View CONTAINER `defineView()` emits:
+  //      `{ list, listViews, formViews }`. Per spec (`view.zod.ts`) it has NO
+  //      top-level `name` — it is keyed implicitly by its target object, which
+  //      lives at `list.data.object` (objectql's `resolveMetadataItemName`
+  //      says the same).
+  //
+  // Guarding the loop on `view.name` therefore skipped every container, and a
+  // container is what `defineView()` — i.e. every example and every app that
+  // authors views this way — actually produces. Objects do not carry
+  // `listViews` once compiled either, so BOTH view branches were dead and
+  // `i18n/missing-view` had zero producers repo-wide while the ratchet
+  // reported green (#4123).
+  //
+  // `formViews` stays uncovered: form views have no counterpart in the
+  // `viewLabel` / `_views.*` resolver convention, so emitting keys for them
+  // would expect translations nothing reads.
   const views: any[] = Array.isArray(config?.views) ? config.views : [];
   for (const view of views) {
-    if (!view?.name) continue;
-    const objectName = viewObjectName(view);
-    if (!objectName) continue;
-    pushDerived(out, ['objects', objectName, '_views', view.name, 'label'], view.label ?? view.name, inlineText(view.label), 'view', { objectName });
-    pushOptional(out, ['objects', objectName, '_views', view.name, 'description'], view.description, 'view', { objectName });
-    pushViewEmptyState(out, ['objects', objectName, '_views', view.name], view, objectName);
+    const containerObject = viewObjectName(view);
+    if (!containerObject) continue;
+
+    if (view.name) {
+      pushViewEntries(out, containerObject, view.name, view);
+      continue;
+    }
+
+    // The container's default list. The console ids an unnamed default as
+    // `primary.name || 'list'` (app-shell `ObjectView`), so it resolves under
+    // `_views.list`.
+    if (view.list && typeof view.list === 'object') {
+      pushViewEntries(out, viewObjectName(view.list) ?? containerObject, view.list.name ?? 'list', view.list);
+    }
+    if (view.listViews && typeof view.listViews === 'object') {
+      for (const [viewName, raw] of Object.entries<any>(view.listViews)) {
+        // A named list view may retarget another object via its own `data`.
+        pushViewEntries(out, viewObjectName(raw) ?? containerObject, viewName, raw ?? {});
+      }
+    }
   }
 
   // ── Top-level actions ────────────────────────────────────────────

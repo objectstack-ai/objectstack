@@ -257,8 +257,9 @@ describe('DevPlugin', () => {
     // Really do the work, just less of it — their answers are true answers.
     const DEGRADED = ['cache', 'queue', 'job', 'file-storage', 'search', 'realtime', 'i18n', 'workflow', 'metadata'];
     // Fabricate the answer — must never be mistaken for a capability.
-    const STUB = ['automation', 'notification', 'ai', 'data', 'auth',
-                  'security.permissions', 'security.rls', 'security.fieldMasker'];
+    // (`security.*` are no longer in this list because they are no longer
+    // registered at all — see the dedicated test below, #4093.)
+    const STUB = ['automation', 'notification', 'ai', 'data', 'auth'];
 
     for (const name of DEGRADED) {
       const info = readServiceSelfInfo(registeredServices.get(name));
@@ -291,6 +292,105 @@ describe('DevPlugin', () => {
 
     // The retired analytics slot stays empty (#4000).
     expect(registeredServices.has('analytics')).toBe(false);
+  });
+
+  // [#4093] The one thing a fallback may never fake. ADR-0076 D12, from #3891:
+  // "a fallback may degrade features, never security semantics" — and these
+  // three did not merely degrade, they inverted. `checkObjectPermission()`
+  // answered `true` for everything, `compileFilter()` returned `null` so no
+  // row-level predicate applied, `maskResults()` returned rows unmasked. The
+  // contract calls them plugin-security's internals and requires
+  // access-narrowing answers to fail CLOSED; a fake registered by another
+  // package under those names is the opposite. The slots stay empty.
+  it('registers NO security sub-service stub, and says so loudly', async () => {
+    const registered = new Map<string, any>();
+    const ctx: any = {
+      logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      getService: vi.fn().mockImplementation((name: string) => {
+        if (registered.has(name)) return registered.get(name);
+        throw new Error('not found');
+      }),
+      getServices: vi.fn().mockReturnValue(new Map()),
+      registerService: vi.fn().mockImplementation((n: string, s: any) => { registered.set(n, s); }),
+      hook: vi.fn(),
+      trigger: vi.fn(),
+      getKernel: vi.fn(),
+    };
+
+    // `security` left ENABLED — plugin-security is mocked as missing at the top
+    // of this file, so this is exactly the boot that used to get allow-all.
+    await new DevPlugin({
+      seedAdminUser: false,
+      services: { objectql: false, driver: false, setup: false, server: false, rest: false, dispatcher: false },
+    }).init(ctx);
+
+    for (const slot of ['security.permissions', 'security.rls', 'security.fieldMasker']) {
+      expect(registered.has(slot), `${slot} must NOT be registered`).toBe(false);
+    }
+
+    // "Nothing is enforcing RBAC/RLS/masking" is not a silent condition.
+    const warned = ctx.logger.warn.mock.calls.find(
+      (call: any[]) => typeof call[0] === 'string' && call[0].includes('No security services'),
+    );
+    expect(warned, 'must warn that security is unenforced').toBeDefined();
+    expect(warned[0]).toContain('plugin-security');
+  });
+
+  // [#4093] The package is published, has no environment check of its own, and
+  // registers fakes that report success for work they never did. A production
+  // process that loads it is misconfigured in a way no runtime behaviour can
+  // make safe, so refuse the boot instead of degrading quietly.
+  describe('production guard', () => {
+    const makeCtx = () => ({
+      logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      getService: vi.fn().mockImplementation(() => { throw new Error('not found'); }),
+      getServices: vi.fn().mockReturnValue(new Map()),
+      registerService: vi.fn(),
+      hook: vi.fn(),
+      trigger: vi.fn(),
+      getKernel: vi.fn(),
+    }) as any;
+
+    // Restored per-case: these tests mutate process.env deliberately.
+    const withEnv = async (env: Record<string, string | undefined>, run: () => Promise<void>) => {
+      const saved: Record<string, string | undefined> = {};
+      for (const [k, v] of Object.entries(env)) {
+        saved[k] = process.env[k];
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+      try { await run(); } finally {
+        for (const [k, v] of Object.entries(saved)) {
+          if (v === undefined) delete process.env[k]; else process.env[k] = v;
+        }
+      }
+    };
+
+    it('refuses to initialize under NODE_ENV=production', async () => {
+      await withEnv({ NODE_ENV: 'production', OS_ALLOW_DEV_PLUGIN: undefined }, async () => {
+        const ctx = makeCtx();
+        await expect(new DevPlugin({ seedAdminUser: false }).init(ctx)).rejects.toThrow(/NODE_ENV=production/);
+        // And nothing was registered before the refusal.
+        expect(ctx.registerService).not.toHaveBeenCalled();
+      });
+    });
+
+    it('names the escape hatch in the refusal, and honours it', async () => {
+      await withEnv({ NODE_ENV: 'production', OS_ALLOW_DEV_PLUGIN: undefined }, async () => {
+        await expect(new DevPlugin({ seedAdminUser: false }).init(makeCtx()))
+          .rejects.toThrow(/OS_ALLOW_DEV_PLUGIN=1/);
+      });
+      await withEnv({ NODE_ENV: 'production', OS_ALLOW_DEV_PLUGIN: '1' }, async () => {
+        await expect(new DevPlugin({ seedAdminUser: false }).init(makeCtx())).resolves.not.toThrow();
+      });
+    });
+
+    it('stays out of the way for every other NODE_ENV', async () => {
+      for (const value of ['development', 'test', undefined]) {
+        await withEnv({ NODE_ENV: value, OS_ALLOW_DEV_PLUGIN: undefined }, async () => {
+          await expect(new DevPlugin({ seedAdminUser: false }).init(makeCtx())).resolves.not.toThrow();
+        });
+      }
+    });
   });
 
   it('should skip disabled services', async () => {

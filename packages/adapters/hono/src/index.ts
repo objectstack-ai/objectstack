@@ -275,8 +275,39 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
     return c.redirect(prefix);
   });
 
+  /**
+   * Hand a path THIS mount does not own to whatever else matched (#4117).
+   *
+   * The `${prefix}/auth/*` mount below claims a whole namespace and used to be
+   * TERMINAL — it answered 404 for a path its auth service does not implement.
+   * That is #4088's shape, which cost four fixes before #4116's scan started
+   * enumerating it, and it is what #4087/#4112 had already concluded about the
+   * `/storage` bridge it deleted: "the wildcard was wider than the two routes it
+   * served".
+   *
+   * What yielding buys HERE is narrower than in #4092, and worth stating so
+   * nobody over-reads it. It does NOT make a later-registered Hono route
+   * reachable: the `${prefix}/*` dispatcher catch-all below is DELIBERATELY
+   * terminal (ADR-0076 OQ#9, #3576/#3608 — the gate stages live inside
+   * `dispatch()`), so it would swallow such a route either way, and mounting Hono
+   * routes is not this adapter's extension path anyway. It means an unowned
+   * `/auth/*` path now reaches that gated `dispatch()` instead of dead-ending in
+   * a 404 built one mount earlier, so a domain handler registered for it becomes
+   * reachable — which IS the adapter's mechanism.
+   *
+   * `c.res = …` rather than `return …`: `app.use('*', cors(…))` above puts a
+   * middleware in this chain, and Hono's compose only assigns a handler's
+   * RETURNED Response while `c.finalized` is false. Reaching the end of the chain
+   * runs notFound, which sets a response and flips that flag, so a `return` here
+   * is silently dropped (learned the hard way in #4092).
+   */
+  const yieldUnowned = async (c: any, next: any, fallback: () => Response) => {
+    await next();
+    if (!c.res) c.res = fallback();
+  };
+
   // --- Auth (needs auth service integration) ---
-  app.all(`${prefix}/auth/*`, async (c) => {
+  app.all(`${prefix}/auth/*`, async (c, next) => {
     try {
       const path = c.req.path.substring(`${prefix}/auth/`.length);
       const method = c.req.method;
@@ -330,10 +361,15 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
 
       if (authService && typeof authService.handleRequest === 'function') {
         const response = await authService.handleRequest(c.req.raw);
-        return new Response(response.body, {
+        const forwarded = () => new Response(response.body, {
           status: response.status,
           headers: response.headers,
         });
+        // 404 from better-auth means "not one of my endpoints" — the #4092
+        // signal. `/auth/me/permissions` is the canonical example: nothing in
+        // better-auth serves it, `plugin-hono-server` does.
+        if (response.status === 404) return yieldUnowned(c, next, forwarded);
+        return forwarded();
       }
 
       // Fallback to legacy dispatcher
@@ -341,6 +377,9 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
         ? {}
         : await c.req.json().catch(() => ({}));
       const result = await dispatcher.handleAuth(path, method, body, { request: c.req.raw });
+      // `handled: false` is the dispatcher saying no auth domain claimed it —
+      // an explicit ownership signal, better than inferring one from a status.
+      if (!result.handled) return yieldUnowned(c, next, () => toResponse(c, result));
       return toResponse(c, result);
     } catch (err: any) {
       return errorJson(c, err.message || 'Internal Server Error', err.statusCode || 500);

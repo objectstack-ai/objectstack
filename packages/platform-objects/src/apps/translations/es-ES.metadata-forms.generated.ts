@@ -78,17 +78,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Único",
         helpText: "No permite valores duplicados"
       },
-      "fields.indexed": {
-        label: "Indexado",
-        helpText: "Crea un índice de base de datos para consultas más rápidas"
-      },
       "fields.readonly": {
         label: "Solo lectura",
         helpText: "Visible, pero nunca editable por usuarios"
-      },
-      "fields.immutable": {
-        label: "Inmutable",
-        helpText: "Editable al crear; bloqueado después"
       },
       "fields.hidden": {
         label: "Oculto",
@@ -102,17 +94,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ordenable",
         helpText: "Permitir ordenar por esta columna"
       },
-      "fields.filterable": {
-        label: "Filtrable",
-        helpText: "Permitir filtrar por esta columna"
-      },
       "fields.defaultValue": {
         label: "Valor predeterminado",
         helpText: "Valor predeterminado para registros nuevos (literal JSON)"
-      },
-      "fields.placeholder": {
-        label: "Marcador",
-        helpText: "Texto de marcador"
       },
       "fields.maxLength": {
         label: "Longitud máxima",
@@ -162,94 +146,90 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Referencia",
         helpText: "Objeto de destino (para lookup/master_detail)"
       },
-      "fields.referenceFilter": {
-        label: "Filtro de referencia",
-        helpText: "Filtro CEL aplicado al selector"
+      "fields.lookupFilters": {
+        label: "Lookup Filters",
+        helpText: "Filter rules applied to the picker ({field, operator, value})"
       },
-      "fields.cascadeDelete": {
-        label: "Eliminación en cascada",
-        helpText: "Eliminar registros hijos cuando se elimine el padre"
+      "fields.deleteBehavior": {
+        label: "Delete Behavior",
+        helpText: "What happens when the referenced record is deleted"
       },
       "fields.multiple": {
         label: "Selección múltiple",
         helpText: "Permitir seleccionar varios registros"
       },
-      "fields.formula": {
-        label: "Fórmula",
-        helpText: "Expresión de fórmula CEL"
+      "fields.expression": {
+        label: "Expression",
+        helpText: "CEL formula expression"
       },
       "fields.returnType": {
         label: "Tipo de retorno",
         helpText: "Tipo de resultado para fórmulas"
       },
-      "fields.summaryType": {
-        label: "Tipo de resumen",
-        helpText: "Agregación"
+      "fields.summaryOperations": {
+        label: "Summary Operations",
+        helpText: "Roll-up: which child object, which field, which aggregation"
       },
-      "fields.summaryField": {
-        label: "Campo de resumen",
-        helpText: "Campo del objeto hijo que se agregará"
+      "fields.summaryOperations.object": {
+        label: "Object",
+        helpText: "Source child object name"
       },
-      "fields.displayFormat": {
-        label: "Formato de visualización",
-        helpText: "p. ej. \"INV-{0000}\""
+      "fields.summaryOperations.field": {
+        label: "Field",
+        helpText: "Field on the child object to aggregate (ignored for count)"
       },
-      "fields.startingNumber": {
-        label: "Número inicial",
-        helpText: "Valor inicial de la secuencia"
+      "fields.summaryOperations.function": {
+        label: "Function",
+        helpText: "Aggregation function"
+      },
+      "fields.autonumberFormat": {
+        label: "Autonumber Format",
+        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
       },
       "fields.language": {
         label: "Idioma",
         helpText: "Lenguaje del editor (p. ej. sql, javascript)"
       },
-      "fields.validation": {
-        label: "Validación",
-        helpText: "Predicado CEL; debe evaluar a true"
-      },
-      "fields.errorMessage": {
-        label: "Mensaje de error",
-        helpText: "Se muestra cuando falla la validación"
-      },
-      "fields.audit": {
-        label: "Auditoría",
-        helpText: "Auditar cambios en este campo"
-      },
       "fields.trackHistory": {
         label: "Seguimiento de historial",
         helpText: "Conservar historial de cambios"
       },
-      "fields.pii": {
-        label: "Información personal",
-        helpText: "Información de identificación personal"
+      "fields.visibleWhen": {
+        label: "Visible When",
+        helpText: "CEL predicate — field is shown only when TRUE"
       },
-      "fields.encrypted": {
-        label: "Cifrado",
-        helpText: "Cifrar en reposo"
+      "fields.readonlyWhen": {
+        label: "Readonly When",
+        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
       },
-      capabilities: {
-        label: "Capacidades",
-        helpText: "Activa/desactiva funciones del sistema"
+      "fields.requiredWhen": {
+        label: "Required When",
+        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
       },
-      "capabilities.trackHistory": {
-        label: "Seguimiento de historial"
+      enable: {
+        label: "Enable",
+        helpText: "Enable/disable system features"
       },
-      "capabilities.searchable": {
-        label: "Buscable"
+      "enable.trackHistory": {
+        label: "Track History"
       },
-      "capabilities.apiEnabled": {
-        label: "API activada"
+      "enable.searchable": {
+        label: "Searchable"
       },
-      "capabilities.files": {
-        label: "Archivos"
+      "enable.apiEnabled": {
+        label: "Api Enabled"
       },
-      "capabilities.feeds": {
-        label: "Feed de actividad"
+      "enable.files": {
+        label: "Files"
       },
-      "capabilities.activities": {
-        label: "Actividades"
+      "enable.feeds": {
+        label: "Feeds"
       },
-      "capabilities.clone": {
-        label: "Clonar"
+      "enable.activities": {
+        label: "Activities"
+      },
+      "enable.clone": {
+        label: "Clone"
       },
       datasource: {
         label: "Fuente de datos",
@@ -528,6 +508,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "body.timeoutMs": {
         label: "Tiempo de espera (ms)",
         helpText: "Tiempo de espera por invocación (ms)"
+      },
+      "body.memoryMb": {
+        label: "Memory Mb",
+        helpText: "Per-invocation memory cap (MB, max 256)"
       },
       handler: {
         label: "Manejador",
@@ -818,6 +802,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "interfaceConfig.filterBy": {
         label: "Filter By",
         helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+      },
+      "interfaceConfig.sort": {
+        label: "Sort",
+        helpText: "Default sort order for the page, defined directly on the page."
       },
       "interfaceConfig.levels": {
         label: "Levels",
@@ -1111,6 +1099,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Timeout Ms",
         helpText: "Per-invocation timeout (ms)"
       },
+      "body.memoryMb": {
+        label: "Memory Mb",
+        helpText: "Per-invocation memory cap (MB, max 256)"
+      },
       params: {
         label: "Parámetros",
         helpText: "Parámetros de entrada de usuario (muestra el formulario antes de ejecutar)"
@@ -1179,10 +1171,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       filter_and_chart: {
         label: "Filtro y gráfico",
         description: "Filtros a nivel de informe y presentación del gráfico."
-      },
-      advanced: {
-        label: "Avanzado",
-        description: "Ajustes de accesibilidad y rendimiento."
       }
     },
     fields: {
@@ -1235,14 +1223,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       chart: {
         label: "Gráfico",
         helpText: "Configuración de gráfico (type, legend, colors)"
-      },
-      aria: {
-        label: "Accesibilidad",
-        helpText: "Etiquetas de accesibilidad"
-      },
-      performance: {
-        label: "Rendimiento",
-        helpText: "Caché y optimización"
       }
     }
   },

@@ -78,17 +78,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "唯一",
         helpText: "不允许重复值"
       },
-      "fields.indexed": {
-        label: "已索引",
-        helpText: "创建数据库索引以加快查询"
-      },
       "fields.readonly": {
         label: "只读",
         helpText: "可见，但用户不可编辑"
-      },
-      "fields.immutable": {
-        label: "不可变",
-        helpText: "创建时可编辑，之后锁定"
       },
       "fields.hidden": {
         label: "隐藏",
@@ -102,17 +94,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "可排序",
         helpText: "允许按此列排序"
       },
-      "fields.filterable": {
-        label: "可筛选",
-        helpText: "允许按此列筛选"
-      },
       "fields.defaultValue": {
         label: "默认值",
         helpText: "新记录的默认值（JSON 字面量）"
-      },
-      "fields.placeholder": {
-        label: "占位符",
-        helpText: "占位提示"
       },
       "fields.maxLength": {
         label: "最大长度",
@@ -162,94 +146,90 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "引用对象",
         helpText: "目标对象（用于 lookup / master_detail）"
       },
-      "fields.referenceFilter": {
-        label: "引用过滤",
-        helpText: "应用于选择器的 CEL 过滤条件"
+      "fields.lookupFilters": {
+        label: "Lookup Filters",
+        helpText: "Filter rules applied to the picker ({field, operator, value})"
       },
-      "fields.cascadeDelete": {
-        label: "级联删除",
-        helpText: "删除父记录时一并删除子记录"
+      "fields.deleteBehavior": {
+        label: "Delete Behavior",
+        helpText: "What happens when the referenced record is deleted"
       },
       "fields.multiple": {
         label: "多选",
         helpText: "允许选择多条记录"
       },
-      "fields.formula": {
-        label: "公式",
-        helpText: "CEL 公式表达式"
+      "fields.expression": {
+        label: "Expression",
+        helpText: "CEL formula expression"
       },
       "fields.returnType": {
         label: "返回类型",
         helpText: "公式结果类型"
       },
-      "fields.summaryType": {
-        label: "汇总类型",
-        helpText: "聚合方式"
+      "fields.summaryOperations": {
+        label: "Summary Operations",
+        helpText: "Roll-up: which child object, which field, which aggregation"
       },
-      "fields.summaryField": {
-        label: "汇总字段",
-        helpText: "要聚合的子对象字段"
+      "fields.summaryOperations.object": {
+        label: "Object",
+        helpText: "Source child object name"
       },
-      "fields.displayFormat": {
-        label: "显示格式",
-        helpText: "例如 \"INV-{0000}\""
+      "fields.summaryOperations.field": {
+        label: "Field",
+        helpText: "Field on the child object to aggregate (ignored for count)"
       },
-      "fields.startingNumber": {
-        label: "起始编号",
-        helpText: "序列起始值"
+      "fields.summaryOperations.function": {
+        label: "Function",
+        helpText: "Aggregation function"
+      },
+      "fields.autonumberFormat": {
+        label: "Autonumber Format",
+        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
       },
       "fields.language": {
         label: "语言",
         helpText: "编辑器语言（如 sql、javascript）"
       },
-      "fields.validation": {
-        label: "校验",
-        helpText: "CEL 谓词，必须求值为 true"
-      },
-      "fields.errorMessage": {
-        label: "错误消息",
-        helpText: "校验失败时显示"
-      },
-      "fields.audit": {
-        label: "审计",
-        helpText: "审计此字段的变更"
-      },
       "fields.trackHistory": {
         label: "历史跟踪",
         helpText: "保留变更历史"
       },
-      "fields.pii": {
-        label: "个人信息",
-        helpText: "个人身份信息"
+      "fields.visibleWhen": {
+        label: "Visible When",
+        helpText: "CEL predicate — field is shown only when TRUE"
       },
-      "fields.encrypted": {
-        label: "加密",
-        helpText: "静态加密存储"
+      "fields.readonlyWhen": {
+        label: "Readonly When",
+        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
       },
-      capabilities: {
-        label: "功能",
-        helpText: "启用或禁用系统功能"
+      "fields.requiredWhen": {
+        label: "Required When",
+        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
       },
-      "capabilities.trackHistory": {
-        label: "历史跟踪"
+      enable: {
+        label: "Enable",
+        helpText: "Enable/disable system features"
       },
-      "capabilities.searchable": {
-        label: "可搜索"
+      "enable.trackHistory": {
+        label: "Track History"
       },
-      "capabilities.apiEnabled": {
-        label: "启用 API"
+      "enable.searchable": {
+        label: "Searchable"
       },
-      "capabilities.files": {
-        label: "文件"
+      "enable.apiEnabled": {
+        label: "Api Enabled"
       },
-      "capabilities.feeds": {
-        label: "动态"
+      "enable.files": {
+        label: "Files"
       },
-      "capabilities.activities": {
-        label: "活动"
+      "enable.feeds": {
+        label: "Feeds"
       },
-      "capabilities.clone": {
-        label: "克隆"
+      "enable.activities": {
+        label: "Activities"
+      },
+      "enable.clone": {
+        label: "Clone"
       },
       datasource: {
         label: "数据源",
@@ -528,6 +508,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "body.timeoutMs": {
         label: "超时（毫秒）",
         helpText: "单次调用超时时间（毫秒）"
+      },
+      "body.memoryMb": {
+        label: "Memory Mb",
+        helpText: "Per-invocation memory cap (MB, max 256)"
       },
       handler: {
         label: "处理器",
@@ -818,6 +802,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "interfaceConfig.filterBy": {
         label: "Filter By",
         helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+      },
+      "interfaceConfig.sort": {
+        label: "Sort",
+        helpText: "Default sort order for the page, defined directly on the page."
       },
       "interfaceConfig.levels": {
         label: "Levels",
@@ -1111,6 +1099,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Timeout Ms",
         helpText: "Per-invocation timeout (ms)"
       },
+      "body.memoryMb": {
+        label: "Memory Mb",
+        helpText: "Per-invocation memory cap (MB, max 256)"
+      },
       params: {
         label: "参数",
         helpText: "执行前向用户收集的输入参数"
@@ -1179,10 +1171,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       filter_and_chart: {
         label: "筛选与图表",
         description: "条件与图表展示"
-      },
-      advanced: {
-        label: "高级设置",
-        description: "性能与无障碍"
       }
     },
     fields: {
@@ -1235,14 +1223,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       chart: {
         label: "图表",
         helpText: "图表类型与配置"
-      },
-      aria: {
-        label: "无障碍",
-        helpText: "无障碍标签与角色"
-      },
-      performance: {
-        label: "性能",
-        helpText: "性能与缓存策略"
       }
     }
   },

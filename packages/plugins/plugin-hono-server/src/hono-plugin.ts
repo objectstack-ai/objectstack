@@ -1279,8 +1279,21 @@ export class HonoServerPlugin implements Plugin {
                 return c.json({ authenticated: false });
             }
             try {
-                const metadata: any = ctx.getService('metadata');
-                const evaluator: any = ctx.getService('security.permissions');
+                // [#4093] Guarded like the three lookups below, not bare:
+                // `getService` THROWS on an unregistered slot, and since
+                // plugin-dev stopped stubbing `security.permissions` (a fake
+                // that answered "allowed" for everything) an unclaimed slot is
+                // the ordinary state of a stack without SecurityPlugin. Bare,
+                // it landed in the outer catch — same fail-open body, but
+                // logged as "/auth/me/permissions failed", which reads as a
+                // fault on every console navigation instead of the deliberate
+                // `!evaluator` branch right below.
+                const metadata: any = (() => {
+                    try { return ctx.getService('metadata'); } catch { return null; }
+                })();
+                const evaluator: any = (() => {
+                    try { return ctx.getService('security.permissions'); } catch { return null; }
+                })();
                 const bootstrap: any[] = (() => {
                     try { return ctx.getService<any[]>('security.bootstrapPermissionSets') ?? []; }
                     catch { return []; }

@@ -78,17 +78,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Unique",
         helpText: "Disallow duplicate values"
       },
-      "fields.indexed": {
-        label: "Indexed",
-        helpText: "Create a database index for faster querying"
-      },
       "fields.readonly": {
         label: "Readonly",
         helpText: "Visible but never user-editable"
-      },
-      "fields.immutable": {
-        label: "Immutable",
-        helpText: "Editable on create, locked thereafter"
       },
       "fields.hidden": {
         label: "Hidden",
@@ -102,17 +94,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Sortable",
         helpText: "Allow sorting on this column"
       },
-      "fields.filterable": {
-        label: "Filterable",
-        helpText: "Allow filtering on this column"
-      },
       "fields.defaultValue": {
         label: "Default Value",
         helpText: "Default value for new records (JSON literal)"
-      },
-      "fields.placeholder": {
-        label: "Placeholder",
-        helpText: "Placeholder hint"
       },
       "fields.maxLength": {
         label: "Max Length",
@@ -162,93 +146,89 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Reference",
         helpText: "Target object (for lookup/master_detail)"
       },
-      "fields.referenceFilter": {
-        label: "Reference Filter",
-        helpText: "CEL filter applied to the picker"
+      "fields.lookupFilters": {
+        label: "Lookup Filters",
+        helpText: "Filter rules applied to the picker ({field, operator, value})"
       },
-      "fields.cascadeDelete": {
-        label: "Cascade Delete",
-        helpText: "Delete children when parent is deleted"
+      "fields.deleteBehavior": {
+        label: "Delete Behavior",
+        helpText: "What happens when the referenced record is deleted"
       },
       "fields.multiple": {
         label: "Multiple",
         helpText: "Allow selecting multiple records"
       },
-      "fields.formula": {
-        label: "Formula",
+      "fields.expression": {
+        label: "Expression",
         helpText: "CEL formula expression"
       },
       "fields.returnType": {
         label: "Return Type",
         helpText: "Result type for formulas"
       },
-      "fields.summaryType": {
-        label: "Summary Type",
-        helpText: "Aggregation"
+      "fields.summaryOperations": {
+        label: "Summary Operations",
+        helpText: "Roll-up: which child object, which field, which aggregation"
       },
-      "fields.summaryField": {
-        label: "Summary Field",
-        helpText: "Field on child object to aggregate"
+      "fields.summaryOperations.object": {
+        label: "Object",
+        helpText: "Source child object name"
       },
-      "fields.displayFormat": {
-        label: "Display Format",
-        helpText: "e.g. \"INV-{0000}\""
+      "fields.summaryOperations.field": {
+        label: "Field",
+        helpText: "Field on the child object to aggregate (ignored for count)"
       },
-      "fields.startingNumber": {
-        label: "Starting Number",
-        helpText: "Starting sequence value"
+      "fields.summaryOperations.function": {
+        label: "Function",
+        helpText: "Aggregation function"
+      },
+      "fields.autonumberFormat": {
+        label: "Autonumber Format",
+        helpText: "e.g. \"INV-{0000}\"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported"
       },
       "fields.language": {
         label: "Language",
         helpText: "Editor language (e.g. sql, javascript)"
       },
-      "fields.validation": {
-        label: "Validation",
-        helpText: "CEL predicate — must evaluate true"
-      },
-      "fields.errorMessage": {
-        label: "Error Message",
-        helpText: "Shown when validation fails"
-      },
-      "fields.audit": {
-        label: "Audit",
-        helpText: "Audit changes to this field"
-      },
       "fields.trackHistory": {
         label: "Track History",
         helpText: "Keep change history"
       },
-      "fields.pii": {
-        label: "Pii",
-        helpText: "Personally identifiable information"
+      "fields.visibleWhen": {
+        label: "Visible When",
+        helpText: "CEL predicate — field is shown only when TRUE"
       },
-      "fields.encrypted": {
-        label: "Encrypted",
-        helpText: "Encrypt at rest"
+      "fields.readonlyWhen": {
+        label: "Readonly When",
+        helpText: "CEL predicate — field is read-only when TRUE (enforced server-side)"
       },
-      capabilities: {
-        label: "Capabilities",
+      "fields.requiredWhen": {
+        label: "Required When",
+        helpText: "CEL predicate — field is required when TRUE (enforced server-side)"
+      },
+      enable: {
+        label: "Enable",
         helpText: "Enable/disable system features"
       },
-      "capabilities.trackHistory": {
+      "enable.trackHistory": {
         label: "Track History"
       },
-      "capabilities.searchable": {
+      "enable.searchable": {
         label: "Searchable"
       },
-      "capabilities.apiEnabled": {
+      "enable.apiEnabled": {
         label: "Api Enabled"
       },
-      "capabilities.files": {
+      "enable.files": {
         label: "Files"
       },
-      "capabilities.feeds": {
+      "enable.feeds": {
         label: "Feeds"
       },
-      "capabilities.activities": {
+      "enable.activities": {
         label: "Activities"
       },
-      "capabilities.clone": {
+      "enable.clone": {
         label: "Clone"
       },
       datasource: {
@@ -528,6 +508,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "body.timeoutMs": {
         label: "Timeout Ms",
         helpText: "Per-invocation timeout (ms)"
+      },
+      "body.memoryMb": {
+        label: "Memory Mb",
+        helpText: "Per-invocation memory cap (MB, max 256)"
       },
       handler: {
         label: "Handler",
@@ -818,6 +802,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "interfaceConfig.filterBy": {
         label: "Filter By",
         helpText: "Always-on base filter for the page — same visual builder as the list toolbar."
+      },
+      "interfaceConfig.sort": {
+        label: "Sort",
+        helpText: "Default sort order for the page, defined directly on the page."
       },
       "interfaceConfig.levels": {
         label: "Levels",
@@ -1111,6 +1099,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Timeout Ms",
         helpText: "Per-invocation timeout (ms)"
       },
+      "body.memoryMb": {
+        label: "Memory Mb",
+        helpText: "Per-invocation memory cap (MB, max 256)"
+      },
       params: {
         label: "Params",
         helpText: "User input parameters (show form before executing)"
@@ -1179,10 +1171,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       filter_and_chart: {
         label: "Filter & chart",
         description: "Report-level filters and chart presentation."
-      },
-      advanced: {
-        label: "Advanced",
-        description: "Accessibility and performance tuning."
       }
     },
     fields: {
@@ -1235,14 +1223,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       chart: {
         label: "Chart",
         helpText: "Chart config (type, legend, colors)"
-      },
-      aria: {
-        label: "Aria",
-        helpText: "Accessibility labels"
-      },
-      performance: {
-        label: "Performance",
-        helpText: "Caching and optimization"
       }
     }
   },

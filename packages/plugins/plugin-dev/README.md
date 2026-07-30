@@ -75,13 +75,25 @@ plugins: [
 | REST API | `@objectstack/rest` | Auto-generated CRUD + metadata endpoints |
 | Dispatcher | `@objectstack/runtime` | Auth routes, GraphQL, analytics, packages, storage |
 
+### ⛔ Local development only
+
+`DevPlugin.init()` **throws under `NODE_ENV=production`**. It fills unclaimed service slots with fakes — some of which report success for work they never did — so a production process must not load it. Remove it from that deployment's plugin list and install the real services. `OS_ALLOW_DEV_PLUGIN=1` overrides the refusal if you deliberately want the dev slate under a production `NODE_ENV` (a staging box mimicking prod, a smoke test that pins the variable).
+
 ### Dev stubs (in-memory / no-op)
 
-Any core kernel service not provided by a real plugin is automatically registered as a dev stub. This ensures the **full kernel service map** is populated and features like UI permissions, automation, etc. don't crash:
+Most core kernel services not provided by a real plugin are registered as a dev stub, so the kernel service map is populated and callers get correct return types instead of `undefined`. Each one declares what kind of fake it is (`__serviceInfo`, ADR-0076 D12) — consumers, the dispatcher included, gate on that:
 
-`cache`, `queue`, `job`, `file-storage`, `search`, `automation`, `graphql`, `analytics`, `realtime`, `notification`, `ai`, `i18n`, `ui`, `workflow`, `security.permissions`, `security.rls`, `security.fieldMasker`
+| Class | Slots | Meaning |
+|:---|:---|:---|
+| `degraded` | `cache`, `queue`, `job`, `file-storage`, `search`, `realtime`, `i18n`, `workflow`, `metadata` | Really does the work, in memory only. Served normally over HTTP. |
+| `stub` | `data`, `auth`, plus `ui` (placeholder with no implementation) | Fabricates its answer. Reported as a stub in discovery, and every dispatcher-owned domain answers it exactly as it answers an empty slot. |
 
-All services are **optional** — if a peer package isn't installed, it is silently skipped and a stub takes its place.
+**Never stubbed** — these slots stay empty on purpose, which is what production has when the real plugin isn't installed:
+
+- `analytics` (#4000). Install `@objectstack/service-analytics` (it runs an InMemory strategy).
+- `security.permissions`, `security.rls`, `security.fieldMasker` (#4093). The former stubs answered "allowed" for every permission check, compiled no row-level filter, and returned rows unmasked — inverting the decisions they stood in for. ADR-0076 D12's rule is that a fallback may degrade features, **never security semantics**. Without `@objectstack/plugin-security` nothing enforces RBAC, RLS or field masking, and the boot log says so rather than a fake quietly saying yes.
+
+All services are **optional** — if a peer package isn't installed it is skipped, and for the slots above a stub takes its place.
 
 ## API Endpoints (when all services enabled)
 

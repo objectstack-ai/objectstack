@@ -2415,6 +2415,71 @@ describe('HttpDispatcher', () => {
             expect(fromDispatcher.message).toBe(fromProtocol.message);
             expect(fromDispatcher.route).toBe(fromProtocol.route);
         });
+
+        // ── The `data` slot: the same hardcode, one degree weaker (#4130) ─────
+        //
+        // `available` / `handlerReady: true` was true here only by a convention
+        // in another package (ObjectQL is the slot's only producer, and
+        // plugin-dev always loads it as a child so its `data` stub never lands).
+        // These pin the computation that replaces the convention.
+
+        it('keeps reporting a real (unmarked) data engine as available — the hardcode it replaces', async () => {
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) =>
+                name === 'data' ? mockObjectQL : null,
+            );
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.services.data.enabled).toBe(true);
+            expect(info.services.data.status).toBe('available');
+            expect(info.services.data.handlerReady).toBe(true);
+            expect(info.services.data.route).toBe('/api/v1/data');
+            expect(info.services.data.provider).toBe('kernel');
+            expect(info.services.data.message).toBeUndefined();
+        });
+
+        it('reports plugin-dev\'s data stub as a stub with no ready handler, not as a query engine', async () => {
+            // The real marker plugin-dev attaches (DEV_STUB_SELF_INFO.data):
+            // `stub` with no explicit handlerReady, which readServiceSelfInfo
+            // defaults to false.
+            const devDataStub = {
+                __serviceInfo: {
+                    status: 'stub',
+                    message: 'Dev stub — find() always returns [], insert() mints an id and stores nothing. Register ObjectQLPlugin for a real engine.',
+                },
+                find: vi.fn().mockResolvedValue([]),
+                insert: vi.fn().mockResolvedValue({ id: 'x' }),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) =>
+                name === 'data' ? devDataStub : null,
+            );
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.services.data.status).toBe('stub');
+            expect(info.services.data.handlerReady).toBe(false);
+            expect(info.services.data.message).toContain('ObjectQLPlugin');
+        });
+
+        it('answers the data slot identically to the metadata-protocol builder', async () => {
+            const { ObjectStackProtocolImplementation } = await import('@objectstack/metadata-protocol');
+            const degradedData = {
+                __serviceInfo: { status: 'degraded', message: 'read-only engine' },
+                find: vi.fn().mockResolvedValue([]),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) =>
+                name === 'data' ? degradedData : null,
+            );
+
+            const fromDispatcher = (await dispatcher.getDiscoveryInfo('/api/v1')).services.data;
+            const fromProtocol = (await new ObjectStackProtocolImplementation(
+                mockObjectQL as any,
+                () => new Map<string, any>([['data', degradedData]]),
+            ).getDiscovery()).services.data;
+
+            expect(fromDispatcher.status).toBe(fromProtocol.status);
+            expect(fromDispatcher.handlerReady).toBe(fromProtocol.handlerReady);
+            expect(fromDispatcher.message).toBe(fromProtocol.message);
+            expect(fromDispatcher.route).toBe(fromProtocol.route);
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════

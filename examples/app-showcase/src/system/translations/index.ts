@@ -178,6 +178,11 @@ export const ShowcaseTranslationBundle = {
           start_date: { label: '开始日期' },
           end_date: { label: '结束日期' },
         },
+        _views: {
+          list: { label: '全部项目' },
+          by_status: { label: '按状态' },
+          budget_chart: { label: '按客户预算' },
+        },
       },
       showcase_task: {
         label: '任务',
@@ -210,6 +215,22 @@ export const ShowcaseTranslationBundle = {
             options: { synced: '已同步', failed: '同步失败' },
           },
           sync_error: { label: '同步错误' },
+        },
+        _views: {
+          list: { label: '全部任务' },
+          in_progress: { label: '进行中' },
+          urgent: { label: '紧急' },
+          done: { label: '已完成' },
+          tabular: { label: '任务清单' },
+          grid: { label: '表格' },
+          board: { label: '看板' },
+          cards: { label: '卡片' },
+          calendar: { label: '日历' },
+          timeline: { label: '活动时间线' },
+          gantt: { label: '甘特图' },
+          map: { label: '工作地点地图' },
+          chart: { label: '工时按状态分布' },
+          legacy_row_actions: { label: '旧式行操作' },
         },
       },
       showcase_account: {
@@ -286,6 +307,22 @@ export const ShowcaseTranslationBundle = {
       showcase_category: {
         label: '分类', pluralLabel: '分类',
         fields: { name: { label: '名称' }, parent: { label: '上级' }, color: { label: '颜色' }, sort_order: { label: '排序' } },
+      },
+      // `_views` only: these two objects have no zh-CN block of their own, and
+      // their object/field debt is inside the ratchet's baseline. Translating
+      // the VIEW labels the coverage fix newly surfaces is what keeps the gate
+      // from widening; the rest is left exactly as it was.
+      showcase_inquiry: {
+        _views: {
+          list: { label: '客户询问' },
+          triage: { label: '询问分流' },
+        },
+      },
+      showcase_business_unit: {
+        _views: {
+          list: { label: '全部单元' },
+          org_chart: { label: '组织架构图' },
+        },
       },
       showcase_field_zoo: {
         label: '字段动物园', pluralLabel: '字段动物园',
