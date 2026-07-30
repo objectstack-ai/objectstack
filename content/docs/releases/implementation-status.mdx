@@ -58,8 +58,8 @@ This matrix is generated from actual codebase analysis and represents the curren
 
 **Notes:**
 - ObjectQL implements complete IDataEngine interface
-- Memory driver is reference implementation (basic CRUD only)
-- Advanced query features (aggregations, window functions) require production drivers
+- Memory driver is the reference implementation: filters, sorting, pagination, aggregations, snapshot transactions, streaming and `syncSchema()` are on; joins, window functions, subqueries, full-text and vector search are off (`InMemoryDriver.supports`)
+- Advanced query features (joins, window functions, subqueries) require production drivers
 - Memory driver supports aggregations (groupBy, count, sum, avg, min, max)
 
 ### Metadata Framework
@@ -70,8 +70,9 @@ This matrix is generated from actual codebase analysis and represents the curren
 
 - Metadata API (list types, list items, get item) is fully functional
 - Metadata is loaded from config files or `dist/objectstack.json` at startup and held in memory
-- `MetadataPlugin` no longer registers `sys_metadata` / `sys_metadata_history` into the runtime or auto-bridges ObjectQL to `DatabaseLoader`
-- Future: production Artifact API loader and durable local artifact cache
+- `MetadataPlugin` auto-provisions the `sys_metadata` / `sys_metadata_history` storage objects (plus the ADR-0067 commit log and the metadata audit trail) by default, so `PUT /api/v1/meta/{type}/{name}` always has somewhere to write. Per-project (cloud) kernels opt out with `registerSystemObjects: false`, because there the control plane owns those tables
+- `MetadataPlugin` does **not** auto-bridge ObjectQL to a `DatabaseLoader` — there is no automatic runtime project-DB bridge, and nothing in the packages calls the bridge during boot. Database-backed metadata is an explicit `MetadataManager` opt-in (`setDataEngine()` / `setDatabaseDriver()`, or a `datasource` + `driver` pair on the manager config), and even then it is control-plane only: both methods return early whenever an `environmentId` is supplied, so a per-project kernel never gets a database-backed metadata loader
+- Future: production Artifact API loader (`artifactSource: { mode: 'artifact-api' }` is reserved) and durable local artifact cache
 
 ### System Services
 
@@ -83,10 +84,10 @@ This matrix is generated from actual codebase analysis and represents the curren
 | **Tracing** | @objectstack/observability | ⚠️ | Error/exporter pipeline shipped (`error-exporters.ts`); full distributed tracing in progress |
 | **Audit** | @objectstack/plugin-audit | ✅ | Audit writers + audit objects shipped |
 | **Job** | @objectstack/service-job | ✅ | Job service with cron/db/interval adapters |
-| **Cache** | ⚠️ | ⚠️ | HTTP caching implemented, in-memory cache partial |
+| **Cache** | @objectstack/service-cache | ✅ | `ICacheService` with in-memory and Redis adapters (`cache-service-plugin.ts`); HTTP caching ships separately in `@objectstack/rest` |
 | **Translation** | @objectstack/service-i18n | ✅ | i18n/translation service with file adapter |
 | **Feature Flags** | ❌ | 📋 | Planned |
-| **Encryption** | ❌ | 📋 | Planned |
+| **Encryption** | @objectstack/service-settings | ⚠️ | `ICryptoProvider` seam with a local AES-256-GCM provider (`local-crypto-provider.ts`); `secret` fields are encrypted at rest into `sys_secret` (`objectql/secret-fields.ts`). Managed KMS/Vault providers not shipped |
 | **Compliance** | ❌ | 📋 | Planned |
 | **Masking** | ❌ | 📋 | Planned |
 | **Notification** | @objectstack/service-messaging | 🟡 | Framework pipeline shipped; objectui bell cut-over remains |
@@ -105,7 +106,7 @@ This matrix is generated from actual codebase analysis and represents the curren
 | **Object** | ✅ | ✅ | ✅ | ✅ Full |
 | **Validation** | ✅ | ⚠️ | ❌ | ⚠️ Partial |
 | **Hook** | ✅ | ✅ | ❌ | ✅ Full |
-| **Dataset** | ✅ | ❌ | ❌ | ❌ Not Impl |
+| **Dataset** | ✅ | ❌ | ✅ | ✅ `@objectstack/service-analytics` |
 | **Mapping** | ✅ | ❌ | ❌ | ❌ Not Impl |
 | **Document** | ✅ | ❌ | ❌ | ❌ Not Impl |
 | **External Lookup** | ✅ | ❌ | ❌ | ❌ Not Impl |
@@ -116,14 +117,14 @@ This matrix is generated from actual codebase analysis and represents the curren
 |:-----------|:-------------:|:------|
 | text, textarea, email, url, phone | ✅ | Full support |
 | number, currency, percent | ✅ | Full support |
-| boolean, checkbox | ✅ | Full support |
+| boolean, toggle | ✅ | Full support (there is no `checkbox` type — a checkbox group is `checkboxes`) |
 | date, datetime, time | ✅ | Full support |
 | select, multiselect | ✅ | Full support |
 | lookup, master_detail | ✅ | Full support in spec, partial in memory driver |
 | formula | ✅ | CEL-backed formula fields are implemented |
 | summary | ✅ | Server-side rollups for count/sum/min/max/avg on child records |
-| json, array | ✅ | Full support |
-| file, image | 📋 | Protocol defined, not implemented |
+| json, tags | ✅ | Full support (there is no `array` type — use `json`, `tags`, or the `repeater` embedded type) |
+| file, image | ✅ | File-class fields (`image`/`file`/`avatar`/`video`/`audio`) hold an opaque `sys_file` id; ownership + release are tracked by `@objectstack/service-storage` |
 
 ### Query Engine
 
@@ -133,8 +134,8 @@ This matrix is generated from actual codebase analysis and represents the curren
 | **Query Builder** | ❌ | ✅ | ❌ | ✅ Client |
 | **Filter Operators** | ✅ | ✅ | ⚠️ | ⚠️ Partial |
 | **Aggregations** | ✅ | ✅ | ✅ | ✅ Full |
-| **Joins** | ✅ | ✅ | ❌ | ⚠️ Spec only |
-| **Sorting** | ✅ | ✅ | ❌ | ⚠️ Spec only |
+| **Joins** | ✅ | ✅ | ❌ | ⚠️ Driver-dependent |
+| **Sorting** | ✅ | ✅ | ✅ | ✅ Full |
 | **Pagination** | ✅ | ✅ | ✅ | ✅ Full |
 | **Window Functions** | ✅ | ❌ | ❌ | ❌ Spec only |
 | **Subqueries** | ✅ | ❌ | ❌ | ❌ Spec only |
@@ -142,8 +143,8 @@ This matrix is generated from actual codebase analysis and represents the curren
 **Notes:**
 - Full query protocol is defined and implemented in ObjectQL engine
 - Actual query capability depends on driver implementation
-- Memory driver supports basic queries only
-- Client SDK provides query builder utilities
+- Memory driver covers filters, sorting, pagination and aggregations; joins, window functions and subqueries are off
+- Client SDK provides query builder utilities (`QueryBuilder` / `FilterBuilder`, `createQuery` / `createFilter`)
 
 ---
 
@@ -164,27 +165,29 @@ This matrix is generated from actual codebase analysis and represents the curren
 | **HTTP Cache** | ✅ | ✅ | ✅ | ✅ | ✅ Full |
 | **Batch** | ✅ | ✅ | ✅ | ✅ | ✅ Full |
 
-The data (`/data`), metadata (`/meta`), and batch endpoints are implemented in `@objectstack/rest` (`rest-server.ts`); `@objectstack/runtime` re-exports `RestServer` from that package and provides the underlying HTTP server/dispatcher.
+The data (`/api/v1/data`), metadata (`/api/v1/meta`), and batch endpoints are implemented in `@objectstack/rest` (`rest-server.ts`); `@objectstack/runtime` re-exports `RestServer` from that package and provides the underlying HTTP server/dispatcher.
 
 **REST Endpoints Implemented:**
 
 | Endpoint Pattern | Method | Purpose | Status |
 |:----------------|:------:|:--------|:------:|
-| `/api/v1` | GET | API discovery | ✅ |
-| `/meta` | GET | List metadata types | ✅ |
-| `/meta/{type}` | GET | List items of type | ✅ |
-| `/meta/{type}/{name}` | GET | Get specific metadata item | ✅ |
-| `/data/{object}` | GET | List records | ✅ |
-| `/data/{object}/{id}` | GET | Get single record | ✅ |
-| `/data/{object}` | POST | Create record | ✅ |
-| `/data/{object}/{id}` | PATCH | Update record | ✅ |
-| `/data/{object}/{id}` | DELETE | Delete record | ✅ |
-| `/data/{object}/createMany` | POST | Batch create | ✅ |
-| `/data/{object}/updateMany` | POST | Batch update | ✅ |
-| `/data/{object}/deleteMany` | POST | Batch delete | ✅ |
-| `/data/{object}/{id}/clone` | POST | Clone a record (gated by `enable.clone`) | ✅ |
-| `/data/{object}/batch` | POST | Atomic batch operations | ✅ |
-| `/batch` | POST | Cross-object atomic batch (parent + children in one transaction, `$ref`) | ✅ |
+| `/api/v1` | GET | API discovery (alias; the SDK connects via `/api/v1/discovery`) | ✅ |
+| `/api/v1/meta` | GET | List metadata types | ✅ |
+| `/api/v1/meta/{type}` | GET | List items of type | ✅ |
+| `/api/v1/meta/{type}/{name}` | GET | Get specific metadata item | ✅ |
+| `/api/v1/data/{object}` | GET | List records | ✅ |
+| `/api/v1/data/{object}/{id}` | GET | Get single record | ✅ |
+| `/api/v1/data/{object}` | POST | Create record | ✅ |
+| `/api/v1/data/{object}/{id}` | PATCH | Update record | ✅ |
+| `/api/v1/data/{object}/{id}` | DELETE | Delete record | ✅ |
+| `/api/v1/data/{object}/createMany` | POST | Batch create | ✅ |
+| `/api/v1/data/{object}/updateMany` | POST | Batch update | ✅ |
+| `/api/v1/data/{object}/deleteMany` | POST | Batch delete | ✅ |
+| `/api/v1/data/{object}/{id}/clone` | POST | Clone a record (gated by `enable.clone`) | ✅ |
+| `/api/v1/data/{object}/batch` | POST | Atomic batch operations | ✅ |
+| `/api/v1/batch` | POST | Cross-object atomic batch (parent + children in one transaction, `$ref`) | ✅ |
+
+Every route carries the `/api/v1` prefix. When project scoping is enabled each row is additionally mirrored under `/api/v1/environments/{environmentId}`. The full audited route list lives in `packages/rest/src/rest-route-ledger.ts`.
 
 ### Advanced Protocols
 
@@ -249,11 +252,11 @@ The data (`/data`), metadata (`/meta`), and batch endpoints are implemented in `
 | **Webhook** | ✅ | ❌ | ✅ | ✅ `@objectstack/plugin-webhooks` |
 | **ETL** | ✅ | ❌ | ✅ | 📋 Plugin |
 | **Sync** | ✅ | ❌ | ✅ | 📋 Plugin |
-| **Trigger Registry** | ✅ | ❌ | ✅ | ✅ `trigger-record-change` / `trigger-schedule` |
+| **Trigger Registry** | ✅ | ❌ | ✅ | ✅ `trigger-api` / `trigger-record-change` / `trigger-schedule` |
 
 **Notes:**
 - Hook system is implemented in ObjectQL (beforeFind, afterInsert, etc.) — this is data-layer eventing, not workflow automation
-- The flow/workflow engine ships in `@objectstack/service-automation` (`engine.ts`, builtin nodes, `plugin.ts`); approvals, webhooks, and triggers ship as `plugin-approvals`, `plugin-webhooks`, `trigger-record-change`, and `trigger-schedule`
+- The flow/workflow engine ships in `@objectstack/service-automation` (`engine.ts`, builtin nodes, `plugin.ts`); approvals, webhooks, and triggers ship as `@objectstack/plugin-approvals`, `@objectstack/plugin-webhooks`, `@objectstack/trigger-api`, `@objectstack/trigger-record-change`, and `@objectstack/trigger-schedule`
 - ETL and Sync protocols are defined but not yet implemented as plugins
 - Discovery API reports automation service as `unavailable` until a plugin is registered
 
@@ -267,26 +270,26 @@ The data (`/data`), metadata (`/meta`), and batch endpoints are implemented in `
 
 ### Auth Service (`plugin-auth`)
 
-The `auth` service in `CoreServiceName` covers both **authentication** (identity) and **authorization** (permissions). There is no separate `permission` service — it is part of `auth`.
+`CoreServiceName` names a single `auth` service — there is no `permission` entry in that enum. Authentication/identity is what `@objectstack/plugin-auth` registers under that name. Authorization is registered *outside* `CoreServiceName`: `@objectstack/plugin-security` registers `security` (plus `security.permissions`, `security.rls`, `security.fieldMasker`) and `@objectstack/plugin-sharing` registers `sharing`, `sharingRules`, and `shareLinks`.
 
 | Protocol | Area | @objectstack/spec | Kernel | Plugin Required | Status |
 |:---------|:-----|:-----------------:|:------:|:---------------:|:------:|
-| **Identity** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
-| **Auth Config** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
-| **Role** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
-| **Organization** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
+| **Identity** | Authentication | ✅ | ❌ | ✅ | ✅ `plugin-auth` (better-auth) |
+| **Auth Config** | Authentication | ✅ | ❌ | ✅ | ✅ `plugin-auth` |
+| **Position** | Authentication | ✅ | ❌ | ✅ | ✅ `plugin-auth` + `plugin-security` |
+| **Organization** | Authentication | ✅ | ❌ | ✅ | ✅ `plugin-auth` (`tenancy` service) |
 | **Policy** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
-| **SCIM** | Authentication | ✅ | ❌ | ✅ | 📋 Plugin |
+| **SCIM** | Authentication | ✅ | ❌ | ✅ | ⚠️ `plugin-auth`, opt-in via `OS_SCIM_ENABLED` |
 | **Permission** | Authorization | ✅ | ✅ Phase-1 | ✅ | ✅ `plugin-security` |
-| **Sharing** | Authorization | ✅ | ❌ | ✅ | 📋 Plugin |
+| **Sharing** | Authorization | ✅ | ❌ | ✅ | ✅ `plugin-sharing` |
 | **RLS** | Authorization | ✅ | ✅ Phase-1 (tenant + owner) | ✅ | ✅ `plugin-security` |
 
 **Notes:**
-- All security protocols (identity + permission) are delivered by a single `auth` plugin — matching `CoreServiceName`
+- Security is delivered by three cooperating plugins, not one: `plugin-auth` (identity, `auth` + `tenancy` services), `plugin-security` (permissions, FLS, RLS, tenant wall), and `plugin-sharing` (OWD, sharing rules, per-record shares, share links)
 - Client SDK supports bearer token header — but token validation requires the auth plugin
 - Auth route (`/auth/*`) only appears in Discovery when the auth plugin is registered
-- Fine-grained authorization (RLS, sharing, territory) is internal to the auth plugin
-- **Phase-1 RBAC enforcement is live end-to-end**: REST → ObjectQL → SecurityPlugin middleware now receives a populated `ExecutionContext` (userId, tenantId, positions, permissions). Tenant isolation is enforced as a Layer 0 tenant wall (`plugin-security/tenant-layer.ts`, ADR-0095 D1) that AND-composes `organization_id == current_user.organization_id` ahead of and independently of business RLS — the earlier wildcard `tenant_isolation` RLS policy on `member_default` was retired (an OR-merged business policy could widen it). The default `member_default` set still ships per-object overrides `sys_organization_self` (`id == current_user.organization_id`) and `sys_user_self` (`id == current_user.id`) for the global tables that lack an `organization_id` column. The earlier `tenantField` indirection (RLS expressions written against an abstract `tenant_id` column then rewritten to the configured physical column at compile time) was removed — the placeholder, the column name, and `RLSUserContext.organization_id` are now the same name end-to-end. The legacy `objectql.registerTenantMiddleware` (hardcoded `where.tenant_id` injection that pre-dated SecurityPlugin) has been removed; SecurityPlugin is the sole authority for tenant isolation. Analytics now uses the same reusable read scope via `security.getReadFilter`, so dataset-bound dashboards/reports do not bypass RLS. Verified cross-organization isolation on `pnpm dev:crm` across `sys_organization`, `sys_member`, `sys_user`, `sys_user_permission_set`, `sys_position_permission_set`. **Anonymous traffic is denied by default** (the ADR-0056 D2 default-deny flip landed: `requireAuth` defaults to `true`); an explicit `requireAuth: false` opt-out logs a boot-time warning, and public forms do not depend on any fall-open — they carry a declaration-derived `publicFormGrant` (ADR-0056 Option A).
+- Fine-grained authorization (RLS, sharing) lives in `plugin-security` / `plugin-sharing`, not in the auth plugin. Territory-style access is expressed as an RLS dynamic-membership set (`ExecutionContext.rlsMembership`, e.g. `id in current_user.territory_account_ids`) rather than as a dedicated territory module
+- **Phase-1 RBAC enforcement is live end-to-end**: REST → ObjectQL → SecurityPlugin middleware now receives a populated `ExecutionContext` (userId, tenantId, positions, permissions). Tenant isolation is enforced as a Layer 0 tenant wall (`plugin-security/tenant-layer.ts`, ADR-0095 D1) that AND-composes `organization_id == current_user.organization_id` ahead of and independently of business RLS — the earlier wildcard `tenant_isolation` RLS policy on `member_default` was retired (an OR-merged business policy could widen it). The default `member_default` set still ships per-object overrides `sys_organization_self` (`id == current_user.organization_id`) and `sys_user_self` (`id == current_user.id`) for the global tables that lack an `organization_id` column. The earlier `tenantField` indirection (RLS expressions written against an abstract `tenant_id` column then rewritten to the configured physical column at compile time) was removed — the placeholder, the column name, and `RLSUserContext.organization_id` are now the same name end-to-end. The legacy `objectql.registerTenantMiddleware` (hardcoded `where.tenant_id` injection that pre-dated SecurityPlugin) has been removed; SecurityPlugin is the sole authority for tenant isolation. Analytics now uses the same reusable read scope via `security.getReadFilter`, so dataset-bound dashboards/reports do not bypass RLS. Verified cross-organization isolation on `pnpm dev:crm` across `sys_organization`, `sys_member`, `sys_user`, `sys_user_permission_set`, `sys_position_permission_set`. **Anonymous traffic is always denied** (ADR-0056 D2). The deployment-wide opt-out is gone: `api.requireAuth` was retired in `@objectstack/spec` 18 (#3963) and is now a tombstoned key that fails validation rather than reopening the data plane. The single decision lives in `@objectstack/core` (`security/anonymous-deny.ts`, 401 `UNAUTHENTICATED`), and every surface that legitimately serves a session-less caller derives its own narrow authorization from a declaration instead: control-plane paths via the auth-gate allowlist, public forms via `publicFormGrant` (ADR-0056 Option A), share links via a capability token validated then read as SYSTEM, `book.audience: 'public'` reads via the audience gate, and MCP via an OAuth token or API key.
 - **OWD / sharing-model enforcement is live and proven end-to-end (ADR-0056)**: `private`, `public_read`, `public_read_write`, and `controlled_by_parent` are enforced through `plugin-sharing` + `plugin-security` and verified by dogfood proofs over the real HTTP stack. `object.sharingModel` accepts the canonical OWD vocabulary only (`private` / `public_read` / `public_read_write` / `controlled_by_parent`) — the legacy `read` / `read_write` / `full` aliases were removed from the enum (ADR-0090 D4), and an unset `sharingModel` on a custom object resolves to `private` (ADR-0090 D1). RLS owner policies resolve `current_user.email` in addition to `id` / `organization_id` / `positions` (#2054). Permission sets may declare `isDefault: true` as the install-time suggestion to bind the set to the built-in `everyone` position (ADR-0090 D5, superseding the ADR-0056 D7 fallback-profile mechanism). **A sharing rule must state its criteria** (#3896): all three write paths reject a match-all shape, a stored criteria-less rule matches nothing, and its materialised grants are revoked on the next reconcile.
 
 ---
@@ -345,9 +348,11 @@ describe that separate runtime.
 
 **Features Implemented:**
 - TestSuite, TestScenario, TestStep schemas ✅
-- HTTP adapter for testing ✅
-- MSW integration for browser mocking ✅
-- QA runner in core ✅
+- HTTP adapter for testing ✅ (`packages/core/src/qa/http-adapter.ts`)
+- QA runner in core ✅ (`packages/core/src/qa/runner.ts`)
+- Conformance/dogfood harnesses in `@objectstack/verify` and `packages/qa` (`dogfood`, `downstream-contract`, `http-conformance`) ✅
+
+There is no MSW package in this repo — browser API mocking is a devDependency of the sibling `objectui` frontend, and `@objectstack/driver-memory` is what backs those in-browser fixtures.
 
 ---
 
@@ -413,29 +418,31 @@ describe that separate runtime.
 ### Phase 8: Automation (Plugin) 🟡 **IN PROGRESS**
 - [x] Flow Engine Plugin
 - [x] Approval Node Plugin
+- [x] Trigger Registry Plugins — `@objectstack/trigger-api`, `@objectstack/trigger-record-change`, `@objectstack/trigger-schedule` (including the time-relative trigger)
 - [ ] ETL Pipeline Plugin
-- [ ] Trigger Registry Plugin
+- [ ] Sync Plugin
 
 ### Phase 9: Security (Plugin) 🟡 **PHASE-1 LANDED**
 - [x] Authentication Plugin (`@objectstack/plugin-auth`, better-auth)
 - [x] Authorization Plugin — `@objectstack/plugin-security` enforces CRUD/FLS/RLS in the ObjectQL middleware chain; REST → ObjectQL now propagates `ExecutionContext` end-to-end (Phase-1)
-- [x] Row-Level Security — tenant isolation is a Layer 0 tenant wall (`plugin-security/tenant-layer.ts`, ADR-0095 D1) that AND-composes `organization_id == current_user.organization_id` independently of business RLS (the earlier wildcard `tenant_isolation` policy on `member_default` was retired); `member_default` still applies per-object overrides `sys_organization_self` / `sys_user_self`. The earlier `tenantField` rewrite indirection was removed: RLS column, placeholder, and `RLSUserContext.organization_id` use the same canonical name end-to-end. Policy `enabled: false` is enforced at the compiler choke point — a disabled policy no longer contributes its OR-branch grant (#3980) — and the void `priority` key is removed (#3990)
+- [x] Row-Level Security — tenant isolation is a Layer 0 tenant wall (`plugin-security/tenant-layer.ts`, ADR-0095 D1) that AND-composes `organization_id == current_user.organization_id` independently of business RLS (the earlier wildcard `tenant_isolation` policy on `member_default` was retired); `member_default` still applies per-object overrides `sys_organization_self` / `sys_user_self`. The earlier `tenantField` rewrite indirection was removed: RLS column, placeholder, and `RLSUserContext.organization_id` use the same canonical name end-to-end. Policy `enabled: false` is enforced at the compiler choke point — a disabled policy no longer contributes its OR-branch grant (#3980) — and the void `rowLevelSecurity[].priority` key was removed in `@objectstack/spec` 17.0.0 (#3896 security audit)
 - [x] Analytics RLS bridge — `@objectstack/service-analytics` auto-bridges to `security.getReadFilter(object, context)` and fails closed when read-scope resolution cannot be safely applied
 - [x] Multi-tenancy — verified cross-organization isolation on `pnpm dev:crm` (Alice@OrgAlpha vs. Bob@OrgBeta only see their own records across `sys_organization`, `sys_member`, `sys_user`, and `sys_*_permission_set` link tables)
 - [x] Legacy `objectql.registerTenantMiddleware` removed — SecurityPlugin is now the sole tenant-isolation authority
 - [x] Organization-Wide Defaults / sharing model — `private`, `public_read`, `public_read_write`, and `controlled_by_parent` enforced via `plugin-sharing` + `plugin-security`, proven by dogfood over the real HTTP stack (ADR-0056). Canonical vocabulary only — legacy aliases removed from the enum (ADR-0090 D4); unset custom-object OWD resolves to `private` (ADR-0090 D1)
 - [x] Sharing Rule evaluator — criteria rules re-evaluated on `afterInsert` / `afterUpdate` (`plugin-sharing/rule-hooks.ts`); enforced recipients are user / position / `unit_and_subordinates` (business-unit-subtree widening, ADR-0057 D5 / ADR-0090 D3); owner-type rules and group/guest recipients remain `[experimental — not enforced]`
 - [x] Everyone-baseline suggestion — a permission set may set `isDefault: true` as the install-time suggestion to bind it to the built-in `everyone` position; resolved per-request as an additive baseline, no fallback cliff (ADR-0090 D5)
-- [x] Default-deny for anonymous traffic — the global default-deny **flip landed** (ADR-0056 D2): `requireAuth` defaults to `true`, explicit `requireAuth: false` opt-outs warn at boot, and public forms self-authorize via `publicFormGrant` (Option A)
+- [x] Default-deny for anonymous traffic — the global default-deny landed (ADR-0056 D2) and the `api.requireAuth` opt-out was then **removed** in `@objectstack/spec` 18 (#3963): the key is tombstoned and rejected at parse time, the deny decision is centralised in `@objectstack/core` `security/anonymous-deny.ts`, and public forms self-authorize via `publicFormGrant` (Option A)
 - [ ] Studio RLS visual editor
 - [ ] Per-user×org permission cache
 - [ ] Audit UI / denied-access logging
 
-### Phase 10: AI Integration 📋 **PLANNED**
-- [ ] Agent Framework
-- [ ] RAG Pipeline
-- [ ] NLQ Engine
-- [ ] Model Registry
+### Phase 10: AI Integration 🟡 **IN PROGRESS**
+- [x] RAG Pipeline — `@objectstack/service-knowledge` plus the `knowledge-memory`, `knowledge-ragflow`, and `embedder-openai` plugins ship in this repo
+- [x] MCP surface — `@objectstack/mcp` exposes the platform to any BYO-AI client
+- [ ] Agent Framework (ObjectOS runtime; not in the open-source framework)
+- [ ] NLQ Engine (ObjectOS runtime)
+- [ ] Model Registry (ObjectOS runtime)
 
 ---
 
@@ -448,8 +455,8 @@ describe that separate runtime.
 | **Data** | 16 | Core modeling, hooks, and query engine fully implemented; document/mapping/external-lookup still pending |
 | **UI** | 10 | Studio/ObjectUI render most authored surfaces (🟡); full cross-surface renderer parity in progress |
 | **API** | 14 | REST/HTTP/discovery/batch fully implemented; OData pending; GraphQL removed from the plan |
-| **System** | 39 | Logging, audit, job, translation, metrics, notification implemented; several governance services pending |
-| **Auth** (plugin) | 10 | Permission + RLS live (`plugin-security`); identity/sharing/territory still plugin-pending |
+| **System** | 39 | Logging, audit, job, translation, metrics, cache, notification implemented; encryption partial (local crypto provider); several governance services pending |
+| **Auth** (plugin) | 10 | Identity/organizations live (`plugin-auth`), permission + RLS live (`plugin-security`), OWD + sharing rules live (`plugin-sharing`); SCIM is opt-in |
 | **Automation** (plugin) | 7 | Flow, workflow, approval, webhook, and triggers implemented; ETL/Sync pending |
 | **AI** | 12 | Agents, model registry, conversation, tools, RAG implemented (ObjectOS runtime + open knowledge plugins); cost/predictive/DevOps-agent pending |
 | **Integration** | 7 | REST/OpenAPI/MCP/Slack connectors, file storage, and queue implemented; GitHub/Vercel connectors pending |
@@ -457,7 +464,7 @@ describe that separate runtime.
 
 ### Implementation Coverage
 
-Implementation spans every layer of the platform. Core infrastructure, data modeling, the REST API, client SDKs, security (Phase-1), automation, AI, and integration all have shipping implementations. Remaining gaps are concentrated in specific protocols (OData, cross-surface UI renderer parity, sharing/territory authorization, ETL/Sync, and a handful of governance and AI-cost services) rather than entire layers. Refer to the per-layer tables above for protocol-level status.
+Implementation spans every layer of the platform. Core infrastructure, data modeling, the REST API, client SDKs, security (Phase-1), automation, AI, and integration all have shipping implementations. Remaining gaps are concentrated in specific protocols (OData, cross-surface UI renderer parity, ETL/Sync, the mapping/document/external-lookup data protocols, and a handful of governance and AI-cost services) rather than entire layers. Refer to the per-layer tables above for protocol-level status.
 
 ### Core Functionality Status
 
@@ -471,38 +478,37 @@ Implementation spans every layer of the platform. Core infrastructure, data mode
 | **Metadata System** | ⚠️ | Partial (`sys_metadata` persistence via `MetadataPlugin`; without it the kernel's in-memory fallback fills the slot and discovery reports it `degraded`) |
 | **HTTP Caching** | ✅ | Yes |
 | **Testing Tools** | ✅ | Yes |
-| **UI Rendering** | ❌ | No |
+| **UI Rendering** | 🟡 | Partial (Studio/ObjectUI render authored surfaces; cross-surface renderer parity in progress) |
 | **Workflows** | ✅ | Yes (plugin: `service-automation`) |
-| **Security** | ⚠️ | Partial (Phase-1 RBAC/RLS via `plugin-security`) |
+| **Security** | ⚠️ | Partial (Phase-1 RBAC/FLS/RLS via `plugin-security`; OWD + sharing rules via `plugin-sharing`; identity via `plugin-auth`) |
 | **AI Features** | ⚠️ | Partial (ObjectOS runtime + open knowledge plugins) |
 
 ---
 
 ## Package Feature Matrix
 
-| Feature | spec | core | objectql | runtime | client | client-react | cli | metadata | hono | memory | msw |
-|:--------|:----:|:----:|:--------:|:-------:|:------:|:------------:|:---:|:--------:|:----:|:------:|:---:|
-| **Protocol Definitions** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Microkernel** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Plugin System** | ❌ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Service Registry** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Event Bus** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Logging** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Schema Registry** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **ObjectQL Engine** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Protocol Implementation** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **REST Server** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Endpoint Generation** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **HTTP Server** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| **Client SDK** | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Query Builder** | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **React Hooks** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **CLI Commands** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Config Validation** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Metadata Loading** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| **File Watching** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| **Database Driver** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ |
-| **API Mocking** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Feature | spec | core | objectql | runtime | client | client-react | cli | metadata | hono | memory |
+|:--------|:----:|:----:|:--------:|:-------:|:------:|:------------:|:---:|:--------:|:----:|:------:|
+| **Protocol Definitions** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Microkernel** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Plugin System** | ❌ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Service Registry** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Event Bus** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Logging** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Schema Registry** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **ObjectQL Engine** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Protocol Implementation** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **REST Server** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Endpoint Generation** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **HTTP Server** | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **Client SDK** | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Query Builder** | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **React Hooks** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **CLI Commands** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Config Validation** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Metadata Loading** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| **File Watching** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| **Database Driver** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ |
 
 > The REST server, endpoint generation, and data/meta/batch endpoints are implemented in the `@objectstack/rest` package (not shown as a column above); `@objectstack/runtime` re-exports `RestServer` from it.
 

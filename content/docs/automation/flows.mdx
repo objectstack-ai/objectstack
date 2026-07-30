@@ -73,11 +73,13 @@ const approvalFlow = {
 | `version` | `number` | optional | Version number (defaults to `1`) |
 | `status` | `enum` | optional | `'draft'`, `'active'`, `'obsolete'`, `'invalid'` (defaults to `'draft'`) |
 | `type` | `FlowType` | ✅ | Flow trigger type (see below) |
-| `runAs` | `enum` | optional | `'system'` or `'user'` execution context (defaults to `'user'`) |
+| `runAs` | `enum` | optional | `'system'` (elevated, bypasses RLS) or `'user'` (the triggering user, RLS-respecting; the default). A `'user'` run that resolved **no** trigger user has nothing to scope to, so its data operations are refused — declare `'system'` for schedule / time-relative / API triggers and for record-change flows fired by a write that carried no user |
 | `variables` | `FlowVariable[]` | optional | Input/output variables |
 | `nodes` | `FlowNode[]` | ✅ | Flow nodes |
 | `edges` | `FlowEdge[]` | ✅ | Connections between nodes |
 | `errorHandling` | `object` | optional | Error handling strategy |
+| `successMessage` | `string` | optional | Toast a screen-flow runner shows on terminal success (plain string — `{var}` is **not** interpolated) |
+| `errorMessage` | `string` | optional | Toast a screen-flow runner shows on failure, instead of the raw error |
 
 ### Flow Types
 
@@ -110,7 +112,7 @@ Each node performs a specific action in the flow.
 | `get_record` | Query records |
 | `http` | Make an HTTP API call |
 | `notify` | Send an outbound notification via the messaging service |
-| `script` | Run a custom script action (dispatched by `config.actionType`) |
+| `script` | Call a named callable — a registered function (`config.function`) or a built-in side-effect marker (`config.actionType`) |
 | `screen` | Display a user form/screen (durable pause) |
 | `wait` | Pause for a timer or named signal (durable pause; timers auto-resume) |
 | `subflow` | Invoke another flow — a pause inside the child suspends both runs as a linked chain |
@@ -134,11 +136,21 @@ Each node performs a specific action in the flow.
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `string` | ✅ | Unique node identifier |
-| `type` | `FlowNodeAction` | ✅ | Node type |
+| `type` | `string` | ✅ | Node type — a built-in id from the table above **or** a plugin-registered one. Per ADR-0018 the spec does not gate this with a closed enum; it is checked against the live action registry at `registerFlow()` |
 | `label` | `string` | ✅ | Display label |
-| `config` | `object` | optional | Type-specific configuration |
-| `connectorConfig` | `object` | optional | External connector settings |
+| `config` | `object` | optional | Type-specific configuration (an open record — the registered executor's `configSchema` owns its shape) |
+| `connectorConfig` | `object` | optional | `{ connectorId, actionId, input }` for a `connector_action` node |
 | `position` | `{ x, y }` | optional | Visual position on canvas |
+| `timeoutMs` | `number` | optional | Per-node execution timeout |
+| `inputSchema` | `object` | optional | Declared input parameter types, for Studio form generation and runtime validation |
+| `waitEventConfig` | `object` | optional | `wait`-node event descriptor (`eventType`, `timerDuration`, `signalName`, `timeoutMs`, `onTimeout`) |
+| `boundaryConfig` | `object` | optional | BPMN boundary-event descriptor (interop) |
+
+<Callout type="info">
+The flow, node, edge, and variable **shells are `.strict()`** — a key they do not
+declare is a parse error naming the likely intended key, not a silent strip. (A
+node's `config` stays open, so plugin node types keep their own vocabulary.)
+</Callout>
 
 ### Node Examples
 
@@ -193,18 +205,36 @@ Each node performs a specific action in the flow.
 
 **Script:**
 
-The built-in `script` executor dispatches on `config.actionType` (e.g. `email`)
-rather than evaluating an arbitrary JavaScript string:
+The built-in `script` executor never evaluates an arbitrary JavaScript string —
+it **names a callable**. Two forms:
+
+- **`config.function`** — a function registered through
+  `defineStack({ functions })`. `config.inputs` is `{var}`-interpolated and
+  handed to it; `config.outputVariable` binds the returned value as a flow
+  variable, so a later declarative node persists it. This is the supported way
+  to run server logic.
+- **`config.actionType`** — one of the two built-in side-effect markers,
+  `'email'` or `'slack'`. These are **logger-backed**: they record the intent
+  and succeed, they do not deliver anything — reach for a `notify` node when you
+  want real delivery. Any other `actionType` value is treated as a
+  registered-function name — except the marker `'invoke_function'`, which means
+  "call the function named in `config.function`" and errors if that key is
+  missing.
+
+Inline `config.script` (a JS source body) is *recognized* but **not executed** —
+the built-in runtime has no server-side JS sandbox, so such a node warns and
+no-ops. A script node that names neither a built-in action nor a registered
+function fails the step loudly rather than passing silently.
 
 ```typescript
 {
-  id: 'send_welcome',
+  id: 'score_lead',
   type: 'script',
-  label: 'Send Welcome Email',
+  label: 'Score Lead',
   config: {
-    actionType: 'email',
-    template: 'welcome',
-    recipients: '{record.email}',
+    function: 'scoreLead',                  // registered via defineStack({ functions })
+    inputs: { rating: '{record.rating}' },  // {var} templates resolve against flow variables
+    outputVariable: 'leadScore',            // later: fields: { score: '{leadScore}' }
   },
 }
 ```
@@ -247,8 +277,11 @@ Two things worth knowing:
   value at all, which counts as unanswered — without `defaultValue: false` the
   user cannot express "no" by leaving it clear.
 - **A broken predicate fails open** (the field stays visible) rather than hiding
-  an input the flow may be waiting on. Nothing validates the expression at
-  author time yet, so a typo shows up as a field that never hides.
+  an input the flow may be waiting on. `registerFlow()` does check the predicate
+  as bare CEL — a `{var}` template or a syntax error is a loud registration
+  failure that quotes the source and locates it as
+  `config.fields[N].visibleWhen` — but a predicate that *parses* and simply
+  names the wrong field still shows up as a field that never hides.
 
 **Screen (object form):**
 
@@ -561,8 +594,9 @@ Edges connect nodes and define the execution path:
 | `source` | `string` | ✅ | Source node ID |
 | `target` | `string` | ✅ | Target node ID |
 | `type` | `enum` | optional | `'default'` (success), `'fault'` (error), `'conditional'` (expression-guarded), or `'back'` (declared back-edge, ADR-0044); defaults to `'default'` |
-| `condition` | `string` | optional | Boolean expression for branching |
+| `condition` | `string` | optional | Boolean CEL predicate for branching (a bare string is stored as `{ dialect: 'cel', source }`) |
 | `label` | `string` | optional | Label displayed on the connector — cosmetic only. It does **not** select a path except on a branching node (`decision` / `approval`), which picks its out-edge by label. |
+| `isDefault` | `boolean` | optional | BPMN default-flow marker (interop). Accepted by the schema, but **the engine does not read it** — traversal selects by `condition` and by `label`. On a `decision` node, the fallback is the out-edge labelled `default`: when no `conditions[]` entry matches, the node emits `branchLabel: 'default'` |
 
 ### Fault edges — handling a failed node
 
@@ -582,7 +616,7 @@ edges: [
 the type leaves an ordinary edge, and every unconditional out-edge is traversed
 (in parallel) on **success**. The handler then runs whenever the node
 *succeeds*, never when it fails, and the run still aborts on failure. Both
-halves are silent, so `objectstack validate` reports this as
+halves are silent, so `os validate` reports this as
 `flow-error-label-not-fault`.
 </Callout>
 
@@ -621,7 +655,7 @@ The split is deliberate. A dropped filter condition does not narrow a query, it
 widens it — so if guards were routable, one `fault` edge on a `delete_record`
 would turn off the protection against emptying the object while the run still
 reported success. Re-running changes nothing either: the fix is to correct the
-metadata, which `objectstack validate` will point at.
+metadata, which `os validate` will point at.
 </Callout>
 
 #### Fault edges vs. `errorHandling.retry`
@@ -673,9 +707,12 @@ errorHandling: {
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
-| `strategy` | `enum` | `'fail'` (stop), `'retry'` (retry), `'continue'` (skip) |
+| `strategy` | `enum` | `'fail'` (stop) or `'retry'` (re-run the whole flow). `'continue'` parses but the engine branches only on `'retry'`, so it behaves exactly like `'fail'` — use a `fault` edge to keep going past a failed node |
 | `maxRetries` | `number` | Maximum retry attempts (0-10) |
 | `retryDelayMs` | `number` | Delay between retries (ms) |
+| `backoffMultiplier` | `number` | Exponential backoff multiplier (default `1`) |
+| `maxRetryDelayMs` | `number` | Ceiling on the backed-off delay (default `30000`) |
+| `jitter` | `boolean` | Randomize the delay to avoid a thundering herd (default `false`) |
 
 ## Discovery & Registration
 
@@ -782,30 +819,43 @@ credentials.
 
 <Callout type="warn">
 **`success: true` doesn't always mean "it ran".** If the start condition isn't
-met, the response is a *successful* skip:
-`{ "success": true, "data": { "skipped": true, "reason": "condition_not_met" } }`.
+met, the response is a *successful* skip — the run result rides in `data`, and
+the skip marker sits on its `output`:
+`{ "success": true, "data": { "success": true, "output": { "skipped": true, "reason": "condition_not_met" } } }`.
 A self-triggering flow caught by the loop guard reports
-`reason: "reentrancy_loop_guard"` the same way. Check `skipped` before assuming
-the work happened.
+`reason: "reentrancy_loop_guard"` the same way. Check `data.output.skipped`
+before assuming the work happened.
 </Callout>
 
 ## Console Flow Viewer & Test Runner
 
-Every flow can surface in the Console metadata browser under `/_console/`.
-ObjectUI's flow viewer replaces the default JSON inspector with rich tabs when
-the flow viewer plugin is installed:
+Every flow surfaces in the Console metadata browser under `/_console/`, where
+ObjectUI's app-shell registers `FlowPreview` as the `flow` metadata preview
+(`registerMetadataPreview('flow', FlowPreview)`) in place of the default JSON
+inspector. It renders the graph on a canvas — editable (add a node, patch a
+selection) only in the designer's edit mode, read-only otherwise. Opening a flow
+shows the **full-width canvas with no side panel**; the toolbar toggles one
+collapsible panel at a time:
 
-| Tab | Component | Purpose |
+| Side panel | Component | Purpose |
 |:---|:---|:---|
-| **Overview** | `FlowViewer` | Renders trigger type, variables, nodes, edges, and `errorHandling` as inspector cards |
-| **Run** | `FlowTestRunner` | Auto-generates a form for every `isInput: true` variable (with type-aware coercion for `number` / `boolean` / `object` / `list`), executes the flow against the per-project kernel, and shows the returned outputs + run id |
-| **Runs** | `FlowRunsPanel` | Lists historical executions for the selected flow with status, duration, and a deep-link to the run record |
+| **Variables** | — | The flow's declared variables with their types and input/output flags. Opt-in — it is the fallback panel, not one that opens on its own |
+| **Problems** | `ProblemsPanel` | Validation findings; selecting one reveals the offending node or edge on the canvas |
+| **Debug** | `FlowSimulatorPanel` | Steps the graph client-side, highlighting the active node, the visited nodes, and the traversed edges |
+| **Runs** | `FlowRunsPanel` | Real run history from [`GET /api/v1/automation/:name/runs`](#observing-runs), each run's step log nested by loop iteration / parallel branch / try-catch handler |
 
-The runner posts to the same
-[`POST /api/v1/automation/:name/trigger`](#run-a-flow-via-api) endpoint,
-scoped to the active project. All three components participate in the Studio
-authentication / project-scope context, so they work identically in
-single-project mode and in cloud mode.
+Actually *running* a flow is a separate Console page — **Developer › Flow Runs**
+(`developer/flow-runs`). Its test runner auto-generates a form for every
+`isInput: true` variable (with type-aware coercion for `number` / `boolean` /
+`object` / `list`) and calls `client.automation.execute(name, { params })` —
+the same [`POST /api/v1/automation/:name/trigger`](#run-a-flow-via-api)
+endpoint — then renders the returned result. A screen flow that comes back
+`paused` is handed to the same `FlowRunner` the record and list surfaces use,
+so multi-step wizards (and `object-form` steps) can be driven to completion
+from here instead of orphaning a suspended run. A run-history panel beside it
+lists recent runs and expands one for its step detail. The Console is not
+project-scoped: the client comes from the app adapter, with no `projectId` in
+the route.
 
 ## Flows in practice
 
@@ -1040,6 +1090,6 @@ To branch on **which** event fired, test `previous` — it is empty on create
 
 ## Related
 
-- [Workflow Metadata](/docs/automation/workflows) — Event-triggered automation rules
+- [Workflow Metadata](/docs/automation/workflows) — why there is no standalone Workflow Rule type, and what replaces it
 - [Object Metadata](/docs/data-modeling/objects) — Objects that flows operate on
 - [Validation Metadata](/docs/data-modeling/validation) — Data validation rules
