@@ -1661,6 +1661,7 @@
     "ui/HttpRequest",
     "ui/I18nLabel",
     "ui/I18nObject",
+    "ui/InlineAction",
     "ui/InterfacePageConfig",
     "ui/JoinedReportBlock",
     "ui/KanbanConfig",
