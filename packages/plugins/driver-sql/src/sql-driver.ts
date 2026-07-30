@@ -20,6 +20,7 @@ import {
   diffManagedTable,
   driftKey,
   expectedIndexes,
+  fieldHasColumn,
   isIndexDriftOp,
   legacyUniqueReplacements,
   uniqueIndexesFromFields,
@@ -2864,11 +2865,22 @@ export class SqlDriver implements IDataDriver {
    * a database that has not been migrated yet. That is the right trade for a
    * command the operator ran to be told the size of the job — and it is paid
    * once, by `plan`/`apply`, never on a normal boot.
+   *
+   * The obligation runs both ways (#3978). #3954 closed "the plan understates
+   * what apply does"; this closes its mirror image — the plan must not promise
+   * work apply CANNOT do. Only fields that materialize a column are listed,
+   * decided by {@link fieldHasColumn}, the same helper `createColumn` and the
+   * column differ use. A virtual `formula` field has no column, so listing it
+   * produced an `add_columns` entry `apply` reported as performed without doing
+   * anything and the next `plan` reported again: a finding no invocation could
+   * ever clear, making a freshly-applied database look un-migrated.
    */
   async previewDeferredSchemaWork(): Promise<PendingSchemaWork[]> {
     const out: PendingSchemaWork[] = [];
     for (const [tableName, obj] of this.deferredSchemaObjects) {
-      const declared = Object.keys(obj.fields ?? {});
+      const declared = Object.entries<any>(obj.fields ?? {})
+        .filter(([, field]) => fieldHasColumn(field ?? {}))
+        .map(([name]) => name);
       if (!(await this.knex.schema.hasTable(tableName))) {
         // A table that does not exist yet is created empty, so nothing to converge.
         out.push({ table: tableName, kind: 'create_table', columns: declared });

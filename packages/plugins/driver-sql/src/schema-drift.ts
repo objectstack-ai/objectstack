@@ -110,6 +110,11 @@ export interface PendingSchemaWork {
   /**
    * Declared columns for a create; the missing ones for an add; the columns
    * being converged for the two datetime steps.
+   *
+   * The additive kinds name only fields that MATERIALIZE a column
+   * ({@link fieldHasColumn}) — a virtual `formula` field never appears. The
+   * promise above cuts both ways: a plan may not promise work `apply` cannot
+   * deliver either, or the finding can never be cleared (#3978).
    */
   columns: string[];
   /**
