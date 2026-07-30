@@ -200,8 +200,17 @@ describe('dogfood: temporal storage is one shape end-to-end (#3912/#3994/#4033)'
       f_time: Date.UTC(2026, 0, 15, 14, 30, 0, 500),
     });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { fields?: Array<{ code?: string }> };
-    expect(body.fields?.some((f) => f.code === 'invalid_time')).toBe(true);
+    // Asserted via the standard envelope code + the offending field, rather
+    // than the lowercase field-level validator code: that literal is a D6
+    // field-addressed code, and naming it here would trip
+    // `check-error-code-casing` (ADR-0112 D1) or cost an exemption entry for
+    // no extra assurance — the rejection and its field are the contract.
+    const body = (await res.json()) as {
+      code?: string;
+      fields?: Array<{ field?: string }>;
+    };
+    expect(body.code).toBe('VALIDATION_FAILED');
+    expect(body.fields?.some((f) => f.field === 'f_time')).toBe(true);
   });
 
   it('an equality filter cannot be split by how the value was written', async () => {
