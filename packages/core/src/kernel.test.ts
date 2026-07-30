@@ -130,6 +130,49 @@ describe('ObjectKernel', () => {
         });
     });
 
+    // #4085 — `ctx.getService()` has to name the fault it actually hit. Both
+    // cases below land in the same branch (neither sync map has the name), and
+    // reading the answer off `pluginLoader.getService()` — an `async` method,
+    // so ALWAYS a Promise — reported both as "is async - use await". That sent
+    // every ordering bug ("this plugin ran before the one that registers the
+    // service") looking for an await that does not exist: the crash that kept
+    // `os serve` from booting without a compiled artifact read as a kernel
+    // fault, and the real cause (plugin order) was invisible.
+    describe('Service resolution diagnostics', () => {
+        it('reports a never-registered service as not found', async () => {
+            expect(() => kernel.getService('nothing-registered-this-name'))
+                .toThrow("[Kernel] Service 'nothing-registered-this-name' not found");
+        });
+
+        it('reports a registered-but-uninstantiated factory as async', async () => {
+            kernel.registerServiceFactory(
+                'lazy-thing',
+                () => ({ ok: true }),
+                ServiceLifecycle.SINGLETON,
+            );
+
+            // Sync accessor cannot run an async factory — the caller needs
+            // `getServiceAsync`, and the message has to say so.
+            expect(() => kernel.getService('lazy-thing'))
+                .toThrow("Service 'lazy-thing' is async - use await");
+
+            // …and the async accessor resolves it, after which the sync
+            // accessor finds the cached instance.
+            await expect(kernel.getServiceAsync('lazy-thing')).resolves.toEqual({ ok: true });
+            expect(kernel.getService('lazy-thing')).toEqual({ ok: true });
+        });
+
+        it('does not mask a factory that throws as a missing service', async () => {
+            kernel.registerServiceFactory(
+                'exploding',
+                () => { throw new Error('driver connect failed'); },
+                ServiceLifecycle.SINGLETON,
+            );
+
+            await expect(kernel.getServiceAsync('exploding')).rejects.toThrow('driver connect failed');
+        });
+    });
+
     describe('Plugin Lifecycle with Timeout', () => {
         it('should timeout plugin init if it takes too long', async () => {
             const plugin: PluginMetadata = {

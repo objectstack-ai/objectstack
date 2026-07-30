@@ -22,18 +22,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const execFileP = promisify(execFile);
-
-const HERE = resolve(fileURLToPath(import.meta.url), '..');
-const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
+import { join } from 'node:path';
+import { runServe, randomPort } from './helpers/serve-process.js';
 
 /**
  * A stack whose only interesting property is that booting it MUST log a
@@ -67,91 +59,16 @@ export default {
 };
 `;
 
-interface ServeRun {
-  stdout: string;
-  stderr: string;
-}
-
-/**
- * Boot `os serve` in `cwd`, collect its output until the banner prints (or
- * `waitFor` matches), then stop it. Never leaves the child running.
- */
-function runServe(
-  cwd: string,
-  args: string[],
-  opts: { waitFor: RegExp; timeoutMs?: number },
-): Promise<ServeRun> {
-  return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', ...args], {
-      cwd,
-      env: {
-        ...process.env,
-        NO_COLOR: '1',
-        // Keep the fixture self-contained: no file written, no port conflict
-        // with another agent's dev server, no inherited log level.
-        OS_DATABASE_URL: ':memory:',
-        OS_LOG_LEVEL: '',
-        OS_DISABLE_CONSOLE: '1',
-      },
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-
-    const finish = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        /* already gone */
-      }
-      if (err) rejectRun(err);
-      else resolveRun({ stdout, stderr });
-    };
-
-    const timer = setTimeout(
-      () =>
-        finish(
-          new Error(
-            `serve did not reach ${opts.waitFor} in time.\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`,
-          ),
-        ),
-      opts.timeoutMs ?? 180_000,
-    );
-
-    child.stdout.on('data', (d) => {
-      stdout += String(d);
-      if (opts.waitFor.test(stdout)) finish();
-    });
-    child.stderr.on('data', (d) => {
-      stderr += String(d);
-    });
-    child.on('error', (err) => finish(err));
-    // A boot that dies still has to have said why — resolve rather than reject
-    // so the assertions can read what it printed on the way down.
-    child.on('exit', () => finish());
-  });
-}
-
 let dir: string;
 
-beforeAll(async () => {
+beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'os-boot-diagnostics-e2e-'));
   writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');
-  // `serve` needs the compiled artifact beside the config: booting from the
-  // config alone currently dies in `AppPlugin` with "Service 'manifest' is
-  // async - use await" (reproducible on `examples/app-todo` too, by moving its
-  // `dist/objectstack.json` aside) — a separate, pre-existing defect, filed
-  // rather than worked around here.
-  await execFileP(TSX, [CLI, 'compile'], {
-    cwd: dir,
-    maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: '1' },
-  });
-}, 240_000);
+  // No `os compile` step. This fixture used to need the artifact beside the
+  // config because config-boot itself died in `AppPlugin` with
+  // "Service 'manifest' is async - use await" — filed as #4085 and fixed
+  // there, so the config alone boots now.
+});
 
 afterAll(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
@@ -163,7 +80,7 @@ describe('os serve — boot-phase logger output (#4012)', () => {
     async () => {
       // Random high port: never contend with a dev server this machine is
       // already running (AGENTS.md multi-agent discipline §8).
-      const port = String(40000 + Math.floor(Math.random() * 20000));
+      const port = randomPort();
       const { stdout, stderr } = await runServe(dir, ['--port', port], {
         waitFor: /Press Ctrl\+C to stop/,
       });
@@ -189,7 +106,7 @@ describe('os serve — boot-phase logger output (#4012)', () => {
       // none of them from boot — not even the kernel's own plain
       // `logger.debug('Triggering kernel:ready hook')`. At a verbose level the
       // quiet window no longer opens at all.
-      const port = String(40000 + Math.floor(Math.random() * 20000));
+      const port = randomPort();
       const { stdout, stderr } = await runServe(dir, ['--port', port, '--log-level', 'debug'], {
         waitFor: /Press Ctrl\+C to stop/,
       });

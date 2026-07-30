@@ -95,33 +95,31 @@ export class ObjectKernel {
                     return loaderService;
                 }
 
-                // 3. Try to get from plugin loader (support async factories)
-                try {
-                    const service = this.pluginLoader.getService(name);
-                    if (service instanceof Promise) {
-                        // If we found it in the loader but not in the sync map, it's likely a factory-based service or still loading
-                        // We must silence any potential rejection from this promise since we are about to throw our own error
-                        // and abandon the promise. Without this, Node.js will crash with "Unhandled Promise Rejection".
-                        service.catch(() => {});
-                        throw new Error(`Service '${name}' is async - use await`);
-                    }
-                    return service as T;
-                } catch (error: any) {
-                    if (error.message?.includes('is async')) {
-                        throw error;
-                    }
-                    
-                    // Re-throw critical factory errors instead of masking them as "not found"
-                    // If the error came from the factory execution (e.g. database connection failed), we must see it.
-                    // "Service '${name}' not found" comes from PluginLoader.getService fallback.
-                    const isNotFoundError = error.message === `Service '${name}' not found`;
-                    
-                    if (!isNotFoundError) {
-                        throw error;
-                    }
-
+                // 3. Neither sync map has it. Two very different faults share
+                //    this branch and MUST NOT share one message (#4085):
+                //      (a) nothing ever registered `name` — a composition /
+                //          ordering fault at the CALLER (e.g. a plugin reaching
+                //          for `manifest` in init() before the engine plugin
+                //          registered it);
+                //      (b) `name` IS registered, as a factory that has not been
+                //          instantiated yet — the caller merely used the wrong
+                //          accessor and needs `getServiceAsync`.
+                //    `pluginLoader.getService` is an `async` method, so its
+                //    return value is ALWAYS a Promise and its internal
+                //    "not found" rejection can never surface synchronously.
+                //    Reading (a) off that Promise therefore reported every
+                //    missing service as "is async - use await" — the wrong fix,
+                //    pointing at the wrong layer. Decide from the registry
+                //    instead, which is synchronous and authoritative.
+                if (!this.pluginLoader.hasService(name)) {
                     throw new Error(`[Kernel] Service '${name}' not found`);
                 }
+
+                // Registered but not instantiated ⇒ factory-backed. Message
+                // kept verbatim: callers that tolerate an async-only service
+                // (console static assets, the HTTP dispatcher) match on
+                // `is async`.
+                throw new Error(`Service '${name}' is async - use await`);
             },
             replaceService: <T>(name: string, implementation: T): void => {
                 const hasService = this.services.has(name) || this.pluginLoader.hasService(name);
