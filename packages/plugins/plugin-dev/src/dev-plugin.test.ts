@@ -257,9 +257,9 @@ describe('DevPlugin', () => {
     // Really do the work, just less of it — their answers are true answers.
     const DEGRADED = ['cache', 'queue', 'job', 'file-storage', 'search', 'realtime', 'i18n', 'workflow', 'metadata'];
     // Fabricate the answer — must never be mistaken for a capability.
-    // (`security.*` are no longer in this list because they are no longer
-    // registered at all — see the dedicated test below, #4093.)
-    const STUB = ['automation', 'notification', 'ai', 'data', 'auth'];
+    // (`security.*`, `data` and `ui` are no longer in this list because they
+    // are no longer registered at all — see the dedicated tests below, #4093.)
+    const STUB = ['automation', 'notification', 'ai', 'auth'];
 
     for (const name of DEGRADED) {
       const info = readServiceSelfInfo(registeredServices.get(name));
@@ -284,14 +284,24 @@ describe('DevPlugin', () => {
       expect(readServiceSelfInfo(registeredServices.get(name))?.handlerReady, `${name} handlerReady`).toBe(false);
     }
 
-    // `ui` has no factory at all — the shapeless placeholder must still be
-    // honest about being nothing.
-    const ui = readServiceSelfInfo(registeredServices.get('ui'));
-    expect(ui?.status).toBe('stub');
-    expect(ui?.handlerReady).toBe(false);
+    // The retired slots stay empty: analytics (#4000); `data`, whose stub
+    // replaced two consumers' deliberate empty-slot degradation with
+    // fabrication; and `ui`, whose shapeless placeholder occupied a slot
+    // nothing in the platform registers or consumes (#4093).
+    for (const name of ['analytics', 'data', 'ui']) {
+      expect(registeredServices.has(name), `${name} slot must stay empty`).toBe(false);
+    }
 
-    // The retired analytics slot stays empty (#4000).
-    expect(registeredServices.has('analytics')).toBe(false);
+    // Config drift pin: every core slot is either implemented or deliberately
+    // empty — a name in neither table would silently regrow a shapeless
+    // placeholder, which is exactly what #4093 retired.
+    const { CORE_SERVICE_NAMES, DEV_STUB_FACTORIES, NO_DEV_STUB_SERVICES } = await import('./dev-plugin');
+    for (const name of CORE_SERVICE_NAMES) {
+      expect(
+        name in DEV_STUB_FACTORIES || NO_DEV_STUB_SERVICES.has(name),
+        `${name} must have a stub factory or be listed in NO_DEV_STUB_SERVICES`,
+      ).toBe(true);
+    }
   });
 
   // [#4093] The one thing a fallback may never fake. ADR-0076 D12, from #3891:

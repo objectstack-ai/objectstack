@@ -843,7 +843,7 @@ export class HttpDispatcher {
         const [
             authSvc, searchSvc, realtimeSvc, filesSvc,
             analyticsSvc, workflowSvc, aiSvc, notificationSvc, i18nSvc,
-            uiSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
+            protocolSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
             metadataSvc, dataSvc,
         ] = await Promise.all([
             this.resolveService(CoreServiceName.enum.auth),
@@ -855,7 +855,11 @@ export class HttpDispatcher {
             this.resolveService(CoreServiceName.enum.ai),
             this.resolveService(CoreServiceName.enum.notification),
             this.resolveService(CoreServiceName.enum.i18n),
-            this.resolveService(CoreServiceName.enum.ui),
+            // [#4093] What `/ui` actually reads (domains/ui.ts). The `ui` SLOT
+            // is vestigial — nothing in the platform registers it (plugin-dev's
+            // shapeless placeholder was its only occupant, now retired), and
+            // the domain never consulted it.
+            this.resolveService('protocol'),
             this.resolveService(CoreServiceName.enum.automation),
             this.resolveService(CoreServiceName.enum.cache),
             this.resolveService(CoreServiceName.enum.queue),
@@ -909,7 +913,14 @@ export class HttpDispatcher {
         const hasAi           = isServiceServeable(aiSvc);
         const hasNotification = isServiceServeable(notificationSvc);
         const hasI18n         = isServiceServeable(i18nSvc);
-        const hasUi           = !!uiSvc;
+        // Mirrors handleUiRequest's OWN guard byte for byte (domains/ui.ts):
+        // it 503s unless a `protocol` service with `getUiView` is resolvable —
+        // the `ui` slot never enters that decision. Gating here on slot
+        // presence was wrong in both directions: a dev boot with the protocol
+        // absent advertised a route that could only 503, and a production boot
+        // (nothing fills the vestigial slot) hid a route that serves fine.
+        // Same predicate ⇒ same answer (the `hasMcp` pattern below).
+        const hasUi           = typeof protocolSvc?.getUiView === 'function';
         const hasAutomation   = isServiceServeable(automationSvc);
         const hasCache        = !!cacheSvc;
         const hasQueue        = !!queueSvc;
@@ -1099,7 +1110,19 @@ export class HttpDispatcher {
                 cache:          hasCache ? svcAvailable(undefined, undefined, cacheSvc) : svcUnavailable('cache'),
                 queue:          hasQueue ? svcAvailable(undefined, undefined, queueSvc) : svcUnavailable('queue'),
                 job:            hasJob ? svcAvailable(undefined, undefined, jobSvc) : svcUnavailable('job'),
-                ui:             hasUi ? svcAvailable(routes.ui, undefined, uiSvc) : svcUnavailable('ui'),
+                // [#4093] Reported from what serves it, like the route above:
+                // `/ui` is a dispatcher domain answered by the `protocol`
+                // service, so its self-description (none today — MetadataPlugin
+                // registers a real shim) is the honest source. The vestigial
+                // `ui` slot is not consulted, matching the domain. The
+                // unavailable message names the actual remedy — `svcUnavailable`
+                // would say "install a ui plugin", and no such plugin exists.
+                ui:             hasUi
+                                    ? svcAvailable(routes.ui, 'metadata-protocol', protocolSvc)
+                                    : {
+                                        enabled: false, status: 'unavailable' as const, handlerReady: false,
+                                        message: 'Served by the protocol service — register MetadataPlugin (@objectstack/metadata-protocol) to enable',
+                                    },
                 workflow:       hasWorkflow ? svcAvailable(routes.workflow, undefined, workflowSvc) : svcUnavailable('workflow'),
                 // Honest entry (ADR-0076 D12, #2462): the registered realtime
                 // service is an in-process event bus with NO mounted HTTP/WS

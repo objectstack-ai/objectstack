@@ -2661,6 +2661,80 @@ describe('HttpDispatcher', () => {
     });
 
     // ═══════════════════════════════════════════════════════════════
+    // [#4093] /ui advertisement reads what /ui reads
+    //
+    // domains/ui.ts serves GET /ui/view/:object off the `protocol` service and
+    // 503s without it; the `ui` SLOT never enters that decision — nothing in
+    // the platform registers a `ui` service (plugin-dev's shapeless
+    // placeholder, retired in #4093, was its only occupant ever). Discovery
+    // used to gate `routes.ui` on that slot, which was wrong in both
+    // directions: a boot with the placeholder but no protocol advertised a
+    // route that could only 503, and a production boot with a working
+    // protocol hid a route that serves. Same predicate ⇒ same answer
+    // (the `hasMcp` rule).
+    // ═══════════════════════════════════════════════════════════════
+
+    describe('/ui discovery gates on the protocol service, not the vestigial ui slot (#4093)', () => {
+        const serveMap = (services: Record<string, unknown>) => {
+            (kernel as any).getService = vi.fn().mockImplementation((n: string) => services[n] ?? null);
+            (kernel as any).services = new Map(Object.entries(services));
+        };
+
+        it('advertises /ui and serves it when a protocol with getUiView is registered', async () => {
+            const protocol = { getUiView: vi.fn().mockResolvedValue({ object: 'account', type: 'list', view: {} }) };
+            serveMap({ protocol });
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.ui).toBe('/api/v1/ui');
+            expect(info.services.ui.enabled).toBe(true);
+            expect(info.services.ui.status).toBe('available');
+            expect(info.services.ui.handlerReady).toBe(true);
+            expect(info.services.ui.provider).toBe('metadata-protocol');
+
+            // The advertised route really answers — same predicate, same fact.
+            const served = await dispatcher.handleUi('/view/account', {}, { request: {} });
+            expect(served.handled).toBe(true);
+            expect(served.response?.status).toBe(200);
+            expect(protocol.getUiView).toHaveBeenCalledWith({ object: 'account', type: 'list' });
+        });
+
+        it('does not advertise /ui without a protocol, and names the actual remedy', async () => {
+            serveMap({});
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.ui).toBeUndefined();
+            expect(info.services.ui.enabled).toBe(false);
+            expect(info.services.ui.handlerReady).toBe(false);
+            // Not svcUnavailable's "Install a ui plugin" — no such plugin exists.
+            expect(info.services.ui.message).toContain('MetadataPlugin');
+        });
+
+        it('a ui-slot occupant buys no route: the old dev-boot shape stays un-advertised and un-served', async () => {
+            // What plugin-dev used to register: a shapeless placeholder in the
+            // `ui` slot, no protocol anywhere. /ui could only 503 — discovery
+            // must say so instead of advertising it.
+            const placeholder = { _serviceName: 'ui', __serviceInfo: { status: 'stub', handlerReady: false, message: 'Dev placeholder' } };
+            serveMap({ ui: placeholder });
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.ui).toBeUndefined();
+            expect(info.services.ui.enabled).toBe(false);
+
+            const served = await dispatcher.handleUi('/view/account', {}, { request: {} });
+            expect(served.handled).toBe(true);
+            expect(served.response?.status).toBe(503);
+        });
+
+        it('a wrong-shaped protocol (no getUiView) is not advertised — mirrors the domain 503', async () => {
+            serveMap({ protocol: { saveMetaItem: vi.fn() } });
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.ui).toBeUndefined();
+            expect(info.services.ui.enabled).toBe(false);
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════
     // i18n across server/dev/mock environments
     // ═══════════════════════════════════════════════════════════════
 

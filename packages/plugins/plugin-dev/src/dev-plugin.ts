@@ -8,7 +8,7 @@ import { SERVICE_SELF_INFO_KEY } from '@objectstack/spec/api';
  * All 17 core kernel service names as defined in CoreServiceName.
  * @see packages/spec/src/system/core-services.zod.ts
  */
-const CORE_SERVICE_NAMES = [
+export const CORE_SERVICE_NAMES = [
   'metadata', 'data', 'auth',
   'file-storage', 'search', 'cache', 'queue',
   'automation', 'analytics', 'realtime',
@@ -238,19 +238,9 @@ function createAuthStub() {
   };
 }
 
-/** IDataEngine — minimal no-op data stub (fallback) */
-function createDataStub() {
-  return {
-    _serviceName: 'data',
-    async find() { return []; },
-    async findOne() { return undefined; },
-    async insert(_obj: string, params: any) { return { id: `dev-${Date.now()}`, ...params?.data }; },
-    async update(_obj: string, _id: string, params: any) { return params?.data ?? {}; },
-    async delete() { return true; },
-    async count() { return 0; },
-    async aggregate() { return []; },
-  };
-}
+// [#4093] The `data` stub is GONE — see NO_DEV_STUB_SERVICES for why. It was
+// a fabricating IDataEngine: find() always [], insert() minted `dev-<ts>` ids
+// and stored nothing.
 
 // [#4093] The three security sub-service stubs are GONE — see
 // SECURITY_SERVICE_NAMES below for why. They were:
@@ -267,7 +257,7 @@ function createDataStub() {
  * Each factory creates a new instance implementing the protocol interface
  * from `packages/spec/src/contracts/`.
  */
-const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
+export const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
   'cache':       () => createMemoryCache(),
   'queue':       () => createMemoryQueue(),
   'job':         () => createMemoryJob(),
@@ -280,7 +270,6 @@ const DEV_STUB_FACTORIES: Record<string, () => Record<string, any>> = {
   'i18n':        createI18nStub,
   'workflow':    createWorkflowStub,
   'metadata':    createMetadataStub,
-  'data':        createDataStub,
   'auth':        createAuthStub,
 };
 
@@ -327,15 +316,7 @@ const DEV_STUB_SELF_INFO: Record<string, { status: 'stub' | 'degraded'; handlerR
   'automation':   { status: 'stub', message: 'Dev stub — execute() reports success WITHOUT running the flow. Register an automation plugin to actually run flows.' },
   'notification': { status: 'stub', message: 'Dev stub — messages are recorded in memory and reported as sent; nothing is delivered. Register a notification plugin to actually send.' },
   'ai':           { status: 'stub', message: 'Dev stub — replies are placeholder text, not model output. Register AIServicePlugin from @objectstack/service-ai for real completions.' },
-  'data':         { status: 'stub', message: 'Dev stub — find() always returns [], insert() mints an id and stores nothing. Register ObjectQLPlugin for a real engine.' },
   'auth':         { status: 'stub', message: 'Dev stub — verify() accepts EVERY request as a fixed dev admin. Never use outside local development; register plugin-auth for real authentication.' },
-};
-
-/** Self-description for a slot with no factory at all (see the registration loop). */
-const SHAPELESS_STUB_SELF_INFO = {
-  status: 'stub' as const,
-  handlerReady: false,
-  message: 'Dev placeholder with no implementation — the slot is occupied so lookups do not throw, and nothing else.',
 };
 
 /**
@@ -350,9 +331,10 @@ function applySelfInfo(svc: Record<string, any>, info: Record<string, unknown>):
 }
 
 /**
- * Core service slots that deliberately get NO dev stub — not even the
- * shapeless placeholder the registration loop uses for slots
- * without a factory.
+ * Core service slots that deliberately get NO dev stub. An empty slot is what
+ * production has when the real provider isn't installed, and for each of
+ * these, every consumer already answers an empty slot honestly — so a stub
+ * could only make the answer worse.
  *
  * `analytics` (#4000): #3891/#3989 retired the degraded analytics shim, making
  * an unoccupied slot the honest signal — `/analytics/*` is not mounted, the
@@ -364,8 +346,27 @@ function applySelfInfo(svc: Record<string, any>, info: Record<string, unknown>):
  * but "the capability is present" must mean the same thing in dev as in
  * production. To use analytics locally, install the real engine:
  * `@objectstack/service-analytics` runs an InMemory strategy.
+ *
+ * `data` (#4093): in any boot with the objectql toggle on, ObjectQLPlugin
+ * registers the real engine and the stub never fired. In an engine-less boot
+ * it was strictly harmful: the two consumers of this slot each carry a
+ * DELIBERATE empty-slot degradation the stub silently replaced with
+ * fabrication — service-automation's CRUD nodes document "no data engine →
+ * no-op success", but the stub's insert() minted a fake record id that
+ * downstream nodes then referenced as if stored; runtime's
+ * default-datasource plugin treats an absent engine as "nothing to wire".
+ * The `/data` HTTP domain never reads this slot at all (it resolves through
+ * `callData`), and discovery reads the occupant's self-info since #4130 —
+ * an empty slot is handled everywhere.
+ *
+ * `ui` (#4093): the slot was pure fiction — NOTHING in the platform registers
+ * a `ui` service and nothing consumes one. `/ui` is served by the `protocol`
+ * service (domains/ui.ts), and discovery gates `routes.ui` on exactly that
+ * predicate now, so the shapeless placeholder's only observable effect was to
+ * advertise `/ui` in boots where the protocol was absent and the route could
+ * only 503.
  */
-const NO_DEV_STUB_SERVICES = new Set<string>(['analytics']);
+export const NO_DEV_STUB_SERVICES = new Set<string>(['analytics', 'data', 'ui']);
 
 /**
  * Escape hatch for {@link assertNotProduction} — deliberately ungrouped and
@@ -378,7 +379,8 @@ const ALLOW_IN_PRODUCTION_ENV = 'OS_ALLOW_DEV_PLUGIN' as const;
  *
  * This plugin's whole purpose is to make a local stack work without installing
  * anything: it fills unclaimed service slots with fakes. Several of those
- * fabricate their answers (`data` discards writes and reports success), and it
+ * fabricate their answers (`automation` reports success without running the
+ * flow), and it
  * ships as a published package with no environment check of its own — so an
  * `objectstack.config.ts` that carries `new DevPlugin()` into a production
  * deploy got the whole fake slate silently, with only a boot log to say so.
@@ -774,13 +776,16 @@ export class DevPlugin implements Plugin {
     }
 
     // ── Register contract-compliant dev stubs for remaining services ────
-    // The kernel defines 17 core services + 3 security services.
     // Real plugins (ObjectQL, Auth, Security, etc.) already registered some.
-    // For any service NOT yet registered, we create a contract-compliant
+    // For any core service NOT yet registered, we create a contract-compliant
     // dev stub (implementing the interface from packages/spec/src/contracts/)
     // so that the full kernel service map is populated and downstream code
     // receives correct return types (arrays, booleans, objects — not undefined).
-    // Exception: NO_DEV_STUB_SERVICES slots stay empty on purpose (#4000).
+    // Exception: NO_DEV_STUB_SERVICES slots stay empty on purpose (#4000,
+    // #4093) — and there is no catch-all placeholder for a slot without a
+    // factory: a slot this file has no implementation for is a slot it must
+    // leave empty, not occupy with a shapeless nothing (the retired `ui`
+    // placeholder was exactly that).
     //
     // Each registered implementation carries its D12 self-description from
     // DEV_STUB_SELF_INFO (#4058), so discovery reports what it actually is —
@@ -789,21 +794,19 @@ export class DevPlugin implements Plugin {
 
     const stubNames: string[] = [];
 
-    /** Build + self-describe one slot's dev implementation. */
-    const makeStub = (svc: string) => {
-      const factory = DEV_STUB_FACTORIES[svc];
-      const info = DEV_STUB_SELF_INFO[svc] ?? SHAPELESS_STUB_SELF_INFO;
-      return applySelfInfo(factory ? factory() : { _serviceName: svc }, info);
-    };
-
     for (const svc of CORE_SERVICE_NAMES) {
       if (!enabled(svc)) continue;
       if (NO_DEV_STUB_SERVICES.has(svc)) continue;
+      const factory = DEV_STUB_FACTORIES[svc];
+      if (!factory) continue; // no implementation → the slot stays empty (see above)
       try {
         ctx.getService(svc);
         // Already registered by a real plugin — skip
       } catch {
-        ctx.registerService(svc, makeStub(svc));
+        // No table entry ⇒ the implementation self-describes (the wrapped
+        // kernel fallbacks); applySelfInfo would refuse to overwrite anyway.
+        const info = DEV_STUB_SELF_INFO[svc];
+        ctx.registerService(svc, info ? applySelfInfo(factory(), info) : factory());
         stubNames.push(svc);
       }
     }

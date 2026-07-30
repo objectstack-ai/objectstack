@@ -86,12 +86,14 @@ Most core kernel services not provided by a real plugin are registered as a dev 
 | Class | Slots | Meaning |
 |:---|:---|:---|
 | `degraded` | `cache`, `queue`, `job`, `file-storage`, `search`, `realtime`, `i18n`, `workflow`, `metadata` | Really does the work, in memory only. Served normally over HTTP. |
-| `stub` | `data`, `auth`, plus `ui` (placeholder with no implementation) | Fabricates its answer. Reported as a stub in discovery, and every dispatcher-owned domain answers it exactly as it answers an empty slot. |
+| `stub` | `auth` | Fabricates its answer. Reported as a stub in discovery, and every dispatcher-owned domain answers it exactly as it answers an empty slot. |
 
 **Never stubbed** — these slots stay empty on purpose, which is what production has when the real plugin isn't installed:
 
 - `analytics` (#4000). Install `@objectstack/service-analytics` (it runs an InMemory strategy).
 - `security.permissions`, `security.rls`, `security.fieldMasker` (#4093). The former stubs answered "allowed" for every permission check, compiled no row-level filter, and returned rows unmasked — inverting the decisions they stood in for. ADR-0076 D12's rule is that a fallback may degrade features, **never security semantics**. Without `@objectstack/plugin-security` nothing enforces RBAC, RLS or field masking, and the boot log says so rather than a fake quietly saying yes.
+- `data` (#4093). With the `objectql` toggle on (the default), ObjectQLPlugin registers the real engine and a stub never fired anyway. In an engine-less boot the stub was strictly harmful: consumers of this slot carry deliberate empty-slot degradations (automation CRUD nodes no-op, the datasource plugin skips wiring) that the stub replaced with fabrication — `insert()` minted record ids for data it discarded.
+- `ui` (#4093). Nothing in the platform registers or consumes a `ui` service — `/ui` is served by the `protocol` service, and discovery now gates `routes.ui` on exactly that. The shapeless placeholder's only observable effect was advertising `/ui` in boots where it could only 503.
 
 All services are **optional** — if a peer package isn't installed it is skipped, and for the slots above a stub takes its place.
 
