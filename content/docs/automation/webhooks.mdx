@@ -399,10 +399,11 @@ The plugin mounts exactly **one** custom endpoint:
 | POST   | `/api/v1/webhooks/redeliver` | `{ deliveryId }`  | Re-queue a previously failed/dead delivery.      |
 
 It delegates to `messaging.redeliverHttp(deliveryId)` and is guarded by the
-better-auth session (any authenticated user). Responses: `200` on success,
-`401` unauthenticated, `400` missing/invalid body, `404` `not_found`, `409`
-`not_eligible`. There are no `/webhooks/:id/test`, `/rotate`,
-`/deliveries`, or per-delivery redeliver routes.
+better-auth session (any authenticated user). Failures answer in the declared
+envelope — `{ success: false, error: { code, message } }` — with `401`
+`UNAUTHENTICATED`, `400` `INVALID_REQUEST` or `MISSING_REQUIRED_FIELD`, `404`
+`RESOURCE_NOT_FOUND`, `409` `DELIVERY_NOT_ELIGIBLE` (ADR-0112). There are no
+`/webhooks/:id/test`, `/rotate`, `/deliveries`, or per-delivery redeliver routes.
 
 ## 9. Concurrency & rate-limiting
 
