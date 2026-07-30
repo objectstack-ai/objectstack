@@ -30,9 +30,10 @@
  * #3675 / #3689 shipped this as a regex block copied into each converted
  * package. Three copies was the signal it wanted lifting (#3843 option 3), and
  * lifting it to a repo-wide scan buys the thing per-package copies structurally
- * cannot: **a module nobody thought to convert still gets audited.** Both
- * modules in the RATCHET table below were found that way — neither is in
- * #3843's hand-written survey.
+ * cannot: **a module nobody thought to convert still gets audited.** Two modules
+ * in the table below were found exactly that way, neither of them in #3843's
+ * hand-written survey — `share-link-routes.ts` (ratcheted, #3983) and
+ * `hmr-routes.ts` (exempt).
  *
  * A module discovered by the scan but absent from the table is an ERROR, not a
  * default: silently applying `2 / 1 / 1` to an unknown module would let a new
@@ -97,6 +98,10 @@ const MODULES = {
   'packages/services/service-datasource/src/admin-routes.ts': { responses: 2, ok: 1, err: 1 },
   'packages/rest/src/external-datasource-routes.ts': { responses: 2, ok: 1, err: 1 },
   'packages/rest/src/package-routes.ts': { responses: 2, ok: 1, err: 1 },
+  // Consolidated by #3973: #3636 put the right envelope on its three read routes
+  // but built it inline in four places, so this module carried a ratchet at 5 / 4 / 1
+  // until those collapsed behind a `sendOk`.
+  'packages/services/service-i18n/src/i18n-service-plugin.ts': { responses: 2, ok: 1, err: 1 },
 
   // ── Exempt ──────────────────────────────────────────────────────────────
 
@@ -114,17 +119,7 @@ const MODULES = {
     exempt: 'dev-only SSE endpoint (/api/v1/dev/*), not on the SDK surface',
   },
 
-  // ── Ratchets: real, tracked, NOT blessed ────────────────────────────────
-
-  // The error half IS consolidated behind `sendError` (#3675). The success half
-  // is not: each of four read routes builds `{ success: true, data }` inline.
-  // Those bodies are CORRECT — `packages/runtime/src/i18n-success-envelope
-  // .conformance.test.ts` drives them — so this is not envelope drift. It is an
-  // unconsolidated builder, i.e. a weaker guard: a fifth read route could get
-  // the shape wrong and only a driven test would notice.
-  'packages/services/service-i18n/src/i18n-service-plugin.ts': {
-    responses: 5, ok: 4, err: 1, ratchet: '#3973',
-  },
+  // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
 
   // Found BY THIS SCAN, absent from #3843's survey — the fifth drifting module.
   // `sendError` already nests `{ code, message }` (that is why #3675's changeset
