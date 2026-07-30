@@ -16,10 +16,18 @@
  *     res.status(400).json({ success: false, failed, cleanups });
  *     res.status(400).json({ success: false });
  *
- * i.e. a caller was told it failed and never told why. Those two are the reason
- * this module needed MINTED codes rather than carried-over ones: there was
- * nothing to carry. See `sendError`'s note in `package-routes.ts` for why the
- * SCREAMING_SNAKE dialect was chosen and why #3841 still owns the vocabulary.
+ * i.e. a caller was told it failed and never told why. They are also why this
+ * module had no codes to carry over: its `error` strings were human messages, so
+ * every code here had to be chosen rather than re-spelled.
+ *
+ * ADR-0112 (#3841) settled the vocabulary, so the choice was not free. Generic
+ * conditions reuse the STANDARD catalog — `MISSING_REQUIRED_FIELD`,
+ * `RESOURCE_NOT_FOUND`, `INTERNAL_ERROR` — and only the package-specific outcomes
+ * are registered in `ERROR_CODE_LEDGER` (`PACKAGE_MANIFEST_INVALID`,
+ * `PACKAGE_PUBLISH_FAILED`, `PACKAGE_DELETE_PARTIAL`, `PACKAGE_DELETE_FAILED`);
+ * see `sendError`'s note in `package-routes.ts`. `ApiErrorSchema.code` is a closed
+ * union now, so an unregistered code fails parse — which is what makes the
+ * `BaseResponseSchema.safeParse` assertions below catch an invented one.
  *
  * The three bodies that already had the flag kept their payload as SIBLINGS of
  * it (`{ success: true, message, package }`); the assertions below pin that they
