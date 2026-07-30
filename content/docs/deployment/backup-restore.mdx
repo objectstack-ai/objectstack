@@ -98,7 +98,9 @@ Fresh container or VM. Install Node 22+ and `@objectstack/cli`.
 
 ```bash
 pg_restore --clean --if-exists -d "$OS_DATABASE_URL" backup-2026-07-14.dump
-# or copy the SQLite file / restore the provider snapshot
+# or restore the provider snapshot
+# SQLite: put the `.backup` file in place with the server stopped, and make sure
+# no stale app.db-wal / app.db-shm is left beside it (see the warning above)
 ```
 
 ### Provide the original secrets
