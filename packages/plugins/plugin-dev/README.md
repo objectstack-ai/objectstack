@@ -77,11 +77,18 @@ plugins: [
 
 ### Dev stubs (in-memory / no-op)
 
-Any core kernel service not provided by a real plugin is automatically registered as a dev stub. This ensures the **full kernel service map** is populated and features like UI permissions, automation, etc. don't crash:
+Most core kernel services not provided by a real plugin are automatically registered as a dev stub, so the **kernel service map** is populated and callers get correct return types instead of `undefined`.
 
-`cache`, `queue`, `job`, `file-storage`, `search`, `automation`, `graphql`, `analytics`, `realtime`, `notification`, `ai`, `i18n`, `ui`, `workflow`, `security.permissions`, `security.rls`, `security.fieldMasker`
+Each stub declares what kind of fake it is (`__serviceInfo`, ADR-0076 D12), because consumers gate on the difference:
 
-All services are **optional** — if a peer package isn't installed, it is silently skipped and a stub takes its place.
+| Class | Slots | Meaning |
+|:---|:---|:---|
+| `degraded` | `cache`, `queue`, `job`, `file-storage`, `search`, `realtime`, `i18n`, `workflow`, `metadata` | Really does the work, in memory only — nothing persists, nothing crosses a process boundary. Served normally over HTTP. |
+| `stub` | `data`, `auth`, `security.permissions`, `security.rls`, `security.fieldMasker`, plus `ui` (placeholder) | Fabricates its answers (allow-all permissions, discarded writes). Reported as a stub in discovery; consumers that honour `handlerReady` treat the slot as empty. |
+
+**Not stubbed at all** — `analytics`, `automation`, `notification`, `ai`. These fakes reported success for work that never happened (a flow "executed" without running, a notification "sent" to nobody, a placeholder AI answer), and the dispatcher served that as a 200. The slots stay **empty**, exactly as in production without the plugin: `/api/v1/{analytics,automation,notifications,ai}/*` answer 404 and discovery reports `unavailable`. Install the real service to use the capability locally — `@objectstack/service-analytics`, `@objectstack/service-automation`, `@objectstack/service-messaging`, or an AI service. (#4000, #4058)
+
+All services are **optional** — if a peer package isn't installed, it is silently skipped and, for the slots above, a stub takes its place.
 
 ## API Endpoints (when all services enabled)
 

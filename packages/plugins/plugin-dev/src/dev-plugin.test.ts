@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readServiceSelfInfo, SERVICE_SELF_INFO_KEY } from '@objectstack/spec/api';
 import { DevPlugin } from './dev-plugin';
 
 // #3060: init()'s graceful-degradation path dynamically imports ~10 real
@@ -67,7 +68,7 @@ describe('DevPlugin', () => {
     await expect(plugin.init(ctx)).resolves.not.toThrow();
   });
 
-  it('should register contract-compliant dev stubs for every core service except analytics', async () => {
+  it('should register contract-compliant dev stubs for every core service except the fabricating ones', async () => {
     const registeredServices = new Map<string, any>();
     const ctx: any = {
       logger: {
@@ -111,6 +112,9 @@ describe('DevPlugin', () => {
       (call: any[]) => typeof call[0] === 'string' && call[0].includes('dev stubs registered'),
     );
     expect(stubLog).toBeDefined();
+    // Split the announced list instead of substring-matching it below: `ai` is
+    // two letters and would match inside another service's name.
+    const announcedStubs = stubLog[0].split(':').pop().split(',').map((s: string) => s.trim());
 
     // ── Verify ICacheService contract ──
     const cache = registeredServices.get('cache');
@@ -153,38 +157,26 @@ describe('DevPlugin', () => {
     expect(searchResult.hits).toHaveLength(1);
     expect(typeof searchResult.totalHits).toBe('number');
 
-    // ── Verify IAutomationService contract ──
-    const automation = registeredServices.get('automation');
-    const execResult = await automation.execute('test_flow');
-    expect(execResult.success).toBe(true);
-    expect(Array.isArray(await automation.listFlows())).toBe(true);
-
-    // ── analytics: deliberately NOT stubbed (#4000) ──
+    // ── analytics / automation / notification / ai: deliberately NOT stubbed
+    //    (#4000, #4058) ──
     // #3891/#3989 retired the degraded analytics shim so an empty slot is the
     // honest signal (route unmounted → 404, discovery `unavailable`). A dev
     // stub refilled the slot and the dispatcher, gating on presence alone,
     // served its fabricated rows with a 200 — the retired shape, one layer
-    // down. The slot stays empty; install @objectstack/service-analytics.
-    expect(registeredServices.has('analytics')).toBe(false);
-    expect(stubLog[0]).not.toContain('analytics');
+    // down. #4058 found the same shape in the other fakes whose headline method
+    // reports success for work that never happened (`automation.execute` →
+    // `{ success: true }` with no flow run, `notification.send` → a messageId
+    // for a message nobody receives, `ai.chat` → a placeholder answer), and
+    // retired them too. The slots stay empty; install the real services.
+    for (const slot of ['analytics', 'automation', 'notification', 'ai']) {
+      expect(registeredServices.has(slot)).toBe(false);
+      expect(announcedStubs).not.toContain(slot);
+    }
 
     // ── Verify IRealtimeService contract ──
     const realtime = registeredServices.get('realtime');
     const subId = await realtime.subscribe('ch', () => {});
     expect(typeof subId).toBe('string');
-
-    // ── Verify INotificationService contract ──
-    const notif = registeredServices.get('notification');
-    const notifResult = await notif.send({ channel: 'email', to: 'test@dev', body: 'hello' });
-    expect(notifResult.success).toBe(true);
-    expect(typeof notifResult.messageId).toBe('string');
-
-    // ── Verify IAIService contract ──
-    const ai = registeredServices.get('ai');
-    const chatResult = await ai.chat([{ role: 'user', content: 'hi' }]);
-    expect(typeof chatResult.content).toBe('string');
-    expect(typeof chatResult.model).toBe('string');
-    expect(Array.isArray(await ai.listModels())).toBe(true);
 
     // ── Verify II18nService contract ──
     const i18n = registeredServices.get('i18n');
@@ -212,6 +204,76 @@ describe('DevPlugin', () => {
     // Security sub-services are registered by either the real SecurityPlugin
     // or dev stubs (when security is disabled, they're skipped entirely).
     // The stubs follow the same contracts as the real implementations.
+  });
+
+  // [#4058] The honesty class of each dev stub, which is the whole point of the
+  // change: consumers gate on `handlerReady` (ADR-0076 D12 conclusion 3, which
+  // the dispatcher executes since #4000/#4058), so a fake that really does the
+  // work in memory must NOT be labelled the same as one that fabricates. Every
+  // stub used to carry only `_dev: true`, which normalizes to `{ status:
+  // 'stub', handlerReady: false }` — one label for both kinds, which is exactly
+  // why the class could not be gated. Each stub now declares its own.
+  it('declares an honesty class per dev stub — degraded for real in-memory work, stub for fabricated', async () => {
+    const registeredServices = new Map<string, any>();
+    const ctx: any = {
+      logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      getService: vi.fn().mockImplementation((name: string) => {
+        if (registeredServices.has(name)) return registeredServices.get(name);
+        throw new Error('not found');
+      }),
+      getServices: vi.fn().mockReturnValue(new Map()),
+      registerService: vi.fn().mockImplementation((name: string, svc: any) => {
+        registeredServices.set(name, svc);
+      }),
+      hook: vi.fn(),
+      trigger: vi.fn(),
+      getKernel: vi.fn(),
+    };
+
+    // `auth` and `security` left ENABLED so their stubs are registered: the
+    // real plugins are mocked to be missing (top of file), so init degrades to
+    // the dev stubs — which is the shape whose labelling this test pins.
+    await new DevPlugin({
+      seedAdminUser: false,
+      services: {
+        objectql: false, driver: false, setup: false,
+        server: false, rest: false, dispatcher: false,
+      },
+    }).init(ctx);
+
+    // Really serves, in memory only → `degraded`, `handlerReady: true`, so its
+    // dispatcher domain (where it has one) keeps serving it.
+    for (const svc of ['cache', 'queue', 'job', 'file-storage', 'search', 'i18n', 'realtime', 'workflow', 'metadata']) {
+      const info = readServiceSelfInfo(registeredServices.get(svc));
+      expect(info, `${svc} must self-declare`).toBeDefined();
+      expect(info!.status, `${svc} really does the work in memory`).toBe('degraded');
+      expect(info!.handlerReady, `${svc} genuinely serves`).toBe(true);
+      expect(info!.message, `${svc} must say what is reduced`).toBeTruthy();
+    }
+
+    // Fabricates its answers → `stub`, `handlerReady: false`: consumers treat
+    // the slot as empty. (`data`/`auth`/`security.*` keep their slots because
+    // the dev stack's core loop resolves them; they are honestly labelled, and
+    // their domains are deliberately not gated — see #4058.)
+    for (const svc of ['data', 'auth', 'security.permissions', 'security.rls', 'security.fieldMasker']) {
+      const info = readServiceSelfInfo(registeredServices.get(svc));
+      expect(info, `${svc} must self-declare`).toBeDefined();
+      expect(info!.status, `${svc} fabricates`).toBe('stub');
+      expect(info!.handlerReady, `${svc} is not a real handler`).toBe(false);
+      expect(info!.message, `${svc} must say what is fake`).toBeTruthy();
+    }
+
+    // A slot with no factory gets the shapeless fallback — no contract method
+    // at all, so it is the purest non-handler and declares `stub`.
+    const ui = readServiceSelfInfo(registeredServices.get('ui'));
+    expect(ui?.status).toBe('stub');
+    expect(ui?.handlerReady).toBe(false);
+
+    // `_dev: true` stays as the provenance tag, but never decides the class:
+    // `__serviceInfo` wins in readServiceSelfInfo, so a `degraded` stub reports
+    // `degraded` even though the legacy marker alone would say `stub`.
+    expect(registeredServices.get('cache')._dev).toBe(true);
+    expect(registeredServices.get('cache')[SERVICE_SELF_INFO_KEY].status).toBe('degraded');
   });
 
   it('should skip disabled services', async () => {

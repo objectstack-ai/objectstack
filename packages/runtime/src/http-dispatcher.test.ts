@@ -2390,6 +2390,197 @@ describe('HttpDispatcher', () => {
     });
 
     // ═══════════════════════════════════════════════════════════════
+    // [#4058] handlerReady across the REST of the service domains
+    //
+    // #4000 executed ADR-0076 D12 conclusion 3 for `analytics` alone; the other
+    // domains kept gating on "is the slot occupied", so a self-declared stub in
+    // any of them was still called like a real implementation. These pin the
+    // class-wide rule and, just as importantly, its limit: `degraded` — an
+    // implementation that really serves with reduced capability — is NOT
+    // affected. A single predicate decides both (`service-serveable.ts`), so the
+    // route/feature advertisement and the handler cannot disagree.
+    // ═══════════════════════════════════════════════════════════════
+
+    describe('handlerReady gating across service domains (D12 / #4058)', () => {
+        /** A fake that fabricates: every method answers, none does the work. */
+        const stubbed = (methods: Record<string, any>) => ({
+            __serviceInfo: { status: 'stub', message: 'dev fake' },
+            ...methods,
+        });
+        /** A fake that really does the work in memory — `handlerReady` defaults true. */
+        const degraded = (methods: Record<string, any>) => ({
+            __serviceInfo: { status: 'degraded', message: 'in-memory' },
+            ...methods,
+        });
+
+        const serveOnly = (name: string, svc: unknown) => {
+            (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === name ? svc : null));
+            (kernel as any).services = new Map([[name, svc]]);
+        };
+
+        // The sharpest case in the class: `execute` reported `{ success: true }`
+        // for a flow that never ran, and the domain served it as a 200 — a
+        // caller (or an agent) read "flow executed" off nothing happening.
+        it('/automation — a stub slot is an empty slot, and is never called', async () => {
+            const stub = stubbed({
+                execute: vi.fn().mockResolvedValue({ success: true, output: undefined, durationMs: 0 }),
+                trigger: vi.fn().mockResolvedValue({ success: true }),
+                listFlows: vi.fn().mockResolvedValue([]),
+                registerFlow: vi.fn(),
+            });
+            serveOnly('automation', stub);
+
+            for (const [path, method] of [['', 'GET'], ['', 'POST'], ['trigger/x', 'POST'], ['x/trigger', 'POST']] as const) {
+                const result = await dispatcher.handleAutomation(path, method, { name: 'x' }, { request: {} });
+                expect(result.handled, `${method} /automation/${path}`).toBe(false);
+            }
+            expect(stub.execute).not.toHaveBeenCalled();
+            expect(stub.trigger).not.toHaveBeenCalled();
+            expect(stub.listFlows).not.toHaveBeenCalled();
+            expect(stub.registerFlow).not.toHaveBeenCalled();
+        });
+
+        it('/automation — a degraded engine keeps serving', async () => {
+            const svc = degraded({ listFlows: vi.fn().mockResolvedValue(['flow_a']) });
+            serveOnly('automation', svc);
+
+            const result = await dispatcher.handleAutomation('', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(result.response?.body?.data?.flows).toEqual(['flow_a']);
+        });
+
+        // Storage answers 501 for an empty slot rather than `handled: false`, so
+        // "same answer as an empty slot" means the same 501 here.
+        it('/storage — a stub slot answers the not-configured 501 without being called', async () => {
+            const stub = stubbed({ upload: vi.fn(), download: vi.fn() });
+            serveOnly('file-storage', stub);
+
+            const result = await dispatcher.handleStorage('upload', 'POST', { name: 'f.txt' }, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(501);
+            expect(stub.upload).not.toHaveBeenCalled();
+        });
+
+        // The half that protects plugin-dev's in-memory file store: it really
+        // stores and really reads back, so it declares `degraded` and serves.
+        it('/storage — a degraded in-memory store keeps serving', async () => {
+            const svc = degraded({ upload: vi.fn().mockResolvedValue({ key: 'f.txt' }) });
+            serveOnly('file-storage', svc);
+
+            const result = await dispatcher.handleStorage('upload', 'POST', { name: 'f.txt' }, { request: {} });
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(200);
+            expect(svc.upload).toHaveBeenCalled();
+        });
+
+        it('/i18n — a stub slot answers the not-available 501; a degraded provider serves', async () => {
+            const stub = stubbed({ getLocales: vi.fn().mockReturnValue(['xx']) });
+            serveOnly('i18n', stub);
+            const stubResult = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
+            expect(stubResult.response?.status).toBe(501);
+            expect(stub.getLocales).not.toHaveBeenCalled();
+
+            const svc = degraded({
+                getLocales: vi.fn().mockReturnValue(['en']),
+                getDefaultLocale: vi.fn().mockReturnValue('en'),
+            });
+            serveOnly('i18n', svc);
+            const okResult = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
+            expect(okResult.response?.status).toBe(200);
+            expect(svc.getLocales).toHaveBeenCalled();
+        });
+
+        // The inbox surface was already protected by accident — the `listInbox`
+        // duck-type kept `send`-only fakes out. Now it is protected on purpose,
+        // so a stub that grows a `listInbox` stays out too.
+        it('/notifications — a stub slot is an empty slot even when it implements listInbox', async () => {
+            const stub = stubbed({
+                listInbox: vi.fn().mockResolvedValue({ messages: [] }),
+                send: vi.fn().mockResolvedValue({ success: true, messageId: 'x' }),
+            });
+            serveOnly('notification', stub);
+
+            const result = await dispatcher.handleNotification('', 'GET', undefined, {}, {
+                request: {}, executionContext: { userId: 'usr_1' },
+            } as any);
+            expect(result.handled).toBe(false);
+            expect(stub.listInbox).not.toHaveBeenCalled();
+        });
+
+        // Being truthy, a stub used to fall through to the `!routes` 503 — which
+        // reads as a fault AND loses the empty-list courtesy the console's
+        // per-navigation `GET /ai/agents` poll depends on. Treating it as an
+        // empty slot restores both.
+        it('/ai — a stub slot 404s per route and keeps the /ai/agents empty list', async () => {
+            const stub = stubbed({ chat: vi.fn(), listModels: vi.fn() });
+            serveOnly('ai', stub);
+
+            const chat = await dispatcher.handleAI('/ai/chat', 'POST', { messages: [] }, {}, { request: {} });
+            expect(chat.handled).toBe(true);
+            expect(chat.response?.status).toBe(404);
+            expect(stub.chat).not.toHaveBeenCalled();
+
+            const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, { request: {} });
+            expect(agents.handled).toBe(true);
+            expect(agents.response?.status).toBe(200);
+            expect(agents.response?.body).toEqual({ agents: [] });
+        });
+
+        // Discovery must say exactly what the domains do — one predicate feeds
+        // both. `services.*` deliberately stays presence-gated: a registered
+        // stub self-reporting `status: 'stub'` says strictly more than
+        // `unavailable` / "install a plugin" would.
+        it('stops advertising routes/features for stub slots, while still reporting them as stubs', async () => {
+            const stubs: Record<string, unknown> = {
+                'file-storage': stubbed({ upload: vi.fn() }),
+                automation:     stubbed({ execute: vi.fn() }),
+                notification:   stubbed({ send: vi.fn() }),
+                ai:             stubbed({ chat: vi.fn() }),
+                i18n:           stubbed({ getLocales: vi.fn().mockReturnValue([]) }),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((n: string) => stubs[n] ?? null);
+            (kernel as any).services = new Map(Object.entries(stubs));
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            for (const key of ['storage', 'automation', 'notifications', 'ai', 'i18n'] as const) {
+                expect(info.routes[key], `routes.${key}`).toBeUndefined();
+            }
+            for (const key of ['files', 'ai', 'notifications', 'i18n'] as const) {
+                expect(info.features[key], `features.${key}`).toBe(false);
+            }
+            for (const key of ['file-storage', 'automation', 'notification', 'ai', 'i18n'] as const) {
+                expect(info.services[key].enabled, `services.${key}.enabled`).toBe(true);
+                expect(info.services[key].status, `services.${key}.status`).toBe('stub');
+                expect(info.services[key].handlerReady, `services.${key}.handlerReady`).toBe(false);
+                expect(info.services[key].route, `services.${key}.route`).toBeUndefined();
+            }
+        });
+
+        it('keeps advertising routes/features for degraded slots that really serve', async () => {
+            const degradeds: Record<string, unknown> = {
+                'file-storage': degraded({ upload: vi.fn() }),
+                automation:     degraded({ listFlows: vi.fn() }),
+                notification:   degraded({ listInbox: vi.fn() }),
+                ai:             degraded({ chat: vi.fn() }),
+                i18n:           degraded({ getLocales: vi.fn().mockReturnValue(['en']), getDefaultLocale: vi.fn().mockReturnValue('en') }),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((n: string) => degradeds[n] ?? null);
+            (kernel as any).services = new Map(Object.entries(degradeds));
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.storage).toBe('/api/v1/storage');
+            expect(info.routes.automation).toBe('/api/v1/automation');
+            expect(info.routes.notifications).toBe('/api/v1/notifications');
+            expect(info.routes.ai).toBe('/api/v1/ai');
+            expect(info.routes.i18n).toBe('/api/v1/i18n');
+            expect(info.features.files).toBe(true);
+            expect(info.features.i18n).toBe(true);
+            expect(info.services['file-storage'].status).toBe('degraded');
+            expect(info.services['file-storage'].handlerReady).toBe(true);
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════
     // i18n across server/dev/mock environments
     // ═══════════════════════════════════════════════════════════════
 

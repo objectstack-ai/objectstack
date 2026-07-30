@@ -4,7 +4,7 @@ import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
-import { isAnalyticsServiceServeable } from './domains/analytics.js';
+import { isServiceServeable } from './service-serveable.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
 import {
@@ -665,7 +665,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         svc = await k.getServiceAsync('analytics').catch(() => undefined);
                     }
                     if (!svc) svc = k?.getService?.('analytics');
-                    return isAnalyticsServiceServeable(svc);
+                    return isServiceServeable(svc);
                 } catch {
                     return false;
                 }

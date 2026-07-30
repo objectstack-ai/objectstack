@@ -1408,18 +1408,29 @@ export class ObjectStackProtocolImplementation implements
             data:      { enabled: true, status: 'available' as const, route: '/api/v1/data', provider: 'objectql' },
         };
 
-        // [#4000] The dispatcher answers a self-declared stub in the `analytics`
-        // slot with the same 404 an empty slot gets (`isAnalyticsServiceServeable`,
-        // runtime/src/domains/analytics.ts), so this builder must not advertise a
-        // route for it — that would be the `declared ≠ enforced` gap discovery
-        // exists to close. Analytics-only on purpose: every other stub-backed
-        // slot IS still served by its dispatcher domain, so their route
-        // advertisement stays presence-gated and honest. Unifying the rule
-        // across domains is #4058.
-        const analyticsUnserveable =
-            readServiceSelfInfo(registeredServices.get('analytics'))?.handlerReady === false;
+        // [#4000, #4058] The dispatcher answers a self-declared non-handler in
+        // one of ITS domains' slots with the same 404/501 an empty slot gets
+        // (`isServiceServeable`, runtime/src/service-serveable.ts), so this
+        // builder must not advertise a route for one — that would be the
+        // `declared ≠ enforced` gap discovery exists to close.
+        //
+        // Scoped to the dispatcher-owned domains on purpose. For the other
+        // entries in SERVICE_CONFIG the route belongs to the plugin that
+        // registers the service (service-storage's own `/api/v1/storage`
+        // routes, plugin-search, plugin-graphql, …) rather than to a dispatcher
+        // domain, so `handlerReady` there says nothing about whether THAT route
+        // is mounted, and suppressing it would be a guess. `file-storage` is
+        // listed because the dispatcher does own a `/storage` bridge for the
+        // no-plugin case; when service-storage is installed it registers a real
+        // (unmarked) service, so the entry never fires.
+        const DISPATCHER_GATED_SERVICES = new Set([
+            'analytics', 'automation', 'notification', 'ai', 'i18n', 'file-storage',
+        ]);
+        const unserveable = (serviceName: string) =>
+            DISPATCHER_GATED_SERVICES.has(serviceName)
+            && readServiceSelfInfo(registeredServices.get(serviceName))?.handlerReady === false;
         const advertisedRoute = (serviceName: string, route?: string) =>
-            serviceName === 'analytics' && analyticsUnserveable ? undefined : route;
+            unserveable(serviceName) ? undefined : route;
 
         // Check which services are actually registered
         for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
