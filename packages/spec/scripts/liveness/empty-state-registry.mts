@@ -107,6 +107,16 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     evidence: 'packages/spec/src/security/sharing.zod.ts',
   },
 
+  {
+    file: 'packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts',
+    property: 'organization_id',
+    semantics: 'open',
+    rationale:
+      "A NULL organization scope on a user↔permission-set grant means the grant is UNSCOPED — it applies in every org context. Deliberate and load-bearing rather than an oversight: ADR-0095 D3 / ADR-0068 D2 DERIVE the platform_admin posture from an unscoped `admin_full_access` user grant specifically, and an org-SCOPED grant of the same set must not confer it. So the empty state is not merely wider, it is the distinguishing input to the highest privilege in the system — which is exactly why it belongs on this list rather than being left to memory. `explain-engine.ts` recomputes the identical predicate on purpose so the explain panel's posture cannot sit higher than enforcement's.",
+    evidence:
+      'packages/core/src/security/resolve-authz-context.ts (resolveAuthzContext.hasPlatformAdminGrant — the single source of truth) and packages/plugins/plugin-security/src/explain-engine.ts (the identical predicate, replicated so the panel cannot overstate)',
+  },
+
   // ---- Scope selectors ---------------------------------------------------
 
   {

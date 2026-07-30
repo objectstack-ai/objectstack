@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type {
-    DataProtocol, MetadataProtocol, AnalyticsProtocol, PackageProtocol,
+    DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
 import { IDataEngine } from '@objectstack/core';
 import { readEnvWithDeprecation } from '@objectstack/types';
@@ -660,6 +660,11 @@ function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEve
  * with no mounted handler 404s and misleads consumers).
  */
 const SERVICE_CONFIG: Record<string, { route?: string; plugin: string }> = {
+    // Plugin-provided like every other optional service since the degraded
+    // ObjectQL fallback was retired (#3891): advertised iff the real engine
+    // is registered — never hardcoded 'available' (the pre-#2462 lie the
+    // fallback existed to paper over).
+    analytics:    { route: '/api/v1/analytics', plugin: 'service-analytics' },
     auth:         { route: '/api/v1/auth', plugin: 'plugin-auth' },
     automation:   { route: '/api/v1/automation', plugin: 'plugin-automation' },
     cache:        { route: '/api/v1/cache', plugin: 'plugin-redis' },
@@ -1042,10 +1047,12 @@ export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void 
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
  * owning services and are reached through the discovery `services` registry,
- * never through this class).
+ * never through this class). Analytics left this list with the degraded shim
+ * retirement (#3891) — the domain's one implementation is
+ * `@objectstack/service-analytics`.
  */
 export class ObjectStackProtocolImplementation implements
-    DataProtocol, MetadataProtocol, AnalyticsProtocol, PackageProtocol {
+    DataProtocol, MetadataProtocol, PackageProtocol {
     private engine: MetadataHostEngine;
     private getServicesRegistry?: () => Map<string, any>;
     /**
@@ -1388,26 +1395,17 @@ export class ObjectStackProtocolImplementation implements
     async getDiscovery() {
         // Get registered services from kernel if available
         const registeredServices = this.getServicesRegistry ? this.getServicesRegistry() : new Map();
-        
-        // Honest capabilities (ADR-0076 D12, #2462): the registered analytics
-        // service may be the lightweight ObjectQL fallback rather than the
-        // full service-analytics engine — report whatever it declares about
-        // itself instead of hardcoding 'available'.
-        const analyticsSelf = readServiceSelfInfo(registeredServices.get('analytics'));
 
-        // Build dynamic service info with proper typing
+        // Build dynamic service info with proper typing. Analytics is NOT in
+        // this kernel-provided block: since the degraded ObjectQL fallback was
+        // retired (#3891) it is an ordinary optional service, computed from the
+        // registry via SERVICE_CONFIG below — absent means `unavailable`, and
+        // no route is advertised (the pre-#2462 hardcode here is exactly what
+        // the fallback was invented to make true).
         const services: Record<string, ServiceInfo> = {
             // --- Kernel-provided (objectql is an example kernel implementation) ---
             metadata:  { enabled: true, status: 'available' as const, route: '/api/v1/meta', provider: 'objectql' },
             data:      { enabled: true, status: 'available' as const, route: '/api/v1/data', provider: 'objectql' },
-            analytics: {
-                enabled: true,
-                status: analyticsSelf?.status ?? ('available' as const),
-                route: '/api/v1/analytics',
-                provider: 'objectql',
-                ...(analyticsSelf?.handlerReady !== undefined ? { handlerReady: analyticsSelf.handlerReady } : {}),
-                ...(analyticsSelf?.message ? { message: analyticsSelf.message } : {}),
-            },
         };
 
         // Check which services are actually registered
@@ -1445,6 +1443,7 @@ export class ObjectStackProtocolImplementation implements
 
         // Build routes from services — a flat convenience map for client routing
         const serviceToRouteKey: Record<string, keyof ApiRoutes> = {
+            analytics: 'analytics',
             auth: 'auth',
             automation: 'automation',
             ui: 'ui',
@@ -1456,9 +1455,7 @@ export class ObjectStackProtocolImplementation implements
             'file-storage': 'storage',
         };
 
-        const optionalRoutes: Partial<ApiRoutes> = {
-            analytics: '/api/v1/analytics',
-        };
+        const optionalRoutes: Partial<ApiRoutes> = {};
 
         // Add routes for available plugin services. Services without an HTTP
         // surface (config.route undefined) advertise no route (D12, #2462).
@@ -3646,183 +3643,16 @@ export class ObjectStackProtocolImplementation implements
         } as BatchUpdateResponse;
     }
 
-    async analyticsQuery(request: any): Promise<any> {
-        // Map AnalyticsQuery (cube-style) to engine aggregation.
-        // cube name maps to object name; measures → aggregations; dimensions → groupBy.
-        const { query, cube } = request;
-        const object = cube;
-        // [#3770] A cube name IS an object name here (`getAnalyticsMeta` derives
-        // every cube from `registry.listItems('object')`), so this read surface
-        // needs the same existence gate as the CRUD ones — otherwise it stays a
-        // way to aggregate over an arbitrary physical table.
-        this.assertObjectRegistered(object);
-
-        // Build groupBy from dimensions
-        const groupBy = query.dimensions || [];
-
-        // Build aggregations from measures
-        // Measures can be simple field names like "count" or "field_name.sum"
-        // Or cube-defined measure names. We support: field.function or just function(field).
-        const aggregations: Array<{ field: string; method: string; alias: string }> = [];
-        if (query.measures) {
-            for (const measure of query.measures) {
-                // Support formats: "count", "amount.sum", "revenue.avg"
-                if (measure === 'count' || measure === 'count_all') {
-                    aggregations.push({ field: '*', method: 'count', alias: 'count' });
-                } else if (measure.includes('.')) {
-                    const [field, method] = measure.split('.');
-                    aggregations.push({ field, method, alias: `${field}_${method}` });
-                } else {
-                    // Treat as count of the field
-                    aggregations.push({ field: measure, method: 'sum', alias: measure });
-                }
-            }
-        }
-
-        // Build filter from analytics filters
-        let filter: any = undefined;
-        if (query.filters && query.filters.length > 0) {
-            const conditions: any[] = query.filters.map((f: any) => {
-                const op = this.mapAnalyticsOperator(f.operator);
-                if (f.values && f.values.length === 1) {
-                    return { [f.member]: { [op]: f.values[0] } };
-                } else if (f.values && f.values.length > 1) {
-                    return { [f.member]: { $in: f.values } };
-                }
-                return { [f.member]: { [op]: true } };
-            });
-            filter = conditions.length === 1 ? conditions[0] : { $and: conditions };
-        }
-
-        // Execute via engine.aggregate (which delegates to driver.find with groupBy/aggregations)
-        const rows = await this.engine.aggregate(object, {
-            where: filter,
-            groupBy: groupBy.length > 0 ? groupBy : undefined,
-            aggregations: aggregations.length > 0
-                ? aggregations.map(a => ({ function: a.method as any, field: a.field, alias: a.alias }))
-                : [{ function: 'count' as any, alias: 'count' }],
-        });
-
-        // Build field metadata
-        const fields = [
-            ...groupBy.map((d: string) => ({ name: d, type: 'string' })),
-            ...aggregations.map(a => ({ name: a.alias, type: 'number' })),
-        ];
-
-        return {
-            success: true,
-            data: {
-                rows,
-                fields,
-            },
-        };
-    }
-
-    async getAnalyticsMeta(request: any): Promise<any> {
-        // Auto-generate cube metadata from registered objects in SchemaRegistry.
-        // Each object becomes a cube; number fields → measures; other fields → dimensions.
-        const objects = this.engine.registry.listItems('object');
-        const cubeFilter = request?.cube;
-
-        const cubes: any[] = [];
-        for (const obj of objects) {
-            const schema = obj as any;
-            if (cubeFilter && schema.name !== cubeFilter) continue;
-
-            const measures: Record<string, any> = {};
-            const dimensions: Record<string, any> = {};
-            const fields = schema.fields || {};
-
-            // Always add a count measure
-            measures['count'] = {
-                name: 'count',
-                label: 'Count',
-                type: 'count',
-                sql: '*',
-            };
-
-            for (const [fieldName, fieldDef] of Object.entries(fields)) {
-                const fd = fieldDef as any;
-                const fieldType = fd.type || 'text';
-
-                if (['number', 'currency', 'percent'].includes(fieldType)) {
-                    // Numeric fields become both measures and dimensions
-                    measures[`${fieldName}_sum`] = {
-                        name: `${fieldName}_sum`,
-                        label: `${fd.label || fieldName} (Sum)`,
-                        type: 'sum',
-                        sql: fieldName,
-                    };
-                    measures[`${fieldName}_avg`] = {
-                        name: `${fieldName}_avg`,
-                        label: `${fd.label || fieldName} (Avg)`,
-                        type: 'avg',
-                        sql: fieldName,
-                    };
-                    dimensions[fieldName] = {
-                        name: fieldName,
-                        label: fd.label || fieldName,
-                        type: 'number',
-                        sql: fieldName,
-                    };
-                } else if (['date', 'datetime'].includes(fieldType)) {
-                    dimensions[fieldName] = {
-                        name: fieldName,
-                        label: fd.label || fieldName,
-                        type: 'time',
-                        sql: fieldName,
-                        granularities: ['day', 'week', 'month', 'quarter', 'year'],
-                    };
-                } else if (['boolean'].includes(fieldType)) {
-                    dimensions[fieldName] = {
-                        name: fieldName,
-                        label: fd.label || fieldName,
-                        type: 'boolean',
-                        sql: fieldName,
-                    };
-                } else {
-                    // text, select, lookup, etc. → dimension
-                    dimensions[fieldName] = {
-                        name: fieldName,
-                        label: fd.label || fieldName,
-                        type: 'string',
-                        sql: fieldName,
-                    };
-                }
-            }
-
-            cubes.push({
-                name: schema.name,
-                title: schema.label || schema.name,
-                description: schema.description,
-                sql: schema.name,
-                measures,
-                dimensions,
-                public: true,
-            });
-        }
-
-        return {
-            success: true,
-            data: { cubes },
-        };
-    }
-
-    private mapAnalyticsOperator(op: string): string {
-        const map: Record<string, string> = {
-            equals: '$eq',
-            notEquals: '$ne',
-            contains: '$contains',
-            notContains: '$notContains',
-            gt: '$gt',
-            gte: '$gte',
-            lt: '$lt',
-            lte: '$lte',
-            set: '$ne',
-            notSet: '$eq',
-        };
-        return map[op] || '$eq';
-    }
+    // `analyticsQuery` / `getAnalyticsMeta` were retired with the degraded
+    // `analytics` service shim (#3891 / #3878). They aggregated through
+    // `engine.aggregate` WITHOUT the caller's ExecutionContext — no RLS or
+    // tenant predicate was ever injected — and read a non-contract `filters`
+    // field while silently ignoring the canonical `AnalyticsQuery.where`, so a
+    // spec-conformant filtered request returned an unscoped full-table
+    // aggregate. The analytics domain has exactly one implementation now:
+    // `@objectstack/service-analytics` (context-aware, fail-closed
+    // `getReadScope`). Deployments without it get an honest 404 from the
+    // dispatcher's `/analytics` domain instead of wrong numbers.
 
     async triggerAutomation(_request: any): Promise<any> {
         throw new Error('triggerAutomation requires plugin-automation service. Install and register a plugin that provides the "automation" service.');

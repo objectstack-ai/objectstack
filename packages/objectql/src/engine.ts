@@ -746,6 +746,31 @@ export class ObjectQL implements IDataEngine {
   }
 
   /**
+   * Every action handler currently registered, as `{ objectName, actionName }`
+   * pairs (plus the owning package when one was given).
+   *
+   * [ADR-0110 D5] The handler registry is one half of the
+   * declaration↔executable bijection; with no way to enumerate it, the other
+   * half could only be checked when someone happened to invoke a route. The
+   * boot reconciliation reads this to list handlers no declaration covers —
+   * which since D3 are refused at dispatch, so having the inventory is what
+   * makes that refusal a checklist instead of a support ticket.
+   */
+  listRegisteredActions(): Array<{ objectName: string; actionName: string; package?: string }> {
+    const out: Array<{ objectName: string; actionName: string; package?: string }> = [];
+    for (const [key, entry] of this.actions.entries()) {
+      const sep = key.indexOf(':');
+      if (sep < 0) continue;
+      out.push({
+        objectName: key.slice(0, sep),
+        actionName: key.slice(sep + 1),
+        ...(entry.package ? { package: entry.package } : {}),
+      });
+    }
+    return out;
+  }
+
+  /**
    * Remove all actions registered by a specific package.
    */
   removeActionsByPackage(packageName: string): void {

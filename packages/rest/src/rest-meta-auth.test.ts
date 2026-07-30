@@ -46,7 +46,7 @@ describe('RestServer metadata routes — requireAuth gate', () => {
         await handler({ method: 'GET', params: { type: 'object' }, query: {}, headers: {} }, res);
 
         expect(state.status).toBe(401);
-        expect(state.body?.error).toBe('unauthenticated');
+        expect(state.body?.error).toBe('UNAUTHENTICATED');
         // The gate short-circuits BEFORE the schema read — nothing leaked.
         expect(protocol.getMetaItems).not.toHaveBeenCalled();
     });

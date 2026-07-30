@@ -35,10 +35,22 @@
  * As with the error twin: the route ledgers cannot catch any of this. They
  * audit which routes exist and whether the SDK can address them, not what
  * comes back.
+ *
+ * The STATIC half — proving no route can bypass the `sendOk` / `sendError` pair
+ * — used to be an open-coded regex block right here. #3843 lifted it out to
+ * `scripts/check-route-envelope.mjs` (`pnpm check:route-envelope`), which audits
+ * EVERY route module in the repo rather than this one package.
+ *
+ * That move mattered more than deduplication. A per-package scan structurally
+ * cannot notice a module nobody thought to convert, and going repo-wide found two
+ * immediately (#3973, #3983). It also dropped the regex: the old block stripped
+ * comments with `String.replace`, which ate `//` inside string literals and
+ * truncated the rest of that line — response writes included — and counted
+ * `c.req.json()` (a request READ) as an unenveloped response. The AST has neither
+ * bug.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -295,32 +307,5 @@ describe('storage success envelope (#3689)', () => {
       // And `{ data }` alone, without the flag, was the third shape.
       expect(typeof body.success, `${c.name} answers no success flag`).toBe('boolean');
     }
-  });
-
-  it('routes every success through `sendOk` — no route may reintroduce a bare body', () => {
-    // Comments stripped first: this module's prose quotes both the old and the
-    // new shape, and a doc comment is not a code path.
-    const source = readFileSync(new URL('./storage-routes.ts', import.meta.url), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '');
-
-    // Exactly two `.json(` call sites in the module: the one inside `sendOk`
-    // and the one inside `sendError`. Every route body is built by a helper, so
-    // this count does not grow with the number of routes — only with a route
-    // that bypasses them.
-    const jsonCalls = [...source.matchAll(/\.json\(/g)];
-    expect(
-      jsonCalls,
-      `expected only sendOk + sendError to call res.json(), found ${jsonCalls.length}`,
-    ).toHaveLength(2);
-
-    // One builder per envelope half, so each shape lives in one line of this
-    // package. (`success: false` is the error twin's assertion; both are
-    // pinned here so moving one without the other fails.)
-    expect([...source.matchAll(/success:\s*true/g)]).toHaveLength(1);
-    expect([...source.matchAll(/success:\s*false/g)]).toHaveLength(1);
-
-    // The retired words, gone from the code path rather than merely unused.
-    expect([...source.matchAll(/\bok:\s*true/g)]).toHaveLength(0);
   });
 });

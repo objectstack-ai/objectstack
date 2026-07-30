@@ -86,17 +86,16 @@ describe('#3918 follow-up — domain catches honour `status` instead of forcing 
             expect(res.status).toBe(404);
             // A 4xx message is a deliberate answer and must reach the caller.
             expect(res.body.error.message).toContain("Object 'ghost' is not registered");
-            expect(res.body.error.details?.code).toBe('OBJECT_NOT_FOUND');
+            // [#3842] Was `details.code` — the parking spot the status forced.
+            expect(res.body.error.code).toBe('OBJECT_NOT_FOUND');
         });
 
         it(`${label}: a ValidationError keeps its 400 and its fields[]`, async () => {
             const res = await dispatchWith(method, path, validationError());
 
             expect(res.status).toBe(400);
-            expect(res.body.error.details).toEqual({
-                code: 'VALIDATION_FAILED',
-                fields: FIELDS,
-            });
+            expect(res.body.error.code).toBe('VALIDATION_FAILED');
+            expect(res.body.error.details).toEqual({ fields: FIELDS });
         });
 
         it(`${label}: an ordinary error still falls back to 500`, async () => {

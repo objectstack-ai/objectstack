@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { actionBodyRunnerFactory, QuickJSScriptRunner } from '@objectstack/runtime';
 
-import { allActions, MarkDoneAction } from '../src/ui/actions/index.js';
+import { allActions, MarkDoneAction, PortfolioSnapshotAction } from '../src/ui/actions/index.js';
 
 /**
  * Execution-path coverage for declared actions.
@@ -82,5 +82,75 @@ describe('showcase actions — executability', () => {
     const factory = actionBodyRunnerFactory(runner, { ql: {}, appId: 'showcase' });
     const handler = factory({ name: 'broken', object: 'showcase_task' } as never);
     expect(handler).toBeUndefined();
+  });
+});
+
+/**
+ * The object-less ("global") action specimen — framework#3913.
+ *
+ * #3913 was filed because object-less actions were unreachable: registered
+ * under the canonical `'global'` key, looked up under `'*'`. Its follow-up then
+ * found that `POST /api/v1/actions//:action` — the empty-object-segment URL the
+ * issue was actually filed against — had no route registration at all. Both
+ * were fixed with **no live specimen**: the showcase is the "one specimen of
+ * everything" app and every action in it declared an `objectName`, so nothing
+ * exercised the object-less dispatch path end to end.
+ *
+ * These tests pin the two properties that make it a specimen. The first is the
+ * one that silently rots: adding an `objectName` to this action would still
+ * build, still pass `coverage.test.ts`, and still work — while quietly removing
+ * the app's only coverage of object-less dispatch.
+ */
+describe('showcase actions — the object-less (`global`) specimen', () => {
+  const runner = new QuickJSScriptRunner();
+
+  it('declares no object, so it keys at `global` (framework#3913)', () => {
+    // This mirrors ObjectQLPlugin.actionObjectKey / AppPlugin's
+    // `action.object || 'global'`: neither field set → the 'global' bucket.
+    const a = PortfolioSnapshotAction as { objectName?: string; object?: string };
+    expect(a.objectName).toBeUndefined();
+    expect(a.object).toBeUndefined();
+
+    // ...and it is the ONLY one, so this test is what keeps the specimen alive.
+    const objectLess = allActions.filter((x) => {
+      const y = x as { objectName?: string; object?: string };
+      return !y.objectName && !y.object;
+    });
+    expect(objectLess.map((x) => x.name)).toEqual(['showcase_portfolio_snapshot']);
+  });
+
+  it('counts across several objects via the sandboxed body', async () => {
+    // An object-less action has no record and no single object to hang off —
+    // this body reads three, which is why it cannot be given an `objectName`.
+    const counts: Record<string, number> = {
+      showcase_account: 15,
+      showcase_project: 5,
+      showcase_invoice: 13,
+    };
+    const seen: string[] = [];
+    const ql = {
+      object: (object: string) => ({
+        count: async () => {
+          seen.push(object);
+          return counts[object] ?? 0;
+        },
+      }),
+    };
+
+    const factory = actionBodyRunnerFactory(runner, { ql, appId: 'showcase' });
+    const handler = factory(PortfolioSnapshotAction as never);
+    expect(typeof handler).toBe('function');
+
+    // No recordId, no record — the object-less invocation shape.
+    const result = await handler!({ params: {}, user: { id: 'u1' } });
+
+    expect(seen).toEqual(['showcase_account', 'showcase_project', 'showcase_invoice']);
+    expect(result).toEqual({
+      ok: true,
+      scope: 'global',
+      accounts: 15,
+      projects: 5,
+      invoices: 13,
+    });
   });
 });

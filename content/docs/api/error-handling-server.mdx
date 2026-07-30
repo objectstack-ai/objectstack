@@ -18,10 +18,10 @@ This guide covers best practices for handling and throwing errors within ObjectS
 ObjectStack does not ship a base error class — there is no `ObjectStackError`
 export. Instead, define a small server-side helper that extends the native
 `Error` and carries the fields from the `EnhancedApiError` schema (`code`,
-`httpStatus`, `fieldErrors`; `category` is optional). The valid `code` values are the
-lowercase snake_case members of `StandardErrorCode` (see
-`@objectstack/spec/api`), e.g. `validation_error`, `resource_conflict`,
-`permission_denied`.
+`httpStatus`, `fieldErrors`; `category` is optional). The valid `code` values are
+SCREAMING_SNAKE (ADR-0112): a `StandardErrorCode` member (e.g. `VALIDATION_ERROR`,
+`RESOURCE_CONFLICT`, `PERMISSION_DENIED`) or a code your package registered in
+`ERROR_CODE_LEDGER` (see `@objectstack/spec/api`).
 
 {/* os:check */}
 ```typescript
@@ -45,7 +45,7 @@ class AppError extends Error {
 class TaskAlreadyCompletedError extends AppError {
   constructor(taskId: string) {
     super(
-      'resource_conflict',
+      'RESOURCE_CONFLICT',
       `Task ${taskId} is already completed and cannot be modified`,
       409,
       [{ field: 'status', code: 'lock_conflict', message: 'Task is in terminal state' }],
@@ -56,7 +56,7 @@ class TaskAlreadyCompletedError extends AppError {
 class InvalidStatusTransitionError extends AppError {
   constructor(from: string, to: string) {
     super(
-      'invalid_field',
+      'INVALID_FIELD',
       `Cannot transition from '${from}' to '${to}'`,
       400,
       [{ field: 'status', code: 'invalid_field', message: `Invalid transition: ${from} → ${to}` }],
@@ -66,7 +66,7 @@ class InvalidStatusTransitionError extends AppError {
 ```
 
 <Callout type="tip">
-**Error Codes:** Per-field `code` values must be members of the `StandardErrorCode` enum (lowercase snake_case, e.g. `invalid_field`, `value_out_of_range`, `duplicate_value`). Use the `category` and `httpStatus` that match — `ErrorHttpStatusMap` in `@objectstack/spec/api` maps each category to its HTTP status.
+**Error Codes:** The top-level `code` is SCREAMING_SNAKE (`StandardErrorCode` or a ledger-registered code). Per-field `code` values are a **separate, lowercase vocabulary** — the validators emit `required`, `max_length`, `invalid_email`, … and its catalog is being settled in [#3977](https://github.com/objectstack-ai/objectstack/issues/3977) (ADR-0112 D6). Use the `category` and `httpStatus` that match — `ErrorHttpStatusMap` in `@objectstack/spec/api` maps each category to its HTTP status.
 </Callout>
 
 ---
@@ -170,7 +170,7 @@ function createValidationError(zodError: z.ZodError): AppError {
   }));
 
   return new AppError(
-    'validation_error',
+    'VALIDATION_ERROR',
     `Validation failed: ${fieldErrors.length} error(s)`,
     400,
     fieldErrors,
@@ -464,7 +464,7 @@ function validateObjectDefinition(input: unknown) {
 
     // Convert to the standardized error format
     throw new AppError(
-      'validation_error',
+      'VALIDATION_ERROR',
       'Invalid object definition',
       400,
       result.error.issues.map((issue) => ({
@@ -502,7 +502,7 @@ export const ValidateBusinessRules: Hook = {
     const result = safeParsePretty(TaskBusinessRules, ctx.input);
     if (!result.success) {
       throw new AppError(
-        'validation_error',
+        'VALIDATION_ERROR',
         result.formatted,
         400,
         result.error.issues.map((i) => ({

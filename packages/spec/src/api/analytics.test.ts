@@ -24,70 +24,72 @@ describe('AnalyticsEndpoint', () => {
   });
 });
 
-describe('AnalyticsQueryRequestSchema', () => {
-  it('should accept valid query request with defaults', () => {
+describe('AnalyticsQueryRequestSchema — the BARE AnalyticsQuery shape (#3878)', () => {
+  it('should accept a minimal bare query', () => {
     const req = AnalyticsQueryRequestSchema.parse({
-      query: {
-        measures: ['total_revenue'],
-      },
       cube: 'orders',
+      measures: ['total_revenue'],
     });
     expect(req.cube).toBe('orders');
-    expect(req.format).toBe('json');
-    expect(req.query.measures).toEqual(['total_revenue']);
+    expect(req.measures).toEqual(['total_revenue']);
   });
 
-  it('should accept query with explicit format', () => {
+  it('should accept the full bare shape: where (canonical), timeDimensions, order, limit', () => {
     const req = AnalyticsQueryRequestSchema.parse({
-      query: {
-        measures: ['count'],
-        dimensions: ['category'],
-      },
-      cube: 'products',
-      format: 'csv',
-    });
-    expect(req.format).toBe('csv');
-  });
-
-  it('should accept query with where (canonical) and time dimensions', () => {
-    const req = AnalyticsQueryRequestSchema.parse({
-      query: {
-        measures: ['total_revenue'],
-        dimensions: ['product_category'],
-        where: { status: 'active' },
-        timeDimensions: [
-          { dimension: 'created_at', granularity: 'month', dateRange: 'Last 7 days' },
-        ],
-        order: { total_revenue: 'desc' },
-        limit: 100,
-      },
       cube: 'sales',
-      format: 'xlsx',
+      measures: ['total_revenue'],
+      dimensions: ['product_category'],
+      where: { status: 'active', stage: { $nin: ['lost'] } },
+      timeDimensions: [
+        { dimension: 'created_at', granularity: 'month', dateRange: 'Last 7 days' },
+      ],
+      order: { total_revenue: 'desc' },
+      limit: 100,
+      offset: 10,
+      timezone: 'Asia/Shanghai',
     });
-    expect(req.query.where).toEqual({ status: 'active' });
-    expect(req.query.timeDimensions).toHaveLength(1);
+    expect(req.where).toEqual({ status: 'active', stage: { $nin: ['lost'] } });
+    expect(req.timeDimensions).toHaveLength(1);
+    expect(req.timezone).toBe('Asia/Shanghai');
   });
 
   it('should reject missing cube', () => {
     expect(() =>
-      AnalyticsQueryRequestSchema.parse({
-        query: { measures: ['x'] },
-      })
+      AnalyticsQueryRequestSchema.parse({ measures: ['x'] })
     ).toThrow();
   });
 
-  it('should reject missing query', () => {
+  it('should reject missing measures', () => {
     expect(() =>
       AnalyticsQueryRequestSchema.parse({ cube: 'test' })
     ).toThrow();
   });
 
-  it('should reject invalid format', () => {
+  it('should reject the retired {cube, query: {...}} envelope (#3891 shim dialect)', () => {
     expect(() =>
       AnalyticsQueryRequestSchema.parse({
-        query: { measures: ['x'] },
-        cube: 'test',
-        format: 'xml',
+        cube: 'orders',
+        query: { measures: ['total_revenue'] },
+      })
+    ).toThrow();
+  });
+
+  it('should reject the non-contract `filters` key (the field is `where`)', () => {
+    expect(() =>
+      AnalyticsQueryRequestSchema.parse({
+        cube: 'orders',
+        measures: ['count'],
+        filters: [{ member: 'status', operator: 'equals', values: ['active'] }],
+      })
+    ).toThrow();
+  });
+
+  it('should reject the retired unimplemented `format` key', () => {
+    expect(() =>
+      AnalyticsQueryRequestSchema.parse({
+        cube: 'orders',
+        measures: ['count'],
+        format: 'csv',
       })
     ).toThrow();
   });

@@ -18,7 +18,7 @@ export type { DefaultHostConfigOptions, DefaultHostConfigResult } from './defaul
 // Export Plugins
 export { DriverPlugin } from './driver-plugin.js';
 export { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
-export type { DefaultDatasourceDefinition } from './default-datasource-plugin.js';
+export type { DefaultDatasourceDefinition, DefaultDatasourcePluginOptions } from './default-datasource-plugin.js';
 export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleActions } from './app-plugin.js';
 export { SeedLoaderService } from './seed-loader.js';
 // Boot-summary seed outcome accumulator (#3415/#3430) — the single writer

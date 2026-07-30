@@ -175,9 +175,10 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
       }),
       async execute(node, variables, context) {
         const cfg = (node.config ?? {}) as Record<string, unknown>;
-        // `function` is canonical; `functionName` is an accepted alias — AI/templates
-        // commonly emit it alongside `actionType: 'invoke_function'` (#1870 DX).
-        const fnRaw = cfg.function ?? cfg.functionName;
+        // The historical aliases (`functionName`/`input`) are canonicalized at
+        // load by the ADR-0087 D2 conversion 'flow-node-script-config-aliases'
+        // (#3796), so only the canonical keys are read here.
+        const fnRaw = cfg.function;
         const fnName = typeof fnRaw === 'string' && fnRaw.trim() ? fnRaw.trim() : undefined;
         const actionType = typeof cfg.actionType === 'string' && cfg.actionType.trim() ? cfg.actionType.trim() : undefined;
 
@@ -212,8 +213,8 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         }
 
         // `actionType: 'invoke_function'` is a MARKER meaning "call the named
-        // function" — the name lives in `function`/`functionName`, not in actionType
-        // itself. A bare actionType that matched no built-in is still accepted as a
+        // function" — the name lives in `function`, not in actionType itself. A
+        // bare actionType that matched no built-in is still accepted as a
         // function name (shorthand).
         const target = fnName ?? (actionType === 'invoke_function' ? undefined : actionType);
         if (!target) {
@@ -221,7 +222,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             success: false,
             error:
               actionType === 'invoke_function'
-                ? `script node '${node.id}': actionType 'invoke_function' requires \`config.function\` (or \`functionName\`) naming the function to call.`
+                ? `script node '${node.id}': actionType 'invoke_function' requires \`config.function\` naming the function to call.`
                 : `script node '${node.id}': declares neither \`actionType\` nor \`function\` — nothing to run.`,
           };
         }
@@ -237,10 +238,10 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           };
         }
 
-        // Map declared inputs (`config.inputs` | `config.input`) to the function,
-        // interpolating `{var}` references against the live flow variables (so a
-        // function can consume a prior node's output, e.g. `{aiResult.id}`).
-        const input = interpolate(cfg.inputs ?? cfg.input ?? {}, variables, context) as Record<string, unknown>;
+        // Map declared inputs (`config.inputs`) to the function, interpolating
+        // `{var}` references against the live flow variables (so a function can
+        // consume a prior node's output, e.g. `{aiResult.id}`).
+        const input = interpolate(cfg.inputs ?? {}, variables, context) as Record<string, unknown>;
         const outputVariable =
           typeof cfg.outputVariable === 'string' && cfg.outputVariable.trim() ? cfg.outputVariable.trim() : undefined;
         try {

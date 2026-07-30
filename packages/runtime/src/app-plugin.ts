@@ -685,6 +685,14 @@ export class AppPlugin implements Plugin {
             });
         }
 
+        // [ADR-0110 D5] The action-governance inventory used to hang off a
+        // `kernel:ready` hook HERE. Moved to ObjectQLPlugin: AppPlugin is
+        // registered conditionally (serve.ts skips it when the host wraps
+        // itself; the `os dev` fast path loads apps without it), so on the
+        // platform's own dev loop the inventory never ran — and the engine
+        // plugin owns the very registry being audited, is unconditionally
+        // present, and re-runs the audit on `metadata:reloaded`.
+
         // ── Auto-register declarative Background Jobs ────────────────────
         // Jobs declared via `defineStack({ jobs })` are scheduled against the
         // running `IJobService` on `kernel:ready` (so the service plugin and

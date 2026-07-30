@@ -23,7 +23,13 @@ List all items of a metadata type.
 
 | Parameter | Location | Description |
 |:----------|:---------|:------------|
-| `type` | path | Metadata type name (e.g. `object`, `view`) |
+| `type` | path | Metadata type name, singular or plural — `object` and `objects` address the same type |
+
+Both spellings are accepted and behave **identically**: the same audience gate
+(ADR-0046 §6.7 books/docs), the same RBAC filtering of privileged apps, and the
+same response shaping apply either way. Metadata type names are singular by
+convention (Prime Directive #3) while REST paths are plural, so both forms exist
+in the wild.
 
 **Response**: `{ type: "object", items: [{ name: "account", ... }, ...] }`
 

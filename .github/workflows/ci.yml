@@ -196,6 +196,126 @@ jobs:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
 
+
+  # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────
+  #
+  # The datetime storage work (#3912/#3942) was verified against real servers
+  # because every one of its bugs was invisible on all-UTC infrastructure: a
+  # zone-naive write resolved in the SERVER's zone on Postgres, mysql2 rendered
+  # a Date in the HOST's zone, and a bare YYYY-MM-DD comparand meant a
+  # different midnight per dialect. The committed suites are opt-in
+  # (OS_TEST_POSTGRES_URL / OS_TEST_MYSQL_URL) and skip without a server, so
+  # without this job they would never run in CI and the seam could regress
+  # silently — D-A3's exact concern.
+  #
+  # Every timezone here is deliberately DIFFERENT: servers at +08:00, the Node
+  # process at America/New_York, assertions in UTC. Both suites assert they
+  # are pointed at a non-UTC server, so a mis-provisioned service fails loudly
+  # instead of letting the job pass vacuously.
+  temporal-conformance:
+    name: Temporal Conformance (live PG + MySQL)
+    needs: filter
+    if: needs.filter.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+      mysql:
+        # Real MySQL 8.0. The hands-on verification of #3942 ran on MariaDB
+        # 10.11 — the stricter dialect for datetime literals — so this job is
+        # the other half of the compatibility claim. `-h 127.0.0.1` forces the
+        # ping over TCP: the image's init phase runs mysqld with networking
+        # disabled, so a socket ping would report healthy before init finishes.
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: conformance
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=24
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Service containers cannot override the image command, so the non-UTC
+      # zones are set post-start through each server's own mechanism. Echoed
+      # back so a provisioning failure is visible in the log — though the
+      # suites' own non-UTC guards are the real gate.
+      - name: Point both servers at a non-UTC timezone
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U postgres -c "ALTER SYSTEM SET timezone='Asia/Shanghai'"
+          docker exec ${{ job.services.postgres.id }} psql -U postgres -c "SELECT pg_reload_conf()"
+          docker exec ${{ job.services.postgres.id }} psql -U postgres -tAc "SHOW timezone"
+          docker exec ${{ job.services.mysql.id }} mysql -uroot -proot -e "SET GLOBAL time_zone = '+08:00'"
+          docker exec ${{ job.services.mysql.id }} mysql -uroot -proot -N -e "SELECT @@global.time_zone"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # Restore-only (same policy as every other job); falls back to the Test
+      # Core namespace because that job builds a superset of what this one
+      # needs and its cache is seeded from main.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-test-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-test-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build driver-sql and its dependencies
+        run: pnpm exec turbo run build --filter=@objectstack/driver-sql... --concurrency=4
+
+      # The whole driver-sql suite runs under the skewed process zone — not
+      # just the live-server files — so a TZ-sensitive assumption anywhere in
+      # the driver's tests fails here before it can ship.
+      - name: Run driver-sql suite against both live servers
+        env:
+          TZ: America/New_York
+          OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          OS_TEST_MYSQL_URL: mysql://root:root@127.0.0.1:3306/conformance
+        run: pnpm --filter @objectstack/driver-sql test
+
   dogfood:
     # Sharded 2-way: the suite is ~60 independent test files, each booting its
     # own in-process app, and a single 4-vCPU runner needed ~7½ minutes for the

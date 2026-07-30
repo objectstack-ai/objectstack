@@ -1,5 +1,20 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+// [ADR-0110] Action governance — addressing vocabulary + the D5 inventory.
+// The engine owns the action-handler map, so the audit of that map and the
+// key derivation dispatch uses both live here; @objectstack/runtime
+// re-exports them so both packages read ONE implementation.
+export {
+  GLOBAL_ACTION_OBJECT_KEY,
+  isObjectLessActionKey,
+  actionHandlerObjectKeys,
+  resolveActionHandlerKeys,
+  reconcileActionRegistrations,
+  collectEngineActionDeclarations,
+  runActionGovernanceInventory,
+} from './action-governance.js';
+export type { GovernanceLogger } from './action-governance.js';
+
 // Export Registry
 export { 
   SchemaRegistry,

@@ -45,6 +45,54 @@ export interface PackageRoutesOptions {
  * dispatcher's own `POST /packages/:id/publish` (ADR-0033 draft publish)
  * is two segments — different shape, no clash.
  */
+/**
+ * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
+ * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
+ * `{ success: false, error: { code, message } }`.
+ *
+ * This module was the *partially* converted one when #3843 was filed, which is
+ * arguably worse than untouched: 3 of its 16 bodies carried `success: true`, so
+ * the same registrar answered two shapes depending on which route you hit. Its
+ * error bodies were the pre-#3675 `{ error: '<string>' }` throughout — and the
+ * string was a human `message`, not a code:
+ *
+ *     res.status(400).json({ error: 'Missing required fields: manifest, metadata' });
+ *
+ * Two of them carried no error at all, only a bare `{ success: false }`, so a
+ * caller was told it failed and never told why.
+ *
+ * Because there were no codes here to preserve, these had to be MINTED. They
+ * follow ADR-0112 (#3841, settled while this was in review): SCREAMING_SNAKE, and
+ * registered in `ERROR_CODE_LEDGER` under `@objectstack/rest` — an unregistered
+ * code fails `ApiErrorSchema` parse, which fails the conformance suite.
+ *
+ * Generic conditions reuse the STANDARD catalog rather than becoming registered
+ * synonyms of it: a missing request field is `MISSING_REQUIRED_FIELD`, an absent
+ * package is `RESOURCE_NOT_FOUND`, an unexpected throw is `INTERNAL_ERROR`. Only
+ * the package-specific outcomes are registered — `PACKAGE_MANIFEST_INVALID`,
+ * `PACKAGE_PUBLISH_FAILED`, `PACKAGE_DELETE_PARTIAL`, `PACKAGE_DELETE_FAILED`.
+ */
+function sendError(res: any, status: number, code: string, message: string, details?: unknown) {
+  res.status(status).json({
+    success: false,
+    error: { code, message, ...(details === undefined ? {} : { details }) },
+  });
+}
+
+/**
+ * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
+ *
+ * The three bodies that already carried `success: true` kept their payload as
+ * SIBLINGS of the flag (`{ success: true, message, package }`); those move under
+ * `data` so the envelope has one payload slot rather than a spread. `packages`
+ * SDK methods read these through `unwrapResponse`, which returns `body.data`
+ * when the flag is present, so `packages.list()` still resolves to
+ * `{ packages, total }`.
+ */
+function sendOk(res: any, data: unknown, status = 200) {
+  res.status(status).json({ success: true, data });
+}
+
 export function registerPackageRoutes(
   server: IHttpServer,
   packageService: PackageService,
@@ -59,20 +107,19 @@ export function registerPackageRoutes(
       const { manifest, metadata } = req.body || {};
 
       if (!manifest || !metadata) {
-        res.status(400).json({ error: 'Missing required fields: manifest, metadata' });
+        sendError(res, 400, 'MISSING_REQUIRED_FIELD', 'Missing required fields: manifest, metadata');
         return;
       }
 
       if (!manifest.id || !manifest.version) {
-        res.status(400).json({ error: 'Invalid manifest: id and version are required' });
+        sendError(res, 400, 'PACKAGE_MANIFEST_INVALID', 'Invalid manifest: id and version are required');
         return;
       }
 
       const result = await packageService.publish({ manifest, metadata });
 
       if (result.success) {
-        res.json({
-          success: true,
+        sendOk(res, {
           message: `Published ${manifest.id}@${manifest.version}`,
           package: {
             id: manifest.id,
@@ -82,9 +129,9 @@ export function registerPackageRoutes(
         return;
       }
 
-      res.status(400).json({ success: false, error: result.error });
+      sendError(res, 400, 'PACKAGE_PUBLISH_FAILED', result.error ?? `Failed to publish ${manifest.id}.`);
     } catch (error) {
-      res.status(500).json({ error: (error as Error).message });
+      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
   });
 
@@ -135,9 +182,9 @@ export function registerPackageRoutes(
       }
 
       const packages = Array.from(packagesMap.values());
-      res.json({ packages, total: packages.length });
+      sendOk(res, { packages, total: packages.length });
     } catch (error) {
-      res.status(500).json({ error: (error as Error).message });
+      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
   });
 
@@ -150,7 +197,7 @@ export function registerPackageRoutes(
       // Try database first (richer data from publish)
       const pkg = await packageService.get(packageId, version);
       if (pkg) {
-        res.json({ package: { ...pkg, source: 'database' } });
+        sendOk(res, { package: { ...pkg, source: 'database' } });
         return;
       }
 
@@ -162,7 +209,7 @@ export function registerPackageRoutes(
             (item.manifest?.id || item.id) === packageId
           );
           if (match) {
-            res.json({ package: { ...match, source: 'registry' } });
+            sendOk(res, { package: { ...match, source: 'registry' } });
             return;
           }
         } catch {
@@ -170,9 +217,9 @@ export function registerPackageRoutes(
         }
       }
 
-      res.status(404).json({ error: 'Package not found' });
+      sendError(res, 404, 'RESOURCE_NOT_FOUND', `Package "${packageId}" was not found.`);
     } catch (error) {
-      res.status(500).json({ error: (error as Error).message });
+      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
   });
 
@@ -195,31 +242,44 @@ export function registerPackageRoutes(
         // runtime-registered package that never published metadata) —
         // only per-item failures make it a failure.
         if (result.failedCount === 0) {
-          res.json({
-            success: true,
+          sendOk(res, {
             message: `Deleted ${packageId}`,
             deletedCount: result.deletedCount,
             cleanups: result.cleanups,
           });
           return;
         }
-        res.status(400).json({ success: false, failed: result.failed, cleanups: result.cleanups });
+        // Was a bare `{ success: false, failed, cleanups }` — a failure with no
+        // `error` at all, so a caller learned that it failed but never why. The
+        // per-item detail is preserved under the declared `error.details`.
+        sendError(
+          res,
+          400,
+          'PACKAGE_DELETE_PARTIAL',
+          `Deleting ${packageId} left ${result.failedCount} item(s) behind.`,
+          { failed: result.failed, cleanups: result.cleanups },
+        );
         return;
       }
 
       const result = await packageService.delete(packageId, version);
 
       if (result.success) {
-        res.json({
-          success: true,
+        sendOk(res, {
           message: `Deleted ${packageId}${version ? `@${version}` : ''}`,
         });
         return;
       }
 
-      res.status(400).json({ success: false });
+      // The other bare `{ success: false }`.
+      sendError(
+        res,
+        400,
+        'PACKAGE_DELETE_FAILED',
+        `Failed to delete ${packageId}${version ? `@${version}` : ''}.`,
+      );
     } catch (error) {
-      res.status(500).json({ error: (error as Error).message });
+      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
   });
 }

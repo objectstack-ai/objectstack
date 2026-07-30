@@ -161,4 +161,25 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
     // Non-discovery routes are unaffected by the cession.
     expect(routes).toContain('GET /api/v1/packages');
   });
+
+  // [#3913 follow-up] The exact bug this file's header describes, committed
+  // again: `handleActionsRequest` learned to route the OBJECT-LESS shape
+  // `POST /actions//:action` at the canonical 'global' key, and its unit tests
+  // called `handleActions()` / `dispatch()` DIRECTLY — so they passed while the
+  // path had no `server.post()` of its own. `:object` does not match an empty
+  // segment, so over real HTTP the request fell through to Hono's `notFound`
+  // and answered a bare `{error: 'Not found'}` with the domain never running.
+  // Found by dogfooding, not by the suite. Assert the registration, which is
+  // the only thing that makes the branch reachable.
+  it('mounts the object-less action shape /actions//:action so it reaches dispatch()', async () => {
+    const { server, routes } = makeFakeServer();
+    const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+    await plugin.start?.(makeCtx(server));
+
+    expect(routes).toContain('POST /api/v1/actions//:action');
+    // The object-scoped shapes must keep their registrations — the empty-segment
+    // route is additive and must not replace or shadow them.
+    expect(routes).toContain('POST /api/v1/actions/:object/:action');
+    expect(routes).toContain('POST /api/v1/actions/:object/:action/:recordId');
+  });
 });

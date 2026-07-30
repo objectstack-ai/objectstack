@@ -8,7 +8,7 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
  *
  * Mounted under `/api/v1/datasources/:name/external/*` and served by the
  * `external-datasource` service. Every route degrades gracefully
- * (`503 external_service_unavailable`) when federation is not wired into the
+ * (`503 SERVICE_UNAVAILABLE`) when federation is not wired into the
  * host, so the routes are safe to register unconditionally.
  *
  *   GET  /datasources/:name/external/tables             → listRemoteTables
@@ -21,6 +21,9 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
  * list / test / create / update / remove, ADR-0015 Addendum) were extracted
  * into the private `@objectstack/datasource-admin` package, which registers
  * them via its own `registerDatasourceAdminRoutes`.
+ *
+ * Every body is built by `sendOk` / `sendError` below, in the envelope
+ * `BaseResponseSchema` declares (#3843).
  */
 export function registerExternalDatasourceRoutes(
   server: IHttpServer,
@@ -37,8 +40,40 @@ export function registerExternalDatasourceRoutes(
     }
   };
 
+  /**
+   * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
+   * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
+   * `{ success: false, error: { code, message } }`.
+   *
+   * Before #3843 this module emitted the pre-#3675 `{ error: '<string>' }`,
+   * with the message a SIBLING of `error` on the import path — so a caller
+   * reading `body.error.message` got `undefined`.
+   *
+   * Codes follow ADR-0112 (#3841, settled while this was in review):
+   * `external_service_unavailable` → the standard `SERVICE_UNAVAILABLE`, since the
+   * ledger asks generic conditions to reuse the catalog rather than register a
+   * per-service synonym; `external_import_error` → `EXTERNAL_IMPORT_ERROR`,
+   * registered under this package because a refused federated import is specific
+   * to it.
+   */
+  const sendError = (res: any, status: number, code: string, message: string) =>
+    res.status(status).json({ success: false, error: { code, message } });
+
+  /**
+   * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
+   *
+   * Payload keys are unchanged, one level deeper. Note `POST /validate` keeps
+   * its `ok` — unlike the `{ ok: true, key }` #3689 retired from storage, that
+   * one was a private second word for `success`, while this `ok` is a COMPUTED
+   * verdict over the federated objects (`results.every(r => r.ok)`). A domain
+   * verdict that happens to share the name is not a second envelope flag, so it
+   * belongs inside `data` rather than being dropped.
+   */
+  const sendOk = (res: any, data: unknown, status = 200) =>
+    res.status(status).json({ success: true, data });
+
   const unavailable = (res: any) =>
-    res.status(503).json({ error: 'external_service_unavailable' });
+    sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The external-datasource service is not available.');
 
   // List remote tables (optionally filtered by ?schema=).
   server.get(`${ext}/tables`, async (req: any, res: any) => {
@@ -46,7 +81,7 @@ export function registerExternalDatasourceRoutes(
     if (!svc?.listRemoteTables) return unavailable(res);
     const schema = typeof req.query?.schema === 'string' ? req.query.schema : undefined;
     const tables = await svc.listRemoteTables(req.params.name, { schema });
-    res.json({ tables });
+    sendOk(res, { tables });
   });
 
   // Generate an Object draft (structured + *.object.ts source) from a table.
@@ -58,7 +93,7 @@ export function registerExternalDatasourceRoutes(
       req.params.remote,
       (req.body as Record<string, unknown>) ?? {},
     );
-    res.json({ draft });
+    sendOk(res, { draft });
   });
 
   // Import a remote table as a live (runtime-origin) federated object so it's
@@ -74,12 +109,14 @@ export function registerExternalDatasourceRoutes(
         req.params.remote,
         (req.body as Record<string, unknown>) ?? {},
       );
-      res.status(201).json({ object: result });
+      sendOk(res, { object: result }, 201);
     } catch (err) {
-      res.status(400).json({
-        error: 'external_import_error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      sendError(
+        res,
+        400,
+        'EXTERNAL_IMPORT_ERROR',
+        err instanceof Error ? err.message : String(err),
+      );
     }
   });
 
@@ -88,7 +125,7 @@ export function registerExternalDatasourceRoutes(
     const svc = externalService();
     if (!svc?.refreshCatalog) return unavailable(res);
     const catalog = await svc.refreshCatalog(req.params.name);
-    res.json({ catalog });
+    sendOk(res, { catalog });
   });
 
   // Validate the federated objects on this datasource.
@@ -97,6 +134,6 @@ export function registerExternalDatasourceRoutes(
     if (!svc?.validateAll) return unavailable(res);
     const report = await svc.validateAll();
     const results = (report.results ?? []).filter((r: any) => r.datasource === req.params.name);
-    res.json({ ok: results.every((r: any) => r.ok), results });
+    sendOk(res, { ok: results.every((r: any) => r.ok), results });
   });
 }

@@ -1,22 +1,28 @@
 {
   "type": "position",
-  "_note": "PositionSchema (ADR-0090 D3; formerly RoleSchema). Flat capability-distribution group.",
+  "_note": "PositionSchema (ADR-0090 D3; formerly RoleSchema). Flat capability-distribution group. 2026-07-30 security-subset re-verification: all four entries call-graph-closed, no corrections.",
   "props": {
     "name": {
       "status": "live",
-      "evidence": "packages/core/src/security/resolve-authz-context.ts:210",
+      "verifiedAt": "2026-07-30",
+      "evidence": "packages/core/src/security/resolve-authz-context.ts (resolveUserAuthzGrants — sys_user_position rows resolve by position name into ctx.positions, which keys position-bound permission-set resolution and the RLS positions domain)",
       "note": "sys_position.name keys position-bound permission-set resolution and ctx.positions."
     },
     "label": {
       "status": "live",
+      "verifiedAt": "2026-07-30",
+      "evidence": "rendered as the record title of sys_position in Setup's generic object views (objectui app-shell list/detail rendering)",
       "note": "display (admin nav/forms, security-plugin.ts)."
     },
     "description": {
       "status": "live",
+      "verifiedAt": "2026-07-30",
+      "evidence": "rendered on the sys_position record detail in Setup's generic object views",
       "note": "display."
     },
     "delegatable": {
       "status": "live",
+      "verifiedAt": "2026-07-30",
       "evidence": "packages/plugins/plugin-security/src/delegated-admin-gate.ts:positionIsDelegatable",
       "proof": "packages/qa/dogfood/test/delegation-of-duty.dogfood.test.ts#delegation-of-duty",
       "note": "ADR-0091 D3: gates the self-service delegation branch — a non-admin may delegate this position only when delegatable=true, time-boxed and reasoned (enforced fail-closed in the D12 gate). ADR-0054 high-risk class (delegation): the proof drives a gated delegation write over HTTP and asserts the delegate's grant resolves in-window and dies at valid_until."

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #3918 follow-up — the LAST hop: what `/actions` puts on the wire.
+ * #3918 follow-up + #3962 — the LAST hop: what `/actions` puts on the wire.
  *
  * The sandbox now carries `code` / `fields` back out of the VM on a
  * `SandboxError` (see `sandbox/error-passthrough.test.ts`). This pins the other
@@ -11,12 +11,12 @@
  * action could raise a toast but never highlight the offending input — the
  * symptom in the original report.
  *
- * **The status stays 200.** `/actions` has always reported business failure in
- * the payload (`{ success: false }`), not as a transport error, and every
- * caller branches on `data.success`. Making this a 4xx would be a wire-contract
- * break in exchange for a strictly additive fix, so the fix is additive: the
- * same envelope, now carrying what the client needs. That choice is asserted
- * below so it cannot drift silently.
+ * **The status is 400 since #3962** — the conscious, documented decision the
+ * previous revision of this file asked for. The 200-with-inner-envelope wire
+ * was never designed: no ADR or doc specified it, and /actions was the only
+ * route of 12 that double-wrapped. `code` and `fields` now ride in
+ * `error.details`, the exact shape `@objectstack/client` normalizes to
+ * `err.code` / `err.fields` (#3927), identical to a ValidationError on /data.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -81,27 +81,27 @@ describe('#3918 follow-up — /actions surfaces code + fields on a validation fa
     it('carries `fields[]` so a form can anchor the error to the input', async () => {
         const response = await invoke(validationSandboxError());
 
-        expect(response.body.data).toMatchObject({
-            success: false,
-            code: 'VALIDATION_FAILED',
-            fields: FIELDS,
-        });
+        expect(response.status).toBe(400);
+        // The semantic code is promoted into `error.code` (#3971); `fields`
+        // stay in `details`.
+        expect(response.body.error.code).toBe('VALIDATION_FAILED');
+        expect(response.body.error.details).toMatchObject({ fields: FIELDS });
     });
 
     it('keeps the human message as the toast text', async () => {
         const response = await invoke(validationSandboxError());
 
-        expect(response.body.data.error).toBe('ValidationError: issued_on is required');
+        expect(response.body.error.message).toBe('ValidationError: issued_on is required');
     });
 
-    it('KEEPS HTTP 200 and `success: false` — the wire contract is unchanged', async () => {
-        // Deliberate: see the file header. If this flips to 4xx it must be a
-        // conscious, documented break, not a side effect.
+    it('is an HTTP 400 — failures speak HTTP (#3962)', async () => {
+        // The previous revision of this test pinned 200 so that flipping it
+        // would be "a conscious, documented break, not a side effect".
+        // #3962 is that documented decision.
         const response = await invoke(validationSandboxError());
 
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);   // dispatcher envelope
-        expect(response.body.data.success).toBe(false); // business outcome
+        expect(response.status).toBe(400);
+        expect(response.body.success).toBe(false);
     });
 
     it('omits `code` / `fields` entirely for an ordinary failure', async () => {
@@ -111,9 +111,9 @@ describe('#3918 follow-up — /actions surfaces code + fields on a validation fa
             new SandboxError("action 'x' threw: boom", 'boom'),
         );
 
-        expect(response.body.data).toEqual({ success: false, error: 'boom' });
-        expect('code' in response.body.data).toBe(false);
-        expect('fields' in response.body.data).toBe(false);
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toBe('boom');
+        expect(response.body.error.details).toBeUndefined();
     });
 
     it('carries a code without fields when that is all the error had', async () => {
@@ -121,8 +121,8 @@ describe('#3918 follow-up — /actions surfaces code + fields on a validation fa
             new SandboxError("action 'x' threw: pick another", 'pick another', { code: 'DUPLICATE' }),
         );
 
-        expect(response.body.data).toEqual({
-            success: false, error: 'pick another', code: 'DUPLICATE',
-        });
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toBe('pick another');
+        expect(response.body.error.code).toBe('DUPLICATE');
     });
 });

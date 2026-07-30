@@ -23,13 +23,10 @@
  *     did not hand-unwrap the inner envelope (the shipped console among them,
  *     which showed a green toast) swallowed it.
  *
- *     Only the DISPATCH FAILURE moved to a status. A handler that RAN and
- *     rejected still reports `{success: false, error, code?, fields?}` at HTTP
- *     200 — that is a business outcome, not a transport error, and #3937 pins
- *     it (`actions-validation-envelope.test.ts`). The line this file asserts is
- *     "did a handler run": below it the payload, above it the status, alongside
- *     the pre-dispatch answers the route already gives one (403 denied, 400
- *     wrong type, 503 unavailable).
+ *     #3913 moved the dispatch failure to a 404; #3962 finished the job —
+ *     every failure speaks HTTP (rejection 400, crash 500), success is a
+ *     SINGLE wrap (`data` = the handler's return value), and the inner
+ *     envelope is gone.
  *
  * The engine double here is deliberately faithful on the one point that
  * matters: a real `Map` keyed `<object>:<action>` that throws
@@ -47,6 +44,15 @@ import { HttpDispatcher } from './http-dispatcher.js';
 function makeDispatcher(opts: {
     registered?: Record<string, (ctx: any) => any>;
     objectDef?: any;
+    /**
+     * [ADR-0110 D3] This file's axis is ADDRESSING, not governance: every case
+     * below asks "which key did the route probe, and what envelope came back".
+     * An undeclared action is refused since D3, so the double declares
+     * whatever name is asked for — a plain script action bound to its own name,
+     * which is the very key the URL segment used to be taken as, so the probe
+     * order these tests pin is unchanged. Pass `false` to exercise the refusal.
+     */
+    declared?: boolean;
 } = {}) {
     const registered = opts.registered ?? {};
     const executeAction = vi.fn(async (object: string, action: string, ctx: any) => {
@@ -65,8 +71,16 @@ function makeDispatcher(opts: {
         find: vi.fn(async () => []),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
     };
+    const declareAny = opts.declared !== false;
+    const synthesize = (type: string, name: string) =>
+        (declareAny && type === 'action')
+            ? { name, type: 'script', target: name, objectName: 'global' }
+            : null;
     const metadata: any = {
-        load: vi.fn(async () => null),
+        load: vi.fn(async (type: string, name: string) => synthesize(type, name)),
+        loadDiagnosed: vi.fn(async (type: string, name: string) => ({
+            data: synthesize(type, name), degraded: false, errors: [],
+        })),
         listObjects: vi.fn(async () => (objectDef ? [objectDef] : [])),
         getObject: vi.fn(async () => objectDef),
     };
@@ -90,7 +104,7 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
         const res = await dispatcher.handleActions('/global/log_call', 'POST', {}, ctx());
 
         expect(res.response.status).toBe(200);
-        expect(res.response.body.data).toEqual({ success: true, data: { logged: true } });
+        expect(res.response.body.data).toEqual({ logged: true });
     });
 
     it('reaches the same handler from POST /actions//:action — the empty-object shape', async () => {
@@ -104,7 +118,7 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
         const res = await dispatcher.handleActions('//log_call', 'POST', {}, ctx());
 
         expect(res.response.status).toBe(200);
-        expect(res.response.body.data).toEqual({ success: true, data: { logged: true } });
+        expect(res.response.body.data).toEqual({ logged: true });
         expect(executeAction).toHaveBeenCalledWith('global', 'log_call', expect.anything());
     });
 
@@ -119,7 +133,7 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
         const res = await dispatcher.handleActions('/crm_contact/log_call', 'POST', {}, ctx());
 
         expect(res.response.status).toBe(200);
-        expect(res.response.body.data).toEqual({ success: true, data: { logged: true } });
+        expect(res.response.body.data).toEqual({ logged: true });
         expect(executeAction).toHaveBeenNthCalledWith(1, 'crm_contact', 'log_call', expect.anything());
         expect(executeAction).toHaveBeenNthCalledWith(2, 'global', 'log_call', expect.anything());
     });
@@ -133,7 +147,7 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
         const res = await dispatcher.handleActions('/crm_contact/log_call', 'POST', {}, ctx());
 
         expect(res.response.status).toBe(200);
-        expect(res.response.body.data).toEqual({ success: true, data: { logged: 'wildcard' } });
+        expect(res.response.body.data).toEqual({ logged: 'wildcard' });
     });
 
     it('probes `global` exactly once when the route already names it', async () => {
@@ -143,6 +157,22 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
 
         const probed = executeAction.mock.calls.map((c: any[]) => c[0]);
         expect(probed).toEqual(['global', '*']);
+    });
+
+    // [ADR-0110 D3] The fixture above declares whatever it is asked for so the
+    // addressing cases stay on their own axis. That must not be read as "the
+    // object-less route is exempt from governance" — it is not.
+    it('refuses an object-less action that has no declaration, before any probe', async () => {
+        const { dispatcher, executeAction } = makeDispatcher({
+            registered: { 'global:log_call': () => ({ logged: true }) },
+            declared: false,
+        });
+
+        const res = await dispatcher.handleActions('/global/log_call', 'POST', {}, ctx());
+
+        expect(res.response.status).toBe(404);
+        expect(res.response.body.error.message).toMatch(/has no declaration/i);
+        expect(executeAction).not.toHaveBeenCalled();
     });
 
     it('prefers the object-specific handler over the global one', async () => {
@@ -156,7 +186,7 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
 
         const res = await dispatcher.handleActions('/crm_contact/log_call', 'POST', {}, ctx());
 
-        expect(res.response.body.data).toEqual({ success: true, data: { scope: 'object' } });
+        expect(res.response.body.data).toEqual({ scope: 'object' });
     });
 
     it('does not try to load a record for an object-less action', async () => {
@@ -167,7 +197,7 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
         const res = await dispatcher.handleActions('/global/log_call/rec_1', 'POST', {}, ctx());
 
         // No `get` against an object named 'global' — only the id echo.
-        expect(res.response.body.data.data.record).toEqual({ id: 'rec_1' });
+        expect(res.response.body.data.record).toEqual({ id: 'rec_1' });
     });
 
     it('404s an unregistered action, naming the ROUTED object rather than the last probe', async () => {
@@ -210,12 +240,9 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
 });
 
 describe('REST /actions — dispatch failure vs business failure (#3913)', () => {
-    it('a handler that RAN and rejected still reports in the payload at HTTP 200', async () => {
-        // The line #3913 draws is "did a handler run". This one did, so the
-        // failure is a business outcome and stays in the envelope — the
-        // contract #3937 pins. Asserted here too so the not-found 404 above
-        // can never be widened into "every action failure is a 4xx" by
-        // someone reading only this file.
+    it('a handler that RAN and rejected is a 400 with the business message (#3962)', async () => {
+        // Distinct from the 404 above: the 404 says "no such action", the 400
+        // says "the action said no". Both speak HTTP since #3962.
         const { dispatcher } = makeDispatcher({
             registered: {
                 'global:log_call': () => {
@@ -228,13 +255,12 @@ describe('REST /actions — dispatch failure vs business failure (#3913)', () =>
 
         const res = await dispatcher.handleActions('/global/log_call', 'POST', {}, ctx());
 
-        expect(res.response.status).toBe(200);
-        expect(res.response.body.data.success).toBe(false);
+        expect(res.response.status).toBe(400);
         // The debug wrapper stays in the server log, not on the wire.
-        expect(res.response.body.data.error).toBe('Contact has no phone number');
+        expect(res.response.body.error.message).toBe('Contact has no phone number');
     });
 
-    it('carries a validation failure\'s code/fields in the payload, unchanged (#3937)', async () => {
+    it('carries a validation failure\'s code/fields in error.details (#3937 → #3962)', async () => {
         const { dispatcher } = makeDispatcher({
             registered: {
                 'global:log_call': () => {
@@ -248,17 +274,16 @@ describe('REST /actions — dispatch failure vs business failure (#3913)', () =>
 
         const res = await dispatcher.handleActions('/global/log_call', 'POST', {}, ctx());
 
-        expect(res.response.status).toBe(200);
-        expect(res.response.body.data).toMatchObject({
-            success: false,
-            code: 'VALIDATION_FAILED',
+        expect(res.response.status).toBe(400);
+        expect(res.response.body.error.code).toBe('VALIDATION_FAILED');
+        expect(res.response.body.error.details).toMatchObject({
             fields: [{ field: 'phone', message: 'required' }],
         });
     });
 
-    it('leaves the success envelope untouched', async () => {
-        // Only the not-found exit moved; a successful action keeps the
-        // `{success: true, data: {success: true, data}}` shape the SDK reads.
+    it('serves success as a SINGLE wrap — data is the handler return value (#3962)', async () => {
+        // The former inner {success, data} envelope existed only to carry a
+        // failure signal at HTTP 200; failures carry a status now.
         const { dispatcher } = makeDispatcher({
             registered: { 'global:log_call': () => ({ id: 'call_1' }) },
         });
@@ -268,7 +293,7 @@ describe('REST /actions — dispatch failure vs business failure (#3913)', () =>
         expect(res.response.status).toBe(200);
         expect(res.response.body).toMatchObject({
             success: true,
-            data: { success: true, data: { id: 'call_1' } },
+            data: { id: 'call_1' },
         });
     });
 });

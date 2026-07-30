@@ -16,7 +16,16 @@ describe('AppPlugin', () => {
             },
             registerService: vi.fn(),
             getService: vi.fn(),
-            getServices: vi.fn()
+            getServices: vi.fn(),
+            // `hook` / `trigger` are REQUIRED members of PluginContext. This
+            // double omitted them and got away with it only because every
+            // `ctx.hook` call site happened to be conditional (jobs register
+            // one only when the bundle declares jobs). ADR-0110 D5's governance
+            // inventory registers one unconditionally, which surfaced the gap —
+            // model the real interface rather than shrinking the code to fit
+            // an incomplete double.
+            hook: vi.fn(),
+            trigger: vi.fn()
         } as unknown as PluginContext;
     });
 

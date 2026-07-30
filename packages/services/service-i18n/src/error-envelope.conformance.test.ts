@@ -14,10 +14,22 @@
  * Both directions are guarded: every error branch is driven and parsed against
  * the real `BaseResponseSchema`, and the module source is scanned so a new
  * route cannot quietly reintroduce the bare shape.
+ *
+ * The STATIC half — proving no route can bypass the `sendOk` / `sendError` pair
+ * — used to be an open-coded regex block right here. #3843 lifted it out to
+ * `scripts/check-route-envelope.mjs` (`pnpm check:route-envelope`), which audits
+ * EVERY route module in the repo rather than this one package.
+ *
+ * That move mattered more than deduplication. A per-package scan structurally
+ * cannot notice a module nobody thought to convert, and going repo-wide found two
+ * immediately (#3973, #3983). It also dropped the regex: the old block stripped
+ * comments with `String.replace`, which ate `//` inside string literals and
+ * truncated the rest of that line — response writes included — and counted
+ * `c.req.json()` (a request READ) as an unenveloped response. The AST has neither
+ * bug.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { I18nServicePlugin } from './i18n-service-plugin';
@@ -174,19 +186,5 @@ describe('i18n error envelope (#3675)', () => {
     expect(status).toBe(500);
     expect(BaseResponseSchema.safeParse(body).success).toBe(true);
     expect(body.error.message).toBe('Internal error');
-  });
-
-  it('routes every error through `sendError` — no route may reintroduce the bare shape', () => {
-    // Comments stripped first: this module's prose quotes both shapes, and a
-    // doc comment is not a code path.
-    const source = readFileSync(new URL('./i18n-service-plugin.ts', import.meta.url), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '');
-
-    const bare = [...source.matchAll(/res\s*\.\s*status\([^)]*\)\s*\.\s*json\(\s*\{\s*error/g)];
-    expect(bare, `bare error bodies found: ${bare.map((m) => m[0]).join(', ')}`).toHaveLength(0);
-
-    // The envelope is built in exactly one place.
-    expect([...source.matchAll(/success:\s*false/g)]).toHaveLength(1);
   });
 });

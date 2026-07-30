@@ -511,11 +511,26 @@ performed. So `plan` really is a dry run, and everything `apply` is about to do
     + crm_quote [create_table, 9 column(s)]
     + crm_contact [add_columns: nickname, region]
 
+  In place (existing rows converged when you apply)
+    ~ crm_contact [normalize_datetime_storage: signed_at — 1,240 row update(s)]
+
   Safe (loosening — applied without --allow-destructive)
     ✓ crm_contact.email [relax_not_null]
 ```
 
 Answering `n` leaves the database exactly as it was.
+
+The two upper sections differ in a way worth reading carefully. **New** is
+purely additive — it creates tables and columns and never touches a row. **In
+place** rewrites existing data: the storage-form convergence a `Field.datetime`
+column needs when the database predates the canonical UTC storage (ADR-0053
+addendum D-B1..D-B4). It carries a row count because that is the number
+deciding whether to run it now; on MySQL it reads `widen_datetime_columns` and
+is an `ALTER … MODIFY` table rebuild that holds a metadata lock for its
+duration.
+
+Both are safe to apply — the convergence preserves every stored instant and is
+idempotent — but only the second takes time proportional to your data.
 
 #### Occupancy check (SQLite)
 

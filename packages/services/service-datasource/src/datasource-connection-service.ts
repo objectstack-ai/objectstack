@@ -31,6 +31,7 @@ import {
 import type {
   IDatasourceDriverFactory,
   DatasourceConnectionSpec,
+  DatasourceDriverOwnership,
 } from './contracts/datasource-driver-factory.js';
 import {
   allowAllConnectPolicy,
@@ -151,6 +152,15 @@ export interface ConnectResult {
   name: string;
   status: ConnectStatus;
   reason?: string;
+  /**
+   * Teardown ownership recorded at connect time from the factory handle
+   * (ADR-0062 D5, #3993). `'host'` marks an ADOPTED pre-built instance
+   * (`createPrebuiltDriverFactory`) whose pool outlives this kernel —
+   * {@link DatasourceConnectionService.disconnect} then clears the retained
+   * state but never closes the driver. Absent ⇒ factory-built for this
+   * connect; kernel teardown may disconnect it.
+   */
+  ownership?: DatasourceDriverOwnership;
 }
 
 /**
@@ -507,17 +517,32 @@ export class DatasourceConnectionService {
       }
 
       this.logger?.info?.(`datasource '${name}': connected (driver=${record.driver}, schemaMode=${record.schemaMode ?? 'managed'})`);
-      return { name, status: 'connected' };
+      return { name, status: 'connected', ...(handle.ownership ? { ownership: handle.ownership } : {}) };
     } catch (err) {
       return this.handleFailure(record, 'failed-degraded', errMsg(err), opts.context, opts.objects);
     }
   }
 
-  /** Gracefully disconnect a previously-registered datasource pool. */
-  async disconnect(name: string): Promise<void> {
+  /**
+   * Gracefully disconnect a previously-registered datasource pool.
+   *
+   * Two teardown rules (ADR-0062 D5, #3993):
+   *  - `asDefault` resolves the driver the way the default was registered —
+   *    under its NATURAL name via the engine's default-driver fallback
+   *    (`getDriverByName('default')` can never find it, by the #3826 design).
+   *  - A `'host'`-owned (adopted) instance is never closed here: its pool
+   *    outlives this kernel (shared proxy base / cross-kernel registry cache),
+   *    so only the retained verdict is cleared and the host keeps the pool.
+   */
+  async disconnect(name: string, opts: { asDefault?: boolean } = {}): Promise<void> {
     const engine = this.cfg.engine();
-    const driver = engine?.getDriverByName?.(name) as { disconnect?: () => Promise<void> } | undefined;
-    if (typeof driver?.disconnect === 'function') {
+    const driverName = opts.asDefault ? engine?.getDefaultDriverName?.() : name;
+    const driver = (driverName ? engine?.getDriverByName?.(driverName) : undefined) as
+      | { disconnect?: () => Promise<void> }
+      | undefined;
+    if (this.states.get(name)?.ownership === 'host') {
+      this.logger?.debug?.(`datasource '${name}': adopted (host-owned) instance — pool left to the host, clearing state only`);
+    } else if (typeof driver?.disconnect === 'function') {
       try {
         await driver.disconnect();
       } catch (err) {
@@ -529,6 +554,23 @@ export class DatasourceConnectionService {
     // datasource that no longer exists in that state.
     this.states.delete(name);
     engine?.clearDatasourceUnavailable?.(name);
+  }
+
+  /**
+   * Kernel-teardown sweep (ADR-0062 D5, #3993): disconnect exactly the pools
+   * THIS service opened — states with status `'connected'`, nothing else.
+   * `'already-registered'` is deliberately excluded (someone else registered
+   * that driver — an `onEnable` bridge, the default's idempotent replay — and
+   * this service closing it would pull a pool from under its real owner);
+   * host-owned adopted instances are skipped inside {@link disconnect}.
+   */
+  async disconnectAll(): Promise<void> {
+    const names = Array.from(this.states.entries())
+      .filter(([, st]) => st.status === 'connected')
+      .map(([n]) => n);
+    for (const n of names) {
+      await this.disconnect(n, { asDefault: n === 'default' });
+    }
   }
 
   /**

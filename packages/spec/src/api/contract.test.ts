@@ -21,17 +21,17 @@ import {
 describe('ApiErrorSchema', () => {
   it('should accept valid API error', () => {
     const error = ApiErrorSchema.parse({
-      code: 'validation_error',
+      code: 'VALIDATION_ERROR',
       message: 'Invalid input data',
     });
 
-    expect(error.code).toBe('validation_error');
+    expect(error.code).toBe('VALIDATION_ERROR');
     expect(error.message).toBe('Invalid input data');
   });
 
   it('should accept error with details', () => {
     const error = ApiErrorSchema.parse({
-      code: 'validation_error',
+      code: 'VALIDATION_ERROR',
       message: 'Validation failed',
       details: {
         fields: {
@@ -58,13 +58,13 @@ describe('BaseResponseSchema', () => {
     const response = BaseResponseSchema.parse({
       success: false,
       error: {
-        code: 'not_found',
+        code: 'NOT_FOUND',
         message: 'Record not found',
       },
     });
 
     expect(response.success).toBe(false);
-    expect(response.error?.code).toBe('not_found');
+    expect(response.error?.code).toBe('NOT_FOUND');
   });
 
   it('should accept response with metadata', () => {
@@ -264,7 +264,7 @@ describe('SingleRecordResponseSchema', () => {
     const response = SingleRecordResponseSchema.parse({
       success: false,
       error: {
-        code: 'not_found',
+        code: 'NOT_FOUND',
         message: 'Record not found',
       },
       data: {},
@@ -327,7 +327,7 @@ describe('ModificationResultSchema', () => {
       success: false,
       errors: [
         {
-          code: 'validation_error',
+          code: 'VALIDATION_ERROR',
           message: 'Invalid data',
         },
       ],
@@ -359,7 +359,7 @@ describe('BulkResponseSchema', () => {
         {
           success: false,
           errors: [
-            { code: 'validation_error', message: 'Invalid' },
+            { code: 'VALIDATION_ERROR', message: 'Invalid' },
           ],
         },
       ],
@@ -386,7 +386,7 @@ describe('DeleteResponseSchema', () => {
       success: false,
       id: '123',
       error: {
-        code: 'not_found',
+        code: 'NOT_FOUND',
         message: 'Record not found',
       },
     });

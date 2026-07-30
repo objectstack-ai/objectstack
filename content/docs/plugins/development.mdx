@@ -273,7 +273,7 @@ import type { EnhancedApiError } from '@objectstack/spec/api';
 
 function handlePluginError(error: unknown): EnhancedApiError {
   return {
-    code: 'internal_error',
+    code: 'INTERNAL_ERROR',
     message: `Hello plugin error: ${String(error)}`,
     category: 'server',
     httpStatus: 500,

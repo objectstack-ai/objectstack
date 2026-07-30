@@ -19,7 +19,7 @@ The types you'll actually use:
 | `script` *(default)* | Run server-side logic | Inline `body` **or** a handler registered via `target` |
 | `flow` | Launch a flow (e.g. a screen-flow wizard) | `target` names the flow |
 | `url` | Navigate / open a link | `target` is the URL (`${ctx.record.id}` interpolation supported) |
-| `modal` | Open a modal page to collect input, then submit to a handler | `target` names the modal page |
+| `modal` | Open a modal page — client-side only, no server dispatch | `target` names the modal page (to collect input *and* run logic, use `script` + `params`) |
 | `api` | Call an HTTP endpoint directly | `target` is the endpoint; `method` / `bodyShape` / `bodyExtra` shape the request |
 | `form` | Open a form view, prefilled with the current record | `target` names the FormView; routed to `/forms/:target?recordId=…` |
 
@@ -229,22 +229,26 @@ curl -b cookies.txt -X POST \
   https://your-app.example.com/api/v1/actions/todo_task/complete_task \
   -H "Content-Type: application/json" \
   -d '{ "recordId": "rec_123", "params": {} }'
-# → 200 { "success": true, "data": { "success": true, "data": ... } }
+# → 200 { "success": true, "data": <your handler's return value> }
 ```
 
-Failures split three ways:
+The URL names the action by its **`name`**, never by `target`. `target` binds
+the action to whatever runs it — a handler key here, a flow id for
+`type: 'flow'`, a URL for `type: 'url'` — so it is an implementation detail:
+the server resolves your declaration by name and derives the handler key from
+it. Rename the underlying function freely; as long as the declaration's
+`target` follows, the public URL is unchanged.
 
-- **It ran and rejected** — HTTP **200**, `data: { "success": false, "error",
-  "code"?, "fields"? }`. An action that says no is a normal business outcome,
-  not a transport error, so it rides the payload. Always branch on
-  `data.success`.
-- **It never dispatched** — a real status: **404** no such action, **403**
-  denied, **400** wrong action type or a param-contract violation, **503**
-  unavailable — with `{ "success": false, "error": { "message", "code" } }`.
-- **It crashed** — **500**. A `TypeError` in your handler, a driver error or a
-  sandbox timeout is not an outcome your action chose to report, so it is a
-  server fault and shows up as one in logs, alerting and gateway error rates.
-  A deliberate `throw new Error('…')` is a rejection, not a crash.
+Failures speak HTTP — the status code is the signal (#3962):
+
+- **400** — the action ran and **rejected** (a business rule said no, or
+  validation failed — then with `error.details.fields[]` to anchor the input).
+- **404 / 403 / 503** — it never dispatched: no such action, denied, service
+  unavailable. A `url`/`modal`/`form`/`api` type with no server dispatch is
+  also a 400.
+- **500** — it **crashed**: a `TypeError` in your handler, a driver error, a
+  sandbox timeout. A deliberate `throw new Error('…')` is a 400 rejection,
+  not a crash.
 
 Full table in the [error catalog](/docs/api/error-catalog). The
 [client SDK](/docs/api/client-sdk) folds all of it into one
@@ -263,6 +267,49 @@ The endpoint dispatches on the **declared `type`**, exactly like the MCP
 | `flow` | Runs `target` on the automation engine, with your identity forwarded (a `runAs: 'user'` flow enforces RLS as you). Equivalent to `POST /api/v1/automation/:target/trigger`, without having to know the flow name. |
 | `api` | **400** — it dispatches on `target`; call that endpoint directly. |
 | `url` / `modal` / `form` | **400** — client-side navigation; there is nothing for the server to run. |
+
+## Headless actions: declare it, then hide it
+
+An action that should be callable but not appear in the UI is still a
+**declared** action. Hiding is a property you set; it is not the absence of a
+declaration:
+
+```typescript
+defineAction({
+  name: 'recalculate_commissions',
+  type: 'script',
+  target: 'recalcCommissions',
+  locations: [],                            // no UI surface
+  requiredPermissions: ['finance.admin'],   // still gated
+  // `ai.exposed` is false by default — no MCP tool either
+})
+```
+
+You keep the capability gate, the param contract, the audit trail, and Setup
+visibility for admins. A declaration that no surface renders costs you nothing.
+
+<Callout type="warn">
+Registering a handler **without** a declaration is not a way to hide an action —
+it is refused. An undeclared handler has no `requiredPermissions` to enforce and
+no param contract to check, yet it would execute with system privileges, so the
+server declines it:
+
+```
+Action 'recalc' on 'crm_account' has no declaration — add
+`defineAction({ name: 'recalc', … })`, or register the handler under a declared
+action's `target`.
+```
+
+If server-side logic should never be reachable over HTTP at all, do not register
+it as an action — export a plain function and call it from your own code.
+`engine.registerAction` means "publish this on the HTTP and MCP surfaces".
+
+Migrating an app that has undeclared handlers? Startup lists every one of them
+under `[action-governance]`, with the object and key to declare. There is no
+flag that runs them meanwhile — one would be the same ungoverned execution this
+rule exists to prevent — so declare each one, or drop the registration if
+nothing should invoke it over HTTP.
+</Callout>
 
 ## Expose it to AI (MCP)
 

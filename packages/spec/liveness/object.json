@@ -102,8 +102,9 @@
     },
     "ownership": {
       "status": "live",
-      "evidence": "packages/objectql/src/registry.ts:272",
-      "note": "#3175 record-ownership model. applySystemFields injects the reassignable owner_id lookup by default (ownership:'user'); 'org'|'none' opt out (Dataverse-style catalog/junction tables). Proven in objectql/src/registry.test.ts."
+      "verifiedAt": "2026-07-30",
+      "evidence": "packages/objectql/src/registry.ts:292 (applySystemFields reads schema.ownership)",
+      "note": "#3175 record-ownership model. applySystemFields injects the reassignable owner_id lookup by default (ownership:'user'); 'org'|'none' opt out (Dataverse-style catalog/junction tables). Proven in objectql/src/registry.test.ts. Evidence line refreshed 2026-07-30 (was :272, drifted)."
     },
     "access": {
       "status": "live",
@@ -112,7 +113,8 @@
     },
     "requiredPermissions": {
       "status": "live",
-      "evidence": "packages/plugins/plugin-security/src/security-plugin.ts",
+      "verifiedAt": "2026-07-30",
+      "evidence": "packages/plugins/plugin-security/src/security-plugin.ts:132 (NormalizedRequiredPermissions — per-CRUD buckets) + packages/plugins/plugin-security/src/permission-evaluator.ts (crudBucketForOperation keeps the buckets in lockstep with OPERATION_TO_PERMISSION)",
       "note": "ADR-0066 D3 object capability contract — the security middleware denies unless the caller's systemPermissions union covers it (AND-gate, before the CRUD grant). Mirrors App.requiredPermissions. Unit + full-middleware proven in plugin-security/security-plugin.test.ts."
     },
     "userActions": {
@@ -121,18 +123,21 @@
     },
     "systemFields": {
       "status": "live",
-      "evidence": "packages/objectql/src/registry.ts",
+      "verifiedAt": "2026-07-30",
+      "evidence": "packages/objectql/src/registry.ts (column injection) + packages/plugins/plugin-security/src/security-plugin.ts:3281 (systemFields.tenant === false read as the tenancy opt-out)",
       "note": "organization_id auto-inject gate."
     },
     "sharingModel": {
       "status": "live",
-      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:54",
+      "verifiedAt": "2026-07-30",
       "proof": "packages/qa/dogfood/test/controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent",
+      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:54",
       "note": "ADR-0055 high-risk class (sharing): the `controlled_by_parent` value derives a detail object's access from its master — the security layer injects `masterFK IN (accessible master ids)` on reads and requires master edit-access on by-id writes. The proof asserts a member who cannot read the master can neither read nor by-id-write the detail, and is not over-blocked on a master they own."
     },
     "publicSharing": {
       "status": "live",
-      "evidence": "packages/plugins/plugin-sharing/src/share-link-service.ts:56"
+      "verifiedAt": "2026-07-30",
+      "evidence": "packages/plugins/plugin-sharing/src/share-link-service.ts:48 (policy extraction) — share-link creation on an object without publicSharing.enabled=true is rejected 422 (share-link-service.ts:170)"
     },
     "tenancy": {
       "children": {
@@ -191,7 +196,8 @@
     },
     "isSystem": {
       "status": "live",
-      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:74",
+      "verifiedAt": "2026-07-30",
+      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:75",
       "note": "effectiveSharingModel: an object with no sharingModel and isSystem===true defaults to 'public' (else 'private') — fail-closed org-wide-default posture; ORed with the sys_ name-prefix fallback. Also read by lint/src/validate-security-posture.ts:98 (isSystemObject exempts system objects from the master-detail CRUD-grant lint) and mirrored in metadata-protocol/src/protocol.ts:106. The 2026-06 audit mis-classified as dead (sharing/lint readers not re-verified)."
     },
     "searchableFields": {
@@ -200,8 +206,9 @@
     },
     "externalSharingModel": {
       "status": "planned",
+      "verifiedAt": "2026-07-30",
       "authorWarn": true,
-      "note": "[ADR-0090 D11] P1 lands the SPEC SHAPE only (validated external<=internal at authoring; Studio surfaces the Ext badge). Runtime consumption (audience-aware evaluator branch substituting the external dial for external principals) is scheduled with the principal-taxonomy semantics phase; tracked on #2696. `planned` + authorWarn per enforce-or-mark: authors get told the dial does not evaluate yet. Was a bespoke 'authorable' status outside the documented vocabulary."
+      "note": "[ADR-0090 D11] P1 lands the SPEC SHAPE only (validated external<=internal at authoring; Studio surfaces the Ext badge). Runtime consumption (audience-aware evaluator branch substituting the external dial for external principals) is scheduled with the principal-taxonomy semantics phase; tracked on #2696. `planned` + authorWarn per enforce-or-mark: authors get told the dial does not evaluate yet. Was a bespoke 'authorable' status outside the documented vocabulary. Re-verified 2026-07-30: still no runtime consumer (authoring-time external<=internal validation in lint/src/validate-security-posture.ts:175 only, plus the ADR-0090 D4 retired-alias value check); nothing external-principal-shaped evaluates it, matching planned."
     },
     "fileAccessDelegate": {
       "status": "live",

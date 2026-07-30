@@ -139,7 +139,9 @@ describe('HttpDispatcher', () => {
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(422); // NOT the old hardcoded 400
             const error = result.response?.body?.error;
-            expect(error?.details?.code).toBe('invalid_metadata');
+            // [#3842] The spec-validation code is the `error.code`; the
+            // field-anchored issues stay in `details`, which is what they are.
+            expect(error?.code).toBe('invalid_metadata');
             expect(error?.details?.issues).toEqual(err.issues);
             expect(error?.details?.issues[0].path).toBe('fields.amount.type');
         });
@@ -516,7 +518,7 @@ describe('HttpDispatcher', () => {
                     return null;
                 });
 
-                const result = await dispatcher.handleAnalytics('query', 'POST', { sql: 'SELECT 1' }, { request: {} });
+                const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't1', measures: ['count'] }, { request: {} });
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(200);
                 expect(mockAnalytics.query).toHaveBeenCalled();
@@ -535,11 +537,16 @@ describe('HttpDispatcher', () => {
                 );
                 const ec = { userId: 'u1', positions: [], permissions: [], tenantId: 'org-1' };
 
-                await dispatcher.handleAnalytics('query', 'POST', { cube: 'leads' }, { request: {}, executionContext: ec } as any);
-                expect(mockAnalytics.query).toHaveBeenCalledWith({ cube: 'leads' }, ec);
+                // [#3878] The ORIGINAL body must be forwarded (no parse-output
+                // substitution): a parsed body would carry the schema's
+                // `timezone: 'UTC'` default and override org-timezone resolution.
+                const body = { cube: 'leads', measures: ['count'] };
+                await dispatcher.handleAnalytics('query', 'POST', body, { request: {}, executionContext: ec } as any);
+                expect(mockAnalytics.query).toHaveBeenCalledWith(body, ec);
+                expect(mockAnalytics.query.mock.calls[0][0]).toBe(body);
 
-                await dispatcher.handleAnalytics('sql', 'POST', { cube: 'leads' }, { request: {}, executionContext: ec } as any);
-                expect(mockAnalytics.generateSql).toHaveBeenCalledWith({ cube: 'leads' }, ec);
+                await dispatcher.handleAnalytics('sql', 'POST', body, { request: {}, executionContext: ec } as any);
+                expect(mockAnalytics.generateSql).toHaveBeenCalledWith(body, ec);
             });
 
             it('should handle POST /analytics/sql with async service', async () => {
@@ -548,7 +555,7 @@ describe('HttpDispatcher', () => {
                 };
                 (kernel as any).getService = vi.fn().mockResolvedValue(mockAnalytics);
 
-                const result = await dispatcher.handleAnalytics('sql', 'POST', { object: 'test' }, { request: {} });
+                const result = await dispatcher.handleAnalytics('sql', 'POST', { cube: 'test', measures: ['count'] }, { request: {} });
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(200);
                 expect(mockAnalytics.generateSql).toHaveBeenCalled();
@@ -599,6 +606,79 @@ describe('HttpDispatcher', () => {
 
                 const result = await dispatcher.handleAnalytics('unknown', 'POST', {}, { request: {} });
                 expect(result.handled).toBe(false);
+            });
+
+            // [#3878] Entry validation: a malformed body raises the duck-typed
+            // VALIDATION_FAILED shape BEFORE the service runs — previously it
+            // reached the engine, inferred a column-less cube, and died as an
+            // SQL syntax error (or had its off-contract filter silently
+            // dropped). The domain throws through (same contract as service
+            // errors, see 'should propagate analytics query error'); the HTTP
+            // bridge maps the shape to a 400 envelope — pinned end-to-end in
+            // `dispatcher-validation-error.real.test.ts`.
+            describe('AnalyticsQuery body validation (#3878)', () => {
+                const service = () => {
+                    const mockAnalytics = {
+                        query: vi.fn().mockResolvedValue({ rows: [] }),
+                        generateSql: vi.fn().mockResolvedValue({ sql: 'SELECT 1', params: [] }),
+                    };
+                    (kernel as any).getService = vi.fn().mockResolvedValue(mockAnalytics);
+                    return mockAnalytics;
+                };
+
+                it('rejects the retired {cube, query:{...}} envelope with the tombstone prescription', async () => {
+                    const mockAnalytics = service();
+                    await expect(dispatcher.dispatch(
+                        'POST', '/analytics/query', { cube: 'x', query: { measures: ['count'] } }, {}, { request: {} },
+                    )).rejects.toMatchObject({
+                        name: 'ValidationError',
+                        code: 'VALIDATION_FAILED',
+                        message: expect.stringContaining('top level'),
+                    });
+                    expect(mockAnalytics.query).not.toHaveBeenCalled();
+                });
+
+                it('rejects a `filters` key, pointing at the contract field `where`', async () => {
+                    const mockAnalytics = service();
+                    await expect(dispatcher.dispatch(
+                        'POST', '/analytics/query',
+                        { cube: 'x', measures: ['count'], filters: [{ member: 'status', operator: 'equals', values: ['active'] }] },
+                        {}, { request: {} },
+                    )).rejects.toMatchObject({
+                        code: 'VALIDATION_FAILED',
+                        message: expect.stringContaining('`where`'),
+                    });
+                    expect(mockAnalytics.query).not.toHaveBeenCalled();
+                });
+
+                it('rejects a body with no measures, naming the missing field', async () => {
+                    const mockAnalytics = service();
+                    await expect(dispatcher.dispatch(
+                        'POST', '/analytics/query', { cube: 'x' }, {}, { request: {} },
+                    )).rejects.toMatchObject({
+                        code: 'VALIDATION_FAILED',
+                        fields: expect.arrayContaining([expect.objectContaining({ field: 'measures' })]),
+                    });
+                    expect(mockAnalytics.query).not.toHaveBeenCalled();
+                });
+
+                it('validates /analytics/sql with the same contract', async () => {
+                    const mockAnalytics = service();
+                    await expect(dispatcher.dispatch(
+                        'POST', '/analytics/sql', { cube: 'x', query: {} }, {}, { request: {} },
+                    )).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+                    expect(mockAnalytics.generateSql).not.toHaveBeenCalled();
+                });
+
+                it('a valid bare body still reaches the service untouched', async () => {
+                    const mockAnalytics = service();
+                    const body = { cube: 'x', measures: ['count'], where: { status: 'active' } };
+                    const result: any = await dispatcher.dispatch(
+                        'POST', '/analytics/query', body, {}, { request: {} },
+                    );
+                    expect(result.response?.status).toBe(200);
+                    expect(mockAnalytics.query.mock.calls[0][0]).toBe(body);
+                });
             });
         });
 
@@ -724,7 +804,9 @@ describe('HttpDispatcher', () => {
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(401);
                 // Shared anonymous-deny body shape (locks the seam migration).
-                expect(result.response?.body?.error?.details?.code).toBe('unauthenticated');
+                // [#3842] `ANONYMOUS_DENY_CODE` reaches `error.code` now — it was
+                // parked in `details` while the status occupied the field.
+                expect(result.response?.body?.error?.code).toBe('UNAUTHENTICATED');
                 expect(service.listAudienceBindingSuggestions).not.toHaveBeenCalled();
             });
 
@@ -938,7 +1020,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).services = new Map([['analytics', syncAnalytics]]);
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', {}, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
             expect(result.handled).toBe(true);
             expect(syncAnalytics.query).toHaveBeenCalled();
         });
@@ -969,7 +1051,7 @@ describe('HttpDispatcher', () => {
                 throw new Error("Service 'analytics' is async - use await");
             });
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', {}, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
             expect(result.handled).toBe(true);
             expect(asyncAnalytics.query).toHaveBeenCalled();
             expect((kernel as any).getServiceAsync).toHaveBeenCalledWith('analytics');
@@ -1039,7 +1121,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).services = new Map([['analytics', syncAnalytics]]);
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', {}, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
             expect(result.handled).toBe(true);
             expect(syncAnalytics.query).toHaveBeenCalled();
         });
@@ -1051,7 +1133,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).services = new Map([['analytics', syncAnalytics]]);
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', {}, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
             expect(result.handled).toBe(true);
             expect(syncAnalytics.query).toHaveBeenCalled();
         });
@@ -1155,7 +1237,7 @@ describe('HttpDispatcher', () => {
             (kernel as any).getService = vi.fn().mockResolvedValue(badAnalytics);
 
             await expect(
-                dispatcher.handleAnalytics('query', 'POST', {}, { request: {} })
+                dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} })
             ).rejects.toThrow('Query timeout');
         });
 
@@ -1915,20 +1997,18 @@ describe('HttpDispatcher', () => {
         /**
          * The dispatcher's error body is the SHAPE the autonomously-mounted
          * i18n/storage services were aligned to in #3675 — nested `error`, with
-         * the `success` flag. It is not yet the CONTRACT: `ApiErrorSchema`
-         * declares `code` as a semantic string ('validation_error'), and this
-         * emits the HTTP status as a number. The dispatcher already works
-         * around its own field being occupied — `this.error(msg, 403, { code:
-         * 'PERMISSION_DENIED' })` parks the real code in `details` — which is
-         * the tell that the number is in the wrong place.
+         * the `success` flag — and, as of #3842, the CONTRACT as well.
          *
-         * Pinned rather than fixed: `error.code` is read across the SDK, the
-         * console and the dogfood suite, so moving it is its own change.
-         * `toEqual(['code'])` is deliberately exact — if a second field starts
-         * deviating this fails, and if the dispatcher is fixed it also fails
-         * and this pin should be deleted.
+         * #3687 pinned the one deviating field here rather than moving it, with
+         * the instruction that the pin be DELETED once the dispatcher was fixed
+         * rather than updated. That is what happened: the assertion is now that
+         * `ApiErrorSchema` parses, spelled against the schema imported from
+         * `packages/spec` so it tracks the contract if the contract moves. The
+         * exhaustive per-branch version lives in
+         * `error-envelope.conformance.test.ts`; this one keeps the guard at the
+         * scene of the original pin.
          */
-        it('pins the ONE field where the dispatcher deviates from ApiErrorSchema (#3675)', async () => {
+        it('emits an ApiErrorSchema-conformant error body (#3842, was the #3675 pin)', async () => {
             const result = await dispatcher.handleI18n('/translations', 'GET', {}, { request: {} });
             const body = result.response?.body as { success?: boolean; error?: unknown };
 
@@ -1936,9 +2016,12 @@ describe('HttpDispatcher', () => {
             expect(typeof body.error).toBe('object');
 
             const parsed = ApiErrorSchema.safeParse(body.error);
-            expect(parsed.success).toBe(false);
-            expect(parsed.error!.issues.map((i) => i.path.join('.'))).toEqual(['code']);
-            expect((body.error as { code: unknown }).code).toBe(400);
+            expect(parsed.error?.issues ?? []).toEqual([]);
+            expect(parsed.success).toBe(true);
+            // The status is on `httpStatus`; `code` is the semantic string it
+            // used to displace — derived here, since this branch has no code of
+            // its own to carry.
+            expect(body.error).toMatchObject({ code: 'VALIDATION_ERROR', httpStatus: 400 });
         });
 
         /**
@@ -2519,7 +2602,14 @@ describe('HttpDispatcher', () => {
             );
             expect(result).not.toBeNull();
             expect(result.status).toBe(403);
-            expect(result.body.error.details.type).toBe('PROJECT_MEMBERSHIP_REQUIRED');
+            // [#3842] Was `details.type` — the only site using that spelling,
+            // parked there because `error.code` held the status. `details` keeps
+            // the two genuine context fields.
+            expect(result.body.error.code).toBe('PROJECT_MEMBERSHIP_REQUIRED');
+            expect(result.body.error.details).toEqual({
+                environmentId: 'proj-private',
+                userId: 'user-1',
+            });
             expect(memberQL.find).toHaveBeenCalledWith('sys_environment_member', expect.objectContaining({
                 where: { environment_id: 'proj-private', user_id: 'user-1' },
             }));

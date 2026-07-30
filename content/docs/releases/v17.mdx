@@ -156,6 +156,52 @@ and flags whitelists the mapping would *widen* so every edit stays reviewable.
 `['upsert']`) strips to `[]`, which is **deny-all** — the object's API closes
 rather than widening.
 
+### An action must be declared to be invocable, and is identified by `name` (ADR-0110, #3935)
+
+Two halves of the `/api/v1/actions/:object/:action` contract were broken in
+complementary ways, which is why neither surfaced: the route resolved the
+**declaration** from the URL segment as a `name`, but dispatched the
+**handler** using that same segment as a registry key. For a target-bound
+action (`{ name: 'complete_task', target: 'completeTask' }`) those differ — so
+the documented `curl .../todo_task/complete_task` resolved the declaration and
+then 404ed, while the Console's `target`-addressed call dispatched fine and
+resolved **no** declaration, silently skipping the ADR-0066 D4 capability gate
+and the ADR-0104 param contract.
+
+Three changes land together:
+
+- **Identity is `name`.** The URL, MCP `run_action`, and every future surface
+  identify an action by its declarative `name`. `target` is a binding
+  expression — polymorphic per type, `${param.X}`-interpolatable, and legally
+  non-unique — so it never identifies anything. The server derives the handler
+  key from the declaration it resolved, using the rotation the MCP bridge
+  already used. The Console posts `name` (objectui ships in lockstep).
+- **An undeclared handler is refused.** `engine.registerAction` with no
+  matching declaration has no `requiredPermissions` to enforce and no param
+  contract to check, yet executes with system privileges. It now returns 404
+  naming the `defineAction` to add. Deleting a declaration used to *remove* an
+  action's gate while leaving it callable; removal now narrows.
+- **An unreachable metadata plane refuses instead of degrading.** A loader
+  failure used to be indistinguishable from "no declaration", so an outage
+  silently ungated every action it could not see. That is now a **503** — the
+  same posture as the datasource entry below.
+
+**Migration:** boot logs list every registered-but-undeclared handler under
+`[action-governance]`, alongside declared script actions bound to no handler.
+Declare each one with `defineAction`, or drop the registration if nothing should
+invoke it over HTTP. **There is no opt-out flag** — a switch that ran an
+ungoverned handler would be the same fail-open this change closes, and a sweep
+of the platform, every package and every example found zero undeclared handlers,
+so it would have shipped a way to reopen the gate for a case nobody has
+observed. The failure is bounded: the app still boots and every declared action
+still works; only an undeclared one returns 404, and it names the `defineAction`
+to add.
+
+Apps whose actions are all declared — anything with working Console buttons —
+need no changes, other than gaining enforcement of the `requiredPermissions`
+they already declared. Callers that hard-coded a `target` in an action URL
+switch to the action's `name`.
+
 ### A flow run with no trigger user may not touch data (#3760)
 
 An effective `runAs: 'user'` run that resolved **no trigger user** used to
@@ -218,6 +264,33 @@ taking effect.
 existed to warn when an author declared both an alias and its canonical key,
 which the parse now rejects outright. Delete the import; there is no replacement
 because the condition can no longer occur.
+
+### Seven flow-node config key aliases graduate into the conversion layer (#3796)
+
+| Node type(s) | Deprecated | Use instead |
+|---|---|---|
+| `get_record` / `create_record` / `update_record` / `delete_record` | `config.object` | `config.objectName` |
+| `notify` | `config.to` / `config.subject` / `config.body` / `config.url` | `config.recipients` / `config.title` / `config.message` / `config.actionUrl` |
+| `script` | `config.functionName` / `config.input` | `config.function` / `config.inputs` |
+
+All are pure key renames with unchanged values. Unlike the three tombstoned
+aliases above, these **cannot** be rejected in the schema —
+`FlowNodeSchema.config` is an unconstrained record — so they keep a load-path
+acceptance window instead: a stored flow authored with an alias keeps loading
+through protocol 17, rewritten to the canonical key at load (including
+`AutomationEngine.registerFlow` rehydration) with a `ConversionNotice`; the
+window retires in 18. The executors read canonical keys only, and the
+`readAliasedConfig` executor shim (which covered `object` → `objectName` and
+warned at run time) is deleted — the conversion layer is now the single seam
+that declares, converts, and retires flow-config aliases.
+
+`os migrate meta --from <your current major>` rewrites all seven in your
+source; or rename the keys by hand. `actionUrl` is the deliberate canonical of
+its pair: the downstream chain already uses that name
+(`sys_notification.action_url`, the channel contract, the REST notification
+model), while `url` platform-wide means an HTTP endpoint to call (`http` node,
+webhooks). The singular `input` on `map` / `subflow` / `connector_action` is
+those nodes' own canonical key and is untouched.
 
 ### `agent.tools[]` is removed — capability comes from skills (ADR-0109, #3820)
 
@@ -456,6 +529,47 @@ now tenant-scoped, matching the sequence.
 - **`GetTranslationsRequest` is locale-only.** The `namespace` / `keys` filters
   were declared, put on the query string by the SDK, and read by neither serving
   surface; passing `keys` shrank nothing and reported nothing.
+
+### The dispatcher's `error.code` is the semantic code, not the HTTP status (#3842)
+
+Everything the runtime dispatcher serves — `/meta/*`, `/actions/*`,
+`/packages/*`, `/automation/*`, `/analytics/*`, `/ready`, the route-not-found
+404 — used to answer with the HTTP status in `error.code`, the field
+`ApiErrorSchema` declares as a semantic string. The real code had to live
+somewhere else and did, in three different somewhere-elses: `error.details.code`,
+`error.details.type`, and a sibling `error.type`.
+
+```jsonc
+// before                                    // after
+{ "error": {                                 { "error": {
+    "message": "…",                              "code": "PERMISSION_DENIED",
+    "code": 403,                                 "message": "…",
+    "details": { "code": "PERMISSION_DENIED" }   "httpStatus": 403
+} }                                          } }
+```
+
+- **`error.code`** is the semantic string. **`error.httpStatus`** is the number.
+  **`error.details`** is context only. Replace a
+  `body.error.details?.code ?? body.error.type` read with `body.error.code`, and
+  a `body.error.code` read (for the status) with `body.error.httpStatus`.
+- **SDK callers need no change.** `ObjectStackClient` already normalised this —
+  `err.code` semantic, `err.httpStatus` numeric. The old-shape fallback read was
+  retired later in this same window (#4007): SDK and server ship on one release
+  train, and the ADR-0112 rename changed the code values a dug-out code would
+  need to match.
+- **No code was renamed.** `PERMISSION_DENIED`, `ROUTE_NOT_FOUND`,
+  `PASSWORD_EXPIRED`, `PROJECT_MEMBERSHIP_REQUIRED`, `VALIDATION_FAILED` and
+  `unauthenticated` all reach the wire spelled exactly as before; only their
+  field changed. Reconciling the platform's two code vocabularies is #3841.
+  A branch with no code of its own now derives a `StandardErrorCode` from the
+  status (`403` → `PERMISSION_DENIED`, post-rename spelling), spelled in one map in the spec.
+- **Spec:** `ApiErrorSchema` gains optional `httpStatus`; `StandardErrorCode`
+  gains `method_not_allowed` and `precondition_required` (both additive).
+  `DispatcherErrorCode` changes members from `'404' | '405' | '501' | '503'` to
+  the four semantic spellings the removed `error.type` declared, and
+  `DispatcherErrorResponseSchema.error.code` becomes a string — it had declared
+  the opposite of `ApiErrorSchema` for the same field, which is what let the
+  deviation stand.
 
 ### Dead spec clusters removed
 

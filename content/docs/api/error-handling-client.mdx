@@ -22,7 +22,7 @@ Every error response from ObjectStack follows this shape:
 interface ErrorResponse {
   success: false;        // Always false for error responses
   error: {
-    code: string;        // Machine-readable error code (e.g. "validation_error")
+    code: string;        // Machine-readable error code (e.g. "VALIDATION_ERROR")
     message: string;     // Human-readable message
     category?: string;   // Error category (e.g. "validation", "authorization")
     httpStatus?: number; // HTTP status code
@@ -31,7 +31,7 @@ interface ErrorResponse {
     retryAfter?: number; // Seconds to wait before retrying (rate limits)
     fieldErrors?: Array<{
       field: string;     // Field path (supports dot notation)
-      code: string;      // Per-field error code (e.g. "invalid_format")
+      code: string;      // Per-field error code (e.g. "INVALID_FORMAT")
       message: string;   // Detail message
       value?: unknown;   // The invalid value that was provided
       constraint?: unknown;
@@ -48,7 +48,7 @@ interface ErrorResponse {
 ```
 
 <Callout type="warning">
-Error `code` values are lowercase snake_case (`validation_error`, `permission_denied`, `rate_limit_exceeded`, `resource_not_found`) — see the [Error Catalog](/docs/api/error-catalog) for the full list.
+Error `code` values are SCREAMING_SNAKE (`VALIDATION_ERROR`, `PERMISSION_DENIED`, `RATE_LIMIT_EXCEEDED`, `RESOURCE_NOT_FOUND`) — see the [Error Catalog](/docs/api/error-catalog) for the full list.
 </Callout>
 
 ---
@@ -81,19 +81,19 @@ class ObjectStackError extends Error {
   }
 
   get isValidation(): boolean {
-    return this.code === 'validation_error';
+    return this.code === 'VALIDATION_ERROR';
   }
 
   get isNotFound(): boolean {
-    return this.code === 'resource_not_found' || this.code === 'record_not_found';
+    return this.code === 'RESOURCE_NOT_FOUND' || this.code === 'RECORD_NOT_FOUND';
   }
 
   get isPermission(): boolean {
-    return this.code === 'permission_denied';
+    return this.code === 'PERMISSION_DENIED';
   }
 
   get isRateLimit(): boolean {
-    return this.code === 'rate_limit_exceeded';
+    return this.code === 'RATE_LIMIT_EXCEEDED';
   }
 
   get isServerError(): boolean {
@@ -360,19 +360,19 @@ function showErrorToast(error: ObjectStackError) {
 
 function getToastConfig(error: ObjectStackError) {
   switch (error.code) {
-    case 'validation_error':
+    case 'VALIDATION_ERROR':
       return {
         type: 'warning' as const,
         message: `Please fix ${Object.keys(error.fieldErrorMap).length} field error(s)`,
         duration: 5000,
       };
-    case 'permission_denied':
+    case 'PERMISSION_DENIED':
       return {
         type: 'error' as const,
         message: 'You don\'t have permission to perform this action',
         duration: 4000,
       };
-    case 'rate_limit_exceeded':
+    case 'RATE_LIMIT_EXCEEDED':
       return {
         type: 'warning' as const,
         message: 'Too many requests. Please wait a moment.',

@@ -48,7 +48,6 @@ export const ContributorAccess = definePermissionSet({
       using: 'assignee == current_user.email',
       positions: ['contributor'],
       enabled: true,
-      priority: 10,
     },
   ],
 });
@@ -63,8 +62,7 @@ export const ContributorAccess = definePermissionSet({
 | `using` | `string` | Predicate for rows the user may **see / act on** (compiled into the query filter) |
 | `check` | `string` | Predicate rows must satisfy **after a write**. Omit it and `using` is reused |
 | `positions` | `string[]` | Which positions the policy applies to. Omit = everyone |
-| `enabled` | `boolean` | Default `true` |
-| `priority` | `number` | Default `0` |
+| `enabled` | `boolean` | Default `true`. `false` switches the policy off — a disabled policy is not evaluated |
 
 At least one of `using` / `check` is required.
 
