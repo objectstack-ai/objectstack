@@ -42,6 +42,7 @@ import { readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import {
   PresignedUrlResponseSchema,
@@ -298,29 +299,20 @@ describe('storage success envelope (#3689)', () => {
   });
 
   it('routes every success through `sendOk` — no route may reintroduce a bare body', () => {
-    // Comments stripped first: this module's prose quotes both the old and the
-    // new shape, and a doc comment is not a code path.
-    const source = readFileSync(new URL('./storage-routes.ts', import.meta.url), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '');
-
-    // Exactly two `.json(` call sites in the module: the one inside `sendOk`
-    // and the one inside `sendError`. Every route body is built by a helper, so
-    // this count does not grow with the number of routes — only with a route
-    // that bypasses them.
-    const jsonCalls = [...source.matchAll(/\.json\(/g)];
-    expect(
-      jsonCalls,
-      `expected only sendOk + sendError to call res.json(), found ${jsonCalls.length}`,
-    ).toHaveLength(2);
-
-    // One builder per envelope half, so each shape lives in one line of this
-    // package. (`success: false` is the error twin's assertion; both are
-    // pinned here so moving one without the other fails.)
-    expect([...source.matchAll(/success:\s*true/g)]).toHaveLength(1);
-    expect([...source.matchAll(/success:\s*false/g)]).toHaveLength(1);
-
-    // The retired words, gone from the code path rather than merely unused.
-    expect([...source.matchAll(/\bok:\s*true/g)]).toHaveLength(0);
+    // This scan used to be open-coded here: strip comments, count `.json(` call
+    // sites, assert one builder per envelope half, assert `ok: true` is gone.
+    // #3843 lifted it into `@objectstack/route-envelope-conformance` — the same
+    // block had been copied into the error twin and into i18n, and the third
+    // copy was the signal it wanted sharing rather than copying. The shared
+    // version also tokenizes properly instead of regex-stripping comments,
+    // which the copies got subtly wrong (a `//` inside a string truncated the
+    // rest of the line, `.json(` calls included).
+    //
+    // The defaults are exactly what the four open-coded assertions were:
+    // 2 call sites (`sendOk` + `sendError`), one builder per half, no literal
+    // `ok:` flag. Both halves stay pinned in both suites, so moving one without
+    // the other still fails.
+    const source = readFileSync(new URL('./storage-routes.ts', import.meta.url), 'utf8');
+    expect(checkRouteEnvelope({ source, module: 'storage-routes.ts' })).toEqual([]);
   });
 });

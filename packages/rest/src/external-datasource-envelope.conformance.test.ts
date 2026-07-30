@@ -1,0 +1,246 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * Response-envelope conformance for `/api/v1/datasources/:name/external/*`
+ * (#3843).
+ *
+ * The drift this closes: the pre-#3675 `{ error: '<string>' }` on both error
+ * arms, no `success` flag on any body, and — on `POST /validate` — its own
+ * private success word:
+ *
+ *     res.status(503).json({ error: 'external_service_unavailable' });
+ *     res.json({ ok: results.every((r: any) => r.ok), results });
+ *
+ * The `ok` is the interesting one, because it is NOT the `ok` #3689 retired from
+ * storage. There, `{ ok: true, key }` was a second word for the envelope's own
+ * `success` and was dropped. Here `ok` is a COMPUTED verdict over the federated
+ * objects — "did every one of them validate" — which is a domain answer that
+ * happens to share the name. It stays, inside `data`, and the assertion below
+ * pins that distinction so a later sweep for "`ok` beside `success`" does not
+ * delete a real field.
+ *
+ * The static half is the shared guard, whose private-success-word rule is
+ * deliberately scoped to `ok:` *literals* for exactly this reason.
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
+import { BaseResponseSchema } from '@objectstack/spec/api';
+import type { IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
+import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
+
+const EXT = '/api/v1/datasources/:name/external';
+
+interface Captured {
+  status: number;
+  body: any;
+}
+
+function mount(svc: unknown) {
+  const routes = new Map<string, RouteHandler>();
+  const server = {
+    get: (p: string, h: RouteHandler) => { routes.set(`GET:${p}`, h); },
+    post: (p: string, h: RouteHandler) => { routes.set(`POST:${p}`, h); },
+    put: (p: string, h: RouteHandler) => { routes.set(`PUT:${p}`, h); },
+    delete: () => {},
+    patch: () => {},
+    use: () => {},
+    listen: async () => {},
+    close: async () => {},
+  } as unknown as IHttpServer;
+  const ctx = { getService: vi.fn().mockReturnValue(svc) } as any;
+  registerExternalDatasourceRoutes(server, ctx, '/api/v1');
+  return routes;
+}
+
+async function drive(
+  routes: Map<string, RouteHandler>,
+  method: string,
+  path: string,
+  req: Record<string, any> = {},
+): Promise<Captured> {
+  const handler = routes.get(`${method}:${path}`);
+  if (!handler) throw new Error(`no handler for ${method} ${path}`);
+  const captured: Captured = { status: 200, body: undefined };
+  const res: any = {
+    json(data: any) { captured.body = data; },
+    send() {},
+    status(code: number) { captured.status = code; return res; },
+    header() { return res; },
+  };
+  await handler(
+    { params: { name: 'ext' }, query: {}, body: undefined, headers: {}, method, path, ...req } as any,
+    res,
+  );
+  return captured;
+}
+
+describe('external-datasource envelope (#3843) — success bodies', () => {
+  const CASES: Array<{ name: string; status: number; dataKeys: string[]; run: () => Promise<Captured> }> = [
+    {
+      name: 'GET /tables',
+      status: 200,
+      dataKeys: ['tables'],
+      run: () => drive(mount({ listRemoteTables: async () => [{ name: 'customers' }] }), 'GET', `${EXT}/tables`),
+    },
+    {
+      name: 'POST /tables/:remote/draft',
+      status: 200,
+      dataKeys: ['draft'],
+      run: () => drive(mount({ generateObjectDraft: async () => ({ name: 'customers' }) }), 'POST', `${EXT}/tables/:remote/draft`, { params: { name: 'ext', remote: 'customers' } }),
+    },
+    {
+      // Carries a non-200 success status.
+      name: 'POST /tables/:remote/import (201)',
+      status: 201,
+      dataKeys: ['object'],
+      run: () => drive(mount({ importObject: async () => ({ name: 'customers' }) }), 'POST', `${EXT}/tables/:remote/import`, { params: { name: 'ext', remote: 'customers' } }),
+    },
+    {
+      name: 'POST /refresh-catalog',
+      status: 200,
+      dataKeys: ['catalog'],
+      run: () => drive(mount({ refreshCatalog: async () => ({ tables: [] }) }), 'POST', `${EXT}/refresh-catalog`),
+    },
+    {
+      name: 'POST /validate',
+      status: 200,
+      dataKeys: ['ok', 'results'],
+      run: () => drive(
+        mount({ validateAll: async () => ({ results: [{ datasource: 'ext', ok: true }] }) }),
+        'POST',
+        `${EXT}/validate`,
+      ),
+    },
+  ];
+
+  for (const c of CASES) {
+    it(`${c.name} answers ${c.status} { success: true, data }`, async () => {
+      const { status, body } = await c.run();
+      expect(status).toBe(c.status);
+
+      // The contract itself, imported — not a restatement of it.
+      const parsed = BaseResponseSchema.safeParse(body);
+      expect(parsed.success, `body is not a BaseResponse: ${JSON.stringify(body)}`).toBe(true);
+      expect(body.success).toBe(true);
+      expect(body.error).toBeUndefined();
+
+      for (const k of c.dataKeys) {
+        expect(body.data?.[k], `data.${k} missing from ${c.name}`).toBeDefined();
+      }
+    });
+  }
+
+  it('the pre-#3843 shape is dead — no payload at the top level', async () => {
+    for (const c of CASES) {
+      const { body } = await c.run();
+      expect(typeof body.success, `${c.name} answers no success flag`).toBe('boolean');
+      for (const k of c.dataKeys) {
+        expect(body[k], `${c.name} still answers a top-level ${k}`).toBeUndefined();
+      }
+    }
+  });
+
+  it("POST /validate keeps its `ok` — a domain verdict, not a second `success`", async () => {
+    // All results valid → data.ok true, while `success` reports the request.
+    const pass = await drive(
+      mount({ validateAll: async () => ({ results: [{ datasource: 'ext', ok: true }] }) }),
+      'POST',
+      `${EXT}/validate`,
+    );
+    expect(pass.body.success).toBe(true);
+    expect(pass.body.data.ok).toBe(true);
+
+    // One invalid → the request still SUCCEEDED, and the verdict is false. The
+    // two flags disagree on purpose; that is why `ok` was not folded into
+    // `success` the way storage's was.
+    const fail = await drive(
+      mount({
+        validateAll: async () => ({
+          results: [{ datasource: 'ext', ok: true }, { datasource: 'ext', ok: false }],
+        }),
+      }),
+      'POST',
+      `${EXT}/validate`,
+    );
+    expect(fail.body.success).toBe(true);
+    expect(fail.body.data.ok).toBe(false);
+    expect(fail.body.data.results).toHaveLength(2);
+  });
+});
+
+describe('external-datasource envelope (#3843) — error bodies', () => {
+  const CASES: Array<{ name: string; status: number; code: string; run: () => Promise<Captured> }> = [
+    {
+      name: 'federation is not wired into the host',
+      status: 503,
+      code: 'external_service_unavailable',
+      run: () => drive(mount(undefined), 'GET', `${EXT}/tables`),
+    },
+    {
+      name: 'an import the service refuses',
+      status: 400,
+      code: 'external_import_error',
+      run: () => drive(
+        mount({ importObject: async () => { throw new Error('metadata store is read-only'); } }),
+        'POST',
+        `${EXT}/tables/:remote/import`,
+        { params: { name: 'ext', remote: 'customers' } },
+      ),
+    },
+  ];
+
+  for (const c of CASES) {
+    it(`${c.name} → ${c.status} ${c.code}, in the declared envelope`, async () => {
+      const { status, body } = await c.run();
+      expect(status).toBe(c.status);
+
+      const parsed = BaseResponseSchema.safeParse(body);
+      expect(parsed.success, `body is not a BaseResponse: ${JSON.stringify(body)}`).toBe(true);
+
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe(c.code);
+      expect(typeof body.error.message).toBe('string');
+      expect(body.error.message.length).toBeGreaterThan(0);
+
+      // The pre-#3675 shapes, explicitly dead.
+      expect(typeof body.error).not.toBe('string');
+      expect(body.message).toBeUndefined();
+    });
+  }
+
+  it('the refusal reason reads at `error.message`', async () => {
+    const { body } = await drive(
+      mount({ importObject: async () => { throw new Error('metadata store is read-only'); } }),
+      'POST',
+      `${EXT}/tables/:remote/import`,
+      { params: { name: 'ext', remote: 'customers' } },
+    );
+    expect(body.error.message).toBe('metadata store is read-only');
+  });
+
+  it('every route degrades to the enveloped 503, not just the first', async () => {
+    const routes = mount(undefined);
+    const paths: Array<[string, string, Record<string, any>?]> = [
+      ['GET', `${EXT}/tables`],
+      ['POST', `${EXT}/tables/:remote/draft`, { params: { name: 'ext', remote: 'c' } }],
+      ['POST', `${EXT}/tables/:remote/import`, { params: { name: 'ext', remote: 'c' } }],
+      ['POST', `${EXT}/refresh-catalog`],
+      ['POST', `${EXT}/validate`],
+    ];
+    for (const [method, path, req] of paths) {
+      const { status, body } = await drive(routes, method, path, req);
+      expect(status, `${method} ${path}`).toBe(503);
+      expect(body.success, `${method} ${path}`).toBe(false);
+      expect(body.error.code, `${method} ${path}`).toBe('external_service_unavailable');
+    }
+  });
+});
+
+describe('external-datasource envelope (#3843) — the shared guard', () => {
+  it('routes every body through the two helpers', () => {
+    const source = readFileSync(new URL('./external-datasource-routes.ts', import.meta.url), 'utf8');
+    expect(checkRouteEnvelope({ source, module: 'external-datasource-routes.ts' })).toEqual([]);
+  });
+});

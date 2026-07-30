@@ -46,8 +46,34 @@ export interface SettingsRoutesOptions {
 // wire a verified `contextFromRequest` (the plugin does).
 const defaultContext = (_req: IHttpRequest): SettingsContext => ({ enforced: true });
 
+/**
+ * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
+ * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
+ * `{ success: false, error: { code, message } }`.
+ *
+ * This module was already half-right before #3843: `error` was correctly a
+ * nested `{ code, message }` object, but no body carried the `success` flag the
+ * envelope declares — so `BaseResponseSchema.safeParse` failed on every
+ * response, success and error alike, and a caller keying on `success` (as
+ * `ObjectStackClient.unwrapResponse` does) could not tell these routes' bodies
+ * apart from an already-unwrapped payload.
+ */
 function sendError(res: IHttpResponse, status: number, code: string, message: string, extra?: Record<string, unknown>) {
-  res.status(status).json({ error: { code, message, ...extra } });
+  res.status(status).json({ success: false, error: { code, message, ...extra } });
+}
+
+/**
+ * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
+ *
+ * The three success bodies keep their payload keys, one level deeper:
+ * `{ manifests }` → `{ success: true, data: { manifests } }`. The
+ * `GET /:namespace` payload is `SettingsNamespacePayloadSchema`
+ * (`{ manifest, values }`) and moves under `data` whole, so that schema still
+ * describes exactly what the route returns — now as the envelope's `data`
+ * rather than as the entire body.
+ */
+function sendOk(res: IHttpResponse, data: unknown, status = 200) {
+  res.status(status).json({ success: true, data });
 }
 
 export function registerSettingsRoutes(
@@ -62,7 +88,7 @@ export function registerSettingsRoutes(
     try {
       const ctx = await ctxOf(req);
       const manifests = service.listManifests(ctx);
-      await res.json({ manifests });
+      sendOk(res, { manifests });
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });
@@ -77,7 +103,7 @@ export function registerSettingsRoutes(
     try {
       const ctx = await ctxOf(req);
       const payload = await service.getNamespace(ns, ctx);
-      await res.json(payload);
+      sendOk(res, payload);
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });
@@ -115,7 +141,7 @@ export function registerSettingsRoutes(
     try {
       const ctx = await ctxOf(req);
       const result = await service.setMany(ns, body, ctx);
-      await res.json({ values: result });
+      sendOk(res, { values: result });
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });
@@ -145,8 +171,23 @@ export function registerSettingsRoutes(
     try {
       const ctx = await ctxOf(req);
       const result = await service.runAction(namespace, actionId, req.body, ctx);
-      const status = result.ok ? 200 : 400;
-      await res.status(status).json(result);
+      // The 200/400 split is PRE-EXISTING and preserved verbatim: an action
+      // that ran and reported `ok: false` is still answered 400. Whether a
+      // reported (as opposed to crashed) failure ought to be a 200 carrying the
+      // verdict is #3913's question about actions generally, not this
+      // envelope's — so only the body shape changes here.
+      //
+      // On the failure arm the whole `SettingsActionResult` is kept under
+      // `error.details`, so the renderer's `message` / `severity` / `details`
+      // all survive while `body.error.message` reads where the envelope says it
+      // should for a 4xx.
+      if (result.ok) {
+        sendOk(res, result);
+      } else {
+        sendError(res, 400, 'SETTINGS_ACTION_FAILED', result.message ?? 'Action reported failure', {
+          details: result,
+        });
+      }
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });

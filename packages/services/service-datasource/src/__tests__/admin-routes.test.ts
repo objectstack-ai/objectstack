@@ -37,7 +37,8 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      datasources: [{ name: 'pg', origin: 'runtime', health: 'ok' }],
+      success: true,
+      data: { datasources: [{ name: 'pg', origin: 'runtime', health: 'ok' }] },
     });
     expect(listDatasources).toHaveBeenCalledOnce();
   });
@@ -46,9 +47,9 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     const app = mount({}); // no service dependency — static catalog
     const res = await app.fetch(json('/api/v1/datasources/drivers'));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { drivers: Array<{ id: string; label: string; configSchema: any }> };
-    expect(Array.isArray(body.drivers)).toBe(true);
-    const sqlite = body.drivers.find((d) => d.id === 'sqlite');
+    const body = (await res.json()) as { data: { drivers: Array<{ id: string; label: string; configSchema: any }> } };
+    expect(Array.isArray(body.data.drivers)).toBe(true);
+    const sqlite = body.data.drivers.find((d) => d.id === 'sqlite');
     expect(sqlite).toBeTruthy();
     expect(sqlite!.label).toBe('SQLite');
     expect(sqlite!.configSchema?.properties?.filename?.type).toBe('string');
@@ -59,7 +60,7 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     const app = mount({ listRemoteTables });
     const res = await app.fetch(json('/api/v1/datasources/demo_ext/remote-tables'));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ tables: [{ name: 'customers', columnCount: 4 }] });
+    expect(await res.json()).toEqual({ success: true, data: { tables: [{ name: 'customers', columnCount: 4 }] } });
     expect(listRemoteTables).toHaveBeenCalledWith('demo_ext');
   });
 
@@ -72,7 +73,7 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
 
     const ok = await app.fetch(json('/api/v1/datasources/demo_ext/object-draft', { method: 'POST', body: JSON.stringify({ table: 'customers' }) }));
     expect(ok.status).toBe(200);
-    expect(((await ok.json()) as any).draft.name).toBe('customers');
+    expect(((await ok.json()) as any).data.draft.name).toBe('customers');
     expect(generateObjectDraft).toHaveBeenCalledWith('demo_ext', 'customers', {});
   });
 
@@ -85,7 +86,7 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     const app = mount({ getDatasource });
     const ok = await app.fetch(json('/api/v1/datasources/demo_ext'));
     expect(ok.status).toBe(200);
-    expect(((await ok.json()) as any).datasource.config.filename).toBe('/tmp/x.db');
+    expect(((await ok.json()) as any).data.datasource.config.filename).toBe('/tmp/x.db');
     const missing = await app.fetch(json('/api/v1/datasources/nope'));
     expect(missing.status).toBe(404);
     expect(getDatasource).toHaveBeenCalledWith('demo_ext');
@@ -96,7 +97,7 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     const app = mount({ testConnection });
     const res = await app.fetch(json('/api/v1/datasources/demo_ext/test', { method: 'POST', body: '{}' }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, latencyMs: 7, tableCount: 2 });
+    expect(await res.json()).toEqual({ success: true, data: { ok: true, latencyMs: 7, tableCount: 2 } });
     expect(testConnection).toHaveBeenCalledWith('demo_ext');
   });
 
@@ -112,7 +113,7 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ result: { ok: true } });
+    expect(await res.json()).toEqual({ success: true, data: { result: { ok: true } } });
     // draft must NOT carry the secret; secret is normalised to { value }.
     expect(testConnection).toHaveBeenCalledWith(
       { name: 'pg', driver: 'postgres' },
@@ -132,7 +133,7 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     );
 
     expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({ datasource: { name: 'pg', origin: 'runtime' } });
+    expect(await res.json()).toEqual({ success: true, data: { datasource: { name: 'pg', origin: 'runtime' } } });
   });
 
   it('degrades to 503 when the datasource-admin service is not wired', async () => {
@@ -141,7 +142,13 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     const res = await app.fetch(json('/api/v1/datasources'));
 
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: 'datasource_admin_unavailable' });
+    expect(await res.json()).toEqual({
+      success: false,
+      error: {
+        code: 'datasource_admin_unavailable',
+        message: 'The datasource-admin service is not available.',
+      },
+    });
   });
 
   it('surfaces lifecycle errors as 400 with the service message', async () => {
@@ -156,9 +163,11 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     );
 
     expect(res.status).toBe(400);
+    // #3843: `message` is a FIELD of `error` now, not a sibling of it — the
+    // asymmetry that made `body.error.message` read `undefined` here.
     expect(await res.json()).toEqual({
-      error: 'datasource_admin_error',
-      message: 'duplicate name',
+      success: false,
+      error: { code: 'datasource_admin_error', message: 'duplicate name' },
     });
   });
 });

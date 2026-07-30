@@ -1,8 +1,9 @@
 {
-  "name": "@objectstack/service-i18n",
-  "version": "17.0.0-rc.0",
+  "name": "@objectstack/route-envelope-conformance",
+  "version": "0.0.1-rc.0",
+  "private": true,
   "license": "Apache-2.0",
-  "description": "I18n Service for ObjectStack — implements II18nService with file-based locale loading",
+  "description": "Shared response-envelope conformance guard (#3843) — one source-scanning check that fails any route module emitting a body outside BaseResponseSchema. Replaces the hand-rolled scan copied into service-storage and service-i18n. Not published; validation instrument, zero runtime dependencies.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,41 +16,27 @@
   },
   "scripts": {
     "build": "tsup --config ../../../tsup.config.ts",
+    "lint": "eslint src",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@objectstack/core": "workspace:*",
-    "@objectstack/spec": "workspace:*"
-  },
   "devDependencies": {
-    "@objectstack/route-envelope-conformance": "workspace:*",
     "@types/node": "^26.1.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
   "keywords": [
     "objectstack",
-    "service",
-    "i18n",
-    "l10n",
-    "translations"
+    "qa",
+    "conformance",
+    "envelope",
+    "static-analysis"
   ],
   "author": "ObjectStack",
   "repository": {
     "type": "git",
     "url": "https://github.com/objectstack-ai/objectstack.git",
-    "directory": "packages/services/service-i18n"
+    "directory": "packages/qa/route-envelope"
   },
   "homepage": "https://objectstack.ai/docs",
-  "bugs": "https://github.com/objectstack-ai/objectstack/issues",
-  "publishConfig": {
-    "access": "public"
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ],
-  "engines": {
-    "node": ">=22.0.0"
-  }
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues"
 }

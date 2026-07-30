@@ -21,6 +21,10 @@ import { DRIVER_CATALOG } from './driver-catalog.js';
  * Request bodies carry the connection draft inline with an optional cleartext
  * `secret` field; the route splits `secret` out so it never reaches the draft
  * the service persists.
+ *
+ * Every body — both halves — is built by `sendOk` / `sendError` below, in the
+ * envelope `BaseResponseSchema` declares. See those two for what this module
+ * emitted before #3843 and why it was the worse of the two drifting dialects.
  */
 export function registerDatasourceAdminRoutes(
   server: IHttpServer,
@@ -45,11 +49,51 @@ export function registerDatasourceAdminRoutes(
     }
   };
 
+  /**
+   * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
+   * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
+   * `{ success: false, error: { code, message } }`.
+   *
+   * Before #3843 this module emitted `{ error: '<string>' }` — the shape #3675
+   * had already declared wrong for `service-storage`, with `message` a SIBLING
+   * of `error` rather than a field of it:
+   *
+   *     res.status(400).json({ error: 'datasource_admin_error', message });
+   *
+   * so a caller reading `body.error.message` got `undefined` here and the real
+   * message from the dispatcher — the identical asymmetry #3675 opened on, one
+   * layer over. `ObjectStackClient` sniffs several shapes to paper over the
+   * difference; that shim is the consumer-side symptom Prime Directive #12 says
+   * to cure at the producer.
+   *
+   * The `code` strings are carried over UNCHANGED (`datasource_admin_error`,
+   * `not_found`, …) even though they are lowercase snake while
+   * `storage-routes.ts` and `settings-routes.ts` emit SCREAMING_SNAKE. Which
+   * vocabulary wins is #3841's call, and it is a decision about ~240 codes
+   * repo-wide, not about these four; re-spelling them here would pick that
+   * dialect by accident and make #3841's sweep harder to verify. This change is
+   * the envelope only — the same split #3687 / #3837 made deliberately.
+   */
+  const sendError = (res: any, status: number, code: string, message: string) =>
+    res.status(status).json({ success: false, error: { code, message } });
+
+  /**
+   * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
+   *
+   * The payload keys are unchanged, just one level deeper: `{ datasources }`
+   * becomes `{ success: true, data: { datasources } }`. `ObjectStackClient`
+   * reads these through `unwrapResponse`, which returns `body.data` when the
+   * flag is present, so the SDK's published return types describe the same
+   * object they always did.
+   */
+  const sendOk = (res: any, data: unknown, status = 200) =>
+    res.status(status).json({ success: true, data });
+
   const unavailable = (res: any) =>
-    res.status(503).json({ error: 'datasource_admin_unavailable' });
+    sendError(res, 503, 'datasource_admin_unavailable', 'The datasource-admin service is not available.');
 
   const badRequest = (res: any, err: unknown) =>
-    res.status(400).json({ error: 'datasource_admin_error', message: err instanceof Error ? err.message : String(err) });
+    sendError(res, 400, 'datasource_admin_error', err instanceof Error ? err.message : String(err));
 
   /** Split an inline `{ secret, ...draft }` body into (draft, secret). */
   const splitSecret = (body: any): { draft: any; secret: any } => {
@@ -69,14 +113,14 @@ export function registerDatasourceAdminRoutes(
     const svc = adminService();
     if (!svc?.listDatasources) return unavailable(res);
     const datasources = await svc.listDatasources();
-    res.json({ datasources });
+    sendOk(res, { datasources });
   });
 
   // Catalog of connection drivers + their JSON-Schema config (drives the
   // Studio connection form). Static metadata — no service dependency, so it
   // is always available even before any datasource-admin service is wired.
   server.get(`${root}/drivers`, async (_req: any, res: any) => {
-    res.json({ drivers: DRIVER_CATALOG });
+    sendOk(res, { drivers: DRIVER_CATALOG });
   });
 
   // Read-only schema introspection for the Studio "sync objects" flow.
@@ -89,7 +133,7 @@ export function registerDatasourceAdminRoutes(
     if (!svc?.listRemoteTables) return unavailable(res);
     try {
       const tables = await svc.listRemoteTables(req.params.name);
-      res.json({ tables });
+      sendOk(res, { tables });
     } catch (err) {
       badRequest(res, err);
     }
@@ -107,8 +151,8 @@ export function registerDatasourceAdminRoutes(
     if (!svc?.getDatasource) return unavailable(res);
     try {
       const datasource = await svc.getDatasource(req.params.name);
-      if (!datasource) return res.status(404).json({ error: 'not_found' });
-      res.json({ datasource });
+      if (!datasource) return sendError(res, 404, 'not_found', `Datasource "${req.params.name}" does not exist.`);
+      sendOk(res, { datasource });
     } catch (err) {
       badRequest(res, err);
     }
@@ -119,7 +163,7 @@ export function registerDatasourceAdminRoutes(
     if (!svc?.testConnection) return unavailable(res);
     try {
       const result = await svc.testConnection(req.params.name);
-      res.json(result);
+      sendOk(res, result);
     } catch (err) {
       badRequest(res, err);
     }
@@ -132,7 +176,7 @@ export function registerDatasourceAdminRoutes(
     if (!table) return badRequest(res, new Error('Body field "table" is required.'));
     try {
       const draft = await svc.generateObjectDraft(req.params.name, String(table), opts);
-      res.json({ draft });
+      sendOk(res, { draft });
     } catch (err) {
       badRequest(res, err);
     }
@@ -146,7 +190,7 @@ export function registerDatasourceAdminRoutes(
     const { draft, secret } = splitSecret(req.body);
     try {
       const result = await svc.testConnection(draft, secret);
-      res.json({ result });
+      sendOk(res, { result });
     } catch (err) {
       badRequest(res, err);
     }
@@ -159,7 +203,7 @@ export function registerDatasourceAdminRoutes(
     const { draft, secret } = splitSecret(req.body);
     try {
       const datasource = await svc.createDatasource(draft, secret);
-      res.status(201).json({ datasource });
+      sendOk(res, { datasource }, 201);
     } catch (err) {
       badRequest(res, err);
     }
@@ -172,7 +216,7 @@ export function registerDatasourceAdminRoutes(
     const { draft, secret } = splitSecret(req.body);
     try {
       const datasource = await svc.updateDatasource(req.params.name, draft, secret);
-      res.json({ datasource });
+      sendOk(res, { datasource });
     } catch (err) {
       badRequest(res, err);
     }

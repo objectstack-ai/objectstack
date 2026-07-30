@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { LocalStorageAdapter } from './local-storage-adapter';
@@ -290,20 +291,12 @@ describe('storage error envelope (#3675)', () => {
   }
 
   it('routes every error through `sendError` — no route may reintroduce the bare shape', () => {
-    // Comments stripped first: this file's own prose quotes both the old and
-    // the new shape, and a doc comment is not a code path.
-    const source = readFileSync(new URL('./storage-routes.ts', import.meta.url), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '');
-
-    // `res.status(…).json({ error…` was the bare-shape idiom. Any reappearance
-    // means a new route bypassed the helper.
-    const bare = [...source.matchAll(/res\s*\.\s*status\([^)]*\)\s*\.\s*json\(\s*\{\s*error/g)];
-    expect(bare, `bare error bodies found: ${bare.map((m) => m[0]).join(', ')}`).toHaveLength(0);
-
-    // And the helper is the only place that builds one, so the shape lives in
-    // exactly one line of this package.
-    const builders = [...source.matchAll(/success:\s*false/g)];
-    expect(builders).toHaveLength(1);
+    // Open-coded here until #3843 lifted the scan into
+    // `@objectstack/route-envelope-conformance`; see the note in the success
+    // twin. The shared check subsumes both of this suite's assertions — the
+    // bare `res.status(…).json({ error…` idiom and the one-builder-per-half
+    // count — and adds the call-site count the error twin never had.
+    const source = readFileSync(new URL('./storage-routes.ts', import.meta.url), 'utf8');
+    expect(checkRouteEnvelope({ source, module: 'storage-routes.ts' })).toEqual([]);
   });
 });

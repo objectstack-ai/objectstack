@@ -18,6 +18,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { I18nServicePlugin } from './i18n-service-plugin';
@@ -177,16 +178,33 @@ describe('i18n error envelope (#3675)', () => {
   });
 
   it('routes every error through `sendError` — no route may reintroduce the bare shape', () => {
-    // Comments stripped first: this module's prose quotes both shapes, and a
-    // doc comment is not a code path.
-    const source = readFileSync(new URL('./i18n-service-plugin.ts', import.meta.url), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '');
-
-    const bare = [...source.matchAll(/res\s*\.\s*status\([^)]*\)\s*\.\s*json\(\s*\{\s*error/g)];
-    expect(bare, `bare error bodies found: ${bare.map((m) => m[0]).join(', ')}`).toHaveLength(0);
-
-    // The envelope is built in exactly one place.
-    expect([...source.matchAll(/success:\s*false/g)]).toHaveLength(1);
+    // Open-coded here until #3843 lifted the scan into
+    // `@objectstack/route-envelope-conformance`. This module needs non-default
+    // counts, and they are worth stating plainly rather than hiding:
+    //
+    //   - `errorBuilders: 1` — the error half IS consolidated behind
+    //     `sendError`, which is what #3675 did to this module.
+    //   - `successBuilders: 4` / `jsonCallSites: 5` — the success half is NOT.
+    //     Each of the four read routes builds `{ success: true, data: … }`
+    //     inline. The envelope those bodies emit is CORRECT (that is what
+    //     `i18n-success-envelope.conformance.test.ts` in `packages/runtime`
+    //     drives), so this is not the envelope drift #3843 is about — it is an
+    //     unconsolidated builder, which makes the guard weaker: a fifth read
+    //     route could get the shape wrong and only a driven test would notice.
+    //
+    // So these two numbers are a RATCHET, not a blessing. They pin the current
+    // structure exactly — a new inline body moves the count and fails here —
+    // and consolidating the four call sites behind a `sendOk` drives them to
+    // the defaults (2 / 1) the other five route modules use.
+    const source = readFileSync(new URL('./i18n-service-plugin.ts', import.meta.url), 'utf8');
+    expect(
+      checkRouteEnvelope({
+        source,
+        module: 'i18n-service-plugin.ts',
+        jsonCallSites: 5,
+        successBuilders: 4,
+        errorBuilders: 1,
+      }),
+    ).toEqual([]);
   });
 });
