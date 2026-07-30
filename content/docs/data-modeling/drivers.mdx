@@ -21,7 +21,11 @@ Drivers can be selected in two ways:
    override the inference (e.g. force `sqlite` for an ambiguous path).
 
 2. **Programmatic** — register a driver instance as a kernel plugin via
-   `DriverPlugin` (the same path the CLI uses internally):
+   `DriverPlugin`. This is the escape hatch for pre-built or auxiliary
+   drivers — the CLI itself no longer boots the primary this way: it declares
+   the `default` datasource as a definition and connects it through the shared
+   datasource path ([#3826](https://github.com/objectstack-ai/objectstack/issues/3826),
+   described further down this page):
    ```typescript
    import { DriverPlugin } from '@objectstack/runtime';
    import { SqlDriver } from '@objectstack/driver-sql';
