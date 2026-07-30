@@ -23,6 +23,16 @@
  * the authorisation. The underlying record is fetched with a SYSTEM
  * context (per-env RLS is bypassed because the token gates access), and
  * `redactFields` are stripped before the record leaves the server.
+ *
+ * Every route answers the declared `{ success: true, data }` envelope with `data`
+ * carrying the payload directly. Create and list used to emit a duplicate
+ * top-level `link` / `links` beside `data` — a producer-side shim for readers
+ * predating the envelope, kept alive because the sharing plugin's routes (the
+ * OTHER surface for these same paths) still answered bare. #3983 moved that
+ * surface onto this shape, which left the duplicate with no reader in any repo —
+ * framework, objectui, or cloud — so #4038 removed it. Both surfaces now emit one
+ * shape, which is what lets `ObjectStackClient.unwrapResponse` return the same
+ * value whichever one served the request.
  */
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -191,7 +201,11 @@ export async function handleShareLinksRequest(
                 },
                 callerCtx,
             );
-            return { handled: true, response: { status: 201, body: { success: true, data: link, link } } };
+            // Hand-built rather than `deps.success(...)` for the 201 alone — that
+            // helper hardcodes 200. Same shape the `/keys` domain builds for its
+            // own 201, and nothing more: the duplicate top-level `link` this used
+            // to carry beside `data` is gone (#4038).
+            return { handled: true, response: { status: 201, body: { success: true, data: link } } };
         }
 
         // GET /share-links?object&recordId → list the caller's own links
@@ -207,7 +221,7 @@ export async function handleShareLinksRequest(
                 },
                 callerCtx,
             );
-            return { handled: true, response: { status: 200, body: { success: true, data: links, links } } };
+            return { handled: true, response: deps.success(links) };
         }
 
         // DELETE /share-links/:idOrToken → revoke
