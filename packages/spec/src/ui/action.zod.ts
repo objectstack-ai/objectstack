@@ -292,10 +292,14 @@ export type ActionLocation = z.infer<typeof ActionLocationSchema>;
 /**
  * Tool category values for {@link ActionAiSchema.category}.
  *
- * Mirrors `ToolCategorySchema` in `../ai/tool.zod`. Kept **inline** rather
- * than imported to avoid a `ui → ai` import cycle (`ai/*.form.ts` already
- * imports `defineForm` from `ui/view.zod`). If you change the canonical
- * tool categories, update both sides.
+ * **Canonical.** This was a hand-copy of `ToolCategorySchema` in
+ * `../ai/tool.zod`, kept inline rather than imported to avoid a `ui → ai`
+ * cycle, under a comment telling the next author to update both sides. #3896
+ * removed `ToolCategorySchema` along with the inert `tool.category` key it
+ * typed — which left that instruction pointing at a source that no longer
+ * exists, and a reader hunting for a second side there is none of. This enum
+ * is now the only declaration of the vocabulary: change it here, nowhere
+ * else. (#3786 — comments are not a mechanism, and they rot silently.)
  */
 const ActionAiCategorySchema = z.enum([
   'data',
