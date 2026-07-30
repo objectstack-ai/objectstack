@@ -155,9 +155,12 @@ const MOUNTS = {
   'packages/adapters/hono/src/index.ts:all `${prefix}/auth/*`': {
     ratchet: '#4117 — terminal, same shape as #4088; adapter has no in-repo consumer',
   },
-  'packages/adapters/hono/src/index.ts:all `${prefix}/storage/*`': {
-    ratchet: '#4117 — terminal, same shape as #4088; adapter has no in-repo consumer',
-  },
+  // The `${prefix}/storage/*` sibling of the above is gone: #4112 retired that
+  // mount outright (the handler spoke a storage contract that does not exist,
+  // and the wildcard claimed the whole `/storage` subtree). #4116's ledger was
+  // written against a tree that still had it and landed after the removal, so
+  // this entry was stale on arrival and main went red on it. Nothing to ratchet
+  // — the mount it named does not exist.
 };
 
 /** HTTP-verb registrars plus `use`; anything that can claim a path pattern. */
