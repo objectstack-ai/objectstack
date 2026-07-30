@@ -152,6 +152,13 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     properties: {
                         objectName: { type: 'string', title: 'Object', xRef: { kind: 'object' } },
                         filter: { type: 'object', additionalProperties: true, title: 'Filter', description: 'Field/value pairs to match (e.g. status → active). Operator values like {"$ne": null} are preserved.' },
+                        // Declared in #4045: the executor has always passed this
+                        // straight into find/findOne as the projection, but no
+                        // form offered it — authorable only by hand until now.
+                        fields: {
+                            type: 'array', items: { type: 'string' }, title: 'Fields',
+                            description: 'Field projection — only these fields are read (default: all).',
+                        },
                         limit: { type: 'integer', title: 'Limit' },
                         outputVariable: { type: 'string', title: 'Output variable' },
                     },

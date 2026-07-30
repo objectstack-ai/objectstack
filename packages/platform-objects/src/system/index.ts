@@ -17,6 +17,9 @@ export {
   readDataMigrationFlag,
   isDataMigrationVerified,
   recordDataMigrationRun,
+  attestFreshDatastore,
+  CREATION_ATTESTATION_DETAIL,
   type MigrationFlagEngine,
   type DataMigrationRunOutcome,
+  type AttestationLogger,
 } from './migration-flag.js';

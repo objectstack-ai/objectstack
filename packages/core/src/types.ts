@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectKernel } from './kernel.js';
-import type { Logger } from '@objectstack/spec/contracts';
+import type { Logger, LifecycleEventName } from '@objectstack/spec/contracts';
 
 /**
  * PluginContext - Runtime context available to plugins
@@ -58,18 +58,26 @@ export interface PluginContext {
     getServices(): Map<string, any>;
 
     /**
-     * Register a hook handler
+     * Register a hook handler.
+     *
+     * Known lifecycle-bus names (see `IPluginLifecycleEvents` in
+     * `@objectstack/spec`) autocomplete; the bus stays open to custom
+     * cross-plugin event names, so any string remains valid.
+     *
      * @param name - Hook name (e.g., 'kernel:ready', 'data:beforeInsert')
      * @param handler - Hook handler function
      */
-    hook(name: string, handler: (...args: any[]) => void | Promise<void>): void;
+    hook(
+        name: LifecycleEventName | (string & {}),
+        handler: (...args: any[]) => void | Promise<void>,
+    ): void;
 
     /**
      * Trigger a hook
-     * @param name - Hook name
+     * @param name - Hook name (known lifecycle names autocomplete; custom names stay legal)
      * @param args - Arguments to pass to hook handlers
      */
-    trigger(name: string, ...args: any[]): Promise<void>;
+    trigger(name: LifecycleEventName | (string & {}), ...args: any[]): Promise<void>;
 
     /**
      * Logger instance

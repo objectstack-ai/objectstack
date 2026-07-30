@@ -63,6 +63,24 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
                   label: { type: 'string', title: 'Label' },
                   type: { type: 'string', title: 'Type' },
                   required: { type: 'boolean', title: 'Required' },
+                  // Declared in #4045 — all three are forwarded into the
+                  // ScreenSpec the client renders, but no form offered them, so
+                  // a select field's choices (and any prefill or hint text) were
+                  // authorable only by hand. Same nested position as the
+                  // `visibleWhen` gap #3528 was filed for.
+                  options: {
+                    type: 'array', title: 'Options',
+                    description: 'Choices for a select-style field.',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        value: { title: 'Value', description: 'Stored value.' },
+                        label: { type: 'string', title: 'Label' },
+                      },
+                    },
+                  },
+                  defaultValue: { title: 'Default', description: 'Prefilled value. Interpolates {var} references.' },
+                  placeholder: { type: 'string', title: 'Placeholder' },
                   visibleWhen: { type: 'string', title: 'Visible when', xExpression: 'expression' },
                 },
               },
@@ -71,6 +89,10 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             objectName: { type: 'string', title: 'Object form', xRef: { kind: 'object' }, description: 'Render this object’s full create/edit form (incl. master-detail) instead of a flat field list.' },
             idVariable: { type: 'string', title: 'Saved-record variable', description: 'Object form only: variable bound to the saved record’s id, for later steps.' },
             mode: { type: 'string', enum: ['create', 'edit'], default: 'create', title: 'Form mode', description: 'Object form only.' },
+            // Declared in #4045: `mode: 'edit'` needs a record to edit, and the
+            // executor reads exactly this key for it — but the form declared the
+            // mode while offering no way to name its target.
+            recordId: { type: 'string', title: 'Record to edit', description: 'Object form only: id of the record `edit` mode opens. Interpolates {var} references.' },
             defaults: { type: 'object', additionalProperties: true, title: 'Form defaults', description: 'Object form only: prefilled values (e.g. account → {account_id}).' },
           },
         },

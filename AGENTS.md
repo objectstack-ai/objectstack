@@ -346,13 +346,16 @@ export const FieldSchema = z.object({
 export type Field = z.infer<typeof FieldSchema>;
 ```
 
-**Plugin:**
+**Plugin** (the kernel contract is `init`/`start`/`destroy` —
+`packages/core/src/types.ts`; the old `onInstall`/`onEnable`/`onDisable`
+example described hooks nothing ever called, retired in #4212):
 ```ts
-export default {
-  async onInstall(ctx: PluginContext) { /* migrations */ },
-  async onEnable(ctx: PluginContext)  { /* register routes/services */ },
-  async onDisable(ctx: PluginContext) { /* cleanup */ },
-};
+export class MyPlugin implements Plugin {
+  name = 'plugin.my-feature';
+  async init(ctx: PluginContext)  { /* register services, schemas, routes */ }
+  async start(ctx: PluginContext) { /* begin work that needs every service up */ }
+  async destroy()                 { /* cleanup */ }
+}
 ```
 
 ---

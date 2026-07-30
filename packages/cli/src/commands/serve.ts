@@ -673,8 +673,8 @@ export default class Serve extends Command {
         throw new Error(`No default export found in ${args.config}`);
       }
 
-      // Preserve module-level named exports (e.g. `onEnable`, `onDisable`
-      // lifecycle hooks) that would otherwise be dropped when we unwrap
+      // Preserve module-level named exports (e.g. the `onEnable` runtime hook
+      // and `functions`) that would otherwise be dropped when we unwrap
       // `mod.default`. Without this AppPlugin can never invoke runtime hooks
       // declared as `export const onEnable = ...` alongside the default
       // `defineStack(...)` export.

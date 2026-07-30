@@ -790,4 +790,53 @@ describe('InMemoryDriver', () => {
     });
   });
 
+  // The observation behind fresh-datastore attestation (#3438, ADR-0104):
+  // a store where this process created every table and found none had no
+  // history, so it can hold no legacy value.
+  describe('getSchemaSyncStats', () => {
+    it('starts at zero — a driver that synced nothing vouches for nothing', () => {
+      expect(driver.getSchemaSyncStats()).toEqual({ created: 0, existing: 0 });
+    });
+
+    it('counts each table it creates', async () => {
+      await driver.syncSchema('alpha', { fields: {} });
+      await driver.syncSchema('beta', { fields: {} });
+
+      expect(driver.getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
+    });
+
+    it('counts a table that already held rows as pre-existing', async () => {
+      // What a persistence adapter's restore looks like: rows land before any
+      // schema is declared, so the store did not start empty here.
+      await driver.create('restored', { id: '1' });
+
+      await driver.syncSchema('restored', { fields: {} });
+
+      expect(driver.getSchemaSyncStats()).toEqual({ created: 0, existing: 1 });
+    });
+
+    /**
+     * Boot syncs the schema more than once, and objects registered later sync
+     * on demand — so a table we created ourselves comes back around. Counting
+     * that as pre-existing would make every store look like it had history and
+     * silently kill attestation everywhere.
+     */
+    it('ignores a re-sync of a table it created this boot', async () => {
+      await driver.syncSchema('alpha', { fields: {} });
+      await driver.syncSchema('alpha', { fields: {} });
+      await driver.syncSchema('alpha', { fields: {} });
+
+      expect(driver.getSchemaSyncStats()).toEqual({ created: 1, existing: 0 });
+    });
+
+    it('counts each pre-existing table once, however often it is synced', async () => {
+      await driver.create('restored', { id: '1' });
+
+      await driver.syncSchema('restored', { fields: {} });
+      await driver.syncSchema('restored', { fields: {} });
+
+      expect(driver.getSchemaSyncStats()).toEqual({ created: 0, existing: 1 });
+    });
+  });
+
 });

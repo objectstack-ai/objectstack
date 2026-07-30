@@ -17,7 +17,7 @@
 // Anything beyond (joins via `include`, raw SQL) falls back to the caller's
 // normal execution path — the preview simply doesn't claim it.
 
-import { calendarPartsInTzOrUtc, nextUtcCalendarDay } from '@objectstack/core';
+import { calendarPartsInTzOrUtc, nextUtcCalendarDay, utcInstantMs } from '@objectstack/core';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
 
@@ -25,8 +25,34 @@ type Row = Record<string, unknown>;
 
 // ── Filters (the unified Query DSL subset) ──────────────────────────────────
 
+/**
+ * Order two operands the way every other filter backend orders them.
+ *
+ * The `Date` arm is load-bearing rather than defensive: `String(new Date())`
+ * is `'Mon Jul 27 2026 …'`, which under the plain string ordering below sorts
+ * AFTER every `'2026-…'` comparand — so a preview row carrying an instant both
+ * disappeared from windows it belongs in and appeared in ones it does not.
+ * Measured against the shared matrix, 10 of 16 cases diverged, and unlike the
+ * cross-type silence on the drivers this direction ADDS rows: a drafted chart
+ * showed numbers no published chart would.
+ *
+ * The population is real. `Field.datetime`'s storage form is a BSON `Date` on
+ * `driver-mongodb` (ADR-0053 D-E2), so rows fetched from a mongo-backed dataset
+ * arrive here as `Date` objects, while the comparands are wire text.
+ * {@link utcInstantMs} is the same primitive `formula`'s write-side evaluator
+ * uses for the same pairing, so the two type-blind surfaces cannot drift.
+ *
+ * Deliberately narrow: the lift runs only when one side is a `Date` and both
+ * read as instants, so string-vs-string keeps ISO lexicographic ordering and a
+ * `Field.time` wall clock — which denotes no instant — is left untouched.
+ */
 function compare(a: unknown, b: unknown): number {
   if (typeof a === 'number' && typeof b === 'number') return a - b;
+  if (a instanceof Date || b instanceof Date) {
+    const ai = utcInstantMs(a);
+    const bi = utcInstantMs(b);
+    if (ai !== null && bi !== null) return ai - bi;
+  }
   return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;
 }
 

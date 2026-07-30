@@ -4,7 +4,6 @@
     "---Plugin Lifecycle---",
     "plugin",
     "plugin-lifecycle-advanced",
-    "plugin-lifecycle-events",
     "plugin-loading",
     "plugin-registry",
     "plugin-runtime",

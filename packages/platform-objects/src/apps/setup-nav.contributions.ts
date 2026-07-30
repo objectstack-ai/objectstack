@@ -22,19 +22,14 @@
  * contributions in the same group (mirrors object owner priority).
  */
 
-import type { NavigationContribution } from '@objectstack/spec/ui';
+import type { NavigationContributionInput } from '@objectstack/spec/ui';
 
 const BASE_PRIORITY = 100;
-
-// `target: '_self'` on every `url` entry is the schema's own default, spelled
-// out: this array is annotated with the PARSED type, where a `.default()`ed key
-// is required. Omitting it was only possible while `NavigationItem` resolved to
-// `any` and nothing checked these literals at all (#4171).
 
 // Marketplace entries (browse / installed) moved to
 // @objectstack/cloud-connection's marketplace plugins (cloud ADR-0009:
 // the nav lives and dies with the capability — no plugin, no entry).
-export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
+export const SETUP_NAV_CONTRIBUTIONS: NavigationContributionInput[] = [
   {
     app: 'setup',
     group: 'group_overview',
@@ -102,7 +97,7 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     group: 'group_configuration',
     priority: BASE_PRIORITY,
     items: [
-      { id: 'nav_settings_hub', type: 'url', target: '_self', label: 'All Settings', url: '/apps/setup/system/settings', icon: 'settings-2', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_settings_hub', type: 'url', label: 'All Settings', url: '/apps/setup/system/settings', icon: 'settings-2', requiredPermissions: ['manage_platform_settings'] },
       // Workspace identity first — Localization (order 2) and Company (order 3)
       // are the lowest-`order` settings manifests and the first thing a new
       // company admin configures. They ship as `service-settings` manifests
@@ -111,15 +106,15 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // admin consoles (Salesforce "Company Information", ServiceNow) surface
       // both directly. No `requiredPermissions` — matches Branding (read perm is
       // the app's base `setup.access`).
-      { id: 'nav_settings_localization', type: 'url', target: '_self', label: 'Localization', url: '/apps/setup/system/settings/localization', icon: 'globe' },
-      { id: 'nav_settings_company', type: 'url', target: '_self', label: 'Company', url: '/apps/setup/system/settings/company', icon: 'building-2' },
-      { id: 'nav_settings_branding', type: 'url', target: '_self', label: 'Branding', url: '/apps/setup/system/settings/branding', icon: 'palette' },
-      { id: 'nav_settings_auth', type: 'url', target: '_self', label: 'Authentication', url: '/apps/setup/system/settings/auth', icon: 'lock-keyhole', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_mail', type: 'url', target: '_self', label: 'Email', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_storage', type: 'url', target: '_self', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_ai', type: 'url', target: '_self', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_knowledge', type: 'url', target: '_self', label: 'Knowledge', url: '/apps/setup/system/settings/knowledge', icon: 'book-open', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_feature_flags', type: 'url', target: '_self', label: 'Feature Flags', url: '/apps/setup/system/settings/feature_flags', icon: 'flag' },
+      { id: 'nav_settings_localization', type: 'url', label: 'Localization', url: '/apps/setup/system/settings/localization', icon: 'globe' },
+      { id: 'nav_settings_company', type: 'url', label: 'Company', url: '/apps/setup/system/settings/company', icon: 'building-2' },
+      { id: 'nav_settings_branding', type: 'url', label: 'Branding', url: '/apps/setup/system/settings/branding', icon: 'palette' },
+      { id: 'nav_settings_auth', type: 'url', label: 'Authentication', url: '/apps/setup/system/settings/auth', icon: 'lock-keyhole', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_settings_mail', type: 'url', label: 'Email', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_settings_knowledge', type: 'url', label: 'Knowledge', url: '/apps/setup/system/settings/knowledge', icon: 'book-open', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_settings_feature_flags', type: 'url', label: 'Feature Flags', url: '/apps/setup/system/settings/feature_flags', icon: 'flag' },
     ],
   },
   {

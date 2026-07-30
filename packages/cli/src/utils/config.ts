@@ -90,7 +90,7 @@ export async function loadConfig(source?: string): Promise<LoadedConfig> {
     throw new Error(`No default export found in ${path.basename(absolutePath)}`);
   }
 
-  // Preserve named exports (e.g. `onEnable`, `onDisable` lifecycle hooks)
+  // Preserve named exports (e.g. the `onEnable` runtime hook and `functions`)
   // alongside the default-exported stack. Module-namespace named exports are
   // otherwise dropped when we unwrap `mod.default`, which prevents AppPlugin
   // from invoking runtime hooks.

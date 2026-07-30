@@ -14,6 +14,7 @@ import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import { isServiceServeable } from '../service-serveable.js';
+import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -66,7 +67,14 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         }
         // [#3842] Was a hand-rolled envelope with the status in `code`. It has
         // no header or shape of its own, so it is simply the shared exit now.
-        return { handled: true, response: deps.error('AI service is not configured', 404) };
+        // 501, not 404: `/ai/*` IS mounted, so the request reached a handler
+        // with nothing behind it — see ./unavailable.ts. The message stays
+        // local rather than using the shared sentence: the real provider
+        // (`@objectstack/service-ai`) ships outside this workspace as a
+        // Cloud/EE package, so CORE_SERVICE_PROVIDER — verified against
+        // workspace packages by check:service-providers — records `null` for
+        // this slot and would describe it as "nothing ships", which is wrong.
+        return capabilityUnavailable(deps, 'ai', 'AI service is not configured');
     }
 
     // The AI service exposes route definitions via buildAIRoutes.

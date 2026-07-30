@@ -2274,4 +2274,48 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
     const flagReads = vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration');
     expect(flagReads).toHaveLength(2);
   });
+
+  // ── Was this datastore created from empty? (#3438, ADR-0104) ──────
+  // The one input to fresh-datastore attestation. Permission is granted on
+  // this answer, so every uncertainty must resolve to `false`.
+  describe('wasDatastoreCreatedFromEmpty', () => {
+    const withStats = (d: IDataDriver, stats: { created: number; existing: number } | null) => {
+      if (stats) (d as any).getSchemaSyncStats = () => stats;
+      else delete (d as any).getSchemaSyncStats;
+    };
+
+    it('is true when the driver created tables and found none', () => {
+      withStats(driver, { created: 12, existing: 0 });
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(true);
+    });
+
+    it('is false when even one table was already there', () => {
+      withStats(driver, { created: 11, existing: 1 });
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(false);
+    });
+
+    it('is false when nothing was created (sync skipped or deferred)', () => {
+      withStats(driver, { created: 0, existing: 0 });
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(false);
+    });
+
+    it('is false when no driver can account for its schema sync', () => {
+      withStats(driver, null);
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(false);
+    });
+
+    it('is false when a second datasource was not created by this boot', () => {
+      withStats(driver, { created: 12, existing: 0 });
+      const other = {
+        name: 'other',
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+        capabilities: {} as any,
+      } as unknown as IDataDriver;
+      withStats(other, { created: 0, existing: 5 });
+      engine.registerDriver(other);
+
+      expect(engine.wasDatastoreCreatedFromEmpty()).toBe(false);
+    });
+  });
 });

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import {
+  CREATION_ATTESTED_MIGRATION_IDS,
   DATA_MIGRATION_FLAG_OBJECT,
   isDataMigrationFlagVerified,
   type DataMigrationFlag,
@@ -131,4 +132,93 @@ export async function recordDataMigrationRun(
     );
   }
   return flag;
+}
+
+/** Marker written into a creation-attested row's `details`, so an operator
+ * reading a verified flag can tell evidence-by-scan from evidence-by-birth. */
+export const CREATION_ATTESTATION_DETAIL = { attested: 'datastore-created-empty' } as const;
+
+/** Optional sink for attestation trouble — best-effort, never fatal. */
+export interface AttestationLogger {
+  info(msg: string, meta?: unknown): void;
+  warn(msg: string, meta?: unknown): void;
+}
+
+/**
+ * Attest, at the moment a datastore is created from empty, the migrations
+ * whose facts that emptiness already settles (ADR-0104, 2026-07-30 addendum).
+ *
+ * **The caller carries the whole precondition.** This function cannot check
+ * it: by the time anything can be queried, "created empty" and "found empty"
+ * look identical, and they are not the same claim — a half-initialised store,
+ * a misconfigured connection, or a store someone truncated all *look* empty
+ * while legacy values may yet arrive. Only the code performing the creation
+ * knows it watched the store come into being. Call this ONLY from there;
+ * never from a probe that concluded a store looks empty.
+ *
+ * Given that, the fact recorded is observed, not assumed — the same discipline
+ * the gates run on. Without it, every deployment born on a version that
+ * already ships these migrations would start lax and stay lax until someone
+ * ran a command that, for them, does nothing.
+ *
+ * **Never overwrites.** A migration id that already has a row is skipped
+ * untouched: a store with flag rows is by definition not one being created,
+ * so a write here would be evidence about the wrong database — and it could
+ * only ever *raise* a gate the real evidence had closed.
+ *
+ * **Best-effort, deliberately diverging from this module's "writes fail
+ * loudly" rule.** That rule fits the migration commands, whose entire output
+ * is the record. This runs inside a fresh deployment's boot, where the two
+ * failure directions are not symmetric: a missed attestation leaves the
+ * deployment lax (warnings, retained files — recoverable by running the
+ * migration), while a thrown error would break the boot of a brand-new
+ * deployment over bookkeeping.
+ *
+ * @returns the ids actually attested (absent ones only).
+ */
+export async function attestFreshDatastore(
+  engine: MigrationFlagEngine,
+  options: { migrationIds?: readonly string[]; logger?: AttestationLogger } = {},
+): Promise<string[]> {
+  const ids = options.migrationIds ?? CREATION_ATTESTED_MIGRATION_IDS;
+  const logger = options.logger;
+  if (!engine.getObject(DATA_MIGRATION_FLAG_OBJECT)) return [];
+
+  const now = new Date().toISOString();
+  const attested: string[] = [];
+  for (const id of ids) {
+    try {
+      if (await readDataMigrationFlag(engine, id)) continue; // not ours to write
+      await engine.insert(
+        DATA_MIGRATION_FLAG_OBJECT,
+        {
+          id,
+          last_run_at: now,
+          verified_at: now,
+          // Nothing was applied — no backfill ran, and none was needed.
+          applied_at: null,
+          blocking: 0,
+          advisory: 0,
+          details: JSON.stringify(CREATION_ATTESTATION_DETAIL),
+          created_at: now,
+          updated_at: now,
+        },
+        { context: { ...SYSTEM_CTX } },
+      );
+      attested.push(id);
+    } catch (err) {
+      logger?.warn(
+        `[migration] could not attest '${id}' on this new datastore ` +
+          `(${(err as Error)?.message ?? err}) — it stays in the lax posture until ` +
+          `\`os migrate\` records the flag`,
+      );
+    }
+  }
+  if (attested.length > 0) {
+    logger?.info(
+      `[migration] new datastore attested at creation: ${attested.join(', ')} — ` +
+        `no legacy data can exist here, so the gated behaviour is enabled from birth`,
+    );
+  }
+  return attested;
 }

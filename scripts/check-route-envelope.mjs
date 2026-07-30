@@ -210,6 +210,12 @@ const DISPATCHER_DOMAINS = {
   // is audited in that package's own routes, not here.
   'ui.ts': { handBuilt: 0 },
 
+  // [#4093 follow-up] Not a domain — the shared 501 every mounted-but-
+  // unimplemented domain answers with. It exists precisely so that refusal is
+  // built in ONE place instead of once per domain, which is this check's own
+  // thesis; it answers through `deps.error` like any domain body.
+  'unavailable.ts': { handBuilt: 0 },
+
   // Kind 1 — enveloped, hand-built only because the helper cannot say it.
   'keys.ts': {
     handBuilt: 1,
