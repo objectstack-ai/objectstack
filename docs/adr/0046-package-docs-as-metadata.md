@@ -564,12 +564,34 @@ it does **not** reopen the §2 non-goal that excluded standalone product doc
 sites — a `public` book is still registry metadata (`doc`/`book`), sanitized
 and rendered by the platform, not a separately-hosted static website.
 
-**Gating is enforced at the read layer, not just the UI.** Ground truth:
-`/meta/doc` is already anonymous-reachable (the gate is the optional global
-`requireAuth` or the SPA's `ProtectedRoute`, not the handler). So a public
-portal that mixes `public` and gated books **must** apply `audience` inside the
-`/meta/doc` and `/meta/book` read path — gating only the UI would let a gated
-doc leak straight from REST.
+**Gating is enforced at the read layer, not just the UI.** A public portal that
+mixes `public` and gated books **must** apply `audience` inside the `/meta/doc`
+and `/meta/book` read path — gating only the UI would let a gated doc leak
+straight from REST.
+
+> **Amendment (framework#3963).** This section originally recorded the ground
+> truth that `/meta/doc` was "already anonymous-reachable (the gate is the
+> optional global `requireAuth` or the SPA's `ProtectedRoute`, not the handler)".
+> That is no longer how `public` is reached, and the original shape was the
+> problem: it made a *per-book* declaration depend on a deployment opening its
+> **entire** data plane, so `audience: 'public'` was really a re-narrowing inside
+> a globally-public deployment rather than a capability of its own.
+>
+> Anonymous reachability of the book/doc read surface is now derived from the
+> declaration itself — the same shape ADR-0056 Option A chose for public form
+> submission. The `/meta` umbrella gate admits an anonymous **GET** of
+> `/meta/:type` / `/meta/:type/:name` (type `book` or `doc`, either spelling) and
+> `/meta/book/:name/tree`, and nothing else; the §6.7 audience gate in the
+> handler remains the *authorization*, admitting `'public'` only. So a
+> secure-by-default deployment (`requireAuth: true`) can publish a public book
+> while every other metadata type — objects, fields, views, flows — stays 401 for
+> anonymous callers.
+>
+> An authenticated caller is unaffected: the exemption applies only when no
+> execution context resolved, so the ADR-0069 auth-policy gate still governs a
+> gated session's book reads. The two decisions this section calls decisive —
+> SEO/crawlability and tenant-from-host — are unchanged; they never depended on
+> the global flag.
 
 **Two frontend surfaces, addressed differently.** The URL must distinguish the
 authenticated app from the docs portal — and not only for the auth gate:

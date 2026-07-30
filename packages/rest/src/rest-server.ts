@@ -1432,6 +1432,38 @@ export class RestServer {
         return PLURAL_TO_SINGULAR[t] ?? t;
     }
 
+    /**
+     * [#3963] Is this request a READ of the audience-gated book/doc surface —
+     * the one metadata surface whose own declaration (`book.audience`) can
+     * authorize an anonymous caller?
+     *
+     * Used by the `/meta` umbrella gate to grant an anonymous caller
+     * REACHABILITY of these three routes, so `audience: 'public'` works on a
+     * secure-by-default deployment instead of only on one that opened its whole
+     * data plane. Authorization stays with the handler's §6.7 gate, which admits
+     * `'public'` only.
+     *
+     * The predicate is keyed on the REGISTERED route path plus the normalized
+     * `:type` param — not on `req.path` string-matching — so a route added later
+     * cannot accidentally fall inside it, and the plural spelling cannot fall
+     * outside it (#3984).
+     */
+    private static isPublicAudienceRead(
+        entry: Readonly<Record<string, unknown>>,
+        req: { method?: unknown; params?: Record<string, unknown> },
+    ): boolean {
+        const method = String(req?.method ?? entry?.method ?? '').toUpperCase();
+        if (method !== 'GET') return false; // reads only — never a write or a publish
+        const path = typeof entry?.path === 'string' ? entry.path : '';
+        // `GET /meta/book/:name/tree` — the type segment is literal here.
+        if (path.endsWith('/book/:name/tree')) return true;
+        // `GET /meta/:type` and `GET /meta/:type/:name` — book/doc only. Every
+        // other type (object, field, view, flow, …) keeps the anonymous deny.
+        if (!/\/:type(\/:name)?$/.test(path)) return false;
+        const type = RestServer.metaTypeSingular(req?.params?.type);
+        return type === 'book' || type === 'doc';
+    }
+
     /** Whether any of these books carries a `{ permissionSet }` audience. */
     private static anyPermissionSetAudience(books: readonly any[]): boolean {
         return books.some(
@@ -2422,7 +2454,30 @@ export class RestServer {
                         // each `/data` handler derives.
                         const environmentId = req?.params?.environmentId;
                         const context = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
-                        if (this.enforceAuth(req, res, context)) return;
+                        // [#3963] `audience: 'public'` is a DECLARED capability, so it
+                        // must not depend on a deployment flipping its whole data plane
+                        // open (`requireAuth: false`). An anonymous read of the
+                        // book/doc surface skips the anonymous-deny and is authorized
+                        // instead by the ADR-0046 §6.7 audience gate inside the handler
+                        // — the same declaration-derived shape ADR-0056 Option A chose
+                        // for public form submission (`publicFormGrant`).
+                        //
+                        // Deliberately narrow, in three independent ways:
+                        //  1. only when NO context resolved. An authenticated caller
+                        //     still goes through `enforceAuth` unchanged, so the
+                        //     ADR-0069 auth-policy gate (expired password, enforced
+                        //     MFA) keeps applying to a gated session's book reads;
+                        //  2. only GET, and only the book/doc routes (see
+                        //     {@link isPublicAudienceRead}) — `/meta/object` stays 401
+                        //     for anonymous, which is the whole point of the umbrella
+                        //     gate;
+                        //  3. the handler still decides. `audienceAllows` returns true
+                        //     for `'public'` ONLY; `org` and `{ permissionSet }` books
+                        //     require `caller.authenticated`, and unresolvable holdings
+                        //     fail closed. This grants REACHABILITY, not authorization.
+                        const anonymousPublicRead = !context?.userId
+                            && RestServer.isPublicAudienceRead(entry, req);
+                        if (!anonymousPublicRead && this.enforceAuth(req, res, context)) return;
                         return (inner as (rq: any, rs: any) => unknown)(req, res);
                     },
                 } as any);
