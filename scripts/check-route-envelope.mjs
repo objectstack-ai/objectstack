@@ -32,8 +32,10 @@
  * lifting it to a repo-wide scan buys the thing per-package copies structurally
  * cannot: **a module nobody thought to convert still gets audited.** Two modules
  * in the table below were found exactly that way, neither of them in #3843's
- * hand-written survey — `share-link-routes.ts` (ratcheted, #3983) and
- * `hmr-routes.ts` (exempt).
+ * hand-written survey — `share-link-routes.ts` (ratcheted on discovery, converted
+ * by #3983) and `hmr-routes.ts` (exempt). The first turned out to be the one where
+ * the drift had actually broken SDK methods, which is the case for scanning rather
+ * than surveying.
  *
  * A module discovered by the scan but absent from the table is an ERROR, not a
  * default: silently applying `2 / 1 / 1` to an unknown module would let a new
@@ -78,7 +80,9 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
  *
  *   responses  — response write sites (`res.json(…)`); one per envelope builder
  *   ok / err   — literal `success: true` / `success: false` (one builder each)
- *   privateOk  — literal `ok: true|false`, a second word for `success` (#3689)
+ *   privateOk  — literal `ok: true|false` at the TOP of a response body, i.e. a
+ *                sibling of where `success` belongs: a second word for it (#3689).
+ *                Inside `data` the same literal is payload, not a flag (#3983).
  *   stringError— bodies whose `error` is a bare string (the pre-#3675 dialect)
  *   ratchet    — set ONLY for a module with outstanding drift. It pins the
  *                CURRENT numbers so nothing gets worse, and names the issue that
@@ -102,6 +106,11 @@ const MODULES = {
   // but built it inline in four places, so this module carried a ratchet at 5 / 4 / 1
   // until those collapsed behind a `sendOk`.
   'packages/services/service-i18n/src/i18n-service-plugin.ts': { responses: 2, ok: 1, err: 1 },
+  // Converted by #3983, the last ratchet. This module was never emitting a
+  // `success` flag at all, which broke `client.shareLinks.create()`/`.list()`
+  // through `unwrapResponse`; it converged onto the shapes its dispatcher twin
+  // (`runtime/src/domains/share-links.ts`) had always returned.
+  'packages/plugins/plugin-sharing/src/share-link-routes.ts': { responses: 2, ok: 1, err: 1 },
 
   // ── Exempt ──────────────────────────────────────────────────────────────
 
@@ -120,16 +129,10 @@ const MODULES = {
   },
 
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
-
-  // Found BY THIS SCAN, absent from #3843's survey — the fifth drifting module.
-  // `sendError` already nests `{ code, message }` (that is why #3675's changeset
-  // cited it as a good example), but NO body carries the `success` flag, and one
-  // answers `{ ok: true }` — the private second word #3689 retired from storage.
-  // Converting it is breaking for share-link consumers and needs its own
-  // consumer sweep, exactly as #3687 did; it is not riding along with #3843.
-  'packages/plugins/plugin-sharing/src/share-link-routes.ts': {
-    responses: 6, ok: 0, err: 0, privateOk: 1, ratchet: '#3983',
-  },
+  //
+  // Empty as of #3983. The mechanism stays — it is how the next drifting module
+  // gets recorded honestly instead of being either fixed on the spot or quietly
+  // skipped. Declare current counts plus a `ratchet` naming the issue.
 };
 
 /** Identifiers whose `.json()` READS a request rather than writing a response. */
@@ -167,35 +170,41 @@ export function scanSource(source, fileName = 'module.ts') {
       found.responses += 1;
       found.sites.push(`${fileName}:${line(node)}`);
 
-      // Is the first argument an object literal whose `error` is a bare string?
+      // Facts that only mean something at the ROOT of a response body, so they
+      // are read off this call's own object literal rather than the whole module.
       const arg = node.arguments[0];
       if (arg && ts.isObjectLiteralExpression(arg)) {
         for (const prop of arg.properties) {
+          if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
+          const key = prop.name.text;
+          const init = prop.initializer;
+          // `error` as a bare string — the pre-#3675 dialect.
           if (
-            ts.isPropertyAssignment(prop) &&
-            ts.isIdentifier(prop.name) &&
-            prop.name.text === 'error' &&
-            (ts.isStringLiteral(prop.initializer) || ts.isTemplateExpression(prop.initializer) ||
-              ts.isNoSubstitutionTemplateLiteral(prop.initializer))
+            key === 'error' &&
+            (ts.isStringLiteral(init) || ts.isTemplateExpression(init) ||
+              ts.isNoSubstitutionTemplateLiteral(init))
           ) {
             found.stringError += 1;
+          }
+          // A literal `ok` is a second word for `success` only where it could BE
+          // the flag: a sibling of `success` at the top of the body. The same
+          // literal inside `data` is payload — `data: { ok: true }` is what a
+          // revoke endpoint legitimately returns, and the dispatcher twin
+          // (`runtime/src/domains/share-links.ts`) has always returned it (#3983).
+          if (key === 'ok' && (init.kind === ts.SyntaxKind.TrueKeyword || init.kind === ts.SyntaxKind.FalseKeyword)) {
+            found.privateOk += 1;
           }
         }
       }
     }
 
-    // Literal envelope flags, anywhere in the module.
-    if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name)) {
-      const key = node.name.text;
-      const kind = node.initializer.kind;
-      const isTrue = kind === ts.SyntaxKind.TrueKeyword;
-      const isFalse = kind === ts.SyntaxKind.FalseKeyword;
-      if (key === 'success' && isTrue) found.ok += 1;
-      if (key === 'success' && isFalse) found.err += 1;
-      // A COMPUTED `ok` is a domain verdict that happens to share the name —
-      // `POST /external/validate` reports `ok: results.every(r => r.ok)`. Only a
-      // literal is a second envelope flag.
-      if (key === 'ok' && (isTrue || isFalse)) found.privateOk += 1;
+    // The `success` flag counts ANYWHERE in the module, unlike `ok` above: it is
+    // the envelope's own flag wherever the body gets built, including the
+    // `const body = { success: true, data }; res.json(body)` form that a
+    // call-local scan cannot see.
+    if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === 'success') {
+      if (node.initializer.kind === ts.SyntaxKind.TrueKeyword) found.ok += 1;
+      if (node.initializer.kind === ts.SyntaxKind.FalseKeyword) found.err += 1;
     }
 
     ts.forEachChild(node, visit);
@@ -329,11 +338,24 @@ function selfTest() {
   r = scanSource(`res.status(503).json({ error: 'datasource_admin_unavailable' });`);
   assert(r.stringError === 1, `bare-string error not caught → ${JSON.stringify(r)}`);
 
-  // A literal `ok` is a second success word; a COMPUTED one is a domain verdict.
+  // A literal `ok` at the top of a body is a second success word.
   r = scanSource(`res.json({ ok: true, key });`);
   assert(r.privateOk === 1, `literal ok not caught → ${JSON.stringify(r)}`);
+  // A COMPUTED one is a domain verdict that happens to share the name —
+  // `POST /external/validate` reports `ok: results.every(r => r.ok)`.
   r = scanSource(`sendOk(res, { ok: results.every((x) => x.ok), results });`);
   assert(r.privateOk === 0, `computed ok must be left alone → ${JSON.stringify(r)}`);
+  // …and a literal one INSIDE `data` is payload, not a competing flag. Both
+  // forms below are what a conformant revoke endpoint returns (#3983); the
+  // `responses`/`ok`/`err` counts stay the real guarantee that the two writers
+  // are the enveloped ones.
+  r = scanSource(`res.json({ success: true, data: { ok: true } });`);
+  assert(r.privateOk === 0 && r.ok === 1, `nested ok is payload → ${JSON.stringify(r)}`);
+  r = scanSource(`${sound}\nhttp.delete('/c', (q, res) => sendOk(res, { ok: true }));`);
+  assert(
+    r.privateOk === 0 && r.responses === 2 && r.ok === 1 && r.err === 1,
+    `ok passed as a helper's data must not count → ${JSON.stringify(r)}`,
+  );
 
   console.log('✓ check-route-envelope self-test passed');
 }
