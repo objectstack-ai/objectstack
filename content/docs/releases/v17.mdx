@@ -806,6 +806,7 @@ import or the authored key.
 | `AuditConfig` cluster (`@objectstack/spec/system`) | dead since #1878 |
 | Capabilities-descriptor cluster (`ObjectQL`/`ObjectUI`/`Kernel`/`ObjectStack`/`ObjectOS CapabilitiesSchema`) | static snapshots superseded by runtime discovery |
 | `FeatureFlagSchema` (`kernel` feature.zod) | orphaned module |
+| `DevPluginConfigSchema` cluster (`kernel` dev-plugin.zod — `DevServiceOverride` / `DevFixtureConfig` / `DevToolsConfig` / `DevPluginPreset`) | a declared dev-mode protocol (presets, fixtures, dev-tools dashboard, per-service mock/stub strategies, simulated latency) nothing implemented and no load path parsed — `@objectstack/plugin-dev` reads its own `DevPluginOptions`, and the `strategy: 'stub'` vocabulary described the dev-stub design ADR-0115 retired (#4149) |
 | `SkillSchema.permissions` | never gated anything (#3686) |
 | `tool.requiresConfirmation` | a safety flag nothing enforced (#3715) |
 | `object.enable.trash` / `enable.mru` | ADR-0049 enforce-or-remove close-out (#2377) |

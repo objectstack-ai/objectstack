@@ -25,7 +25,6 @@
     "cli-extension",
     "cluster",
     "context",
-    "dev-plugin",
     "execution-context",
     "metadata-customization",
     "metadata-loader",
