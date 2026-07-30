@@ -3,12 +3,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   _resetEnvDeprecationWarnings,
+  collectConfiguredLocales,
   readEnvWithDeprecation,
   resolveAllowDegradedTenancy,
   resolveSearchPinyinEnabled,
   resolveSandboxTimeoutMs,
   isMcpServerEnabled,
   resolveMcpStdioAutoStart,
+  stampSearchPinyinEnabled,
 } from './env.js';
 
 describe('readEnvWithDeprecation', () => {
@@ -173,6 +175,53 @@ describe('resolveSearchPinyinEnabled (#2486)', () => {
       process.env.OS_SEARCH_PINYIN_ENABLED = v;
       expect(resolveSearchPinyinEnabled()).toBe(false);
     }
+  });
+});
+
+describe('collectConfiguredLocales / stampSearchPinyinEnabled (#3955)', () => {
+  const original = process.env.OS_SEARCH_PINYIN_ENABLED;
+  afterEach(() => {
+    if (original === undefined) delete process.env.OS_SEARCH_PINYIN_ENABLED;
+    else process.env.OS_SEARCH_PINYIN_ENABLED = original;
+  });
+
+  it('collects defaultLocale, fallbackLocale and supportedLocales; garbage collapses to []', () => {
+    expect(
+      collectConfiguredLocales({ defaultLocale: 'en', fallbackLocale: 'en', supportedLocales: ['en', 'zh-CN'] }),
+    ).toEqual(['en', 'en', 'en', 'zh-CN']);
+    expect(collectConfiguredLocales({ supportedLocales: ['en', 42, null] })).toEqual(['en']);
+    expect(collectConfiguredLocales(undefined)).toEqual([]);
+    expect(collectConfiguredLocales(null)).toEqual([]);
+    expect(collectConfiguredLocales('zh-CN')).toEqual([]);
+  });
+
+  it('stamps OS_SEARCH_PINYIN_ENABLED=true when a zh-* locale is configured and env is unset', () => {
+    delete process.env.OS_SEARCH_PINYIN_ENABLED;
+    expect(stampSearchPinyinEnabled({ defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] })).toBe(true);
+    expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBe('true');
+    // Downstream no-arg consumers (per-engine SchemaRegistry, the plugin
+    // gate) now read the same decision — the whole point of the stamp.
+    expect(resolveSearchPinyinEnabled()).toBe(true);
+  });
+
+  it('leaves the env untouched (and returns false) for a non-Chinese config', () => {
+    delete process.env.OS_SEARCH_PINYIN_ENABLED;
+    expect(stampSearchPinyinEnabled({ defaultLocale: 'en', supportedLocales: ['en', 'ja-JP'] })).toBe(false);
+    expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBeUndefined();
+    expect(stampSearchPinyinEnabled(undefined)).toBe(false);
+    expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBeUndefined();
+  });
+
+  it('an explicit env opt-out beats the locale-derived default and is not overwritten', () => {
+    process.env.OS_SEARCH_PINYIN_ENABLED = 'false';
+    expect(stampSearchPinyinEnabled({ supportedLocales: ['zh-CN'] })).toBe(false);
+    expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBe('false');
+  });
+
+  it('an explicit env opt-in wins even with no zh locale configured', () => {
+    process.env.OS_SEARCH_PINYIN_ENABLED = 'true';
+    expect(stampSearchPinyinEnabled({ supportedLocales: ['en'] })).toBe(true);
+    expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBe('true');
   });
 });
 

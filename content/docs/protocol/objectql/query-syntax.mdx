@@ -363,12 +363,12 @@ const businessHours: FilterCondition = {
 };
 ```
 
-<Callout type="warn">
-`created_at` / `updated_at` are `datetime` (UTC instants), not calendar days. A
-`$between: ['2024-01-01', '2024-12-31']` against a `datetime` column stops at
-`2024-12-31T00:00:00.000Z` and therefore excludes almost all of December 31 — use
-`{ $gte: '2024-01-01', $lt: '2025-01-01' }` instead.
-</Callout>
+A bare `YYYY-MM-DD` bound is a **calendar day**. As a lower bound (`$gte`) it
+means the start of that day (midnight UTC); as an upper bound (`$lte`, or the
+max of a `$between`) it covers the **whole** day — on a `datetime` column the
+driver compiles it half-open (`< next day`), so the `$between` above includes
+everything that happened on Dec 31. A full ISO timestamp keeps exact-instant
+semantics on every operator.
 
 ### Null Checks
 

@@ -35,10 +35,10 @@ const metaListHandler = (rest: RestServer) => {
     return route.handler as (req: any, res: any) => Promise<void>;
 };
 
-describe('RestServer metadata routes — requireAuth gate', () => {
-    it('401s an anonymous caller when requireAuth is on', async () => {
+describe('RestServer metadata routes — anonymous-deny gate (#3963)', () => {
+    it('401s an anonymous caller (unconditional — no opt-out)', async () => {
         const protocol: any = { getMetaItems: vi.fn().mockResolvedValue({ type: 'object', items: [] }) };
-        const rest = new RestServer(makeServer() as any, protocol, { api: { requireAuth: true } } as any);
+        const rest = new RestServer(makeServer() as any, protocol, {} as any);
         rest.registerRoutes();
         const handler = metaListHandler(rest);
 
@@ -53,7 +53,7 @@ describe('RestServer metadata routes — requireAuth gate', () => {
 
     it('lets an authenticated caller read metadata (gate passes through)', async () => {
         const protocol: any = { getMetaItems: vi.fn().mockResolvedValue({ type: 'object', items: [{ name: 'sys_metadata' }] }) };
-        const rest = new RestServer(makeServer() as any, protocol, { api: { requireAuth: true } } as any);
+        const rest = new RestServer(makeServer() as any, protocol, {} as any);
         // A resolved session — the same shape resolveExecCtx yields for a
         // signed-in request (per-env session via hostname / scoped id).
         (rest as any).resolveExecCtx = vi.fn().mockResolvedValue({ userId: 'u1' });
@@ -67,16 +67,20 @@ describe('RestServer metadata routes — requireAuth gate', () => {
         expect(protocol.getMetaItems).toHaveBeenCalled();
     });
 
-    it('serves anonymously when requireAuth is off (unchanged public behaviour)', async () => {
+    it('still 401s an anonymous /meta/object — the opt-out is retired (#3963)', async () => {
+        // `api.requireAuth: false` used to serve object schemas anonymously. The
+        // opt-out is gone: object metadata is never public. (Only the book/doc
+        // read surface is anonymously reachable, and only for `audience:'public'`
+        // — proven in meta-public-book-grant.test.ts.)
         const protocol: any = { getMetaItems: vi.fn().mockResolvedValue({ type: 'object', items: [] }) };
-        const rest = new RestServer(makeServer() as any, protocol, { api: { requireAuth: false } } as any);
+        const rest = new RestServer(makeServer() as any, protocol, {} as any);
         rest.registerRoutes();
         const handler = metaListHandler(rest);
 
         const { res, state } = makeRes();
         await handler({ method: 'GET', params: { type: 'object' }, query: {}, headers: {} }, res);
 
-        expect(state.status).not.toBe(401);
-        expect(protocol.getMetaItems).toHaveBeenCalled();
+        expect(state.status).toBe(401);
+        expect(protocol.getMetaItems).not.toHaveBeenCalled();
     });
 });

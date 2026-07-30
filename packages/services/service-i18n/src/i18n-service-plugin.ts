@@ -31,6 +31,27 @@ function sendError(res: IHttpResponse, status: number, code: string, message: st
 }
 
 /**
+ * Emit a success body in the DECLARED envelope — `BaseResponseSchema`
+ * (`packages/spec/src/api/contract.zod.ts`), i.e. `{ success: true, data }`.
+ *
+ * #3636 put the right shape on all three read routes, but built it inline in each
+ * one — four call sites for one envelope half, while the error half had already
+ * been consolidated behind `sendError` (#3675). Those bodies were never wrong;
+ * this is about the GUARD, not the wire.
+ *
+ * `scripts/check-route-envelope.mjs` counts response write sites per module, so a
+ * consolidated module sits at a fixed two no matter how many routes it grows. This
+ * one sat at five with a declared ratchet (#3973) precisely because a fifth read
+ * route could have hand-rolled a fourth-dialect body and only a driven test would
+ * have caught it — and a driven test only covers the routes that existed when it
+ * was written. Collapsing the four inline builders into this one retires that
+ * ratchet: the module now declares the same `2 / 1 / 1` as the other five.
+ */
+function sendOk(res: IHttpResponse, data: unknown): void {
+  res.json({ success: true, data });
+}
+
+/**
  * Configuration options for the I18nServicePlugin.
  */
 export interface I18nServicePluginOptions {
@@ -187,7 +208,7 @@ export class I18nServicePlugin implements Plugin {
         // copy is what let them answer in different shapes (#3833's lesson,
         // one route over).
         const locales = toLocaleDescriptors(i18n.getLocales(), i18n.getDefaultLocale?.() ?? 'en');
-        res.json({ success: true, data: { locales } });
+        sendOk(res, { locales });
       } catch (error: any) {
         sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');
       }
@@ -202,7 +223,7 @@ export class I18nServicePlugin implements Plugin {
           return;
         }
         const translations = i18n.getTranslations(locale);
-        res.json({ success: true, data: { locale, translations } });
+        sendOk(res, { locale, translations });
       } catch (error: any) {
         sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');
       }
@@ -223,7 +244,7 @@ export class I18nServicePlugin implements Plugin {
         if (hasGetFieldLabels) {
           const labels = (i18n as II18nService & { getFieldLabels(obj: string, loc: string): Record<string, string> })
             .getFieldLabels(objectName, locale);
-          res.json({ success: true, data: { object: objectName, locale, labels } });
+          sendOk(res, { object: objectName, locale, labels });
         } else {
           // Fallback: read field labels out of the locale's translation data.
           // That data is NESTED (`objects.<obj>.fields.<field>.label`) — the
@@ -234,7 +255,7 @@ export class I18nServicePlugin implements Plugin {
           // drift out of shape again the way it did after that fix (#3833).
           const data = i18n.getTranslations(locale) as TranslationData | undefined;
           const labels = resolveObjectFieldLabels(data, objectName);
-          res.json({ success: true, data: { object: objectName, locale, labels } });
+          sendOk(res, { object: objectName, locale, labels });
         }
       } catch (error: any) {
         sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');

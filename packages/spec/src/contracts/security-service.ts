@@ -237,6 +237,28 @@ export interface ISecurityService {
   hasWriteBypass(object: string, context?: SecurityContext): Promise<boolean>;
 
   /**
+   * [ADR-0111 D1 DEPTH] The caller's effective WRITE scope on `object` —
+   * `own` / `own_and_reports` / `unit` / `unit_and_below` / `org` — resolved
+   * from their permission sets exactly as the CRUD middleware's write path
+   * resolves it (`getEffectiveScope('write', …)`).
+   *
+   * The sharing layer's management gate (`ISharingService.canManageShares`)
+   * uses this to let a HIERARCHY MANAGER manage shares on records within their
+   * DEPTH. Note the two meanings of `org`: a genuine `modifyAllRecords` holder,
+   * AND the fail-OPEN "no permission set mentions this object" default — so a
+   * caller of this method must treat `org` as authoritative ONLY when paired
+   * with an explicit {@link hasWriteBypass} check, never on its own.
+   *
+   * **Fails CLOSED** to `own` (the narrowest scope) on a resolution error, a
+   * principal-less context, or an on-behalf-of context (no D10 delegator
+   * intersection on this path). A system context resolves to `org`.
+   */
+  resolveWriteScope(
+    object: string,
+    context?: SecurityContext,
+  ): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'>;
+
+  /**
    * Explain WHY access is granted or denied — the decision plus the layers that
    * produced it (permission sets, object permissions, RLS, sharing, field mask).
    *

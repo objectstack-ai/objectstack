@@ -38,6 +38,7 @@ function buildServer(analyticsProvider?: any) {
     undefined, undefined, undefined, undefined,
     analyticsProvider,
   );
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
   const route = rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query'));
   return { route };

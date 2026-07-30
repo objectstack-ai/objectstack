@@ -86,6 +86,7 @@ function boot(security: any) {
     undefined, // serviceExistsProvider
     security === undefined ? undefined : async () => security,
   );
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
   const route = rest.getRoutes().find(
     (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',
@@ -185,7 +186,8 @@ describe('export route — user-level export axis (#3544)', () => {
       undefined, undefined,
       async () => ({ canExport: async () => false }),
     );
-    rest.registerRoutes();
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
     const route = rest.getRoutes().find(
       (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',
     );

@@ -5,6 +5,7 @@ import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import { normalizeAnalyticsFilters, coerceFilterValueForSql } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { nextUtcCalendarDay } from '@objectstack/core';
 
 /**
  * NativeSQLStrategy — Priority 1
@@ -124,13 +125,24 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
             // BOTH forms at once and coercing only the bounds still empties the
             // half the writer stored the other way (#3912).
             const td2 = this.resolveStorageTarget(cube, td.dimension, tableName);
-            params.push(
-              this.coerceTemporal(ctx, td2, range[0]),
-              this.coerceTemporal(ctx, td2, range[1]),
-            );
-            whereClauses.push(
-              `${this.temporalColumn(ctx, td2, colExpr)} BETWEEN $${params.length - 1} AND $${params.length}`,
-            );
+            const column = this.temporalColumn(ctx, td2, colExpr);
+            // A bare-day window end means "through that whole day" (#3777). A
+            // BETWEEN's inclusive upper bound anchors a bare `YYYY-MM-DD` to
+            // midnight on a datetime column, dropping the final day's rows, so
+            // the window compiles half-open — `>= start AND < end+1day` — the
+            // same `[gte, lt)` the drill ranges emit. Equivalent to the old
+            // BETWEEN for a `date` column (plain `YYYY-MM-DD` ordering), which
+            // is what lets this path stay column-type-blind.
+            const nextDay = nextUtcCalendarDay(range[1]);
+            params.push(this.coerceTemporal(ctx, td2, range[0]));
+            const lower = `${column} >= $${params.length}`;
+            if (nextDay != null) {
+              params.push(this.coerceTemporal(ctx, td2, nextDay));
+              whereClauses.push(`(${lower} AND ${column} < $${params.length})`);
+            } else {
+              params.push(this.coerceTemporal(ctx, td2, range[1]));
+              whereClauses.push(`(${lower} AND ${column} <= $${params.length})`);
+            }
           }
         }
       }
@@ -495,6 +507,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (operator === 'contains' || operator === 'notContains') {
       params.push(`%${values[0]}%`);
       return `${rawCol} ${sqlOp} $${params.length}`;
+    }
+
+    // A bare-day `lte` bound means "through that whole day" (#3777): compile
+    // half-open (`< day+1`) so a datetime column keeps the final day's rows.
+    // Equivalent to `<=` for a `date` column, so no column-type lookup needed.
+    if (operator === 'lte') {
+      const nextDay = nextUtcCalendarDay(values[0]);
+      if (nextDay != null) {
+        params.push(this.coerceTemporal(ctx, target, nextDay));
+        return `${this.temporalColumn(ctx, target, rawCol)} < $${params.length}`;
+      }
     }
 
     // Coerce so booleans/numbers bind as their native SQL types AND so a

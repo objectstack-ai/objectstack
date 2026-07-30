@@ -507,3 +507,34 @@ describe('validateRecord — media value shapes gate on the deployment flag (#36
     expect(() => validateRecord(schema, { ...legacyMedia }, 'insert')).not.toThrow();
   });
 });
+
+/**
+ * ADR-0113 — `required` is a write-time contract with non-regression update
+ * semantics: an insert must provide the value; an update may not null it OUT;
+ * an update that omits the field entirely never 400s (legacy null rows rest).
+ */
+describe('validateRecord — ADR-0113 required write contract on update', () => {
+  const schema: any = {
+    fields: {
+      title: { type: 'text', required: true },
+      notes: { type: 'textarea' },
+    },
+  };
+
+  it('rejects an explicit null-out of a required field on update', () => {
+    expect(() => validateRecord(schema, { title: null }, 'update')).toThrow(/required and cannot be cleared/);
+  });
+  it('rejects an explicit empty-string clear too', () => {
+    expect(() => validateRecord(schema, { title: '' }, 'update')).toThrow(/required and cannot be cleared/);
+  });
+  it('an update that omits the required field passes — legacy rows rest', () => {
+    expect(() => validateRecord(schema, { notes: 'touched only this' }, 'update')).not.toThrow();
+  });
+  it('an update that provides a value passes', () => {
+    expect(() => validateRecord(schema, { title: 'fixed' }, 'update')).not.toThrow();
+  });
+  it('autonumber stays exempt on update as on insert', () => {
+    const s: any = { fields: { rec_no: { type: 'autonumber', required: true, format: 'R-{0000}' } } };
+    expect(() => validateRecord(s, { rec_no: null }, 'update')).not.toThrow();
+  });
+});

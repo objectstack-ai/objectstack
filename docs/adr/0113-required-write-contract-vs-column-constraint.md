@@ -1,6 +1,6 @@
 # ADR-0113: `required` is a write-time contract — the column constraint becomes its own, explicitly-authored axis
 
-**Status**: Proposed (2026-07-30) — **awaiting adjudication**. Drafted from the #3896 close-out; no code in this ADR has been implemented.
+**Status**: Accepted (2026-07-30) — Q1/Q2/Q3 adjudicated same day (uniform semantics; `storage.notNull` spelling; the non-regression invariant unifies `required` and `requiredWhen`). **P0 implemented**: spec knob + parse-seam exclusivity, record-validator null-out rejection, rule-validator non-regression, driver DDL + drift rewired, `field-required-notnull-explicit` conversion. P1 (Console required-marker from the write contract) and P2 (criteria_json flip) follow.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert metadata), the #3896/#3929 sharing-criteria case study, `driver-sql/schema-drift.ts` (the drift classifier whose `destructive` class this ADR exists to route around)
 **Consumers**: `@objectstack/spec` (`FieldSchema`), `@objectstack/objectql` (`validation/record-validator.ts`), `@objectstack/driver-sql` (`sql-driver.ts` column DDL, `schema-drift.ts`), `@objectstack/lint`, objectui form renderers (the required marker)
@@ -78,13 +78,32 @@ polices in the other direction.
 
 ## Decision — proposed rulings
 
-### D1 — `required` means the write contract
+### D1 — the non-regression invariant (unifies `required` and `requiredWhen`)
 
-`required: true` asserts: **an insert must provide a non-null value, and an
-update may not null it out.** Existing rows are untouched — a legacy null row
-remains readable and editable so long as the write does not touch the required
-field. This is exactly the semantics #3929 hand-built for `criteria_json`,
-promoted from three guards to the platform's one word.
+> **A write may not take a record from compliant to violating; a pre-existing
+> violation does not block writes that leave it in place.**
+> Operationally: *reject iff the merged post-state violates AND the pre-state
+> complied.* (On insert the pre-state complies vacuously.)
+
+`required` is the degenerate always-true-condition case: an insert must
+provide a non-null value; an update may not null it out; a legacy null row
+remains readable and editable so long as the write does not touch the field.
+This is exactly the semantics #3929 hand-built for `criteria_json`, promoted
+from three guards to one platform word.
+
+`requiredWhen` inherits the same invariant with the condition generalized —
+which also catches the case the old merged-record check missed in the OTHER
+direction and over-blocked in this one: an update that flips the condition
+true without providing the field **creates** the violation and is rejected,
+while a row violating since before the rule tightened no longer locks out
+unrelated edits (the #3929 objection, cured rather than worked around).
+
+One deliberate over-approximation, chosen to keep the hot write path free of
+prior-state reads for the unconditional knob: an explicit `null` written onto
+an *already-null* legacy required field is rejected even though the pre-state
+already violated. That write was a no-op carrying a false claim; rejecting it
+costs nothing and needs no prior fetch. (`requiredWhen` evaluates against the
+prior record it already fetches, so it applies the exact rule.)
 
 ### D2 — the column constraint becomes explicit
 
@@ -118,21 +137,39 @@ contract), not from the column. `criteria_json` gets its asterisk back, and
 client-side validation aligns with what the server will actually reject —
 removing the last reason for the objectui#2962-style mirror hints.
 
-### D5 — back-compat is the deliberate asymmetry
+### D5 — back-compat by explicitization, never by inference (Q2 resolved: uniform)
 
-For existing metadata, `required: true` today implies both meanings, so the
-migration must not silently drop the column constraint fields already have:
+`required: true` has exactly ONE meaning at any point in time — the write
+contract — and the transition is carried by rewriting old sources, not by the
+loader guessing:
 
-- Fields whose column is **already `NOT NULL`** (created as required): loader
-  treats them as `required + storage.notNull` — nothing changes, no DDL, no
-  drift.
-- Fields declared required whose column is nullable: today that is
-  un-declarable without destructive drift; under this ADR it becomes the D1
-  posture. This set is currently EMPTY by construction (nobody could declare
-  it), so no deployed tenant changes behaviour.
-- New fields: `required: true` alone creates a **nullable** column with a
-  write-contract gate. Authors who want the constraint say so (Q2 disputes
-  this default).
+- **The `field-required-notnull-explicit` conversion** (D2 table, protocol-17
+  step) stamps `storage: { notNull: true }` onto every `required: true` field
+  of a pre-17 source. Under the old semantics that column WAS created
+  `NOT NULL`, so the rewrite writes down what the text already meant — a pure
+  semantic explicitization, lossless by construction. It is
+  **migration-chain-only** (retired from the load path): this is a default
+  flip, not a rename, and a loader that auto-applied it would stamp the
+  constraint back onto 17-authored sources that deliberately omit it.
+- The earlier draft's "loader treats an already-NOT NULL column as
+  `storage.notNull`" is **rejected as self-contradictory** — inferring
+  semantics from the physical column at load is itself the history-dependent
+  behaviour this ADR exists to eliminate.
+- New fields: `required: true` alone creates a **nullable** column with the
+  write-contract gate — uniformly, on new and old objects alike. The
+  history-dependent alternative (new objects still get `NOT NULL`) would make
+  correct authoring depend on a fact absent from the author's context — when
+  the object was first deployed — which an AI author (ADR-0033) cannot know
+  from source. Authors who want the constraint say so; at creation time the
+  ceremony is free (no rows, no backfill).
+- **Drift direction** (refined during implementation): a column *stricter*
+  than its declaration is reported `needs_confirm` (ratify with
+  `storage.notNull` or deliberately relax; never auto-applied) — **except**
+  when the field is `required: true`, where it is *silent*: that is every
+  pre-17 source after a runtime upgrade, the write gate makes the column
+  constraint unreachable, and nagging every legacy required field would bury
+  real drift. A declaration stricter than the column stays the destructive
+  ceremony it always was.
 
 ### D6 — `criteria_json` is the first consumer
 
@@ -145,29 +182,38 @@ pointer as evidence.
 
 ## Rollout (proposed)
 
-- **P0** (`@objectstack/spec` + `objectql`): the storage property + D1
-  validator semantics + D3 drift change. Additive; no tenant behaviour change.
+- **P0 — DONE** (this ADR's landing PR): the storage property + parse-seam
+  exclusivity; record-validator null-out rejection; rule-validator
+  non-regression; driver DDL + drift rewired; the explicitization conversion
+  + chain step.
 - **P1** (objectui): D4 marker + client validation from the write contract.
 - **P2**: D6 criteria_json flip + guard consolidation; sweep for other
   "mandatory in substance, optional in metadata" fields (the empty-state
   registry's `closed` entries are the seed list).
 
-Not v17-blocking: additive surface, no breaking change. Target: early 17.x.
+Lands inside the unreleased 17.0.0 train (the DDL-emission change and the two
+validator tightenings ride the major).
 
-## Open questions for adjudication
+## Resolved questions (adjudicated 2026-07-30)
 
-- **Q1 — spelling.** `storage: { notNull: true }` (proposed: room for future
-  storage knobs — collation, computed defaults) vs a flat
-  `requiredEnforcement: 'write' | 'column'` (one knob, no nesting, but closes
-  the namespace).
-- **Q2 — the new-field default.** This draft says `required: true` alone
-  creates a nullable column (uniform semantics; the constraint is opt-in).
-  The alternative — new objects still get `NOT NULL`, deployed objects don't —
-  keeps today's clean-database behaviour but makes the same declaration mean
-  different DDL depending on when it was authored, which is the kind of
-  history-dependent semantics ADR-0087 exists to eliminate.
-- **Q3 — `requiredWhen` interplay.** The conditional variant evaluates
-  server-side against the merged record on update (#3929 rejected it for
-  criteria_json because it blocks legacy-row edits). Should `requiredWhen`
-  adopt D1's insert-vs-update asymmetry too? Out of scope here unless the
-  deciders want it folded in.
+- **Q1 — spelling: `storage: { notNull: true }`.** The decisive argument is
+  orthogonality: the write contract and the column constraint form a genuine
+  2×2, and every cell exists in the platform's own system objects — `required`
+  alone is the criteria_json posture, `storage.notNull` alone is the
+  engine-populated column (audit fields, the tenant column). A single
+  `requiredEnforcement` enum cannot express the storage-only cell at all, and
+  hands the author a wrong option on every required field. `notNull` is also
+  vocabulary a model already knows from the SQL corpus — no invented term to
+  hallucinate values for. The namespace earns future entries one *enforced*
+  knob at a time (ADR-0078); nothing is pre-reserved.
+  **Rider:** `storage.notNull` × `requiredWhen` is rejected at the parse seam
+  (`FieldSchema.superRefine`) — when the condition is false the contract
+  permits null but the column would refuse it; two gates that cannot both be
+  honest are a contradiction the author must resolve.
+- **Q2 — uniform semantics** (folded into D5 above). Semantics conditioned on
+  deployment history are unreasonable-about by construction for an author —
+  human or model — who sees only the source.
+- **Q3 — folded in and generalized** (D1 above): rather than `requiredWhen`
+  "adopting" `required`'s asymmetry, both are corollaries of the one
+  non-regression invariant. The knobs stay one family with one temporal
+  semantics; no divergence window ever exists.

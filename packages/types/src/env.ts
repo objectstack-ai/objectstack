@@ -297,10 +297,12 @@ export function resolveOrgLimit(): number | undefined {
  *   3. No env var and no `zh-*` locale → off. OSS / non-Chinese deployments
  *      never load `pinyin-pro` and pay zero compute cost.
  *
- * Hosts that know the stack's i18n config (the CLI `serve` boot path) resolve
- * once with locales and stamp the decision back into the env, so downstream
- * consumers constructed without config access (per-engine SchemaRegistry)
- * read the same answer via the no-arg form.
+ * Hosts that know the stack's i18n config — the CLI `serve` boot path AND the
+ * standalone artifact boot (`createStandaloneStack`, which `os migrate`
+ * plan/apply and embedders go through) — resolve once with locales and stamp
+ * the decision back into the env via {@link stampSearchPinyinEnabled}, so
+ * downstream consumers constructed without config access (per-engine
+ * SchemaRegistry) read the same answer via the no-arg form (#3955).
  */
 export function resolveSearchPinyinEnabled(opts?: { locales?: readonly string[] }): boolean {
   const raw = readEnvWithDeprecation('OS_SEARCH_PINYIN_ENABLED', [], { silent: true });
@@ -308,6 +310,57 @@ export function resolveSearchPinyinEnabled(opts?: { locales?: readonly string[] 
     return ['1', 'true', 'on', 'yes'].includes(String(raw).trim().toLowerCase());
   }
   return (opts?.locales ?? []).some((l) => /^zh([-_]|$)/i.test(String(l ?? '').trim()));
+}
+
+/**
+ * The locales a stack's `i18n` config declares — `defaultLocale`,
+ * `fallbackLocale`, then `supportedLocales`. Accepts the config loosely typed
+ * (`unknown`) so any boot path can pass whatever its stack config or compiled
+ * artifact carries without importing spec schemas; non-string entries and a
+ * non-object config collapse to `[]`.
+ */
+export function collectConfiguredLocales(i18n: unknown): string[] {
+  const cfg = (i18n && typeof i18n === 'object' ? i18n : {}) as {
+    defaultLocale?: unknown;
+    fallbackLocale?: unknown;
+    supportedLocales?: unknown;
+  };
+  return [
+    cfg.defaultLocale,
+    cfg.fallbackLocale,
+    ...(Array.isArray(cfg.supportedLocales) ? cfg.supportedLocales : []),
+  ].filter((l): l is string => typeof l === 'string');
+}
+
+/**
+ * Resolve the pinyin-search decision from a stack's `i18n` config and stamp a
+ * positive result back into `OS_SEARCH_PINYIN_ENABLED` (#2486, #3955).
+ *
+ * Every boot path that SEES the stack config must stamp, because consumers
+ * constructed later without config access (each engine's `SchemaRegistry`
+ * provisioning the `__search` companion column, the `plugin-pinyin-search`
+ * gate) read the decision through the no-arg
+ * {@link resolveSearchPinyinEnabled}. A boot path that skips the stamp
+ * computes a schema view WITHOUT the companion columns — which is how
+ * `os migrate` came to flag the dev runtime's live `__search` columns as
+ * destructive orphans (#3955). Call sites: the CLI `serve`/`dev` boot
+ * (`objectstack.config.ts`) and `createStandaloneStack` (compiled artifact —
+ * `os migrate plan`/`apply`, embedders).
+ *
+ * An explicit `OS_SEARCH_PINYIN_ENABLED` always wins — the resolver reads it
+ * before consulting locales, so the stamp only materializes the
+ * locale-derived default. Only a positive decision is written: "unset" and
+ * "off" read identically through the no-arg resolver, and leaving the var
+ * untouched keeps a later boot free to re-derive from ITS config.
+ */
+export function stampSearchPinyinEnabled(i18n: unknown): boolean {
+  const enabled = resolveSearchPinyinEnabled({ locales: collectConfiguredLocales(i18n) });
+  // Write through `globalThis` like `readEnvWithDeprecation` reads — this
+  // package has no Node type dependency (edge-safe); no env object → no stamp.
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env;
+  if (enabled && env) env.OS_SEARCH_PINYIN_ENABLED = 'true';
+  return enabled;
 }
 
 /**

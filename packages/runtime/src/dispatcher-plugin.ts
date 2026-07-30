@@ -53,22 +53,6 @@ export interface DispatcherPluginConfig {
     enforceProjectMembership?: boolean;
 
     /**
-     * Reject anonymous requests to `auth: true` service routes (AI, etc.), the
-     * `/meta` catch-all with HTTP 401, mirroring the
-     * REST API's `requireAuth` gate. Must match the REST plugin's
-     * `api.requireAuth` so `/ai` and `/meta` stay in lockstep with
-     * `/data` — otherwise the AI routes' declared `auth: true` contract is never
-     * enforced and anonymous callers reach adapter/model status routes or read
-     *
-     * Defaults to `true` — secure-by-default, matching the REST plugin's
-     * `api.requireAuth` default (ADR-0056 D2). Hosts pass their `api.requireAuth`
-     * through (the framework `serve` command and the cloud apps do so from the
-     * same stack `api` config the REST plugin reads); a deployment that serves
-     * these surfaces publicly sets `requireAuth: false` explicitly.
-     */
-    requireAuth?: boolean;
-
-    /**
      * Security response headers. When provided, every response routed
      * through this plugin gets the headers merged in (route-specific
      * headers still win on conflict).
@@ -136,7 +120,6 @@ function mountRouteOnServer(
     routePath: string,
     securityHeaders?: Record<string, string>,
     resolveUser?: (headers: Record<string, any>) => Promise<any | undefined>,
-    requireAuth = false,
 ): boolean {
     const handler = async (req: any, res: any) => {
         try {
@@ -156,10 +139,11 @@ function mountRouteOnServer(
             // Enforce the route's declared `auth` contract. This used to be
             // assumed to run "separately"/upstream, but nothing did: an
             // anonymous caller reached `auth: true` handlers (e.g.
-            // `GET /ai/status`) and got adapter/model config back. Gate here
-            // when the deployment requires auth. Off (or `auth: false`) → the
-            // handler runs as before.
-            if (requireAuth && route.auth !== false && !user) {
+            // `GET /ai/status`) and got adapter/model config back. [#3963] The
+            // gate is unconditional now — the deployment-wide `requireAuth`
+            // opt-out is retired, so only a route declaring `auth: false` opens
+            // itself, and it does so by declaration.
+            if (route.auth !== false && !user) {
                 res.status(401);
                 if (securityHeaders) {
                     for (const [k, v] of Object.entries(securityHeaders)) res.header(k, v);
@@ -480,31 +464,14 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // Tests / single-tenant deploys can opt out via the explicit flag.
             const enforceMembership =
                 config.enforceProjectMembership ?? (config.scoping?.enableProjectScoping ?? false);
-            // Secure-by-default alignment with the REST plugin's `requireAuth`.
-            // The cloud apps pass the whole stack `api` block as `scoping`
-            // (which carries `requireAuth`), so honour it there too; an explicit
-            // top-level `requireAuth` wins.
-            //
-            // Defaults to `true` — matching `rest-server.ts`'s `?? true`
-            // (ADR-0056 D2). The dispatcher gates the same object data as REST
-            // through sibling surfaces (`/ai`, the `/meta`
-            // catch-all, service routes); defaulting it OFF while REST defaults
-            // ON is exactly the by-surface inconsistency #2567 closes — a bare
-            // host would deny anonymous `/data` yet serve the same rows over
-            // A deployment that intentionally serves these surfaces
-            // publicly opts out with an explicit `requireAuth: false` (a
-            // boot warning is logged, mirroring the REST plugin).
-            const requireAuth =
-                config.requireAuth ?? (config.scoping as { requireAuth?: boolean } | undefined)?.requireAuth ?? true;
-            if (!requireAuth) {
-                ctx.logger?.warn?.(
-                    '[dispatcher] requireAuth is OFF — /ai and the /meta catch-all serve anonymous callers. ' +
-                    'This is a deliberate opt-out; set api.requireAuth=true to deny anonymous access (ADR-0056 D2, #2567).',
-                );
-            }
+            // [#3963] Anonymous callers are denied unconditionally on every
+            // surface that reaches object data — the deployment-wide opt-out is
+            // retired, so there is nothing to resolve or warn about here. The
+            // dispatcher gates the same data as REST through sibling surfaces
+            // (`/ai`, the `/meta` catch-all, service routes), and by-surface
+            // consistency is exactly what #2567 established.
             const dispatcher = new HttpDispatcher(kernel, undefined, {
                 enforceProjectMembership: enforceMembership,
-                requireAuth,
             });
             const prefix = config.prefix || '/api/v1';
 
@@ -1213,11 +1180,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 let count = 0;
                 if (enableProjectScoping && projectResolution === 'required') {
-                    if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser, requireAuth)) count++;
+                    if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser)) count++;
                 } else {
-                    if (mountRouteOnServer(route, server, routePath, securityHeaders, resolveRequestUser, requireAuth)) count++;
+                    if (mountRouteOnServer(route, server, routePath, securityHeaders, resolveRequestUser)) count++;
                     if (enableProjectScoping) {
-                        if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser, requireAuth)) count++;
+                        if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser)) count++;
                     }
                 }
                 return count;

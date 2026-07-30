@@ -24,7 +24,8 @@
  * `pnpm check:route-envelope` in CI. It sits outside any package on purpose: the
  * three predecessors of that scan were per-package, which structurally cannot
  * notice a route module nobody thought to convert, and two such modules turned up
- * the moment it went repo-wide (#3973, #3983).
+ * the moment it went repo-wide: `share-link-routes.ts` (#3983) and the dev-only
+ * `hmr-routes.ts`, neither of them in #3843's hand-written survey.
  *
  * What stays here is the half that has to live next to the routes it drives:
  * every branch driven, every body parsed against the real spec schemas.

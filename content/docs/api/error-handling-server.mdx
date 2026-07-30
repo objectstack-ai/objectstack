@@ -48,7 +48,10 @@ class TaskAlreadyCompletedError extends AppError {
       'RESOURCE_CONFLICT',
       `Task ${taskId} is already completed and cannot be modified`,
       409,
-      [{ field: 'status', code: 'lock_conflict', message: 'Task is in terminal state' }],
+      // No per-field entry: a terminal-state conflict is a condition of the
+      // RECORD, not a constraint some value violated, and the top-level
+      // RESOURCE_CONFLICT already says so. `fields[]` is for "this value is
+      // wrong", which is why its codes name constraints.
     );
   }
 }
@@ -59,14 +62,16 @@ class InvalidStatusTransitionError extends AppError {
       'INVALID_FIELD',
       `Cannot transition from '${from}' to '${to}'`,
       400,
-      [{ field: 'status', code: 'invalid_field', message: `Invalid transition: ${from} → ${to}` }],
+      // `invalid_transition` — the catalog has a member for exactly this, and it
+      // is more useful to a form than a generic "this field is invalid".
+      [{ field: 'status', code: 'invalid_transition', message: `Invalid transition: ${from} → ${to}` }],
     );
   }
 }
 ```
 
 <Callout type="tip">
-**Error Codes:** The top-level `code` is SCREAMING_SNAKE (`StandardErrorCode` or a ledger-registered code). Per-field `code` values are a **separate, lowercase vocabulary** — the validators emit `required`, `max_length`, `invalid_email`, … and its catalog is being settled in [#3977](https://github.com/objectstack-ai/objectstack/issues/3977) (ADR-0112 D6). Use the `category` and `httpStatus` that match — `ErrorHttpStatusMap` in `@objectstack/spec/api` maps each category to its HTTP status.
+**Error Codes:** The top-level `code` is SCREAMING_SNAKE (`StandardErrorCode` or a ledger-registered code). Per-field `code` values are a **separate, lowercase catalog** — `FieldErrorCode`, closed, naming the constraint the value violated (`required`, `max_length`, `invalid_transition`, …). See the [Error Catalog](/docs/api/error-catalog#field-level-codes); the two vocabularies and why they differ are ADR-0114. Use the `category` and `httpStatus` that match — `ErrorHttpStatusMap` in `@objectstack/spec/api` maps each category to its HTTP status.
 </Callout>
 
 ---

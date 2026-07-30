@@ -31,13 +31,19 @@ time**.
 
 1. **Locale-gated platform switch, no field metadata.**
    `OS_SEARCH_PINYIN_ENABLED` (resolved by `resolveSearchPinyinEnabled()` in
-   `@objectstack/types`) gates the feature end-to-end. When unset, the CLI
-   boot path derives the default from the stack's configured locales (any
-   `zh-*` → on) and stamps the decision back into the env var so every
-   consumer — the per-engine `SchemaRegistry` and the plugin gate — reads the
-   same single decision. No field-level `pinyin` marker exists, so there is
-   no declared-but-unenforced dead metadata (ADR-0049) and no half-state
-   where a field "pretends" to support pinyin.
+   `@objectstack/types`) gates the feature end-to-end. When unset, every boot
+   path that sees the stack config derives the default from its configured
+   locales (any `zh-*` → on) and stamps the decision back into the env var
+   (shared `stampSearchPinyinEnabled()` helper) so every consumer — the
+   per-engine `SchemaRegistry` and the plugin gate — reads the same single
+   decision. There are exactly two such paths: the CLI `serve`/`dev` boot
+   (from `objectstack.config.ts`) and `createStandaloneStack` (from the
+   compiled artifact's `i18n` — `os migrate plan`/`apply`, embedders). A path
+   that resolved without stamping would compute a schema view without the
+   companion columns; that is how `os migrate` once flagged live `__search`
+   columns as destructive orphans (#3955). No field-level `pinyin` marker
+   exists, so there is no declared-but-unenforced dead metadata (ADR-0049)
+   and no half-state where a field "pretends" to support pinyin.
 
 2. **Materialization set ≠ search set: one column per object.** Only the
    ADR-0079 display/name field (`resolveDisplayField`) feeds the hidden

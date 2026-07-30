@@ -2664,8 +2664,8 @@ export class ObjectStackProtocolImplementation implements
         // it was not swept into the implicit-filter bucket either: a caller's
         // `context` survived this spread and, because the assignment below is
         // conditional, became the operation's execution context whenever no
-        // server context resolved (an anonymous request on a deployment that
-        // set `requireAuth: false`).
+        // server context resolved (before #3963 an anonymous request on a
+        // `requireAuth: false` deployment; the invariant holds regardless).
         //
         // What rides on it is total: plugin-security's middleware opens with
         // `if (opCtx.context?.isSystem) return next()` — the entire RLS / FLS /

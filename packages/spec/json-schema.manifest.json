@@ -220,6 +220,7 @@
     "api/ExportJobSummary",
     "api/ExportRequest",
     "api/FieldError",
+    "api/FieldErrorCode",
     "api/FieldMappingEntry",
     "api/FileDownloadUrlResponse",
     "api/FileTypeValidation",

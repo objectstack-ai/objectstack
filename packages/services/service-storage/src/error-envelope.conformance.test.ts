@@ -26,7 +26,8 @@
  *
  * That move mattered more than deduplication. A per-package scan structurally
  * cannot notice a module nobody thought to convert, and going repo-wide found two
- * immediately (#3973, #3983). It also dropped the regex: the old block stripped
+ * immediately — `share-link-routes.ts` (#3983) and the dev-only `hmr-routes.ts`,
+ * neither of them in #3843's hand-written survey. It also dropped the regex: the old block stripped
  * comments with `String.replace`, which ate `//` inside string literals and
  * truncated the rest of that line — response writes included — and counted
  * `c.req.json()` (a request READ) as an unenveloped response. The AST has neither

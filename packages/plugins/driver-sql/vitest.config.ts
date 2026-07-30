@@ -16,7 +16,13 @@ export default defineConfig({
       '@objectstack/spec/system': path.resolve(__dirname, '../../spec/src/system/index.ts'),
       // [ADR-0105 D1] Reached transitively via `@objectstack/types` (tenancy posture).
       '@objectstack/spec/security': path.resolve(__dirname, '../../spec/src/security/index.ts'),
+      // Reached transitively via `@objectstack/core` (#3777's `nextUtcCalendarDay`
+      // import pulls core's src barrel in, which fans out to these subpaths).
+      '@objectstack/spec/api': path.resolve(__dirname, '../../spec/src/api/index.ts'),
+      '@objectstack/spec/kernel': path.resolve(__dirname, '../../spec/src/kernel/index.ts'),
+      '@objectstack/spec/qa': path.resolve(__dirname, '../../spec/src/qa/index.ts'),
       '@objectstack/spec': path.resolve(__dirname, '../../spec/src/index.ts'),
+      '@objectstack/core': path.resolve(__dirname, '../../core/src/index.ts'),
     },
   },
 });

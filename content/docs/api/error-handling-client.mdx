@@ -19,6 +19,8 @@ Every error response from ObjectStack follows this shape:
 
 {/* os:check */}
 ```typescript
+import type { FieldErrorCode } from '@objectstack/spec/api';
+
 interface ErrorResponse {
   success: false;        // Always false for error responses
   error: {
@@ -29,9 +31,15 @@ interface ErrorResponse {
     retryable?: boolean; // Whether the request can be retried
     retryStrategy?: string;
     retryAfter?: number; // Seconds to wait before retrying (rate limits)
+    // ⚠️ Declared as `fieldErrors`; every producer emits `fields`. Read `fields`.
+    // (ADR-0114 D4 — the rename needs a tombstone + migration, so it lands on
+    // its own.)
     fieldErrors?: Array<{
       field: string;     // Field path (supports dot notation)
-      code: string;      // Per-field error code (e.g. "INVALID_FORMAT")
+      // Which CONSTRAINT the value violated — a lowercase `FieldErrorCode`
+      // (`required`, `max_length`, `invalid_email`, …), NOT a top-level code.
+      // The two vocabularies are separate on purpose: see ADR-0114.
+      code: FieldErrorCode;
       message: string;   // Detail message
       value?: unknown;   // The invalid value that was provided
       constraint?: unknown;

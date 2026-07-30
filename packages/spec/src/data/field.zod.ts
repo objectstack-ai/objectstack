@@ -270,8 +270,24 @@ export const FieldSchema = lazySchema(() => z.object({
   // a custom column name was silently ignored. External/federated objects map
   // physical columns via `external.columnMap` (ADR-0062 D7 / ADR-0015).
 
-  /** Database Constraints */
-  required: z.boolean().default(false).describe('Is required'),
+  /** Write contract (ADR-0113 — NOT a column constraint; see `storage.notNull`) */
+  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
+
+  /**
+   * Physical storage constraints (ADR-0113). Deliberately separate from the
+   * write contract above: `required` governs what a WRITE must provide;
+   * `storage` governs what the COLUMN enforces. All four combinations are
+   * legitimate — `required` alone is the criteria_json posture (legacy null
+   * rows rest), `storage.notNull` alone is the engine-populated column
+   * (audit fields, the tenant column). Declaring `notNull` over existing
+   * null rows is a destructive migration gated by the schema-drift ceremony
+   * (backfill first); a column STRICTER than its declaration is reported as
+   * informational, never as actionable drift.
+   */
+  storage: z.object({
+    notNull: z.boolean().optional().describe('Emit a physical NOT NULL on the column (ADR-0113). Absent = the column stays nullable even under `required: true` — the write contract is enforced at the engine, the only sanctioned write path, not by the database. Declaring this over existing null rows is a destructive migration gated by the schema-drift ceremony. Incompatible with `requiredWhen` (a conditional contract cannot be an unconditional column constraint).'),
+  }).strict().optional().describe('Physical storage constraints (ADR-0113). Owns the DDL the write contract deliberately does not imply. Absent = no storage-level constraint requested.'),
+
   searchable: z.boolean().default(false).describe('Is searchable'),
   multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image.'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
@@ -610,6 +626,23 @@ export const FieldSchema = lazySchema(() => z.object({
   // driver builds indexes from the object's `indexes[]` array; a field-level
   // `index: true` created no index. Declare the index in object `indexes[]`.
   externalId: z.boolean().default(false).describe('Is external ID for upsert operations'),
+}).superRefine((field, ctx) => {
+  // ADR-0113: `storage.notNull` × `requiredWhen` is a contradiction, rejected
+  // at the authoring seam — when the condition is FALSE the write contract
+  // permits null, but the column would refuse it, so the author has declared
+  // two gates that cannot both be honest. An unconditional constraint needs
+  // the unconditional contract.
+  if (field.storage?.notNull === true && field.requiredWhen !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['storage', 'notNull'],
+      message:
+        '`storage.notNull` cannot be combined with `requiredWhen` (ADR-0113): when the ' +
+        'condition is false the write contract permits null, but the column would refuse ' +
+        'it. Use `required: true` + `storage.notNull` for an unconditional constraint, or ' +
+        '`requiredWhen` alone for a conditional write contract (the column stays nullable).',
+    });
+  }
 }));
 
 export type Field = z.infer<typeof FieldSchema>;

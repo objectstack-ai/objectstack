@@ -1058,3 +1058,41 @@ describe('ADR-0066 D3 — field-level requiredPermissions', () => {
     expect(f.requiredPermissions).toBeUndefined();
   });
 });
+
+describe('ADR-0113 — required is a write contract; storage.notNull is the column constraint', () => {
+  it('storage.notNull parses and is independent of required', () => {
+    // The engine-populated-column posture: storage constraint, no write contract.
+    const f = FieldSchema.parse({ type: 'text', storage: { notNull: true } });
+    expect(f.storage?.notNull).toBe(true);
+    expect(f.required).toBe(false);
+  });
+  it('required alone declares NO storage constraint', () => {
+    const f = FieldSchema.parse({ type: 'text', required: true });
+    expect(f.storage).toBeUndefined();
+  });
+  it('the classic strict posture combines both', () => {
+    const f = FieldSchema.parse({ type: 'text', required: true, storage: { notNull: true } });
+    expect(f.required).toBe(true);
+    expect(f.storage?.notNull).toBe(true);
+  });
+  it('REJECTS storage.notNull combined with requiredWhen — a conditional contract cannot be an unconditional constraint', () => {
+    expect(() => FieldSchema.parse({
+      type: 'currency',
+      requiredWhen: "record.status == 'sent'",
+      storage: { notNull: true },
+    })).toThrow(/storage\.notNull.*requiredWhen|requiredWhen.*storage\.notNull/s);
+  });
+  it('the rejection carries the prescription (both valid alternatives named)', () => {
+    let message = '';
+    try {
+      FieldSchema.parse({ type: 'currency', requiredWhen: 'record.x', storage: { notNull: true } });
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    expect(message).toMatch(/required: true/);
+    expect(message).toMatch(/ADR-0113/);
+  });
+  it('storage is strict — unknown storage keys reject', () => {
+    expect(() => FieldSchema.parse({ type: 'text', storage: { collation: 'C' } })).toThrow();
+  });
+});

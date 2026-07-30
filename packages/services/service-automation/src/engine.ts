@@ -6,6 +6,7 @@ import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationServ
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
 import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
+import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import { applyConversionsToFlow } from '@objectstack/spec';
 import type { FlowRegionParsed } from '@objectstack/spec/automation';
 import type { Connector, ConnectorProviderFactory } from '@objectstack/spec/integration';
@@ -2723,9 +2724,28 @@ export class AutomationEngine implements IAutomationService {
      * other malformed predicate LOUDLY, with the offending location + source +
      * a corrective hint, instead of letting it fail silently at run time.
      *
-     * Only the *predicate* surfaces are checked here (start/node `config.condition`
-     * and `edge.condition`) — node string fields are templates (a different
-     * dialect) and are validated by the template engine, not as CEL.
+     * Two families of surface are checked:
+     *
+     *  1. The *structural* predicates every flow has — start/node
+     *     `config.condition` and `edge.condition`. Always bare CEL.
+     *  2. Every **descriptor-declared** bare-CEL slot named by
+     *     `FLOW_NODE_EXPRESSION_PATHS` (#4027) — the ledger records the dialect
+     *     each declared slot takes, and the `predicate` ones are checked here.
+     *
+     * (2) exists because assuming "node string fields are templates" is what let
+     * #3528 ship: `screen.fields[].visibleWhen` is declared *bare CEL*, this pass
+     * never traversed it, and an app authored it in the `{var}` template dialect
+     * its sibling config keys use. Nothing complained at any layer. The ledger is
+     * the declared list of such slots and is reconciled against the live
+     * descriptors by a test, so a newly declared expression key cannot go
+     * unvalidated again.
+     *
+     * Recording the dialect is what makes (2) safe rather than a regression:
+     * `{…}` is the #1491 brace-trap in a bare-CEL slot and the *correct* spelling
+     * in a single-brace `{var}` flow-interpolation slot (`loop.collection`). A
+     * dialect-blind pass would reject every valid `collection` while still
+     * passing every wrong `visibleWhen`, so the `flow-template` slots are
+     * recorded and skipped — no validator implements their dialect.
      *
      * #1928 — when an object-schema resolver is wired ({@link setObjectSchemaResolver}),
      * a second, schema-aware pass surfaces the checks `objectstack build` runs
@@ -2751,7 +2771,7 @@ export class AutomationEngine implements IAutomationService {
             })()
             : undefined;
 
-        const check = (where: string, raw: unknown): void => {
+        const check = (where: string, raw: unknown, useSchemaHint = true): void => {
             if (raw == null) return;
             // Fatal pass — syntax, brace-in-CEL, unknown-function (ADR-0032 §5).
             // Unchanged: matches the CLI build's fatal set exactly.
@@ -2763,7 +2783,7 @@ export class AutomationEngine implements IAutomationService {
             // valid (else it would just re-report the fatal error). Everything it
             // finds (field-existence, tier-3 typo, tier-4 type mismatch) is LOGGED,
             // never thrown, so registration behaviour is strictly additive (#1928).
-            if (result.errors.length === 0 && schemaHint) {
+            if (useSchemaHint && result.errors.length === 0 && schemaHint) {
                 const schemaPass = validateExpression('predicate', raw as string | { dialect?: string; source?: string }, schemaHint);
                 for (const issue of [...schemaPass.errors, ...schemaPass.warnings]) {
                     this.logger.warn(`[flow '${flowName}'] ${where}: ${issue.message}\n      source: \`${issue.source}\``);
@@ -2775,6 +2795,29 @@ export class AutomationEngine implements IAutomationService {
             const cfg = (node.config ?? {}) as Record<string, unknown>;
             // start-node trigger gate + decision/branch predicates live in config.condition
             check(`node '${node.id}' (${node.type}) condition`, cfg.condition);
+
+            // Descriptor-declared expression slots (#4027). The ledger names them
+            // per node type and carries the dialect each one takes, so a declared
+            // key like `screen.fields[].visibleWhen` is checked as the bare CEL it
+            // is — the traversal gap that let #3528 ship a `{var}` predicate.
+            //
+            // Only `predicate` slots are checked: `flow-template` slots take the
+            // single-brace `{var}` dialect `interpolate()` implements, and no
+            // validator implements it (validateExpression's `template` role is the
+            // ADR-0032 §3 double-brace text template and would reject every
+            // correct `loop.collection`). They are declared in the ledger so the
+            // reconciliation ratchet still covers the marker.
+            for (const found of resolveFlowNodeExpressions(node.type, node.config)) {
+                if (found.entry.role !== 'predicate') continue;
+                // No schema hint: a screen's `visibleWhen` binds the screen's OWN
+                // collected values, not the trigger record's fields, so the
+                // field-existence pass would report every field name as unknown.
+                check(
+                    `node '${node.id}' (${node.type}) ${found.entry.label} at config.${found.path}`,
+                    found.value,
+                    false,
+                );
+            }
         }
         for (const edge of flow.edges) {
             check(`edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition as unknown);
@@ -2782,8 +2825,10 @@ export class AutomationEngine implements IAutomationService {
 
         if (failures.length > 0) {
             throw new Error(
-                `Flow '${flowName}' has ${failures.length} invalid condition${failures.length > 1 ? 's' : ''} (ADR-0032 §1a). ` +
-                `Conditions are bare CEL — do not wrap field references in \`{…}\` template braces:\n${failures.join('\n')}`,
+                `Flow '${flowName}' has ${failures.length} invalid expression${failures.length > 1 ? 's' : ''} (ADR-0032 §1a). ` +
+                `Predicates — conditions and declared bare-CEL slots such as a screen field's \`visibleWhen\` — ` +
+                `must not wrap references in \`{…}\` template braces; template slots (e.g. \`loop.collection\`) require them:\n` +
+                `${failures.join('\n')}`,
             );
         }
     }

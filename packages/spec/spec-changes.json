@@ -106,7 +106,7 @@
       },
       {
         "surface": "flow.node.notify.config",
-        "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796)",
+        "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
         "conversionId": "flow-node-notify-config-aliases",
         "toMajor": 17
       },
@@ -126,6 +126,12 @@
         "surface": "tool.category / tool.permissions / tool.active / tool.builtIn",
         "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
         "conversionId": "tool-inert-authoring-keys-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "object.fields.*.required / object.fields.*.storage.notNull",
+        "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
+        "conversionId": "field-required-notnull-explicit",
         "toMajor": 17
       }
     ],
@@ -448,7 +454,7 @@
         },
         {
           "surface": "flow.node.notify.config",
-          "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796)",
+          "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
           "conversionId": "flow-node-notify-config-aliases",
           "toMajor": 17
         },
@@ -468,6 +474,12 @@
           "surface": "tool.category / tool.permissions / tool.active / tool.builtIn",
           "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
           "conversionId": "tool-inert-authoring-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "object.fields.*.required / object.fields.*.storage.notNull",
+          "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
+          "conversionId": "field-required-notnull-explicit",
           "toMajor": 17
         }
       ],

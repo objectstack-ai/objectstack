@@ -17,6 +17,7 @@
  */
 
 import type { Filter } from 'mongodb';
+import { nextUtcCalendarDay } from '@objectstack/core';
 
 /**
  * Translate an ObjectStack `where` clause into a MongoDB filter document.
@@ -120,12 +121,25 @@ function translateFieldOperators(ops: Record<string, unknown>): Record<string, u
       case '$gt':
       case '$gte':
       case '$lt':
-      case '$lte':
       case '$in':
       case '$nin':
       case '$exists':
         result[op] = value;
         break;
+
+      case '$lte': {
+        // A bare-day upper bound means "through that whole day" (#4042; the
+        // driver-sql twin is #3777): `<= '2026-07-28'` compiles half-open
+        // (`< '2026-07-29'`) so string-stored timestamps on the final day stay
+        // in; order-equivalent to `<=` for plain `YYYY-MM-DD` date values.
+        // (A BSON-Date-stored field never matched a string bound at all —
+        // MongoDB type bracketing — which is a storage-form problem this
+        // translation layer cannot fix; tracked separately from #4042.)
+        const nextDay = nextUtcCalendarDay(value);
+        if (nextDay != null) result.$lt = nextDay;
+        else result.$lte = value;
+        break;
+      }
 
       // String operators → $regex
       case '$contains':
@@ -147,11 +161,14 @@ function translateFieldOperators(ops: Record<string, unknown>): Record<string, u
         result.$options = 'i';
         break;
 
-      // Range operator → $gte + $lte
+      // Range operator → $gte + upper bound (half-open on a bare-day max,
+      // inheriting `$lte`'s whole-day rule — #4042)
       case '$between':
         if (Array.isArray(value) && value.length === 2) {
           result.$gte = value[0];
-          result.$lte = value[1];
+          const betweenNextDay = nextUtcCalendarDay(value[1]);
+          if (betweenNextDay != null) result.$lt = betweenNextDay;
+          else result.$lte = value[1];
         }
         break;
 
@@ -284,8 +301,11 @@ function translateComparison(field: string, op: string, value: unknown): Filter<
     case 'lt':
       return { [mappedField]: { $lt: value } };
     case '<=':
-    case 'lte':
-      return { [mappedField]: { $lte: value } };
+    case 'lte': {
+      // Bare-day upper bound → half-open, `$lte`'s whole-day rule (#4042).
+      const nextDay = nextUtcCalendarDay(value);
+      return { [mappedField]: nextDay != null ? { $lt: nextDay } : { $lte: value } };
+    }
     case 'in':
       return { [mappedField]: { $in: value as unknown[] } };
     case 'nin':

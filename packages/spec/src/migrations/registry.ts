@@ -392,6 +392,16 @@ const step17: MigrationStep = {
     '`permissions` promised an invocation gate nothing enforced, and `active: false` ' +
     'read as "withdrawn" while the tool kept reaching the LLM tool set. Lossless ' +
     'deletes; the strict ToolSchema rejects each with its prescription.\n\n' +
+    'ADR-0113 splits the `required` tri-binding: post-17, `required` is ONLY the ' +
+    'write-time contract (insert must provide; update may not null out; legacy null ' +
+    'rows rest), and the physical NOT NULL is the explicit `storage.notNull`. The ' +
+    '`field-required-notnull-explicit` conversion preserves every pre-17 source ' +
+    'verbatim-in-meaning by stamping `storage.notNull: true` onto each required ' +
+    'field — under the old semantics that column WAS created NOT NULL, so the ' +
+    'rewrite writes down what the text already meant. Migration-chain-only ' +
+    '(retired from the load path): this is a default flip, not a rename, and a ' +
+    'loader that auto-applied it would stamp the constraint onto 17-authored ' +
+    'sources that deliberately omit it.\n\n' +
     'On the wire contract it also retires the `/analytics/query` request ENVELOPE ' +
     '(#3878): `AnalyticsQueryRequestSchema` used to describe `{ cube, query: {...}, ' +
     'format }` — the dialect of the retired degraded analytics shim (#3891) that the ' +
@@ -413,6 +423,7 @@ const step17: MigrationStep = {
     'flow-node-script-config-aliases',
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',
+    'field-required-notnull-explicit',
   ],
   semantic: [
     {
@@ -444,6 +455,23 @@ const step17: MigrationStep = {
 };
 
 /** All migration steps, keyed by the major they migrate into. */
+const step18: MigrationStep = {
+  toMajor: 18,
+  rationale:
+    'Protocol 18 retires `api.requireAuth` (#3963): the deployment-wide opt-out that let a '
+    + 'stack serve its ENTIRE data plane anonymously with one boolean. Auth is a kernel '
+    + 'concern, not a deployment posture — anonymous access to object data is now denied '
+    + 'unconditionally on every HTTP surface. Every surface that legitimately serves a '
+    + 'session-less caller derives its own narrow authorization from a DECLARATION instead: '
+    + 'the control-plane allowlist, `publicFormGrant` (public form views), share-link tokens '
+    + "(read as SYSTEM), and `book.audience: 'public'` (ADR-0046 §6.7). The key is dropped "
+    + 'with a notice rather than mapped — there is no replacement value, only a different '
+    + 'way to publish (by declaration). A stack that mounts no auth at all now fails at boot '
+    + 'when it would serve a data API, instead of receiving an implicit fail-open.',
+  conversionIds: ['stack-api-require-auth-removed'],
+  semantic: [],
+};
+
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   11: step11,
   12: step12,
@@ -452,6 +480,7 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   15: step15,
   16: step16,
   17: step17,
+  18: step18,
 };
 
 /** The majors that have a step, ascending. */

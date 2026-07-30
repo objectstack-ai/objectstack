@@ -89,6 +89,17 @@ function hasOwnerField(schema: any): boolean {
  */
 export interface SharingSecurityProbe {
   hasWriteBypass?(object: string, context: unknown): Promise<boolean>;
+  /**
+   * [ADR-0111 D1 DEPTH] The caller's effective WRITE scope on `object`
+   * (`own` / `own_and_reports` / `unit` / `unit_and_below` / `org`), resolved
+   * from their permission sets exactly as the CRUD middleware resolves it.
+   * Used by {@link SharingService.canManageShares} to let a hierarchy manager
+   * manage shares on records they can write by DEPTH. Fails closed to `own`.
+   */
+  resolveWriteScope?(
+    object: string,
+    context: unknown,
+  ): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'>;
 }
 
 export interface SharingServiceOptions {
@@ -356,10 +367,11 @@ export class SharingService implements ISharingService {
    * [ADR-0111 D1] May `context` MANAGE shares (grant / revoke / list) on
    * `(object, recordId)`? System → yes. Record owner → yes. Super-user write
    * bypass (`modifyAllRecords`, probed via the late-bound security service) →
-   * yes. Everything else — a missing record, a principal-less context, a
-   * probe failure, a deployment without plugin-security — fails CLOSED to
-   * `false`. The DEPTH extension (hierarchy managers may share subordinates'
-   * records) is a named ADR-0111 direction, deliberately not implemented here.
+   * yes. [ADR-0111 D1 DEPTH] A HIERARCHY MANAGER whose write DEPTH
+   * (`unit` / `unit_and_below` / `own_and_reports`) covers the record's owner →
+   * yes. Everything else — a missing record, a principal-less context, a probe
+   * failure, a deployment without plugin-security or the enterprise resolver —
+   * fails CLOSED to `false`.
    */
   async canManageShares(
     object: string,
@@ -370,7 +382,9 @@ export class SharingService implements ISharingService {
     if (!object || !recordId || !context?.userId) return false;
 
     // Ownership — read under system context so field-level masking cannot
-    // hide the owner column from the decision itself.
+    // hide the owner column from the decision itself. Keep the owner value:
+    // the DEPTH branch below reuses it rather than re-reading the row.
+    let owner: unknown;
     try {
       const rows = await this.engine.find(object, {
         where: { id: recordId },
@@ -380,21 +394,43 @@ export class SharingService implements ISharingService {
       });
       const row: any = Array.isArray(rows) ? rows[0] : undefined;
       if (!row) return false;
-      const owner = row[OWNER_FIELD];
+      owner = row[OWNER_FIELD];
       if (owner != null && String(owner) === String(context.userId)) return true;
     } catch {
       return false;
     }
 
+    const probe = this.securityService?.();
+
     // Modify All Data — the EXPLICIT bypass only (ADR-0111 D1/D2; never the
     // effective write scope, whose unmatched-object case fails open to 'org').
     try {
-      const probe = this.securityService?.();
       if (probe && typeof probe.hasWriteBypass === 'function') {
-        return (await probe.hasWriteBypass(object, context)) === true;
+        if ((await probe.hasWriteBypass(object, context)) === true) return true;
       }
     } catch {
-      /* fall through to deny */
+      /* fall through */
+    }
+
+    // [ADR-0111 D1 DEPTH] Hierarchy-manager authority: a caller whose effective
+    // WRITE scope on this object is a HIERARCHY scope may manage shares on a
+    // record whose owner falls within that scope's owner set (the same set the
+    // write filter/canEdit use). Only the three hierarchy scopes widen here —
+    // `own` adds nothing beyond the ownership check above, and `org` is
+    // DELIBERATELY ignored: `resolveWriteScope` returns `org` both for a genuine
+    // Modify-All holder (already handled) AND for the fail-OPEN
+    // "no permission set mentions this object" case, so honouring `org` here
+    // would reopen exactly the hole `hasWriteBypass` was chosen to avoid.
+    if (owner != null && probe && typeof probe.resolveWriteScope === 'function') {
+      try {
+        const scope = await probe.resolveWriteScope(object, context);
+        if (scope === 'unit' || scope === 'unit_and_below' || scope === 'own_and_reports') {
+          const ownerIds = await this.resolveOwnerScopeIds(context, scope);
+          if (ownerIds.includes(String(owner))) return true;
+        }
+      } catch {
+        /* fall through to deny */
+      }
     }
     return false;
   }

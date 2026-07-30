@@ -19,6 +19,7 @@ import { validateSecurityPosture, validateOrgAxisRedLines, buildAccessMatrix, di
 import { validateReadonlyFlowWrites } from '@objectstack/lint';
 import { lintFlowPatterns } from '../utils/lint-flow-patterns.js';
 import { lintAutonumberFormats } from '../utils/lint-autonumber-formats.js';
+import { lintUniqueDeclarations } from '../lint/data-model-rules.js';
 import { lintLivenessProperties } from '../utils/lint-liveness-properties.js';
 import { lintViewRefs } from '../utils/lint-view-refs.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
@@ -495,6 +496,28 @@ export default class Compile extends Command {
         for (const f of autonumberWarnings) {
           printWarning(`${f.where}: ${f.message}`);
           console.log(chalk.dim(`    ${f.hint}`));
+          console.log(chalk.dim(`    rule: ${f.rule}`));
+        }
+      }
+
+      // 3d-quinquies. Contradictory uniqueness declarations (#3991). A column
+      //     carrying BOTH a field-level `unique: true` and a single-column
+      //     declared unique index has two intents, of which exactly one takes
+      //     effect: since #3696 the field-level form is per-tenant while a
+      //     declared index is platform-wide, so the global index wins and the
+      //     tenant composite becomes unreachable. Advisory — the artifact is
+      //     well-defined; the cost is a declaration that does nothing. Shares
+      //     `lintUniqueDeclarations` with `os lint` so both agree.
+      const uniqueLint = lintUniqueDeclarations(
+        Array.isArray((result.data as Record<string, unknown>).objects)
+          ? ((result.data as Record<string, unknown>).objects as any[])
+          : [],
+      );
+      if (uniqueLint.length > 0 && !flags.json) {
+        console.log('');
+        for (const f of uniqueLint) {
+          printWarning(`${f.path}: ${f.message}`);
+          if (f.fix) console.log(chalk.dim(`    ${f.fix}`));
           console.log(chalk.dim(`    rule: ${f.rule}`));
         }
       }

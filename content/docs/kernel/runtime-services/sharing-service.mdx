@@ -24,9 +24,13 @@ services.sharing.listShares(object: string, recordId: string, context: SharingEx
 
 `grant` / `revoke` / `listShares` are **management operations**, enforced in the
 service for every non-system caller: the caller must hold `canManageShares` on
-the record — its owner, a holder of Modify All Data on the object, or system
-context. A deployment without `@objectstack/plugin-security` fails closed to
-owner-only. Pass `{ isSystem: true }` only from platform-internal machinery.
+the record — its **owner**, a holder of **Modify All Data**, a **hierarchy
+manager** whose effective write DEPTH (`unit` / `unit_and_below` /
+`own_and_reports`) covers the record's owner (via the enterprise
+`hierarchy-scope-resolver`), or **system** context. A deployment without
+`@objectstack/plugin-security` fails closed to owner-only; without the
+enterprise resolver the DEPTH path is inert and authority stays owner +
+Modify-All. Pass `{ isSystem: true }` only from platform-internal machinery.
 
 ## The verb boundary (ADR-0111 D3)
 

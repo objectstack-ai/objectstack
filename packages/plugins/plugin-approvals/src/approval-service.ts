@@ -639,9 +639,10 @@ export class ApprovalService implements IApprovalService {
    * (having also put them on the context). Those are the only two callers that
    * hold a trustworthy actor with no session behind them.
    *
-   * A caller with NO identity at all cannot act. That case is reachable: the
-   * REST anonymous-deny only fires when `api.requireAuth` is set, so without it
-   * an anonymous request previously decided approvals outright by naming one.
+   * A caller with NO identity at all cannot act. Belt-and-suspenders: the REST
+   * anonymous-deny now denies every anonymous request (#3963), but this service
+   * must not rely on a caller upstream — an anonymous actor could otherwise
+   * decide approvals outright by naming one.
    */
   private async resolveActor(
     actorId: string | undefined,

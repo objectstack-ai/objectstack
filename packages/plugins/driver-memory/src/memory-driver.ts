@@ -1,8 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
+import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
-import { Logger, createLogger } from '@objectstack/core';
+import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
 
@@ -703,15 +704,40 @@ export class InMemoryDriver implements IDataDriver {
 
     for (const item of filters) {
       if (typeof item === 'string') {
-        const newLogic = item.toLowerCase() as 'and' | 'or';
-        if (newLogic !== currentLogic) {
-          currentLogic = newLogic;
+        const lower = item.toLowerCase();
+        // Previously this cast ANY string to 'and' | 'or'. A bare comparison
+        // triple — which reaches a driver only when `isFilterAST()` refused its
+        // operator, leaving the array unparsed — therefore opened three empty
+        // logic groups, produced no conditions, and returned `{}`: a filter that
+        // matches EVERY record. An unapplied filter must not look like a
+        // satisfied one. #3948.
+        if (lower !== 'and' && lower !== 'or') {
+          throw new Error(
+            `[driver-memory] Unrecognized filter operator "${item}" in a comparison triple. ` +
+              `A filter array is either a logical node (["and"|"or", …]) or nested ` +
+              `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
+              `reaches the driver when its operator is outside @objectstack/spec ` +
+              `VALID_AST_OPERATORS, which leaves the filter unparsed. ` +
+              `Filter was: ${JSON.stringify(filters)}`,
+          );
+        }
+        if (lower !== currentLogic) {
+          currentLogic = lower;
           logicGroups.push({ logic: currentLogic, conditions: [] });
         }
       } else if (Array.isArray(item)) {
         const [field, operator, value] = item;
+        // `convertConditionToMongo` now throws rather than returning null for an
+        // operator it cannot express, so a dropped condition can no longer
+        // silently widen the result set.
         const cond = this.convertConditionToMongo(field, operator, value);
         if (cond) logicGroups[logicGroups.length - 1].conditions.push(cond);
+      } else {
+        throw new Error(
+          `[driver-memory] Unrecognized filter element of type ` +
+            `"${item === null ? 'null' : typeof item}" — expected a logical keyword ` +
+            `("and"/"or") or a condition array. Filter was: ${JSON.stringify(filters)}`,
+        );
       }
     }
 
@@ -735,7 +761,12 @@ export class InMemoryDriver implements IDataDriver {
    * Convert a single ObjectQL condition to MongoDB operator format.
    */
   private convertConditionToMongo(field: string, operator: string, value: any): Record<string, any> | null {
-    switch (operator) {
+    // Fold every accepted spelling of one comparison onto a single infix form,
+    // so this switch has one case per comparison rather than one per spelling —
+    // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
+    // `after` for the same thing. A private alias list here is what let this
+    // driver and driver-sql accept different vocabularies. #3948.
+    switch (canonicalAstOperator(operator)) {
       case '=': case '==':
         return { [field]: value };
       case '!=': case '<>':
@@ -746,13 +777,20 @@ export class InMemoryDriver implements IDataDriver {
         return { [field]: { $gte: value } };
       case '<':
         return { [field]: { $lt: value } };
-      case '<=':
-        return { [field]: { $lte: value } };
+      case '<=': {
+        // A bare-day upper bound means "through that whole day" (#4042, the
+        // driver-sql twin is #3777): `<= 2026-07-28` on an ISO-timestamp value
+        // compiles half-open (`< 2026-07-29`), which is also order-equivalent
+        // to `<=` for plain `YYYY-MM-DD` date values — so no field-type lookup
+        // is needed, exactly the argument the preview evaluator uses.
+        const nextDay = nextUtcCalendarDay(value);
+        return { [field]: nextDay != null ? { $lt: nextDay } : { $lte: value } };
+      }
       case 'in':
         return { [field]: { $in: value } };
-      case 'nin': case 'not in':
+      case 'nin': case 'not_in': case 'notin': case 'not in':
         return { [field]: { $nin: value } };
-      case 'contains': case 'like':
+      case 'contains': case 'like': case 'ilike':
         return { [field]: { $regex: new RegExp(this.escapeRegex(value), 'i') } };
       case 'notcontains': case 'not_contains':
         return { [field]: { $not: { $regex: new RegExp(this.escapeRegex(value), 'i') } } };
@@ -760,13 +798,42 @@ export class InMemoryDriver implements IDataDriver {
         return { [field]: { $regex: new RegExp(`^${this.escapeRegex(value)}`, 'i') } };
       case 'endswith': case 'ends_with':
         return { [field]: { $regex: new RegExp(`${this.escapeRegex(value)}$`, 'i') } };
+      // Null / empty predicates. These are in `VALID_AST_OPERATORS` and were
+      // absent here, so every one of them fell to `default: return null` and was
+      // dropped — `is_null` narrowed nothing instead of matching null rows.
+      // Alias sets and semantics mirror driver-sql's `whereNull`/`whereNotNull`
+      // arms so both backends accept the same vocabulary. In a document store
+      // `{field: null}` matches null AND missing, and `$ne: null` excludes both,
+      // which is the right analogue of SQL IS [NOT] NULL. #3948.
+      case 'is_null': case 'isnull': case 'is_empty': case 'isempty': case 'empty':
+        return { [field]: null };
+      case 'is_not_null': case 'isnotnull':
+      case 'is_not_empty': case 'isnotempty': case 'not_empty': case 'notempty':
+      case 'is_set': case 'set':
+        return { [field]: { $ne: null } };
       case 'between':
         if (Array.isArray(value) && value.length === 2) {
-          return { [field]: { $gte: value[0], $lte: value[1] } };
+          // Bare-day max → half-open, inheriting `<=`'s whole-day rule (#4042).
+          const nextDay = nextUtcCalendarDay(value[1]);
+          return {
+            [field]: nextDay != null
+              ? { $gte: value[0], $lt: nextDay }
+              : { $gte: value[0], $lte: value[1] },
+          };
         }
-        return null;
+        throw new Error(
+          `[driver-memory] "between" on field "${field}" needs a two-element array, got ` +
+            `${JSON.stringify(value)}. Returning no predicate would silently match every record.`,
+        );
       default:
-        return null;
+        // Was `return null`, which the caller dropped — so an operator this
+        // driver cannot express narrowed nothing instead of erroring. driver-sql
+        // already threw on the same input; the two backends disagreed. #3948.
+        throw new Error(
+          `[driver-memory] Unsupported filter operator "${operator}" on field "${field}". ` +
+            `Supported operators: =, !=, <, <=, >, >=, in, nin, between, contains, ` +
+            `not_contains, starts_with, ends_with (see @objectstack/spec VALID_AST_OPERATORS).`,
+        );
     }
   }
 
@@ -862,9 +929,21 @@ export class InMemoryDriver implements IDataDriver {
         case '$between':
           if (Array.isArray(val) && val.length === 2) {
             result.$gte = val[0];
-            result.$lte = val[1];
+            // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
+            const betweenNextDay = nextUtcCalendarDay(val[1]);
+            if (betweenNextDay != null) result.$lt = betweenNextDay;
+            else result.$lte = val[1];
           }
           break;
+        case '$lte': {
+          // A bare-day upper bound means "through that whole day" (#4042; the
+          // driver-sql twin is #3777). Order-equivalent to `<=` for plain
+          // `YYYY-MM-DD` values, so it applies without a field-type lookup.
+          const nextDay = nextUtcCalendarDay(val);
+          if (nextDay != null) result.$lt = nextDay;
+          else result.$lte = val;
+          break;
+        }
         case '$null':
           // $null: true → field is null, $null: false → field is not null
           // Use $eq/$ne null for Mingo compatibility

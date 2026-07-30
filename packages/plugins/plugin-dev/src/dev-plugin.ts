@@ -603,21 +603,22 @@ export class DevPlugin implements Plugin {
     if (enabled('rest')) {
       try {
         const { createRestApiPlugin } = await import('@objectstack/rest') as any;
-        // Secure-by-default carve-out (mirrors `objectstack serve`, ADR-0056
-        // D2): when NO auth mounted in this dev stack (service disabled or
-        // plugin-auth not installed), nobody could ever authenticate — the
-        // deny default would brick the local playground's data API. Pass an
-        // EXPLICIT fail-open for that case; the REST plugin's boot warning
-        // keeps the posture visible.
-        const restPlugin = authMounted
-          ? createRestApiPlugin()
-          : createRestApiPlugin({ api: { api: { requireAuth: false } } as any });
-        this.childPlugins.push(restPlugin);
-        ctx.logger.info(
-          authMounted
-            ? '  ✔ REST API endpoints enabled (CRUD + metadata)'
-            : '  ✔ REST API endpoints enabled (CRUD + metadata; anonymous ALLOWED — no auth mounted)',
-        );
+        // [#3963] The auth-less fail-open carve-out is gone. It used to pass an
+        // EXPLICIT `requireAuth: false` when no auth was mounted, on the grounds
+        // that nobody could authenticate so the deny default would brick the
+        // playground's data API. That reasoning inverts the right conclusion: a
+        // stack with no auth has no security model, so it should not serve a data
+        // API at all — and leaving the back door here would have made the dev
+        // plugin the one surface that still opens the whole data plane.
+        if (!authMounted) {
+          throw new Error(
+            '[dev] Cannot enable the data API: no auth is mounted in this stack, so no caller could '
+            + 'ever authenticate and anonymous access to object data is always denied (#3963). '
+            + 'Install/enable plugin-auth (or the `auth` tier), or drop the REST API from this dev stack.',
+          );
+        }
+        this.childPlugins.push(createRestApiPlugin());
+        ctx.logger.info('  ✔ REST API endpoints enabled (CRUD + metadata)');
       } catch {
         ctx.logger.debug('  ℹ @objectstack/rest not installed — skipping REST endpoints');
       }

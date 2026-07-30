@@ -682,6 +682,27 @@ export class SecurityPlugin implements Plugin {
             return false;
           }
         },
+        // [ADR-0111 D1 DEPTH] Effective WRITE scope — the DEPTH primitive behind
+        // canManageShares' hierarchy-manager branch. Same evaluator the CRUD
+        // write path uses; fails CLOSED to 'own' on error / principal-less /
+        // on-behalf-of. Returns 'org' for system and for Modify-All holders —
+        // AND for the fail-open unmatched-object case, which is why the sharing
+        // gate treats 'org' from here as non-authoritative on its own.
+        resolveWriteScope: async (object: string, context?: any): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'> => {
+          if (context?.isSystem) return 'org';
+          if (!context?.userId || context?.onBehalfOf?.userId) return 'own';
+          try {
+            const meta = await this.getObjectSecurityMeta(object);
+            const sets = await this.resolvePermissionSetsForContext(context);
+            return this.permissionEvaluator.getEffectiveScope('write', object, sets, { isPrivate: meta.isPrivate });
+          } catch (e) {
+            this.logger.warn?.(
+              `[security] resolveWriteScope failed for object '${object}' (user ${context?.userId ?? 'unknown'}) — narrowing to 'own' (fail-closed)`,
+              e instanceof Error ? e : new Error(String(e)),
+            );
+            return 'own';
+          }
+        },
         // [ADR-0046 §6.7] Effective permission-set NAMES for a caller — the
         // primitive the REST read layer needs to evaluate a permission-set-
         // gated book/doc audience ({ permissionSet: '…' }). Same resolution
@@ -750,7 +771,7 @@ export class SecurityPlugin implements Plugin {
       // form's declared target (set by the rest-server form-submit route). It
       // authorizes ONLY create + the immediate read-back on THAT object — never
       // anything else, and never the anonymous fall-open. This lets public forms
-      // work under secure-by-default (requireAuth) WITHOUT a deployment-configured
+      // work under secure-by-default (anonymous-deny) WITHOUT a deployment-configured
       // `guest_portal`, scoped to exactly the declared object (the field
       // allow-list is enforced at the route; the context is request-scoped).
       const formGrant = opCtx.context?.publicFormGrant;

@@ -55,7 +55,7 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
   ];
 
   describe('detectManagedDrift', () => {
-    it('flags a NOT NULL column that metadata says is optional (safe / relax_not_null)', async () => {
+    it('flags a NOT NULL column on a non-required optional field as needs_confirm (ADR-0113 — ratify or relax, never auto-applied)', async () => {
       const driver = makeDriver();
       await seedLegacyTable(driver);
       await driver.initObjects(relaxedMeta);
@@ -64,8 +64,12 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
       const orgDrift = drift.find((d) => d.column === 'organization_id');
       expect(orgDrift).toBeDefined();
       expect(orgDrift!.kind).toBe('nullability_mismatch');
-      expect(orgDrift!.category).toBe('safe');
+      expect(orgDrift!.category).toBe('needs_confirm');
       expect(orgDrift!.op.type).toBe('relax_not_null');
+      // The write-gated sibling is SILENT: `name` is required-without-storage
+      // over its legacy NOT NULL column — the pre-17 posture after a runtime
+      // upgrade; the validator makes the column constraint unreachable.
+      expect(drift.find((d) => d.column === 'name')).toBeUndefined();
     });
 
     it('flags an orphaned physical column as destructive (unmapped_column)', async () => {
@@ -85,18 +89,29 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
       expect(orphan!.op.type).toBe('drop_column');
     });
 
-    it('flags a required metadata field over a nullable column as destructive (tighten)', async () => {
+    it('flags a declared storage.notNull over a nullable column as destructive (tighten) — ADR-0113', async () => {
       const driver = makeDriver();
       await knexInstance.schema.createTable('biz_unit', (t: any) => {
         t.string('id').primary();
         t.string('name'); // nullable
       });
-      await driver.initObjects([{ name: 'biz_unit', fields: { name: { type: 'string', required: true } } }]);
+      await driver.initObjects([{ name: 'biz_unit', fields: { name: { type: 'string', required: true, storage: { notNull: true } } } }]);
 
       const drift = await driver.detectManagedDrift();
       const d = drift.find((x) => x.column === 'name');
       expect(d?.category).toBe('destructive');
       expect(d?.op.type).toBe('tighten_not_null');
+    });
+
+    it('required WITHOUT storage.notNull over a nullable column is the declared posture — no drift (ADR-0113)', async () => {
+      const driver = makeDriver();
+      await knexInstance.schema.createTable('biz_unit', (t: any) => {
+        t.string('id').primary();
+        t.string('name'); // nullable — exactly what the declaration asks for
+      });
+      await driver.initObjects([{ name: 'biz_unit', fields: { name: { type: 'string', required: true } } }]);
+
+      expect(await driver.detectManagedDrift()).toHaveLength(0);
     });
 
     it('does not flag varchar length on SQLite (no length enforcement)', async () => {
@@ -119,28 +134,32 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
   });
 
   describe("dev auto-reconcile (autoMigrate: 'safe')", () => {
-    it('self-heals a NOT NULL→NULL relax on restart, preserving data, so an optional-field insert succeeds (#2178 repro)', async () => {
+    it('does NOT auto-relax a stray NOT NULL — needs_confirm survives dev auto-reconcile (ADR-0113, supersedes the #2178 self-heal)', async () => {
+      // Pre-ADR-0113 this scenario self-healed: relax_not_null was `safe`, so
+      // dev auto-reconcile silently stripped the constraint. That silence cuts
+      // both ways — the same auto-relax would strip a constraint an operator
+      // added deliberately. The relax is now `needs_confirm`: reported loudly,
+      // applied only on purpose (ratify with `storage.notNull` or run the
+      // migrate apply). Data is untouched either way.
       const driver = makeDriver({ autoMigrate: 'safe' });
       await seedLegacyTable(driver);
 
       await driver.initObjects(relaxedMeta); // simulates restart after pull+rebuild
 
-      // Column is now nullable...
+      // The column is NOT auto-relaxed...
       const info = await knexInstance('biz_unit').columnInfo();
-      expect(info.organization_id.nullable).toBe(true);
+      expect(info.organization_id.nullable).toBe(false);
 
-      // ...the pre-existing row survived the rebuild...
+      // ...the pre-existing row is untouched...
       const rows = await knexInstance('biz_unit').select('*');
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ id: '1', name: 'Acme', organization_id: 'org1' });
 
-      // ...and a write that omits the now-optional field succeeds.
-      await expect(
-        knexInstance('biz_unit').insert({ id: '2', name: 'Beta' }),
-      ).resolves.toBeDefined();
-
-      // No residual drift.
-      expect(await driver.detectManagedDrift()).toHaveLength(0);
+      // ...and the divergence is reported for a human decision.
+      const drift = await driver.detectManagedDrift();
+      const d = drift.find((x) => x.column === 'organization_id');
+      expect(d?.category).toBe('needs_confirm');
+      expect(d?.op.type).toBe('relax_not_null');
     });
 
     it('does NOT auto-apply destructive drift (orphan column kept; warned instead)', async () => {

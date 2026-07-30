@@ -3,10 +3,18 @@
 /**
  * REST surface for ShareLinkService.
  *
- *   POST   /api/v1/share-links                 → create a link
- *   GET    /api/v1/share-links                 → list links (?object, ?recordId, ?includeRevoked)
- *   DELETE /api/v1/share-links/:idOrToken      → revoke
- *   GET    /api/v1/share-links/:token/resolve  → resolve token, returns { record, link, redactFields }
+ *   POST   /api/v1/share-links                 → create a link      → data: link
+ *   GET    /api/v1/share-links                 → list links         → data: link[]
+ *                                                (?object, ?recordId, ?includeRevoked)
+ *   DELETE /api/v1/share-links/:idOrToken      → revoke             → data: { ok: true }
+ *   GET    /api/v1/share-links/:token/resolve  → resolve token      → data: { record, link, redactFields }
+ *   GET    /api/v1/share-links/:token/messages → conversation rows  → data: ai_messages[]
+ *
+ * Every body is the declared `{ success: true, data }` / `{ success: false,
+ * error: { code, message } }` envelope, built in exactly two places — {@link sendOk}
+ * and {@link sendError}. Read `sendOk`'s note first: the shapes above are the
+ * dispatcher twin's, which this module converged onto in #3983, and the `success`
+ * flag they used to omit is why two `client.shareLinks.*` methods were broken here.
  *
  * The resolve route is intentionally public — it's the only endpoint
  * holders of a token need. It does:
@@ -48,8 +56,63 @@ export interface ShareLinkRoutesOptions {
 // verified `contextFromRequest` (the plugin does).
 const defaultContext = (_req: IHttpRequest): ShareLinkExecutionContext => ({});
 
+/**
+ * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
+ * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
+ * `{ success: false, error: { code, message } }`.
+ *
+ * The nested `{ code, message }` was already right (#3675's changeset cited this
+ * module as the good example of it); the `success` flag is what was missing.
+ * See {@link sendOk} for why that flag is load-bearing rather than decorative.
+ */
 function sendError(res: IHttpResponse, status: number, code: string, message: string) {
-  res.status(status).json({ error: { code, message } });
+  res.status(status).json({ success: false, error: { code, message } });
+}
+
+/**
+ * Emit a success body in the DECLARED envelope — `BaseResponseSchema`
+ * (`packages/spec/src/api/contract.zod.ts`), i.e. `{ success: true, data }`,
+ * with `data` carrying each route's payload DIRECTLY.
+ *
+ * ## This is a convergence, not a new dialect
+ *
+ * These five routes have a twin: `runtime/src/domains/share-links.ts` serves
+ * the same paths off the dispatcher, and for cloud's per-environment kernels
+ * that twin is the DESIGNED PRIMARY surface (`registerShareLinkRoutes: false`).
+ * It has always answered in the declared envelope with `data` as the payload —
+ * `data: link`, `data: links`, `data: { ok: true }`, `data: { record, link,
+ * redactFields }`, `data: rows`. This module answered `{ link }`, `{ links }`,
+ * `{ ok: true }`, `{ record, link, redactFields }`, `{ data: rows }`. Same
+ * routes, two shapes, decided by which surface happened to mount them — the
+ * asymmetry #3636 fixed for `/i18n`, one domain over.
+ *
+ * ## What that asymmetry actually broke
+ *
+ * Three of these routes are `disposition: 'sdk'` in `runtime/src/route-ledger.ts`
+ * (`shareLinks.create` / `.list` / `.revoke`), and `ObjectStackClient.unwrapResponse`
+ * keys on a boolean `success`. With no flag it returns the body verbatim, so
+ * against THIS surface:
+ *
+ *   • `shareLinks.create()` — documented "Returns the link row (incl. `token`)"
+ *     — handed back `{ link: … }`, making `.token` `undefined`.
+ *   • `shareLinks.list()` — typed `Promise<any[]>` — handed back `{ links: [] }`,
+ *     so any `.map()` on it threw.
+ *
+ * `packages/client/src/admin-surfaces.test.ts` mocks all three as
+ * `{ success: true, data: <payload> }`: the SDK was written and tested against
+ * the dispatcher's shape. So this is not envelope cosmetics — it is why two SDK
+ * methods did not work on the plugin surface at all.
+ *
+ * ## Why `data` carries the payload bare
+ *
+ * `sendOk(res, links)`, not `sendOk(res, { links })`. That is what makes
+ * `unwrapResponse` return the same value on both surfaces, and it is what the
+ * consumers already read (`body.links ?? body.data`, `created.link ?? created.data`,
+ * `body?.data ?? []`) — they carry that tolerance precisely BECAUSE both shapes
+ * exist in the fleet. Prime Directive #12: the shim goes once the producer agrees.
+ */
+function sendOk(res: IHttpResponse, data: unknown, status = 200): void {
+  res.status(status).json({ success: true, data });
 }
 
 /** Strip `redactFields` from a record (also removes from nested arrays of objects). */
@@ -101,7 +164,7 @@ export function registerShareLinkRoutes(
       // endpoint also returns it (admins need to copy/recreate URLs),
       // but downstream API consumers typically derive the public URL
       // from `link.token` immediately.
-      await res.status(201).json({ link });
+      sendOk(res, link, 201);
     } catch (err: any) {
       sendError(res, err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Failed to create link');
     }
@@ -113,7 +176,7 @@ export function registerShareLinkRoutes(
       const ctx = await ctxOf(req);
       if (!ctx.userId) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to list share links');
       const q = req.query ?? {};
-      const link = await service.listLinks(
+      const links = await service.listLinks(
         {
           object: typeof q.object === 'string' ? q.object : undefined,
           recordId: typeof q.recordId === 'string' ? q.recordId : undefined,
@@ -124,7 +187,7 @@ export function registerShareLinkRoutes(
         },
         ctx,
       );
-      await res.json({ links: link });
+      sendOk(res, links);
     } catch (err: any) {
       sendError(res, err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Failed to list links');
     }
@@ -136,7 +199,11 @@ export function registerShareLinkRoutes(
       const ctx = await ctxOf(req);
       if (!ctx.userId) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to revoke share links');
       await service.revokeLink(req.params.idOrToken, ctx);
-      await res.status(200).json({ ok: true });
+      // `{ ok: true }` moves from BEING the body to being its `data`. It was a
+      // second word for `success` at the top level (#3689 retired that from
+      // storage); inside `data` it is just the payload, and it is the payload the
+      // dispatcher twin and `admin-surfaces.test.ts` both already use.
+      sendOk(res, { ok: true });
     } catch (err: any) {
       sendError(res, err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Failed to revoke link');
     }
@@ -206,7 +273,7 @@ export function registerShareLinkRoutes(
         return sendError(res, 410, 'RECORD_GONE', 'The shared record no longer exists');
       }
 
-      await res.json({
+      sendOk(res, {
         record: applyRedaction(record, resolved.redactFields),
         link: {
           id: resolved.link.id,
@@ -262,7 +329,10 @@ export function registerShareLinkRoutes(
         limit: 500,
         context: SYSTEM_CTX,
       } as any);
-      res.status(200).json({ data: rows ?? [] });
+      // Already had a `data` key, but no `success` flag — so `unwrapResponse`
+      // returned the WRAPPER `{ data: rows }` rather than `rows`. Adding the flag
+      // is what makes the same read (`body.data`) work through the SDK too.
+      sendOk(res, rows ?? []);
     } catch (err: any) {
       sendError(
         res,

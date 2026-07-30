@@ -9,6 +9,7 @@ import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/obs
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
@@ -78,6 +79,78 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
  * returns a misleading 404.
  */
 /**
+ * A Zod issue → the field-level catalog (ADR-0114 D3).
+ *
+ * Zod's issue codes are Zod's API, not ours, and this used to pass them straight
+ * through. Two things were wrong with that. The wire carried two vocabularies on
+ * one position — `too_small` from a route that parses with Zod, `min_length` from
+ * the validators — so a client could not read a field code without knowing which
+ * route served it. And Zod's own codes are ambiguous alone: `too_small` covers a
+ * short string, a small number AND a short array.
+ *
+ * `origin` and `format` disambiguate every case, so the mapping is total rather
+ * than best-effort. The one row that fixes a user-visible bug rather than tidying
+ * a name: Zod reports a MISSING required property as `invalid_type` (expected
+ * string, received undefined), so passing it through marked a missing input as a
+ * type error.
+ */
+function zodIssueToFieldCode(issue: any, input?: unknown, inputProvided = false): FieldErrorCode {
+    const origin = issue?.origin;
+    switch (issue?.code) {
+        case 'too_small':
+            return origin === 'number' || origin === 'bigint' || origin === 'date' ? 'min_value'
+                : origin === 'array' || origin === 'set' ? 'min_items'
+                : 'min_length';
+        case 'too_big':
+            return origin === 'number' || origin === 'bigint' || origin === 'date' ? 'max_value'
+                : origin === 'array' || origin === 'set' ? 'max_items'
+                : 'max_length';
+        case 'invalid_format':
+            return issue?.format === 'email' ? 'invalid_email'
+                : issue?.format === 'url' ? 'invalid_url'
+                : 'invalid_format';
+        case 'invalid_type': {
+            // Zod spells "absent" as a type mismatch against `undefined`, so a
+            // MISSING required property arrives here rather than as its own code.
+            // The issue itself cannot tell the two apart — v4 carries `expected`
+            // and a message but not the offending value — so the only honest
+            // discriminator is the parsed input, walked to `path`. Without it we
+            // keep `invalid_type`: reading "received undefined" out of the message
+            // would make the wire contract depend on Zod's phrasing, which is the
+            // leak this mapping exists to stop.
+            if (!inputProvided) return 'invalid_type';
+            return valueAtPath(input, issue?.path) === undefined ? 'required' : 'invalid_type';
+        }
+        case 'invalid_value':
+            // A closed set (`z.enum`, `z.literal`) the value is not a member of.
+            return 'invalid_option';
+        case 'unrecognized_keys':
+            return 'unknown_field';
+        case 'invalid_union':
+        case 'invalid_element':
+        case 'invalid_key':
+            return 'invalid_shape';
+        case 'not_multiple_of':
+        case 'custom':
+        default:
+            // A catalog member, not a leak: an unmapped Zod code still lands on a
+            // code the client can read, and `message` carries the specifics.
+            return 'invalid_value';
+    }
+}
+
+/** Walk a Zod issue `path` into the value that was parsed. */
+function valueAtPath(input: unknown, path: unknown): unknown {
+    if (!Array.isArray(path)) return undefined;
+    let cur: any = input;
+    for (const seg of path) {
+        if (cur === null || cur === undefined) return undefined;
+        cur = cur[seg as any];
+    }
+    return cur;
+}
+
+/**
  * Zod issues → the data surface's `fields[]` validation envelope
  * (`{ field, code, message }`, docs/api/wire-format §7).
  *
@@ -85,13 +158,18 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
  * a validator-thrown `VALIDATION_FAILED` does through {@link mapDataError}
  * (#3918) — otherwise a client keying on `fields` has to learn a second shape
  * per route, and `code: 'VALIDATION_FAILED'` stops meaning one thing on the
- * wire.
+ * wire. Since ADR-0114 that sameness covers the `code` VALUE too, not just the
+ * shape: see {@link zodIssueToFieldCode}.
  */
-export function zodIssuesToFields(issues: unknown): Array<{ field: string; code: string; message: string }> {
+export function zodIssuesToFields(
+    issues: unknown,
+    ...input: [] | [unknown]
+): Array<{ field: string; code: FieldErrorCode; message: string }> {
     if (!Array.isArray(issues)) return [];
+    const inputProvided = input.length > 0;
     return issues.map((i: any) => ({
         field: Array.isArray(i?.path) ? i.path.join('.') : String(i?.path ?? ''),
-        code: String(i?.code ?? 'invalid'),
+        code: zodIssueToFieldCode(i, input[0], inputProvided),
         message: String(i?.message ?? 'Invalid value'),
     }));
 }
@@ -782,7 +860,6 @@ type NormalizedRestServerConfig = {
         enableSearch?: boolean;
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
-        requireAuth: boolean;
         documentation: RestApiConfig['documentation'];
         responseFormat: RestApiConfig['responseFormat'];
     };
@@ -1145,8 +1222,9 @@ export class RestServer {
     }
 
     /**
-     * Reject anonymous requests with HTTP 401 when `api.requireAuth` is set.
-     * Returns `true` if the response was sent and the caller should stop
+     * Reject anonymous requests with HTTP 401 — unconditionally (#3963: the
+     * `api.requireAuth` opt-out is retired). Returns `true` if the response was
+     * sent and the caller should stop
      * processing. Returns `false` to continue.
      *
      * The check is intentionally narrow: only `context?.userId` counts as
@@ -1155,7 +1233,7 @@ export class RestServer {
      */
     private enforceAuth(req: any, res: any, context: any): boolean {
         // ADR-0069 — authentication-policy gate (password expiry, enforced MFA).
-        // Independent of `requireAuth`: a gated session (carrying `authGate`) is
+        // Independent of the anonymous-deny: a gated session (carrying `authGate`) is
         // blocked from protected resources, while the core allow-list keeps auth
         // + remediation reachable. Runs before the anonymous check.
         const gate = context?.authGate;
@@ -1169,7 +1247,6 @@ export class RestServer {
         // exactly as before (the allowlist is reserved for a future umbrella
         // seam). `isSystem` is never set on inbound HTTP, so it cannot bypass.
         if (shouldDenyAnonymous({
-            requireAuth: this.config.api.requireAuth,
             userId: context?.userId,
             isSystem: context?.isSystem,
             method: req?.method,
@@ -1981,7 +2058,6 @@ export class RestServer {
                 enableSearch: (api as any).enableSearch ?? true,
                 enableProjectScoping: api.enableProjectScoping ?? false,
                 projectResolution: api.projectResolution ?? 'auto',
-                requireAuth: (api as any).requireAuth ?? true, // secure-by-default (ADR-0056 D2; mirrors RestApiConfigSchema)
                 documentation: api.documentation,
                 responseFormat: api.responseFormat,
             },
@@ -2128,6 +2204,41 @@ export class RestServer {
     }
     
     /**
+     * Is `/mcp` actually serveable — i.e. is the MCP service registered with
+     * the shape `handleMcpRequest` needs?
+     *
+     * `true`/`false` are answers; `null` means "could not probe". The route
+     * itself is served by the runtime dispatcher (`domains/mcp.ts`), which
+     * 501s on `!mcp || typeof mcp.handleHttpRequest !== 'function'` — so this
+     * probe exists to keep our `/discovery` from advertising a route that
+     * would 501 (#4024).
+     *
+     * Same two probe paths as {@link resolveRegisteredServices} (ADR-0057
+     * D10): the per-request kernel for multi-env hosts, else the single-env
+     * `serviceExistsProvider` — which `rest-api-plugin` always wires. Via the
+     * kernel we can check the SHAPE; the single-env provider answers existence
+     * only, which is the dominant case (the dispatcher's own service-aware
+     * discovery covers the wrong-shape case).
+     */
+    private async probeMcpServeable(req: any): Promise<boolean | null> {
+        try {
+            let environmentId: string | undefined = req?.params?.environmentId;
+            if ((!environmentId || environmentId === ':environmentId') && this.defaultEnvironmentIdProvider) {
+                try { environmentId = this.defaultEnvironmentIdProvider() || undefined; } catch { /* ignore */ }
+            }
+            if (environmentId && environmentId !== 'platform' && this.kernelManager) {
+                const kernel: any = await this.kernelManager.getOrCreate(environmentId);
+                if (kernel && typeof kernel.getServiceAsync === 'function') {
+                    const svc: any = await kernel.getServiceAsync('mcp').catch(() => undefined);
+                    return typeof svc?.handleHttpRequest === 'function';
+                }
+            }
+            if (this.serviceExistsProvider) return this.serviceExistsProvider('mcp') === true;
+        } catch { /* fall through to "cannot probe" */ }
+        return null;
+    }
+
+    /**
      * Register discovery endpoints
      */
     private registerDiscoveryEndpoints(basePath: string): void {
@@ -2166,8 +2277,22 @@ export class RestServer {
                         // project-scoped), so point at the unscoped base. This
                         // `/discovery` (served by @objectstack/rest) is separate
                         // from the dispatcher's getDiscoveryInfo — both must
-                        // advertise `mcp` (single source: isMcpServerEnabled).
-                        if (isMcpServerEnabled()) {
+                        // advertise `mcp` on the same terms.
+                        //
+                        // Enabled is NOT the same as serveable (#4024). The flag
+                        // alone used to gate this, on the reasoning that `os serve`
+                        // auto-loads plugin-mcp from the same flag. But that
+                        // lockstep belongs to the CLI: `@objectstack/rest` has no
+                        // `@objectstack/mcp` dependency, mounts no /mcp route and
+                        // performs no auto-load, so an embedder that skips
+                        // plugin-mcp had `mcp` advertised here while the route
+                        // 501'd — the `declared ≠ enforced` failure #3369 forbids.
+                        // A `null` probe means we genuinely cannot tell; keep the
+                        // old flag-only answer there rather than hiding a working
+                        // endpoint (fail-open, ADR-0057 D10) — the dispatcher's own
+                        // discovery is service-aware and stays authoritative.
+                        const mcpServeable = await this.probeMcpServeable(req);
+                        if (isMcpServerEnabled() && mcpServeable !== false) {
                             const unscopedBase = isScoped
                                 ? basePath.replace(/\/(environments|projects)\/:environmentId$/, '')
                                 : basePath;
@@ -2420,23 +2545,22 @@ export class RestServer {
     }
     
     /**
-     * Register the metadata routes behind the SAME `requireAuth` gate the
+     * Register the metadata routes behind the SAME anonymous-deny gate the
      * `/data` routes use.
      *
      * `registerMetadataEndpoints` builds ~17 `/meta/*` routes but — unlike the
      * `/data` handlers — never calls {@link enforceAuth}: its handlers assumed
-     * the `requireAuth` gate rejected anonymous callers "upstream", yet nothing
-     * upstream covers `/meta`, so on a `requireAuth` deployment an anonymous
-     * caller could read object / field schemas. On a tenant-less runtime host
-     * those are SYSTEM-object schemas and the host is publicly reachable — a
-     * real leak.
+     * the anonymous-deny rejected anonymous callers "upstream", yet nothing
+     * upstream covers `/meta`, so an anonymous caller could read object / field
+     * schemas. On a tenant-less runtime host those are SYSTEM-object schemas and
+     * the host is publicly reachable — a real leak.
      *
      * Rather than add the gate to every handler (and have the next new route
      * forget it — the exact failure mode that caused this), wrap the route
      * registrar for the duration of registration so every meta route, present
-     * and future, inherits it. The check is a no-op when `requireAuth` is off
-     * (demo / single-tenant), so the previously-public metadata surface there
-     * is unchanged; an authenticated user passes exactly as on `/data`.
+     * and future, inherits it. An authenticated user passes exactly as on
+     * `/data`; the one exception is the declaration-derived public-book read
+     * (#3963), handled just below.
      */
     private registerMetadataEndpoints(basePath: string): void {
         const realRouteManager = this.routeManager;
@@ -2455,7 +2579,7 @@ export class RestServer {
                         const context = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                         // [#3963] `audience: 'public'` is a DECLARED capability, so it
                         // must not depend on a deployment flipping its whole data plane
-                        // open (`requireAuth: false`). An anonymous read of the
+                        // open. An anonymous read of the
                         // book/doc surface skips the anonymous-deny and is authorized
                         // instead by the ADR-0046 §6.7 audience gate inside the handler
                         // — the same declaration-derived shape ADR-0056 Option A chose
@@ -2632,7 +2756,7 @@ export class RestServer {
                         // privileged apps (Studio, Setup, etc.) and gated nav
                         // items are stripped before reaching the client. We
                         // intentionally leave anonymous responses untouched —
-                        // the existing `requireAuth` gate (when enabled) blocks
+                        // the anonymous-deny gate blocks
                         // them upstream; when disabled, the demo / public
                         // surface keeps its prior behaviour.
                         //
@@ -4967,14 +5091,14 @@ export class RestServer {
      *   GET  {basePath}/forms/:slug          → resolved form spec
      *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required)
      *
-     * Both routes bypass `enforceAuth` even when `requireAuth=true` on the
+     * Both routes bypass `enforceAuth` even though anonymous-deny is on for the
      * deployment (e.g. ObjectOS multi-tenant). Security is delegated to the
      * `guest_portal` permission set carried on the execution context — the
      * SecurityPlugin enforces INSERT-only access to the target object. If
      * the deployment hasn't registered a `guest_portal` profile, the
      * security middleware falls open with `permissions: []` (no userId),
      * matching the existing anonymous-access semantics; deployers must
-     * keep `requireAuth=true` deployments paired with a `guest_portal`
+     * keep secure-by-default deployments paired with a `guest_portal`
      * profile (the CRM example does this) to enforce the INSERT-only
      * contract.
      *
@@ -5246,7 +5370,7 @@ export class RestServer {
                     // form — a narrow create grant scoped to exactly this form's target
                     // object. The SecurityPlugin honors `publicFormGrant` (create + the
                     // immediate read-back, that object ONLY), so public forms work under
-                    // secure-by-default (requireAuth) WITHOUT a deployment-configured
+                    // secure-by-default (anonymous-deny) WITHOUT a deployment-configured
                     // `guest_portal`. `guest_portal` + `anonymous` are kept for back-compat
                     // with object hooks (guest detection via falsy `ctx.user?.id`).
                     const context: any = {
@@ -5604,8 +5728,8 @@ export class RestServer {
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (!context?.userId) {
-                    // Even on requireAuth=false deployments the explain surface
-                    // stays authenticated-only — it is an admin diagnosis tool.
+                    // The explain surface stays authenticated-only — it is an
+                    // admin diagnosis tool. (Anonymous is already 401ed above.)
                     return res.status(401).json({
                         code: 'UNAUTHORIZED',
                         message: 'The access-explanation endpoint requires an authenticated caller.',
@@ -7001,17 +7125,15 @@ export class RestServer {
                         // (ADR-0049) was enforced on A while B was written. Zod also
                         // strips unknown keys, which keeps a body `context` from
                         // becoming the execution context on a deployment where none
-                        // resolves (anonymous-reachable `requireAuth: false`).
+                        // resolves (e.g. an anonymous public-book read, #3963).
                         const { UpdateManyDataRequestSchema } = await import('@objectstack/spec/api');
-                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse({
-                            ...(req.body ?? {}),
-                            object: req.params.object,
-                        });
+                        const updateManyInput = { ...(req.body ?? {}), object: req.params.object };
+                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse(updateManyInput);
                         if (!parsedUpdate.success) {
                             res.status(400).json({
                                 error: 'Invalid updateMany request',
                                 code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsedUpdate.error?.issues),
+                                fields: zodIssuesToFields(parsedUpdate.error?.issues, updateManyInput),
                                 object: req.params?.object,
                             });
                             return;
@@ -7067,15 +7189,13 @@ export class RestServer {
                         // so a body `object` would move the delete to an object
                         // whose exposure policy was never checked.
                         const { DeleteManyDataRequestSchema } = await import('@objectstack/spec/api');
-                        const parsed = (DeleteManyDataRequestSchema as any).safeParse({
-                            ...(req.body ?? {}),
-                            object: req.params.object,
-                        });
+                        const deleteManyInput = { ...(req.body ?? {}), object: req.params.object };
+                        const parsed = (DeleteManyDataRequestSchema as any).safeParse(deleteManyInput);
                         if (!parsed.success) {
                             res.status(400).json({
                                 error: 'Invalid deleteMany request',
                                 code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsed.error?.issues),
+                                fields: zodIssuesToFields(parsed.error?.issues, deleteManyInput),
                                 object: req.params?.object,
                             });
                             return;

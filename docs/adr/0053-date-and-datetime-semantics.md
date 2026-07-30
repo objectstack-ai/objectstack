@@ -658,3 +658,62 @@ host's zone) is not recoverable. Regression cover:
 `sql-driver-time-canonical-storage.test.ts`, `sql-driver-time-of-day.test.ts`
 (SQLite), `sql-driver-time-live-dialects.test.ts` (live PG + MySQL, in the CI
 temporal-conformance job's non-UTC matrix).
+
+---
+
+## Addendum (2026-07-30) — a bare-day UPPER bound means the whole day (#3777)
+
+> **Status:** landed. Extends Phase 1's calendar-day semantics with the
+> operator-sensitive half the original decision left implicit — and the default
+> dashboard configuration hit it: the date-range filter's default field is
+> `created_at`, a system-injected `Field.datetime`, and 7 of 13 presets end
+> "today", so `{ $lte: <today> }` anchored to midnight silently dropped every
+> row created after 00:00 of the final day.
+
+### D-D1 — Operator-sensitive translation lives at the comparison EMITTERS
+
+`YYYY-MM-DD` anchors to midnight UTC (D-B1). That instant is the correct
+comparand for `$gte`/`$gt`/`$lt` — and the wrong one for `$lte`, whose author
+means "through the whole of that day". The translation is therefore a property
+of the *comparison*, not of the value: `temporalFilterValue` stays
+operator-blind (form only), and each emitter that owns an operator compiles a
+bare-day upper bound half-open:
+
+- **`SqlDriver` filter compiler** (`calendarDayUpperBoundRewrite` /
+  `calendarDayBetweenRewrite`): `$lte`/`<=` → `< next-day-midnight` in storage
+  form; `$between [min, max]` with a bare-day max decomposes to
+  `>= min AND < next-day(max)`. Applies on both the plain and the
+  CASE-normalised (D-B2) column paths, and to the Mongo-style and array
+  `where` spellings. `driver-sqlite-wasm` inherits.
+- **`NativeSQLStrategy`** windows and `lte` filters bind `< next-day` instead
+  of `BETWEEN`/`<=` when the bound is a bare day.
+- **`ObjectQLStrategy`** leaves its lowered `{$gte, $lte}` bounds bare — the
+  driver rewrite is the single execution-path authority — and renders
+  `/analytics/sql` half-open so the echoed SQL reproduces execution.
+- **The dataset preview evaluator** applies the same rule in memory, replacing
+  its `'~'`-suffix string hack, so draft numbers match published numbers.
+
+One primitive backs all of them: `nextUtcCalendarDay` (`@objectstack/core`),
+which rejects instants, `Date`s and impossible days (`2026-02-30`) rather than
+inventing a bound. Half-open — never an inclusive `23:59:59.999`, which
+re-opens the gap at whatever precision the dialect stores beyond milliseconds
+(Postgres keeps microseconds), and is the same `[gte, lt)` shape the drill
+ranges (#1752) already emit. `< next-day` is also order-equivalent to `<= day`
+for `Field.date` text, which is what lets the type-blind emitters (raw SQL,
+preview) apply it unconditionally; the driver, which knows the column type,
+scopes the rewrite to `datetime` so `date`/`time` columns compile byte-identical
+to before.
+
+The filter-token resolver (`filter-tokens.ts`) keeps its documented refusal to
+widen: a resolver-side fix would change what a token *is*; the emitter-side fix
+changes what a comparison *does* with it, per column type — which is the layer
+that owns that knowledge.
+
+### D-D2 — Consequences for D-A3
+
+The conformance matrix gains a **bound-semantics** axis (`point`, `whole-day`):
+row-result coverage for the `$lte`/`$between` upper-bound cells now lives in
+`sql-driver-calendar-day-upper-bound.test.ts` (canonical + legacy-mixed
+storage, dialect physical forms, boundary rollovers) and the strategy/preview
+suites; the full matrix program (relative-token × live-driver × timezone)
+remains open under D-A3.
