@@ -116,7 +116,7 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **maxBatchSize** | `integer` | ✅ | Maximum number of keys per batch load |
-| **batchScheduleFn** | `Enum<'microtask' \| 'TIMEOUT' \| 'manual'>` | ✅ | Scheduling strategy for collecting batch keys |
+| **batchScheduleFn** | `Enum<'microtask' \| 'timeout' \| 'manual'>` | ✅ | Scheduling strategy for collecting batch keys |
 | **cacheEnabled** | `boolean` | ✅ | Enable per-request result caching |
 | **cacheKeyFn** | `string` | optional | Name or identifier of the cache key function |
 | **cacheTtl** | `number` | optional | Cache time-to-live in seconds (0 = no expiration) |
@@ -214,7 +214,7 @@ const result = ApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **preventNPlusOne** | `boolean` | ✅ | Enable N+1 query detection and prevention |
-| **dataLoader** | `{ maxBatchSize: integer; batchScheduleFn: Enum<'microtask' \| 'TIMEOUT' \| 'manual'>; cacheEnabled: boolean; cacheKeyFn?: string; … }` | optional | DataLoader batch loading configuration |
+| **dataLoader** | `{ maxBatchSize: integer; batchScheduleFn: Enum<'microtask' \| 'timeout' \| 'manual'>; cacheEnabled: boolean; cacheKeyFn?: string; … }` | optional | DataLoader batch loading configuration |
 | **batchStrategy** | `{ strategy: Enum<'dataloader' \| 'windowed' \| 'prefetch'>; windowMs?: number; prefetchDepth?: integer; associationLoading: Enum<'lazy' \| 'eager' \| 'batch'> }` | optional | Batch loading strategy configuration |
 | **maxQueryDepth** | `integer` | ✅ | Maximum depth for nested relation queries |
 | **queryComplexityLimit** | `number` | optional | Maximum allowed query complexity score |
