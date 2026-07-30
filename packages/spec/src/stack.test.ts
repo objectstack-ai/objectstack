@@ -303,7 +303,7 @@ describe('defineStack - Map Format Support', () => {
       apps: {
         sales: {
           label: 'Sales',
-          objects: ['account', 'contact'],
+          icon: 'briefcase',
         },
       },
     };
@@ -321,7 +321,7 @@ describe('defineStack - Map Format Support', () => {
         task: { fields: { title: { type: 'text' } } },
       },
       apps: [
-        { name: 'sales', label: 'Sales', objects: ['account'] },
+        { name: 'sales', label: 'Sales', icon: 'briefcase' },
       ],
     };
 

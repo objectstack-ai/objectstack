@@ -73,7 +73,7 @@ const result = ActionNavItem.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | App unique machine name (lowercase snake_case) |
 | **label** | `string` | ✅ | App display label |
-| **version** | `string` | optional | App version |
+| **version** | `any` | optional | [REMOVED] `App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no consumer in framework or objectui). An app is versioned by its owning package: use `manifest.version`. Delete the key. |
 | **description** | `string` | optional | App description |
 | **icon** | `string` | optional | App icon used in the App Launcher |
 | **branding** | `{ primaryColor?: string; accentColor?: string; logo?: string; favicon?: string }` | optional | App-specific branding |
@@ -85,13 +85,13 @@ const result = ActionNavItem.parse(data);
 | **contextSelectors** | `{ id: string; label: string; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
 | **homePageId** | `string` | optional | ID of the navigation item to serve as landing page |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this app |
-| **objects** | `any[]` | optional | Objects belonging to this app |
-| **apis** | `any[]` | optional | Custom APIs belonging to this app |
-| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration |
-| **embed** | `{ enabled?: boolean; allowedOrigins?: string[]; width?: string; height?: string; … }` | optional | Iframe embedding configuration |
-| **mobileNavigation** | `{ mode?: Enum<'drawer' \| 'bottom_nav' \| 'hamburger'>; bottomNavItems?: string[] }` | optional | Mobile-specific navigation configuration |
+| **objects** | `any` | optional | [REMOVED] `App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read; the spec itself labelled it "config file convenience"). Objects belong to the stack (`defineStack({ objects })`); an app reaches them through its navigation items. Delete the key. |
+| **apis** | `any` | optional | [REMOVED] `App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read). Declarative endpoints belong to the stack (`defineStack({ apis })`), not the app shell. Delete the key. |
+| **sharing** | `any` | optional | [REMOVED] `App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared sharing that did not exist. Public access is granted per FORM VIEW (`FormView.sharing`, the public-data-collection surface). Delete the key. |
+| **embed** | `any` | optional | [REMOVED] `App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface (`FormView.sharing`), not an app-level switch. Delete the key. |
+| **mobileNavigation** | `any` | optional | [REMOVED] `App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — fully unimplemented; no renderer, including packages/mobile, ever read it). Delete the key; the block returns if/when a real mobile navigation ships. |
 | **defaultAgent** | `string` | optional | Platform agent bound to this app's ambient chat ('ask' is the implicit default; 'build' for authoring surfaces) — ADR-0063 §1 |
-| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the application |
+| **aria** | `any` | optional | [REMOVED] `App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no renderer read app-level ARIA attributes). Declare `aria` on the component/widget that renders the DOM node instead. Delete the key. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this app. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

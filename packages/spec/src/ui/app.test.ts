@@ -557,25 +557,20 @@ describe('AppSchema', () => {
       expect(() => AppSchema.parse(hrApp)).not.toThrow();
     });
 
-    it('should accept app with sharing and embed config', () => {
-      const app = AppSchema.parse({
+    it('rejects the retired app-level sharing/embed blocks with the per-form-view pointer', () => {
+      // Pre-#4001 these parsed and were never read — a declared-but-unenforced
+      // security surface (2026-06 liveness audit, ADR-0049). The tombstone
+      // carries the prescription: public access is per FORM VIEW.
+      const result = AppSchema.safeParse({
         name: 'shared_portal',
         label: 'Shared Portal',
         navigation: [],
-        sharing: {
-          enabled: true,
-          allowAnonymous: true,
-        },
-        embed: {
-          enabled: true,
-          allowedOrigins: ['https://example.com'],
-          responsive: true,
-        },
+        sharing: { enabled: true },
+        embed: { enabled: true },
       });
-
-      expect(app.sharing?.enabled).toBe(true);
-      expect(app.embed?.enabled).toBe(true);
-      expect(app.embed?.allowedOrigins).toEqual(['https://example.com']);
+      expect(result.success).toBe(false);
+      const messages = result.error!.issues.map((i) => i.message).join('\n');
+      expect(messages).toContain('FormView.sharing');
     });
 
     it('should accept CRM app with deeply nested navigation tree', () => {
@@ -639,36 +634,20 @@ describe('AppSchema', () => {
   });
 });
 
-describe('App Mobile Navigation', () => {
-  it('should accept app with mobile navigation', () => {
-    const app = AppSchema.parse({
+describe('App Mobile Navigation (retired, #4001)', () => {
+  it('rejects the retired mobileNavigation block with the prescription', () => {
+    // Pre-#4001 these tests asserted a mode picker that changed NOTHING — the
+    // block was fully unimplemented (2026-06 liveness audit: even
+    // packages/mobile ignored it). The strip-era fiction is a loud error now.
+    const result = AppSchema.safeParse({
       name: 'mobile_app',
       label: 'Mobile App',
-      mobileNavigation: {
-        mode: 'bottom_nav',
-        bottomNavItems: ['nav_home', 'nav_contacts', 'nav_settings'],
-      },
+      mobileNavigation: { mode: 'bottom_nav' },
     });
-    expect(app.mobileNavigation?.mode).toBe('bottom_nav');
-    expect(app.mobileNavigation?.bottomNavItems).toHaveLength(3);
-  });
-  it('should accept all mobile navigation modes', () => {
-    const modes = ['drawer', 'bottom_nav', 'hamburger'] as const;
-    modes.forEach(mode => {
-      expect(() => AppSchema.parse({
-        name: 'mobile_test',
-        label: 'Test',
-        mobileNavigation: { mode },
-      })).not.toThrow();
-    });
-  });
-  it('should default to drawer mode', () => {
-    const app = AppSchema.parse({
-      name: 'default_mobile',
-      label: 'Default Mobile',
-      mobileNavigation: {},
-    });
-    expect(app.mobileNavigation?.mode).toBe('drawer');
+    expect(result.success).toBe(false);
+    const messages = result.error!.issues.map((i) => i.message).join('\n');
+    expect(messages).toContain('mobileNavigation');
+    expect(messages).toContain('unimplemented');
   });
 });
 
@@ -702,49 +681,25 @@ describe('defineApp', () => {
   });
 });
 
-describe('AppSchema sharing and embed fields', () => {
-  it('should accept app with sharing config', () => {
-    const app = AppSchema.parse({
+describe('AppSchema retired sharing/embed keys (#4001)', () => {
+  it('rejects app-level sharing with the FormView prescription', () => {
+    const result = AppSchema.safeParse({
       name: 'public_app',
       label: 'Public App',
-      sharing: {
-        enabled: true,
-        password: 'secret123',
-        allowedDomains: ['example.com'],
-      },
+      sharing: { enabled: true },
     });
-
-    expect(app.sharing?.enabled).toBe(true);
-    expect(app.sharing?.password).toBe('secret123');
-    expect(app.sharing?.allowedDomains).toEqual(['example.com']);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('FormView.sharing');
   });
 
-  it('should accept app with embed config', () => {
-    const app = AppSchema.parse({
+  it('rejects app-level embed with the per-form-view prescription', () => {
+    const result = AppSchema.safeParse({
       name: 'embeddable_app',
       label: 'Embeddable App',
-      embed: {
-        enabled: true,
-        allowedOrigins: ['https://portal.example.com'],
-        width: '100%',
-        height: '800px',
-      },
-    });
-
-    expect(app.embed?.enabled).toBe(true);
-    expect(app.embed?.allowedOrigins).toEqual(['https://portal.example.com']);
-  });
-
-  it('should accept app with both sharing and embed', () => {
-    const app = AppSchema.parse({
-      name: 'shared_embedded',
-      label: 'Shared & Embedded',
-      sharing: { enabled: true },
       embed: { enabled: true },
     });
-
-    expect(app.sharing?.enabled).toBe(true);
-    expect(app.embed?.enabled).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('iframe');
   });
 
   it('should accept app without sharing/embed (backward compatibility)', () => {
@@ -1073,5 +1028,31 @@ describe('AppSchema with areas', () => {
 
     expect(app.areas).toHaveLength(1);
     expect(app.areas![0].navigation).toHaveLength(7);
+  });
+});
+
+// #4001 (app step, PR A) — the seven keys the 2026-06 AppSchema liveness audit
+// verdicted DEAD are retiredKey() tombstones: tsc-level `never` for typed
+// authors, and a parse-time prescription for everyone else. Not a silent
+// strip: AppSchema is not yet .strict(), so a bare deletion would have
+// reintroduced the exact failure mode this campaign eliminates.
+describe('retired dead keys carry prescriptions (#4001)', () => {
+  it.each([
+    ['version', '1.0.0', 'manifest.version'],
+    ['aria', { label: 'x' }, 'component/widget'],
+    ['objects', [], 'defineStack'],
+    ['apis', [], 'defineStack'],
+  ] as const)('rejects `%s` with its upgrade prescription', (key, value, fragment) => {
+    const result = AppSchema.safeParse({ name: 'app_x', label: 'X', [key]: value });
+    expect(result.success).toBe(false);
+    const messages = result.error!.issues.map((i) => i.message).join('\n');
+    expect(messages).toContain(fragment);
+  });
+
+  it('an app without any retired key parses unchanged', () => {
+    expect(() => AppSchema.parse({
+      name: 'clean_app', label: 'Clean',
+      navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
+    })).not.toThrow();
   });
 });

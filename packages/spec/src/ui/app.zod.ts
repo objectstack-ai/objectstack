@@ -3,8 +3,8 @@
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
-import { SharingConfigSchema, EmbedConfigSchema } from './sharing.zod';
+import { I18nLabelSchema } from './i18n.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Base Navigation Item Schema
@@ -549,9 +549,17 @@ export const AppSchema = lazySchema(() => z.object({
   /** Display label */
   label: I18nLabelSchema.describe('App display label'),
 
-  /** App version */
-  version: z.string().optional().describe('App version'),
-  
+  /**
+   * REMOVED — never read by any consumer (2026-06 AppSchema liveness audit).
+   * An app's version is its owning package's `manifest.version`; a second
+   * per-app number had no reader and could silently disagree with it.
+   */
+  version: retiredKey(
+    '`App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
+    'no consumer in framework or objectui). An app is versioned by its owning package: ' +
+    'use `manifest.version`. Delete the key.',
+  ),
+
   /** Description */
   description: I18nLabelSchema.optional().describe('App description'),
   
@@ -635,26 +643,54 @@ export const AppSchema = lazySchema(() => z.object({
    */
   requiredPermissions: z.array(z.string()).optional().describe('Permissions required to access this app'),
   
-  /** 
-   * Package Components (For config file convenience)
-   * In a real monorepo these might be auto-discovered, but here we allow explicit registration.
+  /**
+   * REMOVED — the self-described "config file convenience" slots were never
+   * read (2026-06 liveness audit): objects register via `defineStack`, and the
+   * ambient chatbot derives an app's object list from its NAV ITEMS
+   * (`collectNavObjects`), never from `App.objects`.
    */
-  objects: z.array(z.unknown()).optional().describe('Objects belonging to this app'),
-  apis: z.array(z.unknown()).optional().describe('Custom APIs belonging to this app'),
+  objects: retiredKey(
+    '`App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
+    'never read; the spec itself labelled it "config file convenience"). Objects belong ' +
+    'to the stack (`defineStack({ objects })`); an app reaches them through its ' +
+    'navigation items. Delete the key.',
+  ),
+  apis: retiredKey(
+    '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
+    'never read). Declarative endpoints belong to the stack (`defineStack({ apis })`), ' +
+    'not the app shell. Delete the key.',
+  ),
 
-  /** Sharing configuration for public access */
-  sharing: SharingConfigSchema.optional().describe('Public sharing configuration'),
+  /**
+   * REMOVED — a declared-but-unenforced security surface (ADR-0049 class,
+   * 2026-06 liveness audit): the only live sharing/embed path is
+   * `FormView.sharing` (public data collection); no public-app or iframe route
+   * ever read the app-level blocks, so authoring them created a false
+   * security/feature impression.
+   */
+  sharing: retiredKey(
+    '`App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
+    'ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared ' +
+    'sharing that did not exist. Public access is granted per FORM VIEW ' +
+    '(`FormView.sharing`, the public-data-collection surface). Delete the key.',
+  ),
+  embed: retiredKey(
+    '`App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
+    'ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface ' +
+    '(`FormView.sharing`), not an app-level switch. Delete the key.',
+  ),
 
-  /** Embed configuration for iframe embedding */
-  embed: EmbedConfigSchema.optional().describe('Iframe embedding configuration'),
-
-  /** Mobile navigation mode */
-  mobileNavigation: z.object({
-    mode: z.enum(['drawer', 'bottom_nav', 'hamburger']).default('drawer')
-      .describe('Mobile navigation mode: drawer sidebar, bottom navigation bar, or hamburger menu'),
-    bottomNavItems: z.array(z.string()).optional()
-      .describe('Navigation item IDs to show in bottom nav (max 5)'),
-  }).optional().describe('Mobile-specific navigation configuration'),
+  /**
+   * REMOVED — fully unimplemented (2026-06 liveness audit: even
+   * `packages/mobile` ignored it). Re-admit only together with a real mobile
+   * navigation implementation, per the ADR-0049 trichotomy — a mode picker
+   * that changes nothing is an authoring trap.
+   */
+  mobileNavigation: retiredKey(
+    '`App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness ' +
+    'audit — fully unimplemented; no renderer, including packages/mobile, ever read ' +
+    'it). Delete the key; the block returns if/when a real mobile navigation ships.',
+  ),
 
   /**
    * Default agent for this app's ambient chat surface.
@@ -681,8 +717,15 @@ export const AppSchema = lazySchema(() => z.object({
   defaultAgent: SnakeCaseIdentifierSchema.optional()
     .describe("Platform agent bound to this app's ambient chat ('ask' is the implicit default; 'build' for authoring surfaces) — ADR-0063 §1"),
 
-  /** ARIA accessibility attributes */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes for the application'),
+  /**
+   * REMOVED — never read at the APP level (2026-06 liveness audit). ARIA
+   * attributes are live on the component/widget surfaces that render DOM.
+   */
+  aria: retiredKey(
+    '`App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no ' +
+    'renderer read app-level ARIA attributes). Declare `aria` on the component/widget ' +
+    'that renders the DOM node instead. Delete the key.',
+  ),
 
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package

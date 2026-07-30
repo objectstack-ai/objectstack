@@ -392,6 +392,14 @@ const step17: MigrationStep = {
     '`permissions` promised an invocation gate nothing enforced, and `active: false` ' +
     'read as "withdrawn" while the tool kept reaching the LLM tool set. Lossless ' +
     'deletes; the strict ToolSchema rejects each with its prescription.\n\n' +
+    'The AppSchema sheds its seven dead authoring keys (2026-06 liveness audit, ' +
+    '#4001 app step): `version` (apps are versioned by manifest.version), `aria`, ' +
+    '`objects`/`apis` (the self-described "config file convenience" — nothing read ' +
+    'them; the chatbot derives an app\'s objects from its nav items), `sharing`/' +
+    '`embed` (a declared-but-unenforced public surface — the only live path is ' +
+    'FormView.sharing; ADR-0049), and `mobileNavigation` (fully unimplemented). ' +
+    'Pure lossless deletes — none ever had a runtime effect; each key is ' +
+    'tombstoned with its prescription.\n\n' +
     'ADR-0113 splits the `required` tri-binding: post-17, `required` is ONLY the ' +
     'write-time contract (insert must provide; update may not null out; legacy null ' +
     'rows rest), and the physical NOT NULL is the explicit `storage.notNull`. The ' +
@@ -434,6 +442,7 @@ const step17: MigrationStep = {
     'flow-node-script-config-aliases',
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',
+    'app-dead-authoring-keys-removed',
     'field-required-notnull-explicit',
     'action-inert-keys-removed',
     'flow-inert-keys-removed',

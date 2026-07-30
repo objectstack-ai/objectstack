@@ -123,6 +123,12 @@
         "toMajor": 17
       },
       {
+        "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation",
+        "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' removed (2026-06 liveness audit — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented)",
+        "conversionId": "app-dead-authoring-keys-removed",
+        "toMajor": 17
+      },
+      {
         "surface": "object.fields.*.required / object.fields.*.storage.notNull",
         "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
         "conversionId": "field-required-notnull-explicit",
@@ -505,6 +511,12 @@
           "surface": "tool.category / tool.permissions / tool.active / tool.builtIn",
           "to": "tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing)",
           "conversionId": "tool-inert-authoring-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "app.version / app.aria / app.objects / app.apis / app.sharing / app.embed / app.mobileNavigation",
+          "to": "app keys 'version'/'aria'/'objects'/'apis'/'sharing'/'embed'/'mobileNavigation' removed (2026-06 liveness audit — never read; sharing/embed declared a public surface no route enforced, mobileNavigation was fully unimplemented)",
+          "conversionId": "app-dead-authoring-keys-removed",
           "toMajor": 17
         },
         {
