@@ -3,7 +3,12 @@
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
-import { normalizeAnalyticsFilters, coerceFilterValueForObjectQL } from './filter-normalizer.js';
+import {
+  normalizeAnalyticsFilterTree,
+  collectFilterLeaves,
+  coerceFilterValueForObjectQL,
+  type NormalizedFilterNode,
+} from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -99,11 +104,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // Operands that cannot merge into their field's entry without one silently
     // replacing the other; ANDed in below so the engine intersects them.
     const conjuncts: Record<string, unknown>[] = [];
-    for (const f of normalizeAnalyticsFilters(query)) {
-      const fieldName = this.resolveFieldName(cube, f.member, 'any');
-      const extra = this.mergeFilterOperand(filter, fieldName, this.convertFilter(f.operator, f.values));
-      if (extra) conjuncts.push(extra);
-    }
+    this.applyFilterNode(normalizeAnalyticsFilterTree(query), cube, filter, conjuncts);
     // #3650 — and the time-dimension WINDOWS, through the SAME merge, so a
     // `dateRange` and a caller `where` bound on one field compose instead of
     // clobbering each other.
@@ -222,8 +223,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // `/analytics/sql` and `execute()` accept/reject the SAME set). An in-envelope
     // cross-object dim renders as a LEFT JOIN — its logical shape; `execute()`
     // serves it via FK-expand.
+    // EVERY member the filter touches, including ones nested in an `$or` —
+    // the envelope check rejects cross-object filters, so a member it cannot
+    // see is a filter it cannot reject.
     const plan = this.planCrossObject(cube, query, Object.fromEntries(
-      normalizeAnalyticsFilters(query).map((f) => [this.resolveFieldName(cube, f.member, 'any'), true]),
+      collectFilterLeaves(normalizeAnalyticsFilterTree(query))
+        .map((f) => [this.resolveFieldName(cube, f.member, 'any'), true]),
     ));
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
     const joinClauses: string[] = [];
@@ -288,15 +293,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // so `/analytics/sql` rejects the same out-of-envelope set `execute()` does.)
 
     const whereParts: string[] = [];
-    for (const f of normalizeAnalyticsFilters(query)) {
-      const clause = this.buildFilterClauseSql(
-        this.resolveFieldName(cube, f.member, 'any'),
-        f.operator,
-        f.values,
-        params,
-      );
-      if (clause) whereParts.push(clause);
-    }
+    // Recursive, so the echoed statement carries the same disjunctions the
+    // engine filter does — the echo exists to REPRODUCE execution, and an
+    // `$or` rendered as a conjunction (or dropped) is exactly the lie this
+    // block's comment above warns about, in the other direction.
+    const filterClause = this.renderFilterNodeSql(
+      normalizeAnalyticsFilterTree(query),
+      cube,
+      params,
+    );
+    if (filterClause) whereParts.push(filterClause);
     // Bounds bind as `$n` placeholders like every other comparand: this string
     // travels to the browser, and a window can carry tenant-derived dates.
     // A bare-day upper bound renders half-open (`< day+1`) because that is
@@ -727,6 +733,105 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * are handed back for the caller to AND in separately, so the engine
    * intersects them instead of the strategy picking a winner.
    */
+  /**
+   * Fold a normalized filter node into the engine filter being built.
+   *
+   * AND-ed LEAVES merge per field through {@link mergeFilterOperand}, exactly
+   * as the flat loop this replaced did — so a query without combinators still
+   * produces byte-identical engine input. Anything structural (`$or`, `$not`,
+   * a nested `$and` that cannot merge) becomes its own conjunct, which the
+   * caller ANDs in. The engine speaks these combinators natively
+   * (`FilterCondition` declares them and every driver compiles them), so this
+   * path hands them over rather than lowering them.
+   */
+  private applyFilterNode(
+    node: NormalizedFilterNode | null,
+    cube: Cube,
+    filter: Record<string, unknown>,
+    conjuncts: Record<string, unknown>[],
+  ): void {
+    if (!node) return;
+
+    if (node.kind === 'leaf') {
+      const fieldName = this.resolveFieldName(cube, node.member, 'any');
+      const extra = this.mergeFilterOperand(filter, fieldName, this.convertFilter(node.operator, node.values));
+      if (extra) conjuncts.push(extra);
+      return;
+    }
+
+    if (node.kind === 'and') {
+      for (const child of node.children) this.applyFilterNode(child, cube, filter, conjuncts);
+      return;
+    }
+
+    const rendered = this.filterNodeToCondition(node, cube);
+    if (rendered) conjuncts.push(rendered);
+  }
+
+  /** A node as a standalone `FilterCondition` the engine can consume. */
+  private filterNodeToCondition(
+    node: NormalizedFilterNode | null,
+    cube: Cube,
+  ): Record<string, unknown> | null {
+    if (!node) return null;
+
+    if (node.kind === 'not') {
+      const inner = this.filterNodeToCondition(node.child, cube);
+      return inner ? { $not: inner } : null;
+    }
+
+    if (node.kind === 'or') {
+      const branches = node.children
+        .map((child) => this.filterNodeToCondition(child, cube))
+        .filter((c): c is Record<string, unknown> => !!c);
+      return branches.length > 0 ? { $or: branches } : null;
+    }
+
+    // `leaf` and `and` share the merge path so one field carrying several
+    // operators composes here the same way it does at the top level.
+    const filter: Record<string, unknown> = {};
+    const conjuncts: Record<string, unknown>[] = [];
+    this.applyFilterNode(node, cube, filter, conjuncts);
+    if (conjuncts.length > 0) {
+      filter.$and = [...(Array.isArray(filter.$and) ? filter.$and : []), ...conjuncts];
+    }
+    return Object.keys(filter).length > 0 ? filter : null;
+  }
+
+  /**
+   * Render a normalized filter node as the display SQL `/analytics/sql`
+   * echoes. Values still bind as `$n` placeholders — the echo travels to the
+   * browser, so a comparand is never inlined.
+   */
+  private renderFilterNodeSql(
+    node: NormalizedFilterNode | null,
+    cube: Cube,
+    params: unknown[],
+  ): string | null {
+    if (!node) return null;
+
+    if (node.kind === 'leaf') {
+      return this.buildFilterClauseSql(
+        this.resolveFieldName(cube, node.member, 'any'),
+        node.operator,
+        node.values,
+        params,
+      );
+    }
+
+    if (node.kind === 'not') {
+      const inner = this.renderFilterNodeSql(node.child, cube, params);
+      return inner ? `NOT (${inner})` : null;
+    }
+
+    const parts = node.children
+      .map((child) => this.renderFilterNodeSql(child, cube, params))
+      .filter((s): s is string => !!s);
+    if (parts.length === 0) return null;
+    if (parts.length === 1) return parts[0];
+    return `(${parts.join(node.kind === 'or' ? ' OR ' : ' AND ')})`;
+  }
+
   private mergeFilterOperand(
     filter: Record<string, unknown>,
     field: string,

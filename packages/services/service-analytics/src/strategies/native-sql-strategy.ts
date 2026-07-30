@@ -3,7 +3,11 @@
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
-import { normalizeAnalyticsFilters, coerceFilterValueForSql } from './filter-normalizer.js';
+import {
+  normalizeAnalyticsFilterTree,
+  coerceFilterValueForSql,
+  type NormalizedFilterNode,
+} from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 
@@ -134,19 +138,19 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       }
     }
 
-    // Build WHERE clause
+    // Build WHERE clause. The filter is a TREE, so it compiles recursively —
+    // a flat loop can only ever AND, which is precisely why an author's `$or`
+    // used to be dropped instead of compiled.
     const whereClauses: string[] = [];
-    const normalizedFilters = normalizeAnalyticsFilters(query);
-    if (normalizedFilters.length > 0) {
-      for (const filter of normalizedFilters) {
-        const colExpr = this.resolveFieldSql(cube, filter.member, tableName, joins);
-        // Resolve the (object, column) this member binds against so the value
-        // can be coerced to the column's storage form (see buildFilterClause).
-        const target = this.resolveStorageTarget(cube, filter.member, tableName);
-        const clause = this.buildFilterClause(colExpr, filter.operator, filter.values, params, ctx, target);
-        if (clause) whereClauses.push(clause);
-      }
-    }
+    const filterSql = this.compileFilterNode(
+      normalizeAnalyticsFilterTree(query),
+      cube,
+      tableName,
+      joins,
+      params,
+      ctx,
+    );
+    if (filterSql) whereClauses.push(filterSql);
 
     // Build time dimension filters
     if (query.timeDimensions && query.timeDimensions.length > 0) {
@@ -501,6 +505,52 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   ): string {
     if (typeof ctx.coerceTemporalFilterColumn !== 'function') return col;
     return ctx.coerceTemporalFilterColumn(target.object, target.field, col) || col;
+  }
+
+  /**
+   * Compile a normalized filter node into a boolean SQL expression, recursing
+   * through the combinators. `null` = no constraint.
+   *
+   * Leaves go through {@link buildFilterClause} exactly as they did when this
+   * was a flat loop, so the storage-form coercion and the calendar-day
+   * upper-bound rule (#3777) apply at every depth — including inside an `$or`,
+   * where a second, combinator-aware implementation would have been free to
+   * drift from the first.
+   *
+   * Parenthesisation is explicit rather than left to SQL's precedence: `AND`
+   * does bind tighter than `OR`, so `a AND b OR c` happens to be right, but
+   * being right by construction is what keeps a future edit from making it
+   * wrong.
+   */
+  private compileFilterNode(
+    node: NormalizedFilterNode | null,
+    cube: Cube,
+    parentTable: string,
+    joins: Map<string, string>,
+    params: unknown[],
+    ctx: StrategyContext,
+  ): string | null {
+    if (!node) return null;
+
+    if (node.kind === 'leaf') {
+      const colExpr = this.resolveFieldSql(cube, node.member, parentTable, joins);
+      // Resolve the (object, column) this member binds against so the value
+      // can be coerced to the column's storage form (see buildFilterClause).
+      const target = this.resolveStorageTarget(cube, node.member, parentTable);
+      return this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
+    }
+
+    if (node.kind === 'not') {
+      const inner = this.compileFilterNode(node.child, cube, parentTable, joins, params, ctx);
+      return inner ? `NOT (${inner})` : null;
+    }
+
+    const parts = node.children
+      .map((child) => this.compileFilterNode(child, cube, parentTable, joins, params, ctx))
+      .filter((s): s is string => !!s);
+    if (parts.length === 0) return null;
+    if (parts.length === 1) return parts[0];
+    return `(${parts.join(node.kind === 'or' ? ' OR ' : ' AND ')})`;
   }
 
   private buildFilterClause(

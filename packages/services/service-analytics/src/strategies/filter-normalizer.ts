@@ -31,17 +31,26 @@
  *     `$contains` `$notContains` `$startsWith` `$endsWith`;
  *   - value-DEPENDENT, so resolved explicitly rather than through the map —
  *     `$null` and `$exists`, whose meaning flips with their boolean;
- *   - lowered — `$and` (flattened in place), and `$between`, which becomes its
- *     two bounds so each strategy's existing upper-bound handling applies the
- *     calendar-day whole-day rule (see the note at the lowering);
+ *   - lowered — `$between`, which becomes its two bounds so each strategy's
+ *     existing upper-bound handling applies the calendar-day whole-day rule
+ *     (see the note at the lowering);
+ *   - structural — `$and` / `$or` / `$not`, carried as tree nodes;
  *   - anything else THROWS. An operator outside the vocabulary is a caller
  *     error, and a loud one beats a silently widened read — the call
  *     driver-memory made for the same shape in #3948.
  *
- * The one remaining gap is declared, not silent: the `$or` / `$not`
- * combinators are still skipped, because expressing them needs a recursive
- * WHERE builder rather than this flat array. Row-result cover for everything
- * above lives in `filter-operator-coverage.test.ts`.
+ * `$or` / `$not` were the last of that family, and they were dropped for a
+ * structural reason rather than an oversight: this module produced a flat
+ * ARRAY, which cannot carry a disjunction. So an author's `{$or: […]}`
+ * vanished from the WHERE clause and the widget drew every row. The output is
+ * now a {@link NormalizedFilterNode} tree, and each strategy compiles it the
+ * way its own backend expresses a disjunction.
+ *
+ * Row-result cover: `filter-operator-coverage.test.ts` for the operator
+ * vocabulary, and `native-sql-filter-logic-conformance.test.ts`, which runs
+ * the SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL
+ * compiler, the in-memory matcher, `formula` and `read-scope-sql` are already
+ * held to.
  */
 
 export interface NormalizedAnalyticsFilter {
@@ -92,134 +101,216 @@ function stringifyForCube(v: unknown): string {
   return String(v);
 }
 
-function flattenCondition(cond: Record<string, unknown>, out: NormalizedAnalyticsFilter[]): void {
-  for (const [key, raw] of Object.entries(cond)) {
-    if (raw === undefined) continue;
+/**
+ * One node of the normalized filter TREE.
+ *
+ * A tree rather than the flat array this module used to produce, because a flat
+ * array cannot express `$or` — and what it did with one was DROP it, which does
+ * not narrow a query, it widens it to rows the author excluded (#3650's
+ * symptom). The structure is the minimum that survives that: leaves carry the
+ * pipeline's `{member, operator, values}` triple unchanged, and the combinators
+ * are explicit so each strategy can compile them the way its own backend
+ * expresses them — recursive SQL for the raw-SQL path, a passed-through
+ * `$or`/`$not` for the engine path.
+ */
+export type NormalizedFilterNode =
+  | { kind: 'leaf'; member: string; operator: string; values: string[] }
+  | { kind: 'and'; children: NormalizedFilterNode[] }
+  | { kind: 'or'; children: NormalizedFilterNode[] }
+  | { kind: 'not'; child: NormalizedFilterNode };
 
-    if (key === '$and' && Array.isArray(raw)) {
-      for (const sub of raw) {
-        if (sub && typeof sub === 'object') {
-          flattenCondition(sub as Record<string, unknown>, out);
-        }
-      }
-      continue;
-    }
-    // Logical $or / $not require recursive WHERE building which the
-    // current strategies don't yet support; ignore so partial queries
-    // still run.
-    if (key === '$or' || key === '$not') continue;
-
-    if (raw === null) {
-      out.push({ member: key, operator: 'notSet', values: [] });
-      continue;
-    }
-
-    if (typeof raw === 'object' && !Array.isArray(raw) && !(raw instanceof Date)) {
-      const wrapper = raw as Record<string, unknown>;
-      const opKeys = Object.keys(wrapper).filter(k => k.startsWith('$'));
-      if (opKeys.length > 0) {
-        for (const opKey of opKeys) {
-          // `$between [min, max]` LOWERS to its two bounds rather than getting a
-          // `between` operator of its own. Both strategies already carry the
-          // calendar-day whole-day rule on their upper bound — NativeSQLStrategy
-          // compiles a bare-day `lte` half-open (#3777), ObjectQLStrategy hands
-          // `$lte` to the driver, which does the same — so a range's max
-          // inherits that rule by construction instead of needing a second
-          // implementation to keep in step. (The preview evaluator's `$between`
-          // gap was closed the same way, sharing its `$lte` helper.)
-          //
-          // Before this, `$between` was simply absent from the operator map and
-          // fell to the `continue` below: the predicate VANISHED from the WHERE
-          // clause, so a dashboard widget carrying a range filter charted the
-          // entire dataset — #3650's symptom, on the surface #3650 was about.
-          // The temporal conformance matrix caught it as row results
-          // (`native-sql-temporal-conformance.test.ts`).
-          if (opKey === '$between') {
-            const v = wrapper[opKey];
-            if (!Array.isArray(v) || v.length !== 2) {
-              // Never drop it: an unbounded read is the failure mode this whole
-              // branch exists to prevent, and it is indistinguishable from a
-              // legitimately wide query. Same stance driver-memory took for the
-              // same shape (#3948).
-              throw new Error(
-                `[analytics] "$between" on "${key}" needs a two-element [min, max] array, got ` +
-                `${JSON.stringify(v)}. Dropping the predicate would silently widen the query to every row.`,
-              );
-            }
-            out.push({ member: key, operator: 'gte', values: [stringifyForCube(v[0])] });
-            out.push({ member: key, operator: 'lte', values: [stringifyForCube(v[1])] });
-            continue;
-          }
-
-          // The two null predicates read their BOOLEAN, not just their key —
-          // which is why neither can live in MONGO_TO_CUBE_OP. `$null: true`
-          // asks for IS NULL (`notSet`), `$null: false` for IS NOT NULL
-          // (`set`); `$exists` is the mirror image. `$null` is the shape the
-          // console emits for an "is empty" / "is not empty" filter
-          // (`is_null`/`is_not_null` normalise to it in `filter.zod.ts`), so
-          // dropping it silently meant such a widget showed every row.
-          if (opKey === '$null' || opKey === '$exists') {
-            const isNull = opKey === '$null' ? wrapper[opKey] === true : wrapper[opKey] === false;
-            out.push({ member: key, operator: isNull ? 'notSet' : 'set', values: [] });
-            continue;
-          }
-
-          const cubeOp = MONGO_TO_CUBE_OP[opKey];
-          if (!cubeOp) {
-            // NEVER drop: a missing predicate does not narrow the query, it
-            // WIDENS it — the compiled SQL stays valid and simply returns rows
-            // the author excluded, which is indistinguishable from a
-            // legitimately broad query and invisible to any test that asserts
-            // the emitted SQL. That failure mode is #3650's, and skipping
-            // unmapped operators is how `$between` reproduced it (#4128).
-            // driver-memory made the same call for the same reason in #3948.
-            throw new Error(
-              `[analytics] Unsupported filter operator "${opKey}" on "${key}". ` +
-              `Supported: ${Object.keys(MONGO_TO_CUBE_OP).join(', ')}, $between, $null, $exists ` +
-              `(and $and; $or/$not are not yet compiled by the analytics strategies). ` +
-              `Dropping it would silently widen the query to rows the filter excludes.`,
-            );
-          }
-          const v = wrapper[opKey];
-          const values = Array.isArray(v)
-            ? v.map(stringifyForCube)
-            : [stringifyForCube(v)];
-          out.push({ member: key, operator: cubeOp, values });
-        }
-        continue;
-      }
-      // Nested relation (e.g. {profile: {verified: true}}). Flatten with
-      // dot-prefixed keys so cube field path resolution still works.
-      for (const [nestedKey, nestedVal] of Object.entries(wrapper)) {
-        flattenCondition({ [`${key}.${nestedKey}`]: nestedVal }, out);
-      }
-      continue;
-    }
-
-    // Implicit equality / array → in
-    if (Array.isArray(raw)) {
-      out.push({ member: key, operator: 'in', values: raw.map(stringifyForCube) });
-    } else {
-      out.push({ member: key, operator: 'equals', values: [stringifyForCube(raw)] });
-    }
-  }
+/** `null` means "no constraint" — an empty object contributes no predicate. */
+function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
+  if (children.length === 0) return null;
+  if (children.length === 1) return children[0];
+  return { kind: 'and', children };
 }
 
 /**
- * Normalize an analytics query's `where` (FilterCondition) into the
- * internal array form used by all strategies.
+ * Compile one `field: value | { $op: … }` entry into its leaves.
+ *
+ * Multiple operators on one field AND together — the rule
+ * `FILTER_LOGIC_CASES` pins for every other backend, and the one a range
+ * `{ $gte, $lte }` depends on.
  */
-export function normalizeAnalyticsFilters(query: { where?: unknown } | unknown): NormalizedAnalyticsFilter[] {
-  if (!query || typeof query !== 'object') return [];
+function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
+  const out: NormalizedFilterNode[] = [];
+  const leaf = (operator: string, values: string[]): void => {
+    out.push({ kind: 'leaf', member: key, operator, values });
+  };
 
-  const out: NormalizedAnalyticsFilter[] = [];
-  const where = (query as { where?: unknown }).where;
-
-  if (where && typeof where === 'object' && !Array.isArray(where)) {
-    flattenCondition(where as Record<string, unknown>, out);
+  if (raw === null) {
+    leaf('notSet', []);
+    return out;
   }
 
+  if (typeof raw === 'object' && !Array.isArray(raw) && !(raw instanceof Date)) {
+    const wrapper = raw as Record<string, unknown>;
+    const opKeys = Object.keys(wrapper).filter((k) => k.startsWith('$'));
+    if (opKeys.length > 0) {
+      for (const opKey of opKeys) {
+        // `$between [min, max]` LOWERS to its two bounds rather than getting a
+        // `between` operator of its own. Both strategies already carry the
+        // calendar-day whole-day rule on their upper bound — NativeSQLStrategy
+        // compiles a bare-day `lte` half-open (#3777), ObjectQLStrategy hands
+        // `$lte` to the driver, which does the same — so a range's max
+        // inherits that rule by construction instead of needing a second
+        // implementation to keep in step. (The preview evaluator's `$between`
+        // gap was closed the same way, sharing its `$lte` helper.)
+        //
+        // Before this, `$between` was simply absent from the operator map and
+        // fell to the `continue` below: the predicate VANISHED from the WHERE
+        // clause, so a dashboard widget carrying a range filter charted the
+        // entire dataset — #3650's symptom, on the surface #3650 was about.
+        // The temporal conformance matrix caught it as row results
+        // (`native-sql-temporal-conformance.test.ts`).
+        if (opKey === '$between') {
+          const v = wrapper[opKey];
+          if (!Array.isArray(v) || v.length !== 2) {
+            // Never drop it: an unbounded read is the failure mode this whole
+            // branch exists to prevent, and it is indistinguishable from a
+            // legitimately wide query. Same stance driver-memory took for the
+            // same shape (#3948).
+            throw new Error(
+              `[analytics] "$between" on "${key}" needs a two-element [min, max] array, got ` +
+              `${JSON.stringify(v)}. Dropping the predicate would silently widen the query to every row.`,
+            );
+          }
+          leaf('gte', [stringifyForCube(v[0])]);
+          leaf('lte', [stringifyForCube(v[1])]);
+          continue;
+        }
+
+        // The two null predicates read their BOOLEAN, not just their key —
+        // which is why neither can live in MONGO_TO_CUBE_OP. `$null: true`
+        // asks for IS NULL (`notSet`), `$null: false` for IS NOT NULL
+        // (`set`); `$exists` is the mirror image. `$null` is the shape the
+        // console emits for an "is empty" / "is not empty" filter
+        // (`is_null`/`is_not_null` normalise to it in `filter.zod.ts`), so
+        // dropping it silently meant such a widget showed every row.
+        if (opKey === '$null' || opKey === '$exists') {
+          const isNull = opKey === '$null' ? wrapper[opKey] === true : wrapper[opKey] === false;
+          leaf(isNull ? 'notSet' : 'set', []);
+          continue;
+        }
+
+        const cubeOp = MONGO_TO_CUBE_OP[opKey];
+        if (!cubeOp) {
+          // NEVER drop: a missing predicate does not narrow the query, it
+          // WIDENS it — the compiled SQL stays valid and simply returns rows
+          // the author excluded, which is indistinguishable from a
+          // legitimately broad query and invisible to any test that asserts
+          // the emitted SQL. That failure mode is #3650's, and skipping
+          // unmapped operators is how `$between` reproduced it (#4128).
+          // driver-memory made the same call for the same reason in #3948.
+          throw new Error(
+            `[analytics] Unsupported filter operator "${opKey}" on "${key}". ` +
+            `Supported: ${Object.keys(MONGO_TO_CUBE_OP).join(', ')}, $between, $null, $exists, ` +
+            `and the $and/$or/$not combinators. ` +
+            `Dropping it would silently widen the query to rows the filter excludes.`,
+          );
+        }
+        const v = wrapper[opKey];
+        leaf(cubeOp, Array.isArray(v) ? v.map(stringifyForCube) : [stringifyForCube(v)]);
+      }
+      return out;
+    }
+    // Nested relation (e.g. {profile: {verified: true}}). Flatten with
+    // dot-prefixed keys so cube field path resolution still works.
+    for (const [nestedKey, nestedVal] of Object.entries(wrapper)) {
+      out.push(...fieldLeaves(`${key}.${nestedKey}`, nestedVal));
+    }
+    return out;
+  }
+
+  // Implicit equality / array → in
+  if (Array.isArray(raw)) leaf('in', raw.map(stringifyForCube));
+  else leaf('equals', [stringifyForCube(raw)]);
   return out;
+}
+
+/**
+ * Compile a `FilterCondition` object into a node. `null` = no constraint.
+ *
+ * Every entry of one object ANDs with its siblings, at every depth — the rule
+ * `filter-logic-conformance.ts` exists to hold each backend to (#3774). The
+ * combinator handling deliberately mirrors `read-scope-sql.ts`'s
+ * `compileNode`, including its fail-closed empty-array rejection, so the two
+ * SQL-producing paths in this package cannot drift apart about what a filter
+ * MEANS.
+ */
+function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
+  const children: NormalizedFilterNode[] = [];
+
+  for (const [key, raw] of Object.entries(cond)) {
+    if (raw === undefined) continue;
+
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(raw) || raw.length === 0) {
+        throw new Error(
+          `[analytics] "${key}" requires a non-empty array. An empty combinator has no ` +
+          `defensible reading — dropping it widens the query, and treating it as "match ` +
+          `nothing" silently empties a chart.`,
+        );
+      }
+      const branches = raw
+        .map((sub) => (sub && typeof sub === 'object' ? buildNode(sub as Record<string, unknown>) : null))
+        .filter((n): n is NormalizedFilterNode => n !== null);
+      if (branches.length === 0) continue;
+      // `$and` folds into this object's own AND; `$or` becomes a node, since
+      // OR is exactly the structure a flat list could not carry.
+      if (key === '$and') children.push(...branches);
+      else children.push(branches.length === 1 ? branches[0] : { kind: 'or', children: branches });
+      continue;
+    }
+
+    if (key === '$not') {
+      const inner = raw && typeof raw === 'object' ? buildNode(raw as Record<string, unknown>) : null;
+      if (inner) children.push({ kind: 'not', child: inner });
+      continue;
+    }
+
+    if (key.startsWith('$')) {
+      throw new Error(
+        `[analytics] Unsupported top-level filter operator "${key}". ` +
+        `Dropping it would silently widen the query to rows the filter excludes.`,
+      );
+    }
+
+    children.push(...fieldLeaves(key, raw));
+  }
+
+  return andOf(children);
+}
+
+/**
+ * Normalize an analytics query's `where` (FilterCondition) into the tree the
+ * strategies compile. `null` when the query carries no `where`.
+ */
+export function normalizeAnalyticsFilterTree(
+  query: { where?: unknown } | unknown,
+): NormalizedFilterNode | null {
+  if (!query || typeof query !== 'object') return null;
+  const where = (query as { where?: unknown }).where;
+  if (!where || typeof where !== 'object' || Array.isArray(where)) return null;
+  return buildNode(where as Record<string, unknown>);
+}
+
+/**
+ * Every leaf in the tree, structure discarded.
+ *
+ * For asking WHICH MEMBERS a filter touches — the cross-object envelope check
+ * is the caller. Never for building a predicate: the leaves of an `$or` read
+ * as a conjunction here, so compiling from this list would turn `a OR b` into
+ * `a AND b`. Use {@link normalizeAnalyticsFilterTree} for that.
+ */
+export function collectFilterLeaves(
+  node: NormalizedFilterNode | null,
+): NormalizedAnalyticsFilter[] {
+  if (!node) return [];
+  if (node.kind === 'leaf') return [{ member: node.member, operator: node.operator, values: node.values }];
+  if (node.kind === 'not') return collectFilterLeaves(node.child);
+  return node.children.flatMap(collectFilterLeaves);
 }
 
 /** Recover a finite number from a purely-numeric token, else undefined. */

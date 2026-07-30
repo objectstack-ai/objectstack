@@ -28,7 +28,7 @@ import type { AnalyticsQuery, FilterCondition } from '@objectstack/spec/data';
 import type { StrategyContext } from '@objectstack/spec/contracts';
 
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
-import { normalizeAnalyticsFilters } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
 
 interface Row {
   id: string;
@@ -181,12 +181,12 @@ describe('analytics filters — every authorable operator reaches the query (#41
     // rows the filter excludes. A typo'd or non-spec operator is a caller
     // error, and a loud one — the same call driver-memory made in #3948.
     expect(() =>
-      normalizeAnalyticsFilters({ where: { name: { $sortOf: 'alpha' } } }),
+      normalizeAnalyticsFilterTree({ where: { name: { $sortOf: 'alpha' } } }),
     ).toThrow(/Unsupported filter operator "\$sortOf"/);
   });
 
   it('a malformed $between throws rather than binding a half-open guess', () => {
-    expect(() => normalizeAnalyticsFilters({ where: { score: { $between: [10] } } })).toThrow(
+    expect(() => normalizeAnalyticsFilterTree({ where: { score: { $between: [10] } } })).toThrow(
       /two-element/,
     );
   });
