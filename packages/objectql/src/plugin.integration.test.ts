@@ -54,6 +54,13 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       // Serving is unaffected — `/api/v1/meta` is the protocol's route.
       expect(discovery.services.metadata.handlerReady).toBe(true);
       expect(discovery.routes.metadata).toBe('/api/v1/meta');
+
+      // …and on the same boot, `data` — derived from its slot too now (#4130)
+      // — is unchanged: ObjectQLPlugin registers the real engine there and it
+      // carries no marker, so the derivation reproduces the old hardcode.
+      expect(discovery.services.data.status).toBe('available');
+      expect(discovery.services.data.handlerReady).toBe(true);
+      expect(discovery.services.data.message).toBeUndefined();
     });
 
     it('should serve in-memory metadata definitions', async () => {
