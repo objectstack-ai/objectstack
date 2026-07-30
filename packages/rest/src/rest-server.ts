@@ -10,6 +10,7 @@ import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
+import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
@@ -1412,6 +1413,25 @@ export class RestServer {
         }
     }
 
+    /**
+     * Canonical SINGULAR form of the `:type` path segment.
+     *
+     * The metadata routes accept either spelling — the protocol's `getMetaItems`
+     * normalizes singular↔plural and serves both — and Prime Directive #3 makes
+     * PLURAL the canonical REST spelling (`/api/v1/meta/books`). So every gate
+     * keyed on the type must compare against the normalized form. The three
+     * ADR-0046 §6.7 audience gates below each tested `req.params.type === 'book'`
+     * literally, which meant `GET /meta/books` served the list with the gate
+     * never running: a `{ permissionSet }`-gated book (an *Admin Guide*) came
+     * back to a caller who does not hold the set, and an `org` book came back to
+     * an anonymous reader on a publicly-served deployment. Same route, gate
+     * enforced on one spelling of it.
+     */
+    private static metaTypeSingular(type: unknown): string {
+        const t = typeof type === 'string' ? type : '';
+        return PLURAL_TO_SINGULAR[t] ?? t;
+    }
+
     /** Whether any of these books carries a `{ permissionSet }` audience. */
     private static anyPermissionSetAudience(books: readonly any[]): boolean {
         return books.some(
@@ -2568,7 +2588,7 @@ export class RestServer {
                         // objectql implementation actually returns the raw
                         // array. Handle both shapes defensively.
                         let visible: any = items;
-                        if (req.params.type === 'app') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'app') {
                             const raw = items as unknown;
                             const list: any[] | null = Array.isArray(raw)
                                 ? (raw as any[])
@@ -2595,7 +2615,7 @@ export class RestServer {
 
                         // ADR-0057 D10: gate dashboard widgets by `requiresService`
                         // the same way app nav entries are gated above.
-                        if (req.params.type === 'dashboard') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'dashboard') {
                             const raw = visible as unknown;
                             const list: any[] | null = Array.isArray(raw)
                                 ? (raw as any[])
@@ -2623,7 +2643,7 @@ export class RestServer {
                         // excluded. Runtime `shared` / `personal` views
                         // (sys_view_definition) are merged client-side via the
                         // generic data API.
-                        if (req.params.type === 'view' && req.query?.object) {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'view' && req.query?.object) {
                             const obj = String(req.query.object);
                             const raw = visible as unknown;
                             const list: any[] | null = Array.isArray(raw)
@@ -2645,7 +2665,7 @@ export class RestServer {
                         // callers see only `public` books; `{ permissionSet }`-gated
                         // books require the caller to hold the named set (resolved
                         // through the security service; unresolvable → fail closed).
-                        if (req.params.type === 'book') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'book') {
                             const raw = visible as unknown;
                             const list = RestServer.metaItemsArray(raw);
                             if (list.length > 0) {
@@ -2664,7 +2684,7 @@ export class RestServer {
                         // claim it; unclaimed docs default to `org`). Runs on the
                         // raw items (before locale collapse) so `_packageId`
                         // provenance is still present for membership scoping.
-                        if (req.params.type === 'doc') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'doc') {
                             const raw = visible as unknown;
                             const list = RestServer.metaItemsArray(raw);
                             if (list.length > 0) {
@@ -2705,7 +2725,7 @@ export class RestServer {
                         // ADR-0046 i18n: collapse each doc to the request
                         // locale (localized label/description, `translations`
                         // map dropped) before the content-strip step below.
-                        if (req.params.type === 'doc') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'doc') {
                             const locale = this.extractLocale(req);
                             const { resolveDocLocale } = await import('@objectstack/spec/system');
                             const raw = visible as unknown;
@@ -2727,7 +2747,7 @@ export class RestServer {
                         // name + label. `?include=content` opts back in; the
                         // single-item GET /meta/doc/:name always returns the
                         // full body.
-                        if (req.params.type === 'doc' && req.query?.include !== 'content') {
+                        if (RestServer.metaTypeSingular(req.params.type) === 'doc' && req.query?.include !== 'content') {
                             const raw = visible as unknown;
                             const list: any[] | null = Array.isArray(raw)
                                 ? (raw as any[])
@@ -2926,7 +2946,7 @@ export class RestServer {
                         // viewers of the same app schema. Drafts also
                         // bypass cache: the cache is keyed on the
                         // published checksum and drafts are out-of-band.
-                        const isAppType = req.params.type === 'app';
+                        const isAppType = RestServer.metaTypeSingular(req.params.type) === 'app';
                         const isDraftRead = typeof req.query?.state === 'string'
                             && req.query.state.toLowerCase() === 'draft';
                         // ADR-0033/0037 — `?preview=draft` overlays a pending
@@ -3043,7 +3063,7 @@ export class RestServer {
                             // ADR-0057 D10: gate dashboard widgets by `requiresService`
                             // (mirrors the app-nav gate above) so the console never
                             // renders a tile bound to an absent optional service.
-                            if (req.params.type === 'dashboard' && visible) {
+                            if (RestServer.metaTypeSingular(req.params.type) === 'dashboard' && visible) {
                                 const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                                 const registered = await this.resolveRegisteredServices((ctx as any)?.__kernel, [visible]);
                                 const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
@@ -3056,13 +3076,14 @@ export class RestServer {
                             // it, unclaimed → org). 401 for anonymous, 403 for an
                             // authenticated non-holder; fail closed when holdings
                             // cannot be resolved (ADR-0049).
-                            if ((req.params.type === 'book' || req.params.type === 'doc') && visible) {
+                            const audienceGatedType = RestServer.metaTypeSingular(req.params.type);
+                            if ((audienceGatedType === 'book' || audienceGatedType === 'doc') && visible) {
                                 const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
                                     await import('@objectstack/spec/system');
                                 const target = isMetaEnvelope(visible) ? (visible as any).item : visible;
                                 let caller: { authenticated: boolean; permissionSets?: string[] };
                                 let allowed: boolean;
-                                if (req.params.type === 'book') {
+                                if (audienceGatedType === 'book') {
                                     caller = await this.resolveAudienceCaller(environmentId, req, {
                                         needPermissionSets: RestServer.anyPermissionSetAudience([target]),
                                     });
@@ -3104,7 +3125,7 @@ export class RestServer {
                             // ADR-0046 i18n: collapse the doc to the request
                             // locale (label/description/content) and drop the
                             // `translations` map so consumers get one body.
-                            if (req.params.type === 'doc' && visible) {
+                            if (audienceGatedType === 'doc' && visible) {
                                 const locale = this.extractLocale(req);
                                 const { resolveDocLocale } = await import('@objectstack/spec/system');
                                 visible = isMetaEnvelope(visible)
