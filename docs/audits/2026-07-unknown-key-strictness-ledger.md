@@ -166,7 +166,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `state-machine.zod.ts` | 7 | authorable (p) | |
 | `control-flow.zod.ts` | 6 | authorable (p) | validated structurally by `validateControlFlow` |
 | `bpmn-interop.zod.ts` | 5 | wire (p) | interop import shapes |
-| `approval.zod.ts` | 4 | authorable | **next candidate** — v17 approval nodes are new authoring surface |
+| `approval.zod.ts` | 4 | authorable | **strict as of #4001 step 3** — all four authoring schemas (node config / approver / escalation / decision-output). The published JSON schema carries `additionalProperties: false` into the Studio form AND `registerFlow()` config validation (#4027/#4040), so an unknown key in an approval node's `config` is rejected at registration too — verified: `z.toJSONSchema` on the strict lazySchema does not throw (#3746 hazard checked) |
 | `node-executor.zod.ts` | 4 | wire | executor contract |
 | `webhook.zod.ts` | 1 | authorable (p) | spec-only (#3461) |
 
@@ -205,15 +205,19 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
 1. `ui/app.zod.ts` — `AppSchema` + navigation union (highest-traffic remaining
    authorable type; needs union-error design so the strict error is readable).
-2. `automation/approval.zod.ts` — new v17 authoring surface, tighten while young.
-3. `data/hook.zod.ts`, `data/datasource.zod.ts` — `defineHook` / stack config.
-4. Promote this ledger to a machine-checked gate (pattern of
+2. `data/hook.zod.ts`, `data/datasource.zod.ts` — `defineHook` / stack config.
+3. Promote this ledger to a machine-checked gate (pattern of
    `packages/spec/liveness/` + `check:liveness`) once enough of the surface is
    classified that the table above is enforceable rather than descriptive.
 
-Done in step 2 (this PR): `security/rls.zod.ts` + `security/sharing.zod.ts`
-strict; `PositionSchema` strict with the protection envelope declared (closing
-the known sibling gap below).
+Done in step 2: `security/rls.zod.ts` + `security/sharing.zod.ts` strict;
+`PositionSchema` strict with the protection envelope declared (closing the
+known sibling gap below).
+
+Done in step 3: `automation/approval.zod.ts` — the four approval authoring
+schemas, with the ADR-0019 re-home map as wrong-layer guidance
+(`steps` / `entryCriteria` / `onApprove` / `onReject` / `rejectionBehavior`
+each point at where the concept lives on the flow graph now).
 
 Long tail stays gated on a verification pass per shape — never a one-shot
 "make all ~453 sites strict" (ADR-0054 ratchet; #4001's own recommendation).

@@ -13,6 +13,7 @@ import {
   ApprovalNodeApproverSchema,
   ApprovalEscalationSchema,
   ApprovalNodeConfigSchema,
+  DecisionOutputDefSchema,
   getApprovalNodeConfigJsonSchema,
   normalizeDecisionOutputs,
 } from './approval.zod';
@@ -315,5 +316,94 @@ describe('normalizeDecisionOutputs', () => {
     expect(normalizeDecisionOutputs(['', { key: '' }, { label: 'no key' }, 42])).toEqual([]);
     expect(normalizeDecisionOutputs(undefined)).toEqual([]);
     expect(normalizeDecisionOutputs('next_reviewers')).toEqual([]);
+  });
+});
+
+// #4001 step 3 — the four approval authoring schemas are `.strict()`: an
+// undeclared key used to be dropped by zod's default `.strip`, so an approval
+// gate shipped that quietly ignored part of its declared behavior. Approval is
+// a v17-new surface, tightened before stored volume exists. The published JSON
+// schema now carries additionalProperties:false into the Studio form AND
+// registerFlow()'s per-node config validation (#4027/#4040) — asserted below.
+describe('unknown keys are rejected, not stripped (#4001)', () => {
+  const unknownKeyIssue = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
+    const result = schema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i: { code: string }) => i.code === 'unrecognized_keys');
+  };
+  const minimalConfig = { approvers: [{ type: 'manager' as const }] };
+
+  describe('ApprovalNodeConfigSchema', () => {
+    it('rejects an undeclared key instead of silently dropping it', () => {
+      expect(unknownKeyIssue(ApprovalNodeConfigSchema, { ...minimalConfig, notAKey: 1 })!.message)
+        .toContain('`notAKey`');
+    });
+
+    it('carries the ADR-0019 re-home guidance for process-era keys', () => {
+      for (const key of ['steps', 'entryCriteria', 'onApprove', 'onReject', 'rejectionBehavior']) {
+        const message = unknownKeyIssue(ApprovalNodeConfigSchema, { ...minimalConfig, [key]: [] })!.message;
+        expect(message, `\`${key}\` should carry ADR-0019 guidance`).toContain('ADR-00');
+        expect(message).toContain(`\`${key}\``);
+      }
+    });
+
+    it('points behavior/threshold synonyms at the canonical keys', () => {
+      expect(unknownKeyIssue(ApprovalNodeConfigSchema, { ...minimalConfig, mode: 'unanimous' })!.message)
+        .toContain('`mode` → `behavior`');
+      expect(unknownKeyIssue(ApprovalNodeConfigSchema, { ...minimalConfig, quorum: 2 })!.message)
+        .toContain('`quorum` → `minApprovals`');
+    });
+
+    it('accepts every key the schema declares (guards APPROVAL_NODE_CONFIG_KEYS drift)', () => {
+      const probes: Record<string, unknown> = {
+        behavior: 'quorum', minApprovals: 2, lockRecord: false,
+        approvalStatusField: 'approval_status', onEmptyApprovers: 'fail',
+        decisionOutputs: ['next_approver', { key: 'picked', type: 'user' }],
+        escalation: { enabled: true, timeoutHours: 4 }, maxRevisions: 1,
+      };
+      for (const [key, value] of Object.entries(probes)) {
+        const result = ApprovalNodeConfigSchema.safeParse({ ...minimalConfig, [key]: value });
+        const unknown = result.success
+          ? undefined
+          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(unknown, `\`${key}\` should be a declared config key`).toBeUndefined();
+      }
+    });
+  });
+
+  describe('ApprovalNodeApproverSchema', () => {
+    it('points org/resolveAs synonyms at the canonical keys', () => {
+      expect(unknownKeyIssue(ApprovalNodeApproverSchema, { type: 'position', value: 'cfo', org: '$root' })!.message)
+        .toContain('`org` → `organization`');
+      expect(unknownKeyIssue(ApprovalNodeApproverSchema, { type: 'expression', value: 'vars.x', expandAs: 'user' })!.message)
+        .toContain('`expandAs` → `resolveAs`');
+    });
+  });
+
+  describe('ApprovalEscalationSchema', () => {
+    it('points timeout/target synonyms at the canonical keys', () => {
+      expect(unknownKeyIssue(ApprovalEscalationSchema, { timeoutHours: 4, timeout: 4 })!.message)
+        .toContain('`timeout` → `timeoutHours`');
+      expect(unknownKeyIssue(ApprovalEscalationSchema, { timeoutHours: 4, target: 'ops' })!.message)
+        .toContain('`target` → `escalateTo`');
+    });
+  });
+
+  describe('DecisionOutputDefSchema', () => {
+    it('points name/widget synonyms at the canonical keys', () => {
+      expect(unknownKeyIssue(DecisionOutputDefSchema, { key: 'k', name: 'k' })!.message)
+        .toContain('`name` → `key`');
+      expect(unknownKeyIssue(DecisionOutputDefSchema, { key: 'k', widget: 'user' })!.message)
+        .toContain('`widget` → `type`');
+    });
+  });
+
+  it('publishes additionalProperties:false through the JSON schema (Studio + registerFlow)', () => {
+    const js = getApprovalNodeConfigJsonSchema() as {
+      additionalProperties?: boolean;
+      properties?: { approvers?: { items?: { additionalProperties?: boolean } } };
+    };
+    expect(js.additionalProperties).toBe(false);
+    expect(js.properties?.approvers?.items?.additionalProperties).toBe(false);
   });
 });
