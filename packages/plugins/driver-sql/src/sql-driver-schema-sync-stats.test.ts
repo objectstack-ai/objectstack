@@ -79,10 +79,16 @@ describe('SqlDriver.getSchemaSyncStats', () => {
     const filename = join(dir, 'store.db');
     const opts = { client: 'better-sqlite3' as const, connection: { filename }, useNullAsDefault: true };
 
+    // Both pools are closed unconditionally: a knex pool outlives a failed
+    // assertion with a live timer, which keeps the test process from exiting
+    // long after the run itself has passed.
     const first = new SqlDriver(opts);
-    await first.initObjects(OBJECTS as any);
-    expect(first.getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
-    await first.disconnect();
+    try {
+      await first.initObjects(OBJECTS as any);
+      expect(first.getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
+    } finally {
+      await first.disconnect();
+    }
 
     // A later boot against the same store — the tables precede it.
     const second = new SqlDriver(opts);
