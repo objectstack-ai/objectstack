@@ -1,6 +1,6 @@
 # ADR-0112: One error-code vocabulary — SCREAMING_SNAKE on the wire, a closed standard catalog plus a registered extension ledger
 
-**Status**: Proposed (2026-07-30)
+**Status**: Accepted (2026-07-30)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (declare-and-enforce — a declared property nothing enforces is worse than absent), [ADR-0060](./0060-conformance-ledger-platform-pattern.md) (the ledger pattern this ADR reuses for extension codes), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert declarations — a catalog no route validates against is exactly this), [ADR-0089](./0089-unify-visibility-predicate-naming.md) (the naming-unification precedent: one name per concept, enforced)
 **Consumers**: `@objectstack/spec` (`api/errors.zod.ts`, `api/contract.zod.ts`, generated manifests), `@objectstack/client` (re-exports `StandardErrorCode`; `StandardError` interface; the three-location code probe), `@objectstack/runtime` (`http-dispatcher.ts`), `@objectstack/rest` (`rest-server.ts`, import/export routes), `services/*` (storage, i18n, messaging, automation …), `packages/qa/dogfood`, objectui console (`RecordAttachmentsPanel` and every error-code branch), `content/docs/api/error-catalog.mdx`
