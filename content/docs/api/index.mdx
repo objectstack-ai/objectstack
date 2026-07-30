@@ -181,7 +181,7 @@ Validation failures additionally include a `fields` array (one entry per invalid
 Branch on `error.code`, never on `error.httpStatus` — the status answers "what
 class of failure" and the code answers "which failure". A branch that has no
 code of its own is served a `StandardErrorCode` derived from the status
-(`403` → `permission_denied`, `503` → `service_unavailable`, …).
+(`403` → `PERMISSION_DENIED`, `503` → `SERVICE_UNAVAILABLE`, …).
 
 <Callout type="info">
 The richer `ErrorResponseSchema` in `@objectstack/spec/api` (with `category`, `retryable`, etc.) is the aspirational spec envelope, not the current wire format. Its `category` values are drawn from the `ErrorCategory` enum: `validation`, `authentication`, `authorization`, `not_found`, `conflict`, `rate_limit`, `server`, `external`, `maintenance`.
