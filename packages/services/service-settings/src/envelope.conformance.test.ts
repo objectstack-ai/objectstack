@@ -18,18 +18,19 @@
  *   1. every branch is DRIVEN and parsed against the real schemas imported from
  *      `packages/spec` — not restatements, so the assertions track the contract
  *      if the contract moves;
- *   2. the module source is scanned by the SHARED guard
- *      (`@objectstack/route-envelope-conformance`), so a NEW route cannot bypass
- *      the helpers. Without (2) this suite only ever covers the branches that
- *      existed the day it was written.
+ * The STATIC half of this conformance — proving no route can bypass the
+ * `sendOk` / `sendError` pair — is not here. It is
+ * `scripts/check-route-envelope.mjs`, a repo-wide guard run by
+ * `pnpm check:route-envelope` in CI. It sits outside any package on purpose: the
+ * three predecessors of that scan were per-package, which structurally cannot
+ * notice a route module nobody thought to convert, and two such modules turned up
+ * the moment it went repo-wide (#3973, #3983).
  *
- * (2) used to be a hand-rolled regex block copied into each package. #3843
- * lifted it into one place — three copies was the signal it wanted sharing.
+ * What stays here is the half that has to live next to the routes it drives:
+ * every branch driven, every body parsed against the real spec schemas.
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import { SettingsNamespacePayloadSchema } from '@objectstack/spec/system';
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
@@ -279,13 +280,6 @@ describe('settings envelope (#3843) — error bodies', () => {
       expect(body.code).toBeUndefined();
     });
   }
-});
-
-describe('settings envelope (#3843) — the shared guard', () => {
-  it('routes every body through the two helpers', () => {
-    const source = readFileSync(new URL('./settings-routes.ts', import.meta.url), 'utf8');
-    expect(checkRouteEnvelope({ source, module: 'settings-routes.ts' })).toEqual([]);
-  });
 });
 
 describe('settings envelope (#3843) — a reported action failure keeps its detail', () => {

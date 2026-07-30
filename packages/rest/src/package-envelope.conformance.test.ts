@@ -28,8 +28,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import type { RouteHandler } from '@objectstack/spec/contracts';
 import { registerPackageRoutes } from './package-routes.js';
@@ -348,9 +346,3 @@ describe('packages envelope (#3843) — error bodies', () => {
   });
 });
 
-describe('packages envelope (#3843) — the shared guard', () => {
-  it('routes every body through the two helpers', () => {
-    const source = readFileSync(new URL('./package-routes.ts', import.meta.url), 'utf8');
-    expect(checkRouteEnvelope({ source, module: 'package-routes.ts' })).toEqual([]);
-  });
-});

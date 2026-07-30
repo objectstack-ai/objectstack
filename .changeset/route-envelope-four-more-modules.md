@@ -79,29 +79,46 @@ merge order: objectui's `packages` readers were already tolerant
 
 ## The guard is shared now, not copied
 
-New private `@objectstack/route-envelope-conformance` (`packages/qa/route-envelope`)
-exports one pure `checkRouteEnvelope(source) => finding[]`. Its load-bearing
-assertion is structural rather than per-route: **count the `.json(` call sites**.
-When every body goes through the `sendOk` / `sendError` pair, that count is fixed
-at two and does not grow with the route list — so a *future* route that
-hand-rolls a body fails the guard, which is the coverage a driven test can never
-give.
+`scripts/check-route-envelope.mjs` + `pnpm check:route-envelope`, wired into
+`lint.yml` alongside the nine sibling `check:*` guards. Its load-bearing assertion
+is structural rather than per-route: **it counts the response write sites per
+module.** When every body goes through the `sendOk` / `sendError` pair that count
+is fixed at two and does not grow with the route list — so a *future* route that
+hand-rolls a body fails the guard. That is the coverage a driven-body test can
+never give, since it can only drive the routes that existed the day it was
+written.
 
 This existed three times already as an open-coded regex block (storage error,
-storage success, i18n error); the third copy was the signal it wanted lifting
-(#3843 option 3, done before the conversions). All three now delegate to it, as
-do the four new per-module suites. The shared version also fixes a real bug in
-the copies: they stripped comments with `String.replace`, which also ate `//`
-inside string literals and silently truncated the rest of that line —
-`.json(` calls included. A guard that under-counts call sites passes while drift
-ships, which is the failure mode this issue is about. The shared scanner
-tokenizes properly and pins that case in its own suite.
+storage success, i18n error). Lifting it did more than deduplicate: a per-package
+scan **structurally cannot notice a module nobody thought to convert**, and going
+repo-wide found two the moment it ran — neither is in #3843's hand-written survey:
 
-**One ratchet, stated rather than hidden.** `i18n-service-plugin.ts` is declared
-at `jsonCallSites: 5, successBuilders: 4`. Its error half *is* consolidated
-(#3675), but each of its four read routes builds `{ success: true, data }`
-inline. Those bodies are correct — that is not envelope drift — but an
-unconsolidated builder is a weaker guard: a fifth read route could get the shape
-wrong and only a driven test would notice. The numbers pin today's structure
-exactly (a new inline body fails), and consolidating behind a `sendOk` drives
-them to the 2 / 1 the other five modules use.
+- `plugin-sharing/share-link-routes.ts` — the fifth drifting module. No body
+  carries `success`, and one answers `{ ok: true }`, the private second word #3689
+  retired from storage. Filed as #3983 and pinned by the guard; converting it is
+  breaking for share-link consumers and needs its own sweep.
+- `metadata/routes/hmr-routes.ts` — declared **exempt** with a reason (dev-only
+  SSE endpoint, not on the SDK surface), not skipped. Three states, deliberately —
+  conformant / ratcheted / exempt — because that is the honest classification
+  ADR-0049 asks for. A route module the scan finds but the table does not declare
+  is an **error**, never a default: applying `2 / 1 / 1` to an unknown module would
+  let a new one pass by coincidence.
+
+It also drops the regex for the TypeScript AST, fixing two real bugs the copies
+had. They stripped comments with `String.replace`, whose line-comment pattern also
+ate `//` inside string literals and truncated the rest of that line — response
+writes included. And `.json(` does not mean "write a response": `hmr-routes.ts`
+calls `c.req.json()` twice to READ a request body, which a textual count reports as
+two unenveloped responses. Comments and literals are not AST tokens, and
+request-vs-response is a property of the callee, so both disappear. The script
+carries a `--self-test` pinning each case — the nine sibling guards have none, but
+both of these bugs survived a review of the regex version.
+
+**The i18n ratchet, stated rather than hidden.** `i18n-service-plugin.ts` is
+declared at `responses: 5, ok: 4, err: 1` with a ratchet pointing at #3973. Its
+error half *is* consolidated (#3675), but each of its four read routes builds
+`{ success: true, data }` inline. Those bodies are correct — that is not envelope
+drift — but an unconsolidated builder is a weaker guard: a fifth read route could
+get the shape wrong and only a driven test would notice. The numbers pin today's
+structure exactly (a new inline body fails) and drop to the conformant `2 / 1 / 1`
+when #3973 lands.

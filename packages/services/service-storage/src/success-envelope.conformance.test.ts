@@ -35,14 +35,25 @@
  * As with the error twin: the route ledgers cannot catch any of this. They
  * audit which routes exist and whether the SDK can address them, not what
  * comes back.
+ *
+ * The STATIC half — proving no route can bypass the `sendOk` / `sendError` pair
+ * — used to be an open-coded regex block right here. #3843 lifted it out to
+ * `scripts/check-route-envelope.mjs` (`pnpm check:route-envelope`), which audits
+ * EVERY route module in the repo rather than this one package.
+ *
+ * That move mattered more than deduplication. A per-package scan structurally
+ * cannot notice a module nobody thought to convert, and going repo-wide found two
+ * immediately (#3973, #3983). It also dropped the regex: the old block stripped
+ * comments with `String.replace`, which ate `//` inside string literals and
+ * truncated the rest of that line — response writes included — and counted
+ * `c.req.json()` (a request READ) as an unenveloped response. The AST has neither
+ * bug.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import {
   PresignedUrlResponseSchema,
@@ -296,23 +307,5 @@ describe('storage success envelope (#3689)', () => {
       // And `{ data }` alone, without the flag, was the third shape.
       expect(typeof body.success, `${c.name} answers no success flag`).toBe('boolean');
     }
-  });
-
-  it('routes every success through `sendOk` — no route may reintroduce a bare body', () => {
-    // This scan used to be open-coded here: strip comments, count `.json(` call
-    // sites, assert one builder per envelope half, assert `ok: true` is gone.
-    // #3843 lifted it into `@objectstack/route-envelope-conformance` — the same
-    // block had been copied into the error twin and into i18n, and the third
-    // copy was the signal it wanted sharing rather than copying. The shared
-    // version also tokenizes properly instead of regex-stripping comments,
-    // which the copies got subtly wrong (a `//` inside a string truncated the
-    // rest of the line, `.json(` calls included).
-    //
-    // The defaults are exactly what the four open-coded assertions were:
-    // 2 call sites (`sendOk` + `sendError`), one builder per half, no literal
-    // `ok:` flag. Both halves stay pinned in both suites, so moving one without
-    // the other still fails.
-    const source = readFileSync(new URL('./storage-routes.ts', import.meta.url), 'utf8');
-    expect(checkRouteEnvelope({ source, module: 'storage-routes.ts' })).toEqual([]);
   });
 });

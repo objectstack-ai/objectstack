@@ -14,11 +14,22 @@
  * Both directions are guarded: every error branch is driven and parsed against
  * the real `BaseResponseSchema`, and the module source is scanned so a new
  * route cannot quietly reintroduce the bare shape.
+ *
+ * The STATIC half — proving no route can bypass the `sendOk` / `sendError` pair
+ * — used to be an open-coded regex block right here. #3843 lifted it out to
+ * `scripts/check-route-envelope.mjs` (`pnpm check:route-envelope`), which audits
+ * EVERY route module in the repo rather than this one package.
+ *
+ * That move mattered more than deduplication. A per-package scan structurally
+ * cannot notice a module nobody thought to convert, and going repo-wide found two
+ * immediately (#3973, #3983). It also dropped the regex: the old block stripped
+ * comments with `String.replace`, which ate `//` inside string literals and
+ * truncated the rest of that line — response writes included — and counted
+ * `c.req.json()` (a request READ) as an unenveloped response. The AST has neither
+ * bug.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { I18nServicePlugin } from './i18n-service-plugin';
@@ -175,36 +186,5 @@ describe('i18n error envelope (#3675)', () => {
     expect(status).toBe(500);
     expect(BaseResponseSchema.safeParse(body).success).toBe(true);
     expect(body.error.message).toBe('Internal error');
-  });
-
-  it('routes every error through `sendError` — no route may reintroduce the bare shape', () => {
-    // Open-coded here until #3843 lifted the scan into
-    // `@objectstack/route-envelope-conformance`. This module needs non-default
-    // counts, and they are worth stating plainly rather than hiding:
-    //
-    //   - `errorBuilders: 1` — the error half IS consolidated behind
-    //     `sendError`, which is what #3675 did to this module.
-    //   - `successBuilders: 4` / `jsonCallSites: 5` — the success half is NOT.
-    //     Each of the four read routes builds `{ success: true, data: … }`
-    //     inline. The envelope those bodies emit is CORRECT (that is what
-    //     `i18n-success-envelope.conformance.test.ts` in `packages/runtime`
-    //     drives), so this is not the envelope drift #3843 is about — it is an
-    //     unconsolidated builder, which makes the guard weaker: a fifth read
-    //     route could get the shape wrong and only a driven test would notice.
-    //
-    // So these two numbers are a RATCHET, not a blessing. They pin the current
-    // structure exactly — a new inline body moves the count and fails here —
-    // and consolidating the four call sites behind a `sendOk` drives them to
-    // the defaults (2 / 1) the other five route modules use.
-    const source = readFileSync(new URL('./i18n-service-plugin.ts', import.meta.url), 'utf8');
-    expect(
-      checkRouteEnvelope({
-        source,
-        module: 'i18n-service-plugin.ts',
-        jsonCallSites: 5,
-        successBuilders: 4,
-        errorBuilders: 1,
-      }),
-    ).toEqual([]);
   });
 });

@@ -21,14 +21,19 @@
  * success arm: `sendOk` sets an explicit `status(200)` where the module used to
  * call bare `res.json(…)`, and only a real adapter proves the chain works.
  *
- * The static half is the shared guard (`@objectstack/route-envelope-conformance`),
- * so a NEW route cannot bypass the helpers — the coverage a driven test can
- * never give, since it can only drive the routes that exist today.
+ * The STATIC half of this conformance — proving no route can bypass the
+ * `sendOk` / `sendError` pair — is not here. It is
+ * `scripts/check-route-envelope.mjs`, a repo-wide guard run by
+ * `pnpm check:route-envelope` in CI. It sits outside any package on purpose: the
+ * three predecessors of that scan were per-package, which structurally cannot
+ * notice a route module nobody thought to convert, and two such modules turned up
+ * the moment it went repo-wide (#3973, #3983).
+ *
+ * What stays here is the half that has to live next to the routes it drives:
+ * every branch driven, every body parsed against the real spec schemas.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
@@ -220,12 +225,5 @@ describe('datasource-admin envelope (#3843) — error bodies', () => {
     );
     // Before #3843 this read `undefined`, and the message sat at `body.message`.
     expect(body.error.message).toBe('duplicate name');
-  });
-});
-
-describe('datasource-admin envelope (#3843) — the shared guard', () => {
-  it('routes every body through the two helpers', () => {
-    const source = readFileSync(new URL('../admin-routes.ts', import.meta.url), 'utf8');
-    expect(checkRouteEnvelope({ source, module: 'admin-routes.ts' })).toEqual([]);
   });
 });

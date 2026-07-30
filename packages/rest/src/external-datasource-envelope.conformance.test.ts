@@ -19,13 +19,19 @@
  * pins that distinction so a later sweep for "`ok` beside `success`" does not
  * delete a real field.
  *
- * The static half is the shared guard, whose private-success-word rule is
- * deliberately scoped to `ok:` *literals* for exactly this reason.
+ * The STATIC half of this conformance — proving no route can bypass the
+ * `sendOk` / `sendError` pair — is not here. It is
+ * `scripts/check-route-envelope.mjs`, a repo-wide guard run by
+ * `pnpm check:route-envelope` in CI. It sits outside any package on purpose: the
+ * three predecessors of that scan were per-package, which structurally cannot
+ * notice a route module nobody thought to convert, and two such modules turned up
+ * the moment it went repo-wide (#3973, #3983).
+ *
+ * What stays here is the half that has to live next to the routes it drives:
+ * every branch driven, every body parsed against the real spec schemas.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import type { IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
@@ -235,12 +241,5 @@ describe('external-datasource envelope (#3843) — error bodies', () => {
       expect(body.success, `${method} ${path}`).toBe(false);
       expect(body.error.code, `${method} ${path}`).toBe('external_service_unavailable');
     }
-  });
-});
-
-describe('external-datasource envelope (#3843) — the shared guard', () => {
-  it('routes every body through the two helpers', () => {
-    const source = readFileSync(new URL('./external-datasource-routes.ts', import.meta.url), 'utf8');
-    expect(checkRouteEnvelope({ source, module: 'external-datasource-routes.ts' })).toEqual([]);
   });
 });

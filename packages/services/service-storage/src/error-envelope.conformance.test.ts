@@ -18,14 +18,25 @@
  *   2. the module source is scanned so a NEW route cannot quietly reintroduce
  *      the bare shape. Without (2) this suite only ever covers the branches
  *      that existed the day it was written.
+ *
+ * The STATIC half — proving no route can bypass the `sendOk` / `sendError` pair
+ * — used to be an open-coded regex block right here. #3843 lifted it out to
+ * `scripts/check-route-envelope.mjs` (`pnpm check:route-envelope`), which audits
+ * EVERY route module in the repo rather than this one package.
+ *
+ * That move mattered more than deduplication. A per-package scan structurally
+ * cannot notice a module nobody thought to convert, and going repo-wide found two
+ * immediately (#3973, #3983). It also dropped the regex: the old block stripped
+ * comments with `String.replace`, which ate `//` inside string literals and
+ * truncated the rest of that line — response writes included — and counted
+ * `c.req.json()` (a request READ) as an unenveloped response. The AST has neither
+ * bug.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { checkRouteEnvelope } from '@objectstack/route-envelope-conformance';
 import { BaseResponseSchema } from '@objectstack/spec/api';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { LocalStorageAdapter } from './local-storage-adapter';
@@ -289,14 +300,4 @@ describe('storage error envelope (#3675)', () => {
       expect(body.code).toBeUndefined();
     });
   }
-
-  it('routes every error through `sendError` — no route may reintroduce the bare shape', () => {
-    // Open-coded here until #3843 lifted the scan into
-    // `@objectstack/route-envelope-conformance`; see the note in the success
-    // twin. The shared check subsumes both of this suite's assertions — the
-    // bare `res.status(…).json({ error…` idiom and the one-builder-per-half
-    // count — and adds the call-site count the error twin never had.
-    const source = readFileSync(new URL('./storage-routes.ts', import.meta.url), 'utf8');
-    expect(checkRouteEnvelope({ source, module: 'storage-routes.ts' })).toEqual([]);
-  });
 });
