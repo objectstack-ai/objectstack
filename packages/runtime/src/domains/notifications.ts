@@ -20,6 +20,7 @@
  */
 
 import { CoreServiceName } from '@objectstack/spec/system';
+import type { INotificationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -41,15 +42,36 @@ export async function handleNotificationRequest(
     query: any,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    const service = await deps.resolveService(CoreServiceName.enum.notification, context.environmentId) as any;
+    // [#4127] Typed against the contract instead of `as any`, so a call this
+    // file makes that `INotificationService` does not declare is a compile
+    // error rather than a runtime discovery. That is the check missing when
+    // #4087 shipped a `/storage` handler calling `upload(key, data)` with two
+    // wrong arguments for months.
+    const service = await deps.resolveService(
+        CoreServiceName.enum.notification,
+        context.environmentId,
+    ) as INotificationService | undefined;
     // [#4058] Three ways to have no inbox capability, one answer. The
-    // `listInbox` duck-type was already here and, by accident, kept the known
+    // `listInbox` probe was already here and, by accident, kept the known
     // fabricating stub off this surface (the dev one implements `send` /
     // `sendBatch` only). `isServiceServeable` makes that explicit rather than
     // incidental: a self-declared non-handler (`handlerReady: false`, ADR-0076
     // D12) is an empty slot even if it grows a `listInbox` later. A `degraded`
     // inbox that really serves keeps serving.
-    if (!isServiceServeable(service) || typeof service.listInbox !== 'function') return { handled: false };
+    //
+    // [#4127] The probe STAYS, and it is not a duck-type any more: `listInbox`
+    // is now a declared OPTIONAL method. Optional because an inbox needs a
+    // durable store, and a send-only provider (SMTP, Twilio, a Slack webhook)
+    // fills this slot legitimately without one — a fact `handlerReady` cannot
+    // express, since the slot is serveable and only this capability is absent.
+    // The dev stub implementing exactly `send`/`sendBatch` was never a bug on
+    // its part: it followed the contract, and the contract was the incomplete
+    // thing.
+    if (!service || !isServiceServeable(service) || typeof service.listInbox !== 'function') {
+        return { handled: false };
+    }
+    // Narrowed for the routes below: the entry probe established `listInbox`.
+    const inbox = service as INotificationService & Required<Pick<INotificationService, 'listInbox'>>;
 
     const userId: string | undefined = context.executionContext?.userId;
     if (!userId) {
@@ -64,25 +86,35 @@ export async function handleNotificationRequest(
     // the legacy `.replace(/\/+$/, '')` had carried the trap since ADR-0030.
     const subPath = path.split('/').filter(Boolean).join('/');
 
+    // Each write route probes its OWN method rather than riding the entry
+    // `listInbox` probe (#4127). The three are separately optional on the
+    // contract, so "has an inbox to read" does not imply "has read-state to
+    // write" — and the same-shaped `handled: false` is what an absent
+    // capability already answers everywhere else in this file. Before the
+    // methods were declared, the entry probe was the only thing standing
+    // between a list-only provider and a `TypeError` on `markRead`.
+
     // GET /notifications — list the user's inbox joined with read-state.
     if (subPath === '' && m === 'GET') {
         const read = query?.read === undefined ? undefined : String(query.read) === 'true';
         const limit = query?.limit ? Number(query.limit) : undefined;
         const type = query?.type ? String(query.type) : undefined;
-        const result = await service.listInbox(userId, { read, type, limit });
+        const result = await inbox.listInbox(userId, { read, type, limit });
         return { handled: true, response: deps.success(result) };
     }
 
     // POST /notifications/read — mark specific notifications read.
     if (subPath === 'read' && m === 'POST') {
+        if (typeof inbox.markRead !== 'function') return { handled: false };
         const ids: string[] = Array.isArray(body?.ids) ? body.ids.map((x: unknown) => String(x)) : [];
-        const result = await service.markRead(userId, ids);
+        const result = await inbox.markRead(userId, ids);
         return { handled: true, response: deps.success(result) };
     }
 
     // POST /notifications/read/all — mark all of the user's inbox read.
     if (subPath === 'read/all' && m === 'POST') {
-        const result = await service.markAllRead(userId);
+        if (typeof inbox.markAllRead !== 'function') return { handled: false };
+        const result = await inbox.markAllRead(userId);
         return { handled: true, response: deps.success(result) };
     }
 

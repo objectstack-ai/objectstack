@@ -255,6 +255,30 @@ export interface ResumeSignal {
     [RESUME_AUTHORITY_SERVICE]?: true;
 }
 
+/**
+ * One flow's deployment + trigger-binding state, as
+ * {@link IAutomationService.getFlowRuntimeStates} reports it (#4127).
+ */
+export interface FlowRuntimeState {
+    /** Flow name (snake_case) — the key {@link IAutomationService.execute} takes. */
+    name: string;
+    /** Whether the flow is enabled; a disabled flow stays registered and never runs. */
+    enabled: boolean;
+    /**
+     * Whether a trigger is actually wired to this flow. `false` for a flow with
+     * no declared trigger (manual / screen flows) AND for one whose declared
+     * trigger type has no registered trigger — `triggerType` distinguishes the
+     * two.
+     */
+    bound: boolean;
+    /** Persisted deployment status, when the flow carries one. */
+    status?: string;
+    /** Declared trigger type, when the flow declares one. */
+    triggerType?: string;
+    /** Object the trigger binds to, for object-bound trigger types. */
+    object?: string;
+}
+
 export interface IAutomationService {
     /**
      * Execute a named flow or script
@@ -321,6 +345,24 @@ export interface IAutomationService {
      * @returns Array of registered action descriptors
      */
     getActionDescriptors?(): ActionDescriptor[];
+
+    /**
+     * Per-flow deployment + binding state, for operator surfaces.
+     *
+     * [#4127] Declared because the dispatcher's `GET /automation/_status`
+     * already called it (as did the CLI boot summary and the
+     * `kernel:bootstrapped` audit), while the contract stopped at
+     * {@link listFlows} — a bare `string[]` that cannot say whether a flow is
+     * enabled, or bound to a trigger, or why it is not.
+     *
+     * `bound: false` is the answer the operator surfaces exist for: a flow with
+     * no trigger (manually-invoked / screen flows) or whose declared trigger
+     * type has no registered trigger. `triggerType` / `object` expose the
+     * declared binding so the caller can say WHY, rather than only that.
+     *
+     * @returns One entry per registered flow
+     */
+    getFlowRuntimeStates?(): FlowRuntimeState[];
 
     /**
      * Resume a run that suspended at a pausing node (ADR-0019). The run must

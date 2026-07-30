@@ -139,4 +139,72 @@ describe('Notification Service Contract', () => {
     expect(sent[0].templateId).toBe('welcome-email');
     expect(sent[0].templateData?.userName).toBe('Alice');
   });
+
+  /**
+   * [#4127] The inbox half. These three backed three SDK-expressed dispatcher
+   * routes for as long as the routes existed, while this file described only
+   * the send half — so the dev stub, which implements exactly `send` and
+   * `sendBatch` BECAUSE it followed this contract, was the implementation the
+   * domain had to duck-type past.
+   *
+   * Optional, and the first test is the reason: a send-only provider (SMTP,
+   * Twilio, a Slack webhook) fills the slot legitimately with no inbox at all.
+   */
+  describe('inbox (#4127)', () => {
+    it('keeps a send-only provider valid — the inbox trio is optional', () => {
+      const sendOnly: INotificationService = {
+        send: async () => ({ success: true }),
+      };
+
+      expect(sendOnly.listInbox).toBeUndefined();
+      expect(sendOnly.markRead).toBeUndefined();
+      expect(sendOnly.markAllRead).toBeUndefined();
+    });
+
+    it('types an inbox provider the way service-messaging implements it', async () => {
+      const readIds = new Set<string>();
+      const rows = [
+        { id: 'n1', type: 'mention', title: 'You were mentioned', body: 'in Acme', createdAt: '2026-07-30T00:00:00.000Z' },
+        { id: 'n2', type: 'assignment', title: 'Case assigned', body: 'CASE-1', actionUrl: '/cases/1', createdAt: '2026-07-30T01:00:00.000Z' },
+      ];
+
+      const service: INotificationService = {
+        send: async () => ({ success: true }),
+        listInbox: async (_userId, options) => {
+          const all = rows.map((r) => ({ ...r, read: readIds.has(r.id) }));
+          const filtered = all
+            .filter((r) => (options?.read === undefined ? true : r.read === options.read))
+            .filter((r) => (options?.type ? r.type === options.type : true))
+            .slice(0, options?.limit ?? 50);
+          return { notifications: filtered, unreadCount: all.filter((r) => !r.read).length };
+        },
+        markRead: async (_userId, ids) => {
+          let readCount = 0;
+          for (const id of ids) {
+            if (rows.some((r) => r.id === id) && !readIds.has(id)) { readIds.add(id); readCount += 1; }
+          }
+          return { success: true, readCount };
+        },
+        markAllRead: async (userId) => {
+          const { notifications } = await service.listInbox!(userId, { read: false });
+          return service.markRead!(userId, notifications.map((n) => n.id));
+        },
+      };
+
+      const first = await service.listInbox!('u-1');
+      expect(first.notifications).toHaveLength(2);
+      expect(first.unreadCount).toBe(2);
+
+      expect(await service.markRead!('u-1', ['n1'])).toEqual({ success: true, readCount: 1 });
+      // Re-marking an already-read notification counts nothing.
+      expect(await service.markRead!('u-1', ['n1'])).toEqual({ success: true, readCount: 0 });
+
+      const unread = await service.listInbox!('u-1', { read: false });
+      expect(unread.notifications.map((n) => n.id)).toEqual(['n2']);
+      expect(unread.unreadCount).toBe(1);
+
+      expect(await service.markAllRead!('u-1')).toEqual({ success: true, readCount: 1 });
+      expect((await service.listInbox!('u-1', { read: false })).notifications).toHaveLength(0);
+    });
+  });
 });
