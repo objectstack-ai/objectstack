@@ -12,6 +12,7 @@
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { IAutomationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
+import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -119,8 +120,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // automation capability. This domain is the sharpest case for the rule: a
     // stub whose `execute` returns `{ success: true }` without running anything
     // answered 200, so a caller (or an agent) read "flow executed" off a flow
-    // that never ran. 404 handled by caller.
-    if (!isServiceServeable(automationService)) return { handled: false };
+    // that never ran.
+    //
+    // 501, not the `handled: false` this used to return: `/automation` IS
+    // mounted, so the dispatcher's ROUTE_NOT_FOUND exit ("No handler matched
+    // this request") described neither half truthfully. See ./unavailable.ts.
+    if (!isServiceServeable(automationService)) return capabilityUnavailable(deps, 'automation');
 
     const m = method.toUpperCase();
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);

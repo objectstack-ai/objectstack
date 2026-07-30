@@ -22,6 +22,7 @@
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { INotificationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
+import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -67,8 +68,13 @@ export async function handleNotificationRequest(
     // The dev stub implementing exactly `send`/`sendBatch` was never a bug on
     // its part: it followed the contract, and the contract was the incomplete
     // thing.
+    //
+    // 501 rather than the `handled: false` this used to return — `/notifications`
+    // is mounted, so that produced a ROUTE_NOT_FOUND whose hint ("check the API
+    // discovery endpoint") pointed at a page that correctly does not list the
+    // route. See ./unavailable.ts. The slot key is `notification`, singular.
     if (!service || !isServiceServeable(service) || typeof service.listInbox !== 'function') {
-        return { handled: false };
+        return capabilityUnavailable(deps, 'notification');
     }
     // Narrowed for the routes below: the entry probe established `listInbox`.
     const inbox = service as INotificationService & Required<Pick<INotificationService, 'listInbox'>>;
@@ -105,7 +111,7 @@ export async function handleNotificationRequest(
 
     // POST /notifications/read — mark specific notifications read.
     if (subPath === 'read' && m === 'POST') {
-        if (typeof inbox.markRead !== 'function') return { handled: false };
+        if (typeof inbox.markRead !== 'function') return capabilityUnavailable(deps, 'notification');
         const ids: string[] = Array.isArray(body?.ids) ? body.ids.map((x: unknown) => String(x)) : [];
         const result = await inbox.markRead(userId, ids);
         return { handled: true, response: deps.success(result) };
@@ -113,7 +119,7 @@ export async function handleNotificationRequest(
 
     // POST /notifications/read/all — mark all of the user's inbox read.
     if (subPath === 'read/all' && m === 'POST') {
-        if (typeof inbox.markAllRead !== 'function') return { handled: false };
+        if (typeof inbox.markAllRead !== 'function') return capabilityUnavailable(deps, 'notification');
         const result = await inbox.markAllRead(userId);
         return { handled: true, response: deps.success(result) };
     }
