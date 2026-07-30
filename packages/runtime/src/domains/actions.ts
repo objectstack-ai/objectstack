@@ -124,6 +124,9 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     }
     const projectQl: any = await deps.resolveProjectKernelObjectQL(_context);
 
+    // [#4127] Same as the
+    // action-execution site: `executeAction` is outside IDataEngine, and
+    // ObjectQL's wider surface has no contract yet.
     const ql: any = projectQl ?? await deps.getObjectQL(_context?.environmentId);
     if (!ql || typeof ql.executeAction !== 'function') {
         return { handled: true, response: deps.error('Data engine not available', 503) };

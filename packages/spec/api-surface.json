@@ -3567,6 +3567,7 @@
     "AudienceBindingSuggestionSync (interface)",
     "AuthResult (interface)",
     "AuthSession (interface)",
+    "AuthSessionApi (interface)",
     "AuthUser (interface)",
     "AutomationContext (interface)",
     "AutomationResult (interface)",

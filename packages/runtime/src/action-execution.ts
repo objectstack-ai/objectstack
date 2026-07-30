@@ -17,6 +17,7 @@
 
 import { validateActionParams, type ResolvedActionParam } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { checkApiExposure } from './api-exposure.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -57,8 +58,18 @@ function warnActionParamsOnce(key: string, message: string): void {
     console.warn(message);
 }
 
-/** The dispatcher facilities the action subsystem may touch. */
+/**
+ * The dispatcher facilities the action subsystem may touch.
+ *
+ * [#4127 batch 4] `resolveService` is split the same way as the one on
+ * `DomainHandlerDeps`. This is a NARROWER re-declaration of the same facility
+ * and it kept returning `any` after the main one stopped — the third copy of
+ * the pattern, alongside `ResolveOptions` in security/resolve-execution-context.
+ * A lookup facade has to be typed everywhere it is re-declared, or the copy
+ * that still says `any` becomes the way around all the others.
+ */
 export interface ActionExecutionDeps {
+    resolveService<K extends keyof ServiceSlotContracts>(name: K, environmentId?: string): Promise<ServiceSlotContract<K> | undefined>;
     resolveService(name: string, environmentId?: string): any;
     getObjectQL(environmentId?: string): Promise<any>;
 }
@@ -329,7 +340,11 @@ export function headlessActionTypeError(deps: ActionExecutionDeps, action: any, 
  */
 export async function resolveAutomationService(deps: ActionExecutionDeps, envId?: string): Promise<any | null> {
     try {
-        const svc: any = await deps.resolveService('automation', envId);
+        // [#4127 batch 4] Was `: any`, which voided the gate here. `execute` is
+        // declared on IAutomationService, so this needed no contract work — only
+        // for someone to notice, and three grep sweeps over `domains/*.ts` never
+        // reached this file. The lint rule did.
+        const svc = await deps.resolveService('automation', envId);
         return svc && typeof svc.execute === 'function' ? svc : null;
     } catch {
         return null; // no automation service on this kernel
@@ -810,6 +825,9 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
 
     // ── script/body dispatch via the engine's executeAction ──
+    // [#4127] `executeAction` is
+    // ObjectQL's own surface, outside IDataEngine; `getObjectQL` exists to reach
+    // exactly that. Closing this needs ObjectQL's contract written, not a cast.
     const ql: any = await deps.getObjectQL(envId);
     if (!ql || typeof ql.executeAction !== 'function') {
         throw new Error('Data engine not available for action dispatch');
@@ -1060,7 +1078,16 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     let degraded = false;
     let reason: string | undefined;
     try {
-        const meta: any = await deps.resolveService('metadata', envId);
+        // [#4127 FINDING, batch 5]
+        // `metadata` IS contracted, so this `any` is not legitimate — but
+        // `loadDiagnosed` is not on IMetadataService, though MetadataManager
+        // implements it. Same shape as every gap this line of work has found:
+        // call site and implementation agree, the contract is what nobody wrote.
+        // Recorded rather than fixed here — adding it changes a public contract
+        // and belongs in the batch that adds the four undeclared auth members.
+        // [#4127 batch 4] `loadDiagnosed` is on IMetadataService now, so this
+        // reads the contract instead of guessing at it.
+        const meta = await deps.resolveService('metadata', envId);
         if (meta && typeof meta.loadDiagnosed === 'function') {
             const diag: any = await meta.loadDiagnosed('action', actionName);
             if (diag?.data && ownsRoute(diag.data)) return { action: diag.data, obj };

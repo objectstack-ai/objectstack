@@ -85,7 +85,12 @@ export async function handleShareLinksRequest(
     // request's RESOLVED (per-env) kernel first: `resolveService('objectql',
     // env)` can hand back a different (host/scoped) engine that lacks the
     // per-env rows.
-    const getEngine = async (): Promise<any> => {
+    // [#4127 batch 4] The `Promise<any>` return annotation was a THIRD way the
+    // slot type got erased, after `const x: any =` and `as any` in batches 2-3.
+    // Both arms resolve the same `objectql` slot and both are typed now; the
+    // wrapper's own annotation flattened them back to `any` on the way out.
+    // Inferred instead, so `engine.find` below is checked against IDataEngine.
+    const getEngine = async () => {
         try {
             const e = await deps.getRequestKernelService('objectql');
             if (e) return e;

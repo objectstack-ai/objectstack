@@ -131,6 +131,40 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
         expect(error.details).toEqual({ environmentId: 'proj-private', userId: 'user-1' });
     });
 
+    // [#4127 batch 4] The case above mocks auth as `{ api: { getSession } }` —
+    // the LEGACY direct-mount shape. `plugin-auth` registers `AuthManager`,
+    // which has no `.api` at all and exposes `getApi()` instead. So this gate
+    // was green in tests and open in production: the session read yielded
+    // undefined, `userId` stayed unset, and the handler returned at its
+    // "anonymous — upstream auth will decide" line without ever querying
+    // `sys_environment_member`. A signed-in NON-MEMBER passed it, on every
+    // deployment with project scoping on. This pins the shipped shape.
+    it('denies a non-member when the auth service exposes getApi() rather than .api (the shipped shape)', async () => {
+        const ql = { find: vi.fn().mockResolvedValue([]) };   // no membership row
+        const kernel: any = {
+            context: {
+                getService: (name: string) => {
+                    // No `.api` member at all — exactly like AuthManager.
+                    if (name === 'auth') {
+                        return { getApi: async () => ({ getSession: async () => ({ user: { id: 'user-1' } }) }) };
+                    }
+                    if (name === 'objectql') return ql;
+                    return null;
+                },
+            },
+        };
+        const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: true });
+        const response = await (dispatcher as any).enforceProjectMembership(
+            { request: { headers: {} }, environmentId: 'proj-private' },
+            '/api/v1/environments/proj-private/data/task',
+        );
+
+        const error = expectConformantError(response);
+        expect(error.code).toBe('PROJECT_MEMBERSHIP_REQUIRED');
+        expect(error.details).toEqual({ environmentId: 'proj-private', userId: 'user-1' });
+        expect(ql.find).toHaveBeenCalled();   // the membership query actually ran
+    });
+
     it('lifts a thrown error’s own code into the declared field', async () => {
         const thrown = Object.assign(new Error('publish backend unavailable'), {
             code: 'CONNECTOR_UPSTREAM_UNAVAILABLE',

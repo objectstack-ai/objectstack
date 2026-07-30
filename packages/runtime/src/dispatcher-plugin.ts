@@ -3,6 +3,7 @@
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
+import type { IAuthService } from '@objectstack/spec/contracts';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
@@ -1140,7 +1141,13 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // hits to protected routes are rejected upstream.
             const resolveRequestUser = async (headers: Record<string, any>): Promise<any | undefined> => {
                 try {
-                    const authService: any = ctx.getService('auth');
+                    // [#4127 batch 4] The KERNEL's `ctx.getService` is a
+                    // different, still-untyped surface — typing it is its own
+                    // change. Naming the contract in the cast is the point: the
+                    // claim being made is the ledger's (`auth` -> IAuthService),
+                    // written where a reader can check it, instead of `any`,
+                    // which claims the same thing while saying nothing.
+                    const authService = ctx.getService('auth') as IAuthService | undefined;
                     if (!authService) return undefined;
                     let api: any = authService.api;
                     if (!api && typeof authService.getApi === 'function') {

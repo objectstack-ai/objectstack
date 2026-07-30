@@ -116,4 +116,67 @@ export interface IAuthService {
      * @returns The metadata URL, or `null` when the OAuth track is off
      */
     getMcpResourceMetadataUrl?(): string | null;
+
+    /**
+     * The underlying session API, when the provider mounts it DIRECTLY on
+     * itself (the legacy shape). Prefer {@link getApi} — the shipped
+     * `plugin-auth` registers an `AuthManager`, which has no `api` member at
+     * all, so a caller that reads only this one gets `undefined` on every
+     * current deployment.
+     *
+     * [#4127 batch 4] Declared because reading it without the `getApi()`
+     * fallback silently disabled the project-membership gate: the read yielded
+     * `undefined`, the caller treated that as "anonymous", and
+     * `sys_environment_member` was never queried. Both shapes are on the
+     * contract now so the two-step read is a checked expression rather than a
+     * pair of guesses.
+     */
+    api?: AuthSessionApi;
+
+    /**
+     * Resolve the session API, creating the underlying auth instance on first
+     * use (the lazy-plugin shape `AuthManager` implements). This is the
+     * accessor callers should reach for; {@link api} is its legacy twin.
+     */
+    getApi?(): Promise<AuthSessionApi | undefined>;
+
+    /**
+     * Whether the deployment's auth gate is live, i.e. whether unauthenticated
+     * requests should be challenged at all. Synchronous and cheap by contract —
+     * the implementation keeps a TTL-refreshed snapshot precisely so every
+     * request can ask.
+     *
+     * [#4127 batch 4] Implemented by `AuthManager` and probed identically by
+     * the dispatcher and `packages/rest` — two independent callers agreeing on
+     * a member the contract never mentioned.
+     */
+    isAuthGateActive?(): boolean;
+
+    /**
+     * Verify an OAuth 2.1 access token issued by this deployment's embedded
+     * authorization server, for the MCP surface (#2698). Resolves to the
+     * token's principal, or a falsy value when the token is
+     * unknown/expired/revoked or carries the wrong audience — callers fail
+     * CLOSED on anything but a verified result.
+     *
+     * [#4127 batch 4] Implemented by `AuthManager`; the execution-context
+     * resolver has always called it through `any`.
+     */
+    verifyMcpAccessToken?(token: string): Promise<{ userId: string; scopes: string[]; clientId?: string } | undefined>;
+}
+
+/**
+ * The slice of the session API the platform actually uses.
+ *
+ * [#4127 batch 4] Deliberately NOT a re-declaration of better-auth's handle,
+ * which is far wider and belongs to that library. Every dispatcher-side reader
+ * calls exactly `getSession({ headers })` and reads exactly the fields below,
+ * so that is what is declared. Widening this is for whoever needs more, with
+ * the call site to prove it.
+ */
+export interface AuthSessionApi {
+    getSession?(input: { headers: unknown }): Promise<{
+        user?: { id?: string };
+        session?: { userId?: string; activeOrganizationId?: string };
+    } | undefined>;
 }
