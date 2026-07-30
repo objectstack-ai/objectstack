@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "@hono/node-server": "^2.0.12",
-    "@objectstack/driver-memory": "workspace:*",
+    "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/hono": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",

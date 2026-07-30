@@ -44,6 +44,7 @@
     "@objectstack/driver-mongodb": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",

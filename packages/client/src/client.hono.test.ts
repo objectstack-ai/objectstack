@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { ObjectStackClient } from './index';
 
@@ -108,7 +108,7 @@ describe('ObjectStackClient (with Hono Server)', () => {
 
         // 3. Setup Driver
         const ql = kernel.getService<ObjectQL>('objectql');
-        ql.registerDriver(new InMemoryDriver(), true);
+        ql.registerDriver(new SqliteWasmDriver({ filename: ':memory:' }) as never, true);
 
         // 4. Load Metadata (Schema)
         ql.registerObject({
@@ -119,6 +119,11 @@ describe('ObjectStackClient (with Hono Server)', () => {
                 email: { type: 'text', label: 'Email' }
             }
         });
+        // Objects registered AFTER bootstrap miss the boot-time schema sync, so
+        // nothing has issued their DDL. The mingo driver this suite used before
+        // #4065 created a table on first touch and hid that; on SQL the first
+        // write fails with `no such table`.
+        await ql.syncObjectSchema('customer');
 
         // 5. Get Port from Service
         const httpServer = kernel.getService<any>('http.server');

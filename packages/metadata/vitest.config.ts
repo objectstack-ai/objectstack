@@ -7,7 +7,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@objectstack/core': path.resolve(__dirname, '../core/src/index.ts'),
-      '@objectstack/driver-memory': path.resolve(__dirname, '../plugins/driver-memory/src/index.ts'),
       '@objectstack/spec/api': path.resolve(__dirname, '../spec/src/api/index.ts'),
       '@objectstack/spec/cloud': path.resolve(__dirname, '../spec/src/cloud/index.ts'),
       '@objectstack/spec/contracts': path.resolve(__dirname, '../spec/src/contracts/index.ts'),

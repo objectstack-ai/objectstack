@@ -3,15 +3,20 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MetadataManager } from './metadata-manager';
 import { DatabaseLoader } from './loaders/database-loader';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 describe('Metadata History', () => {
   let manager: MetadataManager;
-  let driver: InMemoryDriver;
+  let driver: SqliteWasmDriver;
 
   beforeEach(async () => {
-    // Create a fresh in-memory driver and database loader
-    driver = new InMemoryDriver({});
+    // A fresh in-memory SQLite database per test + the database loader.
+    // `DatabaseLoader` provisions its own two tables via `driver.syncSchema`,
+    // so it needs a CONNECTED driver — the mingo driver this used before #4065
+    // needed no connect and created tables on first touch, so neither step was
+    // visible here.
+    driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
 
     const dbLoader = new DatabaseLoader({
       driver,
@@ -21,7 +26,7 @@ describe('Metadata History', () => {
     });
 
     manager = new MetadataManager({
-      datasource: 'memory',
+      datasource: 'sqlite',
       loaders: [dbLoader],
     });
   });

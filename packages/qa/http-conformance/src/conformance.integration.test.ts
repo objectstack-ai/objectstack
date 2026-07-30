@@ -18,7 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createDispatcherPlugin, createRestApiPlugin } from '@objectstack/runtime';
 import { NodeServerPlugin } from './node-plugin.js';
@@ -74,7 +74,15 @@ async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean 
     await kernel.bootstrap();
 
     const ql = kernel.getService<ObjectQL>('objectql');
-    ql.registerDriver(new InMemoryDriver(), true);
+    // In-memory SQLite (pure-JS WASM, no native build) — the same engine
+    // `@objectstack/verify`'s bootStack runs the dogfood gate on. `connect()`
+    // is NOT optional the way it was for the mingo driver this used before
+    // #4065: an unconnected datasource is an UNAVAILABLE one, and every data
+    // entry point then reports the object as unregistered (a 404 that looks
+    // like a routing bug and is really a boot-order one).
+    const driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
+    ql.registerDriver(driver as never, true);
     ql.registerObject({
         name: 'task',
         label: 'Task',
@@ -82,6 +90,12 @@ async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean 
             title: { type: 'text', label: 'Title' },
         },
     });
+    // Registering an object after bootstrap misses the boot-time schema sync,
+    // so nothing has issued this table's DDL. The mingo driver this fixture used
+    // before #4065 created a table on first touch and hid that; on SQL the
+    // insert fails with `no such table`, which the REST error mapper turns into
+    // a 404 OBJECT_NOT_FOUND — a routing-shaped symptom for a DDL-shaped cause.
+    await ql.syncObjectSchema('task');
 
     const httpServer = kernel.getService<any>('http.server');
     return { kernel, base: `http://127.0.0.1:${httpServer.getPort()}` };
