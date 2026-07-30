@@ -628,6 +628,7 @@ where the data lives.
 | Command | Description |
 |---------|-------------|
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
+| `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 
 ```bash
 os migrate files-to-references            # Dry run: full report, writes nothing
@@ -658,6 +659,49 @@ Exit status is `0` only when the self-check passes, so CI can gate on it.
 | :--- | :--- |
 | **Media value shapes** | A malformed `file` / `image` / `avatar` / `video` / `audio` value is **rejected** (`400 invalid_type`) instead of warned about. Set `OS_ALLOW_LAX_MEDIA_VALUES=1` to re-open leniency while diagnosing. |
 | **Released-file collection** | A field file whose one owning record lets go (the field is cleared or the record deleted) is tombstoned into the declared 30-day grace window; re-referencing the id within the window revives it, and after it the platform sweep reclaims the row and its bytes. Unverified deployments keep every released file forever. |
+
+#### `os migrate value-shapes`
+
+The same gate for the **non-media** value classes — references (`lookup`,
+`master_detail`, `user`, `tree`) and structured JSON (`location`, `address`,
+`composite`, `repeater`, `record`, `vector`).
+
+```bash
+os migrate value-shapes                    # Scan: full report, writes nothing
+os migrate value-shapes --apply            # Scan, then record the flag if clean (prompts)
+os migrate value-shapes --apply --yes --json   # CI / scripts
+os migrate value-shapes --object contact       # Restrict to one object (repeatable)
+```
+
+**This one converts nothing.** Its sibling rewrites legacy file values because
+the platform narrowed that storage form and therefore owes the conversion; a
+`location` stored as `{latitude, longitude}` instead of `{lat, lng}` is
+*application* data whose correct value only its author knows. So the run reports
+— object, field, type, how many records, sample record ids, and the parse issue
+— and you fix the values (or the code writing them) and re-run until it is
+green. Because there is nothing to convert, `--apply`'s only write is the flag
+row itself.
+
+A scan that is **truncated** (by `--max-records`) or that cannot read an object
+fails the gate even with zero violations found: "none in the part we read" is
+not the claim the flag makes.
+
+| Once verified | Effect |
+| :--- | :--- |
+| **Reference + structured-JSON value shapes** | A malformed value of those classes is **rejected** (`400 invalid_type`) instead of warned about. Set `OS_ALLOW_LAX_VALUE_SHAPES=1` to re-open leniency while diagnosing. |
+
+This flag is deliberately **separate** from the file migration's. That one
+attests that file values were migrated and their ownership reconciled — it says
+nothing about whether a `lookup` id or a `location` payload is well formed, so
+it may not vouch for these classes. A deployment can legitimately have passed
+either without the other.
+
+<Callout type="warn">
+`OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` turns on **every** value class at once,
+regardless of which migrations this deployment has run. It is the "I already
+know my data" lever, not the route to strictness — the route is running the
+migration that produces the evidence.
+</Callout>
 
 Other value classes are unaffected: a `lookup` or `location` value keeps its own
 warn-first rollout, because this migration is evidence about *file* values and
