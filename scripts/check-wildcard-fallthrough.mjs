@@ -147,15 +147,21 @@ const MOUNTS = {
 
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
   //
-  // Both are the #4088 shape in an adapter that no in-repo package depends on,
-  // so nothing is broken today — but it ships, and ADR-0076's own trigger is an
-  // out-of-tree embedder (`../objectbase`'s gateway). An embedder mounting a
-  // route under either prefix hits exactly #4088. Found BY this scan; manual
-  // greps for the pattern had missed both. Tracked by #4117.
+  // The #4088 shape in an adapter that no in-repo package depends on, so nothing
+  // is broken today — but it ships, and ADR-0076's own trigger is an out-of-tree
+  // embedder (`../objectbase`'s gateway). An embedder mounting a route under
+  // this prefix hits exactly #4088. Found BY this scan; manual greps for the
+  // pattern had missed it. Tracked by #4117.
+  //
+  // This listed the adapter's `${prefix}/storage/*` mount too, until #4112
+  // deleted that mount outright (see the "deliberately NOT mounted (#4087)"
+  // note in the adapter): the wildcard claimed the whole `/storage` subtree and
+  // answered its own 404 for every path `service-storage` registers under it —
+  // the #4088 failure actually happening, so the fix was removal rather than a
+  // ratchet. #4112 and the PR that added this scan (#4122) were each green on
+  // their own base and landed in that order, which left the entry declaring a
+  // mount that no longer existed and failed this guard on `main`.
   'packages/adapters/hono/src/index.ts:all `${prefix}/auth/*`': {
-    ratchet: '#4117 — terminal, same shape as #4088; adapter has no in-repo consumer',
-  },
-  'packages/adapters/hono/src/index.ts:all `${prefix}/storage/*`': {
     ratchet: '#4117 — terminal, same shape as #4088; adapter has no in-repo consumer',
   },
 };
