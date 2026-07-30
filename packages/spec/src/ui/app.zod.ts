@@ -443,15 +443,56 @@ export type NavigationItem =
   | GroupNavItem;
 
 /**
+ * The INPUT half of {@link NavigationItemSchema} — what an author writes, as
+ * opposed to what a parse returns.
+ *
+ * `z.ZodType` takes TWO type parameters, `<Output, Input>`, and **`Input`
+ * defaults to `unknown`**. #4171 fixed the annotation's Output half (it used to
+ * be `z.ZodType<any>`, which made the exported `NavigationItem` `any` for every
+ * consumer) but left `Input` at that default — so `z.input<typeof AppSchema>`
+ * resolved `navigation` to `unknown`, and `unknown` accepts everything. The
+ * documented authoring entry point, `defineApp(config: z.input<typeof AppSchema>)`,
+ * therefore took `navigation: [{ totally: 'made up' }, 42, 'nonsense']` with a
+ * clean compile. That is the same "a type that constrains nothing" failure
+ * #4171 describes, surviving on the half nobody re-measured: the fix was
+ * verified through `z.infer` and `z.input` was never checked.
+ *
+ * The two halves genuinely differ, which is why one union cannot serve both:
+ * `GroupNavItemSchema.expanded` and `UrlNavItemSchema.target` carry
+ * `.default()`, so they are REQUIRED in the output and OPTIONAL here. Reusing
+ * {@link NavigationItem} as the input type would demand authors write values
+ * the schema exists to supply.
+ *
+ * Both recursive branches tie their `children` knot inline. The output union
+ * ties `object` inline but inherits `group`'s knot from the {@link GroupNavItem}
+ * alias — an asymmetry kept only because that alias is public API.
+ * `app.nav-type-assertions.ts` pins both unions at compile level.
+ */
+export type NavigationItemInput =
+  | (z.input<typeof ObjectNavItemSchema> & { children?: NavigationItemInput[] })
+  | z.input<typeof DashboardNavItemSchema>
+  | z.input<typeof PageNavItemSchema>
+  | z.input<typeof UrlNavItemSchema>
+  | z.input<typeof ReportNavItemSchema>
+  | z.input<typeof ActionNavItemSchema>
+  | z.input<typeof ComponentNavItemSchema>
+  | z.input<typeof SeparatorNavItemSchema>
+  | (z.input<typeof GroupNavItemSchema> & { children: NavigationItemInput[] });
+
+/**
  * Recursive Union of all navigation item types.
  * Allows constructing an unlimited-depth navigation tree.
  *
- * The trailing cast to `z.ZodType<NavigationItem>` is forced by the member-array
- * widening below: `discriminatedUnion` reports the output of a
+ * The trailing cast to `z.ZodType<NavigationItem, NavigationItemInput>` is forced
+ * by the member-array widening below: `discriminatedUnion` reports the output of a
  * `ZodObject<ZodRawShape>` member as `Record<string, unknown>`, so the union's
  * inferred output carries no branch shapes at all. That fits the `z.ZodType<any>`
  * this used to be annotated with — and nothing sharper, which is how the exported
  * `NavigationItem` came to be `any` for every consumer (#4171).
+ *
+ * BOTH type parameters are spelled out. Naming only the first leaves `Input` at
+ * its `unknown` default, which silently un-checks every authoring path through
+ * this schema — see {@link NavigationItemInput}.
  *
  * What the cast does NOT weaken: every branch of {@link NavigationItem} is
  * `z.infer<typeof XNavItemSchema>`, so a key added to any variant's schema still
@@ -460,7 +501,7 @@ export type NavigationItem =
  * type, or the reverse — which app.test.ts covers at runtime by parsing all nine
  * ("accepts every variant with its full declared payload").
  */
-export const NavigationItemSchema: z.ZodType<NavigationItem> = z.lazy(() =>
+export const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput> = z.lazy(() =>
   // DISCRIMINATED on `type` (#4001 PR B). With `.strict()` members a plain
   // union would answer one unknown key with an `invalid_union` aggregate
   // listing all nine branches' failures; discriminating on `type` first means
@@ -484,7 +525,7 @@ export const NavigationItemSchema: z.ZodType<NavigationItem> = z.lazy(() =>
     // The members are lazySchema Proxies and a superRefine-wrapped variant, so
     // the array is widened for the discriminator-typed overload; runtime
     // discrimination works on all of them (asserted in app.test.ts).
-  ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]]) as unknown as z.ZodType<NavigationItem>
+  ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]]) as unknown as z.ZodType<NavigationItem, NavigationItemInput>
 );
 
 /**

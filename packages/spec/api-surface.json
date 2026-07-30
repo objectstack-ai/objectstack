@@ -3345,6 +3345,7 @@
     "NavigationContribution (type)",
     "NavigationContributionSchema (const)",
     "NavigationItem (type)",
+    "NavigationItemInput (type)",
     "NavigationItemSchema (const)",
     "NavigationModeSchema (const)",
     "Notification (type)",
