@@ -78,6 +78,7 @@ export const ERROR_CODE_LEDGER = {
     'NO_MATCH',                   // import upsert found no record for the match key
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    'OPENAPI_UNAVAILABLE',        // no OpenAPI spec bundled with this runtime
     'PACKAGE_DELETE_FAILED',
     'PACKAGE_DELETE_PARTIAL',        // uninstall left per-item failures behind; see error.details
     'PACKAGE_MANIFEST_INVALID',
@@ -235,6 +236,9 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/hono': [
     'AUTH_CONFIG_ERROR',             // auth service threw while the adapter mounted it
+  ],
+  '@objectstack/service-messaging': [
+    'DELIVERY_NOT_ELIGIBLE',         // delivery row is in a non-terminal state
   ],
   '@objectstack/cloud-connection': [
     'CLOUD_FETCH_FAILED',            // fetching the manifest/bundle from cloud failed

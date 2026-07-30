@@ -151,12 +151,12 @@ describe('ObjectStackProtocolImplementation.registerAuthoringGate (#3050)', () =
   it('a gate throw PROPAGATES with its status/code (the write is rejected)', async () => {
     const p = makeProtocol();
     p.registerAuthoringGate('object', () => {
-      const err: any = new Error('[owd_widening_forbidden] no widening');
-      err.code = 'owd_widening_forbidden'; err.status = 403;
+      const err: any = new Error('[OWD_WIDENING_FORBIDDEN] no widening');
+      err.code = 'OWD_WIDENING_FORBIDDEN'; err.status = 403;
       throw err;
     });
     await expect((p as any).runAuthoringGate(save())).rejects.toMatchObject({
-      code: 'owd_widening_forbidden', status: 403,
+      code: 'OWD_WIDENING_FORBIDDEN', status: 403,
     });
   });
 

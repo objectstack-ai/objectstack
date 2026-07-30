@@ -1758,11 +1758,11 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     expect(arg).not.toHaveProperty('actor');
   });
 
-  it('maps a thrown metadata_conflict (409) to a 409 response with the code', async () => {
+  it('maps a thrown METADATA_CONFLICT (409) to a 409 response with the code', async () => {
     const server = createMockServer();
     const protocol = createMockProtocol();
     const err: any = new Error('parentVersion mismatch');
-    err.code = 'metadata_conflict';
+    err.code = 'METADATA_CONFLICT';
     err.status = 409;
     protocol.saveMetaItem = vi.fn().mockRejectedValue(err);
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
@@ -1775,7 +1775,7 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
       res,
     );
     expect(res.status).toHaveBeenCalledWith(409);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'metadata_conflict' }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'METADATA_CONFLICT' }));
   });
 });
 
@@ -2385,10 +2385,10 @@ describe('mapDataError — schema/constraint envelopes', () => {
       object,
     });
 
-  it('maps the protocol registry gate OBJECT_NOT_FOUND → 404 object_not_found', () => {
+  it('maps the protocol registry gate OBJECT_NOT_FOUND → 404 OBJECT_NOT_FOUND', () => {
     const r = mapDataError(objectNotFound('ghost'), 'ghost');
     expect(r.status).toBe(404);
-    expect(r.body.code).toBe('object_not_found');
+    expect(r.body.code).toBe('OBJECT_NOT_FOUND');
     expect(r.body.object).toBe('ghost');
   });
 
@@ -2401,13 +2401,20 @@ describe('mapDataError — schema/constraint envelopes', () => {
   it('names the object from the error itself when the caller passes none', () => {
     const r = mapDataError(objectNotFound('ghost'));
     expect(r.status).toBe(404);
-    expect(r.body.code).toBe('object_not_found');
+    expect(r.body.code).toBe('OBJECT_NOT_FOUND');
     expect(r.body.object).toBe('ghost');
   });
 
-  it('does not let the generic 4xx passthrough ship the internal SCREAMING_CASE code', () => {
-    const r = mapDataError(objectNotFound('ghost'), 'ghost');
-    expect(r.body.code).not.toBe('OBJECT_NOT_FOUND');
+  // Inverted by ADR-0112. This used to assert the opposite — that the wire code
+  // was NOT the internal SCREAMING one — because the data routes were believed
+  // to speak a lowercase dialect, so `mapDataError` downcased on the way out.
+  // There is one vocabulary now, and OBJECT_NOT_FOUND is a member of it, so the
+  // translation step is what would be wrong. The invariant still worth pinning
+  // is that no translation happens at all: what the gate threw is what ships.
+  it('ships the catalog code unchanged — no per-route dialect translation', () => {
+    const thrown = objectNotFound('ghost');
+    const r = mapDataError(thrown, 'ghost');
+    expect(r.body.code).toBe(thrown.code);
   });
 });
 

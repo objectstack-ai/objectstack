@@ -142,7 +142,7 @@ export type HttpAckResult = HttpAckSuccess | HttpAckFailure;
 export class HttpRedeliverError extends Error {
     constructor(
         message: string,
-        readonly code: 'not_found' | 'not_eligible',
+        readonly code: 'RESOURCE_NOT_FOUND' | 'DELIVERY_NOT_ELIGIBLE',
     ) {
         super(message);
         this.name = 'HttpRedeliverError';

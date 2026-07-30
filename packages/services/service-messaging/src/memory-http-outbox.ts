@@ -125,12 +125,12 @@ export class MemoryHttpOutbox implements IHttpOutbox {
     async redeliver(id: string): Promise<HttpDelivery> {
         const row = this.rows.get(id);
         if (!row) {
-            throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'not_found');
+            throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'RESOURCE_NOT_FOUND');
         }
         if (row.status !== 'success' && row.status !== 'failed' && row.status !== 'dead') {
             throw new HttpRedeliverError(
                 `Delivery row '${id}' is '${row.status}', expected one of: success, failed, dead`,
-                'not_eligible',
+                'DELIVERY_NOT_ELIGIBLE',
             );
         }
         const now = Date.now();

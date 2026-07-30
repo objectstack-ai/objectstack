@@ -55,7 +55,7 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
 
 /**
  * Map a data-layer error to a clean HTTP response. Unknown-object errors are
- * surfaced as a 404 with `code: 'object_not_found'` so clients can distinguish
+ * surfaced as a 404 with `code: 'OBJECT_NOT_FOUND'` so clients can distinguish
  * "object isn't registered" from real server faults. Anything else becomes a
  * 400 (bad request) preserving prior behavior. Genuine 500s are still logged.
  *
@@ -233,8 +233,8 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // [#3770] Object does not exist — thrown by the protocol's registry gate
     // (`assertObjectRegistered`, which covers every data entry point) and by
     // `cloneData`. Mapped to the SAME envelope the driver-string branch below
-    // produces, so one condition has exactly one wire code (`object_not_found`,
-    // the canonical `ApiErrorCode`) no matter which layer detected it — the
+    // produces, so one condition has exactly one wire code (`OBJECT_NOT_FOUND`,
+    // a `StandardErrorCode` member) no matter which layer detected it — the
     // point of #3770 is that this 404 no longer depends on a driver erroring
     // on a missing table. Must precede the generic 4xx passthrough, which
     // would otherwise ship the internal SCREAMING_CASE code verbatim.
@@ -244,7 +244,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             status: 404,
             body: {
                 error: name ? `Object '${name}' is not registered` : 'Object not found',
-                code: 'object_not_found',
+                code: 'OBJECT_NOT_FOUND',
                 ...(name ? { object: name } : {}),
             },
         };
@@ -413,7 +413,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             status: 404,
             body: {
                 error: object ? `Object '${object}' is not registered` : 'Object not found',
-                code: 'object_not_found',
+                code: 'OBJECT_NOT_FOUND',
                 object,
             },
         };
@@ -462,7 +462,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
 function sendError(res: any, error: any, object?: string): void {
     // [#3770] `OBJECT_NOT_FOUND` is deliberately excluded from this
     // status-passthrough: `mapDataError` owns its canonical envelope
-    // (`object_not_found`), and short-circuiting here would ship a second wire
+    // (`OBJECT_NOT_FOUND`), and short-circuiting here would ship a second wire
     // code for the same condition depending on which route caught it.
     const passThroughStatus = error?.code !== 'OBJECT_NOT_FOUND'
         && typeof error?.status === 'number' && error.status >= 400 && error.status < 600;
@@ -2271,8 +2271,7 @@ export class RestServer {
                 if (!spec) {
                     res.status?.(503);
                     res.json({
-                        error: 'openapi_unavailable',
-                        message: 'OpenAPI spec is not bundled with this runtime.',
+                        error: { code: 'OPENAPI_UNAVAILABLE', message: 'OpenAPI spec is not bundled with this runtime.' },
                     });
                     return;
                 }
@@ -2540,8 +2539,7 @@ export class RestServer {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).getMetaDiagnostics !== 'function') {
                             res.status(501).json({
-                                error: 'not_implemented',
-                                message: 'protocol.getMetaDiagnostics() is not available in this kernel',
+                                error: { code: 'NOT_IMPLEMENTED', message: 'protocol.getMetaDiagnostics() is not available in this kernel' },
                             });
                             return;
                         }
@@ -2584,8 +2582,7 @@ export class RestServer {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).listDrafts !== 'function') {
                             res.status(501).json({
-                                error: 'not_implemented',
-                                message: 'protocol.listDrafts() is not available in this kernel',
+                                error: { code: 'NOT_IMPLEMENTED', message: 'protocol.listDrafts() is not available in this kernel' },
                             });
                             return;
                         }
@@ -2910,7 +2907,7 @@ export class RestServer {
                         });
                         if (!audienceAllows((book as any).audience, caller)) {
                             if (!caller.authenticated) {
-                                sendError(res, { code: 'unauthorized', message: 'This documentation requires sign-in', status: 401 });
+                                sendError(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
                             } else {
                                 sendError(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
                             }
@@ -3107,8 +3104,7 @@ export class RestServer {
                                     visible = this.filterAppForUser(item, sysPerms, serviceGate);
                                     if (visible == null) {
                                         res.status(404).json({
-                                            error: 'not_found',
-                                            message: 'Metadata item not found or access denied.',
+                                            error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
                                         });
                                         return;
                                     }
@@ -3169,7 +3165,7 @@ export class RestServer {
                                 }
                                 if (!allowed) {
                                     if (!caller.authenticated) {
-                                        sendError(res, { code: 'unauthorized', message: 'This documentation requires sign-in', status: 401 });
+                                        sendError(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
                                     } else {
                                         sendError(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
                                     }
@@ -3486,7 +3482,7 @@ export class RestServer {
                     if (!Number.isFinite(toVersion) || toVersion < 1) {
                         res.status(400).json({
                             error: `'toVersion' (positive integer) is required`,
-                            code: 'invalid_request',
+                            code: 'INVALID_REQUEST',
                         });
                         return;
                     }
