@@ -511,10 +511,10 @@ All errors follow a standardized format:
 try {
   await client.data.create('todo_task', { subject: '' });
 } catch (error) {
-  console.error(error.code);       // 'VALIDATION_ERROR'
-  console.error(error.category);   // 'validation'
+  console.error(error.code);       // 'VALIDATION_FAILED'
   console.error(error.httpStatus); // 400
-  console.error(error.retryable);  // false
+  console.error(error.category);   // optional — set only when the server sent it
+  console.error(error.retryable);  // optional — set only when the server sent it
   console.error(error.details);    // { ... }
 }
 ```
