@@ -5,7 +5,7 @@ description: Enums protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Aggregation functions used across query, data-engine, analytics, field
+Sort direction used across query, data-engine, analytics
 
 <Callout type="info">
 **Source:** `packages/spec/src/shared/enums.zod.ts`
@@ -14,32 +14,12 @@ Aggregation functions used across query, data-engine, analytics, field
 ## TypeScript Usage
 
 ```typescript
-import { AggregationFunctionEnum, CacheStrategyEnum, IsolationLevelEnum, MutationEventEnum, SortDirectionEnum, SortItem } from '@objectstack/spec/shared';
-import type { AggregationFunctionEnum, CacheStrategyEnum, IsolationLevelEnum, MutationEventEnum, SortDirectionEnum, SortItem } from '@objectstack/spec/shared';
+import { CacheStrategyEnum, IsolationLevelEnum, MutationEventEnum, SortDirectionEnum, SortItem } from '@objectstack/spec/shared';
+import type { CacheStrategyEnum, IsolationLevelEnum, MutationEventEnum, SortDirectionEnum, SortItem } from '@objectstack/spec/shared';
 
 // Validate data
-const result = AggregationFunctionEnum.parse(data);
+const result = CacheStrategyEnum.parse(data);
 ```
-
----
-
-## AggregationFunctionEnum
-
-Standard aggregation functions
-
-### Allowed Values
-
-* `count`
-* `sum`
-* `avg`
-* `min`
-* `max`
-* `count_distinct`
-* `percentile`
-* `median`
-* `stddev`
-* `variance`
-
 
 ---
 

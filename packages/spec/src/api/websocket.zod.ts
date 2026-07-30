@@ -65,10 +65,16 @@ export type WebSocketMessageType = z.infer<typeof WebSocketMessageType>;
 // (`api/realtime.zod.ts`).
 //
 // So this was a *second* spelling of event filtering, disagreeing with both the
-// live one and with `VALID_AST_OPERATORS`, that advertised a capability no code
-// provided — a subscriber setting `filters` would have received every event.
-// Removed rather than wired up: the surface that matters is the realtime
-// contract, and it should grow one filter vocabulary, not inherit an orphan's.
+// live one and with `VALID_AST_OPERATORS`, and it described a capability no code
+// provided: a subscriber setting `filters` received every event regardless.
+//
+// The `filters` key itself stays — retiring an object key needs a tombstone and
+// a conversion (ADR-0104), and there is no author to migrate for a shape nothing
+// validated. It now carries the same `z.unknown()` type and NOT-YET-ENFORCED
+// marker as `SubscriptionEventSchema.filters`, so the two subscription surfaces
+// describe event filtering identically and neither implies enforcement that does
+// not exist. Whichever grows real filtering should lower onto `AST_OPERATOR_MAP`
+// (`data/filter.zod.ts`) rather than reintroduce a vocabulary of its own.
 // objectui#2945.
 
 /**
@@ -93,6 +99,16 @@ export const EventSubscriptionSchema = lazySchema(() => z.object({
   subscriptionId: z.string().uuid().describe('Unique subscription identifier'),
   events: z.array(EventPatternSchema).describe('Event patterns to subscribe to (supports wildcards, e.g., "record.*", "user.created")'),
   objects: z.array(z.string()).optional().describe('Object names to filter events by (e.g., ["account", "contact"])'),
+  /**
+   * ⚠️ NOT YET ENFORCED — no runtime evaluates a payload filter.
+   * `matchesSubscription` matches on object name and event type only
+   * (`contracts/realtime-service.ts`), so a subscription carrying `filters`
+   * receives every event its patterns match. Deliberately `unknown` for the
+   * same reason as `SubscriptionEventSchema.filters` (`api/realtime.zod.ts`):
+   * validating a shape nothing reads would imply an enforcement that does not
+   * exist. objectui#2945.
+   */
+  filters: z.unknown().optional().describe('Filter conditions for event payloads (not yet enforced — the runtime filters by object name and event type only)'),
   channels: z.array(z.string()).optional().describe('Channel names for scoped subscriptions'),
 }));
 

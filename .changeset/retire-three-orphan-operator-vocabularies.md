@@ -28,10 +28,17 @@ name and event type only (`contracts/realtime-service.ts`) — and the
 subscription shape the transports actually carry is the separate, deliberately
 unvalidated `filters: z.unknown()` on `SubscriptionEventSchema`
 (`api/realtime.zod.ts`). So this was a *second* modelling of event filtering
-that advertised a capability no code provided: a subscriber who set `filters`
-would have received every event. The `filters` key is removed with it; the
-surface that matters is the realtime contract, and it should grow one filter
-vocabulary rather than inherit an orphan's.
+that described a capability no code provided: a subscriber who set `filters`
+received every event regardless.
+
+The `filters` **key stays**, now typed `z.unknown()` with the same
+NOT-YET-ENFORCED marker as its `api/realtime.zod.ts` counterpart. Retiring an
+object key requires a tombstone plus a conversion (ADR-0104), which is the right
+rule and the wrong trade here — there is no author to migrate for a shape nothing
+validated, and Track A is meant to carry no migration. The two subscription
+surfaces now describe event filtering identically, and neither implies an
+enforcement that does not exist. Whichever grows real filtering should lower onto
+`AST_OPERATOR_MAP` rather than reintroduce a vocabulary of its own.
 
 **`ODataFilterOperatorSchema`** (`api/odata.zod.ts`). Nothing parses an OData
 `$filter` against it — `$filter` is carried as an opaque string on
@@ -50,5 +57,12 @@ changes meaning. That is what made this the one track of objectui#2945 that was
 safe to start; narrowing `VALID_AST_OPERATORS` or retiring a
 `VIEW_FILTER_OPERATORS` alias is not, and remains blocked on #3948.
 
+The generated artefacts move with the deletions, as the ratchets require:
+`json-schema.manifest.json` drops the five unpublished schemas,
+`authorable-surface.json` the seven keys of the two deleted objects,
+`api-surface.json` the eight exports, and the three reference-doc pages are
+regenerated.
+
 Verified: full `@objectstack/spec` suite **6917 tests across 266 files**, plus
-`tsc --noEmit`, both clean.
+`tsc --noEmit`, `check:docs`, `check:api-surface`, `check:authorable-surface` and
+`check:skill-docs`, all clean.
