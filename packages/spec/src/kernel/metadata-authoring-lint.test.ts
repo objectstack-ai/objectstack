@@ -31,13 +31,18 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // `view` matters doubly: it is a UNION (container | ViewItem | overlay), so
     // its presence pins the union half of the posture logic — a regression that
     // silently dropped unions would shrink coverage without failing the count.
-    for (const expected of ['object', 'page', 'app', 'agent', 'dashboard', 'action', 'report', 'hook', 'view']) {
+    for (const expected of ['object', 'page', 'agent', 'dashboard', 'action', 'report', 'hook', 'view']) {
       expect(lintableTypes, `expected '${expected}' to be lint-covered`).toContain(expected);
     }
   });
 
-  it('excludes the strict Tier-A types — the parse is already loud there', () => {
-    for (const strict of ['flow', 'permission', 'position', 'tool']) {
+  it('excludes the strict types — the parse is already loud there', () => {
+    // This list GROWS as the #4001 tier programme hardens schemas, and each
+    // graduation shrinks the lint's coverage by design — the parse takes over.
+    // `app` graduated mid-flight (#4165) while this very test was in review:
+    // the derivation adapted on its own, and the pinned expectation above is
+    // what forced a human to confirm the shrink was a graduation, not a bug.
+    for (const strict of ['flow', 'permission', 'position', 'tool', 'app']) {
       expect(lintableTypes, `'${strict}' is .strict(); the lint must not double-report`).not.toContain(strict);
     }
   });

@@ -6,15 +6,16 @@ feat(spec): the unknown-authoring-key lint covers every metadata collection, not
 
 #4148 introduced the lint for `object` and `field` — the two surfaces #4120
 caught real drift on. Those two were a sample, not the population: of the
-authorable metadata types, only four are `.strict()` (`flow` / `permission` /
-`position` / `tool`, the #4001 Tier-A set). Every other type strips an
+authorable metadata types, only a handful are `.strict()` (`flow` / `permission`
+/ `position` / `tool` from #4001 Tier-A, joined mid-review by `app` via #4165).
+Every other type strips an
 undeclared key exactly the way `field` did — an author who misspells a key on a
 `page`, an `agent` or a `dashboard` got the same parse-clean-value-gone silence,
 with no lint watching.
 
-`lintUnknownAuthoringKeys` now walks **every metadata collection** — 17 of them
-today: object, app, page, dashboard, report, dataset, action, job, agent, skill,
-hook, mapping, datasource, view, email_template, doc, book — and its coverage is
+`lintUnknownAuthoringKeys` now walks **every metadata collection** — 16 today:
+object, page, dashboard, report, dataset, action, job, agent, skill, hook,
+mapping, datasource, view, email_template, doc, book — and its coverage is
 **derived, not listed**: which collections exist comes from `PLURAL_TO_SINGULAR`
 (the same boundary map the normalizer uses), which schema judges each comes from
 the canonical type→Zod registry, and whether linting is even meaningful is read
@@ -27,7 +28,9 @@ The posture rules keep the lint from ever disagreeing with the parse:
 - **strip** (zod default) → lint: the parse drops unknown keys silently, and
   that silence is what gets reported.
 - **strict** → skip: the parse already rejects loudly with the schema's own
-  tombstone guidance; a second, possibly disagreeing voice helps nobody.
+  tombstone guidance; a second, possibly disagreeing voice helps nobody. This
+  bucket GROWS as #4001 tiers graduate schemas — `app` graduated (#4165) while
+  this change was in review, and the derivation adapted without an edit.
 - **passthrough** → skip: unknown keys survive the parse, nothing is dropped.
 - **unions** (`view`) → the union of member keys; lintable only when a member
   strips and none passes unknowns through.
