@@ -58,6 +58,17 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
   `listRequests` / `countRequests` applied only the tenant half of the
   visibility rule, so any authenticated user could read any request in their
   tenant — payload snapshot, decision history, and attachments.
+- **A sharing rule with no criteria shares nothing, and a disabled RLS policy
+  is disabled.** Both were documented contracts whose real behaviour was wider:
+  a rule stored without criteria evaluated as *every record of the object*
+  (reachable by a typo through three unvalidated write paths, #3896), and an
+  RLS policy switched off with `enabled: false` kept contributing its
+  OR-branch grant. Both now fail closed — found by re-verifying every
+  security-subset claim in the spec liveness ledger against the actual call
+  graph, a sweep that also removed the void RLS `priority` knob and the
+  never-wired plugin sandboxing/integrity config, and left two new CI gates
+  behind the whole class: a permissive empty state must be classified on
+  purpose, and the security entries now carry runtime proofs.
 - **Node.js 22 is the floor.** `engines.node` said `>=18` across all 50
   manifests while CI, the release pipeline and every shipped Docker image ran
   22. The promise now matches the evidence.
@@ -338,6 +349,51 @@ the admin override).
 - `guest` and the owner-type rules are pruned. Every authorable recipient and
   rule type is now enforced.
 
+### Sharing rules: an empty criteria shares nothing (#3896)
+
+A rule stored without criteria — missing, `null`, `{}`, unparsable, or a
+misspelled key (`criterias`) — used to evaluate as `find(object, { filter: {} })`
+under the system context: **every record of the object, granted to the
+recipient**, up to the evaluator's 5000-record window. Three write paths
+accepted that shape without validation: `POST /api/v1/sharing/rules`, a direct
+`sys_sharing_rule` insert (what authoring in Setup issues), and the seed
+bootstrap's own match-all branch. The field description even advertised it —
+*"leave empty to share every record"* — which was never a feature, only a name
+for the bug.
+
+Now, in three layers:
+
+- **`defineRule` rejects** a match-all criteria with `VALIDATION_FAILED`.
+- **The evaluator matches nothing** for such a rule and logs why. This is the
+  layer that matters for already-deployed tenants: a row stored before this
+  gate **under-shares instead of over-sharing, and the next reconcile revokes
+  the grants it had materialised**. No data migration is needed.
+- **A `sys_sharing_rule` insert fails field-level** (`fields[].field =
+  'criteria_json'`), so Setup marks the Criteria input instead of saving a
+  rule that silently does nothing. The Console builder says so before you
+  save (objectui#2962) and renders the server's reason on the field
+  (objectui#2966).
+
+There is no "share every record" sharing rule: object-wide read is the
+object's organization-wide default (`sharingModel`). A rule that relied on the
+empty shape must state its predicate, or the object should use `sharingModel`.
+
+### RLS: `enabled` is enforced, `priority` is removed (#3980, #3990)
+
+- **`enabled: false` now actually disables a policy.** The schema always said
+  *"Disabled policies are not evaluated"*, but nothing read the property — and
+  because applicable policies OR-combine (any match allows access), a policy an
+  admin switched off **kept granting row access**. The gate is at the single
+  choke point both the find and analytics paths flow through; `enabled` absent
+  stays active, so no stored policy changes behaviour. Access-narrowing only —
+  but re-check any policy you set `enabled: false` on expecting no effect,
+  because until now it had none.
+- **`priority` is removed.** It promised "conflict resolution" that cannot
+  exist: with OR-combination there is never a conflict to order, and evaluation
+  order cannot change an outcome. Nothing ever read it. Authored values are
+  tombstoned with a fix-it prescription; `os migrate meta` deletes the key
+  mechanically, and policy outcomes are identical with or without it.
+
 ### Membership grade is not a capability channel (ADR-0108, #3723)
 
 `sys_member.role` answers "what is your standing in this organization", not
@@ -586,6 +642,8 @@ import or the authored key.
 | `ReportColumnSchema` / `ReportGroupingSchema` + report chart `groupBy` | unread (#3463) |
 | Report `aria` / `performance` props | report-liveness close-out |
 | `DataQualityRulesSchema` / `ComputedFieldCacheSchema` | orphaned value schemas (#3726, #3733) |
+| `DynamicLoadingConfig` / `PluginDiscoveryConfig` / `PluginDiscoverySource` | promised plugin sandboxing / integrity verification / source allow-listing / load approval; none of it was ever wired (#3950) |
+| `RowLevelSecurityPolicy.priority` | conflict-resolution semantics that cannot exist under OR-combination (#3990) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
 | `ChartInteraction.zoom` / `.clickAction` | never implemented (#3752) |
@@ -813,6 +871,20 @@ most of its rows in silence.
 - Liveness entries gain a `verifiedAt` re-verification clock, and a batch of
   ledger claims were re-verified against the real Console consumer — eight of the
   last ten preview-only `live` claims were wrong.
+- **The ledger's security subset had its first full re-verification** (#3896
+  follow-up): all 44 permission/position/object-sharing entries call-graph-closed
+  by hand and dated. It found the unenforced RLS `enabled` (fixed the same day)
+  and the void `priority` (removed), refuted two standing suspicions
+  (`allowExport` *is* enforced server-side; the transfer/restore/purge gates are
+  pre-mapped fail-closed), and bound two new runtime proofs
+  (`permission.tabPermissions`, `permission.objects.writeScope`) so the claims
+  re-prove on every CI run.
+- **A new `check:empty-state` gate** scans the authorable surface — spec schemas
+  *and* platform-object field descriptions, where #3896's *"leave empty to share
+  every record"* actually lived — for statements declaring a permissive empty
+  state, and requires each to be classified (`scope` / `closed` / `open` /
+  `output`) with a rationale. Omission is the commonest authoring error a model
+  makes; it must not also be the widest grant.
 - Metadata-plane FLS (per-caller masking) is proposed as ADR-0106.
 
 ## New in Console (Studio) — bundled objectui 17.0
@@ -933,6 +1005,13 @@ objectui commits on top of the pin 16.1.0 shipped.
   instead of failing every later query.
 - **Sharing rules:** rewrite `sharedWith.type: 'group'` → `'team'`; drop `guest`
   and owner-type rules; expect `accessLevel: 'full'` to convert to `'edit'`.
+  **A rule must state its criteria** — authoring one without is rejected, and a
+  stored criteria-less rule stops granting (its materialised grants are revoked
+  on the next reconcile). State the predicate, or use the object's
+  `sharingModel` if everyone should read it.
+- **RLS policies:** delete `priority` (`os migrate meta` does it; outcomes are
+  unchanged). Re-check any policy you set `enabled: false` on — disabling now
+  actually withdraws its grant, which until v17 it silently did not.
 - **Membership:** move business capability off `sys_member.role` and onto
   positions (`sys_user_position`).
 - **SDK callers:** remove calls to `client.permissions.*`, `client.realtime.*`,
