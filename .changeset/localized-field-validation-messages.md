@@ -39,20 +39,25 @@ form layer localized the *same* constraint correctly (the browser's native
 
 3. **The constraint is exposed as data**, so a client can format its own text
    instead of parsing the sentence:
-   `{ field, code, message, label, params: { min: 0 } }`. `params` carries
-   `min`/`max`/`minLength`/`maxLength`/`actual`/`value`/`allowed`/`type`. The
-   per-field envelope is now one Zod source — `FieldValidationErrorSchema` in
-   `@objectstack/spec/data` — instead of a hand-written interface in `objectql`.
+   `{ field, code, message, label, constraint: { min: 0 } }`. This rides
+   ADR-0114's existing `constraint` / `value` positions on `FieldErrorSchema`
+   (`constraint` tightens from `unknown` to `Record<string, unknown>`) rather
+   than adding a parallel payload — `label` is the only new field. The bag
+   carries `min`/`max`/`minLength`/`maxLength`/`actual`/`allowed`/`type`, and the
+   message templates interpolate from exactly those keys.
 
 Covered end-to-end, not only in the validator: single and batch insert,
-single-id and multi-row update, the object-level rule evaluator's own built-in
-messages (`requiredWhen`, per-option gating, state-machine fallbacks), and the
-importer's cell-coercion + required pre-check messages, which land in the same
-row report.
+single-id and multi-row update, ADR-0113's clear-out rejection, the object-level
+rule evaluator's own built-in messages (`requiredWhen`, per-option gating,
+state-machine fallbacks), and the importer's cell-coercion, required pre-check
+and #3956 bound pre-check messages — all of which land in the same row report.
 
 **What this changes for consumers.**
 
-- `code` is unchanged and remains the thing to match on.
+- `code` is unchanged (ADR-0114's `FieldErrorCode`) and remains the thing to
+  match on. Message keys are finer-grained than codes — `invalid_datetime`,
+  `invalid_option_value`, `required_cleared` are rendering detail and never reach
+  the wire — so localization never splits the client-facing vocabulary.
 - `message` **text changes**: it is localized, and it names the field by label
   even in English (`Budget must be ≥ 0`, not `budget must be ≥ 0`). Anything
   asserting on the old English string should match `code` (and now `params`)
