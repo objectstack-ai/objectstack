@@ -13,7 +13,9 @@
  * `SettingsService`.
  */
 
-import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/contracts';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+import { sendOk, sendError } from '@objectstack/types';
 import { SettingsService } from './settings-service.js';
 import {
   SettingsForbiddenError,
@@ -45,36 +47,6 @@ export interface SettingsRoutesOptions {
 // request headers — a deployment that wants authenticated settings access must
 // wire a verified `contextFromRequest` (the plugin does).
 const defaultContext = (_req: IHttpRequest): SettingsContext => ({ enforced: true });
-
-/**
- * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
- * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
- * `{ success: false, error: { code, message } }`.
- *
- * This module was already half-right before #3843: `error` was correctly a
- * nested `{ code, message }` object, but no body carried the `success` flag the
- * envelope declares — so `BaseResponseSchema.safeParse` failed on every
- * response, success and error alike, and a caller keying on `success` (as
- * `ObjectStackClient.unwrapResponse` does) could not tell these routes' bodies
- * apart from an already-unwrapped payload.
- */
-function sendError(res: IHttpResponse, status: number, code: string, message: string, extra?: Record<string, unknown>) {
-  res.status(status).json({ success: false, error: { code, message, ...extra } });
-}
-
-/**
- * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
- *
- * The three success bodies keep their payload keys, one level deeper:
- * `{ manifests }` → `{ success: true, data: { manifests } }`. The
- * `GET /:namespace` payload is `SettingsNamespacePayloadSchema`
- * (`{ manifest, values }`) and moves under `data` whole, so that schema still
- * describes exactly what the route returns — now as the envelope's `data`
- * rather than as the entire body.
- */
-function sendOk(res: IHttpResponse, data: unknown, status = 200) {
-  res.status(status).json({ success: true, data });
-}
 
 export function registerSettingsRoutes(
   http: IHttpServer,

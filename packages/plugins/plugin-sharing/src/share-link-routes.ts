@@ -11,10 +11,11 @@
  *   GET    /api/v1/share-links/:token/messages → conversation rows  → data: ai_messages[]
  *
  * Every body is the declared `{ success: true, data }` / `{ success: false,
- * error: { code, message } }` envelope, built in exactly two places — {@link sendOk}
- * and {@link sendError}. Read `sendOk`'s note first: the shapes above are the
- * dispatcher twin's, which this module converged onto in #3983, and the `success`
- * flag they used to omit is why two `client.shareLinks.*` methods were broken here.
+ * error: { code, message } }` envelope, written by the shared `sendOk` /
+ * `sendError` (`@objectstack/types`). Read the note below on why `data` carries
+ * the payload bare: the shapes above are the dispatcher twin's, which this module
+ * converged onto in #3983, and the `success` flag they used to omit is why two
+ * `client.shareLinks.*` methods were broken here.
  *
  * The resolve route is intentionally public — it's the only endpoint
  * holders of a token need. It does:
@@ -29,7 +30,9 @@
  * and renders the response read-only.
  */
 
-import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/contracts';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+import { sendOk, sendError } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import type { ShareLinkService } from './share-link-service.js';
 import type { SharingEngine } from './sharing-service.js';
@@ -57,24 +60,9 @@ export interface ShareLinkRoutesOptions {
 const defaultContext = (_req: IHttpRequest): ShareLinkExecutionContext => ({});
 
 /**
- * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
- * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
- * `{ success: false, error: { code, message } }`.
+ * ## Why `data` carries the payload bare on this module's five routes
  *
- * The nested `{ code, message }` was already right (#3675's changeset cited this
- * module as the good example of it); the `success` flag is what was missing.
- * See {@link sendOk} for why that flag is load-bearing rather than decorative.
- */
-function sendError(res: IHttpResponse, status: number, code: string, message: string) {
-  res.status(status).json({ success: false, error: { code, message } });
-}
-
-/**
- * Emit a success body in the DECLARED envelope — `BaseResponseSchema`
- * (`packages/spec/src/api/contract.zod.ts`), i.e. `{ success: true, data }`,
- * with `data` carrying each route's payload DIRECTLY.
- *
- * ## This is a convergence, not a new dialect
+ * `sendOk(res, links)`, not `sendOk(res, { links })`.
  *
  * These five routes have a twin: `runtime/src/domains/share-links.ts` serves
  * the same paths off the dispatcher, and for cloud's per-environment kernels
@@ -86,34 +74,22 @@ function sendError(res: IHttpResponse, status: number, code: string, message: st
  * routes, two shapes, decided by which surface happened to mount them — the
  * asymmetry #3636 fixed for `/i18n`, one domain over.
  *
- * ## What that asymmetry actually broke
- *
- * Three of these routes are `disposition: 'sdk'` in `runtime/src/route-ledger.ts`
- * (`shareLinks.create` / `.list` / `.revoke`), and `ObjectStackClient.unwrapResponse`
- * keys on a boolean `success`. With no flag it returns the body verbatim, so
- * against THIS surface:
- *
- *   • `shareLinks.create()` — documented "Returns the link row (incl. `token`)"
- *     — handed back `{ link: … }`, making `.token` `undefined`.
- *   • `shareLinks.list()` — typed `Promise<any[]>` — handed back `{ links: [] }`,
- *     so any `.map()` on it threw.
- *
+ * That was not cosmetics. Three of these routes are `disposition: 'sdk'` in
+ * `runtime/src/route-ledger.ts` (`shareLinks.create` / `.list` / `.revoke`), and
+ * `ObjectStackClient.unwrapResponse` keys on a boolean `success`. With no flag
+ * it returns the body verbatim, so against THIS surface `shareLinks.create()`
+ * handed back `{ link: … }` (making the documented `.token` `undefined`) and
+ * `shareLinks.list()` handed back `{ links: [] }`, so any `.map()` on it threw.
  * `packages/client/src/admin-surfaces.test.ts` mocks all three as
  * `{ success: true, data: <payload> }`: the SDK was written and tested against
- * the dispatcher's shape. So this is not envelope cosmetics — it is why two SDK
- * methods did not work on the plugin surface at all.
+ * the dispatcher's shape (#3983).
  *
- * ## Why `data` carries the payload bare
- *
- * `sendOk(res, links)`, not `sendOk(res, { links })`. That is what makes
- * `unwrapResponse` return the same value on both surfaces, and it is what the
- * consumers already read (`body.links ?? body.data`, `created.link ?? created.data`,
- * `body?.data ?? []`) — they carry that tolerance precisely BECAUSE both shapes
- * exist in the fleet. Prime Directive #12: the shim goes once the producer agrees.
+ * So passing the payload bare is what makes `unwrapResponse` return the same
+ * value on both surfaces, and it is what the consumers already read
+ * (`body.links ?? body.data`, `created.link ?? created.data`, `body?.data ?? []`)
+ * — they carry that tolerance precisely BECAUSE both shapes existed in the
+ * fleet. Prime Directive #12: the shim goes once the producer agrees.
  */
-function sendOk(res: IHttpResponse, data: unknown, status = 200): void {
-  res.status(status).json({ success: true, data });
-}
 
 /** Strip `redactFields` from a record (also removes from nested arrays of objects). */
 function applyRedaction(record: any, redactFields: string[]): any {

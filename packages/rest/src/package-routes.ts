@@ -2,6 +2,8 @@
 
 import { IHttpServer } from '@objectstack/core';
 import type { PackageService } from '@objectstack/service-package';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+import { sendOk, sendError } from '@objectstack/types';
 
 /**
  * Options for package route registration.
@@ -44,13 +46,10 @@ export interface PackageRoutesOptions {
  * swallowed every `client.packages.install` call with a 400. The
  * dispatcher's own `POST /packages/:id/publish` (ADR-0033 draft publish)
  * is two segments — different shape, no clash.
- */
-/**
- * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
- * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
- * `{ success: false, error: { code, message } }`.
  *
- * This module was the *partially* converted one when #3843 was filed, which is
+ * ## Where this module's error codes came from
+ *
+ * This was the *partially* converted module when #3843 was filed, which is
  * arguably worse than untouched: 3 of its 16 bodies carried `success: true`, so
  * the same registrar answered two shapes depending on which route you hit. Its
  * error bodies were the pre-#3675 `{ error: '<string>' }` throughout — and the
@@ -63,8 +62,10 @@ export interface PackageRoutesOptions {
  *
  * Because there were no codes here to preserve, these had to be MINTED. They
  * follow ADR-0112 (#3841, settled while this was in review): SCREAMING_SNAKE, and
- * registered in `ERROR_CODE_LEDGER` under `@objectstack/rest` — an unregistered
- * code fails `ApiErrorSchema` parse, which fails the conformance suite.
+ * registered in `ERROR_CODE_LEDGER` under `@objectstack/rest`. That union is now
+ * the `code` parameter's TYPE — `sendError` takes `ErrorCode`, not `string`
+ * (#3973) — so an unregistered code fails to compile rather than waiting for a
+ * conformance suite to parse a driven body.
  *
  * Generic conditions reuse the STANDARD catalog rather than becoming registered
  * synonyms of it: a missing request field is `MISSING_REQUIRED_FIELD`, an absent
@@ -72,27 +73,6 @@ export interface PackageRoutesOptions {
  * the package-specific outcomes are registered — `PACKAGE_MANIFEST_INVALID`,
  * `PACKAGE_PUBLISH_FAILED`, `PACKAGE_DELETE_PARTIAL`, `PACKAGE_DELETE_FAILED`.
  */
-function sendError(res: any, status: number, code: string, message: string, details?: unknown) {
-  res.status(status).json({
-    success: false,
-    error: { code, message, ...(details === undefined ? {} : { details }) },
-  });
-}
-
-/**
- * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
- *
- * The three bodies that already carried `success: true` kept their payload as
- * SIBLINGS of the flag (`{ success: true, message, package }`); those move under
- * `data` so the envelope has one payload slot rather than a spread. `packages`
- * SDK methods read these through `unwrapResponse`, which returns `body.data`
- * when the flag is present, so `packages.list()` still resolves to
- * `{ packages, total }`.
- */
-function sendOk(res: any, data: unknown, status = 200) {
-  res.status(status).json({ success: true, data });
-}
-
 export function registerPackageRoutes(
   server: IHttpServer,
   packageService: PackageService,
@@ -257,7 +237,7 @@ export function registerPackageRoutes(
           400,
           'PACKAGE_DELETE_PARTIAL',
           `Deleting ${packageId} left ${result.failedCount} item(s) behind.`,
-          { failed: result.failed, cleanups: result.cleanups },
+          { details: { failed: result.failed, cleanups: result.cleanups } },
         );
         return;
       }
