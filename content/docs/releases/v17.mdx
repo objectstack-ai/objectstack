@@ -329,9 +329,9 @@ schema to the two highest-risk authorable surfaces, per the triage in
   layer (see the alias table above).
 - **RLS policies** — `RowLevelSecurityPolicySchema`. A silently dropped key
   here meant a row-level restriction the author wrote was never compiled into
-  the filter (`roles` → `positions`, `withCheck` → `check`,
-  `condition`/`filter`/`where` → `using`). The runtime evaluation shapes stay
-  tolerant.
+  the filter (the pre-ADR-0090 D3 vocabulary → `positions`,
+  `withCheck` → `check`, `condition`/`filter`/`where` → `using`). The runtime
+  evaluation shapes stay tolerant.
 - **Sharing rules** — the rule, its criteria extension, and the `sharedWith`
   recipient (`criteria` → `condition`, `access` → `accessLevel`,
   `recipient` → `sharedWith`; `ownedBy` carries the removed owner-type-rule
