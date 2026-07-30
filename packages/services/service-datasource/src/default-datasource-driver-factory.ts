@@ -257,8 +257,30 @@ export function createDefaultDatasourceDriverFactory(
       }
 
       // memory
+      //
+      // [#4083] Ephemeral by default, and the declared `config` is forwarded —
+      // this was the one branch that dropped `spec.config` on the floor and
+      // constructed a bare `new InMemoryDriver()`.
+      //
+      // The driver's OWN default is `persistence: 'auto'`, which under Node
+      // means file persistence at a CWD-relative
+      // `.objectstack/data/memory-driver.json`. So a datasource declared
+      // `driver: 'memory'` silently became file-backed and reloaded its rows on
+      // the next boot: "memory" did not mean memory, nothing disclosed it, and
+      // two memory datasources in one process wrote through the same default
+      // path. It also contradicted the platform's own contract — `objectstack
+      // dev` reads an explicit memory driver as the user opting OUT of
+      // persistence (`resolveDefaultDevDbUrl`, cli/dev.ts) and persists via a
+      // sqlite file instead.
+      //
+      // The rule now matches the `sqlite-wasm` branch above: persistence
+      // follows an EXPLICIT request, never an implicit default. An author who
+      // wants a file says so — `config: { persistence: 'file' }`, or any other
+      // shape the driver accepts.
       const { InMemoryDriver } = await import('@objectstack/driver-memory');
-      return toHandle(new InMemoryDriver());
+      return toHandle(new InMemoryDriver({
+        persistence: ('persistence' in cfg ? cfg.persistence : false) as never,
+      }));
     },
   };
 }

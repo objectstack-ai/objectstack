@@ -216,8 +216,17 @@ export const MemoryConfigSchema = lazySchema(() => z.object({
    * new InMemoryDriver({ persistence: false })
    * // Custom adapter for serverless
    * new InMemoryDriver({ persistence: { adapter: upstashAdapter } })
+   *
+   * **A datasource declared with `driver: 'memory'` is ephemeral unless this
+   * key is set (#4083).** `'auto'` is the default for a driver you construct
+   * yourself; the shared datasource factory
+   * (`createDefaultDatasourceDriverFactory`) passes `false` when the
+   * declaration says nothing, so a declared memory datasource cannot silently
+   * become a file-backed store in the process's working directory. That
+   * matches `objectstack dev`, which already reads an explicit memory driver
+   * as the user opting out of persistence. Set this key to opt back in.
    */
-  persistence: MemoryPersistenceConfigSchema.or(z.literal(false)).default('auto').describe('Persistence configuration (defaults to auto-detect)'),
+  persistence: MemoryPersistenceConfigSchema.or(z.literal(false)).default('auto').describe('Persistence configuration (auto-detect by default; a declared memory datasource is ephemeral unless set)'),
 
   /**
    * Fields to index for faster lookups.

@@ -71,7 +71,15 @@ async function boot(opts: { connectPolicy?: DatasourceConnectPolicy } = {}) {
 
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
-  await kernel.use(new DriverPlugin(new InMemoryDriver())); // default driver
+  // [#4083] `persistence: false` explicitly: InMemoryDriver's own default is
+  // `'auto'`, which under Node writes a CWD-relative
+  // `.objectstack/data/memory-driver.json`. A test must neither depend on nor
+  // leave behind state in the checkout — and this file learned that the hard
+  // way: its federated-read assertion passed on a virgin clone (so CI, always
+  // fresh, stayed green) and failed on every later local run, the seeded rows
+  // accumulating two per run. The factory-built datasource driver is ephemeral
+  // by default now; this one is constructed directly, so it says so itself.
+  await kernel.use(new DriverPlugin(new InMemoryDriver({ persistence: false }))); // default driver
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new AppPlugin(artifact()));
   await kernel.use(
