@@ -5,21 +5,23 @@ import { z } from 'zod';
 /**
  * # Dev Mode Plugin Protocol
  *
- * Defines the schema for a development-mode plugin that automatically enables
- * all platform services for local simulation. When loaded as a `devPlugin`,
- * the kernel bootstraps every subsystem (data, UI, API, auth, events, jobs, …)
- * using in-memory or stub implementations so that developers can exercise the
- * full stack without external dependencies.
+ * Declared configuration vocabulary for a development-mode plugin: per-service
+ * dev strategies, fixture loading, developer tooling, presets.
  *
- * Design goals:
+ * ⚠️ **Declared, not implemented — pending enforce-or-remove (#4149).**
+ * The shipped `@objectstack/plugin-dev` consumes its own `DevPluginOptions`
+ * interface, NOT this schema, and none of the surfaces below (presets,
+ * fixtures, dev-tools dashboard, per-service strategies, simulated latency)
+ * exist in it. Since ADR-0115 it is an **assembly** plugin: it wires the real
+ * platform plugins for local development and registers no stub or simulated
+ * services — an unfilled slot answers exactly as it does in production. The
+ * `strategy: 'stub'` value in particular describes a behaviour the platform
+ * has retired. Do not build against this file until #4149 resolves it.
+ *
+ * Original design goals, kept for the #4149 evaluation:
  * - Zero-config by default: `devPlugins: ['@objectstack/plugin-dev']`
  * - Every service can be overridden or disabled individually
  * - Preset profiles (minimal / standard / full) for common scenarios
- *
- * Inspired by:
- * - Spring Boot DevTools (auto-configuration)
- * - Next.js Dev Server (HMR + mock APIs)
- * - Vite Plugin Dev Mode (instant startup)
  */
 
 // ============================================================================
