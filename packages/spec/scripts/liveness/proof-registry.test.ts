@@ -123,6 +123,10 @@ describe('registry invariants', () => {
         'permission/rowLevelSecurity.check',
         'permission/objects.readScope',
         'permission/objects.modifyAllRecords',
+        // Bound 2026-07-30 (#3896 security-subset re-verification) — after the
+        // me-apps dogfood proof was extended to actually AUTHOR the property on
+        // a permission set, rather than mentioning it in its header.
+        'permission/tabPermissions',
       ].sort(),
     );
   });

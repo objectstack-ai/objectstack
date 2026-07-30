@@ -135,8 +135,9 @@
     "tabPermissions": {
       "status": "live",
       "verifiedAt": "2026-07-30",
+      "proof": "packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts#me-apps-and-everyone-baseline",
       "evidence": "packages/plugins/plugin-hono-server/src/hono-plugin.ts:1200 (tabRank merges all four values — hidden/default_off/default_on/visible — across resolved sets, most-visible wins; app hidden ⇒ dropped from /me/apps) + packages/runtime/src/security/resolve-execution-context.ts:205 + packages/rest/src/rest-server.ts:1551 (projection)",
-      "note": "Re-verified 2026-07-30 — the previous note ('only hidden is read') UNDERSTATED it: the rank merge reads every value. Exercised by packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts (registered in proof-registry.mts, unbound there because the binding was recorded against the ungoverned `app` type — this governed entry could carry it instead)."
+      "note": "Re-verified 2026-07-30 — the previous note ('only hidden is read') UNDERSTATED it: the rank merge reads every value. Proof BOUND the same day after the dogfood test was extended to actually AUTHOR the property on a permission set (it had only mentioned tabPermissions in its header): hidden drops the app from /me/apps, a more-visible sibling grant wins it back."
     },
     "rowLevelSecurity": {
       "children": {

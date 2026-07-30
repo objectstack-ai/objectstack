@@ -235,6 +235,7 @@ binding lands one class at a time (ADR-0054 §3), never as a big-bang backfill.
 | Data lifecycle (ADR-0057) | `object.lifecycle` | `storage-growth#adr0057-lifecycle-bounded-growth` |
 | Webhook materialization | `webhook.object` | `webhook-materialization#webhook-materialization` |
 | Object semantic roles (ADR-0085) | `object.highlightFields`, `.stageField`, `.fieldGroups` | `semantic-roles#semantic-roles-served` |
+| Tab visibility | `permission.tabPermissions` | `me-apps-and-everyone-baseline#me-apps-and-everyone-baseline` |
 
 **Registered but unbound.** A proof with no authorable property to ratchet is
 still registered — otherwise its `@proof:` tag reads as an orphan — and records
@@ -246,7 +247,6 @@ still registered — otherwise its `@proof:` tag reads as an orphan — and reco
 | `permission-set-projection` | a storage invariant (ADR-0094), not an authorable property |
 | `flow-runas-schedule` | guards `flow.runAs`, already bound to `flow-runas-identity` — one entry carries one `proof` |
 | `showcase-scope-depth-fallback` | guards `permission.objects.readScope`, already bound — this is the CLI-wiring sibling |
-| `me-apps-and-everyone-baseline` | enforces `app.requiredPermissions` / `app.tabPermissions`; `app` is not governed yet |
 | `showcase-agent-intersection` | a runtime principal-resolution invariant (`onBehalfOf`), not authorable |
 | `showcase-agent-scope-ceiling` | the OAuth-scope → ceiling-set mapping lives in the runtime resolver |
 | `showcase-bu-hierarchy-sharing` | stack-level `sharingRules`, not a governed per-type property |

@@ -67,6 +67,65 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
     expect(body?.apps ?? []).toEqual([]);
   });
 
+  // ── permission.tabPermissions authored end-to-end ─────────────────────────
+  // Added by the 2026-07 security-subset liveness re-verification. Until then
+  // this file only MENTIONED tabPermissions in its header while exercising the
+  // route and requiredPermissions — and per ADR-0054, binding a ledger entry to
+  // a proof that does not author the property is the preview-renderer mistake
+  // in a nicer costume. This authors the property on a permission set, both
+  // directions of the rank merge included.
+  it('a permission set hiding an app via tabPermissions drops it from /me/apps — and a more-visible grant wins it back', async () => {
+    const tabTok = await stack.signUp('tab-member@verify.test');
+    const tabUser = await ql.findOne('sys_user', { where: { email: 'tab-member@verify.test' }, context: SYS });
+    expect(tabUser?.id, 'dedicated tab-probe member resolved').toBeTruthy();
+
+    // Control: before any tabPermissions grant, the member sees the app.
+    const before = await stack.apiAs(tabTok, 'GET', '/me/apps');
+    const beforeNames = (((await before.json()) as any)?.apps ?? []).map((a: any) => a?.name);
+    expect(beforeNames, 'control: visible before any tab grant').toContain('showcase_app');
+
+    // Author the property: a set whose ONLY job is tabPermissions.hidden.
+    const hideSet = await ql.insert(
+      'sys_permission_set',
+      {
+        name: 'tab_probe_hide',
+        label: 'Tab probe — hide showcase',
+        tab_permissions: JSON.stringify({ showcase_app: 'hidden' }),
+      },
+      { context: SYS },
+    );
+    const hideSetId = hideSet?.id ?? (await ql.findOne('sys_permission_set', { where: { name: 'tab_probe_hide' }, context: SYS }))?.id;
+    expect(hideSetId, 'hide set stored').toBeTruthy();
+    await ql.insert('sys_user_permission_set', { user_id: tabUser.id, permission_set_id: hideSetId }, { context: SYS });
+
+    const hidden = await stack.apiAs(tabTok, 'GET', '/me/apps');
+    const hiddenNames = (((await hidden.json()) as any)?.apps ?? []).map((a: any) => a?.name);
+    expect(hiddenNames, 'tabPermissions.hidden drops the app for this principal').not.toContain('showcase_app');
+
+    // Rank merge: hidden(0) loses to visible(3) from ANY other resolved set —
+    // most-visible wins across the principal's sets, matching hono's tabRank.
+    const showSet = await ql.insert(
+      'sys_permission_set',
+      {
+        name: 'tab_probe_show',
+        label: 'Tab probe — show showcase',
+        tab_permissions: JSON.stringify({ showcase_app: 'visible' }),
+      },
+      { context: SYS },
+    );
+    const showSetId = showSet?.id ?? (await ql.findOne('sys_permission_set', { where: { name: 'tab_probe_show' }, context: SYS }))?.id;
+    await ql.insert('sys_user_permission_set', { user_id: tabUser.id, permission_set_id: showSetId }, { context: SYS });
+
+    const merged = await stack.apiAs(tabTok, 'GET', '/me/apps');
+    const mergedNames = (((await merged.json()) as any)?.apps ?? []).map((a: any) => a?.name);
+    expect(mergedNames, 'most-visible wins: a visible grant overrides the hidden one').toContain('showcase_app');
+
+    // The probe must not leak into other principals' assertions.
+    const others = await stack.apiAs(memberTok, 'GET', '/me/apps');
+    const otherNames = (((await others.json()) as any)?.apps ?? []).map((a: any) => a?.name);
+    expect(otherNames, 'unrelated principals are untouched by the probe sets').toContain('showcase_app');
+  });
+
   // ── #2753: the baseline binds to the everyone anchor at bootstrap ────────
   it('bootstrap binds member_default to the everyone position (one channel, D5)', async () => {
     const everyone = await ql.findOne('sys_position', { where: { name: 'everyone' }, context: SYS });
