@@ -60,8 +60,8 @@ and #3956 bound pre-check messages — all of which land in the same row report.
   the wire — so localization never splits the client-facing vocabulary.
 - `message` **text changes**: it is localized, and it names the field by label
   even in English (`Budget must be ≥ 0`, not `budget must be ≥ 0`). Anything
-  asserting on the old English string should match `code` (and now `params`)
-  instead.
+  asserting on the old English string should match `code` (and now
+  `constraint`) instead.
 - An author-written validation-rule `message` is never touched — it is already
   in the language its author chose.
 - A deployment can override any built-in message with a `translation` item
