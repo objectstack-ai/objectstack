@@ -600,6 +600,51 @@ describe('HttpDispatcher', () => {
                 expect(result.handled).toBe(false);
             });
 
+            // [#4000] ADR-0076 D12 conclusion 3 binds consumers: only
+            // `handlerReady: true` is a real capability. The dispatcher gated
+            // on presence alone, so anything occupying the slot got called and
+            // its fabricated rows went back as a 200 — the shape #3891 retired
+            // one layer up, kept alive in dev by plugin-dev's analytics stub
+            // (retired with this change). A stub slot is an empty slot.
+            it('returns unhandled when the analytics slot holds a self-declared stub, without calling it', async () => {
+                const stub = {
+                    _dev: true,
+                    query: vi.fn().mockResolvedValue({ rows: [], fields: [] }),
+                    getMeta: vi.fn().mockResolvedValue([]),
+                    generateSql: vi.fn().mockResolvedValue({ sql: '', params: [] }),
+                };
+                (kernel as any).getService = vi.fn().mockResolvedValue(stub);
+
+                for (const [sub, method] of [['query', 'POST'], ['meta', 'GET'], ['sql', 'POST']] as const) {
+                    const result = await dispatcher.handleAnalytics(sub, method, { cube: 'leads', measures: ['count'] }, { request: {} });
+                    expect(result.handled, `${method} /analytics/${sub}`).toBe(false);
+                }
+                expect(stub.query).not.toHaveBeenCalled();
+                expect(stub.getMeta).not.toHaveBeenCalled();
+                expect(stub.generateSql).not.toHaveBeenCalled();
+            });
+
+            // The same gate read through the standard descriptor, and its other
+            // half: `degraded` means "working, but partial" — `handlerReady`
+            // defaults to true there, so it keeps serving. Only a self-confessed
+            // non-handler is treated as an empty slot.
+            it('honours __serviceInfo: stub 404s, degraded still serves', async () => {
+                const make = (info: Record<string, unknown>) => ({
+                    __serviceInfo: info,
+                    query: vi.fn().mockResolvedValue({ rows: [], fields: [] }),
+                });
+
+                const stub = make({ status: 'stub', message: 'dev fake' });
+                (kernel as any).getService = vi.fn().mockResolvedValue(stub);
+                expect((await dispatcher.handleAnalytics('query', 'POST', { cube: 'leads', measures: ['count'] }, { request: {} })).handled).toBe(false);
+                expect(stub.query).not.toHaveBeenCalled();
+
+                const degraded = make({ status: 'degraded' });
+                (kernel as any).getService = vi.fn().mockResolvedValue(degraded);
+                expect((await dispatcher.handleAnalytics('query', 'POST', { cube: 'leads', measures: ['count'] }, { request: {} })).handled).toBe(true);
+                expect(degraded.query).toHaveBeenCalled();
+            });
+
             it('should return unhandled for unknown analytics sub-path', async () => {
                 const mockAnalytics = { query: vi.fn() };
                 (kernel as any).getService = vi.fn().mockResolvedValue(mockAnalytics);
@@ -2307,6 +2352,28 @@ describe('HttpDispatcher', () => {
             expect(info.services.analytics.message).toBe('Lightweight fallback');
             // Route stays advertised — the fallback genuinely serves it.
             expect(info.routes.analytics).toBe('/api/v1/analytics');
+        });
+
+        // [#4000] The other half of the same marker: a stub occupying the
+        // analytics slot must not have its route advertised, because the
+        // dispatcher now answers it with the empty-slot 404. Reporting the
+        // service itself stays maximally informative — `stub` /
+        // `handlerReady: false` says more than `unavailable` would.
+        it('stops advertising the analytics route for a stub, while still reporting it as a stub', async () => {
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) =>
+                name === 'analytics' ? { _dev: true, query: vi.fn() } : null,
+            );
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.routes.analytics).toBeUndefined();
+            expect(info.features.analytics).toBe(false);
+            expect(info.services.analytics.enabled).toBe(true);
+            expect(info.services.analytics.status).toBe('stub');
+            expect(info.services.analytics.handlerReady).toBe(false);
+            // …and the advertisement matches what the route actually does:
+            // `handled: false`, which the caller answers with the 404.
+            const result = await dispatcher.dispatch('POST', '/analytics/query', { cube: 'leads', measures: ['count'] }, {}, { request: {} });
+            expect(result.handled).toBe(false);
         });
 
         it('keeps reporting unmarked services as available', async () => {

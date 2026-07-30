@@ -175,6 +175,25 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.routes.analytics).toBe('/api/v1/analytics');
   });
 
+  // #4000 — the same rule one step further: a stub occupying the slot is not
+  // the capability either. The dispatcher answers it with the empty-slot 404,
+  // so advertising a route here would re-tell the lie #3891 removed. The
+  // service entry itself still self-reports as a stub — that says more than
+  // `unavailable` would.
+  it('should not advertise the analytics route for a self-declared stub', async () => {
+    const mockServices = new Map<string, any>();
+    mockServices.set('analytics', { _dev: true, query: async () => ({ rows: [], fields: [] }) });
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
+    expect(discovery.services.analytics.enabled).toBe(true);
+    expect(discovery.services.analytics.status).toBe('stub');
+    expect(discovery.services.analytics.handlerReady).toBe(false);
+    expect(discovery.services.analytics.route).toBeUndefined();
+    expect(discovery.routes.analytics).toBeUndefined();
+  });
+
   it('should map file-storage service to storage route', async () => {
     const mockServices = new Map<string, any>();
     mockServices.set('file-storage', {});

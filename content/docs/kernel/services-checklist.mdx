@@ -186,6 +186,13 @@ caller's `ExecutionContext` — aggregates ran without RLS/tenant scoping — an
 silently ignored the contract `where` filter. Without
 `@objectstack/service-analytics`, `/api/v1/analytics/*` now answers **404** and
 discovery reports `analytics: { enabled: false, status: "unavailable" }`.
+
+**This holds in dev mode too** (#4000): `plugin-dev` no longer registers an
+`analytics` dev stub, and the dispatcher treats a slot filled by any
+self-declared stub (`handlerReady: false`, ADR-0076 D12) exactly like an empty
+one — routes unmounted, request 404. To use analytics locally, install the real
+engine; `@objectstack/service-analytics` runs an InMemory strategy, so it needs
+no database of its own.
 </Callout>
 
 ### Features (via `@objectstack/service-analytics`)

@@ -11,7 +11,7 @@ import { apiErrorResponse } from './error-envelope.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
 import * as actionExec from './action-execution.js';
-import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analytics.js';
+import { createAnalyticsDomain, handleAnalyticsRequest, isAnalyticsServiceServeable } from './domains/analytics.js';
 import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
 import { createNotificationsDomain, handleNotificationRequest } from './domains/notifications.js';
 import { createSecurityDomain, handleSecurityRequest } from './domains/security.js';
@@ -864,7 +864,19 @@ export class HttpDispatcher {
         const hasAuth         = !!authSvc;
         const hasSearch       = !!searchSvc;
         const hasFiles        = !!filesSvc;
-        const hasAnalytics    = !!analyticsSvc;
+        // [#4000] Mirrors the analytics domain's OWN guard
+        // (`isAnalyticsServiceServeable`, domains/analytics.ts): a slot filled
+        // by a self-declared stub takes the same `handled:false` → 404 an empty
+        // slot takes, so advertising the route on mere presence would promise an
+        // API that can only 404 — the `declared ≠ enforced` failure `hasMcp`
+        // below refuses by construction. Same predicate ⇒ same answer.
+        //
+        // `analyticsRegistered` stays presence-only, for the services map alone:
+        // a registered stub is reported there as `status: 'stub',
+        // handlerReady: false` (D12's honest self-report), which says strictly
+        // more than collapsing it to `unavailable` / "install a plugin" would.
+        const analyticsRegistered = !!analyticsSvc;
+        const hasAnalytics    = isAnalyticsServiceServeable(analyticsSvc);
         const hasWorkflow     = !!workflowSvc;
         const hasAi           = !!aiSvc;
         const hasNotification = !!notificationSvc;
@@ -987,7 +999,10 @@ export class HttpDispatcher {
                 // Plugin-provided — only available when a plugin registers the service
                 auth:           hasAuth ? svcAvailable(routes.auth, undefined, authSvc) : svcUnavailable('auth'),
                 automation:     hasAutomation ? svcAvailable(routes.automation, undefined, automationSvc) : svcUnavailable('automation'),
-                analytics:      hasAnalytics ? svcAvailable(routes.analytics, undefined, analyticsSvc) : svcUnavailable('analytics'),
+                // [#4000] Presence-gated, not serveability-gated: a registered
+                // stub self-reports as `stub` / `handlerReady: false` here (and
+                // carries no `route`, since `routes.analytics` is undefined for it).
+                analytics:      analyticsRegistered ? svcAvailable(routes.analytics, undefined, analyticsSvc) : svcUnavailable('analytics'),
                 cache:          hasCache ? svcAvailable(undefined, undefined, cacheSvc) : svcUnavailable('cache'),
                 queue:          hasQueue ? svcAvailable(undefined, undefined, queueSvc) : svcUnavailable('queue'),
                 job:            hasJob ? svcAvailable(undefined, undefined, jobSvc) : svcUnavailable('job'),

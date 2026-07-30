@@ -67,7 +67,7 @@ describe('DevPlugin', () => {
     await expect(plugin.init(ctx)).resolves.not.toThrow();
   });
 
-  it('should register contract-compliant dev stubs for all core services', async () => {
+  it('should register contract-compliant dev stubs for every core service except analytics', async () => {
     const registeredServices = new Map<string, any>();
     const ctx: any = {
       logger: {
@@ -159,12 +159,14 @@ describe('DevPlugin', () => {
     expect(execResult.success).toBe(true);
     expect(Array.isArray(await automation.listFlows())).toBe(true);
 
-    // ── Verify IAnalyticsService contract ──
-    const analytics = registeredServices.get('analytics');
-    const analyticsResult = await analytics.query({ cube: 'test' });
-    expect(Array.isArray(analyticsResult.rows)).toBe(true);
-    expect(Array.isArray(analyticsResult.fields)).toBe(true);
-    expect(Array.isArray(await analytics.getMeta())).toBe(true);
+    // ── analytics: deliberately NOT stubbed (#4000) ──
+    // #3891/#3989 retired the degraded analytics shim so an empty slot is the
+    // honest signal (route unmounted → 404, discovery `unavailable`). A dev
+    // stub refilled the slot and the dispatcher, gating on presence alone,
+    // served its fabricated rows with a 200 — the retired shape, one layer
+    // down. The slot stays empty; install @objectstack/service-analytics.
+    expect(registeredServices.has('analytics')).toBe(false);
+    expect(stubLog[0]).not.toContain('analytics');
 
     // ── Verify IRealtimeService contract ──
     const realtime = registeredServices.get('realtime');

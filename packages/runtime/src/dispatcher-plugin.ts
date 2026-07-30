@@ -4,6 +4,7 @@ import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
+import { isAnalyticsServiceServeable } from './domains/analytics.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
 import {
@@ -648,14 +649,23 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // Route via dispatch() (not handleAnalytics directly) so the host
             // dispatcher's project-aware kernel swap runs first — the
             // per-project kernel owns the `analytics` service.
+            //
+            // [#4000] "Registered" is not the test — `handlerReady` is. A
+            // service that self-declares as a stub (ADR-0076 D12) occupies the
+            // slot without being the capability, and the domain answers it with
+            // the same `handled:false` 404 an empty slot gets; mounting routes
+            // that can only 404 would re-advertise a capability that isn't
+            // there. Same predicate on both, so the wire surface and the
+            // handler can't disagree.
             const analyticsInstalled = dispatcher.isMultiTenantHost() || await (async () => {
                 const k: any = kernel;
                 try {
+                    let svc: unknown;
                     if (k && typeof k.getServiceAsync === 'function') {
-                        const svc = await k.getServiceAsync('analytics').catch(() => undefined);
-                        if (svc) return true;
+                        svc = await k.getServiceAsync('analytics').catch(() => undefined);
                     }
-                    return !!k?.getService?.('analytics');
+                    if (!svc) svc = k?.getService?.('analytics');
+                    return isAnalyticsServiceServeable(svc);
                 } catch {
                     return false;
                 }
@@ -690,7 +700,8 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 });
             } else {
                 ctx.logger?.info?.(
-                    '[dispatcher] /analytics not mounted — no `analytics` service is registered. ' +
+                    '[dispatcher] /analytics not mounted — no `analytics` service is registered ' +
+                    '(or the registered one self-declares as a stub). ' +
                     'Install @objectstack/service-analytics to enable the analytics API.',
                 );
             }
