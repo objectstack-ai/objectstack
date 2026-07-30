@@ -132,7 +132,8 @@ export interface IDataDriver {
   // ===========================================================================
   //
   // A driver is the single source of truth for how a `Field.date` /
-  // `Field.datetime` value is physically stored on its dialect. Any surface
+  // `Field.datetime` / `Field.time` value is physically stored on its
+  // dialect. Any surface
   // that builds queries OUTSIDE the driver's own find()/filter path — the
   // analytics native-SQL strategy today, any future raw-query strategy — must
   // route its temporal comparands AND its column references through these two
@@ -152,7 +153,8 @@ export interface IDataDriver {
   /**
    * Coerce a filter comparand to the on-disk storage form of `field` on
    * `objectName` — e.g. an ISO instant for a canonical-text datetime column,
-   * `YYYY-MM-DD` text for a `Field.date`, a dialect-spelled datetime literal
+   * `YYYY-MM-DD` text for a `Field.date`, canonical `HH:MM:SS[.fff]` text
+   * for a `Field.time` (#3994), a dialect-spelled datetime literal
    * where the dialect cannot parse ISO-8601. Non-temporal fields and
    * uninterpretable values are returned unchanged.
    */

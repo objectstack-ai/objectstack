@@ -285,17 +285,14 @@ export function renderPendingSchemaWork(pending: PendingSchemaWork[]): void {
   if (inPlace.length > 0) {
     console.log(`  ${chalk.bold('In place (existing rows converged when you apply)')}`);
     for (const p of inPlace) {
-      const label = p.kind === 'normalize_datetime_storage'
-        ? 'normalize_datetime_storage'
-        : 'widen_datetime_columns';
       // A MySQL widen is `ALTER … MODIFY`, i.e. a full table rebuild holding a
       // metadata lock — worth saying outright, not just implying via the count.
-      const cost = p.kind === 'widen_datetime_columns'
+      const cost = p.kind === 'widen_datetime_columns' || p.kind === 'widen_time_columns'
         ? `${formatRows(p.rows)} row table rebuild`
         : `${formatRows(p.rows)} row update(s)`;
       console.log(
         `    ${chalk.yellow('~')} ${chalk.yellow(p.table)} ` +
-        `${chalk.dim(`[${label}: ${p.columns.join(', ')} — ${cost}]`)}`,
+        `${chalk.dim(`[${p.kind}: ${p.columns.join(', ')} — ${cost}]`)}`,
       );
     }
     console.log('');
@@ -320,7 +317,7 @@ export function summarizePendingSchemaWork(pending: PendingSchemaWork[]): string
   if (inPlace.length > 0) {
     const cols = inPlace.reduce((n, p) => n + p.columns.length, 0);
     const rows = inPlace.reduce((n, p) => n + (p.rows ?? 0), 0);
-    parts.push(`${cols} datetime column(s) to converge in place (~${formatRows(rows)} rows)`);
+    parts.push(`${cols} temporal column(s) to converge in place (~${formatRows(rows)} rows)`);
   }
   return parts.join(', ');
 }

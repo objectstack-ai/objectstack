@@ -41,6 +41,8 @@ const ADDITIVE: PendingSchemaWork[] = [
 const IN_PLACE: PendingSchemaWork[] = [
   { table: 'evt', kind: 'normalize_datetime_storage', columns: ['at'], rows: 1234567 },
   { table: 'legacy', kind: 'widen_datetime_columns', columns: ['at', 'created_at'], rows: 42 },
+  { table: 'shift', kind: 'normalize_time_storage', columns: ['starts_at'], rows: 7 },
+  { table: 'shift_my', kind: 'widen_time_columns', columns: ['starts_at'], rows: 9 },
 ];
 
 describe('renderPendingSchemaWork (#3954)', () => {
@@ -74,6 +76,11 @@ describe('renderPendingSchemaWork (#3954)', () => {
     expect(out()).toContain('widen_datetime_columns: at, created_at');
     // A MySQL widen is ALTER … MODIFY — a rebuild, said outright.
     expect(out()).toContain('42 row table rebuild');
+    // The Field.time twins (#3994) take the same rendering rules.
+    expect(out()).toContain('normalize_time_storage: starts_at');
+    expect(out()).toContain('7 row update(s)');
+    expect(out()).toContain('widen_time_columns: starts_at');
+    expect(out()).toContain('9 row table rebuild');
   });
 
   it('shows both sections when both kinds are pending', () => {
@@ -102,7 +109,7 @@ describe('summarizePendingSchemaWork (#3954)', () => {
     const summary = summarizePendingSchemaWork([...ADDITIVE, ...IN_PLACE]);
     expect(summary).toContain('1 table(s) to create');
     expect(summary).toContain('1 column(s) to add');
-    expect(summary).toContain('3 datetime column(s) to converge in place');
-    expect(summary).toContain('~1,234,609 rows');
+    expect(summary).toContain('5 temporal column(s) to converge in place');
+    expect(summary).toContain('~1,234,625 rows');
   });
 });

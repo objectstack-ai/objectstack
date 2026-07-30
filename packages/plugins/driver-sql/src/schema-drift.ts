@@ -128,23 +128,26 @@ export interface PendingSchemaWork {
 /**
  * What kind of physical work a {@link PendingSchemaWork} entry represents.
  *
- * The first two are purely additive and never touch existing rows. The datetime
- * pair is NOT: `normalize_datetime_storage` rewrites rows in place (the SQLite
- * canonical-UTC backfill) and `widen_datetime_columns` rebuilds a column (the
- * MySQL `TIMESTAMP` → `DATETIME(3)` widening) — both from #3912/#3942. They are
- * rendered under their own heading for that reason: the additive section tells
- * the operator the work is never data-losing, and that claim must not silently
- * come to cover a row rewrite.
+ * The first two are purely additive and never touch existing rows. The rest are
+ * NOT: `normalize_datetime_storage` / `normalize_time_storage` rewrite rows in
+ * place (the SQLite canonical-text backfills, #3912/#3994) and
+ * `widen_datetime_columns` / `widen_time_columns` rebuild a column (the MySQL
+ * `TIMESTAMP` → `DATETIME(3)` and `TIME` → `TIME(3)` widenings, #3942/#3994).
+ * They are rendered under their own heading for that reason: the additive
+ * section tells the operator the work is never data-losing, and that claim must
+ * not silently come to cover a row rewrite.
  */
 export type PendingSchemaWorkKind =
   | 'create_table'
   | 'add_columns'
   | 'normalize_datetime_storage'
-  | 'widen_datetime_columns';
+  | 'normalize_time_storage'
+  | 'widen_datetime_columns'
+  | 'widen_time_columns';
 
 /** True for the kinds that rewrite or rebuild existing data rather than adding to it. */
 export function isInPlaceSchemaWork(kind: PendingSchemaWorkKind): boolean {
-  return kind === 'normalize_datetime_storage' || kind === 'widen_datetime_columns';
+  return kind !== 'create_table' && kind !== 'add_columns';
 }
 
 /** Ops that act on an index rather than a column — reconciled without a table rebuild. */
