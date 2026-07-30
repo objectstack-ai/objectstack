@@ -1041,9 +1041,16 @@ export default class Serve extends Command {
             const { AppPlugin } = await import('@objectstack/runtime');
             plugins = [...plugins, new AppPlugin(config)];
         } catch (e: any) {
-            // @objectstack/runtime unavailable — no wrap to append, so
-            // top-level metadata stays out of the registry (unchanged
-            // behaviour; a standalone boot cannot get this far without it).
+            // Non-fatal — the platform still boots, just without this app's
+            // metadata. But it must SAY so: this catch was silent, and the two
+            // things it swallows (a malformed envelope AppPlugin rejects by
+            // construction, an unresolvable @objectstack/runtime) both leave a
+            // server answering with zero objects and no stated reason — the
+            // same class of invisible boot failure as #4085 itself.
+            console.warn(chalk.yellow(
+              `  ⚠ Skipped registering the app defined in this config: ${e?.message ?? e}\n`
+              + '    Its objects/flows will NOT be served. Fix the config (or pin an AppPlugin in `plugins`).',
+            ));
         }
       }
 

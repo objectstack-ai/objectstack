@@ -62,8 +62,27 @@ const BARE_CONFIG = `
 export default {};
 `;
 
+/**
+ * An app payload with no `manifest.id`/`name` — the one envelope `AppPlugin`
+ * rejects by construction. The platform must still serve (a bad app is not a
+ * bad platform), but it has to SAY the app was skipped: the CLI used to swallow
+ * this into a silent `catch`, leaving a server answering with zero objects and
+ * no stated reason — the same invisible-boot-failure class as #4085 itself.
+ */
+const UNREGISTERABLE_CONFIG = `
+export default {
+  objects: [{
+    name: 'orphan_task',
+    label: 'Task',
+    sharingModel: 'private',
+    fields: { title: { type: 'text', label: 'Title' } },
+  }],
+};
+`;
+
 let appDir: string;
 let bareDir: string;
+let orphanDir: string;
 
 beforeAll(() => {
   appDir = mkdtempSync(join(tmpdir(), 'os-no-artifact-app-'));
@@ -71,10 +90,13 @@ beforeAll(() => {
 
   bareDir = mkdtempSync(join(tmpdir(), 'os-no-artifact-bare-'));
   writeFileSync(join(bareDir, 'objectstack.config.ts'), BARE_CONFIG, 'utf8');
+
+  orphanDir = mkdtempSync(join(tmpdir(), 'os-no-artifact-orphan-'));
+  writeFileSync(join(orphanDir, 'objectstack.config.ts'), UNREGISTERABLE_CONFIG, 'utf8');
 });
 
 afterAll(() => {
-  for (const dir of [appDir, bareDir]) {
+  for (const dir of [appDir, bareDir, orphanDir]) {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -129,6 +151,26 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
       expect(stdout + stderr).not.toContain('rollback complete');
       // MetadataPlugin's own fatal on the absent `dist/objectstack.json`.
       expect(stdout + stderr).not.toContain('Cannot read artifact file');
+    },
+    240_000,
+  );
+
+  it(
+    'serves on, and says why, when the config carries an app it cannot register',
+    async () => {
+      const { stdout, stderr } = await runServe(orphanDir, ['--port', randomPort()], {
+        waitFor: /Press Ctrl\+C to stop/,
+        timeoutMs: 240_000,
+      });
+      const seen = `\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`;
+      const out = stdout + stderr;
+
+      // A rejected app must not take the platform down…
+      expect(stdout, `platform died on an unregisterable app${seen}`).toContain('Server is ready');
+      // …and must not be swallowed either: the operator has to learn that their
+      // objects are NOT being served, and why.
+      expect(out, `no warning about the skipped app${seen}`).toContain('Skipped registering the app');
+      expect(out, `warning does not name the cause${seen}`).toContain('no manifest.id');
     },
     240_000,
   );
