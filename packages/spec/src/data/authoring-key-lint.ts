@@ -37,7 +37,7 @@ import { ObjectSchema } from './object.zod';
 import { FieldSchema } from './field.zod';
 
 /** Which authoring surface a finding came from. */
-export type AuthoringKeySurface = 'object' | 'field';
+export type AuthoringKeySurface = 'object' | 'field' | 'stack';
 
 /** One unknown key on one authored object or field. */
 export interface UnknownAuthoringKeyFinding {
@@ -122,6 +122,27 @@ export const OBJECT_KEY_GUIDANCE: Readonly<
   tableName: { why: 'removed — the table name always equals the object `name`.' },
 });
 
+/**
+ * Semantic near-misses on `ObjectStackDefinitionSchema` — the stack's own
+ * top-level keys.
+ *
+ * Same silent-drop mechanism as the two tables above, one level up: the stack
+ * schema is not `.strict()` either, so an undeclared top-level key parses clean
+ * and `defineStack` returns a stack without it. Every documented authoring path
+ * goes through that parse, which is what made `storage` (framework#4167) look
+ * like it worked — `os serve` honoured it only on the one path that skips
+ * `defineStack` entirely.
+ */
+export const STACK_KEY_GUIDANCE: Readonly<
+  Record<string, { to?: string; why?: string }>
+> = Object.freeze({
+  storage: {
+    why: 'not a stack key — the file-storage backend is a deployment concern, not an application declaration. '
+      + 'Configure it with the OS_STORAGE_* environment variables, or per-deployment in Setup → Settings → Storage '
+      + '(which also holds credentials, where a stack definition would commit them to git and to any published artifact).',
+  },
+});
+
 /** Declared top-level keys of a Zod object schema, read off `.shape`. */
 function declaredKeys(schema: unknown): readonly string[] {
   const shape = (schema as { shape?: Record<string, unknown> }).shape;
@@ -167,27 +188,44 @@ function lintRecord(
 }
 
 /**
- * Report every key an authored stack sets on an object or field that the schema
- * does not declare — i.e. every value the parse is about to discard silently.
+ * Report every key an authored stack sets — at the top level, or on an object or
+ * field — that the schema does not declare, i.e. every value the parse is about
+ * to discard silently.
  *
  * Pure and side-effect free. Runs on the **raw** (normalized but unparsed)
  * stack: see the module note for why a parsed stack is too late.
  *
  * @param rawStack The authored stack, after `normalizeStackInput` and before
  *   `ObjectStackDefinitionSchema.parse`.
+ * @param stackSchema `ObjectStackDefinitionSchema`, injected rather than
+ *   imported: `stack.zod.ts` imports THIS module, so importing it back would
+ *   close a cycle. Required, not optional, so a caller that forgets it fails to
+ *   compile instead of silently losing the top-level check — which is the exact
+ *   failure mode this rule exists to report.
  */
-export function lintUnknownAuthoringKeys(rawStack: unknown): UnknownAuthoringKeyFinding[] {
+export function lintUnknownAuthoringKeys(
+  rawStack: unknown,
+  stackSchema: unknown,
+): UnknownAuthoringKeyFinding[] {
   if (!isPlainRecord(rawStack)) return [];
+
+  const out: UnknownAuthoringKeyFinding[] = [];
+
+  // Top level first, so a stack with no `objects` at all is still checked.
+  const stackKeys = declaredKeys(stackSchema);
+  if (stackKeys.length > 0) {
+    lintRecord(rawStack, stackKeys, STACK_KEY_GUIDANCE, 'stack', 'stack', out);
+  }
+
   const objects = rawStack.objects;
-  if (!Array.isArray(objects)) return [];
+  if (!Array.isArray(objects)) return out;
 
   const objectKeys = declaredKeys(ObjectSchema);
   const fieldKeys = declaredKeys(FieldSchema);
   // A schema that failed to expose a shape would make this rule silently pass on
   // everything — the failure mode a lint must not have.
-  if (objectKeys.length === 0 || fieldKeys.length === 0) return [];
+  if (objectKeys.length === 0 || fieldKeys.length === 0) return out;
 
-  const out: UnknownAuthoringKeyFinding[] = [];
   for (const obj of objects) {
     if (!isPlainRecord(obj)) continue;
     const objName = typeof obj.name === 'string' && obj.name ? obj.name : '<unnamed>';

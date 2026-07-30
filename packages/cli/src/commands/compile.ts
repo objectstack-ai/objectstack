@@ -263,7 +263,10 @@ export default class Compile extends Command {
       //     authored through it; this covers the ones that skip it (a plain
       //     object default-export, `strict: false`) and would otherwise emit an
       //     artifact with the key quietly gone. Advisory, never fatal.
-      const unknownKeyFindings = lintUnknownAuthoringKeys(normalized as Record<string, unknown>);
+      const unknownKeyFindings = lintUnknownAuthoringKeys(
+        normalized as Record<string, unknown>,
+        ObjectStackDefinitionSchema,
+      );
       if (unknownKeyFindings.length > 0 && !flags.json) {
         printWarning(`Undeclared authoring keys (${unknownKeyFindings.length}) — dropped at load (#3786)`);
         for (const f of unknownKeyFindings.slice(0, 50)) {

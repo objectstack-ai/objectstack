@@ -17,7 +17,7 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
-import { loadConfig } from '../../utils/config.js';
+import { resolveStorageCapabilityArg } from '../serve.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -36,8 +36,15 @@ async function confirm(question: string): Promise<boolean> {
  * Settings first: the storage plugin re-resolves its adapter from persisted
  * settings when a settings service is present, which is how an S3-configured
  * deployment's backfill uploads land in S3 rather than on this machine.
- * Storage config mirrors `os serve`'s resolution (config.storage, else the
- * local default) so the CLI materialises bytes exactly where the server would.
+ * Storage config goes through the SAME resolver `os serve` uses
+ * (`resolveStorageCapabilityArg`), so the CLI materialises bytes exactly where
+ * the server would. It did not, and that mattered here more than anywhere: this
+ * command reconciles what records claim against what storage actually holds, so
+ * a root that disagrees with the server's reconciles against the wrong tree.
+ * It built `{ driver: 'local', root }` — keys `StorageServicePluginOptions` does
+ * not declare — so the adapter silently used the plugin's own `./storage`
+ * default while the server (since framework#4096) writes under
+ * `.objectstack/data/uploads`.
  */
 async function buildDataMigrationPlugins(): Promise<unknown[]> {
   const plugins: unknown[] = [];
@@ -48,19 +55,8 @@ async function buildDataMigrationPlugins(): Promise<unknown[]> {
     // optional — without it, constructor/env-driven storage config still applies
   }
   const { StorageServicePlugin } = await import('@objectstack/service-storage');
-  let arg: Record<string, unknown> | undefined;
-  try {
-    const { config } = await loadConfig();
-    const cfgStorage = (config as any)?.storage;
-    if (cfgStorage && (cfgStorage.driver || cfgStorage.adapter)) arg = cfgStorage;
-  } catch {
-    // artifact-only project (no objectstack.config.ts) — use the default below
-  }
-  if (arg === undefined) {
-    const root = process.env.OS_STORAGE_ROOT || '.objectstack/data/uploads';
-    arg = { driver: 'local', root };
-  }
-  plugins.push(new StorageServicePlugin({ ...(arg as any), registerRoutes: false }));
+  const { options } = resolveStorageCapabilityArg(process.env.OS_STORAGE_ROOT);
+  plugins.push(new StorageServicePlugin({ ...options, registerRoutes: false }));
   return plugins;
 }
 

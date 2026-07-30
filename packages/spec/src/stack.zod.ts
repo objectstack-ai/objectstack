@@ -1109,7 +1109,7 @@ const warnedUnknownAuthoringKeys = new Set<string>();
  * author deserves to hear about it either way.
  */
 function warnUnknownAuthoringKeys(raw: unknown): void {
-  for (const finding of lintUnknownAuthoringKeys(raw)) {
+  for (const finding of lintUnknownAuthoringKeys(raw, ObjectStackDefinitionSchema)) {
     if (warnedUnknownAuthoringKeys.has(finding.path)) continue;
     warnedUnknownAuthoringKeys.add(finding.path);
     console.warn(`defineStack: ${formatUnknownAuthoringKey(finding)}`);
