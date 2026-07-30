@@ -657,7 +657,7 @@ Exit status is `0` only when the self-check passes, so CI can gate on it.
 | Once verified | Effect |
 | :--- | :--- |
 | **Media value shapes** | A malformed `file` / `image` / `avatar` / `video` / `audio` value is **rejected** (`400 invalid_type`) instead of warned about. Set `OS_ALLOW_LAX_MEDIA_VALUES=1` to re-open leniency while diagnosing. |
-| **Released-file collection** | Not yet shipped — the flag is the gate it will read. |
+| **Released-file collection** | A field file whose one owning record lets go (the field is cleared or the record deleted) is tombstoned into the declared 30-day grace window; re-referencing the id within the window revives it, and after it the platform sweep reclaims the row and its bytes. Unverified deployments keep every released file forever. |
 
 Other value classes are unaffected: a `lookup` or `location` value keeps its own
 warn-first rollout, because this migration is evidence about *file* values and
@@ -670,7 +670,9 @@ later run that *fails* its self-check clears the flag's verified state, so a
 database that has drifted closes its own gate.
 
 A running server reads the flag once; after migrating, **restart it** for
-enforcement to take effect.
+enforcement (and release-time tombstoning) to take effect. The sweep's final
+delete check re-reads the flag fresh, so a later failing run stops collection
+without a restart.
 </Callout>
 
 ### Scaffolding

@@ -248,6 +248,26 @@ the parse itself rejects loudly, with the schema's own guidance. Because the
 lint reads each schema's real unknown-key posture, it can never disagree with
 the parse.
 
+It also covers the stack's **own top-level keys** — the envelope those
+collections sit in, and the level where the silence is hardest to spot, because
+an undeclared key there reads as configuration that took effect rather than as
+a typo:
+
+```ts
+export default defineStack({
+  storage: { adapter: 's3', s3: { bucket: 'app-files' } },
+  // ↑ not a stack key → dropped at load; the app keeps writing to local disk
+  objects: [...],
+});
+```
+
+```
+stack.storage: 'storage' is not a declared stack key, so its value is dropped at
+  load — the file-storage backend is a deployment concern, not an application
+  declaration. Configure it with the OS_STORAGE_* environment variables, or
+  per-deployment in Setup → Settings → Storage.
+```
+
 This is **advisory** — the stack still loads. Strict rejection is where these
 schemas are headed (ADR-0049 enforce-or-remove), but these are the protocol's
 most-authored surfaces, so the tightening is scheduled on what this check finds
@@ -273,7 +293,7 @@ time, so an author sees them without running the CLI at all.
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ |
 | Liveness author-warnings | ✓ | ✓ |
-| Undeclared authoring keys, every metadata collection (#3786) | ✓ | ✓ |
+| Undeclared authoring keys — every metadata collection (#3786) and the stack's own top-level keys (#4167) | ✓ | ✓ |
 | Emits `dist/objectstack.json` | — | ✓ |
 
 So `os validate` is the fast inner-loop check (no artifact); `os build` is what

@@ -797,23 +797,22 @@ export const ListViewSchema = lazySchema(() => z.object({
 }));
 
 /**
- * Form Field Configuration Schema
- * Detailed configuration for individual form fields.
- * 
- * Reuses Data.FieldType and related constraints from the Data protocol to avoid duplication.
- * The `type` field auto-infers widget rendering; explicit `widget` overrides are only needed
- * for custom components.
- * 
- * @example Auto-inferred select widget
- * { field: 'status', type: 'select', options: [{ label: 'Open', value: 'open' }] }
- * 
- * @example Lookup field with reference
- * { field: 'account_id', type: 'lookup', reference: 'account', label: 'Account' }
- * 
- * @example Custom widget override
- * { field: 'filter', widget: 'filter-builder' }
+ * Non-recursive half of {@link FormFieldSchema} — every key except the
+ * recursive `fields`.
+ *
+ * Split out so the recursion can be TYPED. `z.lazy()` needs an explicit
+ * annotation to break the circular inference, and the `z.ZodType<any>` this
+ * schema used to carry made `FormField` resolve to `any` for every consumer
+ * (#4171): a precise 30-key contract silently reduced to a type that constrains
+ * nothing, with no compile error anywhere to say so. Inferring the base and
+ * closing the recursive loop in the type instead keeps the keys derived from the
+ * schema — the `QueryAST` pattern in `data/query.zod.ts`.
+ *
+ * Still `lazySchema`-wrapped: splitting the literal out of the exported schema's
+ * factory would otherwise have moved its construction back to module load, which
+ * is the allocation `lazySchema` exists to defer.
  */
-export const FormFieldSchema: z.ZodType<any> = lazySchema(() => z.object({
+const FormFieldBaseSchema = lazySchema(() => z.object({
   /** Field name (snake_case) */
   field: z.string().describe('Field name (snake_case)'),
   
@@ -861,18 +860,6 @@ export const FormFieldSchema: z.ZodType<any> = lazySchema(() => z.object({
   language: z.string().optional().describe('Code editor language (for type=code)'),
 
   /**
-   * Sub-fields for `composite` / `repeater` / `record` types — declares
-   * the inner shape of an embedded sub-object (composite), each row of
-   * an embedded sub-object array (repeater), or each entry of a name-keyed
-   * map (record). Recursive: any of the three can nest.
-   *
-   * Use `lookup` / `master_detail` instead when the children are independent
-   * records with their own IDs in a separate object/table.
-   */
-  fields: z.array(z.lazy(() => FormFieldSchema)).optional()
-    .describe('Sub-fields for composite/repeater/record types'),
-
-  /**
    * For `record`-typed fields only. Declares how the map key is sourced,
    * displayed, and validated when an admin creates a new entry.
    *
@@ -904,7 +891,50 @@ export const FormFieldSchema: z.ZodType<any> = lazySchema(() => z.object({
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
-}, { error: strictVisibilityError }).strict().transform(normalizeVisibleWhen));
+}, { error: strictVisibilityError }));
+
+/**
+ * A parsed form field — the TYPE half of {@link FormFieldSchema}.
+ *
+ * `visibleOn` is absent by construction: ADR-0089 D2 folds it into
+ * `visibleWhen` at the schema boundary, so it is accepted on input and never
+ * present on output.
+ */
+export type FormField = Omit<z.infer<typeof FormFieldBaseSchema>, 'visibleOn'> & {
+  /**
+   * Sub-fields for `composite` / `repeater` / `record` types — declares
+   * the inner shape of an embedded sub-object (composite), each row of
+   * an embedded sub-object array (repeater), or each entry of a name-keyed
+   * map (record). Recursive: any of the three can nest.
+   *
+   * Use `lookup` / `master_detail` instead when the children are independent
+   * records with their own IDs in a separate object/table.
+   */
+  fields?: FormField[];
+};
+
+/**
+ * Form Field Configuration Schema
+ * Detailed configuration for individual form fields.
+ *
+ * Reuses Data.FieldType and related constraints from the Data protocol to avoid duplication.
+ * The `type` field auto-infers widget rendering; explicit `widget` overrides are only needed
+ * for custom components.
+ *
+ * @example Auto-inferred select widget
+ * { field: 'status', type: 'select', options: [{ label: 'Open', value: 'open' }] }
+ *
+ * @example Lookup field with reference
+ * { field: 'account_id', type: 'lookup', reference: 'account', label: 'Account' }
+ *
+ * @example Custom widget override
+ * { field: 'filter', widget: 'filter-builder' }
+ */
+export const FormFieldSchema: z.ZodType<FormField> = lazySchema(() =>
+  FormFieldBaseSchema.extend({
+    fields: z.array(z.lazy(() => FormFieldSchema)).optional()
+      .describe('Sub-fields for composite/repeater/record types'),
+  }).strict().transform(normalizeVisibleWhen));
 
 /**
  * Form Layout Section
@@ -1800,7 +1830,8 @@ export type ListView = z.infer<typeof ListViewSchema>;
 export type FormView = z.infer<typeof FormViewSchema>;
 export type FormSection = z.infer<typeof FormSectionSchema>;
 export type ListColumn = z.infer<typeof ListColumnSchema>;
-export type FormField = z.infer<typeof FormFieldSchema>;
+// `FormField` is declared next to FormFieldSchema — it IS that schema's
+// annotation, so it cannot be inferred back out of it (#4171).
 export type SelectionConfig = z.infer<typeof SelectionConfigSchema>;
 export type NavigationConfig = z.infer<typeof NavigationConfigSchema>;
 export type PaginationConfig = z.infer<typeof PaginationConfigSchema>;

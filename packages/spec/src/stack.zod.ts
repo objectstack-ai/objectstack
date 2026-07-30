@@ -12,7 +12,7 @@ import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
 import type { ConversionNotice } from './conversions/types.js';
 import { formatUnknownAuthoringKey } from './data/authoring-key-lint';
-import { lintUnknownAuthoringKeys } from './kernel/metadata-authoring-lint';
+import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadata-authoring-lint';
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
@@ -1107,7 +1107,13 @@ const warnedUnknownAuthoringKeys = new Set<string>();
  * author deserves to hear about it either way.
  */
 function warnUnknownAuthoringKeys(raw: unknown): void {
-  for (const finding of lintUnknownAuthoringKeys(raw)) {
+  const findings = [
+    // Top level first: an undeclared envelope key is the one that reads as
+    // configuration that took effect (#4167).
+    ...lintUnknownStackKeys(raw, ObjectStackDefinitionSchema),
+    ...lintUnknownAuthoringKeys(raw),
+  ];
+  for (const finding of findings) {
     if (warnedUnknownAuthoringKeys.has(finding.path)) continue;
     warnedUnknownAuthoringKeys.add(finding.path);
     console.warn(`defineStack: ${formatUnknownAuthoringKey(finding)}`);

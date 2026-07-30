@@ -274,10 +274,20 @@ believe it, and before you file a bug about `main` being red. (Two phantom "brea
 removals" this way while writing this section; `check:generated` now prints this caveat
 inline when that gate is the one failing.)
 
-`check:liveness`, `check:empty-state`, `check:skill-examples` and
-`check:react-conformance` are pure checks with no generator — a failure there is a real
-finding to fix, not an artifact to regenerate. `check:generated` names them as
-deliberately not run, so its "all up to date" never reads as "everything passed".
+`check:liveness`, `check:empty-state`, `check:skill-examples`,
+`check:react-conformance` and `check:exported-any` are pure checks with no generator — a
+failure there is a real finding to fix, not an artifact to regenerate. `check:generated`
+names them as deliberately not run, so its "all up to date" never reads as "everything
+passed".
+
+`check:exported-any` is the one of those that also reads the built `dist/*.d.ts`, so the
+stale-`dist` caveat above applies to it too. It asks the other half of the
+`api-surface.json` question: that snapshot records an export *exists*, never what it
+*resolves to*, which is how five exported symbols sat at `any` for a whole major with
+every gate green (#4171). A recursive Zod schema needs an annotation to break its
+circular inference, and `z.ZodType<any>` compiles, validates correctly, and silently
+throws the type away — annotate with the type instead (`QueryAST` in
+`src/data/query.zod.ts` is the pattern).
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the script reports that each run rather than staying silent

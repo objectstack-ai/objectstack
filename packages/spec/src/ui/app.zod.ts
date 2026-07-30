@@ -412,11 +412,55 @@ const SeparatorNavItemSchema = lazySchema(() => z.object({
   order: z.number().optional().describe('Sort order within the same level (lower = first)'),
 }, { error: navItemUnknownKeyError('separator') }).strict());
 
+/** Separator branch — internal, mirrors {@link SeparatorNavItemSchema}. */
+type SeparatorNavItem = z.infer<typeof SeparatorNavItemSchema>;
+
+/**
+ * Recursive union of every navigation item type — the TYPE half of
+ * {@link NavigationItemSchema}, and the annotation that breaks its circular
+ * inference.
+ *
+ * Spelled out here rather than derived with `z.infer<typeof NavigationItemSchema>`
+ * because that inference is exactly what the recursion cannot compute: the
+ * schema needs an annotation, and the `z.ZodType<any>` this used to carry made
+ * `NavigationItem` resolve to `any` for every consumer (#4171). `any` is
+ * mutually assignable with everything, so a consumer deleting its own
+ * `NavigationItem` in favour of this import — what #4115 asks for — silently
+ * traded a precise type for one that constrains nothing.
+ *
+ * Only the recursive `children` knot is tied by hand; each branch still derives
+ * from its own schema, so a key added to `ObjectNavItemSchema` lands here too.
+ */
+export type NavigationItem =
+  | (ObjectNavItem & { children?: NavigationItem[] })
+  | DashboardNavItem
+  | PageNavItem
+  | UrlNavItem
+  | ReportNavItem
+  | ActionNavItem
+  | ComponentNavItem
+  | SeparatorNavItem
+  | GroupNavItem;
+
 /**
  * Recursive Union of all navigation item types.
  * Allows constructing an unlimited-depth navigation tree.
+ *
+ * The trailing cast to `z.ZodType<NavigationItem>` is forced by the member-array
+ * widening below: `discriminatedUnion` reports the output of a
+ * `ZodObject<ZodRawShape>` member as `Record<string, unknown>`, so the union's
+ * inferred output carries no branch shapes at all. That fits the `z.ZodType<any>`
+ * this used to be annotated with — and nothing sharper, which is how the exported
+ * `NavigationItem` came to be `any` for every consumer (#4171).
+ *
+ * What the cast does NOT weaken: every branch of {@link NavigationItem} is
+ * `z.infer<typeof XNavItemSchema>`, so a key added to any variant's schema still
+ * flows into the exported type with no edit here. What it leaves unchecked is
+ * only the MEMBERSHIP of the list — a branch added to the schema and not to the
+ * type, or the reverse — which app.test.ts covers at runtime by parsing all nine
+ * ("accepts every variant with its full declared payload").
  */
-export const NavigationItemSchema: z.ZodType<any> = z.lazy(() =>
+export const NavigationItemSchema: z.ZodType<NavigationItem> = z.lazy(() =>
   // DISCRIMINATED on `type` (#4001 PR B). With `.strict()` members a plain
   // union would answer one unknown key with an `invalid_union` aggregate
   // listing all nine branches' failures; discriminating on `type` first means
@@ -440,7 +484,7 @@ export const NavigationItemSchema: z.ZodType<any> = z.lazy(() =>
     // The members are lazySchema Proxies and a superRefine-wrapped variant, so
     // the array is widened for the discriminator-typed overload; runtime
     // discrimination works on all of them (asserted in app.test.ts).
-  ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]])
+  ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]]) as unknown as z.ZodType<NavigationItem>
 );
 
 /**
@@ -1027,7 +1071,8 @@ export function defineApp(config: z.input<typeof AppSchema>): App {
 export type App = z.infer<typeof AppSchema>;
 export type AppInput = z.input<typeof AppSchema>;
 export type AppBranding = z.infer<typeof AppBrandingSchema>;
-export type NavigationItem = z.infer<typeof NavigationItemSchema>;
+// `NavigationItem` is declared next to NavigationItemSchema — it IS that
+// schema's annotation, so it cannot be inferred back out of it (#4171).
 export type NavigationArea = z.infer<typeof NavigationAreaSchema>;
 
 // Discriminated Item Types (Helper exports)

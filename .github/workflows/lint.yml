@@ -99,6 +99,16 @@ jobs:
       - name: Single authz resolver guard
         run: pnpm check:authz-resolver
 
+      # #4093 follow-up. Discovery tells a consumer an absent capability is
+      # absent AND what to install. The first half has been carefully honest
+      # since #2462/#4000; the second was invented from the slot name, so ten
+      # of fifteen entries named packages that do not exist — a dead end handed
+      # to whoever is trying to fix their stack. Asserts every package named in
+      # CORE_SERVICE_PROVIDER is a real workspace package, and that no core
+      # slot is missing an entry.
+      - name: Service-provider remedy guard
+        run: pnpm check:service-providers
+
       # #3843 response-envelope guard. The route ledgers audit which routes EXIST;
       # nothing audited what comes back, so six route modules emitted bodies
       # outside BaseResponseSchema while carrying green `sdk` rows. Counts the
@@ -283,6 +293,19 @@ jobs:
       # step above (reads the built dist).
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
+
+      # Same surface, the other axis: api-surface.json records that an export
+      # EXISTS, never what it resolves to — so four exported types sat at `any`
+      # across a whole major with every gate green (#4171). #4115 tells consumers
+      # to replace a local declaration with the spec import, which for those four
+      # traded a precise type for one that constrains nothing, silently: `any` is
+      # mutually assignable with everything, so the check that would catch the
+      # swap reports "identical, safe to re-export". Reads the built dist a
+      # consumer's import actually resolves to, so it runs after the build step
+      # with the other consumer gates. Self-tests first — a scan whose green
+      # result is "nothing found" has to prove it can still find something.
+      - name: Check no exported spec type resolves to `any`
+        run: pnpm --filter @objectstack/spec run check:exported-any
 
       # Anti-drift for the skill EXAMPLES, not just the skill reference indexes
       # (#3094). The TypeScript in skills/ is the first thing an AI copies when

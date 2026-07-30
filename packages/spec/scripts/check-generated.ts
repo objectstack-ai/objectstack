@@ -62,6 +62,19 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
   { check: 'check:react-conformance', why: 'audits react blocks against their contract — no artifact' },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
+  // Landed in #4177 while this ledger landed in #4183 — neither PR could see the
+  // other, so `main` carried an unclassified script and this reconciliation was
+  // failing on `main` itself. The doc it checks against is hand-written, so there
+  // is no generator to name.
+  { check: 'check:variant-docs', why: 'audits that each schema variant appears in its hand-written doc — no artifact' },
+  // The odd one out: it audits the source's TYPES, but reads them from the BUILT
+  // `dist/*.d.ts` — the surface a consumer's import actually resolves to, which
+  // is the only place the defect is visible (#4171). So the `readsDist` caveat
+  // above applies to it even though there is nothing to regenerate.
+  {
+    check: 'check:exported-any',
+    why: 'audits the built .d.ts for exported types/schemas that resolve to `any` — no artifact (needs a fresh `pnpm build`)',
+  },
 ];
 
 /**

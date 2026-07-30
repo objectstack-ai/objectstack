@@ -77,12 +77,17 @@ export const STUDIO_APP: App = {
       placement: 'sidebar_header',
     },
   ],
+  // `expanded: false` on each group is the schema's own default, spelled out:
+  // this literal is annotated with the PARSED `App` type, where a `.default()`ed
+  // key is required. Omitting it was only possible while `NavigationItem`
+  // resolved to `any` and nothing checked these entries at all (#4171).
   navigation: [
     {
       id: 'group_overview',
       type: 'group',
       label: 'Overview',
       icon: 'layout-dashboard',
+      expanded: false,
       children: [
         {
           // The application builder's front door (ADR-0080/0084): pick or
@@ -121,6 +126,7 @@ export const STUDIO_APP: App = {
       type: 'group',
       label: 'Data Model',
       icon: 'database',
+      expanded: false,
       children: [
         {
           id: 'nav_objects',
@@ -146,6 +152,7 @@ export const STUDIO_APP: App = {
       type: 'group',
       label: 'User Experience',
       icon: 'layout',
+      expanded: false,
       children: [
         {
           id: 'nav_apps',
@@ -204,6 +211,7 @@ export const STUDIO_APP: App = {
       type: 'group',
       label: 'Logic',
       icon: 'function-square',
+      expanded: false,
       children: [
         {
           id: 'nav_actions',
@@ -229,6 +237,7 @@ export const STUDIO_APP: App = {
       type: 'group',
       label: 'Automation',
       icon: 'workflow',
+      expanded: false,
       children: [
         {
           id: 'nav_flows',
@@ -253,6 +262,7 @@ export const STUDIO_APP: App = {
       type: 'group',
       label: 'AI',
       icon: 'sparkles',
+      expanded: false,
       children: [
         {
           id: 'nav_agents',
@@ -289,6 +299,7 @@ export const STUDIO_APP: App = {
       type: 'group',
       label: 'Developer',
       icon: 'terminal',
+      expanded: false,
       children: [
         {
           id: 'nav_api_console',
@@ -322,6 +333,7 @@ export const STUDIO_APP: App = {
       type: 'group',
       label: 'Integration',
       icon: 'plug',
+      expanded: false,
       children: [
         {
           id: 'nav_email_templates',

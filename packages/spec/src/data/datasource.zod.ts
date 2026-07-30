@@ -8,6 +8,261 @@ import { z } from 'zod';
  * Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowflake").
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
+
+/*
+ * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
+ *
+ * Every AUTHORING shape in this module is `.strict()`. `datasource` is a
+ * registered metadata type (BUILTIN_METADATA_TYPE_SCHEMAS), so one shape backs
+ * `defineDatasource()`, `defineStack({ datasources })`, the
+ * `/api/v1/meta/datasource` endpoint, and the Setup → Datasources form.
+ *
+ * TWO ESCAPE HATCHES STAY OPEN, and must:
+ *   - `config` is per-driver by construction (a sqlite `filename` and a
+ *     postgres `host`/`port` share no shape), so it stays `z.record`. The
+ *     driver's own `configSchema` is what validates it.
+ *   - `readReplicas` carries the same per-driver config objects.
+ *
+ * That openness is exactly why the TOP level had to close. Before this, a
+ * connection key written one level too high — `host` next to `driver` instead
+ * of inside `config` — was stripped in silence, and the datasource then
+ * connected on driver defaults (localhost, default port) rather than failing.
+ * A misplaced `password` is the same bug wearing a worse hat, which is why it
+ * is prescribed toward `external.credentialsRef` rather than merely relocated.
+ */
+
+/** Keys {@link DriverDefinitionSchema} declares (drift-guarded by datasource.test.ts). */
+const DRIVER_DEFINITION_KEYS = ['id', 'label', 'description', 'icon', 'configSchema', 'capabilities'] as const;
+
+/** Keys {@link ExternalDatasourceSettingsSchema} declares (drift-guarded by datasource.test.ts). */
+const EXTERNAL_SETTINGS_KEYS = [
+  'label', 'allowedSchemas', 'allowWrites', 'validation',
+  'credentialsRef', 'queryTimeoutMs', 'requirePermission',
+] as const;
+
+/** Keys the external `validation` block declares (drift-guarded by datasource.test.ts). */
+const EXTERNAL_VALIDATION_KEYS = ['onMismatch', 'checkOnBoot', 'checkIntervalMs'] as const;
+
+/** Keys {@link DatasourceSchema} declares (drift-guarded by datasource.test.ts). */
+const DATASOURCE_KEYS = [
+  'name', 'label', 'driver', 'config', 'pool', 'readReplicas', 'capabilities',
+  'healthCheck', 'ssl', 'retryPolicy', 'description', 'active', 'autoConnect',
+  'schemaMode', 'external', 'origin',
+] as const;
+
+/** Keys the datasource `pool` block declares (drift-guarded by datasource.test.ts). */
+const POOL_KEYS = ['min', 'max', 'idleTimeoutMillis', 'connectionTimeoutMillis'] as const;
+
+/** Keys the datasource `healthCheck` block declares (drift-guarded by datasource.test.ts). */
+const HEALTH_CHECK_KEYS = ['enabled', 'intervalMs', 'timeoutMs'] as const;
+
+/** Keys the datasource `ssl` block declares (drift-guarded by datasource.test.ts). */
+const SSL_KEYS = ['enabled', 'rejectUnauthorized', 'ca', 'cert', 'key'] as const;
+
+/** Keys the datasource `retryPolicy` block declares (drift-guarded by datasource.test.ts). */
+const DATASOURCE_RETRY_POLICY_KEYS = ['maxRetries', 'baseDelayMs', 'maxDelayMs', 'backoffMultiplier'] as const;
+
+/** A connection detail written one level too high — it belongs inside `config`. */
+const belongsInConfig = (key: string) =>
+  `\`${key}\` is a driver connection detail — it belongs inside \`config\`, not at the top `
+  + `level. Move it to \`config: { ${key}: … }\`; the driver's own configSchema validates it there.`;
+
+const driverDefinitionUnknownKeyError = strictUnknownKeyError({
+  surface: 'this driver definition',
+  knownKeys: DRIVER_DEFINITION_KEYS,
+  aliases: {
+    name: 'id',
+    driver: 'id',
+    title: 'label',
+    config: 'configSchema',
+    schema: 'configSchema',
+    capability: 'capabilities',
+  },
+  history: 'Until #4001 these were dropped silently — the driver still registered.',
+});
+
+const externalSettingsUnknownKeyError = strictUnknownKeyError({
+  surface: "this datasource's external settings",
+  knownKeys: EXTERNAL_SETTINGS_KEYS,
+  aliases: {
+    schemas: 'allowedSchemas',
+    allowedschema: 'allowedSchemas',
+    writable: 'allowWrites',
+    allowwrite: 'allowWrites',
+    credentials: 'credentialsRef',
+    secretref: 'credentialsRef',
+    timeoutms: 'queryTimeoutMs',
+    querytimeout: 'queryTimeoutMs',
+    permission: 'requirePermission',
+  },
+  guidance: {
+    password:
+      '`password` must never be inlined. Put the secret in the secrets store and reference '
+      + 'it with `credentialsRef` (e.g. `credentialsRef: "secret:warehouse/password"`).',
+    readOnly:
+      '`readOnly` is not an external-settings key. Use `allowWrites: false` here for the '
+      + 'datasource-wide gate, or `capabilities.readOnly` to describe the driver.',
+  },
+  history: 'Until #4001 these were dropped silently — federation ran on the defaults instead.',
+});
+
+const externalValidationUnknownKeyError = strictUnknownKeyError({
+  surface: "this datasource's external validation policy",
+  knownKeys: EXTERNAL_VALIDATION_KEYS,
+  aliases: {
+    onmismatch: 'onMismatch',
+    mismatch: 'onMismatch',
+    checkonboot: 'checkOnBoot',
+    validateonboot: 'checkOnBoot',
+    interval: 'checkIntervalMs',
+    checkinterval: 'checkIntervalMs',
+  },
+  history:
+    'Until #4001 these were dropped silently — drift checking ran on the defaults '
+    + '(fail on mismatch, check at boot) regardless of what was written.',
+});
+
+const datasourceUnknownKeyError = strictUnknownKeyError({
+  surface: 'this datasource',
+  knownKeys: DATASOURCE_KEYS,
+  aliases: {
+    type: 'driver',
+    connection: 'config',
+    connectionconfig: 'config',
+    options: 'config',
+    enabled: 'active',
+    pooling: 'pool',
+    replicas: 'readReplicas',
+    mode: 'schemaMode',
+    schema_mode: 'schemaMode',
+    federation: 'external',
+    retry: 'retryPolicy',
+    tls: 'ssl',
+  },
+  guidance: {
+    host: belongsInConfig('host'),
+    port: belongsInConfig('port'),
+    database: belongsInConfig('database'),
+    user: belongsInConfig('user'),
+    username: belongsInConfig('username'),
+    filename: belongsInConfig('filename'),
+    url: belongsInConfig('url'),
+    connectionString: belongsInConfig('connectionString'),
+    password:
+      '`password` must never be inlined on a datasource. Interpolate it from the environment '
+      + 'inside `config`, or for an external datasource reference the secrets store via '
+      + '`external.credentialsRef`.',
+  },
+  history:
+    'Until #4001 these were dropped silently — a connection key written one level too high '
+    + 'left the datasource connecting on driver defaults rather than failing.',
+});
+
+const poolUnknownKeyError = strictUnknownKeyError({
+  surface: "this datasource's pool config",
+  knownKeys: POOL_KEYS,
+  aliases: {
+    minimum: 'min',
+    maximum: 'max',
+    minconnections: 'min',
+    maxconnections: 'max',
+    idletimeout: 'idleTimeoutMillis',
+    idletimeoutms: 'idleTimeoutMillis',
+    connectiontimeout: 'connectionTimeoutMillis',
+    connectiontimeoutms: 'connectionTimeoutMillis',
+    acquiretimeoutmillis: 'connectionTimeoutMillis',
+  },
+  history:
+    'Until #4001 these were dropped silently — the pool ran on its defaults (min 0, max 10) '
+    + 'no matter what was written. Note both timeouts end in `Millis`, not `Ms`.',
+});
+
+const healthCheckUnknownKeyError = strictUnknownKeyError({
+  surface: "this datasource's healthCheck config",
+  knownKeys: HEALTH_CHECK_KEYS,
+  aliases: {
+    active: 'enabled',
+    interval: 'intervalMs',
+    intervalmillis: 'intervalMs',
+    timeout: 'timeoutMs',
+    timeoutmillis: 'timeoutMs',
+  },
+  history: 'Until #4001 these were dropped silently — health checks ran on the defaults.',
+});
+
+const sslUnknownKeyError = strictUnknownKeyError({
+  surface: "this datasource's ssl config",
+  knownKeys: SSL_KEYS,
+  aliases: {
+    active: 'enabled',
+    ssl: 'enabled',
+    tls: 'enabled',
+    rejectunauthorised: 'rejectUnauthorized',
+    cacert: 'ca',
+    certificate: 'cert',
+    clientcert: 'cert',
+    privatekey: 'key',
+    clientkey: 'key',
+  },
+  guidance: {
+    insecure:
+      '`insecure` is not an ssl key. To accept a self-signed certificate set '
+      + '`rejectUnauthorized: false` — deliberately, and never against a production database.',
+  },
+  history:
+    'Until #4001 these were dropped silently — which meant a TLS setting that never took '
+    + 'effect looked identical to one that did.',
+});
+
+const datasourceRetryPolicyUnknownKeyError = strictUnknownKeyError({
+  surface: "this datasource's retryPolicy",
+  knownKeys: DATASOURCE_RETRY_POLICY_KEYS,
+  aliases: {
+    retries: 'maxRetries',
+    attempts: 'maxRetries',
+    backoffms: 'baseDelayMs',
+    basedelay: 'baseDelayMs',
+    delayms: 'baseDelayMs',
+    maxdelay: 'maxDelayMs',
+    multiplier: 'backoffMultiplier',
+    backoff: 'backoffMultiplier',
+  },
+  history:
+    'Until #4001 these were dropped silently — reconnects ran on the defaults. Note a hook '
+    + 'retryPolicy spells its delay `backoffMs`; a datasource spells it `baseDelayMs`.',
+});
+
+const capabilitiesUnknownKeyError = strictUnknownKeyError({
+  surface: 'these datasource capabilities',
+  knownKeys: [
+    'transactions', 'queryFilters', 'queryAggregations', 'querySorting',
+    'queryPagination', 'queryWindowFunctions', 'querySubqueries', 'joins',
+    'fullTextSearch', 'readOnly', 'dynamicSchema',
+  ],
+  aliases: {
+    transaction: 'transactions',
+    filters: 'queryFilters',
+    filtering: 'queryFilters',
+    aggregations: 'queryAggregations',
+    aggregation: 'queryAggregations',
+    sorting: 'querySorting',
+    sort: 'querySorting',
+    pagination: 'queryPagination',
+    windowfunctions: 'queryWindowFunctions',
+    subqueries: 'querySubqueries',
+    join: 'joins',
+    fulltext: 'fullTextSearch',
+    search: 'fullTextSearch',
+    readonly: 'readOnly',
+    schemaless: 'dynamicSchema',
+  },
+  history:
+    'Until #4001 these were dropped silently — and a capability that fails to register '
+    + 'reads as FALSE, so the engine quietly stopped pushing that work down to the driver '
+    + 'and recomputed it in memory instead.',
+});
+
 export const DriverType = z.string().describe('Underlying driver identifier');
 
 /**
@@ -33,7 +288,7 @@ export const DriverDefinitionSchema = lazySchema(() => z.object({
    * What this driver supports out-of-the-box.
    */
   capabilities: z.lazy(() => DatasourceCapabilities).optional(),
-}));
+}, { error: driverDefinitionUnknownKeyError }).strict());
 
 /**
  * Datasource Capabilities Schema
@@ -86,7 +341,7 @@ export const DatasourceCapabilities = z.object({
   
   /** Is scheme-less (needs schema inference)? */
   dynamicSchema: z.boolean().default(false),
-});
+}, { error: capabilitiesUnknownKeyError }).strict();
 
 /**
  * Schema Ownership Mode (ADR-0015)
@@ -126,14 +381,16 @@ export const ExternalDatasourceSettingsSchema = z.object({
       .describe('Validate federated objects against the remote schema at boot.'),
     checkIntervalMs: z.number().optional()
       .describe('Optional background drift-check interval in milliseconds.'),
-  }).default({ onMismatch: 'fail', checkOnBoot: true }).describe('Boot/drift validation policy'),
+  }, { error: externalValidationUnknownKeyError }).strict()
+    .default({ onMismatch: 'fail', checkOnBoot: true }).describe('Boot/drift validation policy'),
   credentialsRef: z.string().optional()
     .describe('Reference into the secrets store; never inline credentials.'),
   queryTimeoutMs: z.number().default(30_000)
     .describe('Hard cap on per-query execution time.'),
   requirePermission: z.string().optional()
     .describe('Optional convenience: gate the entire datasource behind a single role.'),
-}).describe('External datasource federation settings (schemaMode != "managed")');
+}, { error: externalSettingsUnknownKeyError }).strict()
+  .describe('External datasource federation settings (schemaMode != "managed")');
 
 export type ExternalDatasourceSettings = z.infer<typeof ExternalDatasourceSettingsSchema>;
 
@@ -167,7 +424,7 @@ export const DatasourceSchema = lazySchema(() => z.object({
     max: z.number().default(10).describe('Maximum connections'),
     idleTimeoutMillis: z.number().default(30000).describe('Idle timeout'),
     connectionTimeoutMillis: z.number().default(3000).describe('Connection establishment timeout'),
-  }).optional().describe('Connection pool settings'),
+  }, { error: poolUnknownKeyError }).strict().optional().describe('Connection pool settings'),
 
   /**
    * Read Replicas
@@ -187,7 +444,7 @@ export const DatasourceSchema = lazySchema(() => z.object({
     enabled: z.boolean().default(true).describe('Enable health check endpoint'),
     intervalMs: z.number().default(30000).describe('Health check interval in milliseconds'),
     timeoutMs: z.number().default(5000).describe('Health check timeout in milliseconds'),
-  }).optional().describe('Datasource health check configuration'),
+  }, { error: healthCheckUnknownKeyError }).strict().optional().describe('Datasource health check configuration'),
 
   /** SSL/TLS Configuration */
   ssl: z.object({
@@ -196,7 +453,7 @@ export const DatasourceSchema = lazySchema(() => z.object({
     ca: z.string().optional().describe('CA certificate (PEM format or path to file)'),
     cert: z.string().optional().describe('Client certificate (PEM format or path to file)'),
     key: z.string().optional().describe('Client private key (PEM format or path to file)'),
-  }).optional().describe('SSL/TLS configuration for secure database connections'),
+  }, { error: sslUnknownKeyError }).strict().optional().describe('SSL/TLS configuration for secure database connections'),
 
   /** Retry Policy */
   retryPolicy: z.object({
@@ -204,7 +461,7 @@ export const DatasourceSchema = lazySchema(() => z.object({
     baseDelayMs: z.number().default(1000).describe('Base delay between retries in milliseconds'),
     maxDelayMs: z.number().default(30000).describe('Maximum delay between retries in milliseconds'),
     backoffMultiplier: z.number().default(2).describe('Exponential backoff multiplier'),
-  }).optional().describe('Connection retry policy for transient failures'),
+  }, { error: datasourceRetryPolicyUnknownKeyError }).strict().optional().describe('Connection retry policy for transient failures'),
 
   /** Description */
   description: z.string().optional().describe('Internal description'),
@@ -251,7 +508,7 @@ export const DatasourceSchema = lazySchema(() => z.object({
    */
   origin: z.enum(['code', 'runtime']).default('code')
     .describe('Datasource provenance (server-managed, read-only)'),
-}).superRefine((ds, ctx) => {
+}, { error: datasourceUnknownKeyError }).strict().superRefine((ds, ctx) => {
   if (ds.schemaMode !== 'managed' && !ds.external) {
     ctx.addIssue({
       code: 'custom',

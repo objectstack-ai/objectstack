@@ -53,9 +53,9 @@ GET /api/v1/discovery HTTP/1.1
   "services": {
     "data": { "enabled": true, "status": "available", "route": "/api/v1/data", "provider": "objectql" },
     "metadata": { "enabled": true, "status": "available", "route": "/api/v1/meta", "provider": "objectql" },
-    "auth": { "enabled": true, "status": "available", "route": "/api/v1/auth", "provider": "plugin-auth" },
-    "workflow": { "enabled": false, "status": "unavailable", "message": "Install plugin-workflow to enable" },
-    "ai": { "enabled": false, "status": "unavailable", "message": "Install plugin-ai to enable" }
+    "auth": { "enabled": true, "status": "available", "route": "/api/v1/auth", "provider": "@objectstack/plugin-auth" },
+    "workflow": { "enabled": false, "status": "unavailable", "message": "No implementation ships for the 'workflow' slot — register a service under it to enable" },
+    "ai": { "enabled": false, "status": "unavailable", "message": "No implementation ships for the 'ai' slot — register a service under it to enable" }
   },
   "locale": {
     "default": "en-US",

@@ -157,10 +157,10 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `field.zod.ts` | 11 | authorable | partially strict |
 | `filter.zod.ts` / `query.zod.ts` | 11+10 | open | query dialect — user data flows through; validated semantically elsewhere |
 | `driver-nosql.zod.ts` / `driver.zod.ts` / `driver-sql.zod.ts` | 10+9+2 | wire | driver capability contracts |
-| `datasource.zod.ts` | 9 | authorable (p) | stack-authored config — **candidate** |
+| `datasource.zod.ts` | 9 | authorable | **strict as of #4001 data step** — all 9: `DatasourceSchema` (+ `pool` / `healthCheck` / `ssl` / `retryPolicy`), `ExternalDatasourceSettingsSchema` (+ `validation`), `DatasourceCapabilities`, `DriverDefinitionSchema`. `config` + `readReplicas` stay `z.record` by construction (per-driver shapes; the driver's own `configSchema` validates them) — which is precisely why the top level had to close: a connection key written one level too high was stripped, and the datasource then connected on driver defaults instead of failing |
 | `analytics.zod.ts` | 8 | mixed (p) | |
 | `document.zod.ts` | 8 | wire (p) | |
-| `hook.zod.ts` / `hook-body.zod.ts` | 6+2 | authorable (p) | `defineHook` — **candidate** |
+| `hook.zod.ts` / `hook-body.zod.ts` | 6+2 | mixed | **strict as of #4001 data step** for the AUTHORING shapes: `HookSchema` (+ `retryPolicy`) and both body branches (`ExpressionBodySchema` / `ScriptBodySchema`). `HookContextSchema` and its `session` / `provenance` / `user` blocks are the RUNTIME shape the engine hands a handler — they stay tolerant, and must: strictness there would make an engine-internal enrichment (as `provenance` was in #3712) a breaking change for anyone parsing a context they were given. The file's old blanket `authorable (p)` was too wide — verification split it |
 | `mapping.zod.ts` | 3 | authorable (p) | |
 | `external-catalog.zod.ts` | 4 | wire (p) | |
 | `field-value.zod.ts` / `seed.zod.ts` / `validation.zod.ts` | 1 ea | mixed (p) | |
@@ -213,13 +213,11 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
 ## Next steps (verify-then-enforce, one shape at a time)
 
-1. `data/hook.zod.ts`, `data/datasource.zod.ts` — `defineHook` / stack config
-   (both still provisional (p) classifications — verify before tightening).
-2. The `@objectstack/lint` unknown-key WARNING layer: non-breaking, shippable
+1. The `@objectstack/lint` unknown-key WARNING layer: non-breaking, shippable
    in a minor, and it extends AI-detectable coverage to every remaining
    authorable site at once while accumulating evidence (which keys real
    tenant projects actually carry) for a v18 strict close-out.
-3. Promote this ledger to a machine-checked gate (pattern of
+2. Promote this ledger to a machine-checked gate (pattern of
    `packages/spec/liveness/` + `check:liveness`) once enough of the surface is
    classified that the table above is enforceable rather than descriptive.
 
@@ -240,6 +238,29 @@ Done in the app step, PR A: the seven audit-dead AppSchema keys tombstoned
 (`retiredKey` + `app-dead-authoring-keys-removed` conversion + step-17
 migration entry), clearing the enforce-or-remove precondition for the app
 strict step (PR B).
+
+Done in the data step: `data/hook.zod.ts` + `data/hook-body.zod.ts` +
+`data/datasource.zod.ts` — the last two entries that carried a provisional
+`(p)` classification. Verification changed the answer for one of them: the
+blanket `authorable (p)` on `hook.zod.ts` was too wide, because
+`HookContextSchema` in the same file is a runtime shape and stays tolerant.
+Both types were confirmed authorable the same way — they sit in
+`BUILTIN_METADATA_TYPE_SCHEMAS`, so one shape backs `defineStack()` parsing,
+`/api/v1/meta/types/:type`, and the Studio form.
+
+Measured while doing it, and worth recording because it contradicts the
+assumption the earlier steps were written under: **strictness does not change
+the published JSON Schema.** `build-schemas.ts` converts with the default
+`io: 'output'`, and in output mode zod emits `additionalProperties: false` for
+a `.strip()` object too — the post-parse shape genuinely has no extra keys.
+Verified by regenerating both ways: `Datasource.json` is byte-identical before
+and after. So the JSON Schema had been advertising `additionalProperties: false`
+while the zod parse quietly accepted and dropped unknown keys. These flips align
+the parse with the contract that was already published, rather than widening it.
+(Note this cuts against the `approval.zod.ts` note above, which reads as though
+the flip carried strictness INTO the JSON schema. It did not; approval's schema
+would have said `false` regardless. The registration-time rejection it describes
+is real, but it came from the published schema, not from the flip.)
 
 Long tail stays gated on a verification pass per shape — never a one-shot
 "make all ~453 sites strict" (ADR-0054 ratchet; #4001's own recommendation).

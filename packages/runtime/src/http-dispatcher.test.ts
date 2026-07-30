@@ -2290,6 +2290,61 @@ describe('HttpDispatcher', () => {
             expect(info.features.i18n).toBe(false);
         });
 
+        // [#4093 follow-up] Discovery's remedy line must name a package that can
+        // actually be installed. It used to be templated from the slot name
+        // (`Install a ${slot} plugin to enable`), which named nothing real for
+        // `ai` / `search` / `workflow` and got it wrong wherever the package is
+        // not called after its slot. Both builders now read one table.
+        describe('unavailable slots name a real remedy (#4093 follow-up)', () => {
+            beforeEach(() => {
+                (kernel as any).getService = vi.fn().mockResolvedValue(null);
+                (kernel as any).services = new Map();
+            });
+
+            it('names the actual package, including where the name differs from the slot', async () => {
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                // service-messaging fills `notification` — the case a
+                // name-derived guess can never get right.
+                expect(info.services.notification.message).toBe('Install @objectstack/service-messaging to enable');
+                expect(info.services.auth.message).toBe('Install @objectstack/plugin-auth to enable');
+                expect(info.services['file-storage'].message).toBe('Install @objectstack/service-storage to enable');
+            });
+
+            it('says nothing ships rather than naming a package that does not exist', async () => {
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                for (const slot of ['ai', 'search', 'workflow'] as const) {
+                    expect(info.services[slot].message, `services.${slot}.message`).not.toMatch(/Install/);
+                    expect(info.services[slot].message, `services.${slot}.message`).toContain(slot);
+                }
+            });
+
+            it('never emits the old slot-name-derived template', async () => {
+                const info = await dispatcher.getDiscoveryInfo('/api/v1');
+                for (const [slot, entry] of Object.entries(info.services as Record<string, any>)) {
+                    if (typeof entry?.message !== 'string') continue;
+                    expect(entry.message, `services.${slot}.message`).not.toMatch(/Install a .+ plugin to enable/);
+                }
+            });
+
+            it('gives the same remedy as the metadata-protocol builder', async () => {
+                const { ObjectStackProtocolImplementation } = await import('@objectstack/metadata-protocol');
+                const fromProtocol = (await new ObjectStackProtocolImplementation(
+                    mockObjectQL as any,
+                    () => new Map<string, any>(),
+                ).getDiscovery()).services;
+                const fromDispatcher = (await dispatcher.getDiscoveryInfo('/api/v1')).services as Record<string, any>;
+
+                // Every slot both builders report must carry the same remedy —
+                // two hosts telling a consumer to install different things is
+                // the drift #4089/#4130 closed for `metadata` and `data`.
+                for (const slot of Object.keys(fromProtocol)) {
+                    const mine = fromDispatcher[slot];
+                    if (!mine || mine.enabled !== false) continue;
+                    expect(mine.message, `services.${slot}.message parity`).toBe((fromProtocol as any)[slot].message);
+                }
+            });
+        });
+
         it('should detect i18n via getServiceAsync (async factory) in discovery', async () => {
             const mockI18nService = {
                 getLocales: vi.fn().mockReturnValue(['en', 'fr']),

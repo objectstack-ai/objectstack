@@ -21,7 +21,7 @@ import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { parseFilterAST, isFilterAST, VALID_AST_OPERATORS, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
-import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
+import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed } from '@objectstack/spec/kernel';
 import {
     extractProtection,
@@ -916,28 +916,42 @@ function suggestQueryParam(param: string, knownFields: readonly string[]): strin
  * not advertise a route for it (ADR-0076 D12, #2462: an advertised route
  * with no mounted handler 404s and misleads consumers).
  */
-const SERVICE_CONFIG: Record<string, { route?: string; plugin: string }> = {
+/**
+ * [#4093 follow-up] `plugin` is no longer written here. It named the package a
+ * consumer should install, and ten of the fifteen names did not exist —
+ * `plugin-redis` / `plugin-bullmq` / `job-scheduler` / `plugin-notifications` /
+ * `plugin-storage` / `plugin-automation` / `ui-plugin`, plus `plugin-ai`,
+ * `plugin-search` and `plugin-workflow` for slots nothing implements at all.
+ * The value is surfaced as discovery's `provider` and as its remedy line, so a
+ * wrong name is a dead end handed to whoever is trying to fix their stack.
+ *
+ * It now comes from `CORE_SERVICE_PROVIDER` in `@objectstack/spec/system`, the
+ * one table both discovery builders read, verified against what actually
+ * registers each slot and guarded by `scripts/check-service-providers.mjs`.
+ * Only the ROUTE stays local — that is this builder's own knowledge.
+ */
+const SERVICE_CONFIG: Record<string, { route?: string }> = {
     // Plugin-provided like every other optional service since the degraded
     // ObjectQL fallback was retired (#3891): advertised iff the real engine
     // is registered — never hardcoded 'available' (the pre-#2462 lie the
     // fallback existed to paper over).
-    analytics:    { route: '/api/v1/analytics', plugin: 'service-analytics' },
-    auth:         { route: '/api/v1/auth', plugin: 'plugin-auth' },
-    automation:   { route: '/api/v1/automation', plugin: 'plugin-automation' },
-    cache:        { route: '/api/v1/cache', plugin: 'plugin-redis' },
-    queue:        { route: '/api/v1/queue', plugin: 'plugin-bullmq' },
-    job:          { route: '/api/v1/jobs', plugin: 'job-scheduler' },
-    ui:           { route: '/api/v1/ui', plugin: 'ui-plugin' },
-    workflow:     { route: '/api/v1/workflow', plugin: 'plugin-workflow' },
+    analytics:    { route: '/api/v1/analytics' },
+    auth:         { route: '/api/v1/auth' },
+    automation:   { route: '/api/v1/automation' },
+    cache:        { route: '/api/v1/cache' },
+    queue:        { route: '/api/v1/queue' },
+    job:          { route: '/api/v1/jobs' },
+    ui:           { route: '/api/v1/ui' },
+    workflow:     { route: '/api/v1/workflow' },
     // service-realtime is an in-process pub/sub bus; nothing mounts
     // /api/v1/realtime, so no route is advertised (D12, #2462).
-    realtime:     { plugin: 'service-realtime' },
-    notification: { route: '/api/v1/notifications', plugin: 'plugin-notifications' },
-    ai:           { route: '/api/v1/ai', plugin: 'plugin-ai' },
-    i18n:         { route: '/api/v1/i18n', plugin: 'service-i18n' },
-    graphql:      { route: '/graphql', plugin: 'plugin-graphql' },  // GraphQL uses /graphql by convention (not versioned REST)
-    'file-storage': { route: '/api/v1/storage', plugin: 'plugin-storage' },
-    search:       { route: '/api/v1/search', plugin: 'plugin-search' },
+    realtime:     {},
+    notification: { route: '/api/v1/notifications' },
+    ai:           { route: '/api/v1/ai' },
+    i18n:         { route: '/api/v1/i18n' },
+    graphql:      { route: '/graphql' },  // GraphQL uses /graphql by convention (not versioned REST)
+    'file-storage': { route: '/api/v1/storage' },
+    search:       { route: '/api/v1/search' },
 };
 
 /**
@@ -1747,7 +1761,7 @@ export class ObjectStackProtocolImplementation implements
                     enabled: true,
                     status: self?.status ?? (noHttpSurface ? ('degraded' as const) : ('available' as const)),
                     route: advertisedRoute(serviceName, config.route),
-                    provider: config.plugin,
+                    provider: CORE_SERVICE_PROVIDER[serviceName] ?? undefined,
                     ...(noHttpSurface || self?.handlerReady !== undefined
                         ? { handlerReady: noHttpSurface ? false : self?.handlerReady }
                         : {}),
@@ -1762,7 +1776,7 @@ export class ObjectStackProtocolImplementation implements
                 services[serviceName] = {
                     enabled: false,
                     status: 'unavailable' as const,
-                    message: `Install ${config.plugin} to enable`,
+                    message: serviceUnavailableMessage(serviceName),
                 };
             }
         }
@@ -2894,7 +2908,14 @@ export class ObjectStackProtocolImplementation implements
                     readonly: fields[f]?.readonly,
                     type: fields[f]?.type,
                     // Default to 2 columns for most, 1 for textareas
-                    colSpan: (fields[f]?.type === 'textarea' || fields[f]?.type === 'html') ? 2 : 1
+                    colSpan: (fields[f]?.type === 'textarea' || fields[f]?.type === 'html') ? 2 : 1,
+                    // `FormField.span` defaults to 'auto'; this view is hand-built
+                    // rather than run through `FormFieldSchema.parse()`, so the
+                    // default is spelled out to make the returned object a real
+                    // parsed `View` (the same reason the section below states its
+                    // own `collapsible` / `collapsed` / `columns` defaults). Was
+                    // unnoticed while `FormField` resolved to `any` (#4171).
+                    span: 'auto' as const
                 }));
 
              return {

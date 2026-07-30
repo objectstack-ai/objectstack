@@ -131,8 +131,31 @@ export interface Plugin {
      * Dependencies (Optional)
      * List of other plugin names that this plugin depends on.
      * The kernel ensures these plugins are initialized before this one.
+     * A name that is not composed on the kernel fails the boot.
      */
     dependencies?: string[];
+
+    /**
+     * Soft dependencies (Optional) — order-if-present, ADR-0116.
+     * Hoisted ahead exactly like `dependencies` when composed, silently
+     * skipped when absent. For plugins that degrade without the dependency
+     * but must never initialize before it.
+     */
+    optionalDependencies?: string[];
+
+    /**
+     * Services this plugin resolves SYNCHRONOUSLY during init() (ADR-0116).
+     * Validated before Phase 1 and again immediately before this plugin's
+     * init, so a misordered composition fails with a named error instead of
+     * crashing inside your init.
+     */
+    requiresServices?: string[];
+
+    /**
+     * Services this plugin's init() registers UNCONDITIONALLY (ADR-0116).
+     * Never declare an option-gated registration.
+     */
+    providesServices?: string[];
 
     /**
      * Init Phase (REQUIRED)
@@ -241,6 +264,47 @@ Plugins follow a strict three-phase lifecycle managed by the kernel:
 1. **init()** — Called during kernel initialization. Register services that other plugins may depend on.
 2. **start()** — Called after *all* plugins have initialized. Start servers, connect to databases, or execute main logic.
 3. **destroy()** — Called during shutdown, in reverse order. Clean up connections, timers, and resources.
+
+### Resolving a service inside `init()` — declare it
+
+`kernel.use()` **registration order is not a contract**. Init order comes from
+the dependency graph, so "it works because I registered it later" is luck, and
+it is the recipe behind two production bugs (a server that booted with no
+tables, then [#4085](https://github.com/objectstack-ai/objectstack/issues/4085)).
+Anything you resolve in `start()` needs no declaration — Phase 1 completes
+before any `start()` runs. For `init()`, pick one of two:
+
+| Your plugin… | Declare |
+| :--- | :--- |
+| **cannot work** without the provider | `dependencies: ['<provider plugin>']` — plus `requiresServices` to say which service, and why |
+| **degrades** without it, but must init after it when present | `optionalDependencies: ['<provider plugin>']` + `requiresServices: ['<service>']` |
+
+Resolving a service in `init()` while declaring **neither** is the bug shape:
+it works until someone composes the stack in a different order, and then fails
+inside your `init()` with an error that names the service but not the cause.
+
+```ts
+class MyPlugin implements Plugin {
+  // Hard: the engine is always composed with this plugin.
+  dependencies = ['com.objectstack.engine.objectql'];
+  requiresServices = ['manifest'];        // what the dependency is FOR
+
+  async init(ctx: PluginContext) {
+    ctx.getService<{ register(m: any): void }>('manifest').register(mySchema);
+  }
+}
+```
+
+Two rules worth stating explicitly, because both have already caused bugs:
+
+- **Declare the requirement directly, not transitively.** Depending on a plugin
+  that *happens* to depend on the real provider works until that plugin's own
+  dependencies change, and the breakage then surfaces in your `init()`.
+- **A service you probe behind `try`/`catch` is not a requirement.** Put only
+  hard, no-fallback needs in `requiresServices` — and if you write a fallback
+  branch, make sure it can actually run: `getService` **throws** for a missing
+  service, it never returns `undefined`, so `if (!svc) { /* degrade */ }` after
+  a bare `getService` is dead code advertising a mode you do not have.
 
 ## Next Steps
 
