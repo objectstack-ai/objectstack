@@ -195,9 +195,8 @@
         "priority": {
           "status": "dead",
           "verifiedAt": "2026-07-30",
-          "authorWarn": true,
-          "authorHint": "priority has no effect and CANNOT have one: applicable policies OR-combine (most permissive wins, per the schema's own describe), so there is no conflict to order and no evaluation-order effect on the outcome. Remove it from the policy.",
-          "note": "CORRECTED 2026-07-30 (was live citing rls-compiler.ts, which never reads it — confirmed across the load site, the projection round-trip and the compiler). Not merely unimplemented: under OR-combination the promised 'conflict resolution' semantics cannot exist, so this is a REMOVE candidate (#3715/#3950 precedent, v17 window) rather than an implement candidate."
+          "evidence": "packages/spec/src/security/rls.zod.ts (retiredKey tombstone — authored values REJECT with the prescription; z.input types the key never)",
+          "note": "REMOVED 2026-07-30, same day the audit corrected it (was live citing rls-compiler.ts, which never reads it — confirmed across the load site, the projection round-trip and the compiler). Not merely unimplemented: under OR-combination the promised 'conflict resolution' semantics cannot exist, so it went straight to the #3715/#3950 remove disposition inside the v17 breaking window. Tombstoned rather than deleted so the removal is audible; drop the tombstone (and this entry) ~two majors out."
         },
         "tags": {
           "status": "dead",

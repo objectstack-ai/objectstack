@@ -124,6 +124,8 @@ Finally it removes agent `tools` (#3894): the legacy inline `{type,name,descript
 
 Beyond those spec-surface removals, it graduates the seven flow-node config key aliases the executors still tolerated (#3796): the CRUD nodes' `object` (use `objectName`) — the last tenant of the `readAliasedConfig` executor shim, which is deleted with it — plus the six open-coded fallbacks that never went through that shim: notify `to`/`subject`/`body`/`url` (use `recipients`/`title`/`message`/`actionUrl`) and script `functionName`/`input` (use `function`/`inputs`). All are pure key renames with unchanged values and replay losslessly. Like the sharing-rule access level above they keep a load-path acceptance window: none carried a prior deprecation warning, and `FlowNodeSchema.config` is an unconstrained record, so no schema tombstone can reject them — the conversion layer is the only seam that can declare, convert, and retire them.
 
+And it removes the RLS-policy key `priority` (#3896 security audit): promised "conflict resolution" that cannot exist, because applicable policies OR-combine (most permissive wins) — there is never a conflict to order, and nothing ever read the key (call graph closed across the collection site, the projection round-trip and the compiler). A pure lossless delete: outcomes are identical with or without it; the schema tombstones the key with the same prescription.
+
 ### Mechanical (applied for you)
 
 | Conversion | Surface | Change | Load window |
@@ -136,6 +138,7 @@ Beyond those spec-surface removals, it graduates the seven flow-node config key 
 | `flow-node-crud-object-alias` | `flow.node.config.objectName` | CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation) | live — protocol 17 loader accepts the old shape |
 | `flow-node-notify-config-aliases` | `flow.node.notify.config` | notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796) | live — protocol 17 loader accepts the old shape |
 | `flow-node-script-config-aliases` | `flow.node.script.config` | script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796) | live — protocol 17 loader accepts the old shape |
+| `permission-rls-priority-removed` | `permission.rowLevelSecurity.priority` | RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome) | retired — `migrate meta` only |
 
 ---
 

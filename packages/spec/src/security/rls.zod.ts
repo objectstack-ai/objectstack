@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * # Row-Level Security (RLS) Protocol
@@ -382,17 +383,26 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
     .describe('Whether this policy is active'),
 
   /**
-   * Policy priority for conflict resolution.
-   * Higher numbers = higher priority.
-   * When multiple policies apply, the most permissive wins (OR logic).
-   * Priority is only used for ordering evaluation (performance).
-   * 
-   * @default 0
+   * REMOVED — `priority` promised "conflict resolution" that cannot exist.
+   *
+   * Applicable policies OR-combine (any match allows access — the doc above
+   * `RLSCompiler.compileFilter` and this schema's own former describe both say
+   * most-permissive-wins), so there is never a conflict to order and evaluation
+   * order cannot change an outcome. Nothing ever read the key: the 2026-07-30
+   * security-subset liveness re-verification (#3896 follow-up) closed the call
+   * graph across the collection site, the projection round-trip and the
+   * compiler, and found no consumer. A semantically-void knob on a SECURITY
+   * policy is worse than dead — an author (very often an AI, ADR-0033) reads it
+   * as a precedence lever and reasons about policy interactions that do not
+   * exist. Removed per the #3715 / #3950 precedent; tombstoned so the removal
+   * is audible (tsc `never` + the parse-time prescription) instead of a silent
+   * strip.
    */
-  priority: z.number()
-    .int()
-    .default(0)
-    .describe('Policy evaluation priority (higher = evaluated first)'),
+  priority: retiredKey(
+    '`rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). ' +
+    'It never had an effect and could not: applicable policies OR-combine (most permissive wins), ' +
+    'so there is no conflict to order. Delete the key — policy outcomes are unchanged.',
+  ),
 
   /**
    * Tags for policy categorization and reporting.
@@ -546,7 +556,6 @@ export const RLS = {
     operation: 'all',
     using: `${ownerField} == current_user.id`,
     enabled: true,
-    priority: 0,
   }),
 
   /**
@@ -566,7 +575,6 @@ export const RLS = {
     using: `${tenantField} == current_user.organization_id`,
     check: `${tenantField} == current_user.organization_id`,
     enabled: true,
-    priority: 0,
   }),
 
   /**
@@ -580,7 +588,6 @@ export const RLS = {
     using: condition,
     positions,
     enabled: true,
-    priority: 0,
   }),
 
   /**
@@ -594,6 +601,5 @@ export const RLS = {
     using: '1 == 1', // Always true
     positions,
     enabled: true,
-    priority: 0,
   }),
 } as const;

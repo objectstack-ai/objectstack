@@ -82,7 +82,7 @@ const denyWritesOnManagedObjects = (): Record<string, {
  * permission set name appears in the request `ExecutionContext.permissions[]`.
  *
  * Each entry is run through `PermissionSetSchema.parse(...)` so Zod fills
- * in the boolean/`priority`/`enabled` defaults — keeping the literal
+ * in the boolean/`enabled` defaults — keeping the literal
  * source readable while still satisfying the strict output type.
  *
  * `objects: { '*': … }` uses the wildcard sentinel honoured by

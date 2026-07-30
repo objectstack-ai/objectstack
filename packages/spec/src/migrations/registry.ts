@@ -379,7 +379,13 @@ const step17: MigrationStep = {
     'they keep a load-path acceptance window: none carried a prior deprecation ' +
     'warning, and `FlowNodeSchema.config` is an unconstrained record, so no schema ' +
     'tombstone can reject them — the conversion layer is the only seam that can ' +
-    'declare, convert, and retire them.',
+    'declare, convert, and retire them.\n\n' +
+    'And it removes the RLS-policy key `priority` (#3896 security audit): promised ' +
+    '"conflict resolution" that cannot exist, because applicable policies OR-combine ' +
+    '(most permissive wins) — there is never a conflict to order, and nothing ever ' +
+    'read the key (call graph closed across the collection site, the projection ' +
+    'round-trip and the compiler). A pure lossless delete: outcomes are identical ' +
+    'with or without it; the schema tombstones the key with the same prescription.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -389,6 +395,7 @@ const step17: MigrationStep = {
     'flow-node-crud-object-alias',
     'flow-node-notify-config-aliases',
     'flow-node-script-config-aliases',
+    'permission-rls-priority-removed',
   ],
   semantic: [],
 };
