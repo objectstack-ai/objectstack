@@ -745,7 +745,7 @@ import or the authored key.
 | `tool.category` / `.permissions` / `.active` / `.builtIn` (+ `ToolCategorySchema`) | authorable and inert — `permissions` gated nothing, `active: false` withdrew nothing; strict-rejected with prescriptions (#3896 close-out) |
 | `action.shortcut` / `.bulkEnabled` | no keydown path dispatches shortcuts; the multi-select toolbar reads the view's `bulkActions` (#3896 close-out) |
 | `flow.active` / `.template` / node `outputSchema` / `errorHandling.fallbackNodeId` | `active: false` never stopped a flow — `status` is the enforced lifecycle; faults route via per-node fault edges (#3896 close-out) |
-| view: list `responsive`/`performance`, form `data`/`defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` stay live (#3896 close-out) |
+| view: list `responsive`/`performance`, form `defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` **and form `data`** stay live — `defineForm` writes `data: { provider: 'schema', schemaId }` onto every metadata form (#3896 close-out) |
 | `dashboard.aria` / `.performance` / widget `performance` (+ `PerformanceConfigSchema`) | no renderer applied them; virtual scrolling is the live top-level `virtualScroll` (#3896 close-out) |
 | `agent.knowledge` (+ `AIKnowledgeSchema`) | declaring sources/indexes never scoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's tool-call arguments (#3896 close-out) |
 | `skill.triggerPhrases` | phrases were never matched; activation is `triggerConditions` + the agent's `skills[]` allowlist (#3896 close-out) |
