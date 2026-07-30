@@ -202,7 +202,7 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
             protocol.publishMetaItem({
                 type: 'view', name: 'case_grid', organizationId: 'org_alpha', actor: 'admin',
             }),
-        ).rejects.toMatchObject({ code: 'no_draft', status: 404 });
+        ).rejects.toMatchObject({ code: 'NO_DRAFT', status: 404 });
     });
 
     it('getMetaItem(state=draft) returns 404 no_draft when no overlay row exists', async () => {
@@ -224,7 +224,7 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
                 type: 'view', name: 'case_grid', organizationId: 'org_alpha',
                 state: 'draft',
             }),
-        ).rejects.toMatchObject({ code: 'no_draft', status: 404 });
+        ).rejects.toMatchObject({ code: 'NO_DRAFT', status: 404 });
 
         // Also covers the "never saved" path — no overlay row at all.
         await expect(
@@ -232,7 +232,7 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
                 type: 'view', name: 'never_existed', organizationId: 'org_alpha',
                 state: 'draft',
             }),
-        ).rejects.toMatchObject({ code: 'no_draft', status: 404 });
+        ).rejects.toMatchObject({ code: 'NO_DRAFT', status: 404 });
     });
 
     it('getMetaItem(state=draft) returns the draft body when one is pending', async () => {
@@ -297,7 +297,7 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
                 type: 'view', name: 'case_grid', organizationId: 'org_alpha',
                 toVersion: 99, actor: 'admin',
             }),
-        ).rejects.toMatchObject({ code: 'version_not_found', status: 404 });
+        ).rejects.toMatchObject({ code: 'VERSION_NOT_FOUND', status: 404 });
     });
 
     it('diffMetaItem returns structured top-level key diff between two versions', async () => {

@@ -293,7 +293,7 @@ async function runOne(type: string, fx: Fixture | undefined): Promise<Row> {
         invalidNote = hasSchema ? 'expected 422 but save succeeded' : 'no schema → fall-through (OK)';
         invalidRejected = hasSchema ? 'fail' : 'ok';
     } catch (e: any) {
-        if (e?.code === 'invalid_metadata' && e?.status === 422 && Array.isArray(e?.issues)) {
+        if (e?.code === 'INVALID_METADATA' && e?.status === 422 && Array.isArray(e?.issues)) {
             invalidRejected = 'ok';
         } else {
             invalidNote = `unexpected error: ${e?.code ?? 'unknown'} ${e?.status ?? ''} ${e?.message ?? ''}`;

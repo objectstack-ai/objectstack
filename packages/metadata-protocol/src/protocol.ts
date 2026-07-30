@@ -2134,7 +2134,7 @@ export class ObjectStackProtocolImplementation implements
                 const err: any = new Error(
                     `[no_draft] No pending draft exists for ${request.type}/${request.name}.`,
                 );
-                err.code = 'no_draft';
+                err.code = 'NO_DRAFT';
                 err.status = 404;
                 throw err;
             }
@@ -4079,7 +4079,7 @@ export class ObjectStackProtocolImplementation implements
             `[item_locked] ${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
             + `${reason} — See ADR-0010 §3.3.`,
         );
-        (err as any).code = 'item_locked';
+        (err as any).code = 'ITEM_LOCKED';
         (err as any).status = 403;
         (err as any).lock = state.lock;
         (err as any).lockReason = reason;
@@ -4117,7 +4117,7 @@ export class ObjectStackProtocolImplementation implements
             `[item_locked] ${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
             + `${reason} — See ADR-0010 §3.3.`,
         );
-        (err as any).code = 'item_locked';
+        (err as any).code = 'ITEM_LOCKED';
         (err as any).status = 403;
         (err as any).lock = state.lock;
         (err as any).lockReason = reason;
@@ -4292,7 +4292,7 @@ export class ObjectStackProtocolImplementation implements
                     + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
                     + `See docs/adr/0005-metadata-customization-overlay.md.`
                 );
-                (err as any).code = 'not_overridable';
+                (err as any).code = 'NOT_OVERRIDABLE';
                 (err as any).status = 403;
                 throw err;
             }
@@ -4301,7 +4301,7 @@ export class ObjectStackProtocolImplementation implements
                     `[not_creatable] Metadata type '${request.type}' does not allow runtime creation `
                     + `(allowRuntimeCreate=false, allowOrgOverride=false). New items of this type must be defined in source code.`
                 );
-                (err as any).code = 'not_creatable';
+                (err as any).code = 'NOT_CREATABLE';
                 (err as any).status = 403;
                 throw err;
             }
@@ -4343,14 +4343,14 @@ export class ObjectStackProtocolImplementation implements
                             + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '')
                             + ` — re-submit with ?force=true to proceed.`
                         );
-                        (err as any).code = 'destructive_change';
+                        (err as any).code = 'DESTRUCTIVE_CHANGE';
                         (err as any).status = 409;
                         (err as any).issues = issues;
                         throw err;
                     }
                 }
             } catch (err: any) {
-                if (err?.code === 'destructive_change') throw err;
+                if (err?.code === 'DESTRUCTIVE_CHANGE') throw err;
                 // Other errors during the diff lookup are non-fatal —
                 // they just skip the safety check.
             }
@@ -4382,7 +4382,7 @@ export class ObjectStackProtocolImplementation implements
                     + `Unwrap and send the effective/overlay document instead — the layered shape is read-only `
                     + `(GET ?layers=true) and must never be persisted.`
                 );
-                (err as any).code = 'invalid_metadata';
+                (err as any).code = 'INVALID_METADATA';
                 (err as any).status = 422;
                 throw err;
             }
@@ -4431,7 +4431,7 @@ export class ObjectStackProtocolImplementation implements
                         `[invalid_metadata] ${request.type}/${request.name} failed spec validation: ${summary}`
                         + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '')
                     );
-                    (err as any).code = 'invalid_metadata';
+                    (err as any).code = 'INVALID_METADATA';
                     (err as any).status = 422;
                     (err as any).issues = issues;
                     throw err;
@@ -4536,7 +4536,7 @@ export class ObjectStackProtocolImplementation implements
                     + `the package '${request.packageId}' is read-only (provided by code or an installed app). `
                     + `Switch to a writable package in the package selector, or create a new one, and retry.`,
                 );
-                (err as any).code = 'writable_package_required';
+                (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
                 (err as any).status = 422;
                 (err as any).packageId = request.packageId;
                 (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
@@ -4627,7 +4627,7 @@ export class ObjectStackProtocolImplementation implements
                         `[metadata_conflict] ${request.type}/${request.name} has been modified since you loaded it. `
                         + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                     );
-                    (conflict as any).code = 'metadata_conflict';
+                    (conflict as any).code = 'METADATA_CONFLICT';
                     (conflict as any).status = 409;
                     (conflict as any).expectedParent = err.expectedParent;
                     (conflict as any).actualHead = err.actualHead;
@@ -4725,7 +4725,7 @@ export class ObjectStackProtocolImplementation implements
                 `Failed to persist customization overlay to sys_metadata: ${dbError.message}. `
                 + `In-memory registry was updated but will be lost on restart.`,
             );
-            (err as any).code = 'overlay_persistence_failed';
+            (err as any).code = 'OVERLAY_PERSISTENCE_FAILED';
             (err as any).status = 500;
             throw err;
         }
@@ -4867,7 +4867,7 @@ export class ObjectStackProtocolImplementation implements
             const err: any = new Error(
                 `[not_overridable] Metadata type '${request.type}' is not draftable — no overlay/runtime-create permission.`,
             );
-            err.code = 'not_overridable';
+            err.code = 'NOT_OVERRIDABLE';
             err.status = 403;
             throw err;
         }
@@ -4906,7 +4906,7 @@ export class ObjectStackProtocolImplementation implements
                     `[metadata_conflict] ${request.type}/${request.name} published row advanced while you held the draft. `
                     + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                 );
-                conflict.code = 'metadata_conflict';
+                conflict.code = 'METADATA_CONFLICT';
                 conflict.status = 409;
                 conflict.expectedParent = err.expectedParent;
                 conflict.actualHead = err.actualHead;
@@ -5950,7 +5950,7 @@ export class ObjectStackProtocolImplementation implements
         const row = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!row) {
             const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
-            err.code = 'commit_not_found';
+            err.code = 'COMMIT_NOT_FOUND';
             err.status = 404;
             throw err;
         }
@@ -6042,7 +6042,7 @@ export class ObjectStackProtocolImplementation implements
         const target = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!target) {
             const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
-            err.code = 'commit_not_found';
+            err.code = 'COMMIT_NOT_FOUND';
             err.status = 404;
             throw err;
         }
@@ -6099,7 +6099,7 @@ export class ObjectStackProtocolImplementation implements
             const err: any = new Error(
                 `[invalid_request] rollbackMetaItem requires a positive integer 'toVersion' (got ${request.toVersion}).`,
             );
-            err.code = 'invalid_request';
+            err.code = 'INVALID_REQUEST';
             err.status = 400;
             throw err;
         }
@@ -6109,7 +6109,7 @@ export class ObjectStackProtocolImplementation implements
             const err: any = new Error(
                 `[not_overridable] Metadata type '${request.type}' is not revertable — no overlay/runtime-create permission.`,
             );
-            err.code = 'not_overridable';
+            err.code = 'NOT_OVERRIDABLE';
             err.status = 403;
             throw err;
         }
@@ -6159,7 +6159,7 @@ export class ObjectStackProtocolImplementation implements
                     `[metadata_conflict] ${request.type}/${request.name} advanced during rollback. `
                     + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                 );
-                conflict.code = 'metadata_conflict';
+                conflict.code = 'METADATA_CONFLICT';
                 conflict.status = 409;
                 conflict.expectedParent = err.expectedParent;
                 conflict.actualHead = err.actualHead;
@@ -6313,7 +6313,7 @@ export class ObjectStackProtocolImplementation implements
                     + `and the type has not opted into per-org overlay writes. `
                     + `See docs/adr/0005-metadata-customization-overlay.md.`
                 );
-                (err as any).code = 'not_overridable';
+                (err as any).code = 'NOT_OVERRIDABLE';
                 (err as any).status = 403;
                 throw err;
             }
@@ -6321,7 +6321,7 @@ export class ObjectStackProtocolImplementation implements
                 const err = new Error(
                     `[not_creatable] Metadata type '${request.type}' does not allow runtime creation or deletion.`
                 );
-                (err as any).code = 'not_creatable';
+                (err as any).code = 'NOT_CREATABLE';
                 (err as any).status = 403;
                 throw err;
             }
@@ -6456,7 +6456,7 @@ export class ObjectStackProtocolImplementation implements
                         `[metadata_conflict] ${request.type}/${request.name} has been modified since you loaded it. `
                         + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
                     );
-                    (conflict as any).code = 'metadata_conflict';
+                    (conflict as any).code = 'METADATA_CONFLICT';
                     (conflict as any).status = 409;
                     (conflict as any).expectedParent = err.expectedParent;
                     (conflict as any).actualHead = err.actualHead;

@@ -126,7 +126,7 @@ describe('HttpDispatcher', () => {
             // field-anchored issues; the dispatcher must pass them through (not
             // flatten to a single 400 message) so the Studio can point at fields.
             const err: any = new Error('[invalid_metadata] object/bad failed spec validation: fields.amount.type: Required');
-            err.code = 'invalid_metadata';
+            err.code = 'INVALID_METADATA';
             err.status = 422;
             err.issues = [
                 { path: 'fields.amount.type', message: 'Required', code: 'invalid_type' },
@@ -141,7 +141,7 @@ describe('HttpDispatcher', () => {
             const error = result.response?.body?.error;
             // [#3842] The spec-validation code is the `error.code`; the
             // field-anchored issues stay in `details`, which is what they are.
-            expect(error?.code).toBe('invalid_metadata');
+            expect(error?.code).toBe('INVALID_METADATA');
             expect(error?.details?.issues).toEqual(err.issues);
             expect(error?.details?.issues[0].path).toBe('fields.amount.type');
         });

@@ -2133,7 +2133,7 @@ export class AutomationEngine implements IAutomationService {
         );
         return {
             success: false,
-            code: 'forbidden',
+            code: 'PERMISSION_DENIED',
             error: direct
                 ? `Run '${runId}' is paused at a '${nodeType}' node, which only its owning service may resume — ` +
                   `drive it through that service's API (e.g. an approval decision), not a raw resume`
@@ -2321,7 +2321,7 @@ export class AutomationEngine implements IAutomationService {
                 );
                 return {
                     success: false,
-                    code: 'invalid_signal',
+                    code: 'INVALID_SIGNAL',
                     error:
                         `Resume signal may not set engine-internal variables (${rejected.join(', ')}) — ` +
                         `names starting with '$' (or containing '.$') are reserved by the flow engine`,

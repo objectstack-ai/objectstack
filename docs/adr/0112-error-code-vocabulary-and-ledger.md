@@ -53,6 +53,24 @@ The client SDK is the living cost: `packages/client/src/index.ts:4455-4459` prob
 
 Every consumer that exists today branches on the **SCREAMING** dialect. No consumer branch on the lowercase dialect has been found (to be re-verified per service during the sweep — see Rollout).
 
+> **Corrected during batch 2 (#4003).** The re-verification the sentence above asks for found three lowercase consumer branches that the original survey missed, all in-repo:
+> `packages/runtime/src/domains/automation.ts:240,243` reads `forbidden` and `invalid_signal` from `service-automation`'s resume result; `packages/metadata-protocol/src/protocol.ts:4353` re-reads its own thrown `destructive_change`; and `packages/spec/src/contracts/automation-service.ts` *documents* `code: 'forbidden'` as the contract. Each was renamed atomically with its emitter. The lesson generalises: grep for `code === '…'` (comparison), not only `code: '…'` (emission), before each service's sweep — a rename that misses the comparison side does not fail any test, it silently stops matching.
+
+#### Sweep checklist (earned in batch 2)
+
+A `code: 'x'` grep finds the easy half. Each of these forms was missed once and cost a red suite:
+
+| Form | Example | Why a `code: '…'` grep misses it |
+|:---|:---|:---|
+| Comparison | `err?.code === 'destructive_change'` | reads, doesn't emit — and silently stops matching rather than failing |
+| Assignment to a property | `err.code = 'item_locked'` | no colon |
+| Indirect / computed | `const code = intent === 'runtime-only' ? 'not_creatable' : 'not_overridable'` | the literal never sits next to the word `code:` |
+| Regex assertion | `expect.stringMatching(/^(not_overridable\|not_creatable)$/)` | literal is inside a pattern |
+| `toBe` assertion | `expect(caught.code).toBe('invalid_metadata')` | test-side spelling of the same contract |
+| Doc comment / contract docstring | ``* refused with `{ code: 'forbidden' }` `` | teaches the old spelling to the next author (and to AI) |
+
+Also rebuild dependent packages before trusting a cross-package suite: a stale `dist/` makes the *old* code the one under test, which reads as "my rename broke it" (or, worse, as a false green).
+
 ### The field-level vocabulary is a third thing entirely
 
 `FieldErrorSchema.code` declares `StandardErrorCode`, but field-level emitters use vocabularies of their own: `packages/objectql/src/validation/record-validator.ts` and `rule-validator.ts` emit `required`, `max_length`, `invalid_email`, … (of which only `invalid_format` is in the enum); `packages/rest/src/import-coerce.ts` adds `reference_ambiguous`, `reference_not_found`; `packages/rest/src/rest-server.ts:89-96` passes **raw Zod issue codes** (`invalid_type`, `too_small`) straight through. The wire array is named `fields`, not the declared `fieldErrors`, and no schema validates it. This is a separate decision with different consumers (form UIs) and different emitters (validators), and jamming it into this ADR would either block the top-level fix or force a hasty field-level one.
@@ -91,6 +109,8 @@ Nine rulings, D1–D9.
 **D5 — One location, eventually: `error.code` carries the semantic code.** Target end-state, recorded here so the follow-ups have a fixed destination: the HTTP status lives on the transport and (optionally) `error.httpStatus`; `error.code` is always the semantic string; `error.details.code` and `error.type` are retired as code carriers. The dispatcher-occupation fix (#3689 sibling) and `ROUTE_NOT_FOUND`-in-`type` retirement land as follow-ups (Rollout, batch 3). The client's three-location probe is deleted only after both.
 
 **D6 — Field-level codes are explicitly a separate vocabulary, and the schema stops lying meanwhile.** `FieldErrorSchema.code` widens from `StandardErrorCode` to `z.string()` with a banner comment pointing at the follow-up issue. Widening is honest (emitters never complied) and prevents this ADR's rename from silently claiming field-level compliance it does not deliver. The field vocabulary (validator codes, import codes, Zod-passthrough, the `fields` vs `fieldErrors` naming, and a schema for the wire array) gets its own issue and, if the decision is non-obvious, its own ADR.
+
+**D6b — Persisted code columns are a third separate vocabulary (added in batch 2).** `sys_metadata_audit.code` spells its denial reasons exactly like the codes `metadata-protocol` throws (`item_locked`, `destructive_change`, …), so a naive sweep renames it too. It must not: the column is audit *history*, rows written before this ADR keep their spelling forever, and the same field also holds outcomes that are not errors (`ok`, `lock_override`). Following the error catalog here would buy either a data migration or one column with two vocabularies mixed by write date. So the audit column stays lowercase and self-contained, the thrown code goes SCREAMING, and the two deliberately diverge — recorded at both sites so the split reads as a decision rather than a missed rename. Generalisation for the remaining batches: a code that is **persisted** is versioned by its data, not by the catalog, and is out of scope for a rename sweep.
 
 **D7 — `error-catalog.mdx` is generated from the spec.** The hand-written catalog is how docs and wire drifted apart in the first place (`docs/audits/2026-06-handwritten-docs-accuracy-followups.md:230` catalogues the casing drift; `:106` found a documented-only vocabulary with zero emitters). Generated docs are the only docs that cannot lie — and for AI authors, docs *are* context.
 

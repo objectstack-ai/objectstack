@@ -237,10 +237,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 if (b.output && typeof b.output === 'object') signal.output = b.output;
                 if (typeof b.branchLabel === 'string') signal.branchLabel = b.branchLabel;
                 const result = await automationService.resume(parts[2], signal);
-                if (result?.success === false && result.code === 'forbidden') {
+                if (result?.success === false && result.code === 'PERMISSION_DENIED') {
                     return { handled: true, response: deps.error(result.error ?? 'Resume forbidden', 403) };
                 }
-                if (result?.success === false && result.code === 'invalid_signal') {
+                if (result?.success === false && result.code === 'INVALID_SIGNAL') {
                     return { handled: true, response: deps.error(result.error ?? 'Invalid resume signal', 400) };
                 }
                 return { handled: true, response: deps.success(result) };

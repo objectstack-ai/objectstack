@@ -84,7 +84,7 @@ export const ProtectionSchema = z.object({
     ),
 
     /**
-     * Short user-visible explanation surfaced in `403 item_locked`
+     * Short user-visible explanation surfaced in `403 ITEM_LOCKED`
      * errors and the Studio lock banner. Aim for one sentence; the
      * banner truncates long values.
      */

@@ -196,10 +196,23 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/metadata-protocol': [
     'CLONE_DISABLED',
+    'COMMIT_NOT_FOUND',
     'CONCURRENT_UPDATE',
+    'DESTRUCTIVE_CHANGE',         // change would drop data; needs an explicit opt-in
+    'INVALID_METADATA',
+    'INVALID_REQUEST',
+    'ITEM_LOCKED',                // _lock refuses the write/delete (ADR-0010 §3.3)
+    'METADATA_CONFLICT',
     'NAMESPACE_PREFIX',           // name violates the package namespace-prefix rule
+    'NO_DRAFT',
+    'NOT_CREATABLE',
+    'NOT_OVERRIDABLE',
+    'OVERLAY_PERSISTENCE_FAILED',
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
+    'VERSION_NOT_FOUND',
+    'VERSION_NOT_RESTORABLE',
+    'WRITABLE_PACKAGE_REQUIRED',
   ],
   '@objectstack/metadata-core': [
     'METADATA_BRANCH',
@@ -256,6 +269,7 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/service-automation': [
     'AUTOMATION_UNSCOPED_RUN_DATA_ACCESS',
     'EXECUTION_ERROR',
+    'INVALID_SIGNAL',             // resume signal writes engine-internal variables
     'NODE_FAILURE',
     'NO_EXECUTOR',
   ],

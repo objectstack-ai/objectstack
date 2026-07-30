@@ -262,7 +262,7 @@ describe('SysMetadataRepository', () => {
                 { name: 'on_insert', object: 'case', event: 'beforeInsert' },
                 { parentVersion: null, actor: 'studio' },
             ),
-        ).rejects.toMatchObject({ code: 'not_overridable', status: 403 });
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     });
 
     it('put refuses non-allowOrgOverride types (datasource)', async () => {
@@ -272,7 +272,7 @@ describe('SysMetadataRepository', () => {
                 { name: 'analytics', driver: 'sql' },
                 { parentVersion: null, actor: 'studio' },
             ),
-        ).rejects.toMatchObject({ code: 'not_overridable', status: 403 });
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     });
 
     // ── runtime-create gate: plugin-registered types must be accepted ───
@@ -314,7 +314,7 @@ describe('SysMetadataRepository', () => {
                 { name: 'evil_theme', label: 'X', tokens: {} },
                 { parentVersion: null, actor: 'studio' },
             ),
-        ).rejects.toMatchObject({ code: 'not_overridable', status: 403 });
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     });
 
     it('put refuses statically-registered type with allowRuntimeCreate:false (agent)', async () => {
@@ -328,7 +328,7 @@ describe('SysMetadataRepository', () => {
                 { name: 'my_agent', label: 'My Agent' },
                 { parentVersion: null, actor: 'studio', intent: 'runtime-only' },
             ),
-        ).rejects.toMatchObject({ code: 'not_creatable', status: 403 });
+        ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
     });
 
     // ── list ────────────────────────────────────────────────────────
@@ -668,7 +668,7 @@ describe('SysMetadataRepository', () => {
         await repo.put(ref, sampleView, { parentVersion: null, actor: 'studio' });
         await expect(
             repo.promoteDraft(ref, { actor: 'admin' }),
-        ).rejects.toMatchObject({ code: 'no_draft', status: 404 });
+        ).rejects.toMatchObject({ code: 'NO_DRAFT', status: 404 });
     });
 
     it('restoreVersion writes the historical body back as active with op=revert', async () => {
@@ -700,7 +700,7 @@ describe('SysMetadataRepository', () => {
         await repo.put(ref, sampleView, { parentVersion: null, actor: 'studio' });
         await expect(
             repo.restoreVersion(ref, 99, { actor: 'admin' }),
-        ).rejects.toMatchObject({ code: 'version_not_found', status: 404 });
+        ).rejects.toMatchObject({ code: 'VERSION_NOT_FOUND', status: 404 });
     });
 
     // ── close ───────────────────────────────────────────────────────

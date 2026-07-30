@@ -10,7 +10,7 @@
  *      entry sets `allowOrgOverride: true` may be persisted as
  *      per-organization overlays. Everything else (trigger, hook,
  *      datasource, function, service, …) MUST throw with
- *      `code='not_overridable'`, `status=403`. This is the
+ *      `code='NOT_OVERRIDABLE'`, `status=403`. This is the
  *      shared-DB tenancy invariant (ADR-0005 amendment
  *      §"Tenant-customizable type whitelist").
  *
@@ -198,7 +198,7 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
                         organizationId: 'org_alpha',
                     }),
                 ).rejects.toMatchObject({
-                    code: expect.stringMatching(/^(not_overridable|not_creatable)$/),
+                    code: expect.stringMatching(/^(NOT_OVERRIDABLE|NOT_CREATABLE)$/),
                     status: 403,
                 });
             });

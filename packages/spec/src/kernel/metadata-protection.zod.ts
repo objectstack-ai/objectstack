@@ -14,7 +14,7 @@ import { z } from 'zod';
  * Wire / runtime contract:
  *  - `_lock`        — 4-state enum, controls overlay / delete actions.
  *  - `_lockReason`  — short, user-visible explanation surfaced in
- *                     `403 item_locked` errors and on Studio tooltips.
+ *                     `403 ITEM_LOCKED` errors and on Studio tooltips.
  *  - `_lockSource`  — which layer set the lock (Phase 1 only emits
  *                     `'artifact'`; `'package'` and `'env-forced'`
  *                     are reserved for Phase 3/2 respectively).
@@ -39,7 +39,7 @@ import { z } from 'zod';
  *  | Value         | Save (PUT / publish / rollback) | Delete |
  *  |---------------|---------------------------------|--------|
  *  | `none`        | allow                           | allow  |
- *  | `no-overlay`  | **deny** (403 item_locked)      | allow  |
+ *  | `no-overlay`  | **deny** (403 ITEM_LOCKED)      | allow  |
  *  | `no-delete`   | allow                           | **deny** |
  *  | `full`        | **deny**                        | **deny** |
  *
@@ -89,7 +89,7 @@ export const MetadataProtectionFields = {
   ),
 
   /**
-   * Short, user-visible explanation surfaced in `403 item_locked`
+   * Short, user-visible explanation surfaced in `403 ITEM_LOCKED`
    * error envelopes and Studio tooltips. Keep < 200 chars.
    */
   _lockReason: z.string().max(500).optional().describe(
@@ -183,19 +183,19 @@ export function extractProtection(item: unknown): {
  *
  * Returns `null` on allow. Returns a structured refusal envelope when
  * the lock blocks the operation; the protocol layer turns that into a
- * `403 item_locked` HTTP error.
+ * `403 ITEM_LOCKED` HTTP error.
  */
-export function evaluateLockForWrite(lock: MetadataLock): { code: 'item_locked'; reason: string } | null {
+export function evaluateLockForWrite(lock: MetadataLock): { code: 'ITEM_LOCKED'; reason: string } | null {
   if (lock === 'no-overlay' || lock === 'full') {
-    return { code: 'item_locked', reason: `Write refused — _lock=${lock}` };
+    return { code: 'ITEM_LOCKED', reason: `Write refused — _lock=${lock}` };
   }
   return null;
 }
 
 /** Counterpart of {@link evaluateLockForWrite} for delete operations. */
-export function evaluateLockForDelete(lock: MetadataLock): { code: 'item_locked'; reason: string } | null {
+export function evaluateLockForDelete(lock: MetadataLock): { code: 'ITEM_LOCKED'; reason: string } | null {
   if (lock === 'no-delete' || lock === 'full') {
-    return { code: 'item_locked', reason: `Delete refused — _lock=${lock}` };
+    return { code: 'ITEM_LOCKED', reason: `Delete refused — _lock=${lock}` };
   }
   return null;
 }

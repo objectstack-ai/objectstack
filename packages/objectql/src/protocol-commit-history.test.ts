@@ -108,7 +108,7 @@ describe('ADR-0067 — revertCommit', () => {
   it('throws commit_not_found (404) for an unknown commit', async () => {
     const { engine } = makeFakeEngine();
     const p = makeProtocol(engine, {});
-    await expect(p.revertCommit({ commitId: 'nope' })).rejects.toMatchObject({ code: 'commit_not_found', status: 404 });
+    await expect(p.revertCommit({ commitId: 'nope' })).rejects.toMatchObject({ code: 'COMMIT_NOT_FOUND', status: 404 });
   });
 
   it('reverts dependent artifacts in REVERSE apply order (view before its object)', async () => {
@@ -153,7 +153,7 @@ describe('ADR-0067 — rollbackToPackageCommit', () => {
   it('throws commit_not_found for an unknown target', async () => {
     const { engine } = makeFakeEngine();
     const p = makeProtocol(engine, {});
-    await expect(p.rollbackToPackageCommit({ commitId: 'ghost' })).rejects.toMatchObject({ code: 'commit_not_found' });
+    await expect(p.rollbackToPackageCommit({ commitId: 'ghost' })).rejects.toMatchObject({ code: 'COMMIT_NOT_FOUND' });
   });
 });
 

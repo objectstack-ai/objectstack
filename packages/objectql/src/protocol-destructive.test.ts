@@ -58,7 +58,7 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
                 },
             },
         })).rejects.toMatchObject({
-            code: 'destructive_change',
+            code: 'DESTRUCTIVE_CHANGE',
             status: 409,
             issues: expect.arrayContaining([
                 expect.objectContaining({ code: 'field_removed', field: 'status' }),
@@ -80,7 +80,7 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
                 },
             },
         })).rejects.toMatchObject({
-            code: 'destructive_change',
+            code: 'DESTRUCTIVE_CHANGE',
             issues: expect.arrayContaining([
                 expect.objectContaining({ code: 'field_type_change', field: 'amount' }),
             ]),
@@ -101,7 +101,7 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
                 },
             },
         })).rejects.toMatchObject({
-            code: 'destructive_change',
+            code: 'DESTRUCTIVE_CHANGE',
             issues: expect.arrayContaining([
                 expect.objectContaining({ code: 'field_required_no_default', field: 'name' }),
             ]),
@@ -110,7 +110,7 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
 
     it('allows save when a field is made required WITH a default value', async () => {
         // No destructive_change should fire; downstream persistence may still
-        // throw for other reasons, so just assert the code is not 'destructive_change'.
+        // throw for other reasons, so just assert the code is not 'DESTRUCTIVE_CHANGE'.
         try {
             await protocol.saveMetaItem({
                 type: 'object',
@@ -126,7 +126,7 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
                 },
             });
         } catch (err: any) {
-            expect(err?.code).not.toBe('destructive_change');
+            expect(err?.code).not.toBe('DESTRUCTIVE_CHANGE');
         }
     });
 
@@ -146,7 +146,7 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
                 },
             });
         } catch (err: any) {
-            expect(err?.code).not.toBe('destructive_change');
+            expect(err?.code).not.toBe('DESTRUCTIVE_CHANGE');
         }
     });
 
@@ -167,7 +167,7 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
                 },
             });
         } catch (err: any) {
-            expect(err?.code).not.toBe('destructive_change');
+            expect(err?.code).not.toBe('DESTRUCTIVE_CHANGE');
         }
     });
 
@@ -180,7 +180,7 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
                 item: { name: 'account_grid', type: 'grid', object: 'account' },
             });
         } catch (err: any) {
-            expect(err?.code).not.toBe('destructive_change');
+            expect(err?.code).not.toBe('DESTRUCTIVE_CHANGE');
         }
     });
 });

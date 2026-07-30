@@ -220,7 +220,7 @@ describe('publishPackageDrafts — env-wide draft under a non-null active org (#
         });
 
         // Before the fix this returned { success:false, failedCount:1,
-        // failed:[{ code:'no_draft' }] }.
+        // failed:[{ code:'NO_DRAFT' }] }.
         expect(res.failed).toEqual([]);
         expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
         expect(res.published.map((p) => p.name)).toEqual(['proj_task']);

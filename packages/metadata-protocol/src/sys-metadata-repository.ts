@@ -595,7 +595,7 @@ export class SysMetadataRepository implements MetadataRepository {
       const err: any = new Error(
         `[no_draft] No pending draft exists for ${ref.type}/${ref.name} — nothing to publish.`,
       );
-      err.code = 'no_draft';
+      err.code = 'NO_DRAFT';
       err.status = 404;
       throw err;
     }
@@ -663,7 +663,7 @@ export class SysMetadataRepository implements MetadataRepository {
       const err: any = new Error(
         `[version_not_found] No history row at version ${targetVersion} for ${ref.type}/${ref.name}.`,
       );
-      err.code = 'version_not_found';
+      err.code = 'VERSION_NOT_FOUND';
       err.status = 404;
       throw err;
     }
@@ -672,7 +672,7 @@ export class SysMetadataRepository implements MetadataRepository {
       const err: any = new Error(
         `[version_not_restorable] Version ${targetVersion} for ${ref.type}/${ref.name} is a delete tombstone — nothing to restore.`,
       );
-      err.code = 'version_not_restorable';
+      err.code = 'VERSION_NOT_RESTORABLE';
       err.status = 409;
       throw err;
     }
@@ -937,7 +937,7 @@ export class SysMetadataRepository implements MetadataRepository {
       ...OVERLAY_ALLOWED_TYPES,
       ...envWritableMetadataTypes(),
     ];
-    const code = intent === 'runtime-only' ? 'not_creatable' : 'not_overridable';
+    const code = intent === 'runtime-only' ? 'NOT_CREATABLE' : 'NOT_OVERRIDABLE';
     const detail = intent === 'runtime-only'
       ? `'${type}' has neither allowOrgOverride nor allowRuntimeCreate in the registry. `
       : `'${type}' is not allowOrgOverride in the registry. `;
