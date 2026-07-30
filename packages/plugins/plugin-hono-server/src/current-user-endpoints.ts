@@ -65,6 +65,30 @@ export const DEFAULT_CURRENT_USER_PREFIX = '/api/v1';
 export interface CurrentUserEndpointsContext {
     getService<T>(name: string): T | undefined;
     logger?: Partial<Pick<Logger, 'debug' | 'warn'>>;
+    /**
+     * The kernel this locator reads from. Optional, and used for ONE thing: it
+     * is the `defaultKernel` argument the host's `kernel-resolver` seam takes
+     * (see {@link resolveRequestContext}). `PluginContext.getKernel` satisfies
+     * it; a host adapter should supply it too. Without it a multi-tenant host
+     * cannot be asked which kernel owns the request, and these endpoints answer
+     * from `getService` — which on such a host is the wrong kernel (#927 is the
+     * cloud-side record of that failure), so omitting it is a downgrade, not a
+     * neutral choice.
+     */
+    getKernel?(): unknown;
+}
+
+/**
+ * Minimal shape of the host's ADR-0006 kernel-resolution seam, as registered
+ * under the `kernel-resolver` service name. Structurally the framework's
+ * `KernelResolver` (`@objectstack/runtime`), declared here rather than imported
+ * so this package keeps no runtime dependency on the dispatcher.
+ */
+export interface KernelResolverLike {
+    resolveKernel(
+        context: { request: { headers: unknown }; routePath?: string; environmentId?: string },
+        defaultKernel: unknown,
+    ): Promise<unknown | undefined> | unknown | undefined;
 }
 
 /** Options for {@link registerCurrentUserEndpoints}. */
@@ -79,6 +103,93 @@ export interface RegisterCurrentUserEndpointsOptions {
     ctx: CurrentUserEndpointsContext;
     /** API prefix. @default '/api/v1' */
     prefix?: string;
+}
+
+/** Body returned when the request's environment kernel cannot be reached. */
+const ENVIRONMENT_UNAVAILABLE = {
+    error: 'environment_unavailable',
+    message: 'The environment serving this request is not available yet. Retry shortly.',
+} as const;
+
+/** A locator over an arbitrary kernel, for the per-request resolution below. */
+function contextForKernel(kernel: any, from: CurrentUserEndpointsContext): CurrentUserEndpointsContext {
+    return {
+        // Sync `getService`, like every other read on this surface. Per-environment
+        // kernels register `auth` / `objectql` / `metadata` /
+        // `security.permissions` as INSTANCES (their plugins register them in
+        // `init()`), so they are in the service map by the time a request arrives.
+        getService: <T>(name: string): T | undefined => kernel?.getService?.(name) as T | undefined,
+        logger: from.logger,
+        getKernel: () => kernel,
+    };
+}
+
+/**
+ * Which kernel's services answer THIS request.
+ *
+ * Single-environment hosts register no `kernel-resolver` and are unchanged: the
+ * registration-time locator is the answer. On a MULTI-TENANT host the seam is
+ * the whole point — identity lives on the per-environment kernel (cloud's
+ * `ArtifactKernelFactory` mounts `AuthPlugin` per environment; its host kernel is
+ * a routing shell with no `auth` at all), so resolving against the host kernel
+ * reports `{authenticated:false}` for every real caller and the console's
+ * permission layer silently falls open. The dispatcher has consulted this seam
+ * since ADR-0006 Phase 5; these three endpoints not consulting it was the defect
+ * (#927).
+ *
+ * Resolution is LAZY — the service is read per request, never captured at
+ * registration — because a host may register these routes before
+ * `kernel.bootstrap()` (to outrank an auth wildcard), which is before the plugin
+ * that registers the resolver has run its `init()`.
+ *
+ * Four outcomes, and the two failure ones are deliberate:
+ *   - no resolver (or no `getKernel`) → the registration-time locator.
+ *   - a kernel → that kernel's services. THE fix.
+ *   - `undefined` → the registration-time locator. That is the seam's contract
+ *     for "unscoped / control-plane / single-environment request", and on such a
+ *     host the default kernel really is the right answer.
+ *   - a throw → **no answer at all**, surfaced as the thrown status when it
+ *     carries one (cloud's `KernelWarmingError` is a 503 + `Retry-After`) else
+ *     503. Falling back to the default kernel here would hand back a
+ *     confidently-wrong `{authenticated:false}`, which the client reads as
+ *     "anonymous" and fails OPEN on — strictly worse than a retryable error.
+ */
+async function resolveRequestContext(
+    c: any,
+    ctx: CurrentUserEndpointsContext,
+    prefix: string,
+): Promise<{ ctx: CurrentUserEndpointsContext } | { response: Response }> {
+    const resolver = (() => {
+        try { return ctx.getService<KernelResolverLike>('kernel-resolver'); } catch { return undefined; }
+    })();
+    if (typeof resolver?.resolveKernel !== 'function' || typeof ctx.getKernel !== 'function') {
+        return { ctx };
+    }
+    const defaultKernel = ctx.getKernel();
+    // `routePath` is the API-prefix-stripped path, matching what the dispatcher
+    // hands the resolver — cloud's resolver applies its own path policy to it
+    // (control-plane prefixes skip environment resolution).
+    const path: string = c.req.path ?? '';
+    const routePath = path.startsWith(prefix) ? path.slice(prefix.length) || '/' : path;
+    try {
+        const resolved = await resolver.resolveKernel(
+            { request: { headers: c.req.raw.headers }, routePath },
+            defaultKernel,
+        );
+        if (!resolved || resolved === defaultKernel) return { ctx };
+        return { ctx: contextForKernel(resolved, ctx) };
+    } catch (err: any) {
+        const status = typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode <= 599
+            ? err.statusCode
+            : 503;
+        ctx.logger?.warn?.('[hono] current-user endpoint: environment resolution failed', {
+            err: err?.message, code: err?.code, status, routePath,
+        });
+        if (typeof err?.retryAfterSeconds === 'number' && err.retryAfterSeconds > 0) {
+            try { c.header('Retry-After', String(Math.ceil(err.retryAfterSeconds))); } catch { /* best effort */ }
+        }
+        return { response: c.json(ENVIRONMENT_UNAVAILABLE, status) };
+    }
 }
 
 /** The three route paths this module owns, under `prefix`. */
@@ -520,7 +631,28 @@ export function registerCurrentUserEndpoints(
         ctx.logger?.debug?.('Current-user endpoints already registered — skipping', { prefix });
         return false;
     }
-    const resolveCtx = makeExecutionContextResolver(ctx);
+    /**
+     * Wrap a handler so it runs against the kernel that OWNS the request.
+     *
+     * The handler's `ctx` parameter deliberately shadows the registration-time
+     * locator: every `ctx.getService(...)` in the bodies below then reads the
+     * per-request kernel on a multi-tenant host and the same kernel as before on
+     * a single-environment one, with no per-read plumbing to keep in sync. Same
+     * for `resolveCtx` — the caller's identity must be resolved from the kernel
+     * that owns the session, not the routing shell in front of it.
+     */
+    const withRequestContext = (
+        handler: (
+            c: any,
+            ctx: CurrentUserEndpointsContext,
+            resolveCtx: ReturnType<typeof makeExecutionContextResolver>,
+        ) => Promise<Response>,
+    ) => async (c: any): Promise<Response> => {
+        const resolution = await resolveRequestContext(c, ctx, prefix);
+        if ('response' in resolution) return resolution.response;
+        return handler(c, resolution.ctx, makeExecutionContextResolver(resolution.ctx));
+    };
+
     // Effective permissions for the current user — single aggregation
     // endpoint that resolves session → roles → permission sets → merged
     // field/object permissions. Frontend Field-Level Security (FLS)
@@ -538,7 +670,7 @@ export function registerCurrentUserEndpoints(
     //
     // Returns `{authenticated:false}` (200) when no session is
     // present, so the frontend can distinguish anon from error.
-    rawApp.get(`${prefix}/auth/me/permissions`, async (c: any) => {
+    rawApp.get(`${prefix}/auth/me/permissions`, withRequestContext(async (c, ctx, resolveCtx) => {
         const execCtx = await resolveCtx(c);
         if (!execCtx?.userId) {
             return c.json({ authenticated: false });
@@ -738,7 +870,7 @@ export function registerCurrentUserEndpoints(
             ctx.logger?.warn?.('[hono] /auth/me/permissions failed', { err: err?.message });
             return c.json({ authenticated: true, userId: execCtx.userId, objects: {}, fields: {} });
         }
-    });
+    }));
 
     // GET /me/localization — the resolved regional defaults (currency /
     // locale / timezone) for the current request's tenant, exposed to EVERY
@@ -746,7 +878,7 @@ export function registerCurrentUserEndpoints(
     // `setup.access`, but the resolved defaults are needed by every renderer
     // to format currency/dates/numbers — so they ride on the request
     // ExecutionContext (ADR-0053) and are surfaced here without that gate.
-    rawApp.get(`${prefix}/auth/me/localization`, async (c: any) => {
+    rawApp.get(`${prefix}/auth/me/localization`, withRequestContext(async (c, ctx, resolveCtx) => {
         const execCtx = await resolveCtx(c);
         if (!execCtx?.userId) {
             return c.json({ authenticated: false });
@@ -757,7 +889,7 @@ export function registerCurrentUserEndpoints(
             locale: execCtx.locale ?? null,
             timezone: execCtx.timezone ?? null,
         });
-    });
+    }));
 
     // GET /me/apps — list apps the current user is allowed to enter.
     // Apps live in the ENGINE REGISTRY (runtime AppPlugin registerApp()),
@@ -771,7 +903,7 @@ export function registerCurrentUserEndpoints(
     //   2. ctx.tabPermissions[app.name] !== 'hidden'
     // Anonymous users get an empty array. When SecurityPlugin is absent
     // we fail-open and return every app (matches server behaviour).
-    rawApp.get(`${prefix}/me/apps`, async (c: any) => {
+    rawApp.get(`${prefix}/me/apps`, withRequestContext(async (c, ctx, resolveCtx) => {
         const execCtx = await resolveCtx(c);
         if (!execCtx?.userId) return c.json({ apps: [] });
         try {
@@ -870,7 +1002,7 @@ export function registerCurrentUserEndpoints(
             ctx.logger?.warn?.('[hono] /me/apps failed', { err: err?.message });
             return c.json({ apps: [] });
         }
-    });
+    }));
     ctx.logger?.debug?.('Registered current-user endpoints', { prefix });
     return true;
 }
