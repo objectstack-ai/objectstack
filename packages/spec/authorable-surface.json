@@ -682,7 +682,7 @@
     "api/BatchOptions:atomic",
     "api/BatchOptions:continueOnError",
     "api/BatchOptions:returnRecords",
-    "api/BatchOptions:validateOnly",
+    "api/BatchOptions:validateOnly [RETIRED]",
     "api/BatchRecord:data",
     "api/BatchRecord:externalId",
     "api/BatchRecord:id",

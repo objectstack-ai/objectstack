@@ -467,9 +467,30 @@ const step18: MigrationStep = {
     + "(read as SYSTEM), and `book.audience: 'public'` (ADR-0046 §6.7). The key is dropped "
     + 'with a notice rather than mapped — there is no replacement value, only a different '
     + 'way to publish (by declaration). A stack that mounts no auth at all now fails at boot '
-    + 'when it would serve a data API, instead of receiving an implicit fail-open.',
+    + 'when it would serve a data API, instead of receiving an implicit fail-open.\n\n'
+    + 'The same major retires `BatchOptions.validateOnly` (#4052): a batch "dry-run" flag that '
+    + 'was declared but never implemented — every batch surface (`updateManyData` / '
+    + '`deleteManyData` / `batchData`) persisted regardless, so a caller sending it to PREVIEW a '
+    + 'mutation got it executed. That is the dangerous direction of declared ≠ enforced: a flag '
+    + 'lying about a data-safety guarantee. No dry-run exists today; the schema tombstones the '
+    + 'key with the prescription. It is HTTP-only (never stored in stack metadata), so the '
+    + 'change is one semantic TODO for API callers rather than a stack conversion.',
   conversionIds: ['stack-api-require-auth-removed'],
-  semantic: [],
+  semantic: [
+    {
+      id: 'batch-options-validate-only-retired',
+      surface: 'api.batchOptions.validateOnly',
+      replacement: '(removed — no dry-run today; open an issue to design a no-commit batch preview)',
+      reason:
+        'The `validateOnly` key promised a dry-run ("validate records without persisting") but no '
+        + 'batch surface ever read it — updateManyData / deleteManyData / batchData persist '
+        + 'regardless. There is no behaviour to preserve and nothing stored to rewrite (it only '
+        + 'ever appeared in an HTTP request body). Callers must stop sending it.',
+      acceptanceCriteria:
+        'No /batch, /updateMany or /deleteMany call sends `options.validateOnly`; a request that '
+        + 'includes it answers 400 VALIDATION_FAILED with the retirement prescription.',
+    },
+  ],
 };
 
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
