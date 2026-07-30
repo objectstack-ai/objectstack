@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { ObjectKernel } from '@objectstack/core';
 import { ApiErrorSchema } from '@objectstack/spec/api';
+import type { ConnectorDescriptor } from '@objectstack/spec/integration';
 
 describe('HttpDispatcher', () => {
     let kernel: ObjectKernel;
@@ -179,11 +180,18 @@ describe('HttpDispatcher', () => {
                     { type: 'http_request', name: 'HTTP Request', category: 'io', paradigms: ['flow', 'approval'], source: 'builtin' },
                     { type: 'send_sms', name: 'Send SMS', category: 'io', paradigms: ['flow'], source: 'plugin' },
                 ]),
+                // [#4127] Typed as `ConnectorDescriptor[]` now that the contract
+                // declares `getConnectorDescriptors`, so this fixture cannot
+                // drift from the shape the route serves. The previous untyped
+                // literal was already missing `origin` and `state` — both
+                // REQUIRED, and both the fields a designer reads to tell a
+                // declarative instance from a plugin one, or a degraded
+                // connector from a live one (#3017).
                 getConnectorDescriptors: vi.fn().mockReturnValue([
-                    { name: 'rest', label: 'REST', type: 'api', actions: [{ key: 'request', label: 'Request' }] },
-                    { name: 'slack', label: 'Slack', type: 'api', actions: [{ key: 'chat.postMessage', label: 'Post Message' }] },
-                    { name: 'pg', label: 'Postgres', type: 'database', actions: [] },
-                ]),
+                    { name: 'rest', label: 'REST', type: 'api', origin: 'plugin', state: 'ready', actions: [{ key: 'request', label: 'Request' }] },
+                    { name: 'slack', label: 'Slack', type: 'api', origin: 'plugin', state: 'ready', actions: [{ key: 'chat.postMessage', label: 'Post Message' }] },
+                    { name: 'pg', label: 'Postgres', type: 'database', origin: 'declarative', state: 'degraded', degradedReason: 'upstream unreachable', actions: [] },
+                ] satisfies ConnectorDescriptor[]),
                 getFlowRuntimeStates: vi.fn().mockReturnValue([
                     { name: 'flow_a', enabled: true, bound: true },
                     { name: 'flow_b', enabled: false, bound: false },
@@ -508,6 +516,25 @@ describe('HttpDispatcher', () => {
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.total).toBe(1);
             expect(result.response?.body?.data?.connectors[0].name).toBe('pg');
+        });
+
+        // [#4127] The route serves the WHOLE descriptor. `origin` and `state`
+        // are what the designer reads to distinguish a live declarative
+        // instance from a plugin connector, and a dispatchable one from a
+        // degraded one (ADR-0097 §4, #3017) — while the contract did not
+        // declare the method, nothing pinned that they survive the hop.
+        it('should preserve origin / state / degradedReason on GET /connectors', async () => {
+            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, { request: {} });
+            expect(result.handled).toBe(true);
+            const byName = Object.fromEntries(
+                result.response?.body?.data?.connectors.map((c: ConnectorDescriptor) => [c.name, c]),
+            );
+            expect(byName.rest).toMatchObject({ origin: 'plugin', state: 'ready' });
+            expect(byName.pg).toMatchObject({
+                origin: 'declarative',
+                state: 'degraded',
+                degradedReason: 'upstream unreachable',
+            });
         });
 
         it('should return an empty registry when the service lacks getConnectorDescriptors', async () => {

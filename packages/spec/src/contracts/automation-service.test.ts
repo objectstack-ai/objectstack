@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { IAutomationService, AutomationResult } from './automation-service';
 import type { FlowParsed } from '../automation/flow.zod';
 import type { ExecutionLog } from '../automation/execution.zod';
+import type { ConnectorDescriptor } from '../integration/connector-descriptor';
 
 describe('Automation Service Contract', () => {
   it('should allow a minimal IAutomationService implementation with required methods', () => {
@@ -166,5 +167,58 @@ describe('Automation Service Contract', () => {
 
     await service.toggleFlow!('test_flow', true);
     expect(flowEnabled).toBe(true);
+  });
+
+  // [#4127] `getConnectorDescriptors` is the sibling of `getActionDescriptors`
+  // — the other half of the flow designer's `connector_action` pickers — and
+  // was the last of the four dispatcher routes calling a method the contract
+  // did not declare. Typing the return value here is the assertion: the
+  // descriptor must carry `origin` and `state`, so a shape that omits them no
+  // longer compiles anywhere the contract is honoured.
+  it('should return typed ConnectorDescriptor[] from getConnectorDescriptors', () => {
+    const service: IAutomationService = {
+      execute: async () => ({ success: true }),
+      listFlows: async () => [],
+      getConnectorDescriptors: (): ConnectorDescriptor[] => [
+        {
+          name: 'billing',
+          label: 'Billing',
+          type: 'api',
+          origin: 'declarative',
+          state: 'ready',
+          actions: [{ key: 'request', label: 'Request', inputSchema: { type: 'object' } }],
+        },
+        {
+          name: 'gh_mcp',
+          label: 'GitHub MCP',
+          type: 'api',
+          origin: 'declarative',
+          state: 'degraded',
+          degradedReason: 'MCP server unreachable at boot',
+          actions: [],
+        },
+      ],
+    };
+
+    const descriptors = service.getConnectorDescriptors!();
+    expect(descriptors.map((d) => d.name)).toEqual(['billing', 'gh_mcp']);
+    expect(descriptors[0].actions[0].key).toBe('request');
+    // A degraded instance is listed rather than hidden (#3017), exposes no
+    // actions, and says why.
+    expect(descriptors[1].state).toBe('degraded');
+    expect(descriptors[1].actions).toEqual([]);
+    expect(descriptors[1].degradedReason).toBe('MCP server unreachable at boot');
+  });
+
+  // The registry is a flow-engine capability, not a property of every
+  // automation slot: a script-runner implementation legitimately omits it, and
+  // `GET /automation/connectors` answers an empty registry rather than 404.
+  it('should allow an implementation that omits getConnectorDescriptors', () => {
+    const service: IAutomationService = {
+      execute: async () => ({ success: true }),
+      listFlows: async () => [],
+    };
+
+    expect(service.getConnectorDescriptors).toBeUndefined();
   });
 });

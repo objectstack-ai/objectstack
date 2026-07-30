@@ -16,6 +16,7 @@
 import type { FlowParsed } from '../automation/flow.zod';
 import type { ExecutionLog } from '../automation/execution.zod';
 import type { ActionDescriptor } from '../automation/node-executor.zod';
+import type { ConnectorDescriptor } from '../integration/connector-descriptor';
 
 /**
  * Context passed to a flow/script execution
@@ -345,6 +346,25 @@ export interface IAutomationService {
      * @returns Array of registered action descriptors
      */
     getActionDescriptors?(): ActionDescriptor[];
+
+    /**
+     * The connector registry, as designer-facing descriptors (ADR-0022).
+     *
+     * [#4127] Declared because `GET /automation/connectors` already called it —
+     * the sibling of {@link getActionDescriptors}, which the contract HAS
+     * declared since ADR-0018, serving the same designer with the other half of
+     * the `connector_action` node's pickers (node type ← actions, connector /
+     * action / input ← this). Undeclared, the route had to probe for the method
+     * and then re-type its own result as `any` to filter on `type`.
+     *
+     * Optional for the same reason `getActionDescriptors` is: a connector
+     * registry is a capability of the flow-engine implementation, not of every
+     * automation slot — a script-runner implementation of this contract has no
+     * connectors to describe, and answers an empty registry rather than 404.
+     *
+     * @returns One entry per registered connector; empty when none are registered
+     */
+    getConnectorDescriptors?(): ConnectorDescriptor[];
 
     /**
      * Per-flow deployment + binding state, for operator surfaces.
