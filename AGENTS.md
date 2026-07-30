@@ -117,6 +117,37 @@ own worktree, operate defensively:
    up your own instance on a random high port (`pnpm dev -- --fresh -p <random>`)
    and **shut it down yourself when the task is done**
    (`kill $(lsof -ti tcp:<port>)`). Don't leave orphan servers behind.
+9. **After pulling `main` into a long-lived worktree, refresh its build state
+   before you trust a single test or gate.** A worktree that has been open across
+   several merges accumulates artefacts that are stale relative to the source, and
+   every one of them fails **as if your change broke something** — naming other
+   people's exports, other packages' files, or config you never touched:
+
+   | stale artefact | how it presents | why it lies |
+   |---|---|---|
+   | `packages/spec/dist` | `check:api-surface` reports *other people's* exports as "N breaking (removed/narrowed)"; `check:i18n-coverage` rejects an example config for a value the spec allows | both read the built `.d.ts`, not `src/` |
+   | `node_modules` | a package fails to resolve a dependency it plainly declares (`Cannot find package 'hono'`) | the merge moved `pnpm-lock.yaml` |
+   | `packages/runtime/.objectstack/` | `datasource-autoconnect` sees each row 6× | gitignored fixture state accumulating across runs |
+   | `.cache/objectui-*` | `pnpm lint` reports dozens of errors in files you have never opened | a full objectui checkout left by `build-console.sh`, linted as if it were ours |
+
+   So after any `git merge origin/main`:
+   `pnpm install --frozen-lockfile && pnpm build && rm -rf packages/runtime/.objectstack`
+   (add `rm -rf .cache` if you have run the console build). Note `OS_SKIP_DTS=1`
+   keeps a build fast but leaves no `.d.ts`, so `gen:api-surface` cannot run at
+   all under it — that one needs a real build.
+
+   None of this is CI-visible: CI checks out fresh and installs clean. It costs
+   only *your* time, which is exactly why it is worth recognising in one step
+   rather than re-diagnosing per gate.
+10. **A clean merge is not a working merge.** Git conflicts on overlapping lines;
+   nothing warns you when two changes are individually fine and jointly wrong.
+   Real examples from one branch's lifetime: a test asserting a response body's
+   exact shape landed while that shape was being changed elsewhere (merged clean,
+   failed CI); a domain file was deleted while another agent's guard still
+   declared it. **Before opening a PR, and again before merging, pull `main` and
+   re-run the suite** — the second CI round is where these surface, and the guards
+   in `scripts/check-*.mjs` exist largely because this class of breakage is
+   invisible to `git merge`.
 
 ---
 
