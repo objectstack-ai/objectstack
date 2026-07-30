@@ -47,7 +47,7 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 
 // Export Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
-export type { ObjectQLHostContext, HookHandler, HookEntry, OperationContext, EngineMiddleware } from './engine.js';
+export type { HookHandler, HookEntry, OperationContext, EngineMiddleware } from './engine.js';
 export { SummaryRecomputeError } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()

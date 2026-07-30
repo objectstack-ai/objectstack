@@ -264,16 +264,6 @@ export type EngineMiddleware = (
 ) => Promise<void>;
 
 /**
- * Host Context provided to plugins (Internal ObjectQL Plugin System)
- */
-export interface ObjectQLHostContext {
-  ql: ObjectQL;
-  logger: Logger;
-  // Extensible map for host-specific globals (like HTTP Router, etc.)
-  [key: string]: any;
-}
-
-/**
  * Derive the registry key for a metadata item.
  *
  * Most metadata items expose a top-level `name` (or `id`). The `View`
@@ -392,9 +382,6 @@ export class ObjectQL implements IDataEngine {
   // `engine.registerFunction(...)`.
   private functions = new Map<string, FunctionEntry>();
 
-  // Host provided context additions (e.g. Server router)
-  private hostContext: Record<string, any> = {};
-
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
 
@@ -423,7 +410,6 @@ export class ObjectQL implements IDataEngine {
   private _registry: SchemaRegistry = new SchemaRegistry();
 
   constructor(hostContext: Record<string, any> = {}) {
-    this.hostContext = hostContext;
     // Use provided logger or create a new one
     this.logger = hostContext.logger || createLogger({ level: 'info', format: 'pretty' });
     // Pick up production hardening switches from env so deployers can
@@ -460,42 +446,6 @@ export class ObjectQL implements IDataEngine {
    */
   get registry(): SchemaRegistry {
     return this._registry;
-  }
-
-  /**
-   * Load and Register a Plugin
-   */
-  async use(manifestPart: any, runtimePart?: any) {
-    this.logger.debug('Loading plugin', { 
-      hasManifest: !!manifestPart, 
-      hasRuntime: !!runtimePart 
-    });
-
-    // 1. Validate / Register Manifest
-    if (manifestPart) {
-      this.registerApp(manifestPart);
-    }
-
-    // 2. Execute Runtime
-    if (runtimePart) {
-       const pluginDef = (runtimePart as any).default || runtimePart;
-       if (pluginDef.onEnable) {
-          this.logger.debug('Executing plugin runtime onEnable');
-          
-          const context: ObjectQLHostContext = {
-            ql: this,
-            logger: this.logger,
-            // Expose the driver registry helper explicitly if needed
-            drivers: {
-                register: (driver: IDataDriver) => this.registerDriver(driver)
-            },
-            ...this.hostContext
-          };
-          
-          await pluginDef.onEnable(context);
-          this.logger.debug('Plugin runtime onEnable completed');
-       }
-    }
   }
 
   /**
