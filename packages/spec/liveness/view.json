@@ -189,6 +189,16 @@
         "userFilters": {
           "status": "live",
           "note": "objectui: UserFilters.tsx — element/fields/tabs/showAllRecords wired (audit L15); object views narrow to ObjectUserFiltersSchema (ADR-0047 amendment, #2679/objectui#2338)."
+        },
+        "responsive": {
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); the grid is responsive by its own layout rules."
+        },
+        "performance": {
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); list performance tuning was never implemented."
         }
       }
     },
@@ -288,6 +298,16 @@
         "defaults": {
           "status": "live",
           "note": "objectui: ObjectForm.tsx foldFormButtons() reads schema.defaults and folds it into create-mode initialValues (framework#1894 / #2998); an explicit initialValues (URL prefill) still wins."
+        },
+        "defaultSort": {
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); a related list sorts by its own list view's `sort`."
+        },
+        "aria": {
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); no form renderer applied it; report gaps as renderer issues."
         }
       }
     },

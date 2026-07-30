@@ -40,6 +40,11 @@
       "status": "live",
       "evidence": "packages/services/service-ai/src/skill-registry.ts:93",
       "note": "inactive skills dropped."
+    },
+    "triggerPhrases": {
+      "status": "dead",
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); routing intent belongs in `triggerConditions`; describe intent in `description`/`instructions`."
     }
   }
 }

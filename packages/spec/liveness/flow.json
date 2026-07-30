@@ -98,6 +98,11 @@
           "status": "live",
           "evidence": "objectui: packages/app-shell/src/views/metadata-admin/inspectors/flow-node-config.ts:480",
           "note": "LIVE via objectui metadata-admin authoring UI — the 2026-06 audit missed objectui; verified by reading the file."
+        },
+        "outputSchema": {
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); node outputs were never validated; downstream nodes read prior outputs via expressions regardless."
         }
       }
     },
@@ -126,8 +131,23 @@
         "jitter": {
           "status": "live",
           "evidence": "packages/services/service-automation/src/engine.ts"
+        },
+        "fallbackNodeId": {
+          "status": "dead",
+          "verifiedAt": "2026-07-30",
+          "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); faults route via per-node fault edges — draw a fault edge to the handler node."
         }
       }
+    },
+    "active": {
+      "status": "dead",
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); the real switch is `status` ('obsolete'/'invalid' disable, 'active' arms)."
+    },
+    "template": {
+      "status": "dead",
+      "verifiedAt": "2026-07-30",
+      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); shared logic is invoked via a subflow NODE referencing the flow by name."
     }
   }
 }

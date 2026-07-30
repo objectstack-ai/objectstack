@@ -269,12 +269,6 @@ export default defineSkill({
     'update_support_case',
     'escalate_case',
   ],
-  triggerPhrases: [
-    'I need help with a case',
-    'Create a support ticket',
-    'What is the status of my case',
-    'Escalate this issue',
-  ],
   triggerConditions: [
     { field: 'objectName', operator: 'eq', value: 'support_case' },
   ],
