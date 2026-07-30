@@ -529,8 +529,23 @@ const step18: MigrationStep = {
     + 'mutation got it executed. That is the dangerous direction of declared ≠ enforced: a flag '
     + 'lying about a data-safety guarantee. No dry-run exists today; the schema tombstones the '
     + 'key with the prescription. It is HTTP-only (never stored in stack metadata), so the '
-    + 'change is one semantic TODO for API callers rather than a stack conversion.',
-  conversionIds: ['stack-api-require-auth-removed'],
+    + 'change is one semantic TODO for API callers rather than a stack conversion.\n\n'
+    + 'The third of the same kind is `wait`\'s timeout pair (#4158). `waitEventConfig.onTimeout` '
+    + 'had ZERO readers — no path ever inspected it, so neither `fail` nor `continue` ever '
+    + 'happened, while its `.default(\'fail\')` stamped a decision nothing made onto every wait '
+    + 'node. `waitEventConfig.timeoutMs` said "maximum wait time before timeout" and its only '
+    + 'reader used it as the timer DURATION when `timerDuration` was absent: it did something, '
+    + 'just not what it said. Together they declared a timeout `wait` does not have — the run '
+    + 'resumes when its timer elapses or its signal arrives, never on a deadline. Rather than '
+    + 'retrofit an implementation to fit two keys that happened to be declared, the pair is '
+    + 'retired and real timeout semantics are left to be built to a requirement. `timeoutMs` '
+    + 'converts to `timerDuration` (stringified — the target is `z.string()` and '
+    + '`parseIsoDuration` reads a bare numeric string as milliseconds, so the wait is unchanged); '
+    + 'with `timerDuration` already set it is dropped, having been dead metadata. Like the other '
+    + 'keys retired for MISDESCRIBING themselves rather than for being renamed, both leave the '
+    + 'load path: absorbing them silently would let an author keep believing they configured a '
+    + 'timeout.',
+  conversionIds: ['stack-api-require-auth-removed', 'flow-node-wait-timeout-keys-removed'],
   semantic: [
     {
       id: 'batch-options-validate-only-retired',
