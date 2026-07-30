@@ -20,7 +20,8 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Transitive dependencies
 
-- `node_modules/@objectstack/spec/src/api/contract.zod.ts` — The numeric HTTP status, when a producer chooses to mirror it into the body.
+- `node_modules/@objectstack/spec/src/api/contract.zod.ts` — Machine-readable semantic code (ADR-0112): a `StandardErrorCode` member or
+- `node_modules/@objectstack/spec/src/api/error-code-ledger.zod.ts` — Error-Code Ledger (ADR-0112 D3).
 - `node_modules/@objectstack/spec/src/api/realtime-shared.zod.ts` — Realtime Shared Protocol
 - `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
