@@ -421,7 +421,7 @@ export class SharingServicePlugin implements Plugin {
       if (this.options.enforce === false) {
         ctx.logger.info('SharingServicePlugin: enforcement disabled (enforce=false) — share-link service still registered');
       } else {
-        const mw = buildSharingMiddleware(this.service);
+        const mw = buildSharingMiddleware(this.service, ctx.logger as any);
         if (typeof engine.registerMiddleware === 'function') {
           engine.registerMiddleware(mw, { object: '*' });
           ctx.logger.info('SharingServicePlugin: enforcement middleware installed');
@@ -586,9 +586,13 @@ export class SharingServicePlugin implements Plugin {
 /**
  * Build the engine middleware that injects read filters and gates
  * write operations. Exported so it can be unit-tested without booting
- * a kernel.
+ * a kernel. `log` is optional — the [ADR-0111 D10] delete-denial breadcrumb
+ * is best-effort and absent in unit tests.
  */
-export function buildSharingMiddleware(service: SharingService): EngineMiddleware {
+export function buildSharingMiddleware(
+  service: SharingService,
+  log?: { warn?: (msg: string, meta?: any) => void },
+): EngineMiddleware {
   return async function sharingMiddleware(ctx: OperationContext, next: () => Promise<void>) {
     const op = ctx.operation;
     const exec = ctx.context as any;
@@ -644,17 +648,23 @@ export function buildSharingMiddleware(service: SharingService): EngineMiddlewar
       return next();
     }
 
-    // WRITES — gate on canEdit for update / delete.
+    // WRITES — gate on the per-VERB check. [ADR-0111 D3] update and delete no
+    // longer share a gate: `canEdit` accepts an edit-level share, `canDelete`
+    // does not (a share widens which rows a principal reaches, never which
+    // verbs). The middleware picks the gate by `op`.
     if (op === 'update' || op === 'delete') {
+      const verb: 'update' | 'delete' = op;
+      const gate = (o: string, id: string, c: any) =>
+        verb === 'delete' ? service.canDelete(o, id, c) : service.canEdit(o, id, c);
       const data: any = ctx.data;
       const options: any = ctx.options;
       const id = inferTargetId(data, options);
       if (id != null) {
-        let ok = await service.canEdit(ctx.object, String(id), exec ?? {});
-        // [ADR-0090 D10] The delegator must ALSO be able to edit the row — an
-        // on-behalf-of write may only touch rows the delegator could touch.
+        let ok = await gate(ctx.object, String(id), exec ?? {});
+        // [ADR-0090 D10] The delegator must ALSO be able to perform the write —
+        // an on-behalf-of write may only touch rows the delegator could touch.
         if (ok && exec?.onBehalfOf?.userId) {
-          ok = await service.canEdit(ctx.object, String(id), {
+          ok = await gate(ctx.object, String(id), {
             ...exec,
             userId: exec.onBehalfOf.userId,
             onBehalfOf: undefined,
@@ -662,6 +672,16 @@ export function buildSharingMiddleware(service: SharingService): EngineMiddlewar
           });
         }
         if (!ok) {
+          // [ADR-0111 D10] A fail-closed delete denial gets a specific,
+          // greppable reason so the "edit-share does not grant delete"
+          // tightening is diagnosable rather than a mystery 403.
+          if (verb === 'delete') {
+            log?.warn?.(
+              `[sharing] delete denied on ${ctx.object} ${id}: an edit-level share does not grant delete; ` +
+                `delete requires ownership, write depth, or Modify All Data (ADR-0111 D3)`,
+              { object: ctx.object, recordId: String(id), userId: exec?.userId },
+            );
+          }
           const err: any = new Error(
             `FORBIDDEN: insufficient privileges to ${op} ${ctx.object} ${id}`,
           );
@@ -672,21 +692,20 @@ export function buildSharingMiddleware(service: SharingService): EngineMiddlewar
         return next();
       }
 
-      // Bulk (multi) write — no single id to canEdit-gate (#2982). AND the
-      // editable-rows filter into the AST so the update/delete only touches
-      // rows the caller may edit, exactly as the read path scopes finds. The
-      // engine honours ast.where operation-agnostically (same seam the RLS
-      // write filter uses). Without this, a `multi:true` write on an
-      // owner-scoped object would hit every matching row, including peers'.
-      let writeFilter = await service.buildWriteFilter(ctx.object, exec ?? {});
-      // [ADR-0090 D10] Intersect the delegator's editable set for on-behalf-of.
+      // Bulk (multi) write — no single id to gate (#2982). AND the writable-rows
+      // filter into the AST so the update/delete only touches rows the caller
+      // may write, exactly as the read path scopes finds. The verb is threaded
+      // through so a bulk DELETE scopes to owned rows alone (no share widening),
+      // while a bulk UPDATE keeps the edit-share widening (ADR-0111 D3).
+      let writeFilter = await service.buildWriteFilter(ctx.object, exec ?? {}, verb);
+      // [ADR-0090 D10] Intersect the delegator's writable set for on-behalf-of.
       if (exec?.onBehalfOf?.userId) {
         const delFilter = await service.buildWriteFilter(ctx.object, {
           ...exec,
           userId: exec.onBehalfOf.userId,
           onBehalfOf: undefined,
           __writeScope: exec.__delegatorWriteScope,
-        });
+        }, verb);
         writeFilter = composeAnd(writeFilter, delFilter);
       }
       if (writeFilter) {

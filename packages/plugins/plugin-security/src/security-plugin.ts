@@ -2212,6 +2212,11 @@ export class SecurityPlugin implements Plugin {
         ...(sharing && typeof sharing.canEdit === 'function'
           ? { canEditRecord: (o: string, rid: string, c: any) => sharing.canEdit(o, rid, c) }
           : {}),
+        // [ADR-0111 D3] The narrower delete gate — an edit share opens update
+        // but not delete, so a delete explanation must consult this.
+        ...(sharing && typeof sharing.canDelete === 'function'
+          ? { canDeleteRecord: (o: string, rid: string, c: any) => sharing.canDelete(o, rid, c) }
+          : {}),
       },
       { object, operation, context: targetContext, recordId },
     );

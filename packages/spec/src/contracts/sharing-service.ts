@@ -111,11 +111,31 @@ export interface ISharingService {
   ): Promise<unknown | null>;
 
   /**
-   * Return `true` when the principal in `context` may modify the
-   * record `(object, recordId)`. Owner-only for `private` / `read`
-   * objects; always true for `public` objects.
+   * Return `true` when the principal in `context` may UPDATE the record
+   * `(object, recordId)`. Ownership (widened by write DEPTH) OR a write-level
+   * ({@link ShareAccessLevel} `edit`) share. Always true for system context,
+   * `public` objects, and objects with no owner field.
    */
   canEdit(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<boolean>;
+
+  /**
+   * [ADR-0111 D3] Return `true` when the principal in `context` may DELETE the
+   * record `(object, recordId)`.
+   *
+   * The verb boundary: a share widens *which rows* a principal reaches, never
+   * *which verbs* they may use — so delete is **ownership (widened by write
+   * DEPTH) or the `modifyAllRecords` super-user bypass ONLY**, and an `edit`
+   * share does NOT confer it (Salesforce Read/Write cannot delete; Dataverse
+   * `Delete` is a distinct privilege; Odoo splits `write`/`unlink`). Always
+   * true for system context, `public` objects, and objects with no owner
+   * field, matching {@link canEdit}. A per-record delete grant, if ever added,
+   * is a capability mask AND-ed with object CRUD — not a share level.
+   */
+  canDelete(
     object: string,
     recordId: string,
     context: SharingExecutionContext,

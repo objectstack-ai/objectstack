@@ -202,8 +202,15 @@ export interface ExplainEngineDeps {
     recordId: string,
     context: any,
   ) => Promise<Array<{ id?: string; recipient_type?: string; recipient_id?: string; access_level?: 'read' | 'edit' | 'full'; source?: string; source_id?: string }>>;
-  /** The sharing service's per-record write gate (`canEdit`) — the by-construction verdict for write operations. */
+  /** The sharing service's per-record UPDATE gate (`canEdit`) — the by-construction verdict for update operations. */
   canEditRecord?: (object: string, recordId: string, context: any) => Promise<boolean>;
+  /**
+   * [ADR-0111 D3] The sharing service's per-record DELETE gate (`canDelete`) —
+   * the by-construction verdict for a delete operation. Narrower than
+   * `canEditRecord`: an edit-level share opens update but not delete, so the
+   * explanation for a `delete` must consult this rather than the update gate.
+   */
+  canDeleteRecord?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
 
 export interface ExplainInput {
@@ -609,9 +616,12 @@ async function applyRecordAttribution(
     ? await deps.sharingReadFilter(object, context).catch(() => null)
     : undefined;
   const sharingMatches = sharingFilter === undefined ? undefined : matches(sharingFilter);
-  // Write ops: the by-construction verdict is the sharing service's own canEdit.
-  const canEdit = !isRead && deps.canEditRecord && recordExists
-    ? await deps.canEditRecord(object, recordId, context).catch(() => undefined)
+  // Write ops: the by-construction verdict is the sharing service's own gate.
+  // [ADR-0111 D3] delete has its own narrower gate (an edit share does not
+  // confer delete), so a `delete` explanation consults canDelete, not canEdit.
+  const writeGate = engineOp === 'delete' ? deps.canDeleteRecord : deps.canEditRecord;
+  const canEdit = !isRead && writeGate && recordExists
+    ? await writeGate(object, recordId, context).catch(() => undefined)
     : undefined;
   const anyShareAdmits = shareRules.some((r) => r.effect === 'admits');
   let sharingOutcome: ExplainRecordAttribution['outcome'];
