@@ -80,6 +80,35 @@ export interface DevPluginOptions {
 }
 
 /**
+ * Escape hatch for {@link assertNotProduction} — deliberately ungrouped and
+ * scary-looking per the `OS_ALLOW_{X}` convention (AGENTS.md Prime Directive #9).
+ */
+const ALLOW_IN_PRODUCTION_ENV = 'OS_ALLOW_DEV_PLUGIN' as const;
+
+/**
+ * [ADR-0115 D6] Refuse to initialize under `NODE_ENV=production`.
+ *
+ * The stack this plugin assembles is built around a well-known default auth
+ * secret and a seeded dev admin; nothing about it belongs in production, and
+ * failing the boot beats degrading quietly — a production process that reaches
+ * this line is misconfigured in a way no runtime behaviour can make safe.
+ * The escape hatch covers the deliberate cases (a staging box mimicking prod,
+ * a smoke test that pins `NODE_ENV`), and says at the call site that someone
+ * chose this.
+ */
+function assertNotProduction(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (process.env[ALLOW_IN_PRODUCTION_ENV] === '1') return;
+  throw new Error(
+    '@objectstack/plugin-dev refuses to initialize with NODE_ENV=production. '
+    + 'It assembles a development stack around a well-known default auth secret and a seeded '
+    + 'dev admin, so a production process must not load it. Remove DevPlugin from this '
+    + `deployment's plugin list, or set ${ALLOW_IN_PRODUCTION_ENV}=1 if you deliberately want `
+    + 'the dev assembly under a production NODE_ENV.',
+  );
+}
+
+/**
  * Development Assembly Plugin for ObjectStack
  *
  * One plugin that wires the **real** platform stack for local development.
@@ -141,7 +170,7 @@ export interface DevPluginOptions {
  * `init()` refuses to run when `NODE_ENV === 'production'`: the assembly is
  * built around a well-known default auth secret and a seeded dev admin.
  * Escape hatch for the rare deliberate case:
- * `OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION=1`.
+ * `OS_ALLOW_DEV_PLUGIN=1`.
  */
 export class DevPlugin implements Plugin {
   name = 'com.objectstack.plugin.dev';
@@ -173,17 +202,7 @@ export class DevPlugin implements Plugin {
    * if a package isn't installed the service is silently skipped.
    */
   async init(ctx: PluginContext): Promise<void> {
-    // ── ADR-0115 D6: refuse to boot a dev assembly in production ──
-    // The stack this plugin wires is built around a well-known default auth
-    // secret and a seeded dev admin; nothing about it belongs in production.
-    if (process.env.NODE_ENV === 'production' && process.env.OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION !== '1') {
-      throw new Error(
-        '[dev] DevPlugin refuses to start with NODE_ENV=production: it assembles a development '
-        + 'stack around a well-known default auth secret and a seeded dev admin (ADR-0115 D6). '
-        + 'Use the real production assembly instead, or set OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION=1 '
-        + 'if this is deliberate.',
-      );
-    }
+    assertNotProduction();
 
     ctx.logger.info('🚀 DevPlugin initializing — assembling the development stack');
 
@@ -426,6 +445,25 @@ export class DevPlugin implements Plugin {
     // semantic: routes answer 404/501, discovery reports `unavailable`, and
     // in-process consumers handle absence exactly as they already must in
     // production. To use a capability locally, install its real service.
+
+    // The security slots deserve one loud line when empty (#4126): faking an
+    // authorization decision is the one thing ADR-0076 D12 forbids a fallback
+    // to do, so the slots stay empty rather than stubbed — but "no RBAC/RLS/
+    // masking is being enforced" is worth saying in the boot log of a stack
+    // that expected them.
+    if (enabled('security')) {
+      const missing = ['security.permissions', 'security.rls', 'security.fieldMasker'].filter((svc) => {
+        try { ctx.getService(svc); return false; } catch { return true; }
+      });
+      if (missing.length > 0) {
+        ctx.logger.warn(
+          `  ⚠ No security services (${missing.join(', ')}) — SecurityPlugin is not loaded, so RBAC, `
+          + 'row-level security and field masking are NOT enforced. The slots stay empty rather than '
+          + 'being stubbed: a fake that answers "allowed" is worse than an absent one. Install '
+          + '@objectstack/plugin-security to enforce them.',
+        );
+      }
+    }
 
     ctx.logger.info(`DevPlugin initialized ${this.childPlugins.length} plugin(s)`);
   }

@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { ViewFilterRuleSchema } from './view.zod';
+import { InlineActionSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 
@@ -305,6 +306,19 @@ export const ElementButtonPropsSchema = lazySchema(() => z.object({
   iconPosition: z.enum(['left', 'right'])
     .optional().default('left').describe('Icon position relative to label'),
   disabled: z.boolean().optional().default(false).describe('Disable the button'),
+  /**
+   * What the button does when clicked. Declared inline — a page button is not a
+   * registered object action, so `name` and `label` are optional (the button
+   * supplies its own label).
+   *
+   * Without this the button renders inert, which is why it was being authored
+   * regardless: cloud's tenant pages carry five of them across the billing and
+   * pricing funnel. Undeclared, it was **silently stripped** from
+   * `ElementButtonPropsSchema`'s parse output — harmless only because page block
+   * `properties` are still `z.record(z.string(), z.unknown())`, and a loaded gun
+   * the moment that is tightened. objectstack-ai/objectui#2997.
+   */
+  action: InlineActionSchema.optional().describe('Inline action executed on click'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));

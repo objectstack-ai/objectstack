@@ -377,7 +377,20 @@ export const ActionAiSchema = z.object({
 
 export type ActionAi = z.infer<typeof ActionAiSchema>;
 
-export const ActionSchema = lazySchema(() => z.object({
+/**
+ * The object half of {@link ActionSchema}, before its refinements.
+ *
+ * A factory rather than a schema so `lazySchema`'s deferral still holds — the
+ * fields are built on first use of whichever schema derives from them, not at
+ * module load.
+ *
+ * It exists because `.pick()` is a `ZodObject` method and `ActionSchema` is
+ * `z.object(…).refine(…).refine(…)`, so nothing can derive a subset from the
+ * exported schema. {@link InlineActionSchema} derives from this instead of
+ * restating a dozen field definitions and their `describe()` text, which is how
+ * a second action vocabulary would start.
+ */
+const actionObject = () => z.object({
   /** Machine name of the action */
   name: SnakeCaseIdentifierSchema.describe('Machine name (lowercase snake_case)'),
   
@@ -681,7 +694,9 @@ export const ActionSchema = lazySchema(() => z.object({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-}).refine((data) => {
+});
+
+export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // Require `target` for types that reference an external resource
   if (TARGET_REQUIRED_TYPES.has(data.type) && !data.target) {
     return false;
@@ -754,6 +769,96 @@ export const ActionSchema = lazySchema(() => z.object({
 export type Action = z.infer<typeof ActionSchema>;
 export type ActionParam = z.infer<typeof ActionParamSchema>;
 export type ActionInput = z.input<typeof ActionSchema>;
+
+/**
+ * Legacy spellings an inline action may carry, folded to canonical on parse.
+ *
+ * `navigation` is a `type` no spec enum ever declared, and `to` a `target` no
+ * spec schema ever declared — yet both are what cloud's tenant pages actually
+ * write on an `element:button` (`{ type: 'navigation', to: PRICING_ROUTE }`,
+ * five sites across the billing and pricing funnel). They reached a real
+ * dispatcher: objectui's `ActionRunner` has a `navigation` case reading
+ * `nav.to ?? nav.target`.
+ *
+ * `url` + `target` is the canonical pair, and it is also the *better* one — the
+ * runner's `url` path adds `${param.X}` / `${ctx.X}` interpolation, `apiBase`
+ * promotion for `/api/…` paths, and popup-blocker-safe `openIn` handling, none
+ * of which the `navigation` path has. So this is a bridge with an end state, not
+ * a second vocabulary: authored `navigation`/`to` keep validating, parse output
+ * is always `url`/`target`, and the aliases get a `retiredKey` tombstone once
+ * the producers are migrated.
+ *
+ * Exported so a producer can normalize before writing, rather than inventing its
+ * own fold. objectstack-ai/objectui#2997.
+ */
+export function normalizeInlineAction(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const v = value as Record<string, unknown>;
+  const needsType = v.type === 'navigation';
+  const needsTarget = v.target === undefined && typeof v.to === 'string';
+  if (!needsType && !needsTarget && !('to' in v)) return value;
+  const out: Record<string, unknown> = { ...v };
+  if (needsType) out.type = 'url';
+  if (needsTarget) out.target = v.to;
+  delete out.to;
+  return out;
+}
+
+/**
+ * An action declared **inline** on a UI surface, rather than registered by name.
+ *
+ * The execution half of {@link ActionSchema} — `.pick()`ed from the same field
+ * definitions, so the `describe()` text, the operator vocabulary and the
+ * `target`-required rule are shared rather than restated — minus everything that
+ * only means something for a *registered* action: `objectName`, `locations`,
+ * `order`, `ai` exposure, `requiredPermissions`, `visible`/`disabled`
+ * predicates, `resultDialog`.
+ *
+ * `name` and `label` are optional here, which is the substantive difference.
+ * `ActionSchema` requires both because a registry entry needs an identity and a
+ * menu label; an inline action has neither — the host supplies the label (an
+ * `element:button` has its own `label` prop, and requiring `action.label` too
+ * would mean writing it twice).
+ *
+ * Scoped deliberately to what a host actually honours. `element:button`'s
+ * renderer forwards exactly these fields to the `ActionRunner`; `icon` and
+ * `variant` are excluded because the button has its own, and `body` because a
+ * page button running an inline sandboxed script is a separate decision. Widen
+ * this when a renderer widens, not before — a declared field no renderer reads
+ * is the failure this schema exists to stop.
+ */
+export const InlineActionSchema = lazySchema(() => z.preprocess(
+  normalizeInlineAction,
+  actionObject().pick({
+    type: true,
+    name: true,
+    label: true,
+    target: true,
+    openIn: true,
+    method: true,
+    params: true,
+    confirmText: true,
+    successMessage: true,
+    errorMessage: true,
+    refreshAfter: true,
+    opensInNewTab: true,
+  }).partial({
+    name: true,
+    label: true,
+  }).refine((data) => {
+    // The same rule ActionSchema's first refinement applies, for the same
+    // reason: a `url`/`flow`/`modal`/`api`/`form` action with no `target` has
+    // nothing to dispatch to and fails silently at click time.
+    if (TARGET_REQUIRED_TYPES.has(data.type) && !data.target) return false;
+    return true;
+  }, {
+    message: "Inline action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form' (`to` is accepted as a legacy spelling).",
+    path: ['target'],
+  }),
+));
+
+export type InlineAction = z.infer<typeof InlineActionSchema>;
+export type InlineActionInput = z.input<typeof InlineActionSchema>;
 
 /**
  * Action Factory Helper

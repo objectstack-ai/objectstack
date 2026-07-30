@@ -844,7 +844,7 @@ export class HttpDispatcher {
             authSvc, searchSvc, realtimeSvc, filesSvc,
             analyticsSvc, workflowSvc, aiSvc, notificationSvc, i18nSvc,
             uiSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
-            metadataSvc,
+            metadataSvc, dataSvc,
         ] = await Promise.all([
             this.resolveService(CoreServiceName.enum.auth),
             this.resolveService(CoreServiceName.enum.search),
@@ -866,6 +866,8 @@ export class HttpDispatcher {
             // [#4089] Resolved for its self-description alone: the `metadata`
             // slot is reported from what actually fills it, not hardcoded.
             this.resolveService(CoreServiceName.enum.metadata),
+            // [#4130] Same, for the last hardcoded entry in the kernel block.
+            this.resolveService(CoreServiceName.enum.data),
         ]);
 
         const hasAuth         = !!authSvc;
@@ -1052,7 +1054,39 @@ export class HttpDispatcher {
                                     provider: 'kernel',
                                     ...(metadataSelf?.message ? { message: metadataSelf.message } : {}),
                                 },
-                data:           svcAvailable(routes.data, 'kernel'),
+                // [#4130] The last entry in this block that judged itself. It
+                // read `available` / `handlerReady: true` unconditionally, and
+                // that was true only by a convention outside this file:
+                // ObjectQL is the sole producer of the `data` slot, and
+                // plugin-dev — whose `data` stub self-declares `stub` (find()
+                // returns [], insert() stores nothing) — always loads
+                // ObjectQLPlugin as a child, so the stub never reaches the slot.
+                // A convention is not a computation: a second producer, or a
+                // trimmed dev config, and the hardcode starts lying. Passing the
+                // resolved service lets `svcAvailable` derive both fields, and
+                // for a real engine (which carries no marker) the result is
+                // byte-identical to the hardcode it replaces.
+                //
+                // Why `handlerReady` is derived here but pinned `true` for
+                // `metadata` above: each says what its route actually does.
+                // `/meta` answers from the protocol (and a last-resort default
+                // type list) whatever fills the metadata slot, so a degraded
+                // implementation there does not unmount it. `/data` has no such
+                // floor — `callData` needs the `protocol` service or an
+                // objectql-shaped one and throws 503 without them — and the only
+                // way a stub occupies this slot is a stack where ObjectQL never
+                // registered, i.e. exactly the stack where `/data` cannot serve.
+                //
+                // Deliberate limit: this reports the slot, it does not re-derive
+                // serveability from `protocol`/`objectql`. Mirroring that
+                // predicate here would read them UNSCOPED (discovery has no
+                // environment context), which on a multi-kernel host risks
+                // flipping the required data capability to `handlerReady: false`
+                // while per-request scoped resolution serves it fine — a worse
+                // lie than the one being fixed. The `data` domain does not gate
+                // on this slot either (`isServiceServeable` covers the optional
+                // domains, #4058 step 2), so nothing routes off this field.
+                data:           svcAvailable(routes.data, 'kernel', dataSvc),
                 // Plugin-provided — only available when a plugin registers the service
                 auth:           hasAuth ? svcAvailable(routes.auth, undefined, authSvc) : svcUnavailable('auth'),
                 // [#4000, #4058] Presence-gated, not serveability-gated: a

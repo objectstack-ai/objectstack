@@ -82,6 +82,11 @@ export const zhCN: TranslationData = {
         notes: { label: '备注' },
         category_color: { label: '分类颜色' },
       },
+      _views: {
+        list: { label: '全部任务' },
+        overdue: { label: '逾期任务' },
+        due_today: { label: '今日到期' },
+      },
     } satisfies TaskTranslation,
   },
   apps: {

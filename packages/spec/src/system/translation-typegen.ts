@@ -107,4 +107,20 @@ export type StrictObjectTranslation<Obj extends { fields: Record<string, unknown
   label: string;
   pluralLabel?: string;
   fields: StrictFieldTranslations<Obj['fields']>;
+  /**
+   * View translations keyed by view name — the `_views` slot
+   * `ObjectTranslationDataSchema` already permits. Not derivable from `Obj`
+   * (views are declared separately from the object), so it stays optional and
+   * loosely keyed rather than enumerated like `fields`. Without it, `satisfies
+   * StrictObjectTranslation<…>` rejects the very translations the view
+   * coverage gate asks for.
+   */
+  _views?: Record<
+    string,
+    {
+      label?: string;
+      description?: string;
+      emptyState?: { title?: string; message?: string };
+    }
+  >;
 };

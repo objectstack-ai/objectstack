@@ -108,22 +108,30 @@ describe('DevPlugin', () => {
       (call: any[]) => typeof call[0] === 'string' && call[0].includes('dev stub'),
     );
     expect(stubLog).toBeUndefined();
+
+    // The empty security slots are still called out loudly (#4126's boot-log
+    // honesty): empty beats a fake that answers "allowed", but silence about
+    // unenforced RBAC/RLS/masking would be its own kind of fake.
+    const securityWarn = ctx.logger.warn.mock.calls.find(
+      (call: any[]) => typeof call[0] === 'string' && call[0].includes('NOT enforced'),
+    );
+    expect(securityWarn).toBeDefined();
   });
 
   describe('production guard (ADR-0115 D6)', () => {
     const savedNodeEnv = process.env.NODE_ENV;
-    const savedAllow = process.env.OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION;
+    const savedAllow = process.env.OS_ALLOW_DEV_PLUGIN;
 
     afterEach(() => {
       if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = savedNodeEnv;
-      if (savedAllow === undefined) delete process.env.OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION;
-      else process.env.OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION = savedAllow;
+      if (savedAllow === undefined) delete process.env.OS_ALLOW_DEV_PLUGIN;
+      else process.env.OS_ALLOW_DEV_PLUGIN = savedAllow;
     });
 
     it('refuses to init when NODE_ENV=production', async () => {
       process.env.NODE_ENV = 'production';
-      delete process.env.OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION;
+      delete process.env.OS_ALLOW_DEV_PLUGIN;
 
       const { ctx } = mockCtx();
       await expect(new DevPlugin({ seedAdminUser: false }).init(ctx))
@@ -132,9 +140,9 @@ describe('DevPlugin', () => {
       expect(ctx.registerService).not.toHaveBeenCalled();
     });
 
-    it('OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION=1 overrides the guard, deliberately', async () => {
+    it('OS_ALLOW_DEV_PLUGIN=1 overrides the guard, deliberately', async () => {
       process.env.NODE_ENV = 'production';
-      process.env.OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION = '1';
+      process.env.OS_ALLOW_DEV_PLUGIN = '1';
 
       const { ctx } = mockCtx();
       await expect(new DevPlugin({ seedAdminUser: false }).init(ctx)).resolves.not.toThrow();

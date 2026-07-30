@@ -81,7 +81,7 @@ To use a capability locally, install its real service — e.g. `@objectstack/ser
 
 ## Production guard
 
-`init()` throws when `NODE_ENV === 'production'`: the assembly is built around a well-known default auth secret and a seeded dev admin. If you really mean it, set `OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION=1`.
+`init()` throws when `NODE_ENV === 'production'`: the assembly is built around a well-known default auth secret and a seeded dev admin. If you really mean it, set `OS_ALLOW_DEV_PLUGIN=1`.
 
 ## API Endpoints (when all services enabled)
 

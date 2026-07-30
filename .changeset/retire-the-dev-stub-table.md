@@ -26,7 +26,7 @@ DevPlugin used to fill every core-service slot no real plugin occupied with a de
 
 Also new, from the same ADR:
 
-- **Production guard**: `DevPlugin.init()` now throws when `NODE_ENV === 'production'` — the assembly is built around a well-known default auth secret and a seeded dev admin. Escape hatch: `OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION=1`.
+- **Production guard** (first shipped with the security-trio subset): `DevPlugin.init()` throws when `NODE_ENV === 'production'` — the assembly is built around a well-known default auth secret and a seeded dev admin. Escape hatch: `OS_ALLOW_DEV_PLUGIN=1`.
 - **Assembly auto-wire**: `@objectstack/service-storage` and `@objectstack/service-realtime` are wired as optional child plugins when installed (both ship with DevPlugin's dependencies), so dev keeps working file storage and realtime through real implementations.
 - `options.services` keys for the retired stubs are accepted and ignored; `'file-storage'` / `'realtime'` now toggle the real service wiring.
 
