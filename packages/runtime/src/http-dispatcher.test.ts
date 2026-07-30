@@ -518,7 +518,7 @@ describe('HttpDispatcher', () => {
                     return null;
                 });
 
-                const result = await dispatcher.handleAnalytics('query', 'POST', { sql: 'SELECT 1' }, { request: {} });
+                const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't1', measures: ['count'] }, { request: {} });
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(200);
                 expect(mockAnalytics.query).toHaveBeenCalled();
@@ -537,11 +537,16 @@ describe('HttpDispatcher', () => {
                 );
                 const ec = { userId: 'u1', positions: [], permissions: [], tenantId: 'org-1' };
 
-                await dispatcher.handleAnalytics('query', 'POST', { cube: 'leads' }, { request: {}, executionContext: ec } as any);
-                expect(mockAnalytics.query).toHaveBeenCalledWith({ cube: 'leads' }, ec);
+                // [#3878] The ORIGINAL body must be forwarded (no parse-output
+                // substitution): a parsed body would carry the schema's
+                // `timezone: 'UTC'` default and override org-timezone resolution.
+                const body = { cube: 'leads', measures: ['count'] };
+                await dispatcher.handleAnalytics('query', 'POST', body, { request: {}, executionContext: ec } as any);
+                expect(mockAnalytics.query).toHaveBeenCalledWith(body, ec);
+                expect(mockAnalytics.query.mock.calls[0][0]).toBe(body);
 
-                await dispatcher.handleAnalytics('sql', 'POST', { cube: 'leads' }, { request: {}, executionContext: ec } as any);
-                expect(mockAnalytics.generateSql).toHaveBeenCalledWith({ cube: 'leads' }, ec);
+                await dispatcher.handleAnalytics('sql', 'POST', body, { request: {}, executionContext: ec } as any);
+                expect(mockAnalytics.generateSql).toHaveBeenCalledWith(body, ec);
             });
 
             it('should handle POST /analytics/sql with async service', async () => {
@@ -550,7 +555,7 @@ describe('HttpDispatcher', () => {
                 };
                 (kernel as any).getService = vi.fn().mockResolvedValue(mockAnalytics);
 
-                const result = await dispatcher.handleAnalytics('sql', 'POST', { object: 'test' }, { request: {} });
+                const result = await dispatcher.handleAnalytics('sql', 'POST', { cube: 'test', measures: ['count'] }, { request: {} });
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(200);
                 expect(mockAnalytics.generateSql).toHaveBeenCalled();
@@ -601,6 +606,79 @@ describe('HttpDispatcher', () => {
 
                 const result = await dispatcher.handleAnalytics('unknown', 'POST', {}, { request: {} });
                 expect(result.handled).toBe(false);
+            });
+
+            // [#3878] Entry validation: a malformed body raises the duck-typed
+            // VALIDATION_FAILED shape BEFORE the service runs — previously it
+            // reached the engine, inferred a column-less cube, and died as an
+            // SQL syntax error (or had its off-contract filter silently
+            // dropped). The domain throws through (same contract as service
+            // errors, see 'should propagate analytics query error'); the HTTP
+            // bridge maps the shape to a 400 envelope — pinned end-to-end in
+            // `dispatcher-validation-error.real.test.ts`.
+            describe('AnalyticsQuery body validation (#3878)', () => {
+                const service = () => {
+                    const mockAnalytics = {
+                        query: vi.fn().mockResolvedValue({ rows: [] }),
+                        generateSql: vi.fn().mockResolvedValue({ sql: 'SELECT 1', params: [] }),
+                    };
+                    (kernel as any).getService = vi.fn().mockResolvedValue(mockAnalytics);
+                    return mockAnalytics;
+                };
+
+                it('rejects the retired {cube, query:{...}} envelope with the tombstone prescription', async () => {
+                    const mockAnalytics = service();
+                    await expect(dispatcher.dispatch(
+                        'POST', '/analytics/query', { cube: 'x', query: { measures: ['count'] } }, {}, { request: {} },
+                    )).rejects.toMatchObject({
+                        name: 'ValidationError',
+                        code: 'VALIDATION_FAILED',
+                        message: expect.stringContaining('top level'),
+                    });
+                    expect(mockAnalytics.query).not.toHaveBeenCalled();
+                });
+
+                it('rejects a `filters` key, pointing at the contract field `where`', async () => {
+                    const mockAnalytics = service();
+                    await expect(dispatcher.dispatch(
+                        'POST', '/analytics/query',
+                        { cube: 'x', measures: ['count'], filters: [{ member: 'status', operator: 'equals', values: ['active'] }] },
+                        {}, { request: {} },
+                    )).rejects.toMatchObject({
+                        code: 'VALIDATION_FAILED',
+                        message: expect.stringContaining('`where`'),
+                    });
+                    expect(mockAnalytics.query).not.toHaveBeenCalled();
+                });
+
+                it('rejects a body with no measures, naming the missing field', async () => {
+                    const mockAnalytics = service();
+                    await expect(dispatcher.dispatch(
+                        'POST', '/analytics/query', { cube: 'x' }, {}, { request: {} },
+                    )).rejects.toMatchObject({
+                        code: 'VALIDATION_FAILED',
+                        fields: expect.arrayContaining([expect.objectContaining({ field: 'measures' })]),
+                    });
+                    expect(mockAnalytics.query).not.toHaveBeenCalled();
+                });
+
+                it('validates /analytics/sql with the same contract', async () => {
+                    const mockAnalytics = service();
+                    await expect(dispatcher.dispatch(
+                        'POST', '/analytics/sql', { cube: 'x', query: {} }, {}, { request: {} },
+                    )).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+                    expect(mockAnalytics.generateSql).not.toHaveBeenCalled();
+                });
+
+                it('a valid bare body still reaches the service untouched', async () => {
+                    const mockAnalytics = service();
+                    const body = { cube: 'x', measures: ['count'], where: { status: 'active' } };
+                    const result: any = await dispatcher.dispatch(
+                        'POST', '/analytics/query', body, {}, { request: {} },
+                    );
+                    expect(result.response?.status).toBe(200);
+                    expect(mockAnalytics.query.mock.calls[0][0]).toBe(body);
+                });
             });
         });
 
@@ -942,7 +1020,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).services = new Map([['analytics', syncAnalytics]]);
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', {}, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
             expect(result.handled).toBe(true);
             expect(syncAnalytics.query).toHaveBeenCalled();
         });
@@ -973,7 +1051,7 @@ describe('HttpDispatcher', () => {
                 throw new Error("Service 'analytics' is async - use await");
             });
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', {}, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
             expect(result.handled).toBe(true);
             expect(asyncAnalytics.query).toHaveBeenCalled();
             expect((kernel as any).getServiceAsync).toHaveBeenCalledWith('analytics');
@@ -1043,7 +1121,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).services = new Map([['analytics', syncAnalytics]]);
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', {}, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
             expect(result.handled).toBe(true);
             expect(syncAnalytics.query).toHaveBeenCalled();
         });
@@ -1055,7 +1133,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).services = new Map([['analytics', syncAnalytics]]);
 
-            const result = await dispatcher.handleAnalytics('query', 'POST', {}, { request: {} });
+            const result = await dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} });
             expect(result.handled).toBe(true);
             expect(syncAnalytics.query).toHaveBeenCalled();
         });
@@ -1159,7 +1237,7 @@ describe('HttpDispatcher', () => {
             (kernel as any).getService = vi.fn().mockResolvedValue(badAnalytics);
 
             await expect(
-                dispatcher.handleAnalytics('query', 'POST', {}, { request: {} })
+                dispatcher.handleAnalytics('query', 'POST', { cube: 't', measures: ['count'] }, { request: {} })
             ).rejects.toThrow('Query timeout');
         });
 

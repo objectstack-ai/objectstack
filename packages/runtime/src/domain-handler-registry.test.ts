@@ -135,7 +135,7 @@ describe('HttpDispatcher domain registry (D11 step ③)', () => {
             analyticsQuery: vi.fn().mockResolvedValue({ rows: [{ n: 1 }] }),
         };
         const result = await makeDispatcher({ analytics }).dispatch(
-            'POST', '/analytics/query', { metric: 'count' }, {}, {} as any,
+            'POST', '/analytics/query', { cube: 'orders', measures: ['count'] }, {}, {} as any,
         );
         expect(result.handled).toBe(true);
         // The bridge consulted the service (whichever entry point it uses).

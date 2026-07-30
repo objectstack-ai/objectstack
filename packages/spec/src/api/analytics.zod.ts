@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { AnalyticsQuerySchema, CubeSchema } from '../data/analytics.zod';
 import { BaseResponseSchema } from './contract.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Analytics API Protocol
@@ -27,13 +28,39 @@ export const AnalyticsEndpoint = z.enum([
 // ==========================================
 
 /**
- * Query Request Body
+ * Query Request Body — the BARE `AnalyticsQuery` shape (#3878).
+ *
+ * The body IS the `AnalyticsQuery`: `cube` + `measures` at the top level with
+ * the optional `dimensions` / `where` / `timeDimensions` / `order` / `limit` /
+ * `offset` / `timezone` fields beside them. This is what
+ * `AnalyticsService.query` (the domain's one implementation,
+ * `@objectstack/service-analytics`) consumes and what every real caller
+ * (objectui dashboards, `client.analytics.query`) sends.
+ *
+ * History: this schema used to describe a `{ cube, query: {...}, format }`
+ * ENVELOPE — the dialect of the retired degraded shim (#3891), which the real
+ * engine never understood (an envelope body inferred a column-less cube and
+ * died as an SQL syntax error instead of a shape error). The envelope is
+ * rejected now — `.strict()` — and the dispatcher's `/analytics` entry answers
+ * 400 with a migration hint. The unimplemented `format` field went with it
+ * (declared ≠ enforced: every response is the JSON envelope).
  */
-export const AnalyticsQueryRequestSchema = lazySchema(() => z.object({
-  query: AnalyticsQuerySchema.describe('The analytic query definition'),
-  cube: z.string().describe('Target cube name'),
-  format: z.enum(['json', 'csv', 'xlsx']).default('json').describe('Response format'),
-}));
+export const AnalyticsQueryRequestSchema = lazySchema(() =>
+  AnalyticsQuerySchema.extend({
+    cube: z.string().describe('Target cube name'),
+    query: retiredKey(
+      '`query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). ' +
+      'The { cube, query: {...} } envelope was the dialect of the retired degraded analytics shim (#3891) — ' +
+      'the real engine never understood it. Move the query.* fields to the body top level: ' +
+      '{ cube, measures, dimensions?, where?, timeDimensions?, order?, limit?, offset?, timezone? }.',
+    ),
+    format: retiredKey(
+      '`format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). ' +
+      'It was never implemented — every response is the JSON envelope. Delete the key; ' +
+      'for CSV/XLSX use the export surface instead.',
+    ),
+  }).strict()
+);
 
 /**
  * Query Response (JSON)

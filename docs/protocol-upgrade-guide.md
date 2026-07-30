@@ -126,6 +126,8 @@ Beyond those spec-surface removals, it graduates the seven flow-node config key 
 
 And it removes the RLS-policy key `priority` (#3896 security audit): promised "conflict resolution" that cannot exist, because applicable policies OR-combine (most permissive wins) — there is never a conflict to order, and nothing ever read the key (call graph closed across the collection site, the projection round-trip and the compiler). A pure lossless delete: outcomes are identical with or without it; the schema tombstones the key with the same prescription.
 
+On the wire contract it also retires the `/analytics/query` request ENVELOPE (#3878): `AnalyticsQueryRequestSchema` used to describe `{ cube, query: {...}, format }` — the dialect of the retired degraded analytics shim (#3891) that the real engine never understood (an envelope body inferred a column-less cube and died as an SQL syntax error). The canonical request body is now the BARE AnalyticsQuery — `cube` + `measures` at the top level — which is what every real caller already sends; the schema tombstones `query`/`format`, and the dispatcher entry validates bodies and answers 400 with the prescription. No stored metadata carries this shape (it was HTTP-only), so the change is two semantic TODOs for API callers rather than a stack conversion.
+
 ### Mechanical (applied for you)
 
 | Conversion | Surface | Change | Load window |
@@ -139,6 +141,15 @@ And it removes the RLS-policy key `priority` (#3896 security audit): promised "c
 | `flow-node-notify-config-aliases` | `flow.node.notify.config` | notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796) | live — protocol 17 loader accepts the old shape |
 | `flow-node-script-config-aliases` | `flow.node.script.config` | script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (#3796) | live — protocol 17 loader accepts the old shape |
 | `permission-rls-priority-removed` | `permission.rowLevelSecurity.priority` | RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome) | retired — `migrate meta` only |
+
+### Semantic (delegated to you, with acceptance criteria)
+
+- **`analytics-query-request-envelope-retired`** — `api.analyticsQueryRequest.query` → bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)
+  - Why not automatic: The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves.
+  - Done when: Every /analytics/query and /analytics/sql call sends the bare AnalyticsQuery shape and succeeds; no request answers 400 VALIDATION_FAILED with the envelope prescription.
+- **`analytics-query-request-format-retired`** — `api.analyticsQueryRequest.format` → (removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)
+  - Why not automatic: The `format` key was declared but never implemented (declared ≠ enforced): every response is the JSON envelope regardless of the requested value, so there is no behaviour to preserve and nothing stored to rewrite.
+  - Done when: No /analytics/query or /analytics/sql call sends `format`; exports go through the export surface.
 
 ---
 

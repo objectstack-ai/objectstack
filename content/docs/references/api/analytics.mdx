@@ -58,9 +58,17 @@ const result = AnalyticsEndpoint.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **query** | `{ cube?: string; measures: string[]; dimensions?: string[]; where?: any; … }` | ✅ | The analytic query definition |
 | **cube** | `string` | ✅ | Target cube name |
-| **format** | `Enum<'json' \| 'csv' \| 'xlsx'>` | ✅ | Response format |
+| **measures** | `string[]` | ✅ | List of metrics to calculate |
+| **dimensions** | `string[]` | optional | List of dimensions to group by |
+| **where** | `any` | optional | Filtering criteria (canonical Query DSL FilterCondition) |
+| **timeDimensions** | `{ dimension: string; granularity?: Enum<'second' \| 'minute' \| 'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: string \| string[] }[]` | optional |  |
+| **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
+| **limit** | `number` | optional |  |
+| **offset** | `number` | optional |  |
+| **timezone** | `string` | ✅ |  |
+| **query** | `any` | optional | [REMOVED] `query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). The `{ cube, query: {...}` } envelope was the dialect of the retired degraded analytics shim (#3891) — the real engine never understood it. Move the query.* fields to the body top level: `{ cube, measures, dimensions?, where?, timeDimensions?, order?, limit?, offset?, timezone? }`. |
+| **format** | `any` | optional | [REMOVED] `format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). It was never implemented — every response is the JSON envelope. Delete the key; for CSV/XLSX use the export surface instead. |
 
 
 ---

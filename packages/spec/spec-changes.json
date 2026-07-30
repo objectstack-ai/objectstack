@@ -193,6 +193,20 @@
         "migrationId": "dashboard-widget-strict-unknown-keys",
         "toMajor": 16,
         "rationale": "The `.strict()` flip turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: bind a `dataset` and select `dimensions`/`values`, move a renderer setting under `options`, or delete the dead key."
+      },
+      {
+        "surface": "api.analyticsQueryRequest.query",
+        "replacement": "bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)",
+        "migrationId": "analytics-query-request-envelope-retired",
+        "toMajor": 17,
+        "rationale": "The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves."
+      },
+      {
+        "surface": "api.analyticsQueryRequest.format",
+        "replacement": "(removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)",
+        "migrationId": "analytics-query-request-format-retired",
+        "toMajor": 17,
+        "rationale": "The `format` key was declared but never implemented (declared ≠ enforced): every response is the JSON envelope regardless of the requested value, so there is no behaviour to preserve and nothing stored to rewrite."
       }
     ],
     "removed": []
@@ -445,7 +459,22 @@
           "toMajor": 17
         }
       ],
-      "migrated": [],
+      "migrated": [
+        {
+          "surface": "api.analyticsQueryRequest.query",
+          "replacement": "bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)",
+          "migrationId": "analytics-query-request-envelope-retired",
+          "toMajor": 17,
+          "rationale": "The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves."
+        },
+        {
+          "surface": "api.analyticsQueryRequest.format",
+          "replacement": "(removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)",
+          "migrationId": "analytics-query-request-format-retired",
+          "toMajor": 17,
+          "rationale": "The `format` key was declared but never implemented (declared ≠ enforced): every response is the JSON envelope regardless of the requested value, so there is no behaviour to preserve and nothing stored to rewrite."
+        }
+      ],
       "removed": []
     }
   ]
