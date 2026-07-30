@@ -13,7 +13,6 @@
   "dependencies": {
     "@objectstack/spec": "^17.0.0",
     "@objectstack/runtime": "^17.0.0",
-    "@objectstack/driver-memory": "^17.0.0",
     "@objectstack/plugin-hono-server": "^17.0.0",
     "@objectstack/connector-rest": "^17.0.0",
     "@objectstack/connector-openapi": "^17.0.0",
