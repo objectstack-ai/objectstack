@@ -2940,7 +2940,9 @@ export class SqlDriver implements IDataDriver {
     return diffManagedIndexes({
       table: tableName,
       expected: expectedIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }),
-      legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns }),
+      // `declaredIndexes` goes to BOTH: it is what the table should have, and
+      // therefore also what must never be mistaken for legacy debt (#3955).
+      legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns, declaredIndexes }),
       physical: await this.introspectIndexes(tableName),
     });
   }
