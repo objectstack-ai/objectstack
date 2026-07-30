@@ -1357,13 +1357,16 @@ export const InquiryPurgeFlow = defineFlow({
       id: 'purge_check',
       type: 'get_record',
       label: 'Find closed inquiries',
-      // records mode + outputVariable: the result lands in the variable
-      // context, where the out-edge CEL below reads it (the engine routes on
-      // EDGE conditions — same contract as BudgetApprovalFlow's gate).
+      // `limit > 1` is what makes this a LIST read (`find`, not `findOne`) — the
+      // executor has no `mode` key, so a `mode: 'records'` used to sit here doing
+      // nothing while the comment credited it for the behaviour `limit` actually
+      // produced (found by the #4045 unknown-config-key check). `outputVariable`
+      // then lands the array in the variable context, where the out-edge CEL below
+      // reads it — the engine routes on EDGE conditions, same contract as
+      // BudgetApprovalFlow's gate.
       config: {
         objectName: 'showcase_inquiry',
         filter: { status: 'closed' },
-        mode: 'records',
         limit: 200,
         outputVariable: 'closedInquiries',
       },
