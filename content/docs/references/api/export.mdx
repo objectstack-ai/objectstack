@@ -59,7 +59,7 @@ const result = CreateExportJobRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **error** | `{ code: string; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ jobId: string; status: Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>; estimatedRecords?: integer; createdAt: string }` | ✅ |  |
 
@@ -159,7 +159,7 @@ const result = CreateExportJobRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **error** | `{ code: string; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ jobId: string; status: Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>; format: Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>; totalRecords?: integer; … }` | ✅ |  |
 
@@ -233,7 +233,7 @@ const result = CreateExportJobRequest.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **error** | `{ code: string; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ jobId: string; downloadUrl: string; fileName: string; fileSize: integer; … }` | ✅ |  |
 
@@ -451,7 +451,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **error** | `{ code: string; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ totalRecords: integer; validRecords: integer; invalidRecords: integer; duplicateRecords: integer; … }` | ✅ |  |
 
@@ -490,7 +490,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **error** | `{ code: string; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ jobs: { jobId: string; object: string; status: Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>; format: Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>; … }[]; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
@@ -548,7 +548,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **error** | `{ code: string; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ id: string; name: string; enabled: boolean; nextRunAt?: string; … }` | ✅ |  |
 
