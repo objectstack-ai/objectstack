@@ -7,28 +7,27 @@ import { mergeBootConfig } from './merge-boot-config.js';
 const BOOT_API = { enableProjectScoping: false, projectResolution: 'none' } as const;
 
 describe('mergeBootConfig (#4002)', () => {
-    it('keeps the authored api keys the boot result does not set', () => {
+    it('keeps an authored api key the boot result does not set', () => {
         const merged: any = mergeBootConfig(
-            { api: { requireAuth: false, enforceProjectMembership: false } },
+            { api: { enforceProjectMembership: false } },
             { api: { ...BOOT_API }, plugins: [] },
         );
 
-        // The two live knobs the CLI reads a few lines later — both were dropped
-        // by the old shallow spread.
-        expect(merged.api.requireAuth).toBe(false);
+        // `enforceProjectMembership` is a live knob the CLI reads a few lines
+        // later — dropped by the old shallow spread, kept by the per-key merge.
         expect(merged.api.enforceProjectMembership).toBe(false);
     });
 
     it('lets the boot result win on the keys it decides', () => {
         // Environment scoping is not the author's call on a standalone host.
         const merged: any = mergeBootConfig(
-            { api: { enableProjectScoping: true, projectResolution: 'auto', requireAuth: false } },
+            { api: { enableProjectScoping: true, projectResolution: 'auto', enforceProjectMembership: false } },
             { api: { ...BOOT_API } },
         );
 
         expect(merged.api.enableProjectScoping).toBe(false);
         expect(merged.api.projectResolution).toBe('none');
-        expect(merged.api.requireAuth).toBe(false); // untouched by boot → survives
+        expect(merged.api.enforceProjectMembership).toBe(false); // untouched by boot → survives
     });
 
     it('still replaces every other top-level key wholesale', () => {
@@ -49,8 +48,8 @@ describe('mergeBootConfig (#4002)', () => {
     });
 
     it('carries an api block through when only one side has one', () => {
-        expect((mergeBootConfig({ api: { requireAuth: false } }, {}) as any).api)
-            .toEqual({ requireAuth: false });
+        expect((mergeBootConfig({ api: { enforceProjectMembership: false } }, {}) as any).api)
+            .toEqual({ enforceProjectMembership: false });
         expect((mergeBootConfig({}, { api: { ...BOOT_API } }) as any).api)
             .toEqual({ ...BOOT_API });
     });
@@ -60,16 +59,16 @@ describe('mergeBootConfig (#4002)', () => {
         // character-indexed keys from a string spread.
         expect((mergeBootConfig({ api: 'nonsense' as any }, { api: { ...BOOT_API } }) as any).api)
             .toEqual({ ...BOOT_API });
-        expect((mergeBootConfig({ api: { requireAuth: false } }, { api: null as any }) as any).api)
-            .toEqual({ requireAuth: false });
+        expect((mergeBootConfig({ api: { enforceProjectMembership: false } }, { api: null as any }) as any).api)
+            .toEqual({ enforceProjectMembership: false });
     });
 
     it('does not mutate either input', () => {
-        const authored = { api: { requireAuth: false } };
+        const authored = { api: { enforceProjectMembership: false } };
         const boot = { api: { ...BOOT_API } };
         mergeBootConfig(authored, boot);
 
-        expect(authored).toEqual({ api: { requireAuth: false } });
+        expect(authored).toEqual({ api: { enforceProjectMembership: false } });
         expect(boot).toEqual({ api: { ...BOOT_API } });
     });
 });
