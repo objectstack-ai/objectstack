@@ -1728,26 +1728,34 @@ export default class Serve extends Command {
         // (env-native auth IS the membership — ADR-0024 D9) by setting
         // `api.enforceProjectMembership: false`. Undefined → dispatcher default.
         const enforceProjectMembership = apiConfig.enforceProjectMembership;
-        // `requireAuth: true` rejects anonymous requests on `/api/v1/data/*`
-        // with HTTP 401 before they reach ObjectQL. The platform default is
-        // now secure-by-default (ADR-0056 D2): deny anonymous. The CLI keeps
-        // one deliberate carve-out — a stack with NO `auth` tier has no way
-        // to authenticate anyone, so denying would brick its data API
-        // entirely; such auth-less playgrounds get an EXPLICIT `false`
-        // (fail-open), which the REST plugin surfaces with a boot warning.
-        // Apps can always override via stack `api.requireAuth`.
-        // Auth availability = tier auto-registers it OR the stack mounts
-        // AuthPlugin explicitly (hasAuthPlugin, computed above). Keying only on
-        // the tier would hand an explicit fail-open to a stack that ships auth
-        // via `plugins:` under a minimal tier set — re-opening the very hole
-        // the flip closes. Only a stack with NO auth at all gets the carve-out.
-        const requireAuth = apiConfig.requireAuth
-          ?? ((tierEnabled('auth') || hasAuthPlugin) ? true : false);
+        // [#3963] Anonymous access to object data is denied unconditionally —
+        // there is no `api.requireAuth` opt-out any more (auth is a kernel
+        // concern; every legitimately session-less surface derives its own narrow
+        // authorization from a declaration instead).
+        //
+        // The CLI used to hand an EXPLICIT fail-open to a stack with no auth at
+        // all, reasoning that nobody could authenticate against it so denying
+        // would brick its data API. Under A1 that inverts the conclusion: a stack
+        // with no auth has no security model, so it must not serve a data API —
+        // and it should say so at boot instead of quietly serving object data to
+        // the internet. Auth availability = the tier auto-registers it OR the
+        // stack mounts AuthPlugin explicitly.
+        if (flags.server && !(tierEnabled('auth') || hasAuthPlugin)) {
+          throw new Error(
+            'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
+            + 'data is always denied (#3963), which would leave the data API unusable.\n'
+            + 'Fix it one of two ways:\n'
+            + `  • enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`);\n`
+            + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
+            + "Publishing a genuinely public surface does not need anonymous data access: use a public form "
+            + "view, a share link, or `book.audience: 'public'`.",
+          );
+        }
 
         try {
           const { createRestApiPlugin } = await import('@objectstack/rest');
           await kernel.use(
-            createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution, requireAuth } } as any }),
+            createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
           );
           trackPlugin('RestAPI');
         } catch (e: any) {
@@ -1767,9 +1775,6 @@ export default class Serve extends Command {
             createDispatcherPlugin({
               scoping: { enableProjectScoping, projectResolution },
               enforceProjectMembership,
-              // Keep the dispatcher's `auth: true` service routes (AI) in
-              // lockstep with the REST `/data` gate above — same `requireAuth`.
-              requireAuth,
               observability,
             }),
           );

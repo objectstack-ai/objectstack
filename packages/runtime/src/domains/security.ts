@@ -55,7 +55,7 @@ export async function handleSecurityRequest(
     // `requireAuth: false` demo must not let anonymous callers list or
     // confirm audience bindings. Shares the decision + body with every
     // other HTTP seam (#2567).
-    if (shouldDenyAnonymous({ requireAuth: true, userId: ec?.userId, isSystem: ec?.isSystem })) {
+    if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem })) {
         return {
             handled: true,
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),

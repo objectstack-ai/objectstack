@@ -1243,6 +1243,48 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
  * All conversions, keyed by the protocol major that introduced the canonical
  * shape. Newest majors last; ordering within a major is application order.
  */
+/**
+ * Stack `api.requireAuth` → dropped (protocol 18, #3963).
+ *
+ * NOT a rename — there is no key to move the value to. The deployment-wide
+ * anonymous-access opt-out is retired: auth is a kernel concern, and anonymous
+ * access to object data is now always denied. A surface that legitimately
+ * serves a session-less caller derives its own narrow authorization from a
+ * declaration (a public form view, a share link, or `book.audience: 'public'`),
+ * so there is nothing for the old boolean to control.
+ *
+ * Dropping is safe at load time: the runtime no longer reads the key (its
+ * plumbing was removed in the same change), so a surviving `api.requireAuth`
+ * would otherwise be silently stripped by the non-strict schema — the exact
+ * quiet-failure this conversion + the `retiredKey` tombstone exist to prevent.
+ * The notice tells the author their intent was dropped and where to re-declare
+ * public access.
+ */
+const stackApiRequireAuthRemoved: MetadataConversion = {
+  id: 'stack-api-require-auth-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'stack.api.requireAuth',
+  summary: "stack key 'api.requireAuth' removed — anonymous access is always denied; publish public surfaces by declaration (#3963)",
+  apply(stack, emit) {
+    const api = stack.api;
+    if (!isDict(api) || !('requireAuth' in api)) return stack;
+    const nextApi: Dict = { ...api };
+    delete nextApi.requireAuth;
+    emit({ from: 'requireAuth', to: '(removed)', path: 'api' });
+    return { ...stack, api: nextApi };
+  },
+  fixture: {
+    before: {
+      api: { requireAuth: false, enableProjectScoping: false },
+    },
+    after: {
+      api: { enableProjectScoping: false },
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -1259,6 +1301,9 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeScriptConfigAliases,
     permissionRlsPriorityRemoved,
     toolInertAuthoringKeysRemoved,
+  ],
+  18: [
+    stackApiRequireAuthRemoved,
   ],
 };
 

@@ -37,6 +37,7 @@ import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
 
 import { ApiEndpointSchema } from './api/endpoint.zod';
+import { retiredKey } from './shared/retired-key';
 
 // AI Protocol
 import { AgentSchema } from './ai/agent.zod';
@@ -272,12 +273,16 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    */
   api: z.object({
     /**
-     * Reject anonymous requests on `/data/*` with HTTP 401. Secure-by-default
-     * (ADR-0056 D2) at the REST layer; set `false` here to intentionally serve
-     * data publicly (the REST plugin logs a boot warning).
+     * [REMOVED in #3963] See `RestApiConfigSchema.requireAuth` — tombstoned for
+     * the same reason: this block is not `.strict()`, so deleting the key would
+     * silently strip it and the author's intent would vanish without a word.
      */
-    requireAuth: z.boolean().optional()
-      .describe('[ADR-0056 D2] Reject anonymous /data/* requests (secure-by-default; set false to serve publicly)'),
+    requireAuth: retiredKey(
+      '`api.requireAuth` was removed in @objectstack/spec 18 (#3963). Anonymous access to object data '
+      + 'is now always denied. Delete the key; publish public surfaces by declaration instead — a public '
+      + "form view, a share link, or `book.audience: 'public'`. A stack that mounts no auth at all now "
+      + 'fails at boot rather than silently serving object data to anonymous callers.',
+    ),
     /** Enable environment-scoped routing for data/meta/AI APIs. */
     enableProjectScoping: z.boolean().optional(),
     /** Environment id resolution strategy when scoping is on. */

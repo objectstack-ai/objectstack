@@ -782,7 +782,6 @@ type NormalizedRestServerConfig = {
         enableSearch?: boolean;
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
-        requireAuth: boolean;
         documentation: RestApiConfig['documentation'];
         responseFormat: RestApiConfig['responseFormat'];
     };
@@ -1169,7 +1168,6 @@ export class RestServer {
         // exactly as before (the allowlist is reserved for a future umbrella
         // seam). `isSystem` is never set on inbound HTTP, so it cannot bypass.
         if (shouldDenyAnonymous({
-            requireAuth: this.config.api.requireAuth,
             userId: context?.userId,
             isSystem: context?.isSystem,
             method: req?.method,
@@ -1981,7 +1979,6 @@ export class RestServer {
                 enableSearch: (api as any).enableSearch ?? true,
                 enableProjectScoping: api.enableProjectScoping ?? false,
                 projectResolution: api.projectResolution ?? 'auto',
-                requireAuth: (api as any).requireAuth ?? true, // secure-by-default (ADR-0056 D2; mirrors RestApiConfigSchema)
                 documentation: api.documentation,
                 responseFormat: api.responseFormat,
             },

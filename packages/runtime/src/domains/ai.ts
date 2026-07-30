@@ -97,7 +97,7 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
             const gec: any = context.executionContext;
             // `requireAuth && route.auth !== false` is the AI-route contract;
             // the shared function owns the anonymous decision itself.
-            if (shouldDenyAnonymous({ requireAuth: deps.isAuthRequired(), userId: gec?.userId, isSystem: gec?.isSystem })) {
+            if (shouldDenyAnonymous({ userId: gec?.userId, isSystem: gec?.isSystem })) {
                 return {
                     handled: true,
                     response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),

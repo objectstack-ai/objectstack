@@ -3,18 +3,32 @@
 /**
  * #2567 — the single anonymous-deny decision, shared by every HTTP seam.
  *
- * ADR-0056 D2 made the platform deny anonymous callers by default
- * (`requireAuth`). Phase 1 gated each surface (REST `/data`, dispatcher
- * `/graphql` + `/meta`, raw-hono `/data`) but every seam hand-rolled the same
- * `!userId && !isSystem → 401` check. This centralises that DECISION into one
- * pure, tested function — the exact pattern {@link ./auth-gate.ts} established
- * for the ADR-0069 auth-policy gate: keeping the decision in one function means
- * the seams can never drift on who is denied.
+ * ADR-0056 D2 made the platform deny anonymous callers by default. Phase 1 gated
+ * each surface (REST `/data`, dispatcher `/graphql` + `/meta`, raw-hono `/data`)
+ * but every seam hand-rolled the same `!userId && !isSystem → 401` check. This
+ * centralises that DECISION into one pure, tested function — the exact pattern
+ * {@link ./auth-gate.ts} established for the ADR-0069 auth-policy gate: keeping
+ * the decision in one function means the seams can never drift on who is denied.
  *
- * It deliberately does NOT own identity resolution or the dynamic exemptions
- * (public-form submission, share-link tokens): those run UPSTREAM and set the
- * execution context (a `userId`, or `isSystem`) before a seam calls this, so
- * this function only ever inspects the already-resolved context.
+ * ## The `requireAuth` opt-out is gone (#3963)
+ *
+ * This used to take a `requireAuth` posture and no-op when it was falsy, so a
+ * deployment could open its ENTIRE data plane with one config key. That key is
+ * retired: auth is a kernel concern, and every surface that legitimately serves
+ * a caller with no session derives its own narrow authorization from a
+ * DECLARATION instead of from the deployment posture —
+ *
+ *  - control plane (`/auth/*`, `/health`, `/ready`, `/discovery`, the ADR-0069
+ *    remediation paths) → the {@link isAuthGateAllowlisted} allowlist, below;
+ *  - public form submission → `publicFormGrant` (ADR-0056 Option A), derived
+ *    from the form view's own declaration;
+ *  - share links → the capability token, validated then read as SYSTEM;
+ *  - a `book.audience: 'public'` read → the ADR-0046 §6.7 audience gate (#3963);
+ *  - MCP → an OAuth token or API key, never anonymous.
+ *
+ * Those run UPSTREAM of this function and set the execution context (a `userId`,
+ * or `isSystem`) or bypass the seam entirely, so this only ever inspects the
+ * already-resolved context. Nothing else gets in.
  */
 
 import { isAuthGateAllowlisted } from './auth-gate.js';
@@ -32,8 +46,6 @@ export const ANONYMOUS_DENY_BODY = {
 } as const;
 
 export interface AnonymousDenyInput {
-  /** The `requireAuth` posture. Falsy ⇒ no-op (demo / single-tenant). */
-  requireAuth: boolean | undefined;
   /** Resolved caller id, if any. */
   userId?: string | null;
   /** Internal system context (never set on inbound HTTP; cannot be forged). */
@@ -54,7 +66,6 @@ export interface AnonymousDenyInput {
  * seam shares.
  */
 export function shouldDenyAnonymous(input: AnonymousDenyInput): boolean {
-  if (!input.requireAuth) return false;                       // posture off
   if (typeof input.method === 'string' && input.method.toUpperCase() === 'OPTIONS') {
     return false;                                             // CORS preflight
   }

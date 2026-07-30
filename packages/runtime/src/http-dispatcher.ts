@@ -139,14 +139,6 @@ export interface HttpDispatcherOptions {
      * called on every scoped request so idle projects are evicted after TTL.
      */
     scopeManager?: EnvironmentScopeManager;
-    /**
-     * Reject anonymous requests to `auth: true` service routes (AI) and to the
-     * metadata catch-all with HTTP 401, mirroring the REST API's `requireAuth`
-     * gate. Matches {@link DispatcherPluginConfig.requireAuth}; the dispatcher
-     * plugin threads the host's `api.requireAuth` here. Defaults to `false`
-     * (backward-compatible — nothing enforced `RouteDefinition.auth` before).
-     */
-    requireAuth?: boolean;
 }
 
 /**
@@ -190,12 +182,6 @@ export class HttpDispatcher {
      */
     private enforceMembership: boolean;
     /**
-     * When `true`, `auth: true` AI routes and the metadata catch-all reject
-     * anonymous callers with 401 (mirrors the REST `requireAuth` gate). Set
-     * from {@link HttpDispatcherOptions.requireAuth}. Defaults to `false`.
-     */
-    private requireAuth: boolean;
-    /**
      * In-memory cache of positive membership checks, keyed by
      * `${environmentId}:${userId}`. Entries expire 60 seconds after insertion
      * — a short TTL is acceptable because a user whose access was just
@@ -221,7 +207,6 @@ export class HttpDispatcher {
             try { return (kernel as any).getService?.(name); } catch { return undefined; }
         };
         this.enforceMembership = options?.enforceProjectMembership ?? true;
-        this.requireAuth = options?.requireAuth ?? false;
         // ADR-0006 kernel-resolution seam — the host's resolver owns env
         // resolution + kernel selection. Optional service so single-environment
         // hosts that register none are unchanged.
@@ -278,7 +263,6 @@ export class HttpDispatcher {
             } catch { /* fall back to defaultKernel resolution downstream */ }
             return null;
         },
-        isAuthRequired: () => this.requireAuth,
         getRegisteredAiRoutes: () => (this.kernel as any)?.__aiRoutes,
     };
 

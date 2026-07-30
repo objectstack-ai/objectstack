@@ -1777,7 +1777,7 @@
     "api/RestApiConfig:enableProjectScoping",
     "api/RestApiConfig:enableUi",
     "api/RestApiConfig:projectResolution",
-    "api/RestApiConfig:requireAuth",
+    "api/RestApiConfig:requireAuth [RETIRED]",
     "api/RestApiConfig:responseFormat",
     "api/RestApiConfig:version",
     "api/RestApiEndpoint:cacheTtl",

@@ -829,13 +829,13 @@ export class HonoServerPlugin implements Plugin {
                 'This is a deliberate opt-out; set restConfig.requireAuth=true to deny anonymous access (ADR-0056 D2, #2567).',
             );
         }
-        // Returns a 401 Response when the caller is anonymous under the deny
-        // posture, else null (caller proceeds). Delegates the decision to the
+        // Returns a 401 Response when the caller is anonymous, else null
+        // (caller proceeds). Delegates the decision to the
         // shared `shouldDenyAnonymous` (#2567) so every HTTP seam stays in
         // lockstep. `isSystem` is never set on inbound HTTP (internal-only), so
         // it cannot be forged to bypass this.
         const denyAnonymous = (c: any, execCtx: any): Response | null =>
-            shouldDenyAnonymous({ requireAuth, userId: execCtx?.userId, isSystem: execCtx?.isSystem })
+            shouldDenyAnonymous({ userId: execCtx?.userId, isSystem: execCtx?.isSystem })
                 ? c.json(ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS)
                 : null;
 

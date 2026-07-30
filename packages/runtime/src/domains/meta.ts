@@ -57,7 +57,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // deployment requires auth. No-op when `requireAuth` is off.
     {
         const ec: any = _context.executionContext;
-        if (shouldDenyAnonymous({ requireAuth: deps.isAuthRequired(), userId: ec?.userId, isSystem: ec?.isSystem })) {
+        if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem })) {
             return {
                 handled: true,
                 response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
