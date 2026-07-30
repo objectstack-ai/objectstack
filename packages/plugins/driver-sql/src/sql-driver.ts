@@ -4641,9 +4641,23 @@ export class SqlDriver implements IDataDriver {
 
     for (const item of filters) {
       if (typeof item === 'string') {
-        if (item.toLowerCase() === 'or') nextJoin = 'or';
-        else if (item.toLowerCase() === 'and') nextJoin = 'and';
-        continue;
+        const lower = item.toLowerCase();
+        if (lower === 'or') { nextJoin = 'or'; continue; }
+        if (lower === 'and') { nextJoin = 'and'; continue; }
+        // Anything else is not a join keyword, and the only way a bare string
+        // reaches here is a comparison triple that `isFilterAST()` refused —
+        // its operator is outside `VALID_AST_OPERATORS`, so `parseFilterAST()`
+        // never converted it and the raw array arrived as `where`. Skipping it
+        // (the old behaviour) emitted NO predicate at all: the caller asked to
+        // filter and silently got every row. Fail loudly instead. #3948.
+        throw new Error(
+          `[sql-driver] Unrecognized filter operator "${item}" in a comparison triple. ` +
+            `A filter array is either a logical node (["and"|"or", …]) or nested ` +
+            `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
+            `reaches the driver when its operator is outside @objectstack/spec ` +
+            `VALID_AST_OPERATORS, which leaves the filter unparsed. ` +
+            `Filter was: ${JSON.stringify(filters)}`,
+        );
       }
 
       if (Array.isArray(item)) {
@@ -4666,7 +4680,18 @@ export class SqlDriver implements IDataDriver {
         }
 
         nextJoin = 'and';
+        continue;
       }
+
+      // Neither a join keyword nor a condition. Previously fell out of both
+      // branches and was dropped, so a malformed element silently narrowed
+      // nothing. Same reasoning as above: an unapplied filter must not look
+      // like a satisfied one. #3948.
+      throw new Error(
+        `[sql-driver] Unrecognized filter element of type "${item === null ? 'null' : typeof item}" — ` +
+          `expected a logical keyword ("and"/"or") or a condition array. ` +
+          `Filter was: ${JSON.stringify(filters)}`,
+      );
     }
   }
 
