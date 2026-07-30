@@ -443,14 +443,47 @@ interface EnhancedApiError {
 ```typescript
 interface FieldError {
   field: string;            // Field path (supports dot notation)
-  code: string;             // Field-level error code — a SEPARATE vocabulary from
-                            // error.code (`required`, `max_length`, `invalid_email`, …);
-                            // its own catalog is #3977 (ADR-0112 D6)
+  code: FieldErrorCode;     // Which CONSTRAINT the value violated — a closed,
+                            // lowercase catalog, separate from error.code (ADR-0114)
   message: string;          // Human-readable error for this field
   value?: unknown;          // The invalid value (if safe to include)
   constraint?: unknown;     // The constraint that was violated (e.g., max length)
 }
 ```
+
+### Field-level codes
+
+`FieldError.code` is its **own** closed vocabulary, and it is lowercase where
+`error.code` is SCREAMING. That is deliberate (ADR-0114): a top-level code names
+the condition the *request* hit, while a field-level code names the *constraint*
+the value violated — and constraints are declared in the metadata's own
+snake_case, so the code and the schema property are the same word.
+
+```
+{ required: true }   → code 'required'
+{ max_length: 50 }   → code 'max_length'
+{ min_value: 0 }     → code 'min_value'
+```
+
+| Group | Codes |
+|:---|:---|
+| Presence and shape | `required`, `invalid_type`, `invalid_shape`, `unknown_field` |
+| Per-type parse | `invalid_boolean`, `invalid_number`, `invalid_date`, `invalid_time`, `invalid_email`, `invalid_url`, `invalid_phone`, `invalid_json`, `invalid_format` |
+| Bounded ranges | `min_length`, `max_length`, `min_value`, `max_value`, `min_items`, `max_items` |
+| Closed sets and references | `invalid_option`, `invalid_value`, `reference_not_found`, `reference_ambiguous` |
+| Declarative rules | `rule_violation`, `json_schema_violation`, `invalid_initial_state`, `invalid_transition` |
+
+Branch on `code` to decide *how* to mark an input; show `message` to the user.
+Routes that parse with Zod map its issue codes into this catalog rather than
+passing them through, so `fields[]` speaks one vocabulary whichever route served
+it.
+
+<Callout type="warn">
+The declared envelope still calls this array `fieldErrors`, while every producer
+emits **`fields`**. Read `fields`. The rename is decided but deferred — retiring
+an authorable key needs a tombstone plus a migration, so it lands on its own
+(ADR-0114 D4).
+</Callout>
 
 ---
 

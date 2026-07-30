@@ -36,7 +36,9 @@
  * one of those families still has to say which family it joins:
  *
  *   - **D6 — field/param-addressed** (`{ field, code }`, `{ param, code }`):
- *     validator vocabularies, #3977's scope.
+ *     the field-level catalog, which ADR-0114 closed and made lowercase on purpose
+ *     (a field code names the violated CONSTRAINT, and constraints are declared in
+ *     the metadata's own snake_case).
  *   - **D6b — persisted**: `sys_metadata_audit.code` is audit history; old rows
  *     keep their spelling forever and the column also holds `ok`.
  *   - **D6c — diagnostics**: probe/diff records that ship as payload of a 200.
@@ -61,12 +63,12 @@ const SCAN_ROOTS = ['packages'];
  */
 const EXEMPT_FILES = new Map([
   // D6 — field-addressed validator vocabularies (#3977)
-  ['packages/objectql/src/validation/record-validator.ts', 'D6 field-level validator codes'],
+  ['packages/objectql/src/validation/record-validator.ts', 'D6/ADR-0114 field-level catalog codes'],
   ['packages/objectql/src/validation/rule-validator.ts', 'D6 field-level validator codes'],
   ['packages/rest/src/import-coerce.ts', 'D6 field-level import coercion codes'],
   ['packages/rest/src/import-runner.ts', 'D6 field-level import row codes'],
   ['packages/plugins/plugin-sharing/src/rule-criteria.ts', 'D6 field-level; top-level code is VALIDATION_FAILED'],
-  ['packages/spec/src/ui/action-params.zod.ts', 'D6 param-addressed action-param issues'],
+  ['packages/spec/src/ui/action-params.zod.ts', 'D6/ADR-0114 param-addressed issues'],
   // D6b — persisted audit column
   ['packages/metadata-core/src/objects/sys-metadata-audit.object.ts', 'D6b persisted audit vocabulary'],
   ['packages/spec/src/api/errors.test.ts', 'D6 FieldError tests spell field-level codes'],

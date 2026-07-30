@@ -4,6 +4,7 @@ import {
   StandardErrorCode,
   RetryStrategy,
   FieldErrorSchema,
+  FieldErrorCode,
   EnhancedApiErrorSchema,
   ErrorResponseSchema,
   ErrorHttpStatusMap,
@@ -57,8 +58,8 @@ describe('RetryStrategy', () => {
 });
 
 describe('FieldErrorSchema', () => {
-  // Field-level codes are the validators' own lowercase vocabulary (ADR-0112
-  // D6, #3977) — these literals mirror what record-validator actually emits.
+  // Field-level codes are the validators' own lowercase vocabulary, catalogued
+  // by ADR-0114 — these literals mirror what record-validator actually emits.
   it('should accept basic field error', () => {
     const error = FieldErrorSchema.parse({
       field: 'email',
@@ -115,10 +116,14 @@ describe('EnhancedApiErrorSchema', () => {
       retryable: false,
       retryStrategy: 'no_retry',
       details: { count: 2 },
+      // Still `fieldErrors` — the wire says `fields`, but retiring an authorable
+      // key needs ADR-0104's tombstone machinery, so ADR-0114 D4 defers it. The
+      // code below IS fixed: the field-level catalog's lowercase `invalid_email`,
+      // where this block used to assert a top-level SCREAMING member.
       fieldErrors: [
         {
           field: 'email',
-          code: 'INVALID_FORMAT',
+          code: 'invalid_email',
           message: 'Invalid email format',
         },
       ],
@@ -270,5 +275,62 @@ describe('HttpStatusErrorCodeMap / standardErrorCodeForHttpStatus (#3842)', () =
     }
     expect(standardErrorCodeForHttpStatus(ErrorHttpStatusMap['authorization'])).toBe('PERMISSION_DENIED');
     expect(standardErrorCodeForHttpStatus(ErrorHttpStatusMap['not_found'])).toBe('RESOURCE_NOT_FOUND');
+  });
+});
+
+/**
+ * The field-level catalog (ADR-0114). What is load-bearing here is not that the
+ * members parse — it is the two invariants that keep this vocabulary from drifting
+ * back into the top-level one, and the correspondence that justifies its casing.
+ */
+describe('FieldErrorCode', () => {
+  const members = FieldErrorCode.options;
+
+  it('is lowercase snake_case throughout — the opposite of StandardErrorCode', () => {
+    // ADR-0114 D1: these name a violated CONSTRAINT, and constraints are declared
+    // in the metadata's own snake_case. A SCREAMING member here means someone
+    // reached for the top-level catalog's convention by reflex.
+    for (const m of members) {
+      expect(m, `${m} must be lowercase snake_case`).toMatch(/^[a-z][a-z0-9_]*$/);
+    }
+  });
+
+  it('names the constraint property it reports on', () => {
+    // The whole argument for D1's casing: the code IS the schema property name.
+    // If these ever diverge, the field vocabulary has lost its reason to be
+    // lowercase and the decision should be revisited rather than patched.
+    for (const constraint of ['required', 'max_length', 'min_length', 'max_value', 'min_value'] as const) {
+      expect(members).toContain(constraint);
+    }
+  });
+
+  it('overlaps the top-level catalog only where the overlap is declared', () => {
+    // Two vocabularies on two structural levels (ADR-0112 D6). A name in both is
+    // not automatically wrong — the top-level code says why the REQUEST failed,
+    // the field-level one says which value and which constraint — but it must be
+    // deliberate. An unlisted overlap means someone added a field member by
+    // copying a top-level one, which is the reflex the casing test above guards
+    // from the other side.
+    //
+    // `invalid_format` is the only case, and it exists because the top-level
+    // catalog still carries field-shaped members it inherited (`INVALID_FORMAT`,
+    // `VALUE_TOO_LONG`, `MISSING_REQUIRED_FIELD`, …) — see ADR-0114's note on
+    // them. Their field-level counterparts mostly have better names here
+    // (`max_length` over `VALUE_TOO_LONG`); this one happens to coincide.
+    const DECLARED_OVERLAPS = new Set(['invalid_format']);
+    const top = new Set<string>(StandardErrorCode.options.map((c) => c.toLowerCase()));
+    for (const m of members) {
+      if (DECLARED_OVERLAPS.has(m)) continue;
+      expect(top.has(m), `${m} collides with a StandardErrorCode member`).toBe(false);
+    }
+  });
+
+  it('rejects a code from the vocabulary it replaced', () => {
+    // The pre-ADR-0114 leak: Zod's own issue codes reaching the wire.
+    for (const zodCode of ['too_small', 'too_big', 'unrecognized_keys', 'invalid_union']) {
+      expect(() => FieldErrorCode.parse(zodCode)).toThrow();
+    }
+    // …and a top-level code, which is what the schema used to declare.
+    expect(() => FieldErrorCode.parse('VALIDATION_ERROR')).toThrow();
   });
 });

@@ -2509,6 +2509,7 @@
     "ExportRequest (type)",
     "ExportRequestSchema (const)",
     "FieldError (type)",
+    "FieldErrorCode (type)",
     "FieldErrorSchema (const)",
     "FieldMappingEntry (type)",
     "FieldMappingEntrySchema (const)",

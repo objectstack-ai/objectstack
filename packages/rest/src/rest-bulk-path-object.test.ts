@@ -134,8 +134,14 @@ describe('updateMany ingress validation (#3933)', () => {
     expect(res.body.code).toBe('VALIDATION_FAILED');
     // The documented data-surface envelope (`fields[]`, wire-format §7), not a
     // second per-route shape.
+    //
+    // `required`, not `invalid_type` (ADR-0114 D3): `id` is ABSENT here, and Zod
+    // spells absent as a type mismatch against `undefined`. This assertion used to
+    // pin that passthrough, so it pinned a form marking a MISSING input as the
+    // wrong TYPE — the message below still says "received undefined", which is
+    // what the old code was reporting as a type error.
     expect(res.body.fields).toEqual([
-      { field: 'records.0.id', code: 'invalid_type', message: expect.any(String) },
+      { field: 'records.0.id', code: 'required', message: expect.any(String) },
     ]);
     expect(updateManyData).not.toHaveBeenCalled();
   });

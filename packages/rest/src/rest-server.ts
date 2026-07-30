@@ -9,6 +9,7 @@ import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/obs
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
@@ -78,6 +79,78 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
  * returns a misleading 404.
  */
 /**
+ * A Zod issue → the field-level catalog (ADR-0114 D3).
+ *
+ * Zod's issue codes are Zod's API, not ours, and this used to pass them straight
+ * through. Two things were wrong with that. The wire carried two vocabularies on
+ * one position — `too_small` from a route that parses with Zod, `min_length` from
+ * the validators — so a client could not read a field code without knowing which
+ * route served it. And Zod's own codes are ambiguous alone: `too_small` covers a
+ * short string, a small number AND a short array.
+ *
+ * `origin` and `format` disambiguate every case, so the mapping is total rather
+ * than best-effort. The one row that fixes a user-visible bug rather than tidying
+ * a name: Zod reports a MISSING required property as `invalid_type` (expected
+ * string, received undefined), so passing it through marked a missing input as a
+ * type error.
+ */
+function zodIssueToFieldCode(issue: any, input?: unknown, inputProvided = false): FieldErrorCode {
+    const origin = issue?.origin;
+    switch (issue?.code) {
+        case 'too_small':
+            return origin === 'number' || origin === 'bigint' || origin === 'date' ? 'min_value'
+                : origin === 'array' || origin === 'set' ? 'min_items'
+                : 'min_length';
+        case 'too_big':
+            return origin === 'number' || origin === 'bigint' || origin === 'date' ? 'max_value'
+                : origin === 'array' || origin === 'set' ? 'max_items'
+                : 'max_length';
+        case 'invalid_format':
+            return issue?.format === 'email' ? 'invalid_email'
+                : issue?.format === 'url' ? 'invalid_url'
+                : 'invalid_format';
+        case 'invalid_type': {
+            // Zod spells "absent" as a type mismatch against `undefined`, so a
+            // MISSING required property arrives here rather than as its own code.
+            // The issue itself cannot tell the two apart — v4 carries `expected`
+            // and a message but not the offending value — so the only honest
+            // discriminator is the parsed input, walked to `path`. Without it we
+            // keep `invalid_type`: reading "received undefined" out of the message
+            // would make the wire contract depend on Zod's phrasing, which is the
+            // leak this mapping exists to stop.
+            if (!inputProvided) return 'invalid_type';
+            return valueAtPath(input, issue?.path) === undefined ? 'required' : 'invalid_type';
+        }
+        case 'invalid_value':
+            // A closed set (`z.enum`, `z.literal`) the value is not a member of.
+            return 'invalid_option';
+        case 'unrecognized_keys':
+            return 'unknown_field';
+        case 'invalid_union':
+        case 'invalid_element':
+        case 'invalid_key':
+            return 'invalid_shape';
+        case 'not_multiple_of':
+        case 'custom':
+        default:
+            // A catalog member, not a leak: an unmapped Zod code still lands on a
+            // code the client can read, and `message` carries the specifics.
+            return 'invalid_value';
+    }
+}
+
+/** Walk a Zod issue `path` into the value that was parsed. */
+function valueAtPath(input: unknown, path: unknown): unknown {
+    if (!Array.isArray(path)) return undefined;
+    let cur: any = input;
+    for (const seg of path) {
+        if (cur === null || cur === undefined) return undefined;
+        cur = cur[seg as any];
+    }
+    return cur;
+}
+
+/**
  * Zod issues → the data surface's `fields[]` validation envelope
  * (`{ field, code, message }`, docs/api/wire-format §7).
  *
@@ -85,13 +158,18 @@ const TRANSLATABLE_META_TYPES = new Set(['view', 'action', 'object', 'app', 'das
  * a validator-thrown `VALIDATION_FAILED` does through {@link mapDataError}
  * (#3918) — otherwise a client keying on `fields` has to learn a second shape
  * per route, and `code: 'VALIDATION_FAILED'` stops meaning one thing on the
- * wire.
+ * wire. Since ADR-0114 that sameness covers the `code` VALUE too, not just the
+ * shape: see {@link zodIssueToFieldCode}.
  */
-export function zodIssuesToFields(issues: unknown): Array<{ field: string; code: string; message: string }> {
+export function zodIssuesToFields(
+    issues: unknown,
+    ...input: [] | [unknown]
+): Array<{ field: string; code: FieldErrorCode; message: string }> {
     if (!Array.isArray(issues)) return [];
+    const inputProvided = input.length > 0;
     return issues.map((i: any) => ({
         field: Array.isArray(i?.path) ? i.path.join('.') : String(i?.path ?? ''),
-        code: String(i?.code ?? 'invalid'),
+        code: zodIssueToFieldCode(i, input[0], inputProvided),
         message: String(i?.message ?? 'Invalid value'),
     }));
 }
@@ -7003,15 +7081,13 @@ export class RestServer {
                         // becoming the execution context on a deployment where none
                         // resolves (anonymous-reachable `requireAuth: false`).
                         const { UpdateManyDataRequestSchema } = await import('@objectstack/spec/api');
-                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse({
-                            ...(req.body ?? {}),
-                            object: req.params.object,
-                        });
+                        const updateManyInput = { ...(req.body ?? {}), object: req.params.object };
+                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse(updateManyInput);
                         if (!parsedUpdate.success) {
                             res.status(400).json({
                                 error: 'Invalid updateMany request',
                                 code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsedUpdate.error?.issues),
+                                fields: zodIssuesToFields(parsedUpdate.error?.issues, updateManyInput),
                                 object: req.params?.object,
                             });
                             return;
@@ -7067,15 +7143,13 @@ export class RestServer {
                         // so a body `object` would move the delete to an object
                         // whose exposure policy was never checked.
                         const { DeleteManyDataRequestSchema } = await import('@objectstack/spec/api');
-                        const parsed = (DeleteManyDataRequestSchema as any).safeParse({
-                            ...(req.body ?? {}),
-                            object: req.params.object,
-                        });
+                        const deleteManyInput = { ...(req.body ?? {}), object: req.params.object };
+                        const parsed = (DeleteManyDataRequestSchema as any).safeParse(deleteManyInput);
                         if (!parsed.success) {
                             res.status(400).json({
                                 error: 'Invalid deleteMany request',
                                 code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsed.error?.issues),
+                                fields: zodIssuesToFields(parsed.error?.issues, deleteManyInput),
                                 object: req.params?.object,
                             });
                             return;

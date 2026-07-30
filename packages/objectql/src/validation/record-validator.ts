@@ -38,6 +38,7 @@ import {
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
 } from '@objectstack/spec/data';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 
 // Lifecycle columns the engine always owns and the client never supplies. These
 // are skipped by NAME because they are not author-declared business fields.
@@ -76,28 +77,17 @@ const PHONE_RE = /^[+()\-\s\d.]{5,}$/;
 
 export interface FieldValidationError {
   field: string;
-  code:
-    | 'required'
-    | 'min_length'
-    | 'max_length'
-    | 'min_value'
-    | 'max_value'
-    | 'invalid_email'
-    | 'invalid_url'
-    | 'invalid_phone'
-    | 'invalid_number'
-    | 'invalid_boolean'
-    | 'invalid_date'
-    | 'invalid_time'
-    | 'invalid_option'
-    | 'invalid_type'
-    // Object-level validation rules (ADR-0020, see rule-validator.ts)
-    | 'invalid_transition'
-    | 'invalid_initial_state'
-    | 'rule_violation'
-    | 'invalid_format'
-    | 'invalid_json'
-    | 'json_schema_violation';
+  /**
+   * Which constraint the value violated — the spec's field-level catalog
+   * (ADR-0114), not a union maintained here.
+   *
+   * This was a hand-listed literal union, which is the shape that drifts
+   * silently: adding a validator case meant remembering to widen it, and a
+   * consumer's `switch` over it went non-exhaustive in a package the change never
+   * touched. The catalog is the single list, and `FieldErrorSchema.code` validates
+   * against it on the way out.
+   */
+  code: FieldErrorCode;
   message: string;
   /** Allowed values for select/multiselect, when applicable. */
   options?: string[];
