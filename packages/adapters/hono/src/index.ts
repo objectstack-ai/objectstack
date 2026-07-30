@@ -96,8 +96,8 @@ export function objectStackMiddleware(kernel: ObjectKernel) {
 /**
  * Creates a full-featured Hono app with all ObjectStack route dispatchers.
  *
- * Only routes that need framework-specific handling (auth service, storage
- * formData, GraphQL raw result, discovery wrapper) are registered explicitly.
+ * Only routes that need framework-specific handling (auth service, GraphQL
+ * raw result, discovery wrapper) are registered explicitly.
  * All other routes (meta, data, packages, analytics, automation, i18n, ui,
  * openapi, custom endpoints, and any future routes) are handled by a
  * catch-all that delegates to `HttpDispatcher.dispatch()`.
@@ -347,24 +347,18 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
     }
   });
 
-  // --- Storage (needs formData parsing) ---
-  app.all(`${prefix}/storage/*`, async (c) => {
-    try {
-      const subPath = c.req.path.substring(`${prefix}/storage`.length);
-      const method = c.req.method;
-
-      let file: any = undefined;
-      if (method === 'POST' && subPath === '/upload') {
-        const formData = await c.req.formData();
-        file = formData.get('file');
-      }
-
-      const result = await dispatcher.handleStorage(subPath, method, file, { request: c.req.raw });
-      return toResponse(c, result);
-    } catch (err: any) {
-      return errorJson(c, err.message || 'Internal Server Error', err.statusCode || 500);
-    }
-  });
+  // --- Storage: deliberately NOT mounted (#4087) ---
+  // This used to be `app.all(prefix + '/storage/*')` feeding
+  // `dispatcher.handleStorage`. Two things were wrong with it. The handler it
+  // called spoke a storage contract that does not exist (it passed the parsed
+  // file as the `key` argument of `upload(key, data, options?)`, and read the
+  // Buffer that `download(key)` resolves as a `{ url | stream }` descriptor) —
+  // retired with this change. And the wildcard was wider than the two routes
+  // it served: it claimed the WHOLE `/storage` subtree, so every other path
+  // under it — the presigned / chunked / signed-URL protocol `service-storage`
+  // registers, above all — was answered by the bridge's own 404 instead of
+  // falling through to anything else this app might mount. Storage is ordinary
+  // catch-all traffic now, like every other domain.
 
   // ─── Catch-all: delegate to dispatcher.dispatch() ─────────────────────────
   // Handles meta, data, packages, analytics, automation, i18n, ui, openapi,

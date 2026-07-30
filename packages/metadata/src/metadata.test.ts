@@ -1,6 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MetadataManager } from './metadata-manager';
 import { MemoryLoader } from './loaders/memory-loader';
 import type { MetadataLoader } from './loaders/loader-interface';
@@ -760,6 +763,79 @@ describe('MetadataPlugin', () => {
       await plugin.init(ctx);
       await expect(plugin.start(ctx)).rejects.toThrow(/artifact-only/);
       // Must NOT have scanned the filesystem
+      expect(manager.loadMany).not.toHaveBeenCalled();
+    });
+
+    // #4085 — an ABSENT local artifact is "no app compiled yet", not a fault.
+    // `createStandaloneStack` always points MetadataPlugin at
+    // `dist/objectstack.json`, so an unconditional throw here made
+    // `os serve objectstack.config.ts` impossible before a first `os compile`:
+    // the development platform refused to start without an app.
+    it('eager bootstrap boots without a compiled artifact instead of failing', async () => {
+      const { MetadataPlugin } = await import('./plugin.js');
+      const missing = join(tmpdir(), `os-absent-artifact-${process.pid}`, 'dist/objectstack.json');
+      const plugin = new MetadataPlugin({
+        rootDir: '/tmp/test',
+        watch: false,
+        artifactSource: { mode: 'local-file', path: missing },
+      });
+
+      const manager = (plugin as any).manager;
+      manager.loadMany = vi.fn().mockResolvedValue([]);
+
+      const ctx = createMockPluginContext();
+      await plugin.init(ctx);
+      await expect(plugin.start(ctx)).resolves.not.toThrow();
+      // …and it says so, naming the path, rather than booting silently.
+      expect(ctx.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('no compiled artifact yet'),
+        expect.objectContaining({ path: missing }),
+      );
+    });
+
+    // The tolerance is ENOENT-only: a present-but-broken artifact is a real
+    // fault and must not degrade into a silent empty boot.
+    it('eager bootstrap still fails loudly on a malformed artifact file', async () => {
+      const { MetadataPlugin } = await import('./plugin.js');
+      const dir = mkdtempSync(join(tmpdir(), 'os-bad-artifact-'));
+      const bad = join(dir, 'objectstack.json');
+      writeFileSync(bad, '{ this is not json', 'utf8');
+      const plugin = new MetadataPlugin({
+        rootDir: '/tmp/test',
+        watch: false,
+        artifactSource: { mode: 'local-file', path: bad },
+      });
+
+      const manager = (plugin as any).manager;
+      manager.loadMany = vi.fn().mockResolvedValue([]);
+
+      const ctx = createMockPluginContext();
+      await plugin.init(ctx);
+      try {
+        await expect(plugin.start(ctx)).rejects.toThrow(/Cannot read artifact file/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // …and the sealed runtime keeps its hard guarantee: `artifact-only` exists
+    // precisely so a deployment cannot serve metadata it did not ship.
+    it('artifact-only bootstrap still fails when the local artifact is missing', async () => {
+      const { MetadataPlugin } = await import('./plugin.js');
+      const missing = join(tmpdir(), `os-absent-sealed-${process.pid}`, 'dist/objectstack.json');
+      const plugin = new MetadataPlugin({
+        rootDir: '/tmp/test',
+        watch: false,
+        config: { bootstrap: 'artifact-only' },
+        artifactSource: { mode: 'local-file', path: missing },
+      });
+
+      const manager = (plugin as any).manager;
+      manager.loadMany = vi.fn().mockResolvedValue([]);
+
+      const ctx = createMockPluginContext();
+      await plugin.init(ctx);
+      await expect(plugin.start(ctx)).rejects.toThrow(/Cannot read artifact file/);
       expect(manager.loadMany).not.toHaveBeenCalled();
     });
 

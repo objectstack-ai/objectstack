@@ -113,15 +113,19 @@ The metadata service is a **framework** — it works with an in-memory `SchemaRe
 
 ### Discovery: Per-Service Status
 
-The discovery endpoint returns a `services` map so clients know what is available:
+The discovery endpoint returns a `services` map so clients know what is available.
+The `metadata` entry is **computed from the implementation that fills the slot**, not
+fixed (#4089): a stack running the kernel's in-memory fallback reports `degraded` with
+that fallback's own message, while a stack with `MetadataPlugin` reports `available` and
+no message. Below is the former — the fallback case:
 
 ```json
 {
   "services": {
     "metadata": {
-      "enabled": true, "status": "degraded",
+      "enabled": true, "status": "degraded", "handlerReady": true,
       "route": "/api/v1/meta", "provider": "kernel",
-      "message": "In-memory registry; DB persistence pending"
+      "message": "In-memory metadata registry — real reads and writes, no persistence (lost on restart). Register MetadataPlugin for a persisted registry."
     },
     "data": {
       "enabled": true, "status": "available",

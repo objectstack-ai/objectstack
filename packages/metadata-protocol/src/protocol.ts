@@ -1463,9 +1463,34 @@ export class ObjectStackProtocolImplementation implements
         // registry via SERVICE_CONFIG below — absent means `unavailable`, and
         // no route is advertised (the pre-#2462 hardcode here is exactly what
         // the fallback was invented to make true).
+        //
+        // [#4089] The `metadata` slot is reported from whatever fills it, not
+        // hardcoded `available`. The kernel auto-registers `createMemoryMetadata`
+        // when no MetadataPlugin is present, and plugin-dev registers its own
+        // in-memory registry; both self-describe as `degraded` (D12), and
+        // hardcoding `available` here overstated them as exactly equivalent to a
+        // sys_metadata-backed registry. Absent or unmarked ⇒ `available`, which
+        // is what the real MetadataPlugin (carrying no marker) reports.
+        //
+        // This is also where the two builders stopped disagreeing: the runtime
+        // dispatcher hardcoded the opposite verdict for the same slot
+        // (`degraded` + "DB persistence pending"), so one host called a persisted
+        // registry degraded while the other called an in-memory one available.
+        // Both now compute it, and `handlerReady: true` is stated on both sides:
+        // `/api/v1/meta` is served by the protocol, not by this service, so it is
+        // mounted whichever implementation occupies the slot.
+        const metadataSelf = readServiceSelfInfo(registeredServices.get('metadata'));
+
         const services: Record<string, ServiceInfo> = {
             // --- Kernel-provided (objectql is an example kernel implementation) ---
-            metadata:  { enabled: true, status: 'available' as const, route: '/api/v1/meta', provider: 'objectql' },
+            metadata:  {
+                enabled: true,
+                status: metadataSelf?.status ?? ('available' as const),
+                handlerReady: true,
+                route: '/api/v1/meta',
+                provider: 'objectql',
+                ...(metadataSelf?.message ? { message: metadataSelf.message } : {}),
+            },
             data:      { enabled: true, status: 'available' as const, route: '/api/v1/data', provider: 'objectql' },
         };
 
@@ -1480,10 +1505,13 @@ export class ObjectStackProtocolImplementation implements
         // registers the service (service-storage's own `/api/v1/storage`
         // routes, plugin-search, plugin-graphql, …) rather than to a dispatcher
         // domain, so `handlerReady` there says nothing about whether THAT route
-        // is mounted, and suppressing it would be a guess. `file-storage` is
-        // listed because the dispatcher does own a `/storage` bridge for the
-        // no-plugin case; when service-storage is installed it registers a real
-        // (unmarked) service, so the entry never fires.
+        // is mounted, and suppressing it would be a guess. `file-storage` stays
+        // listed as the one entry with no dispatcher domain behind it — #4087
+        // retired the `/storage` bridge — because for that slot `handlerReady`
+        // is not a proxy for anything, it is the fact itself: an occupant that
+        // mounts no HTTP surface must not have `/api/v1/storage` advertised on
+        // its behalf. When service-storage is installed it registers a real
+        // (unmarked) service and mounts the routes, so the entry never fires.
         const DISPATCHER_GATED_SERVICES = new Set([
             'analytics', 'automation', 'notification', 'ai', 'i18n', 'file-storage',
         ]);

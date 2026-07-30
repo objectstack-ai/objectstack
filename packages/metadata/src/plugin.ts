@@ -295,7 +295,7 @@ export class MetadataPlugin implements Plugin {
             // An artifact source, if present, is still honored so projects can
             // pin a known set of metadata at boot without paying the FS scan.
             if (src?.mode === 'local-file') {
-                await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs);
+                await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs, { optional: true });
             } else if (src?.mode === 'artifact-api') {
                 await this._loadFromArtifactApi(ctx, src);
             } else {
@@ -304,7 +304,7 @@ export class MetadataPlugin implements Plugin {
         } else {
             // 'eager' (default): preserve historical behavior.
             if (src?.mode === 'local-file') {
-                await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs);
+                await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs, { optional: true });
             } else if (src?.mode === 'artifact-api') {
                 await this._loadFromArtifactApi(ctx, src);
             } else {
@@ -650,7 +650,10 @@ export class MetadataPlugin implements Plugin {
         src: { path: string; fetchTimeoutMs?: number },
         changed: string[],
     ): Promise<void> {
-        await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs);
+        // Optional for the same reason boot is: an artifact deleted or moved
+        // aside mid-run (a `dist/` clean between recompiles) must not take the
+        // running server down — the watcher reloads it when it comes back.
+        await this._loadFromLocalFile(ctx, src.path, src.fetchTimeoutMs, { optional: true });
         try {
             // `metadata` carries the freshly parsed artifact collections so
             // subscribers can consume the ones that never reach the
@@ -662,7 +665,24 @@ export class MetadataPlugin implements Plugin {
         }
     }
 
-    private async _loadFromLocalFile(ctx: PluginContext, filePath: string, fetchTimeoutMs?: number): Promise<void> {
+    /**
+     * @param opts.optional When true, a LOCAL artifact file that does not exist
+     *   is "nothing compiled yet" rather than a fault: log and return, leaving
+     *   the manager empty and the artifact watcher armed so the first
+     *   `os compile` hydrates the running server (#4085). Callers pass it for
+     *   the `eager` / `lazy` bootstrap modes — the development-platform paths,
+     *   where an app is optional. `artifact-only` (sealed runtime) does NOT:
+     *   there the artifact IS the deployment, so its absence must fail loudly
+     *   instead of silently serving an empty runtime. Only ENOENT is tolerated;
+     *   a present-but-unreadable artifact (malformed JSON, bad permissions) and
+     *   every remote-URL failure stay fatal.
+     */
+    private async _loadFromLocalFile(
+        ctx: PluginContext,
+        filePath: string,
+        fetchTimeoutMs?: number,
+        opts: { optional?: boolean } = {},
+    ): Promise<void> {
         const isUrl = /^https?:\/\//i.test(filePath);
         ctx.logger.info(
             `[MetadataPlugin] Loading metadata from ${isUrl ? 'remote URL' : 'local artifact file'}`,
@@ -678,6 +698,13 @@ export class MetadataPlugin implements Plugin {
                 raw = JSON.parse(content);
             }
         } catch (e: any) {
+            if (opts.optional && !isUrl && e?.code === 'ENOENT') {
+                ctx.logger.info(
+                    '[MetadataPlugin] no compiled artifact yet — starting with no artifact metadata',
+                    { path: filePath },
+                );
+                return;
+            }
             throw new Error(`[MetadataPlugin] Cannot read artifact ${isUrl ? 'URL' : 'file'} at "${filePath}": ${e.message}`);
         }
 

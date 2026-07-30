@@ -204,7 +204,10 @@ const DISPATCHER_DOMAINS = {
   'notifications.ts': { handBuilt: 0 },
   'packages.ts': { handBuilt: 0 },
   'security.ts': { handBuilt: 0 },
-  'storage.ts': { handBuilt: 0 },
+  // No `storage.ts` — the `/storage` domain was retired in #4087 (it called
+  // the storage contract with the wrong arity and read a Buffer as a
+  // descriptor). `/api/v1/storage` is service-storage's surface; its envelope
+  // is audited in that package's own routes, not here.
   'ui.ts': { handBuilt: 0 },
 
   // Kind 1 — enveloped, hand-built only because the helper cannot say it.

@@ -123,6 +123,19 @@ jobs:
       - name: Error-code casing guard
         run: pnpm check:error-code-casing
 
+      # Namespace-wildcard fall-through guard (#4116). A handler mounted on
+      # `<prefix>/*` claims the whole namespace, and Hono's first-registered
+      # handler that answers wins — so a TERMINAL wildcard makes every other
+      # route under that prefix reachable only by registration luck. That shape
+      # has now cost four fixes (#2567, #4018, #4088/#4092, cloud#923) and every
+      # one was found by hand, never by CI. Per-plugin tests cannot cover the
+      # next one; what was missing is the ENUMERATION. Three states — yields
+      # (verified from the AST, so it cannot rot) / exempt-with-reason / ratchet
+      # — and an undeclared mount is an error, never a default. Runs its own
+      # --self-test first.
+      - name: Wildcard fall-through guard
+        run: pnpm check:wildcard-fallthrough
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that
