@@ -83,6 +83,30 @@ export const TaskViews = defineView({
       filter: [{ field: 'status', operator: 'equals', value: 'done' }],
     },
 
+    // ── Legacy `rowActions: string[]` coverage (objectui#2960) ──────────
+    // The pre-`rowActionDefs` authoring form: the row menu is declared as bare
+    // action NAMES rather than defs. Both cases the client has to handle are
+    // present here on purpose:
+    //
+    //   `showcase_recalc_estimate` — declared on the object at `record_more` /
+    //     `record_section`, i.e. NOT a `list_item` action, so nothing derives a
+    //     def for it. The client must resolve the name against the object's
+    //     actions or the entry is a dead menu item.
+    //
+    //   `showcase_quick_view` — already a `list_item` action, so the client
+    //     derives a def for it independently. Naming it here too must NOT
+    //     produce a second, dead copy alongside the working one.
+    //
+    // Kept as a fixture: this is the only view in the showcase authored the
+    // legacy way, and it is what makes the regression visible in a browser.
+    legacy_row_actions: {
+      label: 'Legacy Row Actions',
+      type: 'grid',
+      data,
+      columns: [{ field: 'title' }, { field: 'project' }, { field: 'assignee' }, { field: 'status' }],
+      rowActions: ['showcase_recalc_estimate', 'showcase_quick_view'],
+    },
+
     // 0 ── Tabular ───────────────────────────────────────────────────────
     // ADR-0021 Phase 2: replaces the former `showcase_task_list` report
     // (a flat record list — a ListView concern, not analytics).

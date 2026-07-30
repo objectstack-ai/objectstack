@@ -411,3 +411,66 @@ describe('SharingRuleSchema', () => {
     })).toThrow();
   });
 });
+
+// #4001 step 2 — the authorable sharing rule is `.strict()` (the base shape's
+// strictness and error map ride into the criteria extension): an undeclared
+// key used to be dropped silently, so a share the author intended was never
+// materialised — the same trap class this file's own history (#3896, #3865)
+// keeps closing.
+describe('unknown keys are rejected, not stripped (#4001)', () => {
+  const rule = {
+    name: 'r', type: 'criteria' as const, object: 'task',
+    condition: 'record.status == "open"',
+    sharedWith: { type: 'position' as const, value: 'manager' },
+  };
+  const unknownKeyIssue = (value: unknown) => {
+    const result = SharingRuleSchema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+  };
+
+  it('rejects an undeclared key instead of silently dropping it', () => {
+    expect(unknownKeyIssue({ ...rule, notAKey: 1 })!.message).toContain('`notAKey`');
+  });
+
+  it('points the persisted-row `criteria` spelling at the authored `condition`', () => {
+    expect(unknownKeyIssue({ ...rule, criteria: 'x' })!.message)
+      .toContain('`criteria` → `condition`');
+  });
+
+  it('points access/level at accessLevel and recipient spellings at sharedWith', () => {
+    expect(unknownKeyIssue({ ...rule, access: 'read' })!.message)
+      .toContain('`access` → `accessLevel`');
+    expect(unknownKeyIssue({ ...rule, recipient: {} })!.message)
+      .toContain('`recipient` → `sharedWith`');
+  });
+
+  it('carries the removed owner-type rule guidance for `ownedBy`', () => {
+    const message = unknownKeyIssue({ ...rule, ownedBy: 'team_east' })!.message;
+    expect(message).toContain('`ownedBy`');
+    expect(message).toContain('criteria');
+  });
+
+  it('rejects unknown keys inside sharedWith (strict recipient)', () => {
+    const result = SharingRuleSchema.safeParse({
+      ...rule,
+      sharedWith: { type: 'position', value: 'manager', id: 'x' },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue!.message).toContain('`id` → `value`');
+  });
+
+  it('accepts every key the schema declares (guards SHARING_RULE_KEYS drift)', () => {
+    const probes: Record<string, unknown> = {
+      label: 'L', description: 'D', active: false, accessLevel: 'edit',
+    };
+    for (const [key, value] of Object.entries(probes)) {
+      const result = SharingRuleSchema.safeParse({ ...rule, [key]: value });
+      const unknown = result.success
+        ? undefined
+        : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(unknown, `\`${key}\` should be a declared sharing-rule key`).toBeUndefined();
+    }
+  });
+});

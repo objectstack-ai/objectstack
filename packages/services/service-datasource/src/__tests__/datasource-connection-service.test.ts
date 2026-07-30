@@ -321,7 +321,11 @@ describe('DatasourceConnectionService.connect', () => {
       expect(warned).toContain('visit');
     });
 
-    it('repeats the degraded banner on stderr, which `os serve` boot-quiet cannot swallow', async () => {
+    // The stderr copy survives the operator's LOG LEVEL — `warn` is dropped
+    // outright at `error`/`fatal`/`silent` — not `os serve`'s boot-quiet
+    // window, which swallowed it at every level until framework#4012 fixed
+    // that. Same pin as the engine-side and runtime-side parity tests.
+    it('repeats the degraded banner on stderr, which the operator log level cannot filter away', async () => {
       process.env[ENV] = '1';
       const written: string[] = [];
       const realWrite = process.stderr.write;

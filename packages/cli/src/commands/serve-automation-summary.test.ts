@@ -2,13 +2,14 @@
 //
 // Startup-banner automation summary (2026-07-17 third-party eval).
 //
-// Flow registration and trigger binding happen entirely inside serve's
-// boot-quiet stdout window, so the automation engine's own logs never reach
-// the terminal — a project whose flows silently failed to arm looked exactly
-// like one whose flows armed fine. `collectAutomationSummary` gathers the
-// live binding facts after stdout is restored so the banner can answer
-// "did my flows actually arm?" — including the three silent author mistakes:
-// engine not enabled, trigger not registered, and objectName mismatch.
+// A project whose flows silently failed to arm looks exactly like one whose
+// flows armed fine: the failure modes below emit no log line to go looking for,
+// and the engine's own binding narration is `info`, under the default `warn`
+// level. So the banner reads live binding STATE off the engine rather than
+// scraping output. `collectAutomationSummary` gathers those facts after
+// runtime.start() so the banner can answer "did my flows actually arm?" —
+// including the three silent author mistakes: engine not enabled, trigger not
+// registered, and objectName mismatch.
 
 import { describe, it, expect } from 'vitest';
 import { collectAutomationSummary } from './serve.js';

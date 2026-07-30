@@ -3,11 +3,12 @@
 /**
  * Boot-time seed outcome accumulator (#3415, extended #3430).
  *
- * Seeds run inside the CLI's boot-quiet stdout window and SeedLoader's own
- * result logs sit under the default `warn` level, so `os dev` shows NOTHING
- * about how seeding actually went — a fixture can silently lose most of its
- * rows, a marketplace package can rehydrate onto a fresh DB with zero rows,
- * and a partial row-level failure leaves no signal at all.
+ * SeedLoader's own result logs sit under the default `warn` level, so `os dev`
+ * shows NOTHING about how seeding actually went — a fixture can silently lose
+ * most of its rows, a marketplace package can rehydrate onto a fresh DB with
+ * zero rows, and a partial row-level failure leaves no signal at all. (Seeds
+ * also run inside the CLI's boot-quiet window, which hid them at every level
+ * until framework#4012; the level gate is what still hides them.)
  *
  * Every seeding producer (AppPlugin's inline config-app seed, the
  * marketplace rehydrate/heal path) records a per-source outcome on the

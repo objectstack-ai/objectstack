@@ -98,11 +98,19 @@ strict gate could prove it. Note the asymmetry in the two schema gaps — both
 were *inverse* drift (runtime writes a key the spec cannot express), which the
 liveness ledger's per-property direction cannot see.
 
-**Known sibling gap (follow-up, not this step):** `identity/position.zod.ts`
-— the other registered security type — also omits `MetadataProtectionFields`
-while `applyProtection` stamps it. Harmless today because the schema is not
-strict (the keys are silently stripped, as permission's were), but it must be
-declared before `position` joins the ratchet.
+**Known sibling gap — CLOSED in step 2:** `identity/position.zod.ts` — the
+other registered security type — also omitted `MetadataProtectionFields` while
+`applyProtection` stamps it. Declared (with the author-facing `protection`
+block) when `position` joined the ratchet.
+
+4. **`position.test.ts` asserted a fictional hierarchy** (found in step 2 when
+   `PositionSchema` went strict): the pre-ADR-0090 test "should accept position
+   with parent" — plus four "real-world hierarchy" examples — authored a
+   `parent` key on positions. It only ever "passed" because `.strip` ate the
+   key; no position tree exists (ADR-0090 D3 finalized flatness; hierarchy is
+   the business-unit tree). The tests were codifying the strip-era fiction as
+   expected behavior. Rewritten: `parent` is now asserted to be *rejected* with
+   the flatness guidance.
 
 ## File-level triage — the five authorable directories
 
@@ -168,8 +176,8 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 |---|---|---|---|
 | `explain.zod.ts` | 11 | wire | permission-explain responses — never strict |
 | `permission.zod.ts` | 4 | authorable | **strict as of #4001**; `EffectiveObjectPermissionSchema` explicitly `.strip()`s (wire) |
-| `rls.zod.ts` | 3 | authorable | **next candidate** — a stripped RLS key is a silent policy hole |
-| `sharing.zod.ts` | 2 | authorable | **next candidate** — same class |
+| `rls.zod.ts` | 3 | authorable | **`RowLevelSecurityPolicySchema` strict as of #4001 step 2** (a stripped RLS key is a silent policy hole); `RLSUserContextSchema` / `RLSEvaluationResultSchema` are runtime shapes — stay tolerant |
+| `sharing.zod.ts` | 2 | authorable | **strict as of #4001 step 2** — rule + recipient shapes; strictness and the error map ride the base into the criteria extension |
 
 ### `studio/` — 27 sites
 
@@ -189,7 +197,7 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `cloud/` | 83 | wire | multi-tenant runtime |
 | `ai/` | 75 | mixed | agent/tool/skill definitions authored (partially strict already); model/provider payloads wire |
 | `integration/` | 64 | wire | connector payloads — upstream adds fields freely |
-| `identity/` | 34 | mixed | position/user shapes authored; auth payloads wire |
+| `identity/` | 34 | mixed | position/user shapes authored (`PositionSchema` **strict as of #4001 step 2**, with the ADR-0010 envelope declared); auth payloads wire |
 | `shared/` | 25 | n/a | utilities and building blocks; strictness decided at the consuming schema |
 | `qa/` | 6 | n/a | test fixtures |
 
@@ -197,12 +205,15 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
 1. `ui/app.zod.ts` — `AppSchema` + navigation union (highest-traffic remaining
    authorable type; needs union-error design so the strict error is readable).
-2. `security/rls.zod.ts` + `security/sharing.zod.ts` — small, security-class.
-3. `automation/approval.zod.ts` — new v17 authoring surface, tighten while young.
-4. `data/hook.zod.ts`, `data/datasource.zod.ts` — `defineHook` / stack config.
-5. Promote this ledger to a machine-checked gate (pattern of
+2. `automation/approval.zod.ts` — new v17 authoring surface, tighten while young.
+3. `data/hook.zod.ts`, `data/datasource.zod.ts` — `defineHook` / stack config.
+4. Promote this ledger to a machine-checked gate (pattern of
    `packages/spec/liveness/` + `check:liveness`) once enough of the surface is
    classified that the table above is enforceable rather than descriptive.
+
+Done in step 2 (this PR): `security/rls.zod.ts` + `security/sharing.zod.ts`
+strict; `PositionSchema` strict with the protection envelope declared (closing
+the known sibling gap below).
 
 Long tail stays gated on a verification pass per shape — never a one-shot
 "make all ~453 sites strict" (ADR-0054 ratchet; #4001's own recommendation).

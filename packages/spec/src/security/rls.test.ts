@@ -499,3 +499,61 @@ describe('Row-Level Security (RLS) Protocol', () => {
     });
   });
 });
+
+// #4001 step 2 — the authorable RLS policy is `.strict()`: an undeclared key
+// used to be dropped by zod's default `.strip`, so a row-level restriction the
+// author wrote was never compiled into the filter and nothing failed.
+describe('unknown keys are rejected, not stripped (#4001)', () => {
+  const policy = {
+    name: 'p', object: 'account', operation: 'select' as const,
+    using: 'owner_id == current_user.id',
+  };
+  const unknownKeyIssue = (value: unknown) => {
+    const result = RowLevelSecurityPolicySchema.safeParse(value);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+  };
+
+  it('rejects an undeclared key instead of silently dropping it', () => {
+    expect(unknownKeyIssue({ ...policy, notAKey: 1 })!.message).toContain('`notAKey`');
+  });
+
+  it('points the pre-ADR-0090 `roles` vocabulary at `positions`', () => {
+    expect(unknownKeyIssue({ ...policy, roles: ['manager'] })!.message)
+      .toContain('`roles` → `positions`');
+  });
+
+  it('points PostgreSQL `WITH CHECK` spelling at `check`', () => {
+    expect(unknownKeyIssue({ ...policy, withCheck: 'x = 1' })!.message)
+      .toContain('`withCheck` → `check`');
+  });
+
+  it('points condition/filter/where at `using`', () => {
+    for (const key of ['condition', 'filter', 'where']) {
+      expect(unknownKeyIssue({ ...policy, [key]: 'x = 1' })!.message)
+        .toContain(`\`${key}\` → \`using\``);
+    }
+  });
+
+  it('keeps the retired `priority` tombstone prescription (not a bare strict error)', () => {
+    const result = RowLevelSecurityPolicySchema.safeParse({ ...policy, priority: 10 });
+    expect(result.success).toBe(false);
+    const messages = result.error!.issues.map((i) => i.message).join('\n');
+    expect(messages).toContain('#3896');
+    expect(messages).toContain('Delete the key');
+  });
+
+  it('accepts every key the schema declares (guards RLS_POLICY_KEYS drift)', () => {
+    const probes: Record<string, unknown> = {
+      label: 'L', description: 'D', check: 'owner_id = current_user.id',
+      positions: ['manager'], enabled: false, tags: ['compliance'],
+    };
+    for (const [key, value] of Object.entries(probes)) {
+      const result = RowLevelSecurityPolicySchema.safeParse({ ...policy, [key]: value });
+      const unknown = result.success
+        ? undefined
+        : result.error.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(unknown, `\`${key}\` should be a declared RLS policy key`).toBeUndefined();
+    }
+  });
+});
