@@ -71,8 +71,14 @@ ObjectStack uses a structured error system with **9 error categories** and **53 
 ```
 
 ### `INVALID_FIELD`
-**Cause:** A field name in the request does not exist on the target object.  
-**Fix:** Check the object schema for valid field names. Use `os meta get object <name>` to inspect the object's fields.  
+**Cause:** A field name in the request does not exist on the target object. On a
+list read this also covers an unreserved query parameter — `GET /data/:object`
+reads those as field filters, so one naming no field could only match zero
+records and is rejected rather than answered with an empty page.  
+**Fix:** Check the object schema for valid field names. Use `os meta get object <name>` to inspect the object's fields. If the name was meant as a
+*parameter* rather than a field, use the real one — page size is `top` / `$top`
+/ `limit`, not `pageSize` / `perPage`; the response's `error` names the
+substitute. See the [Data API](/docs/api/data-api).  
 **Retry:** `no_retry`
 
 ### `MISSING_REQUIRED_FIELD`
