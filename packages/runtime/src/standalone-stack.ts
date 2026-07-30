@@ -306,9 +306,24 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     stampSearchPinyinEnabled(artifactBundle?.i18n);
 
     const plugins: any[] = [
-        // MUST precede ObjectQLPlugin: its start() connects the default driver
-        // through the datasource connection service, and ObjectQLPlugin.start()
-        // runs boot schema-sync right after — the driver has to exist by then.
+        // This position buys NOTHING, and reading it as an ordering guarantee is
+        // how #4085 happened. The kernel resolves both init and start order from
+        // the plugin dependency graph, and `DefaultDatasourcePlugin` declares a
+        // hard dependency on ObjectQL — which HOISTS ObjectQLPlugin ahead of it
+        // (measured on a serve boot: `com.objectstack.engine.objectql` inits
+        // 6 slots BEFORE `com.objectstack.runtime.default-datasource`), the exact
+        // opposite of what this slot looks like it is asking for.
+        //
+        // What actually makes the driver exist before boot schema-sync is the
+        // PHASE split, not this list: the datasource plugin connects in `init()`
+        // (Phase 1 completes before ANY `start()` runs) and depends on ObjectQL
+        // so ITS init registers the engine first. That contract, and the earlier
+        // no-tables boot that taught it to us, are documented on the plugin
+        // itself — see the "Ordering — phase, not list position" note in
+        // `default-datasource-plugin.ts`. Order requirements belong THERE, next
+        // to the code the kernel enforces them from; a comment on an array index
+        // cannot enforce anything. (#4131 tracks making the AppPlugin end of this
+        // contract enforced rather than conventional.)
         defaultDatasourcePlugin,
         new MetadataPlugin({
             // Source-file scanner OFF — declarative metadata is loaded
