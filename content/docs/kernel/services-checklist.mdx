@@ -135,6 +135,32 @@ The discovery endpoint returns a `services` map so clients know what is availabl
 }
 ```
 
+#### `stub` vs `degraded` — and what the dispatcher does with each
+
+A service may self-declare that it is not the full thing (ADR-0076 D12), via a
+`__serviceInfo: { status, handlerReady?, message? }` property on the registered
+instance — see [Services → presence is not capability](./services.mdx) for how
+an in-process caller reads it. The two values mean different things, and for the
+HTTP surface the difference is load-bearing (#4058):
+
+| Declared | `handlerReady` default | Meaning | Dispatcher behaviour |
+|:---|:---|:---|:---|
+| `degraded` | `true` | Really does the work, with reduced capability (in-memory, no persistence, no cross-process fan-out) | **Served normally.** Route advertised, requests handled. |
+| `stub` | `false` | Fabricates its answers — reports success for work that never happened | **Treated as an EMPTY slot.** Route not advertised, request answered exactly as if nothing were registered (404, or the domain's 501). |
+
+Only `handlerReady` is consulted, never `status` — so an implementation that
+declares `degraded` but explicitly sets `handlerReady: false` is also treated as
+empty. The rule is enforced by one predicate (`isServiceServeable`) shared by
+the service domains, the route-mount gate, and both discovery builders, so what
+is advertised and what is served cannot disagree. It applies to the
+dispatcher-owned domains: `/analytics`, `/automation`, `/notifications`, `/ai`,
+`/storage`, `/i18n`.
+
+The `services` map still reports a registered stub as
+`{ enabled: true, status: "stub", handlerReady: false }` rather than collapsing
+it to `unavailable` — "something is in this slot, and it is a fake" says more
+than "install a plugin".
+
 ---
 
 ## 2. data Service ✅ Implemented
@@ -193,6 +219,13 @@ self-declared stub (`handlerReady: false`, ADR-0076 D12) exactly like an empty
 one — routes unmounted, request 404. To use analytics locally, install the real
 engine; `@objectstack/service-analytics` runs an InMemory strategy, so it needs
 no database of its own.
+
+**And it is no longer analytics-only** (#4058 step 2): every dispatcher-owned
+domain now gates on `handlerReady`, so a slot occupied by a self-declared `stub`
+— `automation`, `notification`, `ai`, wherever one is registered — answers as an
+empty slot does. The implementations that really do the work in memory declare
+`degraded` and keep serving. See
+[`stub` vs `degraded`](#stub-vs-degraded--and-what-the-dispatcher-does-with-each).
 </Callout>
 
 ### Features (via `@objectstack/service-analytics`)

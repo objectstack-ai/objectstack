@@ -1,68 +1,62 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Temporal filter conformance for the MongoDB driver, against a real server
- * via mongodb-memory-server (ADR-0053 D-A3).
+ * Temporal conformance for the MongoDB driver (ADR-0053 D-A3), against a real
+ * MongoDB via `mongodb-memory-server`.
  *
- * The shared cases come from `@objectstack/spec/data` — see
- * `temporal-conformance.ts` for the four incidents (#3650/#3773/#3777/#4047)
- * the table exists to end. This driver's own incident is #4047, and it was the
- * worst of the family: BSON type-bracket comparison meant a string comparand
- * matched NO `Date` row for every operator, so the dashboard's default window
- * returned nothing at all. The fixture's writer-form tags reproduce that mixed
- * string/Date writer population through `create()`; the sweep proves the
- * converged BSON-Date storage answers every shared case.
+ * The cases come from `@objectstack/spec/data` so this backend, `driver-sql`,
+ * `driver-memory`, the analytics preview and `formula`'s write-side `check`
+ * evaluator are all held to one standard — see `temporal-conformance.ts` for
+ * the four divergences that standard exists to prevent, one of which (#4047)
+ * was this driver's and was the worst of them: type-bracket comparison meant a
+ * string bound matched no BSON `Date` row at all, so the default dashboard
+ * window returned nothing.
+ *
+ * Rows are seeded in their tagged writer forms (ISO string vs JS `Date` — the
+ * D-E4 mixed-writer axis), the exact writer population #4047 hit. Cases
+ * carrying a token spelling also run through `resolveFilterTokens` at the
+ * pinned `TEMPORAL_NOW` — the D-A3 "token → row results" axis (#4081).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import {
-  TEMPORAL_CONFORMANCE_CASES,
-  TEMPORAL_CONFORMANCE_NOW,
-  TEMPORAL_CONFORMANCE_ROWS,
-} from '@objectstack/spec/data';
+import { TEMPORAL_CASES, TEMPORAL_NOW, TEMPORAL_ROWS } from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
 import { MongoDBDriver } from './mongodb-driver.js';
+
+const resolveTokens = <T,>(filter: T): T =>
+  resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
 
 let sharedMongod: MongoMemoryServer | undefined;
 try {
   sharedMongod = await MongoMemoryServer.create({ instance: { launchTimeout: 60_000 } });
 } catch (err) {
   console.warn(
-    '[driver-mongodb] Skipping temporal-conformance suite — mongodb-memory-server could not start: ' +
+    '[driver-mongodb] Skipping temporal conformance — mongodb-memory-server could not start: ' +
       `${(err as Error)?.message ?? String(err)}`,
   );
 }
 
-const ids = (rows: any[]) => rows.map((r: any) => String(r.id)).sort();
-
-const resolveTokens = <T,>(filter: T): T =>
-  resolveFilterTokens(filter, { now: new Date(TEMPORAL_CONFORMANCE_NOW) });
-
-describe.skipIf(!sharedMongod)('MongoDBDriver temporal conformance', () => {
+describe.skipIf(!sharedMongod)('driver-mongodb — temporal conformance', () => {
   const mongod = sharedMongod as MongoMemoryServer;
   let driver: MongoDBDriver;
 
   beforeAll(async () => {
-    driver = new MongoDBDriver({ url: mongod.getUri(), database: 'temporal_conformance_db' });
+    driver = new MongoDBDriver({ url: mongod.getUri(), database: 'temporal_conformance' });
     await driver.connect();
-    // Declaring the object is what teaches the driver which fields are
-    // temporal (D-E2). Seed once — every case is a pure read.
-    await driver.syncSchema('task', {
-      name: 'task',
-      fields: {
-        title: { type: 'string' },
-        happened_at: { type: 'datetime' },
-        happened_on: { type: 'date' },
-      },
+    // The declaration is what gives this driver its field types (#4047) — and
+    // therefore the BSON storage form its comparands must be coerced into.
+    await driver.syncSchema('conformance', {
+      name: 'conformance',
+      fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } },
     });
-    for (const row of TEMPORAL_CONFORMANCE_ROWS) {
-      await driver.create('task', {
-        id: row.id,
-        title: row.id,
+    for (const r of TEMPORAL_ROWS) {
+      await driver.create('conformance', {
+        id: r.id,
         // The mixed-writer axis (D-E4): the exact population #4047 hit.
-        happened_at: row.writerForm === 'native' ? new Date(row.happened_at) : row.happened_at,
-        happened_on: row.happened_on,
+        at: r.writerForm === 'native' ? new Date(r.at) : r.at,
+        on: r.on,
+        why: r.why,
       });
     }
   }, 90_000);
@@ -72,16 +66,18 @@ describe.skipIf(!sharedMongod)('MongoDBDriver temporal conformance', () => {
     if (mongod) await mongod.stop();
   });
 
-  for (const c of TEMPORAL_CONFORMANCE_CASES) {
+  for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const found = await driver.find('task', { where: c.filter } as any);
-      expect(ids(found), c.note).toEqual(c.expected);
+      const rows = await driver.find('conformance', { where: c.filter } as any);
+      const got = (rows as any[]).map((r) => r.id).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
     });
 
     if (c.tokenFilter) {
       it(`${c.name} — via relative tokens`, async () => {
-        const found = await driver.find('task', { where: resolveTokens(c.tokenFilter) } as any);
-        expect(ids(found), c.note).toEqual(c.expected);
+        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) } as any);
+        const got = (rows as any[]).map((r) => r.id).sort();
+        expect(got, c.note).toEqual([...c.expected].sort());
       });
     }
   }

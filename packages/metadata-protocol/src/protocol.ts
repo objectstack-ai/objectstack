@@ -288,6 +288,9 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
  *   - We do NOT replace the persisted document with `parsed.data`; the
  *     original payload is stored verbatim so Studio-only auxiliary fields
  *     (e.g. `isPinned`, `isDefault`, `sortOrder`) survive the round-trip.
+ *     The one exception is filter `operator` spellings, which are grafted back
+ *     from `parsed.data` so a save stops minting new legacy-alias rows — see
+ *     {@link graftNormalizedOperators}.
  *   - Types without a registered schema (the wiring-layer types
  *     `function`/`service`/`router`, and any plugin types that have not
  *     yet called `registerMetadataTypeSchema()`) fall through unvalidated.
@@ -332,6 +335,64 @@ export function normalizeViewMetadata(type: string, item: unknown, saveName: str
     const patch = viewIdentityPatch(it, baseline);
     if (it.name && !patch) return it;
     return { ...it, ...(it.name ? undefined : { name: saveName }), ...patch };
+}
+
+/**
+ * Persist the operator spellings the spec's own schema normalized, and nothing
+ * else. objectui#2945.
+ *
+ * `ViewFilterRuleSchema.operator` is `z.preprocess(normalizeFilterOperator, …)`,
+ * so a stored `notEquals` / `gt` / `isNull` is folded to its canonical form
+ * during validation — and then the result was thrown away, because `saveMeta`
+ * persists the authored body verbatim (deliberately: `parsed.data` strips the
+ * Studio-only auxiliary fields that ride along with an overlay). The alias table
+ * `VIEW_FILTER_OPERATOR_ALIASES` therefore keeps acquiring *new* rows with every
+ * save, which is why it can never be retired: there is no point at which the
+ * last alias row is behind you.
+ *
+ * This grafts the normalization back on without giving up the verbatim body.
+ * It walks the authored value and the parsed value in lockstep **by structure**
+ * and copies across exactly one thing: an `operator` whose parsed value differs
+ * from the authored one. No key list to maintain — every filter site the schema
+ * knows about is covered, including ones added later — and nothing is added,
+ * removed, reordered or defaulted, so an auxiliary field cannot be lost the way
+ * a wholesale `parsed.data` swap would lose it.
+ *
+ * Returns the input itself when nothing changed, so the common case allocates
+ * nothing.
+ */
+export function graftNormalizedOperators(authored: unknown, parsed: unknown): unknown {
+    if (Array.isArray(authored)) {
+        if (!Array.isArray(parsed)) return authored;
+        let changed = false;
+        const out = authored.map((entry, i) => {
+            const next = graftNormalizedOperators(entry, parsed[i]);
+            if (next !== entry) changed = true;
+            return next;
+        });
+        return changed ? out : authored;
+    }
+
+    if (!authored || typeof authored !== 'object') return authored;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return authored;
+
+    const a = authored as Record<string, unknown>;
+    const p = parsed as Record<string, unknown>;
+    let patch: Record<string, unknown> | undefined;
+
+    for (const [key, value] of Object.entries(a)) {
+        // The one value this function is allowed to rewrite. Guarded on both
+        // sides being strings so a `$`-token condition object — a different
+        // operator vocabulary entirely — cannot be reshaped by accident.
+        if (key === 'operator' && typeof value === 'string' && typeof p[key] === 'string') {
+            if (p[key] !== value) (patch ??= {})[key] = p[key];
+            continue;
+        }
+        const next = graftNormalizedOperators(value, p[key]);
+        if (next !== value) (patch ??= {})[key] = next;
+    }
+
+    return patch ? { ...a, ...patch } : authored;
 }
 
 /**
@@ -1408,18 +1469,29 @@ export class ObjectStackProtocolImplementation implements
             data:      { enabled: true, status: 'available' as const, route: '/api/v1/data', provider: 'objectql' },
         };
 
-        // [#4000] The dispatcher answers a self-declared stub in the `analytics`
-        // slot with the same 404 an empty slot gets (`isAnalyticsServiceServeable`,
-        // runtime/src/domains/analytics.ts), so this builder must not advertise a
-        // route for it — that would be the `declared ≠ enforced` gap discovery
-        // exists to close. Analytics-only on purpose: every other stub-backed
-        // slot IS still served by its dispatcher domain, so their route
-        // advertisement stays presence-gated and honest. Unifying the rule
-        // across domains is #4058.
-        const analyticsUnserveable =
-            readServiceSelfInfo(registeredServices.get('analytics'))?.handlerReady === false;
+        // [#4000, #4058] The dispatcher answers a self-declared non-handler in
+        // one of ITS domains' slots with the same 404/501 an empty slot gets
+        // (`isServiceServeable`, runtime/src/service-serveable.ts), so this
+        // builder must not advertise a route for one — that would be the
+        // `declared ≠ enforced` gap discovery exists to close.
+        //
+        // Scoped to the dispatcher-owned domains on purpose. For the other
+        // entries in SERVICE_CONFIG the route belongs to the plugin that
+        // registers the service (service-storage's own `/api/v1/storage`
+        // routes, plugin-search, plugin-graphql, …) rather than to a dispatcher
+        // domain, so `handlerReady` there says nothing about whether THAT route
+        // is mounted, and suppressing it would be a guess. `file-storage` is
+        // listed because the dispatcher does own a `/storage` bridge for the
+        // no-plugin case; when service-storage is installed it registers a real
+        // (unmarked) service, so the entry never fires.
+        const DISPATCHER_GATED_SERVICES = new Set([
+            'analytics', 'automation', 'notification', 'ai', 'i18n', 'file-storage',
+        ]);
+        const unserveable = (serviceName: string) =>
+            DISPATCHER_GATED_SERVICES.has(serviceName)
+            && readServiceSelfInfo(registeredServices.get(serviceName))?.handlerReady === false;
         const advertisedRoute = (serviceName: string, route?: string) =>
-            serviceName === 'analytics' && analyticsUnserveable ? undefined : route;
+            unserveable(serviceName) ? undefined : route;
 
         // Check which services are actually registered
         for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
@@ -4452,6 +4524,11 @@ export class ObjectStackProtocolImplementation implements
                     (err as any).issues = issues;
                     throw err;
                 }
+                // Keep the body verbatim, but not its *legacy operator
+                // spellings*: the schema just folded them to canonical and the
+                // result would otherwise be discarded, so every save minted new
+                // alias rows. See {@link graftNormalizedOperators}.
+                request.item = graftNormalizedOperators(request.item, parsed.data);
             }
         }
 

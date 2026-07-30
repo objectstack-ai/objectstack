@@ -135,7 +135,12 @@ describe('degraded-boot parity between the two connect paths (framework#3826)', 
         });
       }
 
-      it('announces the degraded state on stderr, which `os serve` boot-quiet cannot swallow', async () => {
+      // Parity with the engine-side pin in
+      // `objectql/src/engine-driver-connect-failfast.test.ts`: the stderr copy
+      // survives the operator's LOG LEVEL (`warn` is dropped outright at
+      // `error`/`fatal`/`silent`), not `os serve`'s boot-quiet window — that
+      // swallowed the banner at every level until framework#4012 fixed it.
+      it('announces the degraded state on stderr, which the operator log level cannot filter away', async () => {
         process.env[ENV] = '1';
         const written: string[] = [];
         const realWrite = process.stderr.write;

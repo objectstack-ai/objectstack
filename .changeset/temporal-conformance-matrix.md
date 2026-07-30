@@ -1,36 +1,33 @@
 ---
 "@objectstack/spec": minor
+"@objectstack/service-analytics": patch
 ---
 
-feat(spec): temporal conformance matrix — the runtime regression backstop for date/datetime filter semantics (ADR-0053 D-A3, #4081)
+feat(spec): a shared temporal conformance matrix, and the `$between` gap it found (ADR-0053 D-A3, #4081)
 
-The temporal seam broke four times (#3650, #3773, #3777, #4047), and each break
-was found by a user hitting it, not by a test: every fix left behind a suite
-proving its own issue against its own fixture, so nothing held the six
-evaluation surfaces to one standard and the fifth divergence would again be
-invisible.
+`@objectstack/spec/data` gains `TEMPORAL_ROWS` and `TEMPORAL_CASES` — the
+single set of temporal filter cases every backend is checked against, the twin
+of the existing `FILTER_LOGIC_CASES`. Five backends consume it and assert **row
+results**: `driver-sql` (and, through the live-dialect CI job, real Postgres and
+MySQL), `driver-memory`, `driver-mongodb` (real MongoDB), the analytics preview
+evaluator, and `formula`'s RLS write-side `check`.
 
-`@objectstack/spec/data` now exports that standard — the temporal twin of
-`FILTER_LOGIC_CASES` (#3774):
+This is the regression backstop ADR-0053 D-A3 has asked for since 2026-06 and
+the last of its decisions to be actioned. Four separate incidents — #3650,
+#3773, #3777, #4047 — were each found by a human by accident, and each left a
+suite proving only its own issue against its own fixture. Nothing held the
+backends to one standard, so the fifth divergence had nowhere to fail.
 
-- **`TEMPORAL_CONFORMANCE_ROWS`** — one fixture spanning the boundaries the
-  incidents turned on: an exact-midnight instant, intra-day times, the next
-  day's midnight, a month's last millisecond abutting the next month's first
-  instant, a leap day, a pre-epoch instant, and a `writerForm` tag (`wire` ISO
-  string vs `native` `Date`) so drivers seed genuinely mixed writer
-  populations (D-E4).
-- **`TEMPORAL_CONFORMANCE_CASES`** — `{ name, fieldType, operator, filter,
-  tokenFilter?, dateRange?, expected, note }`: field-type × operator ×
-  bound-semantics (point vs whole-day, D-D2) × relative-token cells, asserting
-  **row-id sets**, never emitted SQL. Each `note` names the incident the case
-  guards.
-- **`TEMPORAL_CONFORMANCE_NOW`** — the pinned instant consumers hand to
-  `resolveFilterTokens`, so `{today}`/`{90_days_ago}`/period-token spellings
-  must produce the same rows as their literal twins.
+**`service-analytics` — a real fix the matrix found on its first run.** The
+draft-preview evaluator had no `$between` case, so it fell through to its
+permissive `default` and matched **every** row: a drafted dashboard carrying a
+range filter charted the entire dataset, then changed its numbers at publish —
+the exact continuity the preview exists to provide. It now evaluates
+`$between`, sharing the upper-bound helper with `$lte` so the whole-day
+calendar-day rule (#3777) applies to a range's max as well.
 
-Six backends consume it through thin per-package tests: `driver-sql` (canonical
-+ un-backfilled legacy storage; live PG/MySQL via CI's temporal job),
-`driver-sqlite-wasm`, `driver-memory`, `driver-mongodb`, `formula`'s
-`matchesFilterCondition`, and the analytics preview evaluator. A red cell now
-names the backend that left the consensus and the issue it is about to
-re-introduce — the signal all four incidents lacked.
+Also recorded (ADR-0053 D-A3.1): `$gt` with a bare-day comparand on a
+`datetime` column cannot agree between typed and type-blind backends, and the
+gap is irreducible without field types. It is asserted in the shared matrix on
+`date` only, with the `datetime` cell left to the typed drivers' own suites,
+rather than papered over.

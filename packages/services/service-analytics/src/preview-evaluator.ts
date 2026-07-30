@@ -9,7 +9,7 @@
 //
 // Scope (deliberately the dataset-query subset, not a general engine):
 //   • Mongo-style `where` filters ($eq implicit, $ne/$gt/$gte/$lt/$lte/
-//     $in/$nin/$contains, $and/$or/$not)
+//     $between/$in/$nin/$contains, $and/$or/$not)
 //   • timeDimensions date-range filtering + granularity bucketing
 //     (day/week/month/quarter/year)
 //   • group-by dimensions; count / countDistinct / sum / avg / min / max
@@ -30,6 +30,21 @@ function compare(a: unknown, b: unknown): number {
   return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;
 }
 
+/**
+ * The inclusive-upper-bound comparison, with the calendar-day rule (#3777): a
+ * bare-day bound means "through that whole day", so it is evaluated half-open
+ * against the next day. String ordering makes `< nextDay` equivalent to
+ * `<= day` for plain date values, so this needs no field-type lookup — which
+ * matters here, because the preview sees drafted rows with no schema.
+ *
+ * Shared by `$lte` and the max of `$between` so the two cannot drift apart.
+ */
+function lteBound(value: unknown, bound: unknown): boolean {
+  const nextDay = nextUtcCalendarDay(bound);
+  if (nextDay != null) return compare(value, nextDay) < 0;
+  return compare(value, bound) <= 0;
+}
+
 function matchOp(value: unknown, op: string, expected: unknown): boolean {
   switch (op) {
     case '$eq': return value === expected || String(value) === String(expected);
@@ -44,9 +59,17 @@ function matchOp(value: unknown, op: string, expected: unknown): boolean {
       // a drafted chart shows different numbers than the published one. String
       // ordering makes `< nextDay` equivalent to `<= day` for plain date
       // values, so no type lookup is needed here either.
-      const nextDay = nextUtcCalendarDay(expected);
-      if (nextDay != null) return compare(value, nextDay) < 0;
-      return compare(value, expected) <= 0;
+      return lteBound(value, expected);
+    }
+    case '$between': {
+      // Was absent, so it fell to the permissive `default` and matched EVERY
+      // row — a drafted chart with a range filter silently charted the whole
+      // dataset, then changed at publish (found by the ADR-0053 D-A3 matrix,
+      // #4081). The max takes the same whole-day rule as `$lte`.
+      if (value == null || !Array.isArray(expected) || expected.length !== 2) return false;
+      const [min, max] = expected;
+      if (min == null || max == null) return false;
+      return compare(value, min) >= 0 && lteBound(value, max);
     }
     case '$in': return Array.isArray(expected) && expected.some((e) => value === e || String(value) === String(e));
     case '$nin': return Array.isArray(expected) && !expected.some((e) => value === e || String(value) === String(e));

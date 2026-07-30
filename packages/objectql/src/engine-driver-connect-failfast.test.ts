@@ -8,6 +8,7 @@
 // OS_ALLOW_DRIVER_CONNECT_FAILURE.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { ObjectLogger } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 import { DriverConnectError } from './driver-connect-errors.js';
 
@@ -138,28 +139,46 @@ describe('ObjectQL.init() — driver connect fail-fast (framework#3741)', () => 
     expect(warned).toContain('sql');
   });
 
-  it('repeats the degraded banner on stderr, which `os serve` boot-quiet cannot swallow', async () => {
-    // `os serve` replaces process.stdout.write for the whole boot, and Logger
-    // sends `warn` to stdout — so a logger-only banner is invisible in exactly
-    // the deployment this flag exists for.
+  it('repeats the degraded banner on stderr, which the operator log level cannot filter away', async () => {
+    // The banner's `logger.warn` is dropped OUTRIGHT at `error`/`fatal`/`silent`
+    // — `Logger.write()` returns before touching a stream — and a production
+    // host at `error` is exactly the deployment this flag exists for. The stderr
+    // copy is what survives that.
+    //
+    // This used to be justified by `os serve`'s boot-quiet stdout capture
+    // instead; that swallowed the banner at EVERY level until framework#4012
+    // fixed it. Pinning the level filter keeps the test tied to the reason that
+    // is still true.
     process.env[ENV] = '1';
     const written: string[] = [];
-    const realWrite = process.stderr.write;
+    const onStdout: string[] = [];
+    const realErrWrite = process.stderr.write;
+    const realOutWrite = process.stdout.write;
     (process.stderr as { write: unknown }).write = (chunk: any) => {
       written.push(String(chunk));
       return true;
     };
+    (process.stdout as { write: unknown }).write = (chunk: any) => {
+      onStdout.push(String(chunk));
+      return true;
+    };
     try {
       const engine = new ObjectQL({
-        logger: { debug() {}, info() {}, warn() {}, error() {} },
+        // A REAL logger, silenced the way a production host silences it.
+        logger: new ObjectLogger({ level: 'error' }),
       } as any);
       engine.registerDriver(fails('sql', 'down'), true);
       await engine.init();
     } finally {
-      (process.stderr as { write: unknown }).write = realWrite;
+      (process.stderr as { write: unknown }).write = realErrWrite;
+      (process.stdout as { write: unknown }).write = realOutWrite;
     }
 
     expect(written.join('')).toContain('DEGRADED BOOT');
+    // The half that makes this a real pin: at `error` the logger emitted
+    // NOTHING, so stderr is the only channel that carried the banner. Drop the
+    // helper and this deployment goes silent.
+    expect(onStdout.join('')).not.toContain('DEGRADED BOOT');
   });
 
   it('treats a falsy opt-in value as off — still fail-fast', async () => {

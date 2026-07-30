@@ -18,6 +18,7 @@
 
 import { resolveLocale } from '@objectstack/core';
 import { CoreServiceName, resolveObjectFieldLabels, toLocaleDescriptors } from '@objectstack/spec/system';
+import { isServiceServeable } from '../service-serveable.js';
 import type { TranslationData } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -39,7 +40,13 @@ export async function handleI18nRequest(
     _context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
     const i18nService = await deps.getService(CoreServiceName.enum.i18n);
-    if (!i18nService) return { handled: true, response: deps.error('i18n service not available', 501) };
+    // [#4058] An empty slot and a slot filled by a self-declared non-handler
+    // (`handlerReady: false`, ADR-0076 D12) are the same amount of i18n. Both
+    // in-memory providers of this slot really translate, so both declare
+    // `degraded` (#4058 step 1 — `createMemoryI18n`, which plugin-dev also
+    // wraps) and `handlerReady` defaults to `true` for them: they keep serving.
+    // This gate is for an occupant that would answer with invented strings.
+    if (!isServiceServeable(i18nService)) return { handled: true, response: deps.error('i18n service not available', 501) };
 
     const m = method.toUpperCase();
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);

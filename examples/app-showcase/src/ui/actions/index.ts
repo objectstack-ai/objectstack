@@ -109,6 +109,11 @@ export const RecalcEstimateAction = defineAction({
   target: '/api/v1/showcase/recalc',
   successMessage: 'Estimate recalculated.',
   locations: ['record_more', 'record_section'],
+  // The endpoint is record-scoped and rejects a body without an id. On a
+  // record surface the page supplies it; invoked from a LIST ROW (see the
+  // `legacy_row_actions` view) nothing else can, so name the body key the
+  // clicked row's id should be written to.
+  recordIdParam: 'recordId',
   refreshAfter: true,
 });
 

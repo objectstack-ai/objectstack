@@ -12,6 +12,7 @@
  */
 
 import { CoreServiceName } from '@objectstack/spec/system';
+import { isServiceServeable } from '../service-serveable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -36,7 +37,13 @@ export async function handleStorageRequest(
     // already ends at the services map (and when `services` is a Map, the
     // legacy index access returned undefined anyway), so it is dropped here.
     const storageService = await deps.getService(CoreServiceName.enum['file-storage']);
-    if (!storageService) {
+    // [#4058] Same 501 for an empty slot and for a slot filled by a
+    // self-declared non-handler (`handlerReady: false`, ADR-0076 D12) — "not
+    // configured" is the honest answer to both. NOT aimed at the in-memory dev
+    // file store: that one really stores and really reads back, so it declares
+    // `degraded` (`handlerReady: true`) and still serves here. The gate exists
+    // for the occupant that only *claims* to store.
+    if (!isServiceServeable(storageService)) {
         return { handled: true, response: deps.error('File storage not configured', 501) };
     }
 

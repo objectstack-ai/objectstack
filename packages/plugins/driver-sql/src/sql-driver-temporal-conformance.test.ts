@@ -1,141 +1,142 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Temporal filter conformance for the SQL compiler, on a real engine
- * (in-memory better-sqlite3) — asserting ROW RESULTS, not emitted SQL
- * (ADR-0053 D-A3).
+ * Temporal conformance for the SQL filter compiler (ADR-0053 D-A3).
  *
- * The shared cases come from `@objectstack/spec/data` so this backend,
- * `driver-sqlite-wasm`, `driver-memory`, `driver-mongodb`, `formula`'s
- * `matchesFilterCondition` and the analytics preview evaluator are all held to
- * one standard — see `temporal-conformance.ts` for the four incidents
- * (#3650/#3773/#3777/#4047) that standard exists to end. Adding a case there
- * adds it to all six at once.
+ * The cases come from `@objectstack/spec/data`, so this backend, the in-memory
+ * and document drivers, the analytics preview and `formula`'s write-side
+ * `check` evaluator are all held to one standard — see `temporal-conformance.ts`
+ * for the four divergences that standard exists to prevent. Adding a case there
+ * adds it here.
  *
- * Three sweeps here, because this driver owns two extra axes:
- *   1. canonical storage — rows written through `create()`, which the D-B1
- *      convention converges to canonical UTC text;
- *   2. the same table again with each case's relative-token spelling resolved
- *      through `@objectstack/core`'s `resolveFilterTokens` (the D-A3
- *      "token → row results" axis);
+ * This is the TYPED half of the matrix: the columns are declared through
+ * `initObjects`, so the driver knows `at` is a `Field.datetime` and `on` a
+ * `Field.date` and coerces comparands accordingly. That the same case yields the
+ * same row set here and in the type-blind backends is the whole assertion.
+ *
+ * Three sweeps, because this driver owns two extra axes (#4081):
+ *   1. canonical storage — rows seeded through `create()` in their tagged
+ *      writer forms (ISO string vs JS `Date`, the D-E4 mixed-writer axis),
+ *      which `formatInput` must converge;
+ *   2. the same cases spelled in relative tokens, resolved through
+ *      `@objectstack/core`'s `resolveFilterTokens` at the pinned `TEMPORAL_NOW`
+ *      — the D-A3 "token → row results" axis;
  *   3. legacy storage — the same rows seeded RAW as pre-#3912 forms (INTEGER
  *      epoch ms / zone-naive TEXT) with the canonical marker cleared, so the
  *      read-repair path answers the same table.
  *
- * Under CI's `Temporal Conformance (live PG + MySQL)` job this whole file also
- * runs against real non-UTC Postgres and MySQL servers — the server-timezone
- * axis needs no extra code here.
+ * Runs against a real SQLite, and — through the `Temporal Conformance
+ * (live PG + MySQL)` CI job, which runs this package's whole suite under
+ * `TZ=America/New_York` against servers on `Asia/Shanghai` — against real
+ * Postgres and MySQL too, with no workflow change needed.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  TEMPORAL_CONFORMANCE_CASES,
-  TEMPORAL_CONFORMANCE_NOW,
-  TEMPORAL_CONFORMANCE_ROWS,
-} from '@objectstack/spec/data';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { TEMPORAL_CASES, TEMPORAL_NOW, TEMPORAL_ROWS } from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
-import { SqlDriver } from './index.js';
+import { SqlDriver } from '../src/index.js';
 import { LegacyStorageDriver } from './legacy-datetime-storage.testkit.js';
 
-const ids = (rows: any[]) => rows.map((r: any) => String(r.id)).sort();
-
 const resolveTokens = <T,>(filter: T): T =>
-  resolveFilterTokens(filter, { now: new Date(TEMPORAL_CONFORMANCE_NOW) });
+  resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
 
-const TASK = {
-  name: 'task',
+const CONFORMANCE_OBJECT = {
+  name: 'conformance',
   fields: {
-    title: { type: 'string' },
-    happened_at: { type: 'datetime' },
-    happened_on: { type: 'date' },
+    at: { type: 'datetime' },
+    on: { type: 'date' },
+    why: { type: 'string' },
   },
 };
 
-describe('SqlDriver temporal conformance (SQLite, canonical storage)', () => {
+describe('sql-driver — temporal conformance', () => {
   let driver: SqlDriver;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     driver = new SqlDriver({
       client: 'better-sqlite3',
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
     });
-    await driver.initObjects([TASK]);
-    for (const row of TEMPORAL_CONFORMANCE_ROWS) {
+    // The declaration is what makes this the typed half — `at` is an instant,
+    // `on` a calendar day, and the driver's coercion follows from that.
+    await driver.initObjects([CONFORMANCE_OBJECT]);
+    for (const r of TEMPORAL_ROWS) {
       await driver.create(
-        'task',
+        'conformance',
         {
-          id: row.id,
-          title: row.id,
-          // The writer-form axis: `formatInput` must converge both shapes.
-          happened_at: row.writerForm === 'native' ? new Date(row.happened_at) : row.happened_at,
-          happened_on: row.happened_on,
+          id: r.id,
+          // The writer-form axis (D-E4): both writer populations must
+          // converge to the one canonical storage form on write.
+          at: r.writerForm === 'native' ? new Date(r.at) : r.at,
+          on: r.on,
+          why: r.why,
         },
         { bypassTenantAudit: true } as any,
       );
     }
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await driver.disconnect?.();
   });
 
-  for (const c of TEMPORAL_CONFORMANCE_CASES) {
+  for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const found = await driver.find('task', { where: c.filter } as any);
-      expect(ids(found), c.note).toEqual(c.expected);
+      const rows = await driver.find('conformance', { where: c.filter } as any);
+      const got = (rows as any[]).map((r) => r.id).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
     });
 
     if (c.tokenFilter) {
       it(`${c.name} — via relative tokens`, async () => {
-        const found = await driver.find('task', { where: resolveTokens(c.tokenFilter) } as any);
-        expect(ids(found), c.note).toEqual(c.expected);
+        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) } as any);
+        const got = (rows as any[]).map((r) => r.id).sort();
+        expect(got, c.note).toEqual([...c.expected].sort());
       });
     }
   }
 });
 
-describe('SqlDriver temporal conformance (SQLite, un-backfilled legacy storage)', () => {
+describe('sql-driver — temporal conformance on un-backfilled legacy storage', () => {
   let driver: LegacyStorageDriver;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     driver = new LegacyStorageDriver({
       client: 'better-sqlite3',
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
     });
-    await driver.initObjects([TASK]);
+    await driver.initObjects([CONFORMANCE_OBJECT]);
     // The two pre-#3912 storage forms, split by the same writer-form tag:
-    // `native` writes were INTEGER epoch ms (a bound JS Date), `wire` writes
-    // were zone-naive TEXT (CURRENT_TIMESTAMP / REST payloads). One column,
-    // both forms — the read repair must answer the same table the canonical
-    // sweep does. (`happened_on` is unaffected: bare-day text has been the
-    // date canon since Phase 1.)
+    // `native` writes landed as INTEGER epoch ms (a bound JS Date), `wire`
+    // writes as zone-naive TEXT (CURRENT_TIMESTAMP / REST payloads). One
+    // column, both forms — the read-repair path must answer the same table
+    // the canonical sweep does. (`on` is unaffected: bare-day text has been
+    // the date canon since Phase 1.)
     await driver.seedLegacyRows(
-      'task',
-      'happened_at',
-      TEMPORAL_CONFORMANCE_ROWS.map((row) => ({
-        id: row.id,
-        title: row.id,
-        happened_at:
-          row.writerForm === 'native'
-            ? Date.parse(row.happened_at)
-            : row.happened_at.replace('T', ' ').replace('Z', ''),
-        happened_on: row.happened_on,
+      'conformance',
+      'at',
+      TEMPORAL_ROWS.map((r) => ({
+        id: r.id,
+        at: r.writerForm === 'native' ? Date.parse(r.at) : r.at.replace('T', ' ').replace('Z', ''),
+        on: r.on,
+        why: r.why,
       })),
     );
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await driver.disconnect?.();
   });
 
   // Literal spellings only: the token axis is orthogonal to storage form and
   // already swept above — a divergence here is a repair-path bug by construction.
-  for (const c of TEMPORAL_CONFORMANCE_CASES) {
+  for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const found = await driver.find('task', { where: c.filter } as any);
-      expect(ids(found), c.note).toEqual(c.expected);
+      const rows = await driver.find('conformance', { where: c.filter } as any);
+      const got = (rows as any[]).map((r) => r.id).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
     });
   }
 });

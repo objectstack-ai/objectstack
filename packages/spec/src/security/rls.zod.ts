@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
 
 /**
  * # Row-Level Security (RLS) Protocol
@@ -211,6 +212,36 @@ export type RLSOperation = z.infer<typeof RLSOperation>;
  * }
  * ```
  */
+/**
+ * Keys {@link RowLevelSecurityPolicySchema} declares (drift-guarded by
+ * rls.test.ts). `priority` is deliberately absent: it is a {@link retiredKey}
+ * tombstone in the shape — declared so its rejection carries the prescription,
+ * but never a suggestion target.
+ */
+const RLS_POLICY_KEYS = [
+  'name', 'label', 'description', 'object', 'operation', 'using', 'check',
+  'positions', 'enabled', 'tags',
+] as const;
+
+const rlsPolicyUnknownKeyError = strictUnknownKeyError({
+  surface: 'this RLS policy',
+  knownKeys: RLS_POLICY_KEYS,
+  aliases: {
+    // ADR-0090 D3 renamed the pre-D3 `roles` vocabulary to `positions`.
+    roles: 'positions',
+    role: 'positions',
+    // PostgreSQL spells the write-side clause `WITH CHECK`.
+    withcheck: 'check',
+    // The read-side clause under other names an author reaches for first.
+    condition: 'using',
+    filter: 'using',
+    where: 'using',
+  },
+  history:
+    'Until #4001 these were dropped silently — the policy still parsed, so a ' +
+    'row-level restriction the author wrote was never compiled into the filter.',
+});
+
 export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
   /**
    * Unique identifier for this policy.
@@ -414,7 +445,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
   tags: z.array(z.string())
     .optional()
     .describe('Policy categorization tags'),
-}).superRefine((data, ctx) => {
+}, { error: rlsPolicyUnknownKeyError }).strict().superRefine((data, ctx) => {
   // Ensure at least one of USING or CHECK is provided
   if (!data.using && !data.check) {
     ctx.addIssue({

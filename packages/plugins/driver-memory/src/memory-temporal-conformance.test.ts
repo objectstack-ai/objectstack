@@ -1,69 +1,64 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Temporal filter conformance for the in-memory driver (ADR-0053 D-A3).
+ * Temporal conformance for the in-memory driver (ADR-0053 D-A3).
  *
- * The shared cases come from `@objectstack/spec/data` — see
- * `temporal-conformance.ts` for the four incidents (#3650/#3773/#3777/#4047)
- * the table exists to end. This driver's own incident is #4047: mingo compares
- * across JS types the way MongoDB compares across BSON types, so a mixed
- * string/Date column answered a window with whichever half matched the
- * comparand's type. The fixture's writer-form tags reproduce exactly that
- * mixed-writer column through `create()`, and the conformance sweep proves the
- * converged storage answers every shared case.
+ * The cases come from `@objectstack/spec/data` so this backend, `driver-sql`,
+ * `driver-mongodb`, the analytics preview and `formula`'s write-side `check`
+ * evaluator are all held to one standard — see `temporal-conformance.ts` for
+ * the four divergences that standard exists to prevent, one of which (#4047)
+ * was this driver's.
+ *
+ * Rows are seeded in their tagged writer forms (ISO string vs JS `Date` — the
+ * D-E4 mixed-writer axis), reproducing exactly the mixed column #4047 hit;
+ * the sweep proves the converged storage answers every shared case. Cases
+ * carrying a token spelling also run through `resolveFilterTokens` at the
+ * pinned `TEMPORAL_NOW` — the D-A3 "token → row results" axis (#4081).
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import {
-  TEMPORAL_CONFORMANCE_CASES,
-  TEMPORAL_CONFORMANCE_NOW,
-  TEMPORAL_CONFORMANCE_ROWS,
-} from '@objectstack/spec/data';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { TEMPORAL_CASES, TEMPORAL_NOW, TEMPORAL_ROWS } from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
 import { InMemoryDriver } from './memory-driver.js';
 
-const ids = (rows: any[]) => rows.map((r: any) => String(r.id)).sort();
-
 const resolveTokens = <T,>(filter: T): T =>
-  resolveFilterTokens(filter, { now: new Date(TEMPORAL_CONFORMANCE_NOW) });
+  resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
 
-describe('InMemoryDriver temporal conformance', () => {
+describe('driver-memory — temporal conformance', () => {
   let driver: InMemoryDriver;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     driver = new InMemoryDriver({});
     await driver.connect();
-    // Declaring the object is what teaches the driver which fields are
-    // temporal (D-E2) — without it, no coercion happens at all.
-    await driver.syncSchema('task', {
-      name: 'task',
-      fields: {
-        title: { type: 'string' },
-        happened_at: { type: 'datetime' },
-        happened_on: { type: 'date' },
-      },
+    // Declaring the object is what teaches this driver the field types (#4047);
+    // without it the values would keep whatever form the writer produced.
+    await driver.syncSchema('conformance', {
+      name: 'conformance',
+      fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } },
     });
-    for (const row of TEMPORAL_CONFORMANCE_ROWS) {
-      await driver.create('task', {
-        id: row.id,
-        title: row.id,
+    for (const r of TEMPORAL_ROWS) {
+      await driver.create('conformance', {
+        id: r.id,
         // The mixed-writer axis (D-E4): both shapes must converge on write.
-        happened_at: row.writerForm === 'native' ? new Date(row.happened_at) : row.happened_at,
-        happened_on: row.happened_on,
+        at: r.writerForm === 'native' ? new Date(r.at) : r.at,
+        on: r.on,
+        why: r.why,
       });
     }
   });
 
-  for (const c of TEMPORAL_CONFORMANCE_CASES) {
+  for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const found = await driver.find('task', { where: c.filter } as any);
-      expect(ids(found), c.note).toEqual(c.expected);
+      const rows = await driver.find('conformance', { where: c.filter } as any);
+      const got = (rows as any[]).map((r) => r.id).sort();
+      expect(got, c.note).toEqual([...c.expected].sort());
     });
 
     if (c.tokenFilter) {
       it(`${c.name} — via relative tokens`, async () => {
-        const found = await driver.find('task', { where: resolveTokens(c.tokenFilter) } as any);
-        expect(ids(found), c.note).toEqual(c.expected);
+        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) } as any);
+        const got = (rows as any[]).map((r) => r.id).sort();
+        expect(got, c.note).toEqual([...c.expected].sort());
       });
     }
   }

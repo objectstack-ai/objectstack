@@ -2,316 +2,345 @@
 
 /**
  * Canonical conformance cases for **temporal filter semantics** — the single
- * source of truth every evaluation surface that compares a `date`/`datetime`
- * comparand against stored rows is checked against (ADR-0053 D-A3).
+ * source of truth every filter backend is checked against (ADR-0053 D-A3).
  *
- * ## Why this exists
+ * The twin of {@link FILTER_LOGIC_CASES}, built for the same reason and after
+ * the same kind of history. One temporal comparison is evaluated by six
+ * independent implementations:
  *
- * The temporal seam broke four times, and each break was found by accident,
- * not by a test:
- *
- * | Issue | Symptom | Fix |
- * |---|---|---|
- * | #3650 | analytics dropped a date window entirely → charted all history | PR #3766 |
- * | #3773 | SQLite datetime bucketing read epoch ms as Julian days → NULL buckets | PR #3775 |
- * | #3777 | bare-day upper bound anchored to midnight → lost the final day (default dashboard config) | PR #4041 / #4048 |
- * | #4047 | memory/mongo compared string comparands against `Date` values by type → windows returned nothing | PR #4060 |
- *
- * Each fix left behind its own suite proving its own issue, with its own
- * fixture. Nothing held the six evaluation surfaces to ONE standard, so the
- * fifth divergence would again be invisible until a user hit it. This table is
- * that standard — the temporal twin of {@link FILTER_LOGIC_CASES} (#3774),
- * consumed the same way: each backend has a thin test that seeds
- * {@link TEMPORAL_CONFORMANCE_ROWS} through its own write path and asserts the
- * row-id sets in {@link TemporalConformanceCase.expected}. **Row results, not
- * emitted SQL** — the ADR's hard requirement.
- *
- * | Backend | Where |
+ * | Backend | Entry point |
  * |---|---|
- * | SQL compiler (SQLite; live PG + MySQL in CI's temporal job) | `driver-sql` |
- * | SQLite-wasm (inherits the SQL compiler) | `driver-sqlite-wasm` |
- * | In-memory matcher | `driver-memory` |
- * | MongoDB (real server via mongodb-memory-server) | `driver-mongodb` |
- * | Record-at-a-time evaluator (RLS write-side `check`) | `formula` `matchesFilterCondition` |
- * | Dataset draft preview | `service-analytics` `preview-evaluator` |
+ * | SQL compiler | `driver-sql` `applyFilterCondition` (+ `driver-sqlite-wasm`) |
+ * | In-memory store | `driver-memory` `convertToMongoQuery` → mingo |
+ * | Document store | `driver-mongodb` `translateFilter` |
+ * | Analytics raw SQL | `service-analytics` `NativeSQLStrategy` |
+ * | Draft preview | `service-analytics` `preview-evaluator` |
+ * | RLS write-side `check` | `formula` `matchesFilterCondition` |
  *
- * ## The axes (D-A3, extended by D-D2 and D-E4)
+ * They disagreed four times, and every time a human found it by accident:
+ * #3650 (the window was dropped entirely), #3773 (buckets collapsed to NULL),
+ * #3777 (a bare-day upper bound dropped the final day — the default dashboard
+ * configuration), #4047 (cross-type comparison matched nothing at all on the
+ * non-SQL drivers). Each fix left a suite proving *its own* issue, with its own
+ * fixture; nothing held the backends to one standard, so the fifth divergence
+ * had nowhere to fail.
  *
- * - **field-type**: {@link TemporalConformanceCase.fieldType} — `date`
- *   (tz-naive calendar day) vs `datetime` (UTC instant).
- * - **operator**: eq, gte/gt/lt/lte windows, in, between, and the analytics
- *   `timeDimensions.dateRange` spelling ({@link TemporalConformanceCase.dateRange}).
- * - **bound-semantics** (D-D2): point vs whole-day — a bare `YYYY-MM-DD`
- *   upper bound means the WHOLE day (compiled half-open, `< next-day`), while
- *   lower/strict bounds and full-ISO comparands anchor to the instant.
- * - **relative-token**: {@link TemporalConformanceCase.tokenFilter} spells the
- *   same filter with `{today}` / `{90_days_ago}` / period tokens. Consumers
- *   resolve it via `@objectstack/core`'s `resolveFilterTokens` pinned to
- *   {@link TEMPORAL_CONFORMANCE_NOW} and must get the same ids — so a resolver
- *   drift and an evaluator drift are distinguishable at a glance.
- * - **storage-form** (D-E4): {@link TemporalConformanceRow.writerForm} tags
- *   each row with a writer shape (`wire` ISO string vs `native` JS `Date`), so
- *   the drivers whose columns were mixed-form (#4047) seed a genuinely mixed
- *   table. `driver-sql` additionally re-runs the table over legacy epoch/naive
- *   storage via its `LegacyStorageDriver` testkit (#3912).
- * - **driver**: every backend above. The SQL consumer also runs under CI's
- *   `Temporal Conformance (live PG + MySQL)` job (`ci.yml`), which supplies
- *   the non-UTC server-timezone axis for free.
+ * Adding a case here adds it to every backend at once. That is the point.
  *
- * ## Deliberate scope — a case belongs here only if EVERY backend must agree
+ * # What belongs here
  *
- * Two consumers (`matchesFilterCondition`, the preview's `matchesWhere`)
- * evaluate a bare record with **no schema**: they cannot canonicalise a
- * comparand to a column's storage form, only compare canonical text
- * lexicographically (which ISO-8601 makes chronological). Three cells are
- * therefore *schema-aware-only* and deliberately absent:
+ * Only rules **every** backend must agree on: what a comparand *denotes*.
+ * Storage form is deliberately out of scope — it is per-dialect by design
+ * (ADR-0053 D-B/D-E: canonical UTC text on SQL, BSON `Date` on mongo), so it is
+ * asserted in each driver's own suite. What is shared is the *semantics* those
+ * storage forms have to preserve.
  *
- * - `$eq` / `$in` with a bare day on a `datetime` column (means "the midnight
- *   instant" to a driver, plain string inequality to a schema-blind matcher);
- * - `$gt` where a stored instant sits exactly AT the bound's midnight (the
- *   driver excludes it; lexicographic text compare includes it);
- * - `Field.time` (D-C) — its own convention, its own suites.
+ * # Why the values are strings
  *
- * Those cells stay pinned where they always were — the per-driver suites
- * (`sql-driver-calendar-day-upper-bound.test.ts` and kin). Every case below
- * either avoids the ambiguous shape (no fixture row at a `$gt` bound's
- * midnight) or targets a `date` column, where text equality IS the contract.
+ * Every row value is a string in the platform's wire form — canonical UTC ISO
+ * for `datetime`, `YYYY-MM-DD` for `date`. That is what lets one table serve
+ * both the typed backends (which coerce it into their storage form on write)
+ * and the type-blind ones (`formula`, the preview evaluator), which see a bare
+ * record with no schema to consult. A backend that needs richer input builds it
+ * from these strings; none needs less.
+ *
+ * # One cell is NOT shared: `$gt` with a bare day on a `datetime` column
+ *
+ * Measured, not assumed. A typed backend anchors the bound to midnight, so a
+ * value sitting exactly ON midnight is excluded:
+ *
+ *     at > '2026-07-28'  →  at > '2026-07-28T00:00:00.000Z'  →  excludes 00:00
+ *
+ * A type-blind one compares the raw strings, and `'2026-07-28T00:00:00.000Z'`
+ * sorts AFTER `'2026-07-28'` on the shared prefix, so it keeps that row.
+ *
+ * The gap is irreducible without field types. The trick that makes the upper
+ * bound type-blind — rewriting `<= day` as `< nextDay` — has no lower-bound
+ * analogue: anchoring the bound to `…T00:00:00.000Z` would fix `datetime` and
+ * break `date`, because `'2026-07-28' >= '2026-07-28T00:00:00.000Z'` is false.
+ *
+ * It bites only a value stored at exactly 00:00:00.000 under strict-greater, so
+ * `$gt` is asserted here on the `date` column (where every backend agrees) and
+ * the `datetime` cell is left to the typed drivers' own suites. `$gte` is
+ * shared: both readings include the midnight row, so they agree by luck of the
+ * boundary being inclusive — which is worth pinning precisely because it is
+ * luck. Tracked separately rather than papered over.
+ *
+ * # The relative-token axis (D-A3's "token → row results", #4081)
+ *
+ * The four incidents happened below token resolution, but the tokens are how
+ * authors actually WRITE these filters — `{today}`, `{90_days_ago}`,
+ * `{current_month_end}` — and nothing proved the resolved comparand reaches
+ * the same rows on every backend. So a case may carry
+ * {@link TemporalCase.tokenFilter} (and, for the analytics window path,
+ * {@link TemporalCase.dateRange}): the SAME filter spelled in tokens.
+ * Consumers that can reach `@objectstack/core` resolve it via
+ * `resolveFilterTokens` pinned to {@link TEMPORAL_NOW} and must land on the
+ * same {@link TemporalCase.expected} as the literal spelling — so a resolver
+ * drift and an evaluator drift are distinguishable at a glance. `formula`
+ * deliberately depends on nothing but `spec` and skips the token sweep: by the
+ * time a filter reaches it, tokens are already resolved.
+ *
+ * # The writer-form seeding hint (D-E4 `mixed-writer-form`)
+ *
+ * Storage form stays out of scope here (see "What belongs here"), but HOW a
+ * row is written is exactly how #4047 happened: the drivers' mixed columns
+ * were produced by two writer populations (REST/JSON ISO strings vs SDK
+ * `Date`s). {@link TemporalRow.writerForm} tags each row so a driver consumer
+ * can seed a genuinely mixed writer population through its own `create()` —
+ * the assertion stays "which rows match", the convergence itself remains each
+ * driver's own suite's claim.
  */
 
 import type { FilterCondition } from './filter.zod';
 
 /**
- * The pinned reference instant for resolving {@link TemporalConformanceCase.tokenFilter}
- * and {@link TemporalConformanceCase.dateRange}: consumers pass
- * `{ now: new Date(TEMPORAL_CONFORMANCE_NOW) }` (UTC, no timezone) to
+ * The pinned reference instant for resolving {@link TemporalCase.tokenFilter}
+ * and {@link TemporalCase.dateRange}: consumers pass
+ * `{ now: new Date(TEMPORAL_NOW) }` (UTC, no timezone) to
  * `resolveFilterTokens`. Mid-day, so no token resolution sits on a day
- * boundary; `{today}` = `2026-07-28`, matching the #3777/#4047 incident
- * fixtures.
+ * boundary; `{today}` resolves to the fixture's boundary day `2026-07-28`,
+ * `{90_days_ago}` to `2026-04-29`, `{yesterday}` to `2026-07-27`.
  */
-export const TEMPORAL_CONFORMANCE_NOW = '2026-07-28T12:00:00.000Z';
+export const TEMPORAL_NOW = '2026-07-28T12:00:00.000Z';
 
 /**
- * Which write-path shape a consumer should seed the row through, where the
- * distinction exists (D-E4 `mixed-writer-form`): `wire` = the ISO-8601 string
- * a REST/JSON write delivers; `native` = a JS `Date`, what SDK callers and the
- * drivers' own timestamp defaults produce. Both must converge to one stored
- * form — the columns that held both at once are how #4047 happened.
+ * Which write-path shape a driver consumer should seed the row through, where
+ * the distinction exists (D-E4): `wire` = the ISO-8601 string a REST/JSON
+ * write delivers; `native` = a JS `Date`, what SDK callers and the drivers'
+ * own timestamp defaults produce. Both writer populations appear inside AND
+ * outside every window, so a backend that converges only one form fails.
  */
 export type TemporalWriterForm = 'wire' | 'native';
 
-/** A row in the conformance fixture. */
-export interface TemporalConformanceRow {
+/**
+ * A row in the temporal fixture.
+ *
+ * `at` is a `Field.datetime` (an instant) and `on` is a `Field.date` (a
+ * timezone-naive calendar day); the two carry the SAME calendar day per row, so
+ * a case can be run against either column and the difference in result is
+ * attributable to the field type rather than to the data.
+ */
+export interface TemporalRow {
   id: string;
-  /** Canonical UTC instant, `YYYY-MM-DDTHH:MM:SS.sssZ` (D-B1). */
-  happened_at: string;
-  /** The instant's UTC calendar day — the row's `Field.date` value. */
-  happened_on: string;
-  /** Writer shape for the mixed-writer-form axis — see {@link TemporalWriterForm}. */
+  /** `Field.datetime` — canonical UTC ISO. */
+  at: string;
+  /** `Field.date` — the calendar day of `at`, timezone-naive. */
+  on: string;
+  /** Writer-population seeding hint for drivers — see {@link TemporalWriterForm}. */
   writerForm: TemporalWriterForm;
+  /** Why the row is in the fixture — surfaced when a case fails. */
+  why: string;
 }
 
 /**
- * The fixture, chronological. Every boundary the four incidents turned on
- * appears as a row: a pre-epoch instant (negative epoch ms), a leap day, the
- * last millisecond of a month abutting the next month's first instant, a
- * window edge, and a full day of instants (its exact midnight, two intra-day
- * times, and the NEXT day's midnight — the row a whole-day upper bound must
- * exclude). Writer forms alternate so both shapes appear inside and outside
- * every window.
+ * The fixture. Every row exists to make one boundary decidable, and the times
+ * of day are chosen so a midnight-anchored bound and a whole-day bound cannot
+ * return the same set: `d_open` sits exactly ON midnight, `d_mid`/`d_late`
+ * strictly after it, and `d_next` on the next midnight — the exclusive edge.
  */
-export const TEMPORAL_CONFORMANCE_ROWS: readonly TemporalConformanceRow[] = [
-  { id: 'pre_epoch', happened_at: '1969-12-31T23:00:00.000Z', happened_on: '1969-12-31', writerForm: 'wire' },
-  { id: 'leap', happened_at: '2024-02-29T12:00:00.000Z', happened_on: '2024-02-29', writerForm: 'native' },
-  { id: 'window_out', happened_at: '2026-04-19T10:00:00.000Z', happened_on: '2026-04-19', writerForm: 'wire' },
-  { id: 'month_end', happened_at: '2026-06-30T23:59:59.999Z', happened_on: '2026-06-30', writerForm: 'wire' },
-  { id: 'month_start', happened_at: '2026-07-01T00:00:00.000Z', happened_on: '2026-07-01', writerForm: 'native' },
-  { id: 'week_edge', happened_at: '2026-07-21T08:30:00.000Z', happened_on: '2026-07-21', writerForm: 'wire' },
-  { id: 'yesterday', happened_at: '2026-07-27T14:00:00.000Z', happened_on: '2026-07-27', writerForm: 'native' },
-  { id: 'midnight', happened_at: '2026-07-28T00:00:00.000Z', happened_on: '2026-07-28', writerForm: 'native' },
-  { id: 'morning', happened_at: '2026-07-28T09:15:00.000Z', happened_on: '2026-07-28', writerForm: 'wire' },
-  { id: 'evening', happened_at: '2026-07-28T21:40:00.000Z', happened_on: '2026-07-28', writerForm: 'wire' },
-  { id: 'next_midnight', happened_at: '2026-07-29T00:00:00.000Z', happened_on: '2026-07-29', writerForm: 'native' },
+export const TEMPORAL_ROWS: readonly TemporalRow[] = [
+  { id: 'a_epoch', at: '1969-12-31T23:00:00.000Z', on: '1969-12-31', writerForm: 'wire',   why: 'pre-epoch instant (negative epoch ms) — any surface assuming a non-negative epoch, or reading one as a Julian day (#3773), breaks here first' },
+  { id: 'a_old',   at: '2026-04-19T10:00:00.000Z', on: '2026-04-19', writerForm: 'wire',   why: 'well before any window here' },
+  { id: 'b_prev',  at: '2026-07-27T14:00:00.000Z', on: '2026-07-27', writerForm: 'native', why: 'the day before the boundary day' },
+  { id: 'c_open',  at: '2026-07-28T00:00:00.000Z', on: '2026-07-28', writerForm: 'native', why: 'boundary day at exactly 00:00 — the only instant a midnight-anchored bound keeps' },
+  { id: 'd_mid',   at: '2026-07-28T09:15:00.000Z', on: '2026-07-28', writerForm: 'wire',   why: 'boundary day, morning — dropped by the #3777 bug' },
+  { id: 'e_late',  at: '2026-07-28T21:40:00.000Z', on: '2026-07-28', writerForm: 'wire',   why: 'boundary day, evening — dropped by the #3777 bug' },
+  { id: 'f_next',  at: '2026-07-29T00:00:00.000Z', on: '2026-07-29', writerForm: 'native', why: 'next midnight — the exclusive edge a half-open bound must NOT keep' },
+  { id: 'g_eom',   at: '2026-07-31T23:59:59.999Z', on: '2026-07-31', writerForm: 'wire',   why: 'last representable instant of a month — month rollover' },
+  { id: 'h_leap',  at: '2024-02-29T12:00:00.000Z', on: '2024-02-29', writerForm: 'native', why: 'leap day — February rollover' },
 ] as const;
 
-/** One conformance case: a temporal filter and the row ids it must match. */
-export interface TemporalConformanceCase {
+/** Which declared field type a case filters on. */
+export type TemporalFieldKind = 'datetime' | 'date';
+
+/** One conformance case: a filter on one column, and the ids it must match. */
+export interface TemporalCase {
   /** Stable identifier, usable as a test name. */
   name: string;
-  /** Which fixture column the filter targets: `happened_at` or `happened_on`. */
-  fieldType: 'date' | 'datetime';
   /**
-   * Operator-axis family. `between` exists so the one consumer whose DSL
-   * subset has no `$between` (the analytics preview `where`) can skip those
-   * cases visibly instead of evaluating them permissively.
+   * Which fixture column — and therefore which declared field type — the
+   * filter is applied to. A typed backend declares the column accordingly; a
+   * type-blind one just reads the property.
    */
-  operator: 'eq' | 'in' | 'range' | 'between';
-  /** The filter with literal comparands — ground truth for all six backends. */
+  field: 'at' | 'on';
+  kind: TemporalFieldKind;
   filter: FilterCondition;
   /**
-   * The same filter spelled with relative-date tokens. Consumers that can
-   * reach `@objectstack/core` resolve it against {@link TEMPORAL_CONFORMANCE_NOW}
-   * and assert the same {@link expected} — end-to-end "token → row results".
+   * The same filter spelled with relative-date tokens — see "The
+   * relative-token axis" in the module doc. Resolve against
+   * {@link TEMPORAL_NOW}; the resolved filter must reach {@link expected}.
    */
   tokenFilter?: FilterCondition;
   /**
    * The analytics `timeDimensions.dateRange` spelling of the same window
-   * (tokens allowed), for the preview/dataset path — the surface #3650 broke.
+   * (tokens allowed) for the dashboard-window path — the surface #3650 broke.
    */
   dateRange?: [string, string];
-  /** Ids of matching rows, ascending (plain ASCII sort). */
+  /** Ids of matching rows, ascending. */
   expected: string[];
   /** Why the case is here — surfaced in failure output. */
   note?: string;
 }
 
 /**
- * The cases. Ordered: whole-day upper bounds (the #3777 family), then
- * calendar-boundary rollovers, then point-semantics anchors, then the `date`
- * column half of the contract.
+ * The cases, ordered from the rule outward: the whole-day upper bound that
+ * #3777 was about, then the operators that must NOT move, then the comparand
+ * shapes that must not be widened, then the rollovers.
  */
-export const TEMPORAL_CONFORMANCE_CASES: readonly TemporalConformanceCase[] = [
-  // ── Whole-day upper bounds (bound-semantics: whole-day) ───────────────────
+export const TEMPORAL_CASES: readonly TemporalCase[] = [
+  // ── The rule: a bare-day UPPER bound denotes the whole day (D-D) ──────────
   {
-    name: 'a 90-day dashboard window keeps the whole final day',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $gte: '2026-04-29', $lte: '2026-07-28' } },
-    tokenFilter: { happened_at: { $gte: '{90_days_ago}', $lte: '{today}' } },
+    name: 'datetime: bare-day $lte keeps the whole final day',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+    tokenFilter: { at: { $gte: '{90_days_ago}', $lte: '{today}' } },
     dateRange: ['{90_days_ago}', '{today}'],
-    expected: ['evening', 'midnight', 'month_end', 'month_start', 'morning', 'week_edge', 'yesterday'],
-    note: '#3777: the midnight-anchored $lte dropped morning+evening; #4047: on mongo the whole window returned []. The dashboard default config (created_at × last_90_days) compiles exactly this.',
+    expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
+    note: '#3777: the default dashboard window. Pre-fix returned only b_prev + c_open — everything after 00:00 on the final day vanished.',
   },
   {
-    name: 'the today preset spans the whole current day',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $gte: '2026-07-28', $lte: '2026-07-28' } },
-    tokenFilter: { happened_at: { $gte: '{today}', $lte: '{today}' } },
+    name: 'date: the same window is unchanged (already whole-day)',
+    field: 'on',
+    kind: 'date',
+    filter: { on: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+    tokenFilter: { on: { $gte: '{90_days_ago}', $lte: '{today}' } },
+    dateRange: ['{90_days_ago}', '{today}'],
+    expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
+    note: 'A `date` column compares as calendar-day text, so `<= day` was always right there. The two rows must agree — that is the invariant.',
+  },
+  {
+    name: 'datetime: a bare-day $lte alone stops at the next midnight',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $lte: '2026-07-28' } },
+    tokenFilter: { at: { $lte: '{today}' } },
+    expected: ['a_epoch', 'a_old', 'b_prev', 'c_open', 'd_mid', 'e_late', 'h_leap'],
+    note: 'f_next sits exactly on the exclusive edge and must stay out — a half-open bound, never an inclusive 23:59:59.999.',
+  },
+  {
+    name: 'datetime: $between inherits the rule on its max',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $between: ['2026-04-29', '2026-07-28'] } },
+    tokenFilter: { at: { $between: ['{90_days_ago}', '{today}'] } },
+    expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
+    note: 'knex whereBetween is inclusive on both ends, so it had the same midnight-anchored upper bound $lte had.',
+  },
+  {
+    name: 'datetime: $between still bounds its min',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $between: ['2026-07-28', '2026-07-28'] } },
+    tokenFilter: { at: { $between: ['{today}', '{today}'] } },
     dateRange: ['{today}', '{today}'],
-    expected: ['evening', 'midnight', 'morning'],
-    note: '#3777: 7 of the 13 dashboard presets end "today"; pre-fix a same-day window matched only the exact-midnight row. next_midnight must stay out — half-open, not next-day-inclusive.',
-  },
-  {
-    name: '$between with a bare-day max covers the whole final day',
-    fieldType: 'datetime',
-    operator: 'between',
-    filter: { happened_at: { $between: ['2026-04-29', '2026-07-28'] } },
-    tokenFilter: { happened_at: { $between: ['{90_days_ago}', '{today}'] } },
-    expected: ['evening', 'midnight', 'month_end', 'month_start', 'morning', 'week_edge', 'yesterday'],
-    note: '#4042: $between decomposes to `>= min AND < next-day(max)`; must answer identically to the $gte/$lte spelling.',
-  },
-  {
-    name: 'a full-ISO upper bound keeps instant semantics',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $lte: '2026-07-28T12:00:00.000Z' } },
-    expected: ['leap', 'midnight', 'month_end', 'month_start', 'morning', 'pre_epoch', 'week_edge', 'window_out', 'yesterday'],
-    note: 'D-D2 bound-semantics: only a BARE day widens to the whole day. An instant comparand is a point — evening (21:40) must stay out.',
+    expected: ['c_open', 'd_mid', 'e_late'],
+    note: 'The "today" preset degenerates to a single day: the min stays midnight-anchored while the max spans the day.',
   },
 
-  // ── Calendar-boundary rollovers ───────────────────────────────────────────
+  // ── Operators that must NOT move (the correct-as-written column) ──────────
   {
-    name: 'the last millisecond of a month survives its whole-day upper bound',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $gte: '2026-06-01', $lte: '2026-06-30' } },
-    tokenFilter: { happened_at: { $gte: '{last_month_start}', $lte: '{last_month_end}' } },
-    dateRange: ['{last_month_start}', '{last_month_end}'],
-    expected: ['month_end'],
-    note: 'month_end sits at 23:59:59.999 and month_start at the NEXT instant: the bound must roll to `< 2026-07-01`, keeping the one and excluding the other. An inclusive 23:59:59.999 rewrite passes on ms-precision stores but re-opens the gap wherever sub-ms precision exists (Postgres keeps µs) — half-open is the pinned shape.',
+    name: 'datetime: bare-day $gte is that midnight',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '2026-07-28' } },
+    tokenFilter: { at: { $gte: '{today}' } },
+    expected: ['c_open', 'd_mid', 'e_late', 'f_next', 'g_eom'],
+    note: 'A LOWER bound anchors to 00:00 — c_open is included precisely because the bound is inclusive of that instant.',
   },
   {
-    name: 'a leap-day window rolls to March 1',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $gte: '2024-02-29', $lte: '2024-02-29' } },
-    expected: ['leap'],
-    note: 'nextUtcCalendarDay(2024-02-29) is 2024-03-01; day-string arithmetic that invents 2024-02-30 matches nothing.',
+    name: 'datetime: bare-day $lt is that midnight',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $lt: '2026-07-28' } },
+    tokenFilter: { at: { $lt: '{today}' } },
+    expected: ['a_epoch', 'a_old', 'b_prev', 'h_leap'],
+    note: 'Strict-less keeps its anchoring: c_open is AT midnight, so it is excluded.',
   },
   {
-    name: 'a pre-epoch day is an ordinary calendar day',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $gte: '1969-12-31', $lte: '1969-12-31' } },
-    expected: ['pre_epoch'],
-    note: 'Negative epoch ms. The #3773 family: any surface that assumes a datetime is a non-negative epoch (or a Julian day) breaks here first.',
-  },
-
-  // ── Point-semantics anchors (bound-semantics: point) ──────────────────────
-  {
-    name: '$lt of a bare day stops at that midnight',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $lt: '2026-07-28' } },
-    tokenFilter: { happened_at: { $lt: '{today}' } },
-    expected: ['leap', 'month_end', 'month_start', 'pre_epoch', 'week_edge', 'window_out', 'yesterday'],
-    note: 'D-D1: lower/strict bounds anchor to 00:00. The exact-midnight row is NOT before its own day.',
-  },
-  {
-    name: '$gte of a bare day starts at that midnight, inclusive',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $gte: '2026-07-28' } },
-    tokenFilter: { happened_at: { $gte: '{today}' } },
-    expected: ['evening', 'midnight', 'morning', 'next_midnight'],
-    note: '#4047: on mongo a string bound matched no Date row at all, for every operator — $gte included.',
-  },
-  {
-    name: '$gt of a bare day is midnight-anchored',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $gt: '2026-07-27' } },
-    tokenFilter: { happened_at: { $gt: '{yesterday}' } },
-    expected: ['evening', 'midnight', 'morning', 'next_midnight', 'yesterday'],
-    note: 'Deliberate scope: no fixture row sits exactly AT this bound\'s midnight — whether $gt excludes that instant is a schema-aware cell, pinned in sql-driver-calendar-day-upper-bound.test.ts.',
+    // `$gt` is asserted on the `date` column only — see "One cell is not
+    // shared" in the module doc for why the `datetime` cell cannot be.
+    name: 'date: bare-day $gt excludes the bound day',
+    field: 'on',
+    kind: 'date',
+    filter: { on: { $gt: '2026-07-28' } },
+    tokenFilter: { on: { $gt: '{today}' } },
+    expected: ['f_next', 'g_eom'],
+    note: 'The boundary day itself is out; the mirror-image of widening a lower bound.',
   },
 
-  // ── The `date` column half of the contract ────────────────────────────────
+  // ── Comparand shapes that must not be widened ─────────────────────────────
   {
-    name: 'date equality against a resolved {today}',
-    fieldType: 'date',
-    operator: 'eq',
-    filter: { happened_on: '2026-07-28' },
-    tokenFilter: { happened_on: '{today}' },
-    expected: ['evening', 'midnight', 'morning'],
-    note: "The ADR's original defect (#1874): `date == today` silently matched nothing while dates were stored as instants. Equality on a date column is plain text equality — Phase 1's whole point.",
+    name: 'datetime: a full-ISO $lte keeps exact-instant semantics',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $lte: '2026-07-28T12:00:00.000Z' } },
+    expected: ['a_epoch', 'a_old', 'b_prev', 'c_open', 'd_mid', 'h_leap'],
+    note: 'Only the day-granular STRING carries whole-day intent. e_late (21:40) is after noon and must stay out.',
   },
   {
-    name: 'date $in of two resolved days',
-    fieldType: 'date',
-    operator: 'in',
-    filter: { happened_on: { $in: ['2026-07-28', '2026-07-27'] } },
-    tokenFilter: { happened_on: { $in: ['{today}', '{yesterday}'] } },
-    expected: ['evening', 'midnight', 'morning', 'yesterday'],
-    note: 'The `expires_on: { $in: [daysFromNow(30)] }` template shape from the #1874 family.',
+    name: 'datetime: a full-ISO $gte is exact too',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '2026-07-28T09:15:00.000Z' } },
+    expected: ['d_mid', 'e_late', 'f_next', 'g_eom'],
+    note: 'd_mid is exactly the bound and inclusive.',
+  },
+
+  // ── Rollovers: the arithmetic has to be a calendar, not +86400000 ─────────
+  {
+    name: 'datetime: month-end $lte spans to the next month',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '2026-07-29', $lte: '2026-07-31' } },
+    tokenFilter: { at: { $gte: '{tomorrow}', $lte: '{current_month_end}' } },
+    dateRange: ['{tomorrow}', '{current_month_end}'],
+    expected: ['f_next', 'g_eom'],
+    note: 'g_eom is 23:59:59.999 on the 31st — kept only if the bound rolled to 2026-08-01.',
   },
   {
-    name: 'the 90-day window answers identically on date and datetime',
-    fieldType: 'date',
-    operator: 'range',
-    filter: { happened_on: { $gte: '2026-04-29', $lte: '2026-07-28' } },
-    tokenFilter: { happened_on: { $gte: '{90_days_ago}', $lte: '{today}' } },
-    dateRange: ['{90_days_ago}', '{today}'],
-    expected: ['evening', 'midnight', 'month_end', 'month_start', 'morning', 'week_edge', 'yesterday'],
-    note: 'Same ids as the datetime case by construction: whole-day window semantics are field-type-independent. A backend that widens or narrows only one of the two field types fails exactly one of the pair.',
+    name: 'datetime: leap-day $lte includes Feb 29',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '2024-02-01', $lte: '2024-02-29' } },
+    expected: ['h_leap'],
+    note: 'The next day is 2024-03-01; a naive month-increment would produce 2024-02-30.',
   },
   {
-    name: 'a date column $lte the last day of a month keeps that day',
-    fieldType: 'date',
-    operator: 'range',
-    filter: { happened_on: { $lte: '2026-06-30' } },
-    tokenFilter: { happened_on: { $lte: '{last_month_end}' } },
-    expected: ['leap', 'month_end', 'pre_epoch', 'window_out'],
-    note: 'On date text `< next-day` is order-equivalent to `<= day` (D-D1) — what lets type-blind emitters rewrite unconditionally. Also the write-side twin: a `check` policy `{ $lte: \'{today}\' }` must not deny same-day rows.',
+    name: 'datetime: the day BEFORE the leap day excludes it',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '2024-02-01', $lte: '2024-02-28' } },
+    expected: [],
+    note: 'Guards the opposite error: rolling 02-28 to 03-01 (skipping the 29th) would wrongly include h_leap.',
   },
   {
-    name: 'a month window via period tokens',
-    fieldType: 'datetime',
-    operator: 'range',
-    filter: { happened_at: { $gte: '2026-07-01', $lte: '2026-07-31' } },
-    tokenFilter: { happened_at: { $gte: '{current_month_start}', $lte: '{current_month_end}' } },
-    dateRange: ['{current_month_start}', '{current_month_end}'],
-    expected: ['evening', 'midnight', 'month_start', 'morning', 'next_midnight', 'week_edge', 'yesterday'],
-    note: "{current_month_end} names the last calendar DAY (2026-07-31), per the vocabulary's documented refusal to widen; the whole-day bound rule is what makes its $lte include the 31st's instants. The two halves of the contract composing (filter-tokens.ts module doc × D-D1).",
+    name: 'datetime: a pre-epoch day is an ordinary calendar day',
+    field: 'at',
+    kind: 'datetime',
+    filter: { at: { $gte: '1969-12-31', $lte: '1969-12-31' } },
+    expected: ['a_epoch'],
+    note: 'Negative epoch ms. The #3773 family: any surface that assumes a datetime is a non-negative epoch, or reads one as a Julian day, breaks here first.',
+  },
+
+  // ── Equality on the `date` column — the ADR's original defect (#1874) ────
+  {
+    name: 'date: equality against a resolved day matches the whole day',
+    field: 'on',
+    kind: 'date',
+    filter: { on: '2026-07-28' },
+    tokenFilter: { on: '{today}' },
+    expected: ['c_open', 'd_mid', 'e_late'],
+    note: '#1874: `date == today` silently matched nothing while dates were stored as instants. Equality on a date column is plain calendar-day text equality — Phase 1\'s whole point.',
+  },
+  {
+    name: 'date: $in of two resolved days',
+    field: 'on',
+    kind: 'date',
+    filter: { on: { $in: ['2026-07-28', '2026-07-27'] } },
+    tokenFilter: { on: { $in: ['{today}', '{yesterday}'] } },
+    expected: ['b_prev', 'c_open', 'd_mid', 'e_late'],
+    note: 'The `expires_on: { $in: [daysFromNow(30)] }` template shape from the #1874 family — element-wise, order-independent.',
   },
 ] as const;

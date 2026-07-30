@@ -2050,8 +2050,11 @@ export class ObjectQL implements IDataEngine {
         `the DDL, so those objects may have no tables even after the database comes back. Unset ` +
         `OS_ALLOW_DRIVER_CONNECT_FAILURE to restore fail-fast boot.`;
       this.logger.warn(banner, { failedDrivers });
-      // …and again on a channel the host cannot silence — see the helper's note
-      // on `os serve`'s boot-quiet stdout capture.
+      // …and again on a channel the operator's log level cannot filter away: the
+      // line above is dropped outright at `error`/`fatal`/`silent`, which is a
+      // normal production setting and precisely where this flag gets used. See
+      // the helper's note — the duplication is deliberate, and it is NOT about
+      // `os serve`'s boot-quiet window (that swallowed it too until #4012).
       emitDegradedBootBanner(banner);
     }
 
