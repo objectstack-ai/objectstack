@@ -301,7 +301,7 @@ agent can act on.
 
 ### D6 — Security-gate strictness is opt-out, never opt-in
 
-`OS_ACTION_PARAMS_STRICT_ENABLED` (opt-**in** strict) is an acceptable
+`OS_ACTION_PARAMS_STRICT_ENABLED` (opt-**in** strict) was an acceptable
 shape for a *param-contract* ratchet (DX concern, warn-first). It is not an
 acceptable shape for an *authorization* gate: an enforcement that ships off
 for everyone who never read the release notes is not enforcement. A flag
@@ -309,6 +309,12 @@ spelled `OS_ALLOW_*` (opt **out** of enforcement) is the sanctioned shape
 where a security escape hatch is warranted at all; `OS_*_STRICT_ENABLED`
 (opt in to enforcement) is reserved for non-security contracts. Existing
 flags are not renamed by this ADR; new ones conform.
+
+*(Update, 2026-07-30: the one flag this section cited as tolerable no longer
+exists. ADR-0104's addendum flipped the param contract strict-by-default in
+17.0 and replaced the opt-in with the opt-out `OS_ALLOW_LAX_ACTION_PARAMS`
+(#3438), which the RC-only lifetime of the old name made free. The rule is
+unchanged; it simply has no remaining exception to point at.)*
 
 **The strongest form of this rule is no flag at all.** D3 originally carried
 an `OS_ALLOW_UNDECLARED_ACTIONS` opt-out — correctly *spelled* under this
