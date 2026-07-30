@@ -2,41 +2,13 @@
 
 /**
  * `/auth` domain — extracted dispatcher body (ADR-0076 D11 step ③, PR-7).
- * Bridges to the `auth` service's better-auth handler; when no auth service
- * is registered (MSW / browser-only mock environments) a minimal mock
- * fallback keeps core sign-up/sign-in/session flows from 404ing.
+ * Bridges to the `auth` service's contract handler. With no auth service
+ * registered the domain answers 501 — it never fabricates a session (#4113).
  */
 
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
-
-/**
- * Browser-safe UUID generator — prefers Web Crypto's `randomUUID`, falls back
- * to an RFC 4122 v4 built from `crypto.getRandomValues` (available everywhere
- * `randomUUID` might be missing, e.g. non-secure contexts). The legacy
- * `Math.random()` fallback was a latent CodeQL js/insecure-randomness hit
- * surfaced by the extraction — these ids feed mock session tokens, so use
- * CSPRNG bytes regardless.
- */
-function randomUUID(): string {
-    const c: Crypto | undefined = globalThis.crypto;
-    if (c && typeof c.randomUUID === 'function') {
-        return c.randomUUID();
-    }
-    const bytes = new Uint8Array(16);
-    if (c && typeof c.getRandomValues === 'function') {
-        c.getRandomValues(bytes);
-    } else {
-        // No crypto at all (ancient runtime) — mock-only path; still avoid
-        // Math.random by deriving from the only entropy available.
-        for (let i = 0; i < 16; i++) bytes[i] = (Date.now() + i * 7919) & 0xff;
-    }
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 
 export function createAuthDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -64,78 +36,46 @@ export async function handleAuthRequest(deps: DomainHandlerDeps, path: string, m
     // the fabricated shape, not the declared one (the same test-side hole that
     // kept #4087 green, catalogued in #4127's last section).
     //
-    // Reading the contract also makes the branch reachable for the first time.
+    // Reading the contract also made this branch reachable for the first time.
     // The Hono adapter calls `handleRequest` itself and only falls through to
     // this dispatcher when no usable auth service answered, so nothing was
-    // silently served by the mock below in that deployment — but a host that
-    // reaches `handleAuth` directly WITH an auth service registered used to get
-    // `mockAuthFallback`'s `mock_<uuid>` session instead of real authentication.
-    // It now gets the auth service.
+    // silently served by the since-retired mock in that deployment — but a host
+    // that reached `handleAuth` directly WITH an auth service registered used to
+    // get that mock's `mock_<uuid>` session instead of real authentication. It
+    // now gets the auth service; #4113 removed the mock entirely (see below).
     const authService = await deps.getService(CoreServiceName.enum.auth);
     if (authService && typeof authService.handleRequest === 'function') {
         const response = await authService.handleRequest(context.request as Request);
         return { handled: true, result: response };
     }
 
-    // 2. Mock fallback for MSW/test environments when no auth service is registered
-    const normalizedPath = path.replace(/^\/+/, '');
-    return mockAuthFallback(normalizedPath, method, body);
-}
-
-/**
- * Provides mock auth responses for core better-auth endpoints when
- * AuthPlugin is not loaded (e.g. MSW/browser-only environments).
- * This ensures registration/sign-in flows do not 404 in mock mode.
- */
-function mockAuthFallback(path: string, method: string, body: any): HttpDispatcherResult {
-    const m = method.toUpperCase();
-    const MOCK_SESSION_EXPIRY_MS = 86_400_000; // 24 hours
-
-    // POST sign-up/email
-    if ((path === 'sign-up/email' || path === 'register') && m === 'POST') {
-        const id = `mock_${randomUUID()}`;
-        return {
-            handled: true,
-            response: {
-                status: 200,
-                body: {
-                    user: { id, name: body?.name || 'Mock User', email: body?.email || 'mock@test.local', emailVerified: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-                    session: { id: `session_${id}`, userId: id, token: `mock_token_${id}`, expiresAt: new Date(Date.now() + MOCK_SESSION_EXPIRY_MS).toISOString() },
-                },
-            },
-        };
-    }
-
-    // POST sign-in/email or login
-    if ((path === 'sign-in/email' || path === 'login') && m === 'POST') {
-        const id = `mock_${randomUUID()}`;
-        return {
-            handled: true,
-            response: {
-                status: 200,
-                body: {
-                    user: { id, name: 'Mock User', email: body?.email || 'mock@test.local', emailVerified: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-                    session: { id: `session_${id}`, userId: id, token: `mock_token_${id}`, expiresAt: new Date(Date.now() + MOCK_SESSION_EXPIRY_MS).toISOString() },
-                },
-            },
-        };
-    }
-
-    // GET get-session
-    if (path === 'get-session' && m === 'GET') {
-        return {
-            handled: true,
-            response: { status: 200, body: { session: null, user: null } },
-        };
-    }
-
-    // POST sign-out
-    if (path === 'sign-out' && m === 'POST') {
-        return {
-            handled: true,
-            response: { status: 200, body: { success: true } },
-        };
-    }
-
-    return { handled: false };
+    // 2. No auth service — 501, never a fabricated session (#4113).
+    //
+    // This used to answer `POST /auth/sign-in/email` (and sign-up, get-session,
+    // sign-out) with 200 and a `mock_<uuid>` user + a 24-hour `mock_token_*`
+    // session, for ANY email and ANY password — the password was never read.
+    // It shipped in `packages/runtime`, not behind a dev-only plugin, and it
+    // gated on nothing but "is the slot empty", so `os serve --preset minimal`
+    // and any embedder without plugin-auth got it. Not a bypass — no session
+    // store backs the token, so `resolve-execution-context.ts` still resolves
+    // anonymous and `shouldDenyAnonymous` still denies — but it told the client
+    // the one thing a server must never lie about: that it had authenticated
+    // someone. Its own justification ("MSW/browser-only environments") had no
+    // consumer in this repo or in `objectui`, whose auth tests mock at the HTTP
+    // client layer; only two tests pinned it, and they pinned the mock itself.
+    //
+    // ADR-0115 retired this whole class inside plugin-dev; this was the last
+    // member, and the only one that shipped to production. Its lineage — the
+    // #3891 analytics shim, #4000's dev stub, #4058/#4086's three, #4126's
+    // security trio — was retired the same way: deleted, not flagged.
+    //
+    // 501, not 404, following `/i18n` — the nearest precedent in shape (a core
+    // capability, a dispatcher-owned domain, an optional plugin behind it, and
+    // a route discovery already declines to advertise when the slot is empty).
+    // The route IS mounted here; what is missing is the implementation behind
+    // it, which is what 501 states and 404 would misdescribe. It also keeps
+    // faith with the one true observation the mock was built on — that a bare
+    // 404 on sign-in sends the operator hunting for a routing bug — without
+    // the lie it used to answer that concern.
+    return { handled: true, response: deps.error('Auth service not available — register @objectstack/plugin-auth to enable authentication', 501) };
 }
