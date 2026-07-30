@@ -78,20 +78,26 @@ function toStr(value: unknown): string | undefined {
 /**
  * Resolve the click-through target record from the node config, if any.
  *
- * Accepts the flat `sourceObject`/`sourceId` keys (canonical — mirrors the
- * `sys_notification.source_object`/`source_id` columns) or the nested
- * `source: { object, id }` form (mirrors the messaging `emit()` surface). A
- * target is produced only when BOTH object and id resolve — a half-specified
- * link is dropped so the inbox never renders a dead deep-link.
+ * Reads the canonical flat `sourceObject`/`sourceId` keys only — they mirror the
+ * `sys_notification.source_object`/`source_id` columns. A target is produced
+ * only when BOTH object and id resolve; a half-specified link is dropped so the
+ * inbox never renders a dead deep-link.
+ *
+ * The nested `source: { object, id }` form (the messaging `emit()` surface) used
+ * to be tolerated here by a bare `cfg.sourceObject ?? src?.object`. It has
+ * graduated into the ADR-0087 D2 conversion layer
+ * (`flow-node-notify-config-aliases`, #4045), which lifts it onto the flat pair
+ * at load — including the `registerFlow` rehydration seam — so no consumer-side
+ * fallback survives and the alias is declared, tested and retirable on schedule
+ * (Prime Directive #12). Same graduation path as `object` → `objectName` (#3796).
  */
 function resolveSource(
     cfg: Record<string, unknown>,
     variables: VariableMap,
     context: AutomationContext,
 ): { object: string; id: string } | undefined {
-    const src = (cfg.source ?? null) as { object?: unknown; id?: unknown } | null;
-    const object = toStr(interpolate(cfg.sourceObject ?? src?.object, variables, context));
-    const id = toStr(interpolate(cfg.sourceId ?? src?.id, variables, context));
+    const object = toStr(interpolate(cfg.sourceObject, variables, context));
+    const id = toStr(interpolate(cfg.sourceId, variables, context));
     return object && id ? { object, id } : undefined;
 }
 

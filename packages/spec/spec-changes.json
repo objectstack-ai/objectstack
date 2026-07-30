@@ -106,7 +106,7 @@
       },
       {
         "surface": "flow.node.notify.config",
-        "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796)",
+        "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
         "conversionId": "flow-node-notify-config-aliases",
         "toMajor": 17
       },
@@ -454,7 +454,7 @@
         },
         {
           "surface": "flow.node.notify.config",
-          "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796)",
+          "to": "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
           "conversionId": "flow-node-notify-config-aliases",
           "toMajor": 17
         },

@@ -959,12 +959,52 @@ const flowNodeCrudObjectAlias: MetadataConversion = {
 };
 
 /**
- * Notify flow-node config key aliases → canonical (protocol 17, #3796).
+ * Lift `notify`'s nested `config.source: { object, id }` onto the canonical flat
+ * `sourceObject` / `sourceId` keys (#4045).
  *
- * The `notify` executor carried four open-coded `??` fallbacks that never went
+ * The fifth notify alias, and the only one that is not a 1:1 rename — it is a
+ * 1→2 destructuring, so {@link renameFlowConfigAliases}' pair mechanism cannot
+ * express it. Semantics mirror the `??` precedence the executor used to carry:
+ * a canonical key already present WINS and its nested counterpart is left
+ * shadowed, exactly as {@link renameConfigKey} treats a shadowed alias.
+ *
+ * `source` is dropped once at least one part was lifted — every part is by then
+ * either lifted or shadowed by a canonical key, so nothing observable is lost
+ * (the executor only ever read `.object` / `.id`). A `source` that is not a dict,
+ * or carries neither key, is left untouched rather than silently deleted.
+ */
+function liftNotifySourceShape(stack: Dict, emit: Emit): Dict {
+  return mapFlowNodes(stack, (node, path) => {
+    if (node.type !== 'notify') return node;
+    const config = node.config;
+    if (!isDict(config)) return node;
+    const source = config.source;
+    if (!isDict(source)) return node;
+
+    const nextConfig: Dict = { ...config };
+    let lifted = false;
+    for (const [from, to] of [['object', 'sourceObject'], ['id', 'sourceId']] as const) {
+      if (source[from] == null) continue;
+      if (nextConfig[to] != null) continue; // canonical already wins
+      nextConfig[to] = source[from];
+      emit({ from: `source.${from}`, to, path: `${path}.config.${to}` });
+      lifted = true;
+    }
+    if (!lifted) return node;
+    delete nextConfig.source;
+    return { ...node, config: nextConfig };
+  });
+}
+
+/**
+ * Notify flow-node config key aliases → canonical (protocol 17, #3796 / #4045).
+ *
+ * The `notify` executor carried five open-coded `??` fallbacks that never went
  * through the deprecation shim — an author who wrote the email-idiom keys got
  * a flow that worked forever and was never steered to the canonical spelling.
- * All four are pure key renames with unchanged values.
+ * Four are pure key renames with unchanged values; the fifth
+ * (`source: { object, id }`, #4045) is a destructuring handled by
+ * {@link liftNotifySourceShape}.
  *
  * `actionUrl` is the deliberate canonical of its pair (the executor's own
  * `configSchema` used to claim the opposite): the entire downstream chain
@@ -980,9 +1020,10 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
   toMajor: 17,
   surface: 'flow.node.notify.config',
   summary:
-    "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796)",
+    "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (#3796), " +
+    "and nested 'source: {object, id}' → 'sourceObject' / 'sourceId' (#4045)",
   apply(stack, emit) {
-    return renameFlowConfigAliases(
+    const renamed = renameFlowConfigAliases(
       stack,
       new Set(['notify']),
       [
@@ -993,6 +1034,7 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
       ],
       emit,
     );
+    return liftNotifySourceShape(renamed, emit);
   },
   fixture: {
     before: {
@@ -1010,6 +1052,19 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
                 body: 'You have been assigned "{record.title}".',
                 url: '/task/{record.id}',
                 channels: ['inbox'],
+                // #4045 — the nested click-through target, lifted to the flat pair.
+                source: { object: 'showcase_task', id: '{record.id}' },
+              },
+            },
+            // A canonical `sourceObject` WINS: only the unshadowed `id` is
+            // lifted, and `source` is dropped since every part is accounted for.
+            {
+              id: 'n3',
+              type: 'notify',
+              config: {
+                recipients: ['{record.owner}'],
+                sourceObject: 'showcase_project',
+                source: { object: 'ignored', id: '{record.project}' },
               },
             },
           ],
@@ -1031,13 +1086,26 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
                 message: 'You have been assigned "{record.title}".',
                 actionUrl: '/task/{record.id}',
                 channels: ['inbox'],
+                sourceObject: 'showcase_task',
+                sourceId: '{record.id}',
+              },
+            },
+            {
+              id: 'n3',
+              type: 'notify',
+              config: {
+                recipients: ['{record.owner}'],
+                sourceObject: 'showcase_project',
+                sourceId: '{record.project}',
               },
             },
           ],
         },
       ],
     },
-    expectedNotices: 4,
+    // 4 renames on n2 + `source.object`/`source.id` lifted on n2 + the single
+    // unshadowed `source.id` on n3 (its `source.object` is shadowed → no notice).
+    expectedNotices: 7,
   },
 };
 
