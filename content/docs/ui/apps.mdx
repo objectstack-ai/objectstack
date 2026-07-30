@@ -57,7 +57,7 @@ const crmApp = {
 
 ## Navigation Items
 
-The navigation tree supports eight item types, combined to create rich menu structures. The most common are shown below (`object`, `dashboard`, `page`, `url`, `group`); the spec also defines `report`, `action`, and `component` items.
+The navigation tree supports nine item types, combined to create rich menu structures. The most common are shown below (`object`, `dashboard`, `page`, `url`, `group`, `separator`); the spec also defines `report`, `action`, and `component` items.
 
 ### Object Navigation
 
@@ -121,9 +121,23 @@ Groups items into collapsible sections with children:
 }
 ```
 
+### Separator
+
+A visual divider in the navigation list. It renders no target and carries no
+label — the only keys it accepts are `type`, an optional `id`, and an optional
+`order`:
+
+```typescript
+{ type: 'separator', order: 30 }
+```
+
 ### Common Navigation Properties
 
-All navigation items share these base properties. Every item **must** declare a unique `id` (lowercase `snake_case`) — it is required by the schema and is referenced by `homePageId` and `mobileNavigation.bottomNavItems`:
+All navigation items **except `separator`** share these base properties. Every
+item **must** declare a unique `id` (lowercase `snake_case`) — it is required by
+the schema and is referenced by `homePageId` and `mobileNavigation.bottomNavItems`.
+(On a `separator`, `id` is optional and the remaining properties below are
+rejected — a divider has nothing to label, gate, or badge.)
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
