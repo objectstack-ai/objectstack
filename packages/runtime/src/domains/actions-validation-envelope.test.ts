@@ -82,10 +82,10 @@ describe('#3918 follow-up — /actions surfaces code + fields on a validation fa
         const response = await invoke(validationSandboxError());
 
         expect(response.status).toBe(400);
-        expect(response.body.error.details).toMatchObject({
-            code: 'VALIDATION_FAILED',
-            fields: FIELDS,
-        });
+        // The semantic code is promoted into `error.code` (#3971); `fields`
+        // stay in `details`.
+        expect(response.body.error.code).toBe('VALIDATION_FAILED');
+        expect(response.body.error.details).toMatchObject({ fields: FIELDS });
     });
 
     it('keeps the human message as the toast text', async () => {
@@ -123,6 +123,6 @@ describe('#3918 follow-up — /actions surfaces code + fields on a validation fa
 
         expect(response.status).toBe(400);
         expect(response.body.error.message).toBe('pick another');
-        expect(response.body.error.details).toMatchObject({ code: 'DUPLICATE' });
+        expect(response.body.error.code).toBe('DUPLICATE');
     });
 });

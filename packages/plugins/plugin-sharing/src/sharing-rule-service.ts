@@ -74,7 +74,29 @@ export class SharingRuleService implements ISharingRuleService {
     this.logger = opts.logger;
   }
 
+  /**
+   * [ADR-0111 D6] The sharing-rule surface is tenant-wide sharing
+   * ADMINISTRATION — a rule is an org-wide grant generator, and `evaluate`
+   * triggers materialisation, so every verb (list/get included) requires the
+   * `manage_sharing` capability. Enforced HERE, not at the route, so every
+   * caller is covered (#3902's widened finding: any signed-in user could
+   * define a broad-criteria rule naming themself and evaluate it into
+   * org-wide `sys_record_share` grants). `manage_platform_settings` is
+   * honoured as the legacy gate the Setup sharing pages used before
+   * `manage_sharing` existed. System contexts (boot seeding, hooks, backfills,
+   * the REST-independent plugin machinery) bypass.
+   */
+  private assertCanManageRules(context: SharingExecutionContext): void {
+    if (context?.isSystem) return;
+    const caps = Array.isArray(context?.systemPermissions) ? context.systemPermissions : [];
+    if (caps.includes('manage_sharing') || caps.includes('manage_platform_settings')) return;
+    throw new Error(
+      'PERMISSION_DENIED: sharing-rule administration requires the manage_sharing capability (ADR-0111 D6)',
+    );
+  }
+
   async defineRule(input: DefineSharingRuleInput, context: SharingExecutionContext): Promise<SharingRuleRow> {
+    this.assertCanManageRules(context);
     if (!input.name) throw new Error('VALIDATION_FAILED: name is required');
     if (!input.label) throw new Error('VALIDATION_FAILED: label is required');
     if (!input.object) throw new Error('VALIDATION_FAILED: object is required');
@@ -176,6 +198,7 @@ export class SharingRuleService implements ISharingRuleService {
     filter: { object?: string; activeOnly?: boolean },
     context: SharingExecutionContext,
   ): Promise<SharingRuleRow[]> {
+    this.assertCanManageRules(context); // [ADR-0111 D6]
     const where: any = {};
     if (filter.object) where.object_name = filter.object;
     if (filter.activeOnly) where.active = true;
@@ -191,6 +214,7 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   async getRule(idOrName: string, context: SharingExecutionContext): Promise<SharingRuleRow | null> {
+    this.assertCanManageRules(context); // [ADR-0111 D6]
     if (!idOrName) return null;
     const orgId = (context as any)?.organizationId ?? (context as any)?.tenantId;
     const byId = await this.engine.find('sys_sharing_rule', {
@@ -209,6 +233,7 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   async deleteRule(idOrName: string, context: SharingExecutionContext): Promise<void> {
+    this.assertCanManageRules(context); // [ADR-0111 D6]
     const row = await this.getRule(idOrName, context);
     if (!row) return;
     // Drop materialised grants first so we don't orphan them.
@@ -223,6 +248,7 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   async evaluateRule(idOrName: string, context: SharingExecutionContext): Promise<SharingRuleEvaluationResult> {
+    this.assertCanManageRules(context); // [ADR-0111 D6]
     const rule = await this.getRule(idOrName, context);
     if (!rule) throw new Error('RULE_NOT_FOUND');
     if (!rule.active) {

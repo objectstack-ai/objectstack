@@ -20,9 +20,8 @@
 // `objectstack dev`). This is a verification harness — it never touches a real
 // database or production data.
 
-import { ObjectKernel, AppPlugin, DriverPlugin, createDispatcherPlugin } from '@objectstack/runtime';
+import { ObjectKernel, AppPlugin, DefaultDatasourcePlugin, createDispatcherPlugin } from '@objectstack/runtime';
 import { ObjectQLPlugin } from '@objectstack/objectql';
-import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
 import { AuthPlugin } from '@objectstack/plugin-auth';
@@ -156,8 +155,14 @@ export async function bootStack(
   const kernel = new ObjectKernel();
 
   // Data engine + in-memory SQLite (pure-JS WASM driver — no native build, CI-safe).
+  // The default datasource is a DECLARED DEFINITION connected through the
+  // shared DatasourceConnectionService (ADR-0062 D1, #3826) — the same boot
+  // shape `objectstack dev`/`serve` use since the standalone stack converged,
+  // so the dogfood gate exercises the real declared-default connect path (the
+  // §Risk mitigation the ADR promised), not the legacy pre-built DriverPlugin
+  // escape hatch.
   await kernel.use(new ObjectQLPlugin());
-  await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
+  await kernel.use(new DefaultDatasourcePlugin({ driver: 'sqlite-wasm', config: { filename: ':memory:' } }));
 
   // HTTP server (registers the `http-server` IHttpServer service the REST +
   // dispatcher plugins mount their routes onto). Port 0 = ephemeral; we never

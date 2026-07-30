@@ -76,6 +76,12 @@ export type {
 
 // Host glue: dev driver factory + fail-closed secret binder.
 export { createDefaultDatasourceDriverFactory } from './default-datasource-driver-factory.js';
+// The "adopt a host-built driver instance" seam (ADR-0062 D1, #3826) — for
+// driver kinds outside open-core (cloud turso) and pooled instances whose
+// lifecycle outlives one kernel; keeps the connect + failure verdict on the
+// one shared path instead of the legacy DriverPlugin/engine-init pair.
+export { createPrebuiltDriverFactory } from './prebuilt-driver-factory.js';
+export type { PrebuiltDriverFactoryOptions } from './prebuilt-driver-factory.js';
 // Shared native-better-sqlite3 → wasm → in-memory step-down (#2229).
 export {
   resolveSqliteDriver,

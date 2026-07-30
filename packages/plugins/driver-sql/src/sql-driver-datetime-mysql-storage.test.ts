@@ -224,6 +224,71 @@ describe.skipIf(!URL)('MySQL TIMESTAMP → DATETIME(3) migration (#3942)', () =>
   });
 });
 
+describe.skipIf(!URL)('os migrate plan lists the MySQL widening (#3954)', () => {
+  const LEGACY = 'os3954_legacy';
+  const SHAPE = { name: LEGACY, fields: { label: { type: 'string' }, at: { type: 'datetime' } } };
+  let driver: SqlDriver;
+
+  beforeEach(async () => {
+    const legacy = rawDriver();
+    await legacy.execute(`drop table if exists ${LEGACY}`);
+    await legacy.execute(
+      `create table ${LEGACY} (
+         id varchar(255) not null primary key,
+         created_at timestamp null default current_timestamp,
+         updated_at timestamp null default current_timestamp,
+         label varchar(255) null,
+         at timestamp null
+       )`,
+    );
+    await legacy.execute(`set time_zone = '+00:00'`);
+    for (let i = 0; i < 5; i++) {
+      await legacy.execute(`insert into ${LEGACY} (id, label, at) values (?, ?, ?)`, [
+        `e${i}`, `e${i}`, '2026-03-20 12:00:00',
+      ]);
+    }
+    await legacy.disconnect();
+    driver = new SqlDriver({ client: 'mysql2', connection: URL });
+  });
+
+  afterEach(async () => {
+    await driver.execute(`drop table if exists ${LEGACY}`).catch(() => {});
+    await driver.disconnect();
+  });
+
+  it('reports the widening, its columns and the table size — without performing it', async () => {
+    driver.setDeferredDdl(true);
+    await driver.initObjects([SHAPE]);
+
+    const pending = await driver.previewDeferredSchemaWork();
+    const widen = pending.filter((p) => p.kind === 'widen_datetime_columns');
+    expect(widen).toHaveLength(1);
+    expect(widen[0].table).toBe(LEGACY);
+    // The audit columns are declared datetime too, so all three are rebuilt.
+    expect([...widen[0].columns].sort()).toEqual(['at', 'created_at', 'updated_at']);
+    // `ALTER … MODIFY` is a full rebuild holding a metadata lock, so the table's
+    // size is the number that decides "now" versus "in a maintenance window".
+    expect(widen[0].rows).toBe(5);
+
+    // Planning must not have touched the schema.
+    expect((await columnTypes(driver, LEGACY)).at).toBe('timestamp');
+  });
+
+  it('applies exactly what it planned, and then finds nothing left', async () => {
+    driver.setDeferredDdl(true);
+    await driver.initObjects([SHAPE]);
+    const planned = await driver.previewDeferredSchemaWork();
+    expect(planned.some((p) => p.kind === 'widen_datetime_columns')).toBe(true);
+
+    await driver.flushDeferredSchemaDdl();
+    expect((await columnTypes(driver, LEGACY)).at).toBe('datetime(3)');
+
+    driver.setDeferredDdl(true);
+    await driver.initObjects([SHAPE]);
+    expect(await driver.previewDeferredSchemaWork()).toEqual([]);
+  });
+});
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 /** mysql2 hands back `[rows, fields]`; normalise to just the rows. */

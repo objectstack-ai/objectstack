@@ -139,7 +139,9 @@ describe('HttpDispatcher', () => {
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(422); // NOT the old hardcoded 400
             const error = result.response?.body?.error;
-            expect(error?.details?.code).toBe('invalid_metadata');
+            // [#3842] The spec-validation code is the `error.code`; the
+            // field-anchored issues stay in `details`, which is what they are.
+            expect(error?.code).toBe('invalid_metadata');
             expect(error?.details?.issues).toEqual(err.issues);
             expect(error?.details?.issues[0].path).toBe('fields.amount.type');
         });
@@ -724,7 +726,9 @@ describe('HttpDispatcher', () => {
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(401);
                 // Shared anonymous-deny body shape (locks the seam migration).
-                expect(result.response?.body?.error?.details?.code).toBe('unauthenticated');
+                // [#3842] `ANONYMOUS_DENY_CODE` reaches `error.code` now — it was
+                // parked in `details` while the status occupied the field.
+                expect(result.response?.body?.error?.code).toBe('unauthenticated');
                 expect(service.listAudienceBindingSuggestions).not.toHaveBeenCalled();
             });
 
@@ -1915,20 +1919,18 @@ describe('HttpDispatcher', () => {
         /**
          * The dispatcher's error body is the SHAPE the autonomously-mounted
          * i18n/storage services were aligned to in #3675 — nested `error`, with
-         * the `success` flag. It is not yet the CONTRACT: `ApiErrorSchema`
-         * declares `code` as a semantic string ('validation_error'), and this
-         * emits the HTTP status as a number. The dispatcher already works
-         * around its own field being occupied — `this.error(msg, 403, { code:
-         * 'PERMISSION_DENIED' })` parks the real code in `details` — which is
-         * the tell that the number is in the wrong place.
+         * the `success` flag — and, as of #3842, the CONTRACT as well.
          *
-         * Pinned rather than fixed: `error.code` is read across the SDK, the
-         * console and the dogfood suite, so moving it is its own change.
-         * `toEqual(['code'])` is deliberately exact — if a second field starts
-         * deviating this fails, and if the dispatcher is fixed it also fails
-         * and this pin should be deleted.
+         * #3687 pinned the one deviating field here rather than moving it, with
+         * the instruction that the pin be DELETED once the dispatcher was fixed
+         * rather than updated. That is what happened: the assertion is now that
+         * `ApiErrorSchema` parses, spelled against the schema imported from
+         * `packages/spec` so it tracks the contract if the contract moves. The
+         * exhaustive per-branch version lives in
+         * `error-envelope.conformance.test.ts`; this one keeps the guard at the
+         * scene of the original pin.
          */
-        it('pins the ONE field where the dispatcher deviates from ApiErrorSchema (#3675)', async () => {
+        it('emits an ApiErrorSchema-conformant error body (#3842, was the #3675 pin)', async () => {
             const result = await dispatcher.handleI18n('/translations', 'GET', {}, { request: {} });
             const body = result.response?.body as { success?: boolean; error?: unknown };
 
@@ -1936,9 +1938,12 @@ describe('HttpDispatcher', () => {
             expect(typeof body.error).toBe('object');
 
             const parsed = ApiErrorSchema.safeParse(body.error);
-            expect(parsed.success).toBe(false);
-            expect(parsed.error!.issues.map((i) => i.path.join('.'))).toEqual(['code']);
-            expect((body.error as { code: unknown }).code).toBe(400);
+            expect(parsed.error?.issues ?? []).toEqual([]);
+            expect(parsed.success).toBe(true);
+            // The status is on `httpStatus`; `code` is the semantic string it
+            // used to displace — derived here, since this branch has no code of
+            // its own to carry.
+            expect(body.error).toMatchObject({ code: 'validation_error', httpStatus: 400 });
         });
 
         /**
@@ -2519,7 +2524,14 @@ describe('HttpDispatcher', () => {
             );
             expect(result).not.toBeNull();
             expect(result.status).toBe(403);
-            expect(result.body.error.details.type).toBe('PROJECT_MEMBERSHIP_REQUIRED');
+            // [#3842] Was `details.type` — the only site using that spelling,
+            // parked there because `error.code` held the status. `details` keeps
+            // the two genuine context fields.
+            expect(result.body.error.code).toBe('PROJECT_MEMBERSHIP_REQUIRED');
+            expect(result.body.error.details).toEqual({
+                environmentId: 'proj-private',
+                userId: 'user-1',
+            });
             expect(memberQL.find).toHaveBeenCalledWith('sys_environment_member', expect.objectContaining({
                 where: { environment_id: 'proj-private', user_id: 'user-1' },
             }));

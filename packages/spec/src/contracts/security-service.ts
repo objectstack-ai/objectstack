@@ -218,6 +218,25 @@ export interface ISecurityService {
   canExport(object: string, context?: SecurityContext): Promise<boolean>;
 
   /**
+   * [ADR-0111 D2] Whether `context` holds the super-user WRITE bypass
+   * (`modifyAllRecords`, "Modify All Data") for `object` — the EXPLICIT bit
+   * only, resolved from the caller's permission sets exactly as the CRUD
+   * middleware resolves them.
+   *
+   * The probe behind the sharing layer's management-authority gate
+   * (`ISharingService.canManageShares`): a non-owner may manage shares on a
+   * record only with this bypass. It deliberately does NOT reuse the effective
+   * write SCOPE — `getEffectiveScope` returns `'org'` for the
+   * "no permission set mentions this object" case (a compatibility fail-open on
+   * the read path), which as a management gate would be a fresh hole.
+   *
+   * **Fails CLOSED.** A resolution failure, a principal-less context, or an
+   * on-behalf-of context (the D10 delegator intersection is not computed on
+   * this path) returns `false`. A system context returns `true`.
+   */
+  hasWriteBypass(object: string, context?: SecurityContext): Promise<boolean>;
+
+  /**
    * Explain WHY access is granted or denied — the decision plus the layers that
    * produced it (permission sets, object permissions, RLS, sharing, field mask).
    *

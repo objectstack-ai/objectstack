@@ -14,6 +14,7 @@
  */
 import chalk from 'chalk';
 import type { ManagedDriftEntry, DriftCategory, PendingSchemaWork } from '@objectstack/driver-sql';
+import { isInPlaceSchemaWork } from '@objectstack/driver-sql';
 import { describeDriverConnection } from './connection-display.js';
 
 export type { PendingSchemaWork };
@@ -251,23 +252,59 @@ export function summarize(drift: ManagedDriftEntry[]): string {
 }
 
 /**
- * Render the additive work the boot sync was held back from doing (#3917).
+ * Render the work the boot sync was held back from doing (#3917), in two
+ * sections split by whether it touches existing data (#3954).
  *
- * Deliberately its own section rather than a `DriftCategory`: this is not
- * divergence between metadata and an existing column — it is the create/add
- * that used to happen silently at boot, now shown before it runs. Purely
- * additive and never data-losing, so it carries no `--allow-destructive` gate.
+ * Deliberately its own block rather than a `DriftCategory`: this is not
+ * divergence between metadata and an existing column — it is what used to
+ * happen silently at boot, now shown before it runs.
+ *
+ * The split matters. The additive section tells the operator the work is never
+ * data-losing, and that promise must not quietly come to cover the datetime
+ * convergence, which rewrites rows (SQLite) or rebuilds a column (MySQL). Those
+ * get their own heading, and their row counts, because "how long will this hold
+ * the table" is the question they raise and the additive kinds do not.
  */
 export function renderPendingSchemaWork(pending: PendingSchemaWork[]): void {
   if (pending.length === 0) return;
-  console.log(`  ${chalk.bold('New (additive — created when you apply)')}`);
-  for (const p of pending) {
-    const detail = p.kind === 'create_table'
-      ? `[create_table, ${p.columns.length} column(s)]`
-      : `[add_columns: ${p.columns.join(', ')}]`;
-    console.log(`    ${chalk.cyan('+')} ${chalk.cyan(p.table)} ${chalk.dim(detail)}`);
+
+  const additive = pending.filter((p) => !isInPlaceSchemaWork(p.kind));
+  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind));
+
+  if (additive.length > 0) {
+    console.log(`  ${chalk.bold('New (additive — created when you apply)')}`);
+    for (const p of additive) {
+      const detail = p.kind === 'create_table'
+        ? `[create_table, ${p.columns.length} column(s)]`
+        : `[add_columns: ${p.columns.join(', ')}]`;
+      console.log(`    ${chalk.cyan('+')} ${chalk.cyan(p.table)} ${chalk.dim(detail)}`);
+    }
+    console.log('');
   }
-  console.log('');
+
+  if (inPlace.length > 0) {
+    console.log(`  ${chalk.bold('In place (existing rows converged when you apply)')}`);
+    for (const p of inPlace) {
+      const label = p.kind === 'normalize_datetime_storage'
+        ? 'normalize_datetime_storage'
+        : 'widen_datetime_columns';
+      // A MySQL widen is `ALTER … MODIFY`, i.e. a full table rebuild holding a
+      // metadata lock — worth saying outright, not just implying via the count.
+      const cost = p.kind === 'widen_datetime_columns'
+        ? `${formatRows(p.rows)} row table rebuild`
+        : `${formatRows(p.rows)} row update(s)`;
+      console.log(
+        `    ${chalk.yellow('~')} ${chalk.yellow(p.table)} ` +
+        `${chalk.dim(`[${label}: ${p.columns.join(', ')} — ${cost}]`)}`,
+      );
+    }
+    console.log('');
+  }
+}
+
+/** `rows` is optional on the type; an unmeasured count reads as unknown, not zero. */
+function formatRows(rows: number | undefined): string {
+  return rows === undefined ? '?' : rows.toLocaleString('en-US');
 }
 
 export function summarizePendingSchemaWork(pending: PendingSchemaWork[]): string {
@@ -275,5 +312,15 @@ export function summarizePendingSchemaWork(pending: PendingSchemaWork[]): string
   const columns = pending
     .filter((p) => p.kind === 'add_columns')
     .reduce((n, p) => n + p.columns.length, 0);
-  return `${creates} table(s) to create, ${columns} column(s) to add`;
+  const parts = [`${creates} table(s) to create`, `${columns} column(s) to add`];
+
+  // Only mentioned when there is some, so the common in-sync summary is
+  // unchanged — but never omitted when there is, which is the #3954 point.
+  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind));
+  if (inPlace.length > 0) {
+    const cols = inPlace.reduce((n, p) => n + p.columns.length, 0);
+    const rows = inPlace.reduce((n, p) => n + (p.rows ?? 0), 0);
+    parts.push(`${cols} datetime column(s) to converge in place (~${formatRows(rows)} rows)`);
+  }
+  return parts.join(', ');
 }

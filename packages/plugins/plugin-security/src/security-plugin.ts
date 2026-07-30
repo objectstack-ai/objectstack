@@ -660,6 +660,28 @@ export class SecurityPlugin implements Plugin {
         // reaches the middleware as a plain `find` and `allowExport` would never
         // be consulted — the REST export route asks HERE before it streams.
         canExport: (object: string, context?: any) => this.canExport(object, context),
+        // [ADR-0111 D2] Super-user WRITE bypass probe — the management-authority
+        // primitive behind `ISharingService.canManageShares`. Explicit
+        // `modifyAllRecords` only (NOT the effective write scope, whose
+        // unmatched-object case fails open to 'org'); fails CLOSED on
+        // resolution errors, principal-less contexts, and on-behalf-of
+        // contexts (no D10 delegator intersection on this path).
+        hasWriteBypass: async (object: string, context?: any): Promise<boolean> => {
+          if (context?.isSystem) return true;
+          if (!context?.userId) return false;
+          if (context?.onBehalfOf?.userId) return false;
+          try {
+            const meta = await this.getObjectSecurityMeta(object);
+            const sets = await this.resolvePermissionSetsForContext(context);
+            return this.permissionEvaluator.hasSuperuserWriteBypass(object, sets, { isPrivate: meta.isPrivate });
+          } catch (e) {
+            this.logger.warn?.(
+              `[security] hasWriteBypass failed for object '${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
+              e instanceof Error ? e : new Error(String(e)),
+            );
+            return false;
+          }
+        },
         // [ADR-0046 §6.7] Effective permission-set NAMES for a caller — the
         // primitive the REST read layer needs to evaluate a permission-set-
         // gated book/doc audience ({ permissionSet: '…' }). Same resolution
@@ -2179,7 +2201,13 @@ export class SecurityPlugin implements Plugin {
           ? { sharingReadFilter: (o: string, c: any) => sharing.buildReadFilter(o, c) }
           : {}),
         ...(sharing && typeof sharing.listShares === 'function'
-          ? { listRecordShares: (o: string, rid: string, c: any) => sharing.listShares(o, rid, c) }
+          // [ADR-0111 D5] listShares is now management-gated in the sharing
+          // service, but explain's own caller authorization already ran
+          // (explaining ANOTHER user requires `manage_users` — D12). Read the
+          // stored rows under system context so the record story keeps its
+          // share attribution when the EXPLAINED principal isn't a share
+          // manager — the exact behaviour this binding had before the gate.
+          ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
           : {}),
         ...(sharing && typeof sharing.canEdit === 'function'
           ? { canEditRecord: (o: string, rid: string, c: any) => sharing.canEdit(o, rid, c) }

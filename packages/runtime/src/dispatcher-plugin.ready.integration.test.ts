@@ -79,7 +79,10 @@ describe('GET /ready over a real HTTP server (integration)', () => {
       expect(res.status).toBe(503);
       const body = await res.json();
       expect(body.success).toBe(false);
-      expect(body.error.code).toBe(503);
+      // [#3842] The status moved to `httpStatus`; `code` is the semantic string,
+      // derived from 503 since /ready carries no code of its own.
+      expect(body.error.code).toBe('service_unavailable');
+      expect(body.error.httpStatus).toBe(503);
       expect(body.error.details.state).toBe('stopping');
     } finally {
       (kernel as any).getState = realGetState;

@@ -12,6 +12,20 @@ export const ApiErrorSchema = lazySchema(() => z.object({
   code: z.string().describe('Error code (e.g. validation_error)'),
   message: z.string().describe('Readable error message'),
   category: z.string().optional().describe('Error category (e.g. validation, authorization)'),
+  /**
+   * The numeric HTTP status, when a producer chooses to mirror it into the body.
+   *
+   * Declared (#3842) because the runtime dispatcher had nowhere to put it and
+   * used `code` — the semantic slot above — instead, handing callers `403` where
+   * the contract promises a string and forcing the real code into `details`.
+   * `EnhancedApiErrorSchema.httpStatus` set the precedent; this is the same
+   * field on the base envelope.
+   *
+   * Optional and redundant on purpose: the response status is authoritative, so
+   * a producer that emits only the semantic `code` is fully conformant. Callers
+   * should branch on `code`, not on this.
+   */
+  httpStatus: z.number().int().optional().describe('HTTP status of the response carrying this error'),
   details: z.unknown().optional().describe('Additional error context (e.g. field validation errors)'),
   requestId: z.string().optional().describe('Request ID for tracking'),
 }));

@@ -81,6 +81,13 @@ export interface SharingExecutionContext {
   tenantId?: string;
   positions?: string[];
   permissions?: string[];
+  /**
+   * [ADR-0111] Capability names the caller holds (`manage_sharing`, …) —
+   * resolved by `resolveAuthzContext` alongside `permissions` (which carries
+   * permission-set NAMES, not capabilities). Consulted by the sharing-rule
+   * management gate; absent → the caller holds no capabilities (fail closed).
+   */
+  systemPermissions?: string[];
   isSystem?: boolean;
 }
 
@@ -114,13 +121,67 @@ export interface ISharingService {
     context: SharingExecutionContext,
   ): Promise<boolean>;
 
-  /** Create or upsert a manual share row. */
+  /**
+   * [ADR-0111 D1] May the principal in `context` MANAGE shares (grant / revoke
+   * / list) on `(object, recordId)`? True for system context, the record's
+   * owner, and holders of the super-user write bypass (`modifyAllRecords`,
+   * probed via the late-bound security service). **Fails closed**: no security
+   * service → owner-only; unknown record / principal-less context → `false`.
+   *
+   * This is the single gate every manual share-management operation consults —
+   * enforcement lives in the SERVICE, so every caller (REST or otherwise) is
+   * covered. The DEPTH extension (hierarchy managers) is a named ADR-0111
+   * direction, not implemented here.
+   */
+  canManageShares(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<boolean>;
+
+  /**
+   * Create or upsert a manual share row.
+   *
+   * [ADR-0111 D1/D7] For non-system callers: requires {@link canManageShares}
+   * (`PERMISSION_DENIED`), an existing record VISIBLE to the caller
+   * (`NOT_FOUND` — missing and invisible are indistinguishable), a `user`
+   * recipient (`VALIDATION_FAILED` — other recipient types are not enforced by
+   * any gate and are refused rather than persisted inert, ADR-0078), and an
+   * object in an enforcing sharing posture (`SHARING_NOT_ENABLED` — a share on
+   * a public / bypass / owner-less / `controlled_by_parent` object enforces
+   * nothing). Upserts match on `(object, record, recipient, source)` so a
+   * manual grant never clobbers a rule-materialised row (D7).
+   */
   grant(input: GrantShareInput, context: SharingExecutionContext): Promise<RecordShare>;
 
-  /** Remove a share row by id. No-op when not found. */
-  revoke(shareId: string, context: SharingExecutionContext): Promise<void>;
+  /**
+   * Remove a share row by id.
+   *
+   * [ADR-0111 D4] For non-system callers: the row must exist and — when
+   * `scope` is provided (REST passes the URL's object/record) — belong to that
+   * record (`NOT_FOUND` otherwise), the caller must hold
+   * {@link canManageShares} on the record (`PERMISSION_DENIED` — revoke is
+   * symmetric with grant, no granter exception), and only `source: 'manual'`
+   * rows are revocable (`CONFLICT` — rule-derived grants are reconciled back
+   * by the evaluator; deactivate the rule instead). System context keeps the
+   * historical delete-by-id no-op-when-missing behaviour (the rule evaluator's
+   * reconciliation path).
+   */
+  revoke(
+    shareId: string,
+    context: SharingExecutionContext,
+    scope?: { object: string; recordId: string },
+  ): Promise<void>;
 
-  /** List all share rows attached to `(object, recordId)`. */
+  /**
+   * List all share rows attached to `(object, recordId)`.
+   *
+   * [ADR-0111 D5] For non-system callers this is MANAGEMENT-gated: an
+   * invisible/missing record throws `NOT_FOUND`, a visible record without
+   * {@link canManageShares} throws `PERMISSION_DENIED`. "What is shared with
+   * me / by me" is served by the self-scoped `sys_record_share` read surface,
+   * not by this method.
+   */
   listShares(
     object: string,
     recordId: string,

@@ -56,6 +56,7 @@ Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. 
 3. **Naming:**
    - TS config keys → `camelCase` (`maxLength`, `defaultValue`)
    - Machine names (data values) → `snake_case` (`name: 'first_name'`)
+   - Error codes → `SCREAMING_SNAKE` (`PERMISSION_DENIED`) — machine constants, not data values; scope and rationale in [ADR-0112](./docs/adr/0112-error-code-vocabulary-and-ledger.md). Not a general license to deviate.
    - Metadata type names → **singular** (`'agent'`, `'view'`, `'flow'`) — matches `MetadataTypeSchema` in `packages/spec/src/kernel/metadata-plugin.zod.ts`
    - REST endpoints → plural (`/api/v1/ai/agents`)
 4. **Imports:** Use `@objectstack/spec` namespaces or subpaths. Never relative `../../packages/spec`.

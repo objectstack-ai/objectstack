@@ -288,13 +288,13 @@ const result = AiAgentCapabilities.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **error** | `{ code: string; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | optional | Operation type that was performed |
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; details?: any; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; httpStatus?: integer; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -461,13 +461,13 @@ const result = AiAgentCapabilities.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **error** | `{ code: string; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | optional | Operation type that was performed |
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; details?: any; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; httpStatus?: integer; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -1417,13 +1417,13 @@ const result = AiAgentCapabilities.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: string; message: string; category?: string; details?: any; … }` | optional | Error details if success is false |
+| **error** | `{ code: string; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | optional | Operation type that was performed |
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; details?: any; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: { code: string; message: string; category?: string; httpStatus?: integer; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---

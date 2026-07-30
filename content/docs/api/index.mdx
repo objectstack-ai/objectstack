@@ -165,18 +165,23 @@ Validation failures additionally include a `fields` array (one entry per invalid
 | `RECORD_NOT_FOUND` | 404 | Resource does not exist |
 | `CONCURRENT_UPDATE` | 409 | Record was modified by another user |
 
-**Runtime dispatcher** (`@objectstack/runtime`) wraps errors in the `{ success: false, ... }` envelope, where `code` is the numeric HTTP status:
+**Runtime dispatcher** (`@objectstack/runtime`) wraps errors in the `{ success: false, ... }` envelope declared by `ApiErrorSchema`. `code` is the semantic string; the numeric HTTP status is on `httpStatus`, and `details` carries structured context only:
 
 ```json
 {
   "success": false,
   "error": {
+    "code": "RECORD_NOT_FOUND",
     "message": "Record not found: account/123",
-    "code": 404,
-    "details": {}
+    "httpStatus": 404
   }
 }
 ```
+
+Branch on `error.code`, never on `error.httpStatus` — the status answers "what
+class of failure" and the code answers "which failure". A branch that has no
+code of its own is served a `StandardErrorCode` derived from the status
+(`403` → `permission_denied`, `503` → `service_unavailable`, …).
 
 <Callout type="info">
 The richer `ErrorResponseSchema` in `@objectstack/spec/api` (with `category`, `retryable`, etc.) is the aspirational spec envelope, not the current wire format. Its `category` values are drawn from the `ErrorCategory` enum: `validation`, `authentication`, `authorization`, `not_found`, `conflict`, `rate_limit`, `server`, `external`, `maintenance`.

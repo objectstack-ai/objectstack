@@ -331,7 +331,8 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
         const result = await makeDispatcher({ shareLinks })
             .handleShareLinks('', 'POST', { object: 'account', recordId: 'r1' }, {}, {} as any);
         expect(result.response?.status).toBe(401);
-        expect(result.response?.body?.error?.details?.code).toBe('UNAUTHENTICATED');
+        // [#3842] Was `details.code`, parked there because `error.code` held 401.
+        expect(result.response?.body?.error?.code).toBe('UNAUTHENTICATED');
     });
 
     it('public resolve route serves the record through the request-kernel engine with redaction', async () => {
@@ -361,7 +362,9 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
         const context: any = { executionContext: { userId: 'u1' } };
         const result = await makeDispatcher({ shareLinks }).handleShareLinks('/a/b/c', 'GET', undefined, {}, context);
         expect(result.response?.status).toBe(404);
-        expect(result.response?.body?.error?.type).toBe('ROUTE_NOT_FOUND');
+        // [#3842] Was `error.type` — a third spelling, sibling to a numeric
+        // `error.code`. Now the declared field.
+        expect(result.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
     });
 });
 

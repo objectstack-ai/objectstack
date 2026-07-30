@@ -390,6 +390,13 @@ export class SharingServicePlugin implements Plugin {
           try { return ctx.getService<any>('hierarchy-scope-resolver'); }
           catch { return null; }
         },
+        // [ADR-0111 D1/D2] Late-bound security probe for canManageShares'
+        // Modify-All path. Absent (no plugin-security) → owner-only, fail
+        // closed — a degraded security stack never widens sharing authority.
+        securityService: () => {
+          try { return ctx.getService<any>('security'); }
+          catch { return null; }
+        },
       });
       ctx.registerService('sharing', this.service);
 
@@ -588,6 +595,29 @@ export function buildSharingMiddleware(service: SharingService): EngineMiddlewar
 
     // READS — AND the visibility filter into the AST.
     if (op === 'find' || op === 'findOne' || op === 'count' || op === 'aggregate') {
+      // [ADR-0111 D5] `sys_record_share` sits on the sharing BYPASS list (the
+      // enforcement queries must not recurse through their own gate), which
+      // used to leave its read surface wide open — any authenticated caller
+      // could enumerate every share row via `/data/sys_record_share` ("who can
+      // see what", plus the share ids the revoke gate protects). Non-system
+      // callers without sharing-admin capability are scoped to rows that NAME
+      // them (as recipient or grantor); principal-less callers see nothing.
+      // The Setup admin views hold `manage_sharing` (seeded into
+      // `admin_full_access`; `manage_platform_settings` honoured as the legacy
+      // gate those pages used) and keep the tenant-wide list.
+      if (ctx.object === 'sys_record_share' && !exec?.isSystem) {
+        const caps: string[] = Array.isArray(exec?.systemPermissions) ? exec.systemPermissions : [];
+        if (!caps.includes('manage_sharing') && !caps.includes('manage_platform_settings')) {
+          const selfScope = exec?.userId
+            ? { $or: [{ recipient_id: exec.userId }, { granted_by: exec.userId }] }
+            : { id: '__deny_all__' };
+          const ast: any = ctx.ast ?? {};
+          ast.where = composeAnd(ast.where, selfScope);
+          ast.filter = composeAnd(ast.filter, selfScope);
+          ctx.ast = ast;
+        }
+        return next();
+      }
       let filter = await service.buildReadFilter(ctx.object, exec ?? {});
       // [ADR-0090 D10] Agent/service intersection on the OWD/sharing axis. When
       // the principal acts on behalf of a user, the owner-match and record

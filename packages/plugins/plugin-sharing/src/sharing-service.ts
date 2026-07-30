@@ -82,6 +82,15 @@ function hasOwnerField(schema: any): boolean {
   return Boolean(schema?.fields && OWNER_FIELD in schema.fields);
 }
 
+/**
+ * [ADR-0111 D2] The narrow slice of `ISecurityService` the management gate
+ * needs — kept structural so unit tests can pass a stub and so a deployment
+ * without `@objectstack/plugin-security` degrades to owner-only (fail closed).
+ */
+export interface SharingSecurityProbe {
+  hasWriteBypass?(object: string, context: unknown): Promise<boolean>;
+}
+
 export interface SharingServiceOptions {
   engine: SharingEngine;
   /** Object names that bypass sharing — typically platform internals. */
@@ -91,6 +100,13 @@ export interface SharingServiceOptions {
    * (`hierarchy-scope-resolver` service). Returns null in the open edition.
    */
   hierarchyResolver?: () => IHierarchyScopeResolver | null | undefined;
+  /**
+   * [ADR-0111 D1/D2] Late-bound lookup for the `security` service, probed for
+   * the super-user write bypass (`modifyAllRecords`) in
+   * {@link SharingService.canManageShares}. Absent / throwing / returning
+   * null → management authority fails CLOSED to owner-only.
+   */
+  securityService?: () => SharingSecurityProbe | null | undefined;
 }
 
 /**
@@ -105,10 +121,12 @@ export class SharingService implements ISharingService {
   private readonly engine: SharingEngine;
   private readonly bypassObjects: Set<string>;
   private readonly hierarchyResolver?: () => IHierarchyScopeResolver | null | undefined;
+  private readonly securityService?: () => SharingSecurityProbe | null | undefined;
 
   constructor(options: SharingServiceOptions) {
     this.engine = options.engine;
     this.hierarchyResolver = options.hierarchyResolver;
+    this.securityService = options.securityService;
     this.bypassObjects = new Set([
       'sys_record_share',
       'sys_user',
@@ -286,8 +304,141 @@ export class SharingService implements ISharingService {
   }
 
   /**
+   * [ADR-0111 D1] May `context` MANAGE shares (grant / revoke / list) on
+   * `(object, recordId)`? System → yes. Record owner → yes. Super-user write
+   * bypass (`modifyAllRecords`, probed via the late-bound security service) →
+   * yes. Everything else — a missing record, a principal-less context, a
+   * probe failure, a deployment without plugin-security — fails CLOSED to
+   * `false`. The DEPTH extension (hierarchy managers may share subordinates'
+   * records) is a named ADR-0111 direction, deliberately not implemented here.
+   */
+  async canManageShares(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<boolean> {
+    if (context?.isSystem) return true;
+    if (!object || !recordId || !context?.userId) return false;
+
+    // Ownership — read under system context so field-level masking cannot
+    // hide the owner column from the decision itself.
+    try {
+      const rows = await this.engine.find(object, {
+        where: { id: recordId },
+        fields: ['id', OWNER_FIELD],
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+      const row: any = Array.isArray(rows) ? rows[0] : undefined;
+      if (!row) return false;
+      const owner = row[OWNER_FIELD];
+      if (owner != null && String(owner) === String(context.userId)) return true;
+    } catch {
+      return false;
+    }
+
+    // Modify All Data — the EXPLICIT bypass only (ADR-0111 D1/D2; never the
+    // effective write scope, whose unmatched-object case fails open to 'org').
+    try {
+      const probe = this.securityService?.();
+      if (probe && typeof probe.hasWriteBypass === 'function') {
+        return (await probe.hasWriteBypass(object, context)) === true;
+      }
+    } catch {
+      /* fall through to deny */
+    }
+    return false;
+  }
+
+  /**
+   * [ADR-0111 D5] Is `(object, recordId)` VISIBLE to the caller? Reads under
+   * the CALLER's own context so the security RLS and sharing read filters
+   * decide, exactly as a plain find would. Any failure → not visible (fail
+   * closed); callers surface that as NOT_FOUND so a missing record and an
+   * invisible one are indistinguishable.
+   */
+  private async isRecordVisible(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<boolean> {
+    try {
+      const rows = await this.engine.find(object, {
+        where: { id: recordId },
+        fields: ['id'],
+        limit: 1,
+        context,
+      });
+      return Array.isArray(rows) && rows.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * [ADR-0111 D1/D5] The shared pre-flight for every management verb:
+   * invisible/missing record → NOT_FOUND (404); visible but unmanageable →
+   * PERMISSION_DENIED (403). System context skips both.
+   */
+  private async assertCanManageShares(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<void> {
+    if (context?.isSystem) return;
+    if (!(await this.isRecordVisible(object, recordId, context))) {
+      throw new Error(`NOT_FOUND: ${object}/${recordId} not found`);
+    }
+    if (!(await this.canManageShares(object, recordId, context))) {
+      throw new Error(
+        `PERMISSION_DENIED: managing shares on ${object}/${recordId} requires record ownership or Modify All Data (ADR-0111 D1)`,
+      );
+    }
+  }
+
+  /**
+   * [ADR-0111 D7] The object must be one the sharing gates actually consult —
+   * otherwise the grant would persist a row no read/write decision ever reads
+   * (the ADR-0078 silently-inert trap, inverted: "share" succeeds and nothing
+   * is shared). Bypass objects, `controlled_by_parent` (a detail record's
+   * access follows its master, ADR-0055), public models, and owner-less
+   * objects all refuse with SHARING_NOT_ENABLED (REST: 422). An engine
+   * without schema access skips the check — it cannot know, and this guard is
+   * an inertness guard, not the authority gate.
+   */
+  private assertSharingEnforced(object: string): void {
+    if (this.bypassObjects.has(object)) {
+      throw new Error(
+        `SHARING_NOT_ENABLED: '${object}' bypasses record sharing; a share row on it would never be consulted`,
+      );
+    }
+    if (typeof this.engine.getSchema !== 'function') return;
+    const schema = this.engine.getSchema(object);
+    if (!schema) throw new Error(`NOT_FOUND: unknown object '${object}'`);
+    const declared = schema?.sharingModel ?? schema?.security?.sharingModel;
+    if (declared === 'controlled_by_parent') {
+      throw new Error(
+        `SHARING_NOT_ENABLED: '${object}' is controlled by its parent (master-detail); share the master record instead`,
+      );
+    }
+    if (effectiveSharingModel(schema) === 'public' || !hasOwnerField(schema)) {
+      throw new Error(
+        `SHARING_NOT_ENABLED: '${object}' is not under record-sharing enforcement `
+        + `(public sharing model or no '${OWNER_FIELD}' field); a share row on it would never be consulted`,
+      );
+    }
+  }
+
+  /**
    * Upsert a share row. Returning the existing row when an identical
    * grant already exists keeps the REST endpoint idempotent.
+   *
+   * [ADR-0111 D1/D7] Non-system callers must hold {@link canManageShares} on
+   * the record; the recipient must be a `user` (the only type any gate
+   * enforces); and the object must be in an enforcing sharing posture. The
+   * upsert matches on `(object, record, recipient, source)` so a manual grant
+   * never clobbers a rule-materialised row (and vice versa) — when both exist,
+   * the gates' `$in` queries make the widest level win (grants are additive).
    */
   async grant(
     input: GrantShareInput,
@@ -298,6 +449,16 @@ export class SharingService implements ISharingService {
     if (!input.recipientId) throw new Error('VALIDATION_FAILED: recipientId is required');
 
     const recipientType = input.recipientType ?? 'user';
+    // [ADR-0111 D7] Only `user` recipients are consulted by the read/write
+    // gates; persisting any other type would be a silently inert grant
+    // (ADR-0078). Group / business-unit principals are delivered via sharing
+    // rules, whose evaluator expands them into per-user rows.
+    if (recipientType !== 'user') {
+      throw new Error(
+        `VALIDATION_FAILED: recipientType must be 'user' (received ${JSON.stringify(recipientType)}) — `
+        + `group/position recipients are delivered via sharing rules (ADR-0111 D7)`,
+      );
+    }
     // Validate BEFORE any write. Previously anything at all was persisted
     // verbatim, so a typo'd level became a grant that no gate ever matched — a
     // share row that looks granted and enforces nothing (#3865). `full`
@@ -306,14 +467,27 @@ export class SharingService implements ISharingService {
     const accessLevel: ShareAccessLevel = normalizeAccessLevel(input.accessLevel, 'read');
     const source = input.source ?? 'manual';
 
-    // Upsert: if a row with same (object, record, recipient) exists,
-    // update its access level / reason; otherwise insert a new one.
+    // [ADR-0111 D1/D7] Authorization + posture, service-side so every caller
+    // is covered (#3902 ③ — the REST route used to hand any signed-in user
+    // straight to this SYSTEM_CTX write path). System callers bypass: the
+    // rule evaluator materialises through here under its own validation.
+    if (!context?.isSystem) {
+      this.assertSharingEnforced(input.object);
+      await this.assertCanManageShares(input.object, input.recordId, context);
+    }
+
+    // Upsert: if a row with same (object, record, recipient, source) exists,
+    // update its access level / reason; otherwise insert a new one. `source`
+    // is part of the key (ADR-0111 D7): a manual grant must not clobber a
+    // rule-materialised row — the rule's next reconcile would fight it (flip
+    // it back or purge it), leaving access flapping between the two answers.
     const existing = await this.engine.find('sys_record_share', {
       where: {
         object_name: input.object,
         record_id: input.recordId,
         recipient_type: recipientType,
         recipient_id: input.recipientId,
+        source,
       },
       limit: 1,
       context: SYSTEM_CTX,
@@ -352,21 +526,82 @@ export class SharingService implements ISharingService {
     return row as RecordShare;
   }
 
-  /** Delete a share row by id. No-op when not found. */
-  async revoke(shareId: string, _context: SharingExecutionContext): Promise<void> {
+  /**
+   * Delete a share row by id.
+   *
+   * [ADR-0111 D4] `revoke(shareId)` used to delete unconditionally — any
+   * signed-in user holding (or enumerating) a share id could silently strip
+   * any user's access to any record (#3902 ①). Non-system callers now must:
+   * hold {@link canManageShares} on the share's record (revoke is SYMMETRIC
+   * with grant — no granter exception); pass a `scope` match when the caller
+   * supplies one (the REST route forwards its URL's object/record, so a share
+   * id cannot be revoked through an unrelated path); and target a `manual`
+   * row — rule-materialised grants would be silently re-granted on the next
+   * reconcile, so "revoked" would be a lie (deactivate the rule instead).
+   * System callers keep the historical delete-by-id no-op-when-missing
+   * behaviour (the rule evaluator's reconciliation path).
+   */
+  async revoke(
+    shareId: string,
+    context: SharingExecutionContext,
+    scope?: { object: string; recordId: string },
+  ): Promise<void> {
     if (!shareId) throw new Error('VALIDATION_FAILED: shareId is required');
+    if (context?.isSystem) {
+      await this.engine.delete('sys_record_share', {
+        where: { id: shareId },
+        context: SYSTEM_CTX,
+      });
+      return;
+    }
+
+    const rows = await this.engine.find('sys_record_share', {
+      where: { id: shareId },
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const row: any = Array.isArray(rows) ? rows[0] : undefined;
+    // Missing row and scope-mismatched row are the same 404 — neither
+    // confirms the share's existence to a caller who cannot manage it.
+    if (!row) throw new Error(`NOT_FOUND: share ${shareId} not found`);
+    if (
+      scope
+      && (String(row.object_name) !== String(scope.object)
+        || String(row.record_id) !== String(scope.recordId))
+    ) {
+      throw new Error(`NOT_FOUND: share ${shareId} not found on ${scope.object}/${scope.recordId}`);
+    }
+    await this.assertCanManageShares(String(row.object_name), String(row.record_id), context);
+    if (row.source != null && row.source !== 'manual') {
+      throw new Error(
+        `CONFLICT: share ${shareId} is materialised by source '${row.source}' and would be re-granted `
+        + `on the next reconciliation — deactivate or edit its sharing rule instead (ADR-0111 D4)`,
+      );
+    }
     await this.engine.delete('sys_record_share', {
       where: { id: shareId },
       context: SYSTEM_CTX,
     });
   }
 
-  /** List share rows for `(object, recordId)`. */
+  /**
+   * List share rows for `(object, recordId)`.
+   *
+   * [ADR-0111 D5] Management-gated for non-system callers: enumerating who
+   * can see a record is both an information disclosure and the exact recon
+   * that hands an attacker the share ids the revoke gate protects (#3902 ②).
+   * Salesforce's Sharing Detail page is likewise owner/hierarchy/admin-only.
+   * "What is shared with me / by me" is served by the self-scoped
+   * `sys_record_share` read surface instead.
+   */
   async listShares(
     object: string,
     recordId: string,
-    _context: SharingExecutionContext,
+    context: SharingExecutionContext,
   ): Promise<RecordShare[]> {
+    if (!context?.isSystem) {
+      await this.assertCanManageShares(object, recordId, context);
+    }
     const rows = await this.engine.find('sys_record_share', {
       where: { object_name: object, record_id: recordId },
       orderBy: [{ field: 'created_at', order: 'desc' }],

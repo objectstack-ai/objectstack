@@ -2732,6 +2732,43 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * The `Field.datetime` (and audit) columns of `table` that MySQL still stores
+   * as a legacy `TIMESTAMP`, with the nullability each must keep.
+   *
+   * Shared by {@link migrateMysqlDatetimeColumns}, which widens them, and
+   * {@link previewDatetimeConvergence}, which reports them into `os migrate
+   * plan` (#3954) — so what the plan lists and what apply does are the same set
+   * by construction, not by two filters that agree today.
+   *
+   * `[]` on any dialect but MySQL, and on a table declaring no datetime column.
+   */
+  protected async legacyMysqlTimestampColumns(
+    table: string,
+    fields: Record<string, any>,
+  ): Promise<Array<{ name: string; nullable: boolean }>> {
+    if (!this.isMysql) return [];
+    const candidates = new Set<string>(AUDIT_TIMESTAMP_COLUMNS);
+    for (const [name, field] of Object.entries(fields)) {
+      if ((field?.type ?? 'string') === 'datetime' && !field?.multiple) candidates.add(name);
+    }
+    if (candidates.size === 0) return [];
+
+    const res: any = await this.knex.raw(
+      `select column_name, is_nullable from information_schema.columns
+       where table_schema = database() and table_name = ? and data_type = 'timestamp'`,
+      [table],
+    );
+    // mysql2 returns [rows, fields]; column names vary in case by server.
+    const rows: any[] = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
+    return rows
+      .map((r) => ({
+        name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
+        nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
+      }))
+      .filter((c) => c.name && candidates.has(c.name));
+  }
+
+  /**
    * Widen a table's legacy MySQL `TIMESTAMP` datetime columns to `DATETIME(3)`
    * (#3942) — the MySQL counterpart of {@link backfillCanonicalDatetimes}.
    *
@@ -2758,26 +2795,8 @@ export class SqlDriver implements IDataDriver {
     fields: Record<string, any>,
   ): Promise<void> {
     if (!this.isMysql) return;
-    const candidates = new Set<string>(AUDIT_TIMESTAMP_COLUMNS);
-    for (const [name, field] of Object.entries(fields)) {
-      if ((field?.type ?? 'string') === 'datetime' && !field?.multiple) candidates.add(name);
-    }
-    if (candidates.size === 0) return;
-
     try {
-      const res: any = await this.knex.raw(
-        `select column_name, is_nullable from information_schema.columns
-         where table_schema = database() and table_name = ? and data_type = 'timestamp'`,
-        [table],
-      );
-      // mysql2 returns [rows, fields]; column names vary in case by server.
-      const rows: any[] = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
-      const legacy = rows
-        .map((r) => ({
-          name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
-          nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
-        }))
-        .filter((c) => c.name && candidates.has(c.name));
+      const legacy = await this.legacyMysqlTimestampColumns(table, fields);
       if (legacy.length === 0) return;
 
       for (const col of legacy) {
@@ -2835,15 +2854,23 @@ export class SqlDriver implements IDataDriver {
   /**
    * What the deferred sync *would* do, without doing it.
    *
-   * Read-only: `hasTable` + `columnInfo`, the same two probes the additive sync
-   * uses to decide between create and alter. Tables and columns that already
-   * match metadata produce no entry, so an in-sync database returns `[]`.
+   * Read-only: `hasTable` + `columnInfo` decide between create and alter (the
+   * same two probes the additive sync uses), then
+   * {@link previewDatetimeConvergence} asks whether the datetime storage steps
+   * have anything left to do. Tables that already match metadata and hold
+   * canonical data produce no entry, so an in-sync database returns `[]`.
+   *
+   * The convergence probe COUNTS rows, so this is more than metadata lookups on
+   * a database that has not been migrated yet. That is the right trade for a
+   * command the operator ran to be told the size of the job — and it is paid
+   * once, by `plan`/`apply`, never on a normal boot.
    */
   async previewDeferredSchemaWork(): Promise<PendingSchemaWork[]> {
     const out: PendingSchemaWork[] = [];
     for (const [tableName, obj] of this.deferredSchemaObjects) {
       const declared = Object.keys(obj.fields ?? {});
       if (!(await this.knex.schema.hasTable(tableName))) {
+        // A table that does not exist yet is created empty, so nothing to converge.
         out.push({ table: tableName, kind: 'create_table', columns: declared });
         continue;
       }
@@ -2852,9 +2879,71 @@ export class SqlDriver implements IDataDriver {
       if (missing.length > 0) {
         out.push({ table: tableName, kind: 'add_columns', columns: missing });
       }
+      out.push(...(await this.previewDatetimeConvergence(tableName, obj.fields ?? {}, existing)));
     }
-    out.sort((a, b) => a.table.localeCompare(b.table));
+    out.sort((a, b) => a.table.localeCompare(b.table) || a.kind.localeCompare(b.kind));
     return out;
+  }
+
+  /**
+   * The datetime storage-convergence work {@link backfillCanonicalDatetimes} and
+   * {@link migrateMysqlDatetimeColumns} would do for `table` — measured, not
+   * performed (#3954).
+   *
+   * Both steps run inside `initObjects` alongside the create/alter path, so
+   * `apply` performs them; without an entry here `plan` would show a two-column
+   * change and `apply` would additionally rewrite every row of a datetime column
+   * or rebuild one on a large table. The plan promises to show what apply does.
+   *
+   * Each probe reuses the very predicate its migration uses, so the preview
+   * cannot claim work the migration will not do (or miss work it will):
+   *   - SQLite counts rows matching `col IS NOT <canonical>` — the backfill's
+   *     entire `WHERE`.
+   *   - MySQL lists the candidate columns still typed `timestamp` — the
+   *     migration's own `information_schema` filter.
+   *
+   * Failures are swallowed to `[]`, matching the migrations themselves: a probe
+   * that cannot run must not fail the plan, and under-reporting here costs an
+   * unlisted step rather than a wrong one.
+   */
+  protected async previewDatetimeConvergence(
+    table: string,
+    fields: Record<string, any>,
+    existingColumns: Set<string>,
+  ): Promise<PendingSchemaWork[]> {
+    try {
+      if (this.isSqlite) {
+        const declared = [...(this.datetimeFields[table] ?? [])].filter((c) => existingColumns.has(c));
+        if (declared.length === 0) return [];
+        const canonical = this.sqliteCanonicalDatetimeSql('??');
+        const columns: string[] = [];
+        let rows = 0;
+        for (const field of declared) {
+          const res: any = await this.knex.raw(
+            `select count(*) as n from ?? where ?? is not null and ?? is not ${canonical}`,
+            [table, field, field, field, field, field, field],
+          );
+          const n = Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
+          if (n > 0) { columns.push(field); rows += n; }
+        }
+        return columns.length === 0
+          ? []
+          : [{ table, kind: 'normalize_datetime_storage', columns, rows }];
+      }
+
+      if (this.isMysql) {
+        const legacy = await this.legacyMysqlTimestampColumns(table, fields);
+        if (legacy.length === 0) return [];
+        const res: any = await this.knex.raw(`select count(*) as n from ??`, [table]);
+        const counted = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
+        const rows = Number((counted[0] as any)?.n ?? (counted as any)?.n ?? 0);
+        return [{ table, kind: 'widen_datetime_columns', columns: legacy.map((c) => c.name), rows }];
+      }
+
+      return [];
+    } catch {
+      return [];
+    }
   }
 
   /**

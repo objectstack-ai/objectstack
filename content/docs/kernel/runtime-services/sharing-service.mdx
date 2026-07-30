@@ -13,21 +13,34 @@ description: Record-level sharing and editability checks.
 ```ts
 services.sharing.buildReadFilter(object: string, context: SharingExecutionContext): Promise<unknown | null>
 services.sharing.canEdit(object: string, recordId: string, context: SharingExecutionContext): Promise<boolean>
+services.sharing.canManageShares(object: string, recordId: string, context: SharingExecutionContext): Promise<boolean>
 services.sharing.grant(input: GrantShareInput, context: SharingExecutionContext): Promise<RecordShare>
-services.sharing.revoke(shareId: string, context: SharingExecutionContext): Promise<void>
+services.sharing.revoke(shareId: string, context: SharingExecutionContext, scope?: { object: string; recordId: string }): Promise<void>
 services.sharing.listShares(object: string, recordId: string, context: SharingExecutionContext): Promise<RecordShare[]>
 ```
+
+## Management authority (ADR-0111)
+
+`grant` / `revoke` / `listShares` are **management operations**, enforced in the
+service for every non-system caller: the caller must hold `canManageShares` on
+the record — its owner, a holder of Modify All Data on the object, or system
+context. A deployment without `@objectstack/plugin-security` fails closed to
+owner-only. Pass `{ isSystem: true }` only from platform-internal machinery.
 
 ## Returns
 
 - `buildReadFilter`: `null` means unrestricted read; otherwise returns an engine filter
-- `canEdit`: boolean decision
+- `canEdit` / `canManageShares`: boolean decisions (they return `false` rather than throwing)
 - `grant`/`listShares`: normalized `RecordShare` rows
 
 ## Typical Errors
 
 - `FORBIDDEN` (403) — a write denied by the `canEdit` gate. Thrown by the sharing engine middleware; `canEdit` itself returns `false` rather than throwing.
-- `VALIDATION_FAILED` — `grant`/`revoke` called without a required field (`object`, `recordId`, `recipientId`, or `shareId`). `revoke` is otherwise a no-op when the share id is not found.
+- `VALIDATION_FAILED` (400) — `grant`/`revoke` called without a required field (`object`, `recordId`, `recipientId`, or `shareId`), or `grant` with a non-`user` `recipientType` (only `user` rows are enforced by the gates; group/position recipients are delivered via sharing rules).
+- `PERMISSION_DENIED` (403) — the caller does not hold `canManageShares` on the record (ADR-0111 D1).
+- `NOT_FOUND` (404) — the record is missing **or not visible to the caller** (indistinguishable by design), or a `revoke` share id does not exist / does not belong to the `scope` record.
+- `CONFLICT` (409) — `revoke` on a rule-materialised share (`source != 'manual'`); the next rule reconciliation would silently re-grant it. Deactivate or edit the sharing rule instead.
+- `SHARING_NOT_ENABLED` (422) — `grant` on an object the sharing gates never consult (public sharing model, no `owner_id` field, a bypass object, or `controlled_by_parent`).
 
 ## Example
 

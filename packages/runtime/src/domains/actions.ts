@@ -142,7 +142,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // read it.
     let actionSchema: any;
     let actionDef: any;
-    try {
+    {
         // Standalone declarations (ObjectQL registry artifacts / Studio-
         // authored `action` rows) resolve here too, so a route whose action
         // never appears inside an object definition is gated and dispatched
@@ -155,12 +155,64 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         });
         actionSchema = declaration?.obj;
         actionDef = declaration?.action;
+
+        // [ADR-0110 D3] Resolution is a TRICHOTOMY, and only one branch may
+        // dispatch. This block used to be a `try { … } catch { /* no gate to
+        // enforce */ }`, which collapsed three states with opposite meanings
+        // into one fail-open path: a declaration that resolved, a metadata
+        // plane that could not answer, and an action that genuinely has no
+        // declaration all arrived as "ungated, run it".
+        //
+        // ── 2/3: the metadata plane could not answer ──
+        // An availability failure is not an authorization decision. Refusing
+        // is the same posture v17 already takes for a datasource that cannot
+        // connect (#3741) and a flow run with no trigger user (#3760): decline
+        // rather than degrade, because the alternative is that an outage
+        // quietly removes the gate an author declared.
+        if (declaration.degraded) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Cannot verify the declaration for action '${actionName}' on '${objectName}' — ` +
+                    `the metadata plane is unavailable (${declaration.reason ?? 'unknown failure'}). ` +
+                    `Refusing rather than running it ungated.`,
+                    503,
+                ),
+            };
+        }
+
+        // ── 3/3: genuinely undeclared ──
+        // A handler with no declaration is invisible to every governance
+        // surface — ADR-0066 D4 has no `requiredPermissions` to read, ADR-0104
+        // no param contract, ADR-0109 materialises no `action_<name>` tool —
+        // yet it executes TRUSTED. Refuse, and say what to add. The valve is
+        // for an upgrade that cannot stop to declare one at 3am; it warns on
+        // every invocation and is slated for removal in 18.
+        if (!actionDef) {
+            if (!actionExec.undeclaredActionsAllowed(deps)) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `Action '${actionName}' on '${objectName}' has no declaration — ` +
+                        `add \`defineAction({ name: '${actionName}', … })\`, or register the handler under a ` +
+                        `declared action's \`target\`. Undeclared handlers cannot be permission-gated ` +
+                        `(ADR-0110 D3); set OS_ALLOW_UNDECLARED_ACTIONS=1 to run it during migration.`,
+                        404,
+                    ),
+                };
+            }
+            console.warn(
+                `[action-governance] UNDECLARED action '${objectName}/${actionName}' executed under ` +
+                `OS_ALLOW_UNDECLARED_ACTIONS — it is ungated (no requiredPermissions, no param contract) ` +
+                `and invisible to the AI surface. Declare it; the valve is removed in 18.`,
+            );
+        }
+
+        // ── 1/3: declared → gate against it ──
         const gateError = actionExec.actionPermissionError(deps, actionDef, _context?.executionContext, objectName);
         if (gateError) {
             return { handled: true, response: deps.error(gateError, 403) };
         }
-    } catch {
-        /* schema unresolved → no declared gate to enforce (handler-only action) */
     }
 
     // [#3915] Action-TYPE dispatch. Per spec every non-`script` type
@@ -281,24 +333,24 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             `(system-elevated context, RLS/FLS-bypassing) for user '${userFromAuth.id}'`,
         );
 
-        // ── script/body dispatch ──
-        // Probe the routed object first, then the object-less keys (#3913):
-        // the canonical `'global'` both writers register under, then the legacy
-        // `'*'`. `executeAction` is an exact-string Map lookup with no wildcard
-        // semantics, so every candidate key has to be tried for real; only its
-        // "not registered" miss rotates, a genuine handler error propagates.
-        let dispatched = false;
-        let result: any;
-        for (const obj of actionExec.actionHandlerObjectKeys(objectName)) {
-            try {
-                result = await ql.executeAction(obj, actionName, actionContext);
-                dispatched = true;
-                break;
-            } catch (err: any) {
-                if (!actionExec.isActionNotRegisteredError(err)) throw err;
-            }
-        }
-        if (!dispatched) {
+        // ── script/body dispatch ── [ADR-0110 D2] "resolve, then address":
+        // the handler KEY is derived from the resolved declaration, not read
+        // off the URL. `app-plugin.ts` registers a body action under `name`
+        // while user code registers a target-bound one under `target`, so the
+        // URL segment matches the registration key only by luck — which is why
+        // the documented `/actions/todo_task/complete_task` curl used to 404
+        // for every target-bound action. The candidate keys rotate across the
+        // object-key rotation (#3913) inside the shared helper the MCP
+        // `run_action` bridge also calls, so both surfaces address handlers
+        // identically. The routed URL segment stays as the last candidate for
+        // an UNDECLARED action, which has no declaration to derive from.
+        const dispatch = await actionExec.executeRegisteredAction(
+            deps, ql, objectName,
+            actionExec.resolveActionHandlerKeys(actionDef, actionName),
+            actionContext,
+        );
+        const result = dispatch.result;
+        if (!dispatch.dispatched) {
             // No key carried a handler. That is a routing miss, not a server
             // fault — 404, and named after the ROUTED object rather than
             // whichever probe happened to run last (the old fallback reported

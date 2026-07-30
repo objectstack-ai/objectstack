@@ -10,6 +10,7 @@
 
 import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
+import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
 import { isSystemObjectName } from '../action-execution.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -158,12 +159,25 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
         return { handled: true, response: deps.error('MCP server is not enabled for this environment', 404) };
     }
     if (method !== 'GET') {
+        // Hand-rolled rather than `deps.error(...)` only because it carries an
+        // `Allow` header; the BODY still goes through the one builder (#3842),
+        // so this branch cannot drift back to a numeric `code`. The code is
+        // DERIVED (`method_not_allowed`), not spelled here — the other two 405
+        // sites (`domains/actions.ts`, `domains/keys.ts`) go through
+        // `deps.error` and derive theirs, and one dispatcher answering the same
+        // status two ways is the drift this issue is closing.
         return {
             handled: true,
             response: {
                 status: 405,
                 headers: { Allow: 'GET' },
-                body: { success: false, error: { message: 'Method not allowed — use GET', code: 405 } },
+                body: {
+                    success: false,
+                    error: buildApiError({
+                        message: 'Method not allowed — use GET',
+                        httpStatus: 405,
+                    }),
+                },
             },
         };
     }

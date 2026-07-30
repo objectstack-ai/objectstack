@@ -156,6 +156,44 @@ and flags whitelists the mapping would *widen* so every edit stays reviewable.
 `['upsert']`) strips to `[]`, which is **deny-all** — the object's API closes
 rather than widening.
 
+### An action must be declared to be invocable, and is identified by `name` (ADR-0110, #3935)
+
+Two halves of the `/api/v1/actions/:object/:action` contract were broken in
+complementary ways, which is why neither surfaced: the route resolved the
+**declaration** from the URL segment as a `name`, but dispatched the
+**handler** using that same segment as a registry key. For a target-bound
+action (`{ name: 'complete_task', target: 'completeTask' }`) those differ — so
+the documented `curl .../todo_task/complete_task` resolved the declaration and
+then 404ed, while the Console's `target`-addressed call dispatched fine and
+resolved **no** declaration, silently skipping the ADR-0066 D4 capability gate
+and the ADR-0104 param contract.
+
+Three changes land together:
+
+- **Identity is `name`.** The URL, MCP `run_action`, and every future surface
+  identify an action by its declarative `name`. `target` is a binding
+  expression — polymorphic per type, `${param.X}`-interpolatable, and legally
+  non-unique — so it never identifies anything. The server derives the handler
+  key from the declaration it resolved, using the rotation the MCP bridge
+  already used. The Console posts `name` (objectui ships in lockstep).
+- **An undeclared handler is refused.** `engine.registerAction` with no
+  matching declaration has no `requiredPermissions` to enforce and no param
+  contract to check, yet executes with system privileges. It now returns 404
+  naming the `defineAction` to add. Deleting a declaration used to *remove* an
+  action's gate while leaving it callable; removal now narrows.
+- **An unreachable metadata plane refuses instead of degrading.** A loader
+  failure used to be indistinguishable from "no declaration", so an outage
+  silently ungated every action it could not see. That is now a **503** — the
+  same posture as the datasource entry below.
+
+**Migration:** boot logs list every registered-but-undeclared handler under
+`[action-governance]`, alongside declared script actions bound to no handler.
+Declare each one. `OS_ALLOW_UNDECLARED_ACTIONS=1` runs them meanwhile, warning
+on every invocation; **it is removed in 18**. Apps whose actions are all
+declared — anything with working Console buttons — need no changes, other than
+gaining enforcement of the `requiredPermissions` they already declared. Callers
+that hard-coded a `target` in an action URL switch to the action's `name`.
+
 ### A flow run with no trigger user may not touch data (#3760)
 
 An effective `runAs: 'user'` run that resolved **no trigger user** used to
@@ -456,6 +494,45 @@ now tenant-scoped, matching the sequence.
 - **`GetTranslationsRequest` is locale-only.** The `namespace` / `keys` filters
   were declared, put on the query string by the SDK, and read by neither serving
   surface; passing `keys` shrank nothing and reported nothing.
+
+### The dispatcher's `error.code` is the semantic code, not the HTTP status (#3842)
+
+Everything the runtime dispatcher serves — `/meta/*`, `/actions/*`,
+`/packages/*`, `/automation/*`, `/analytics/*`, `/ready`, the route-not-found
+404 — used to answer with the HTTP status in `error.code`, the field
+`ApiErrorSchema` declares as a semantic string. The real code had to live
+somewhere else and did, in three different somewhere-elses: `error.details.code`,
+`error.details.type`, and a sibling `error.type`.
+
+```jsonc
+// before                                    // after
+{ "error": {                                 { "error": {
+    "message": "…",                              "code": "PERMISSION_DENIED",
+    "code": 403,                                 "message": "…",
+    "details": { "code": "PERMISSION_DENIED" }   "httpStatus": 403
+} }                                          } }
+```
+
+- **`error.code`** is the semantic string. **`error.httpStatus`** is the number.
+  **`error.details`** is context only. Replace a
+  `body.error.details?.code ?? body.error.type` read with `body.error.code`, and
+  a `body.error.code` read (for the status) with `body.error.httpStatus`.
+- **SDK callers need no change.** `ObjectStackClient` already normalised this —
+  `err.code` semantic, `err.httpStatus` numeric — and still reads the old shape,
+  so a client newer than its server behaves identically.
+- **No code was renamed.** `PERMISSION_DENIED`, `ROUTE_NOT_FOUND`,
+  `PASSWORD_EXPIRED`, `PROJECT_MEMBERSHIP_REQUIRED`, `VALIDATION_FAILED` and
+  `unauthenticated` all reach the wire spelled exactly as before; only their
+  field changed. Reconciling the platform's two code vocabularies is #3841.
+  A branch with no code of its own now derives a `StandardErrorCode` from the
+  status (`403` → `permission_denied`), spelled in one map in the spec.
+- **Spec:** `ApiErrorSchema` gains optional `httpStatus`; `StandardErrorCode`
+  gains `method_not_allowed` and `precondition_required` (both additive).
+  `DispatcherErrorCode` changes members from `'404' | '405' | '501' | '503'` to
+  the four semantic spellings the removed `error.type` declared, and
+  `DispatcherErrorResponseSchema.error.code` becomes a string — it had declared
+  the opposite of `ApiErrorSchema` for the same field, which is what let the
+  deviation stand.
 
 ### Dead spec clusters removed
 

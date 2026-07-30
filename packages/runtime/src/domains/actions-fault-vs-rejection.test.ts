@@ -101,7 +101,8 @@ describe('a deliberate REJECTION is a 400 (#3962)', () => {
         );
 
         expect(response.status).toBe(400);
-        expect(response.body.error.details).toMatchObject({ code: 'VALIDATION_FAILED', fields });
+        expect(response.body.error.code).toBe('VALIDATION_FAILED'); // promoted out of details (#3971)
+        expect(response.body.error.details).toMatchObject({ fields });
     });
 
     it('a bare ValidationError whose fields were stripped in transit', async () => {
@@ -113,7 +114,7 @@ describe('a deliberate REJECTION is a 400 (#3962)', () => {
         const response = await invoke(err);
 
         expect(response.status).toBe(400);
-        expect(response.body.error.details?.code).toBe('VALIDATION_FAILED');
+        expect(response.body.error.code).toBe('VALIDATION_FAILED');
     });
 
     it('a flow that ran and rejected', async () => {
@@ -205,6 +206,7 @@ describe('an unexpected FAULT is a 500', () => {
 
         expect(response.status).toBe(403);
         expect(response.body.error.message).toBe('Record is outside your sharing scope');
-        expect(response.body.error.details?.code).toBe('FORBIDDEN');
+        // [#3842] The thrower's own code reaches the declared field now.
+        expect(response.body.error.code).toBe('FORBIDDEN');
     });
 });

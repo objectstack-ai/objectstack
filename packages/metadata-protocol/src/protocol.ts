@@ -2659,6 +2659,29 @@ export class ObjectStackProtocolImplementation implements
         // probed for query-shape validity (nor reach the driver as a table).
         this.assertObjectRegistered(request.object);
         const options: any = { ...request.query };
+        // The execution context is SERVER-DERIVED and never caller input.
+        //
+        // `request.query` is the raw request bag on every ingress that reaches
+        // here — the REST `POST /data/:object/query` route hands `req.body`
+        // straight in as `query`. `context` is in the known-params set below, so
+        // it was not swept into the implicit-filter bucket either: a caller's
+        // `context` survived this spread and, because the assignment below is
+        // conditional, became the operation's execution context whenever no
+        // server context resolved (an anonymous request on a deployment that
+        // set `requireAuth: false`).
+        //
+        // What rides on it is total: plugin-security's middleware opens with
+        // `if (opCtx.context?.isSystem) return next()` — the entire RLS / FLS /
+        // CRUD chain skipped — and `__expandRead` waives the object-level CRUD
+        // gate for public objects (#2850). Neither is ever schema-stripped on
+        // this path: `ExecutionContextSchema.parse` runs only in
+        // `engine.createContext`, which the read path does not use.
+        //
+        // Route-level `enforceAuth` is what kept that from being reachable, so
+        // this was a fail-OPEN default one layer down. Drop any inbound
+        // `context` unconditionally: the protocol must not depend on a gate
+        // above it staying switched on.
+        delete options.context;
         // Forward the dispatcher's ExecutionContext so RBAC/RLS middleware
         // can apply per-request enforcement. The protocol layer is purely
         // a normalizer — it must never strip security context.
