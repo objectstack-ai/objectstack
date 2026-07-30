@@ -1187,6 +1187,7 @@
     "SystemObjectName (type)",
     "SystemUserId (type)",
     "TASK_PRIORITY_VALUES (const)",
+    "TRANSLATABLE_METADATA_TYPES (const)",
     "TRANSLATE_PLACEHOLDER (const)",
     "Task (type)",
     "TaskExecutionResult (type)",
