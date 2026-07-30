@@ -5263,7 +5263,15 @@ export class SqlDriver implements IDataDriver {
       // {@link syncDeclaredIndexes} — which runs after the table exists and can
       // therefore build composites. `createColumn` owns type/nullability/
       // defaults only.
-      if (field.required) col.notNullable();
+      //
+      // ADR-0113: the physical NOT NULL comes from the EXPLICIT storage
+      // constraint, not from `required` — `required` is the write-time
+      // contract enforced by the record validator at the engine seam, and
+      // binding the DDL to it made every post-deploy tightening a
+      // destructive migration. Sources authored before protocol 17 carry
+      // `storage.notNull` explicitly via the `field-required-notnull-explicit`
+      // conversion, so their columns come out exactly as they always did.
+      if ((field as { storage?: { notNull?: boolean } }).storage?.notNull) col.notNullable();
       // `defaultValue: 'NOW()'` is a framework convention for "use the
       // database clock at insert time". Translate it to the driver-native
       // canonical default (`nowColumnDefault`) so the column gets a real,

@@ -3441,6 +3441,7 @@
     "data/Field:searchable",
     "data/Field:sortable",
     "data/Field:step",
+    "data/Field:storage",
     "data/Field:summaryOperations",
     "data/Field:system",
     "data/Field:trackHistory",

@@ -11,8 +11,10 @@
  *
  * Rules applied (in order, stop at first error per field):
  *
- *  - `required`     missing/null/empty-string is rejected (insert only;
- *                   PATCH validates only fields actually supplied)
+ *  - `required`     ADR-0113 write contract: on INSERT a missing/null/empty
+ *                   value is rejected; on UPDATE a SUPPLIED missing value is
+ *                   rejected (a PATCH may not null out a required field) while
+ *                   an omitted field never 400s — legacy null rows rest.
  *  - `maxLength` / `minLength`            (text/textarea/email/url/phone/password)
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
  *  - format         email / url / phone   (lightweight RFC-aware regex)
@@ -489,12 +491,23 @@ export function validateRecord(
       if (err) errors.push(err);
     }
   } else {
-    // Update — validate only supplied fields, skip required check.
+    // Update — validate only supplied fields; an OMITTED field never 400s.
     for (const [name, value] of Object.entries(data)) {
       if (SKIP_FIELDS.has(name)) continue;
       const def = fields[name];
       if (!def) continue;
       if (def.system || def.readonly) continue;
+      // ADR-0113 non-regression: a PATCH may not null OUT a required field.
+      // The key is in the payload (we are iterating it), so a missing value
+      // is an explicit clear, not an omission — the write would take the
+      // record from compliant to violating. Legacy null rows still rest: a
+      // write that does not touch the field never reaches this check. (The
+      // one over-approximation — explicit null onto an already-null legacy
+      // row — is rejected too; that write was a no-op plus a false claim.)
+      if (def.required && isMissing(value) && def.type !== 'autonumber') {
+        errors.push({ field: name, code: 'required', message: `${name} is required and cannot be cleared` });
+        continue;
+      }
       // skipRequired: PATCH-omitted fields must not 400. (No def clone — the
       // registry's own field object flows through so the ADR-0104 value-shape
       // schema cache, keyed on def identity, hits.)

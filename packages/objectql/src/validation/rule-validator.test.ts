@@ -35,8 +35,27 @@ describe('field requiredWhen enforcement (B2)', () => {
   it('passes when the predicate is FALSE', () => {
     expect(() => evaluateValidationRules(invoiceFields, { status: 'draft' }, 'insert')).not.toThrow();
   });
-  it('evaluates over the merged record on update (prior status=sent, amount absent → required)', () => {
-    expect(() => evaluateValidationRules(invoiceFields, { note: 'x' } as any, 'update', { previous: { status: 'sent' } })).toThrow(ValidationError);
+  // ── ADR-0113 non-regression: reject iff the MERGED state violates AND the
+  // PRE state complied. A write may not CREATE a violation; it need not FIX a
+  // pre-existing one. (The pre-ADR behavior — throwing on ANY write while a
+  // legacy row violates — was the lockout #3929 documented: a row from before
+  // the rule tightened could not be edited at all without backfilling.)
+
+  it('update that CREATES the violation is rejected — condition flipped true without the field', () => {
+    // pre: draft, no amount → complied. Write flips status to sent, no amount → violates.
+    expect(() => evaluateValidationRules(invoiceFields, { status: 'sent' }, 'update', { previous: { status: 'draft' } })).toThrow(ValidationError);
+  });
+  it('update that nulls the field out under a TRUE condition is rejected', () => {
+    // pre: sent + amount → complied. Write clears amount → violates.
+    expect(() => evaluateValidationRules(invoiceFields, { amount: null } as any, 'update', { previous: { status: 'sent', amount: 10 } })).toThrow(ValidationError);
+  });
+  it('legacy rows rest: a pre-existing violation does not block an unrelated write', () => {
+    // pre: sent, amount ALREADY missing → pre violated (row predates the rule).
+    // The write touches only `note` — leaves the violation in place, creates nothing.
+    expect(() => evaluateValidationRules(invoiceFields, { note: 'x' } as any, 'update', { previous: { status: 'sent' } })).not.toThrow();
+  });
+  it('a write that FIXES the legacy violation passes', () => {
+    expect(() => evaluateValidationRules(invoiceFields, { amount: 25 }, 'update', { previous: { status: 'sent' } })).not.toThrow();
   });
   it('honors the conditionalRequired alias', () => {
     const f = { fields: { amount: { type: 'currency', conditionalRequired: "record.status == 'sent'" } } };

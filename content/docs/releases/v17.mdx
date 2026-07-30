@@ -395,6 +395,39 @@ empty shape must state its predicate, or the object should use `sharingModel`.
   tombstoned with a fix-it prescription; `os migrate meta` deletes the key
   mechanically, and policy outcomes are identical with or without it.
 
+### `required` is a write contract; the column constraint is `storage.notNull` (ADR-0113)
+
+`field.required` used to mean three things through one knob: the write check,
+the physical `NOT NULL`, and the drift expectation. Bound together, tightening
+any invariant on a deployed object was a destructive migration blocked by the
+very legacy nulls that motivated it — so real invariants ended up as imperative
+guards (three of them for `sys_sharing_rule.criteria_json`) or didn't happen.
+Split in v17:
+
+- **`required: true`** is the write-time contract, uniformly: an insert must
+  provide a non-null value, an update may not null it out — a PATCH clearing a
+  required field is now rejected (it silently passed before) — and legacy null
+  rows rest: a write that doesn't touch the field never blocks. The column
+  stays nullable.
+- **`storage: { notNull: true }`** is the explicit physical constraint. It owns
+  the `NOT NULL` DDL and the destructive-migration ceremony (backfill first).
+  Declaring it at field creation is free; declaring it over existing nulls is
+  loud.
+- **`requiredWhen` inherits the same non-regression rule**: a write that flips
+  the condition true without providing the field is rejected (it *creates* the
+  violation), while a row violating since before the rule tightened no longer
+  locks out unrelated edits. `storage.notNull` × `requiredWhen` is rejected at
+  parse — a conditional contract cannot be an unconditional constraint.
+- **Pre-17 sources keep their exact meaning**: `os migrate meta` stamps
+  `storage: { notNull: true }` onto every previously-required field
+  (`field-required-notnull-explicit`) — under the old semantics that column
+  *was* created `NOT NULL`, so the rewrite writes down what the text already
+  meant. Migration-chain-only: the loader never guesses.
+- **Drift**: nullability now compares against `storage.notNull`. A column
+  stricter than its declaration is `needs_confirm` (ratify or relax — dev
+  auto-reconcile no longer silently strips a stray `NOT NULL`), and silent when
+  the field is `required` (the write gate makes the constraint unreachable).
+
 ### Membership grade is not a capability channel (ADR-0108, #3723)
 
 `sys_member.role` answers "what is your standing in this organization", not
@@ -1020,6 +1053,12 @@ objectui commits on top of the pin 16.1.0 shipped.
   metadata (`os migrate meta` does it; none ever had an effect). To gate a tool,
   gate the underlying action (`action.requiredPermissions`); to withdraw one,
   remove it from the skills/agents that reference it.
+- **Required fields:** run `os migrate meta` — it stamps
+  `storage: { notNull: true }` onto every pre-17 `required: true` field so your
+  columns keep their exact constraints. New fields: `required: true` alone
+  write-gates with a nullable column; add `storage.notNull` when you want the
+  DDL. Audit any client that PATCHes `null` into required fields — that write
+  is now rejected.
 - **Membership:** move business capability off `sys_member.role` and onto
   positions (`sys_user_position`).
 - **SDK callers:** remove calls to `client.permissions.*`, `client.realtime.*`,

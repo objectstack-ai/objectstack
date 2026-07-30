@@ -209,12 +209,17 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     expect(columns).toHaveProperty('invoice_no');
   });
 
-  it('should create database constraints (unique, required)', async () => {
+  it('should create database constraints (unique, storage.notNull) — required alone stays nullable (ADR-0113)', async () => {
     const objects = [
       {
         name: 'constraint_test',
         fields: {
           unique_field: { type: 'string', unique: true } as any,
+          // The physical constraint is the EXPLICIT storage opt-in…
+          constrained_field: { type: 'string', required: true, storage: { notNull: true } } as any,
+          // …while `required` alone is the write contract: the engine's record
+          // validator gates it, the column deliberately stays nullable so a
+          // post-deploy tightening is never a destructive migration.
           required_field: { type: 'string', required: true } as any,
         },
       },
@@ -222,17 +227,21 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
 
     await driver.initObjects(objects);
 
-    await driver.create('constraint_test', { unique_field: 'u1', required_field: 'r1' });
+    const info = await knexInstance('constraint_test').columnInfo();
+    expect(info.constrained_field.nullable).toBe(false);
+    expect(info.required_field.nullable).toBe(true);
+
+    await driver.create('constraint_test', { unique_field: 'u1', constrained_field: 'c1', required_field: 'r1' });
 
     try {
-      await driver.create('constraint_test', { unique_field: 'u1', required_field: 'r2' });
+      await driver.create('constraint_test', { unique_field: 'u1', constrained_field: 'c2', required_field: 'r2' });
       expect.unreachable('Should throw error for unique violation');
     } catch (e: any) {
       expect(e.message).toMatch(/UNIQUE constraint failed|duplicate key value/);
     }
 
     try {
-      await driver.create('constraint_test', { unique_field: 'u2' });
+      await driver.create('constraint_test', { unique_field: 'u2', required_field: 'r3' });
       expect.unreachable('Should throw error for not null violation');
     } catch (e: any) {
       expect(e.message).toMatch(/NOT NULL constraint failed|null value in column/);

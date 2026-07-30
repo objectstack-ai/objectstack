@@ -1240,6 +1240,76 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
 };
 
 /**
+ * `required: true` gains its explicit `storage.notNull` (protocol 17,
+ * ADR-0113).
+ *
+ * Before protocol 17, `field.required` bound THREE meanings to one knob: the
+ * write-time contract, the physical NOT NULL DDL, and the drift expectation.
+ * ADR-0113 splits them: `required` keeps the write contract, and the column
+ * constraint becomes the explicit `storage: { notNull: true }`. Under the OLD
+ * semantics every required field's column was created NOT NULL, so this
+ * conversion preserves each old source's full meaning by WRITING IT DOWN —
+ * a pure semantic explicitization, lossless by construction.
+ *
+ * `retiredFromLoadPath` is load-bearing here in a way it is not for renames:
+ * a rename is idempotent on canonical input, but this is a DEFAULT FLIP — a
+ * protocol-17-authored `required: true` deliberately means "nullable column,
+ * write-gated", and a loader that auto-applied this transform would stamp
+ * NOT NULL onto it, silently restoring the tri-binding the ADR removed. Only
+ * `os migrate meta --from <16 or lower>` may apply it, where "this source
+ * predates the split" is a fact, not a guess.
+ */
+const fieldRequiredNotNullExplicit: MetadataConversion = {
+  id: 'field-required-notnull-explicit',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'object.fields.*.required / object.fields.*.storage.notNull',
+  summary: "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) => {
+      const fields = (obj as { fields?: Record<string, Record<string, unknown>> }).fields;
+      if (!fields || typeof fields !== 'object') return obj;
+      let touched = false;
+      const nextFields: Record<string, unknown> = { ...fields };
+      for (const [fieldName, def] of Object.entries(fields)) {
+        if (!def || typeof def !== 'object') continue;
+        if (def.required !== true) continue;
+        if (def.storage !== undefined) continue; // an explicit storage block wins
+        nextFields[fieldName] = { ...def, storage: { notNull: true } };
+        emit({ from: 'required: true (implied NOT NULL)', to: 'storage.notNull: true', path: `${path}.fields.${fieldName}.storage.notNull` });
+        touched = true;
+      }
+      return touched ? { ...obj, fields: nextFields } : obj;
+    });
+  },
+  fixture: {
+    before: {
+      objects: [{
+        name: 'crm_lead',
+        label: 'Lead',
+        fields: {
+          name: { type: 'text', required: true },
+          status: { type: 'select', required: true },
+          notes: { type: 'textarea' },
+        },
+      }],
+    },
+    after: {
+      objects: [{
+        name: 'crm_lead',
+        label: 'Lead',
+        fields: {
+          name: { type: 'text', required: true, storage: { notNull: true } },
+          status: { type: 'select', required: true, storage: { notNull: true } },
+          notes: { type: 'textarea' },
+        },
+      }],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
  * All conversions, keyed by the protocol major that introduced the canonical
  * shape. Newest majors last; ordering within a major is application order.
  */
@@ -1259,6 +1329,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeScriptConfigAliases,
     permissionRlsPriorityRemoved,
     toolInertAuthoringKeysRemoved,
+    fieldRequiredNotNullExplicit,
   ],
 };
 

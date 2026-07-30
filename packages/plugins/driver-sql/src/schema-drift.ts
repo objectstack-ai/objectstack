@@ -5,7 +5,7 @@
  *
  * The driver's `initObjects` sync is *additive-only*: it creates missing
  * tables and adds missing columns, but never alters or drops existing ones.
- * So a non-additive metadata change (relax `required`, change a type/length,
+ * So a non-additive metadata change (relax `storage.notNull`, change a type/length,
  * drop or rename a field) silently diverges from an existing database — the
  * served metadata says one thing and the physical column enforces another.
  *
@@ -204,6 +204,8 @@ export interface FieldDef {
   required?: boolean;
   multiple?: boolean;
   maxLength?: number;
+  /** ADR-0113: the explicit physical constraint — nullability drift reads THIS, not `required`. */
+  storage?: { notNull?: boolean };
 }
 
 /**
@@ -253,9 +255,23 @@ export function diffManagedTable(args: {
     const col = columnsByName.get(fieldName);
     if (!col) continue; // additive sync adds it; not drift
 
-    // ── nullability ──────────────────────────────────────────────────
-    const expectNullable = field.required !== true;
-    if (expectNullable && !col.nullable) {
+    // ── nullability (ADR-0113: compared against `storage.notNull`, the
+    // explicit physical constraint — NOT against `required`, which is the
+    // write-time contract and implies nothing about the column) ──────────
+    const expectNullable = field.storage?.notNull !== true;
+    if (expectNullable && !col.nullable && field.required !== true) {
+      // Column STRICTER than its declaration — and the field is not even
+      // write-gated, so an omitting write reaches the DB and dies as a raw
+      // driver error instead of a clean validation 400. That surprise is
+      // worth a human decision; never auto-applied (a `safe` categorisation
+      // would let dev auto-reconcile strip a protection someone added).
+      //
+      // The `required: true` + NOT NULL + no storage declaration case is
+      // deliberately SILENT: that is every pre-protocol-17 source after a
+      // runtime upgrade, the write gate makes the column constraint
+      // unreachable (harmless belt-and-suspenders), and nagging every legacy
+      // required field would bury real drift. `os migrate meta` ratifies it
+      // whenever the source is next migrated.
       out.push({
         kind: 'nullability_mismatch',
         remoteName: table,
@@ -264,11 +280,13 @@ export function diffManagedTable(args: {
         expected: 'NULL',
         actual: 'NOT NULL',
         severity: 'warning',
-        category: 'safe',
+        category: 'needs_confirm',
         op: { type: 'relax_not_null', table, column: fieldName },
         message:
-          `${table}.${fieldName}: metadata is optional but the column is NOT NULL ` +
-          `— writes that omit it fail. Run "os migrate" to relax it.`,
+          `${table}.${fieldName}: the column is NOT NULL but the metadata declares no ` +
+          `storage constraint. Ratify it by declaring \`storage: { notNull: true }\` ` +
+          `(pre-protocol-17 sources: \`os migrate meta\` stamps it for every ` +
+          `previously-required field), or deliberately relax the column via "os migrate".`,
       });
     } else if (!expectNullable && col.nullable) {
       out.push({
@@ -282,8 +300,8 @@ export function diffManagedTable(args: {
         category: 'destructive',
         op: { type: 'tighten_not_null', table, column: fieldName },
         message:
-          `${table}.${fieldName}: metadata is required but the column is nullable ` +
-          `— existing nulls must be backfilled. Run "os migrate apply --allow-destructive".`,
+          `${table}.${fieldName}: metadata declares \`storage.notNull\` but the column is ` +
+          `nullable — existing nulls must be backfilled. Run "os migrate apply --allow-destructive".`,
       });
     }
 
