@@ -34,6 +34,13 @@ jobs:
       - name: Fetch base branch
         run: git fetch --no-tags origin "${{ github.base_ref }}"
 
+      # The mapper excludes test files (a test cannot make an implementation doc
+      # stale). Self-test first, so a regression that widened the exclusion into
+      # dropping real implementation changes fails loudly here instead of turning
+      # this whole comment quietly empty.
+      - name: Self-test the change → docs mapper
+        run: node scripts/docs-audit/affected-docs.mjs --self-test
+
       - name: Compute affected docs
         id: affected
         run: |

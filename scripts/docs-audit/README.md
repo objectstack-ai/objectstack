@@ -21,12 +21,25 @@ node scripts/docs-audit/affected-docs.mjs --json origin/main
 
 # every hand-written doc (full audit scope)
 node scripts/docs-audit/affected-docs.mjs --all
+
+# check the test-file matcher (needs no repo state; CI runs this before the mapping)
+node scripts/docs-audit/affected-docs.mjs --self-test
 ```
 
 Heuristic: a doc is *affected* by a changed package `P` if it mentions `P`'s npm
 name (`@objectstack/<x>`) or repo path (`packages/<x>`). Over-inclusion is preferred
 over misses; the periodic **full** audit (part 4) is the backstop for docs that
 describe a package without naming it.
+
+**One exclusion:** changes to **test files** are dropped before the changed-package
+roots are derived. A test observes behaviour rather than defining it, so it cannot make
+an implementation-accuracy doc stale — yet counting them made every tests-only PR light
+up its packages' whole doc set, a class of finding that is always false. That is the one
+place over-inclusion actively hurt: a comment a reader learns to skip stops working on
+the PR where it is right. The count of excluded files is reported in the summary and as
+`testFilesSkipped` in `--json`, so the narrowing is never silent, and `--self-test`
+pins the matcher against paths that must and must not match (`commands/test.ts` is
+implementation; `foo.conformance.test.ts` is not).
 
 ## 2. CI gate — `.github/workflows/docs-drift-check.yml`
 
