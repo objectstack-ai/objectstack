@@ -225,10 +225,13 @@ export class HttpDispatcher {
      * touch — see {@link DomainHandlerDeps}.
      */
     private readonly domainDeps: DomainHandlerDeps = {
-        resolveService: (name, environmentId) => this.resolveService(name, environmentId),
-        // Deps take plain strings (domain modules pass CoreServiceName enum
-        // values anyway); the dispatcher method's parameter is the enum type.
-        getService: (name) => this.getService(name as Parameters<HttpDispatcher['getService']>[0]),
+        // [#4127] Both are slot-typed on the deps contract now (`resolveService`
+        // via overloads, since it also takes non-core names like `protocol`).
+        // The parameters are annotated because an arrow cannot be contextually
+        // typed against an overloaded signature. Resolution below stays
+        // name-based and unchanged — the typing lives in what the DOMAINS see.
+        resolveService: (name: string, environmentId?: string) => this.resolveService(name, environmentId),
+        getService: (name: string) => this.getService(name as Parameters<HttpDispatcher['getService']>[0]),
         getObjectQL: (environmentId) => this.getObjectQLService(environmentId),
         // Reads off the per-request RESOLVED kernel (`this.kernel` is set by
         // dispatch() before any handler runs) — see the deps contract note.

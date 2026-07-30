@@ -1088,6 +1088,152 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
 };
 
 /**
+ * The loose `config` keys the `wait` executor used to also accept, in the exact
+ * precedence order of the `??` chains it carried, keyed by the declared
+ * `waitEventConfig` property each one feeds.
+ *
+ * `duration` and `signal` are not declared names anywhere in the spec — they
+ * only ever existed as the tail of an executor fallback, which is why the
+ * declared spelling is listed first in each group.
+ */
+const WAIT_EVENT_CONFIG_LIFTS: ReadonlyArray<readonly [target: string, candidates: readonly string[]]> = [
+  ['eventType', ['eventType']],
+  ['timerDuration', ['timerDuration', 'duration']],
+  ['signalName', ['signalName', 'signal']],
+  ['timeoutMs', ['timeoutMs']],
+];
+
+/**
+ * Lift `wait`'s loose `config.*` event keys onto the declared `waitEventConfig`
+ * sibling (#4045).
+ *
+ * The only conversion here whose destination is **not** another `config` key.
+ * `wait`'s contract does not live in `config` at all — it is
+ * `FlowNodeSchema.waitEventConfig` (`flow.zod.ts`), a fully `.describe()`-annotated
+ * block that is in the authorable-field list, reaches the generated reference,
+ * and is what the showcase actually authors. Its descriptor therefore publishes
+ * no `configSchema`, which is by design and not the gap it first looks like.
+ *
+ * The executor nevertheless carried `wec.X ?? loose.X` for six `config` keys —
+ * a second, undeclared de-facto contract of exactly the `notify.source` shape
+ * (PD #12), announced only by the comment "for hand-authored flows that put the
+ * same keys under config".
+ *
+ * The showcase's `wait_revision` node authored exactly that shape
+ * (`config: { eventType: 'signal', signalName: 'budget_revision' }`) until this
+ * change moved it to the declared block — so the back door was not hypothetical,
+ * and the example that demonstrates `wait` was itself on the retiring spelling.
+ *
+ * Precedence mirrors those `??` chains, so the rewrite is behaviour-preserving:
+ * a value already on `waitEventConfig` WINS and its loose counterpart is left
+ * shadowed (as {@link renameConfigKey} treats a shadowed alias), and among loose
+ * candidates the first one present decides.
+ *
+ * `eventType` is defaulted to `'timer'` whenever lifting would otherwise leave
+ * the block without one. That is load-bearing, not tidiness: the loader parses
+ * the CONVERTED flow (`applyConversionsToFlow` → `FlowSchema.parse`), and
+ * `waitEventConfig.eventType` is **required** once the block exists — so a
+ * stored flow carrying only `config: { duration: 'PT1M' }` would go from working
+ * to failing to load. `'timer'` is the exact default the executor applied to
+ * that shape.
+ */
+function liftWaitEventConfig(stack: Dict, emit: Emit): Dict {
+  return mapFlowNodes(stack, (node, path) => {
+    if (node.type !== 'wait') return node;
+    const config = node.config;
+    if (!isDict(config)) return node;
+
+    const wec: Dict = isDict(node.waitEventConfig) ? { ...node.waitEventConfig } : {};
+    const nextConfig: Dict = { ...config };
+    let lifted = false;
+
+    for (const [target, candidates] of WAIT_EVENT_CONFIG_LIFTS) {
+      for (const from of candidates) {
+        if (nextConfig[from] == null) continue;
+        if (wec[target] == null) {
+          wec[target] = nextConfig[from];
+          delete nextConfig[from];
+          emit({ from: `config.${from}`, to: `waitEventConfig.${target}`, path: `${path}.waitEventConfig.${target}` });
+          lifted = true;
+        }
+        // The first candidate PRESENT decides, lifted or shadowed — the `??`
+        // chain never looked past it either.
+        break;
+      }
+    }
+
+    if (!lifted) return node;
+    if (wec.eventType == null) wec.eventType = 'timer';
+    return { ...node, config: nextConfig, waitEventConfig: wec };
+  });
+}
+
+/**
+ * Wait flow-node loose `config` keys → the declared `waitEventConfig` sibling
+ * (protocol 17, #4045). See {@link liftWaitEventConfig} for the precedence rules
+ * and why `eventType` is defaulted. **Live window**; retires at 18.
+ */
+const flowNodeWaitEventConfigLift: MetadataConversion = {
+  id: 'flow-node-wait-event-config-lift',
+  toMajor: 17,
+  surface: 'flow.node.wait.waitEventConfig',
+  summary:
+    "wait flow-node loose config keys → the declared `waitEventConfig` block: 'eventType', " +
+    "'timerDuration'/'duration' → 'timerDuration', 'signalName'/'signal' → 'signalName', 'timeoutMs' (#4045)",
+  apply(stack, emit) {
+    return liftWaitEventConfig(stack, emit);
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'order_settlement',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            // Loose-only, and via the UNDECLARED `duration` spelling with no
+            // eventType anywhere — the shape that would stop loading without
+            // the `'timer'` default.
+            { id: 'n2', type: 'wait', config: { duration: 'PT1M' } },
+            // Loose `signal` alongside an explicit eventType: both lift.
+            { id: 'n3', type: 'wait', config: { eventType: 'signal', signal: 'order_paid' } },
+            // Partially shadowed: `timerDuration` is already declared, so the
+            // loose `duration` stays put untouched; only `timeoutMs` lifts.
+            {
+              id: 'n4',
+              type: 'wait',
+              waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
+              config: { duration: 'PT9M', timeoutMs: 60000 },
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'order_settlement',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'wait', config: {}, waitEventConfig: { timerDuration: 'PT1M', eventType: 'timer' } },
+            { id: 'n3', type: 'wait', config: {}, waitEventConfig: { eventType: 'signal', signalName: 'order_paid' } },
+            {
+              id: 'n4',
+              type: 'wait',
+              waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M', timeoutMs: 60000 },
+              config: { duration: 'PT9M' },
+            },
+          ],
+        },
+      ],
+    },
+    // n2: `duration` → `timerDuration`. n3: `eventType` + `signal` → `signalName`.
+    // n4: only `timeoutMs` (its `duration` is shadowed by a declared
+    // `timerDuration` → no notice, and the key is left in place).
+    expectedNotices: 4,
+  },
+};
+
+/**
  * Script flow-node config key aliases → canonical (protocol 17, #3796).
  *
  * `function` is the canonical callable reference (#1870); `functionName` was
@@ -1720,6 +1866,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     sharingRuleAccessLevelFullToEdit,
     flowNodeCrudObjectAlias,
     flowNodeNotifyConfigAliases,
+    flowNodeWaitEventConfigLift,
     flowNodeScriptConfigAliases,
     permissionRlsPriorityRemoved,
     toolInertAuthoringKeysRemoved,

@@ -71,4 +71,47 @@ describe('Auth Service Contract', () => {
     expect(sessions.has('s1')).toBe(false);
     expect(sessions.has('s2')).toBe(true);
   });
+
+  // [#4127 batch 2] The `/mcp` domain called both of these through
+  // `const authService: any` + `?.()`, so the calls were invisible to the type
+  // system AND accidentally safe: an absent method returned `undefined` and the
+  // route silently fell back, making a real disagreement look like normal
+  // operation. AuthManager implements both; only the contract was missing.
+  it('should expose the MCP resource identity an auth service owns', () => {
+    const service: IAuthService = {
+      handleRequest: async () => new Response('OK'),
+      verify: async () => ({ success: true }),
+      getMcpResourceUrl: () => 'https://acme.example.com/api/v1/mcp',
+      getMcpResourceMetadataUrl: () => 'https://acme.example.com/.well-known/oauth-protected-resource',
+    };
+
+    expect(service.getMcpResourceUrl!()).toBe('https://acme.example.com/api/v1/mcp');
+    expect(service.getMcpResourceMetadataUrl!()).toContain('/.well-known/oauth-protected-resource');
+  });
+
+  it('should let getMcpResourceMetadataUrl report the OAuth track as off', () => {
+    // `null` is the fail-closed answer: the embedded AS is disabled, or the
+    // origin fails the OAuth 2.1 transport rule. API keys remain and nothing is
+    // advertised. Distinct from the method being absent entirely.
+    const service: IAuthService = {
+      handleRequest: async () => new Response('OK'),
+      verify: async () => ({ success: true }),
+      getMcpResourceMetadataUrl: () => null,
+    };
+
+    expect(service.getMcpResourceMetadataUrl!()).toBeNull();
+  });
+
+  it('should allow an auth service with no MCP surface at all', () => {
+    // Both are optional: an auth provider without MCP/OAuth support fills the
+    // slot legitimately, and the `/mcp` route derives a URL from the request
+    // host instead.
+    const service: IAuthService = {
+      handleRequest: async () => new Response('OK'),
+      verify: async () => ({ success: true }),
+    };
+
+    expect(service.getMcpResourceUrl).toBeUndefined();
+    expect(service.getMcpResourceMetadataUrl).toBeUndefined();
+  });
 });

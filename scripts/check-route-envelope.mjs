@@ -227,10 +227,13 @@ const DISPATCHER_DOMAINS = {
   },
 
   // Kind 3 — a foreign wire format, all four in the mock/fallback path.
-  'auth.ts': {
-    handBuilt: 4,
-    note: "bridges better-auth, whose client parses ITS shapes (`{ user, session }`, `{ session: null, user: null }`, `{ success: true }`) — BaseResponseSchema does not govern them",
-  },
+  // [#4113] Was 4, for the mock fallback's better-auth-shaped bodies
+  // (`{ user, session }`, `{ session: null, user: null }`, `{ success: true }`).
+  // That mock is deleted — it fabricated a 200 + a 24h session for any
+  // credentials — so the exemption it needed is gone with it. What remains is
+  // the real service's own `Response`, returned as `result` rather than built
+  // here, plus one `deps.error` 501.
+  'auth.ts': { handBuilt: 0 },
 
   // Kind 2 — the `{ agents: [] }` fallback moved onto `deps.success` in #4053;
   // what remains is the passthrough of the AI service's own result.

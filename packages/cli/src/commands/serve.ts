@@ -1051,22 +1051,17 @@ export default class Serve extends Command {
       const configHasMetadata = !!(
         config.objects || config.manifest || config.apps || config.flows || config.apis
       );
-      // ORDERING (#4085): the wrap is APPENDED to `plugins` rather than
-      // registered here, because plugin registration order IS the kernel's
-      // init/start order (`resolveDependencies` preserves insertion order for
-      // plugins that declare no `dependencies`, and AppPlugin declares none).
-      // AppPlugin.init() registers its manifest through the `manifest` service
-      // and AppPlugin.start() seeds through the default datasource — both owned
-      // by plugins that live in `plugins[]` (ObjectQLPlugin /
-      // DefaultDatasourcePlugin, contributed by `createStandaloneStack`) and
-      // registered by the loop far below. Registering the wrap HERE put it
-      // ahead of them, so config-boot died in Phase 1 with
-      // "Service 'manifest' is async - use await" whenever no compiled
-      // `dist/objectstack.json` existed — the artifact path never hit it only
-      // because `createStandaloneStack` appends ITS AppPlugin after the engine
-      // (which also made the crash look artifact-related rather than
-      // order-related). Appending puts the config-derived app in exactly that
-      // same slot, so both boot paths share one plugin order.
+      // ORDERING (#4085 → #4131/ADR-0116): the wrap is APPENDED to `plugins`
+      // rather than registered here — but the append is no longer what makes
+      // the boot correct. AppPlugin now DECLARES its ordering contract
+      // (`optionalDependencies: ['com.objectstack.engine.objectql']`,
+      // `requiresServices: ['manifest']`), so the kernel hoists the engine
+      // ahead of it in every slot, and a composition that genuinely lacks a
+      // manifest provider fails as a named ordering error instead of the
+      // mislabelled "Service 'manifest' is async - use await" crash #4085
+      // produced. Appending is kept so both boot paths (config-derived wrap
+      // here, `createStandaloneStack`'s own AppPlugin) share one plugin
+      // order and one story in the boot logs.
       if (!hasAppPluginAlready && configHasMetadata) {
         try {
             const { AppPlugin } = await import('@objectstack/runtime');

@@ -179,6 +179,12 @@ export class MetadataPlugin implements Plugin {
     name = 'com.objectstack.metadata';
     type = 'standard';
     version = '1.0.0';
+    /**
+     * Services init() UNCONDITIONALLY registers (ADR-0116, #4131) — lets the
+     * kernel name this plugin when a consumer requires `metadata` before it
+     * initializes.
+     */
+    providesServices = ['metadata'];
 
     private manager: NodeMetadataManager;
     private options: MetadataPluginOptions;

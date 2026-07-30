@@ -624,7 +624,11 @@ organizationId: string | undefined,
 _context: HttpProtocolContext,
 ): Promise<{ success: boolean; inserted?: number; updated?: number; errors?: unknown[]; error?: string }> {
     const protocol: any = await deps.resolveService('protocol');
-    const metadata: any = await deps.getService(CoreServiceName.enum.metadata);
+    // [#4127] `metadata` was annotated `: any`, which erased the slot type even
+    // after the lookup started returning `IMetadataService`. `protocol` and
+    // `ql` keep theirs: neither is a `CoreServiceName` slot and neither has a
+    // written contract, so their `any` is where the ledger honestly ends.
+    const metadata = await deps.getService(CoreServiceName.enum.metadata);
     const ql: any = await deps.resolveService('objectql');
     if (!protocol || typeof protocol.getMetaItem !== 'function' || !ql || !metadata) {
         return { success: false, error: 'seed apply: required services unavailable' };

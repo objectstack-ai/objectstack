@@ -313,6 +313,11 @@ export function findInertDeclaredConnectors(
  */
 export class AutomationServicePlugin implements Plugin {
     name = 'com.objectstack.service-automation';
+    /**
+     * Services init() registers on every path (ADR-0116, #4131) — lets the
+     * kernel name this plugin when a consumer requires one before it inits.
+     */
+    providesServices = ['automation'];
     version = '1.0.0';
     type = 'standard' as const;
     // Soft dependency on metadata: we look it up at start() and tolerate absence.

@@ -66,6 +66,11 @@ export function createApiRegistryPlugin(
 
   return {
     name: 'com.objectstack.core.api-registry',
+    /**
+     * Services init() registers on every path (ADR-0116, #4131) — lets the
+     * kernel name this plugin when a consumer requires one before it inits.
+     */
+    providesServices: ['api-registry'],
     type: 'standard',
     version: '1.0.0',
 

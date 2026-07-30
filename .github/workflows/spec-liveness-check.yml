@@ -18,6 +18,9 @@ on:
     paths:
       - 'packages/spec/**'
       - 'packages/qa/dogfood/**'
+      # The variant/doc gate reads hand-written pages, so editing one can break it
+      # without touching packages/spec at all.
+      - 'content/docs/**'
 
 permissions:
   contents: read
@@ -50,3 +53,11 @@ jobs:
       # commonest authoring error, and it must not also be the widest grant.
       - name: Check empty-state semantics
         run: pnpm --filter @objectstack/spec check:empty-state
+
+      # #4165 follow-up. Those two gates ask what a property does and what its empty
+      # value means. This asks the inverse-drift question neither covers: does a variant
+      # the schema declares appear in the hand-written doc at all? references/ is
+      # generated and cannot drift; the hand-written pages are typed by humans and do.
+      # apps.mdx said the nav tree had "eight item types" while the schema had nine.
+      - name: Check discriminated-union variants are documented
+        run: pnpm --filter @objectstack/spec check:variant-docs

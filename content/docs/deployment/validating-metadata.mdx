@@ -209,10 +209,12 @@ literal (it comes from React state or a variable), a usage carrying a `{...sprea
 a chart given static `data` (its columns are the author's own), and objects
 another package defines.
 
-### 9. Object and field keys the schema never declared
+### 9. Authoring keys the schema never declared
 
-`ObjectSchema` and `FieldSchema` are deliberately not strict, so a key they do
-not declare **parses clean and is dropped** on the way to storage. Nothing fails;
+Most metadata schemas are deliberately not strict — only the types the
+ADR-0049 tier programme has hardened (`flow`, `permission`, `position`, `tool`,
+`app`, …) reject unknown keys. On every other type a key the schema does not
+declare **parses clean and is dropped** on the way to storage. Nothing fails;
 the setting simply is not there.
 
 ```ts
@@ -238,11 +240,19 @@ Plain typos get a "did you mean" (`requred` → `required`); a retired key does
 not, because the nearest declared key by spelling would be noise rather than
 advice.
 
+The check covers **every metadata collection** — pages, apps, agents,
+dashboards, views, actions, and the rest — with its coverage derived from the
+same collection map the loader uses, so a newly registered collection is
+covered the moment it exists. Types that are already strict are skipped: there
+the parse itself rejects loudly, with the schema's own guidance. Because the
+lint reads each schema's real unknown-key posture, it can never disagree with
+the parse.
+
 This is **advisory** — the stack still loads. Strict rejection is where these
-schemas are headed (ADR-0049 enforce-or-remove), but they are the two
-most-authored surfaces in the protocol, so the tightening is scheduled on what
-this check finds rather than assumed. `defineStack` reports the same findings at
-config-load time, so an author sees them without running the CLI at all.
+schemas are headed (ADR-0049 enforce-or-remove), but these are the protocol's
+most-authored surfaces, so the tightening is scheduled on what this check finds
+rather than assumed. `defineStack` reports the same findings at config-load
+time, so an author sees them without running the CLI at all.
 
 ## The one gate, two entry points
 
@@ -263,7 +273,7 @@ config-load time, so an author sees them without running the CLI at all.
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ |
 | Liveness author-warnings | ✓ | ✓ |
-| Undeclared object/field keys (#3786) | ✓ | ✓ |
+| Undeclared authoring keys, every metadata collection (#3786) | ✓ | ✓ |
 | Emits `dist/objectstack.json` | — | ✓ |
 
 So `os validate` is the fast inner-loop check (no artifact); `os build` is what

@@ -78,7 +78,26 @@ export interface DomainRoute {
  * more dispatcher surface.
  */
 export interface DomainHandlerDeps {
-    /** Environment-scoped service resolution (per-request kernel aware). */
+    /**
+     * Environment-scoped service resolution (per-request kernel aware), typed
+     * by the slot when the slot is a core one.
+     *
+     * [#4127 batch 2] `getService` got this treatment first because every one of
+     * its call sites already passed a `CoreServiceName`. This one is mixed, and
+     * the overloads split it exactly where the evidence does:
+     *
+     *  - A **`CoreServiceName`** — however it is written. 17 call sites address a
+     *    core slot with a bare literal (`'metadata'` ×10, `'automation'` ×3,
+     *    `'auth'` ×3, `'ai'`) rather than `CoreServiceName.enum.*`, so the same
+     *    slot was being addressed two ways; both resolve to the contract now.
+     *  - **Anything else** — `protocol`, `objectql`, `mcp`, `kernel-resolver`,
+     *    `security`, `scope-manager`. These are real services with no
+     *    `CoreServiceName` entry and no written contract, so they keep today's
+     *    `any` rather than being given a shape here that nothing verifies.
+     *    Writing their contracts is the next batch; until then the `any` marks
+     *    where the ledger ends.
+     */
+    resolveService<K extends CoreServiceName>(name: K, environmentId?: string): Promise<CoreServiceContract<K> | undefined>;
     resolveService(name: string, environmentId?: string): any;
     /**
      * Unscoped service lookup on the current kernel, typed by the slot.

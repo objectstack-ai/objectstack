@@ -18,9 +18,10 @@ export * from './object.zod';
 // `enable.apiMethods` whitelist into its effective operation set (#3391).
 export * from './api-derivation';
 export * from './field.zod';
-// Pre-parse report of authored keys ObjectSchema/FieldSchema would strip (#3786).
-// Neither schema is `.strict()`, so an undeclared key parses clean and is dropped;
-// this is what turns that silence into a warning the author can act on.
+// The unknown-authoring-key lint's CORE — comparator, finding shape, curated
+// guidance tables (#3786). Kept frontend-safe: the stack WALKER that imports
+// every schema lives in kernel/metadata-authoring-lint.ts, so this subpath's
+// bundles don't inherit the whole schema universe.
 export * from './authoring-key-lint';
 // Field runtime value-shape contract (ADR-0104 D1)
 export * from './field-value.zod';

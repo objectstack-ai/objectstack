@@ -328,8 +328,9 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // itself — see the "Ordering — phase, not list position" note in
         // `default-datasource-plugin.ts`. Order requirements belong THERE, next
         // to the code the kernel enforces them from; a comment on an array index
-        // cannot enforce anything. (#4131 tracks making the AppPlugin end of this
-        // contract enforced rather than conventional.)
+        // cannot enforce anything. (The AppPlugin end of this contract is now
+        // declared too — `optionalDependencies` + `requiresServices`, enforced
+        // by the kernel per ADR-0116 / #4131.)
         defaultDatasourcePlugin,
         new MetadataPlugin({
             // Source-file scanner OFF — declarative metadata is loaded

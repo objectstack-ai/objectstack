@@ -106,6 +106,11 @@ export interface I18nServicePluginOptions {
  */
 export class I18nServicePlugin implements Plugin {
   name = 'com.objectstack.service.i18n';
+  /**
+   * Services init() registers on every path (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one before it inits.
+   */
+  providesServices = ['i18n'];
   version = '1.0.0';
   type = 'standard';
 

@@ -36,6 +36,11 @@ export interface QueueServicePluginOptions {
  */
 export class QueueServicePlugin implements Plugin {
   name = 'com.objectstack.service.queue';
+  /**
+   * Services init() registers on every path (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one before it inits.
+   */
+  providesServices = ['queue'];
   version = '1.1.0';
   type = 'standard';
 

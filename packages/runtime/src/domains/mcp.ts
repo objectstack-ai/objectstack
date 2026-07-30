@@ -193,7 +193,13 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
     // when the auth plugin isn't loaded.
     let mcpUrl: string | undefined;
     try {
-        const authService: any = await deps.resolveService('auth', context.environmentId);
+        // [#4127] Was `const authService: any`, which erased the slot's type
+        // even after `resolveService` started returning it — the escape hatch
+        // this batch closes. `getMcpResourceUrl` is declared on `IAuthService`
+        // now, so `?.()` reads a declared optional capability (an auth provider
+        // without MCP/OAuth support fills this slot legitimately) instead of
+        // guessing at a method the contract never mentioned.
+        const authService = await deps.resolveService('auth', context.environmentId);
         const url = authService?.getMcpResourceUrl?.();
         if (typeof url === 'string' && url) mcpUrl = url;
     } catch { /* fall through to host derivation */ }
@@ -242,7 +248,8 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
  */
 async function getMcpResourceMetadataUrl(deps: DomainHandlerDeps, context: HttpProtocolContext): Promise<string | null> {
     try {
-        const authService: any = await deps.resolveService('auth', context.environmentId);
+        // [#4127] Same `: any` erasure as the skill route above; same fix.
+        const authService = await deps.resolveService('auth', context.environmentId);
         const url = authService?.getMcpResourceMetadataUrl?.();
         return typeof url === 'string' && url ? url : null;
     } catch {

@@ -137,6 +137,11 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
  */
 export class AuthPlugin implements Plugin {
   name = 'com.objectstack.auth';
+  /**
+   * Services init() registers on every path (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one before it inits.
+   */
+  providesServices = ['auth', 'tenancy'];
   type = 'standard';
   version = '1.0.0';
   dependencies: string[] = ['com.objectstack.engine.objectql']; // manifest service required

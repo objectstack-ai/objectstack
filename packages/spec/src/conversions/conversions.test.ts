@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { FlowSchema } from '../automation/flow.zod.js';
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
@@ -228,6 +229,116 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(Array.isArray(flows)).toBe(true);
       expect(flows[0].name).toBe('my_flow'); // map key injected
       expect(flows[0].nodes[0].type).toBe('http'); // converted
+    });
+  });
+
+  describe('flow-node-wait-event-config-lift (PD #12 retirement, #4045)', () => {
+    /**
+     * One `wait` node in a flow that `FlowSchema` can actually parse — `label` is
+     * required on both the flow and every node, which the conversion fixtures
+     * (shape-only, never parsed) omit.
+     */
+    const waitFlow = (node: Record<string, unknown>) => ({
+      flows: [
+        {
+          name: 'settle',
+          label: 'Settle',
+          type: 'autolaunched',
+          edges: [],
+          nodes: [
+            { id: 'n1', type: 'start', label: 'Start' },
+            { id: 'w', type: 'wait', label: 'Wait', ...node },
+          ],
+        },
+      ],
+    });
+    const waitNodeOf = (stack: Record<string, unknown>) => (stack.flows as any[])[0].nodes[1];
+
+    it('lifts the undeclared `duration` / `signal` spellings onto the declared block', () => {
+      const { stack, notices } = collectConversionNotices(waitFlow({ config: { duration: 'PT1M' } }));
+      expect(waitNodeOf(stack).waitEventConfig).toEqual({ timerDuration: 'PT1M', eventType: 'timer' });
+      expect(waitNodeOf(stack).config).toEqual({});
+      expect(notices).toHaveLength(1);
+
+      const sig = collectConversionNotices(waitFlow({ config: { eventType: 'signal', signal: 'order_paid' } }));
+      expect(waitNodeOf(sig.stack).waitEventConfig).toEqual({ eventType: 'signal', signalName: 'order_paid' });
+      expect(sig.notices).toHaveLength(2);
+    });
+
+    it('lets a declared value win and leaves its loose counterpart shadowed in place', () => {
+      const { stack, notices } = collectConversionNotices(
+        waitFlow({
+          waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
+          config: { duration: 'PT9M', timeoutMs: 60_000 },
+        }),
+      );
+      expect(waitNodeOf(stack).waitEventConfig).toEqual({
+        eventType: 'timer',
+        timerDuration: 'PT5M',
+        timeoutMs: 60_000,
+      });
+      // The shadowed alias is not deleted — same treatment `renameConfigKey` gives one.
+      expect(waitNodeOf(stack).config).toEqual({ duration: 'PT9M' });
+      expect(notices).toHaveLength(1);
+    });
+
+    it('prefers the declared spelling over the undeclared one among loose keys', () => {
+      const { stack } = collectConversionNotices(
+        waitFlow({ config: { timerDuration: 'PT1H', duration: 'PT2H' } }),
+      );
+      expect(waitNodeOf(stack).waitEventConfig.timerDuration).toBe('PT1H');
+      // `duration` was never reachable past the `??` chain either — left as-is.
+      expect(waitNodeOf(stack).config).toEqual({ duration: 'PT2H' });
+    });
+
+    /**
+     * The exact shape the showcase's `wait_revision` node carried before this
+     * change — the declared spelling sitting in the undeclared LOCATION, which is
+     * the combination the ledger's candidate order has to get right.
+     */
+    it('lifts the showcase shape: declared key names in a loose `config`', () => {
+      const { stack, notices } = collectConversionNotices(
+        waitFlow({ config: { eventType: 'signal', signalName: 'budget_revision' } }),
+      );
+      expect(waitNodeOf(stack).waitEventConfig).toEqual({
+        eventType: 'signal',
+        signalName: 'budget_revision',
+      });
+      expect(waitNodeOf(stack).config).toEqual({});
+      expect(notices).toHaveLength(2);
+      expect(() => FlowSchema.parse((stack.flows as any[])[0])).not.toThrow();
+    });
+
+    it('leaves a wait node with nothing to lift completely untouched', () => {
+      const before = waitFlow({ waitEventConfig: { eventType: 'manual' }, config: { note: 'keep me' } });
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(waitNodeOf(stack)).toEqual(waitNodeOf(before as any));
+      expect(notices).toHaveLength(0);
+    });
+
+    it('only touches `wait` — the same keys on another node type are not its surface', () => {
+      const { stack, notices } = collectConversionNotices({
+        flows: [{ name: 'f', nodes: [{ id: 'a', type: 'custom', config: { duration: 'PT1M' } }] }],
+      });
+      expect((stack.flows as any[])[0].nodes[0].config).toEqual({ duration: 'PT1M' });
+      expect(notices).toHaveLength(0);
+    });
+
+    /**
+     * The `eventType: 'timer'` default is load-bearing, not tidiness. The loader
+     * parses the CONVERTED flow, and `waitEventConfig.eventType` is required once
+     * the block exists — so this asserts both directions: the shape the
+     * conversion produces loads, and the shape it would have produced without the
+     * default does not.
+     */
+    it('produces a flow the loader can still parse (negative control: no eventType would not)', () => {
+      const { stack } = collectConversionNotices(waitFlow({ config: { duration: 'PT1M' } }));
+      const converted = (stack.flows as any[])[0];
+      expect(() => FlowSchema.parse(converted)).not.toThrow();
+
+      const withoutDefault = structuredClone(converted);
+      delete withoutDefault.nodes[1].waitEventConfig.eventType;
+      expect(() => FlowSchema.parse(withoutDefault)).toThrow();
     });
   });
 });

@@ -28,6 +28,9 @@ export * from './metadata-loader.zod';
 export * from './metadata-plugin.zod';
 export * from './metadata-protection.zod';
 export * from './metadata-type-schemas';
+// Pre-parse unknown-key walker over EVERY metadata collection (#3786). Lives
+// here, not in data/, because covering every type means importing every schema.
+export * from './metadata-authoring-lint';
 export * from './package-artifact.zod';
 export * from './package-registry.zod';
 export * from './package-upgrade.zod';

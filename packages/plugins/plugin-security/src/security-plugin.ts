@@ -296,6 +296,11 @@ export { describeHighPrivilegeBits } from '@objectstack/spec/security';
 
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
+  /**
+   * Services init() registers on every path (ADR-0116, #4131) — lets the
+   * kernel name this plugin when a consumer requires one before it inits.
+   */
+  providesServices = ['security.permissions', 'security.rls', 'security.fieldMasker', 'security.bootstrapPermissionSets', 'security.fallbackPermissionSet'];
   type = 'standard';
   version = '1.0.0';
   dependencies = ['com.objectstack.engine.objectql'];

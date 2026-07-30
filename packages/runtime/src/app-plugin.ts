@@ -56,7 +56,29 @@ export class AppPlugin implements Plugin {
     name: string;
     type = 'app';
     version?: string;
-    
+    /**
+     * Ordering — declared, not positional (ADR-0116, the #4131 close of
+     * #4085). `init()` synchronously registers the manifest through the
+     * `manifest` service and seeds package state / sandbox runners through
+     * `objectql` — both registered by ObjectQLPlugin's init. For months that
+     * ordering held only because callers happened to `use()` this plugin in
+     * the right slot; #4085 is what the wrong slot looks like. Soft (order-
+     * if-present) rather than hard because AppPlugin is deliberately
+     * composed on engine-less kernels too (metadata-only one-shot commands,
+     * mock-engine tests) where it degrades: every `objectql` touch in init
+     * is behind a try/catch.
+     */
+    optionalDependencies = ['com.objectstack.engine.objectql'];
+    /**
+     * The one init-time service this plugin CANNOT degrade without: a
+     * non-empty bundle is registered via `getService('manifest').register()`
+     * with no fallback. Declared so a composition that breaks it fails as a
+     * named ordering/composition error before init side effects (#4131).
+     * Cleared in the constructor for the empty-env no-op path, which never
+     * touches the service.
+     */
+    requiresServices: string[] = ['manifest'];
+
     private bundle: any;
     private projectContext?: AppPluginProjectContext;
     /** When true, init/start become no-ops — env has no app payload. */
@@ -110,8 +132,11 @@ export class AppPlugin implements Plugin {
             if (!hasAppPayload) {
                 // Empty env — degrade to a no-op plugin so kernel boot
                 // succeeds. Auth / data routes will still work; there's
-                // simply nothing to register.
+                // simply nothing to register. No manifest is registered on
+                // this path, so the init-service requirement is dropped —
+                // empty envs boot on kernels with no engine at all.
                 this.empty = true;
+                this.requiresServices = [];
                 const envSlug = projectContext?.environmentId
                     ? projectContext.environmentId.slice(0, 8)
                     : 'empty';

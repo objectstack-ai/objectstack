@@ -213,7 +213,17 @@ jobs:
   # Every timezone here is deliberately DIFFERENT: servers at +08:00, the Node
   # process at America/New_York, assertions in UTC. Both suites assert they
   # are pointed at a non-UTC server, so a mis-provisioned service fails loudly
-  # instead of letting the job pass vacuously.
+  # instead of letting the job pass vacuously — and each test step now asserts
+  # the PROCESS zone too, which nothing did before: a dropped `TZ:` line
+  # silently returned the whole job to UTC coverage with everything still
+  # green.
+  #
+  # The job also carries the non-SQL half of that axis (core, formula,
+  # driver-memory, driver-mongodb, service-analytics) — the other backends the
+  # temporal conformance matrix holds to one standard. Its NAME still says
+  # "live PG + MySQL" on purpose: the name IS the required check, so renaming
+  # it would silently drop the gate wherever branch protection lists it — the
+  # same trap the dogfood shards note below.
   temporal-conformance:
     name: Temporal Conformance (live PG + MySQL)
     needs: filter
@@ -317,7 +327,55 @@ jobs:
           TZ: America/New_York
           OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           OS_TEST_MYSQL_URL: mysql://root:root@127.0.0.1:3306/conformance
-        run: pnpm --filter @objectstack/driver-sql test
+        run: |
+          # The axis is only real if the zone actually took. Without this, a
+          # dropped `TZ:` line silently returns the job to UTC coverage and
+          # everything still passes — the same vacuous-pass hole the live-server
+          # suites close by asserting a non-UTC SERVER.
+          node -e "const tz=Intl.DateTimeFormat().resolvedOptions().timeZone,off=new Date().getTimezoneOffset();if(!tz||tz==='UTC'||off===0){console.error('process zone is '+tz+' (offset '+off+') — this job must run skewed');process.exit(1)}console.log('process zone: '+tz+' (offset '+off+')')"
+          pnpm --filter @objectstack/driver-sql test
+
+      # The non-SQL half of the same axis. `driver-sql` has run under a skewed
+      # process zone since #3979, but the other backends the temporal
+      # conformance matrix holds to that standard never did — and they are the
+      # ones whose correctness rests ENTIRELY on process-zone independence,
+      # since they have no server to blame: `storageDatetimeValue` /
+      # `storageTimeValue` fold an instant through UTC getters, the filter-token
+      # resolver derives "today" from UTC calendar parts, and the analytics
+      # bucketer does the same. Swap one `getUTC*` for its local twin and every
+      # one of those silently shifts by the host's offset — the exact defect
+      # ADR-0053 D-C1 records for a `Date` bound to a Postgres TIME column.
+      #
+      # Measured before adding this: all five suites already pass under
+      # America/New_York (-5/-4, with DST), Asia/Kolkata (+05:30) and
+      # Pacific/Chatham (+12:45). So this found nothing on the day it landed,
+      # which is what a ratchet is for — it makes the property enforced rather
+      # than incidental.
+      - name: Build the non-SQL temporal backends
+        run: >-
+          pnpm exec turbo run build
+          --filter=@objectstack/service-analytics...
+          --filter=@objectstack/driver-memory...
+          --filter=@objectstack/driver-mongodb...
+          --filter=@objectstack/formula...
+          --concurrency=4
+
+      - name: Run the non-SQL temporal backends under the skewed process zone
+        env:
+          TZ: America/New_York
+        run: |
+          # The axis is only real if the zone actually took. Without this, a
+          # dropped `TZ:` line silently returns the job to UTC coverage and
+          # everything still passes — the same vacuous-pass hole the live-server
+          # suites close by asserting a non-UTC SERVER.
+          node -e "const tz=Intl.DateTimeFormat().resolvedOptions().timeZone,off=new Date().getTimezoneOffset();if(!tz||tz==='UTC'||off===0){console.error('process zone is '+tz+' (offset '+off+') — this job must run skewed');process.exit(1)}console.log('process zone: '+tz+' (offset '+off+')')"
+          pnpm \
+            --filter @objectstack/core \
+            --filter @objectstack/formula \
+            --filter @objectstack/driver-memory \
+            --filter @objectstack/driver-mongodb \
+            --filter @objectstack/service-analytics \
+            test
 
   dogfood:
     # Sharded 2-way: the suite is ~60 independent test files, each booting its

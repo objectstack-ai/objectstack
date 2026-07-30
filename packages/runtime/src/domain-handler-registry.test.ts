@@ -638,11 +638,17 @@ describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
         expect(handleRequest).toHaveBeenCalledTimes(1);
     });
 
-    it('/auth mock fallback serves sign-up when no auth service is registered', async () => {
+    // [#4113] Was: "mock fallback serves sign-up when no auth service is
+    // registered" — asserting a 200 whose `session.token` matched
+    // /^mock_token_/. That mock is retired; an empty slot now answers 501 and
+    // mints nothing. Routed through `dispatch` (not the domain body directly)
+    // so the whole registry path is covered.
+    it('/auth answers 501 — and no session — when no auth service is registered', async () => {
         const result = await makeDispatcher().dispatch('POST', '/auth/sign-up/email', { email: 'a@b.c', name: 'A' }, {}, {} as any);
-        expect(result.response?.status).toBe(200);
-        expect(result.response?.body?.user?.email).toBe('a@b.c');
-        expect(result.response?.body?.session?.token).toMatch(/^mock_token_/);
+        expect(result.response?.status).toBe(501);
+        expect(result.response?.body?.user).toBeUndefined();
+        expect(result.response?.body?.session).toBeUndefined();
+        expect(JSON.stringify(result.response?.body ?? {})).not.toMatch(/mock_token_/);
     });
 
     it('/ai/agents returns an empty list (not 404) when no AI service is configured', async () => {
