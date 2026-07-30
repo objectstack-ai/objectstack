@@ -50,6 +50,6 @@ describe('shouldDenyAnonymous — the shared HTTP anonymous-deny decision (#2567
 
   it('exposes a stable 401 body + status for seams to return', () => {
     expect(ANONYMOUS_DENY_STATUS).toBe(401);
-    expect(ANONYMOUS_DENY_BODY).toEqual({ error: 'unauthenticated', message: expect.any(String) });
+    expect(ANONYMOUS_DENY_BODY).toEqual({ error: 'UNAUTHENTICATED', message: expect.any(String) });
   });
 });

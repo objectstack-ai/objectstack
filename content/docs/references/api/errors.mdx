@@ -45,7 +45,7 @@ const result = EnhancedApiError.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'validation_error' \| 'invalid_field' \| 'missing_required_field' \| 'invalid_format' \| 'value_too_long' \| 'value_too_short' \| 'value_out_of_range' \| 'invalid_reference' \| 'duplicate_value' \| 'invalid_query' \| 'invalid_filter' \| 'invalid_sort' \| 'max_records_exceeded' \| 'unauthenticated' \| 'invalid_credentials' \| 'expired_token' \| 'invalid_token' \| 'session_expired' \| 'mfa_required' \| 'email_not_verified' \| 'permission_denied' \| 'insufficient_privileges' \| 'field_not_accessible' \| 'record_not_accessible' \| 'license_required' \| 'ip_restricted' \| 'time_restricted' \| 'resource_not_found' \| 'object_not_found' \| 'record_not_found' \| 'field_not_found' \| 'endpoint_not_found' \| 'resource_conflict' \| 'concurrent_modification' \| 'delete_restricted' \| 'duplicate_record' \| 'lock_conflict' \| 'method_not_allowed' \| 'precondition_required' \| 'rate_limit_exceeded' \| 'quota_exceeded' \| 'concurrent_limit_exceeded' \| 'internal_error' \| 'database_error' \| 'timeout' \| 'service_unavailable' \| 'not_implemented' \| 'external_service_error' \| 'integration_error' \| 'webhook_delivery_failed' \| 'batch_partial_failure' \| 'batch_complete_failure' \| 'transaction_failed'>` | ✅ | Machine-readable error code |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| 'INVALID_REFERENCE' \| 'DUPLICATE_VALUE' \| 'INVALID_QUERY' \| 'INVALID_FILTER' \| 'INVALID_SORT' \| 'MAX_RECORDS_EXCEEDED' \| 'UNAUTHENTICATED' \| 'INVALID_CREDENTIALS' \| 'EXPIRED_TOKEN' \| 'INVALID_TOKEN' \| 'SESSION_EXPIRED' \| 'MFA_REQUIRED' \| 'EMAIL_NOT_VERIFIED' \| 'PERMISSION_DENIED' \| 'INSUFFICIENT_PRIVILEGES' \| 'FIELD_NOT_ACCESSIBLE' \| 'RECORD_NOT_ACCESSIBLE' \| 'LICENSE_REQUIRED' \| 'IP_RESTRICTED' \| 'TIME_RESTRICTED' \| 'RESOURCE_NOT_FOUND' \| 'OBJECT_NOT_FOUND' \| 'RECORD_NOT_FOUND' \| 'FIELD_NOT_FOUND' \| 'ENDPOINT_NOT_FOUND' \| 'RESOURCE_CONFLICT' \| 'CONCURRENT_MODIFICATION' \| 'DELETE_RESTRICTED' \| 'DUPLICATE_RECORD' \| 'LOCK_CONFLICT' \| 'METHOD_NOT_ALLOWED' \| 'PRECONDITION_REQUIRED' \| 'RATE_LIMIT_EXCEEDED' \| 'QUOTA_EXCEEDED' \| 'CONCURRENT_LIMIT_EXCEEDED' \| 'INTERNAL_ERROR' \| 'DATABASE_ERROR' \| 'TIMEOUT' \| 'SERVICE_UNAVAILABLE' \| 'NOT_IMPLEMENTED' \| 'EXTERNAL_SERVICE_ERROR' \| 'INTEGRATION_ERROR' \| 'WEBHOOK_DELIVERY_FAILED' \| 'BATCH_PARTIAL_FAILURE' \| 'BATCH_COMPLETE_FAILURE' \| 'TRANSACTION_FAILED'>` | ✅ | Machine-readable error code |
 | **message** | `string` | ✅ | Human-readable error message |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `number` | optional | HTTP status code |
@@ -53,7 +53,7 @@ const result = EnhancedApiError.parse(data);
 | **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
 | **retryAfter** | `number` | optional | Seconds to wait before retrying |
 | **details** | `any` | optional | Additional error context |
-| **fieldErrors** | `{ field: string; code: Enum<'validation_error' \| 'invalid_field' \| 'missing_required_field' \| 'invalid_format' \| 'value_too_long' \| 'value_too_short' \| 'value_out_of_range' \| 'invalid_reference' \| 'duplicate_value' \| 'invalid_query' \| 'invalid_filter' \| 'invalid_sort' \| 'max_records_exceeded' \| 'unauthenticated' \| 'invalid_credentials' \| 'expired_token' \| 'invalid_token' \| 'session_expired' \| 'mfa_required' \| 'email_not_verified' \| 'permission_denied' \| 'insufficient_privileges' \| 'field_not_accessible' \| 'record_not_accessible' \| 'license_required' \| 'ip_restricted' \| 'time_restricted' \| 'resource_not_found' \| 'object_not_found' \| 'record_not_found' \| 'field_not_found' \| 'endpoint_not_found' \| 'resource_conflict' \| 'concurrent_modification' \| 'delete_restricted' \| 'duplicate_record' \| 'lock_conflict' \| 'method_not_allowed' \| 'precondition_required' \| 'rate_limit_exceeded' \| 'quota_exceeded' \| 'concurrent_limit_exceeded' \| 'internal_error' \| 'database_error' \| 'timeout' \| 'service_unavailable' \| 'not_implemented' \| 'external_service_error' \| 'integration_error' \| 'webhook_delivery_failed' \| 'batch_partial_failure' \| 'batch_complete_failure' \| 'transaction_failed'>; message: string; value?: any; … }[]` | optional | Field-specific validation errors |
+| **fieldErrors** | `{ field: string; code: string; message: string; value?: any; … }[]` | optional | Field-specific validation errors |
 | **timestamp** | `string` | optional | When the error occurred |
 | **requestId** | `string` | optional | Request ID for tracking |
 | **traceId** | `string` | optional | Distributed trace ID |
@@ -70,7 +70,7 @@ const result = EnhancedApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `'false'` | ✅ | Always false for error responses |
-| **error** | `{ code: Enum<'validation_error' \| 'invalid_field' \| 'missing_required_field' \| 'invalid_format' \| 'value_too_long' \| 'value_too_short' \| 'value_out_of_range' \| 'invalid_reference' \| 'duplicate_value' \| 'invalid_query' \| 'invalid_filter' \| 'invalid_sort' \| 'max_records_exceeded' \| 'unauthenticated' \| 'invalid_credentials' \| 'expired_token' \| 'invalid_token' \| 'session_expired' \| 'mfa_required' \| 'email_not_verified' \| 'permission_denied' \| 'insufficient_privileges' \| 'field_not_accessible' \| 'record_not_accessible' \| 'license_required' \| 'ip_restricted' \| 'time_restricted' \| 'resource_not_found' \| 'object_not_found' \| 'record_not_found' \| 'field_not_found' \| 'endpoint_not_found' \| 'resource_conflict' \| 'concurrent_modification' \| 'delete_restricted' \| 'duplicate_record' \| 'lock_conflict' \| 'method_not_allowed' \| 'precondition_required' \| 'rate_limit_exceeded' \| 'quota_exceeded' \| 'concurrent_limit_exceeded' \| 'internal_error' \| 'database_error' \| 'timeout' \| 'service_unavailable' \| 'not_implemented' \| 'external_service_error' \| 'integration_error' \| 'webhook_delivery_failed' \| 'batch_partial_failure' \| 'batch_complete_failure' \| 'transaction_failed'>; message: string; category?: Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>; httpStatus?: number; … }` | ✅ | Error details |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| 'INVALID_REFERENCE' \| 'DUPLICATE_VALUE' \| 'INVALID_QUERY' \| 'INVALID_FILTER' \| 'INVALID_SORT' \| 'MAX_RECORDS_EXCEEDED' \| 'UNAUTHENTICATED' \| 'INVALID_CREDENTIALS' \| 'EXPIRED_TOKEN' \| 'INVALID_TOKEN' \| 'SESSION_EXPIRED' \| 'MFA_REQUIRED' \| 'EMAIL_NOT_VERIFIED' \| 'PERMISSION_DENIED' \| 'INSUFFICIENT_PRIVILEGES' \| 'FIELD_NOT_ACCESSIBLE' \| 'RECORD_NOT_ACCESSIBLE' \| 'LICENSE_REQUIRED' \| 'IP_RESTRICTED' \| 'TIME_RESTRICTED' \| 'RESOURCE_NOT_FOUND' \| 'OBJECT_NOT_FOUND' \| 'RECORD_NOT_FOUND' \| 'FIELD_NOT_FOUND' \| 'ENDPOINT_NOT_FOUND' \| 'RESOURCE_CONFLICT' \| 'CONCURRENT_MODIFICATION' \| 'DELETE_RESTRICTED' \| 'DUPLICATE_RECORD' \| 'LOCK_CONFLICT' \| 'METHOD_NOT_ALLOWED' \| 'PRECONDITION_REQUIRED' \| 'RATE_LIMIT_EXCEEDED' \| 'QUOTA_EXCEEDED' \| 'CONCURRENT_LIMIT_EXCEEDED' \| 'INTERNAL_ERROR' \| 'DATABASE_ERROR' \| 'TIMEOUT' \| 'SERVICE_UNAVAILABLE' \| 'NOT_IMPLEMENTED' \| 'EXTERNAL_SERVICE_ERROR' \| 'INTEGRATION_ERROR' \| 'WEBHOOK_DELIVERY_FAILED' \| 'BATCH_PARTIAL_FAILURE' \| 'BATCH_COMPLETE_FAILURE' \| 'TRANSACTION_FAILED'>; message: string; category?: Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>; httpStatus?: number; … }` | ✅ | Error details |
 | **meta** | `{ timestamp?: string; requestId?: string; traceId?: string }` | optional | Response metadata |
 
 
@@ -83,7 +83,7 @@ const result = EnhancedApiError.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field path (supports dot notation) |
-| **code** | `Enum<'validation_error' \| 'invalid_field' \| 'missing_required_field' \| 'invalid_format' \| 'value_too_long' \| 'value_too_short' \| 'value_out_of_range' \| 'invalid_reference' \| 'duplicate_value' \| 'invalid_query' \| 'invalid_filter' \| 'invalid_sort' \| 'max_records_exceeded' \| 'unauthenticated' \| 'invalid_credentials' \| 'expired_token' \| 'invalid_token' \| 'session_expired' \| 'mfa_required' \| 'email_not_verified' \| 'permission_denied' \| 'insufficient_privileges' \| 'field_not_accessible' \| 'record_not_accessible' \| 'license_required' \| 'ip_restricted' \| 'time_restricted' \| 'resource_not_found' \| 'object_not_found' \| 'record_not_found' \| 'field_not_found' \| 'endpoint_not_found' \| 'resource_conflict' \| 'concurrent_modification' \| 'delete_restricted' \| 'duplicate_record' \| 'lock_conflict' \| 'method_not_allowed' \| 'precondition_required' \| 'rate_limit_exceeded' \| 'quota_exceeded' \| 'concurrent_limit_exceeded' \| 'internal_error' \| 'database_error' \| 'timeout' \| 'service_unavailable' \| 'not_implemented' \| 'external_service_error' \| 'integration_error' \| 'webhook_delivery_failed' \| 'batch_partial_failure' \| 'batch_complete_failure' \| 'transaction_failed'>` | ✅ | Error code for this field |
+| **code** | `string` | ✅ | Error code for this field (field-level vocabulary — see #3977) |
 | **message** | `string` | ✅ | Human-readable error message |
 | **value** | `any` | optional | The invalid value that was provided |
 | **constraint** | `any` | optional | The constraint that was violated (e.g., max length) |
@@ -95,59 +95,59 @@ const result = EnhancedApiError.parse(data);
 
 ### Allowed Values
 
-* `validation_error`
-* `invalid_field`
-* `missing_required_field`
-* `invalid_format`
-* `value_too_long`
-* `value_too_short`
-* `value_out_of_range`
-* `invalid_reference`
-* `duplicate_value`
-* `invalid_query`
-* `invalid_filter`
-* `invalid_sort`
-* `max_records_exceeded`
-* `unauthenticated`
-* `invalid_credentials`
-* `expired_token`
-* `invalid_token`
-* `session_expired`
-* `mfa_required`
-* `email_not_verified`
-* `permission_denied`
-* `insufficient_privileges`
-* `field_not_accessible`
-* `record_not_accessible`
-* `license_required`
-* `ip_restricted`
-* `time_restricted`
-* `resource_not_found`
-* `object_not_found`
-* `record_not_found`
-* `field_not_found`
-* `endpoint_not_found`
-* `resource_conflict`
-* `concurrent_modification`
-* `delete_restricted`
-* `duplicate_record`
-* `lock_conflict`
-* `method_not_allowed`
-* `precondition_required`
-* `rate_limit_exceeded`
-* `quota_exceeded`
-* `concurrent_limit_exceeded`
-* `internal_error`
-* `database_error`
-* `timeout`
-* `service_unavailable`
-* `not_implemented`
-* `external_service_error`
-* `integration_error`
-* `webhook_delivery_failed`
-* `batch_partial_failure`
-* `batch_complete_failure`
-* `transaction_failed`
+* `VALIDATION_ERROR`
+* `INVALID_FIELD`
+* `MISSING_REQUIRED_FIELD`
+* `INVALID_FORMAT`
+* `VALUE_TOO_LONG`
+* `VALUE_TOO_SHORT`
+* `VALUE_OUT_OF_RANGE`
+* `INVALID_REFERENCE`
+* `DUPLICATE_VALUE`
+* `INVALID_QUERY`
+* `INVALID_FILTER`
+* `INVALID_SORT`
+* `MAX_RECORDS_EXCEEDED`
+* `UNAUTHENTICATED`
+* `INVALID_CREDENTIALS`
+* `EXPIRED_TOKEN`
+* `INVALID_TOKEN`
+* `SESSION_EXPIRED`
+* `MFA_REQUIRED`
+* `EMAIL_NOT_VERIFIED`
+* `PERMISSION_DENIED`
+* `INSUFFICIENT_PRIVILEGES`
+* `FIELD_NOT_ACCESSIBLE`
+* `RECORD_NOT_ACCESSIBLE`
+* `LICENSE_REQUIRED`
+* `IP_RESTRICTED`
+* `TIME_RESTRICTED`
+* `RESOURCE_NOT_FOUND`
+* `OBJECT_NOT_FOUND`
+* `RECORD_NOT_FOUND`
+* `FIELD_NOT_FOUND`
+* `ENDPOINT_NOT_FOUND`
+* `RESOURCE_CONFLICT`
+* `CONCURRENT_MODIFICATION`
+* `DELETE_RESTRICTED`
+* `DUPLICATE_RECORD`
+* `LOCK_CONFLICT`
+* `METHOD_NOT_ALLOWED`
+* `PRECONDITION_REQUIRED`
+* `RATE_LIMIT_EXCEEDED`
+* `QUOTA_EXCEEDED`
+* `CONCURRENT_LIMIT_EXCEEDED`
+* `INTERNAL_ERROR`
+* `DATABASE_ERROR`
+* `TIMEOUT`
+* `SERVICE_UNAVAILABLE`
+* `NOT_IMPLEMENTED`
+* `EXTERNAL_SERVICE_ERROR`
+* `INTEGRATION_ERROR`
+* `WEBHOOK_DELIVERY_FAILED`
+* `BATCH_PARTIAL_FAILURE`
+* `BATCH_COMPLETE_FAILURE`
+* `TRANSACTION_FAILED`
 
 
 ---

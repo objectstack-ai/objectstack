@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { QuerySchema } from '../data/query.zod';
+import { ErrorCode } from './error-code-ledger.zod';
 
 // ==========================================
 // 1. Base Envelopes
@@ -9,7 +10,13 @@ import { QuerySchema } from '../data/query.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
 export const ApiErrorSchema = lazySchema(() => z.object({
-  code: z.string().describe('Error code (e.g. validation_error)'),
+  /**
+   * Machine-readable semantic code (ADR-0112): a `StandardErrorCode` member or
+   * a code registered in `ERROR_CODE_LEDGER`. A closed set on purpose — an
+   * unregistered code fails parse, so the envelope conformance suites catch
+   * invented codes instead of letting a new dialect grow (#3841).
+   */
+  code: ErrorCode.describe('Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ ERROR_CODE_LEDGER)'),
   message: z.string().describe('Readable error message'),
   category: z.string().optional().describe('Error category (e.g. validation, authorization)'),
   /**

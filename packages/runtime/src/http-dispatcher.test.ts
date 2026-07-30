@@ -728,7 +728,7 @@ describe('HttpDispatcher', () => {
                 // Shared anonymous-deny body shape (locks the seam migration).
                 // [#3842] `ANONYMOUS_DENY_CODE` reaches `error.code` now — it was
                 // parked in `details` while the status occupied the field.
-                expect(result.response?.body?.error?.code).toBe('unauthenticated');
+                expect(result.response?.body?.error?.code).toBe('UNAUTHENTICATED');
                 expect(service.listAudienceBindingSuggestions).not.toHaveBeenCalled();
             });
 
@@ -1943,7 +1943,7 @@ describe('HttpDispatcher', () => {
             // The status is on `httpStatus`; `code` is the semantic string it
             // used to displace — derived here, since this branch has no code of
             // its own to carry.
-            expect(body.error).toMatchObject({ code: 'validation_error', httpStatus: 400 });
+            expect(body.error).toMatchObject({ code: 'VALIDATION_ERROR', httpStatus: 400 });
         });
 
         /**

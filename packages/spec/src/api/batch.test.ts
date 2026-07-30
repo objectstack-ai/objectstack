@@ -221,7 +221,7 @@ describe('BatchOperationResultSchema', () => {
       index: 1,
       errors: [
         {
-          code: 'validation_error',
+          code: 'VALIDATION_ERROR',
           message: 'Invalid email format',
         },
       ],
@@ -229,7 +229,7 @@ describe('BatchOperationResultSchema', () => {
 
     expect(result.success).toBe(false);
     expect(result.errors).toHaveLength(1);
-    expect(result.errors?.[0].code).toBe('validation_error');
+    expect(result.errors?.[0].code).toBe('VALIDATION_ERROR');
   });
 
   it('should accept result with full record data', () => {
@@ -281,7 +281,7 @@ describe('BatchUpdateResponseSchema', () => {
         {
           success: false,
           index: 1,
-          errors: [{ code: 'validation_error', message: 'Invalid data' }],
+          errors: [{ code: 'VALIDATION_ERROR', message: 'Invalid data' }],
         },
       ],
     });
@@ -304,7 +304,7 @@ describe('BatchUpdateResponseSchema', () => {
           index: 0,
           errors: [
             {
-              code: 'duplicate_value',
+              code: 'DUPLICATE_VALUE',
               message: 'Record already exists',
               details: { field: 'email', value: 'test@example.com' },
             },
@@ -312,13 +312,13 @@ describe('BatchUpdateResponseSchema', () => {
         },
       ],
       error: {
-        code: 'batch_partial_failure',
+        code: 'BATCH_PARTIAL_FAILURE',
         message: 'Batch operation failed',
       },
     });
 
     expect(response.failed).toBe(1);
-    expect(response.error?.code).toBe('batch_partial_failure');
+    expect(response.error?.code).toBe('BATCH_PARTIAL_FAILURE');
   });
 });
 

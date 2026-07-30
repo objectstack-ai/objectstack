@@ -300,7 +300,7 @@ describe('#3918 — dispatcher-plugin errorResponseBase maps VALIDATION_FAILED',
 
         expect(res.statusCode).toBe(500);
         expect(res.body.error).toEqual({
-            code: 'internal_error',
+            code: 'INTERNAL_ERROR',
             message: 'analytics engine unavailable',
             httpStatus: 500,
         });

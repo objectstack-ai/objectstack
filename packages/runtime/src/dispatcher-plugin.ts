@@ -165,7 +165,7 @@ function mountRouteOnServer(
                     for (const [k, v] of Object.entries(securityHeaders)) res.header(k, v);
                 }
                 res.json({
-                    error: 'unauthenticated',
+                    error: 'UNAUTHENTICATED',
                     message: 'Authentication is required to access this endpoint.',
                 });
                 return;

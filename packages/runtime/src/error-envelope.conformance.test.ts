@@ -69,7 +69,7 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
         const result = await makeDispatcher().handleActions('', 'POST', {}, { request: {} });
 
         const error = expectConformantError(result.response);
-        expect(error.code).toBe('validation_error');
+        expect(error.code).toBe('VALIDATION_ERROR');
         expect(error.message).toBe('Path must be /actions/:object/:action');
     });
 
@@ -78,10 +78,10 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
         // without them a 405 would have derived the generic 4xx bucket and read
         // as a validation failure.
         const notAllowed = await makeDispatcher().handleActions('/task/close', 'GET', {}, { request: {} });
-        expect(expectConformantError(notAllowed.response).code).toBe('method_not_allowed');
+        expect(expectConformantError(notAllowed.response).code).toBe('METHOD_NOT_ALLOWED');
 
         const notImplemented = await makeDispatcher().handleI18n('/labels/account', 'GET', {}, { request: {} });
-        expect(expectConformantError(notImplemented.response).code).toBe('not_implemented');
+        expect(expectConformantError(notImplemented.response).code).toBe('NOT_IMPLEMENTED');
     });
 
     it('derives a catalogued code for a 503 (the /ready probe)', async () => {
@@ -89,7 +89,7 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
         const result = await makeDispatcher(kernel).dispatch('GET', '/ready', {}, {}, { request: {} });
 
         const error = expectConformantError(result.response);
-        expect(error.code).toBe('service_unavailable');
+        expect(error.code).toBe('SERVICE_UNAVAILABLE');
         // Genuine context survives the split — only the code was lifted out.
         expect(error.details).toEqual({ state: 'stopping' });
     });
@@ -132,13 +132,13 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
 
     it('lifts a thrown error’s own code into the declared field', async () => {
         const thrown = Object.assign(new Error('publish backend unavailable'), {
-            code: 'STORAGE_FAILURE',
+            code: 'CONNECTOR_UPSTREAM_UNAVAILABLE',
             status: 502,
         });
         const response = (makeDispatcher() as any).errorFromThrown(thrown);
 
         const error = expectConformantError(response);
-        expect(error.code).toBe('STORAGE_FAILURE');
+        expect(error.code).toBe('CONNECTOR_UPSTREAM_UNAVAILABLE');
     });
 
     it('keeps the `Allow` header on the MCP 405 while sharing the body builder', async () => {
@@ -146,7 +146,7 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
 
         expect(result.response?.headers).toEqual({ Allow: 'GET' });
         const error = expectConformantError(result.response);
-        expect(error.code).toBe('method_not_allowed');
+        expect(error.code).toBe('METHOD_NOT_ALLOWED');
     });
 });
 
@@ -155,7 +155,7 @@ describe('#3842 — buildApiError precedence', () => {
         expect(buildApiError({ message: 'm', httpStatus: 403, code: 'EXPLICIT' }).code).toBe('EXPLICIT');
         expect(buildApiError({ message: 'm', httpStatus: 403, details: { code: 'PROMOTED' } }).code)
             .toBe('PROMOTED');
-        expect(buildApiError({ message: 'm', httpStatus: 403 }).code).toBe('permission_denied');
+        expect(buildApiError({ message: 'm', httpStatus: 403 }).code).toBe('PERMISSION_DENIED');
     });
 
     it('drops `details` entirely when the code was all it carried', () => {
@@ -169,7 +169,7 @@ describe('#3842 — buildApiError precedence', () => {
         // not a semantic code — promoting it would put a number straight back
         // into the field this whole change exists to keep a string.
         const error = buildApiError({ message: 'm', httpStatus: 500, details: { code: 42 } });
-        expect(error.code).toBe('internal_error');
+        expect(error.code).toBe('INTERNAL_ERROR');
         expect(error.details).toEqual({ code: 42 });
     });
 

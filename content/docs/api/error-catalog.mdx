@@ -12,10 +12,13 @@ ObjectStack uses a structured error system with **9 error categories** and **53 
 **Import:** `import { StandardErrorCode, ErrorCategory, ErrorResponseSchema } from '@objectstack/spec/api'`
 </Callout>
 
-<Callout type="warn">
-**Spec vs. wire format:** The codes below are `StandardErrorCode` — the standardized, lowercase snake_case contract that plugin/hook authors should throw with (see [Server-Side Error Handling](/docs/api/error-handling-server)). The kernel REST server (`@objectstack/rest`) that serves `/api/v1/data/*` today emits a flatter envelope with SCREAMING_SNAKE_CASE codes instead — e.g. `VALIDATION_FAILED`, `PERMISSION_DENIED`, `RECORD_NOT_FOUND`, `CONCURRENT_UPDATE`, `ERR_DATASOURCE_UNAVAILABLE` — not the codes in this catalog. See the [API Overview](/docs/api#error-handling) for both wire formats in use and [Wire Format](/docs/api/wire-format#7-error-response-format) for JSON examples.
+<Callout type="info">
+**One vocabulary, two tiers** ([ADR-0112](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0112-error-code-vocabulary-and-ledger.md), settles [#3841](https://github.com/objectstack-ai/objectstack/issues/3841)): every top-level `error.code` is SCREAMING_SNAKE and comes from either
 
-Reconciling the two vocabularies is [#3841](https://github.com/objectstack-ai/objectstack/issues/3841), still open. In the meantime the runtime dispatcher emits whichever code its producer already used (`PERMISSION_DENIED`, `VALIDATION_FAILED`, `unauthenticated`, …) and falls back to a `StandardErrorCode` from this catalog when a branch has no code of its own — `HttpStatusErrorCodeMap` in `@objectstack/spec/api` is the single place that mapping is spelled.
+1. the **standard catalog** below (`StandardErrorCode` — generic conditions with platform-wide HTTP semantics), or
+2. the **error-code ledger** (`ERROR_CODE_LEDGER` in `@objectstack/spec/api`) — service-specific codes such as `VALIDATION_FAILED`, `AUTH_REQUIRED`, `ATTACHMENT_DOWNLOAD_DENIED`, registered under their owning package.
+
+`ApiErrorSchema.code` validates against the union, so an unregistered code fails schema parse and CI. **Adding a code:** if a standard code fits, throw with it; otherwise register yours in `ERROR_CODE_LEDGER` (see the registration notes in `packages/spec/src/api/error-code-ledger.ts`). A producer that has no code of its own gets one derived from the HTTP status via `standardErrorCodeForHttpStatus` — always a member of this catalog.
 </Callout>
 
 ---
@@ -49,14 +52,14 @@ Reconciling the two vocabularies is [#3841](https://github.com/objectstack-ai/ob
 
 ## Validation Errors (400)
 
-### `validation_error`
+### `VALIDATION_ERROR`
 **Cause:** Generic validation failure — request body does not match expected schema.  
 **Fix:** Check the `fieldErrors` array for specific field-level issues.  
 **Retry:** `no_retry`
 
 ```json
 {
-  "code": "validation_error",
+  "code": "VALIDATION_ERROR",
   "message": "Request validation failed",
   "category": "validation",
   "httpStatus": 400,
@@ -67,62 +70,62 @@ Reconciling the two vocabularies is [#3841](https://github.com/objectstack-ai/ob
 }
 ```
 
-### `invalid_field`
+### `INVALID_FIELD`
 **Cause:** A field name in the request does not exist on the target object.  
 **Fix:** Check the object schema for valid field names. Use `os meta get object <name>` to inspect the object's fields.  
 **Retry:** `no_retry`
 
-### `missing_required_field`
+### `MISSING_REQUIRED_FIELD`
 **Cause:** A required field was not provided in the request body.  
 **Fix:** Include the missing field. Check `fieldErrors` for the field name.  
 **Retry:** `no_retry`
 
-### `invalid_format`
+### `INVALID_FORMAT`
 **Cause:** Field value does not match the expected format (e.g., invalid email, wrong date format).  
 **Fix:** Ensure the value matches the field's `format` constraint or built-in type validation.  
 **Retry:** `no_retry`
 
-### `value_too_long`
+### `VALUE_TOO_LONG`
 **Cause:** String value exceeds the field's `maxLength` constraint.  
 **Fix:** Truncate the value to the maximum allowed length.  
 **Retry:** `no_retry`
 
-### `value_too_short`
+### `VALUE_TOO_SHORT`
 **Cause:** String value is below the field's `minLength` constraint.  
 **Fix:** Provide a longer value that meets the minimum length requirement.  
 **Retry:** `no_retry`
 
-### `value_out_of_range`
+### `VALUE_OUT_OF_RANGE`
 **Cause:** Numeric value is outside the field's `min`/`max` range.  
 **Fix:** Ensure the value is within the allowed range.  
 **Retry:** `no_retry`
 
-### `invalid_reference`
+### `INVALID_REFERENCE`
 **Cause:** A `lookup` or `master_detail` field references a record that does not exist.  
 **Fix:** Verify the referenced record ID exists in the target object.  
 **Retry:** `no_retry`
 
-### `duplicate_value`
+### `DUPLICATE_VALUE`
 **Cause:** A field with `unique: true` already has a record with the same value.  
 **Fix:** Use a different value or update the existing record.  
 **Retry:** `no_retry`
 
-### `invalid_query`
+### `INVALID_QUERY`
 **Cause:** The query structure is malformed.  
 **Fix:** Check the query syntax against the [Query Cheat Sheet](/docs/data-modeling/queries).  
 **Retry:** `no_retry`
 
-### `invalid_filter`
+### `INVALID_FILTER`
 **Cause:** A filter operator or field in the `where` clause is invalid.  
 **Fix:** Use valid filter operators (`$eq`, `$ne`, `$gt`, `$lt`, `$in`, `$contains`, etc.).  
 **Retry:** `no_retry`
 
-### `invalid_sort`
+### `INVALID_SORT`
 **Cause:** The `orderBy` clause references a non-existent or non-sortable field.  
 **Fix:** Ensure the field exists and has `sortable: true`.  
 **Retry:** `no_retry`
 
-### `max_records_exceeded`
+### `MAX_RECORDS_EXCEEDED`
 **Cause:** The request attempts to create or return more records than the system limit.  
 **Fix:** Use pagination (`limit`/`offset` or cursor-based) for large datasets. Batch operations for bulk creates.  
 **Retry:** `no_retry`
@@ -131,37 +134,37 @@ Reconciling the two vocabularies is [#3841](https://github.com/objectstack-ai/ob
 
 ## Authentication Errors (401)
 
-### `unauthenticated`
+### `UNAUTHENTICATED`
 **Cause:** No authentication credentials were provided.  
 **Fix:** Include a valid `Authorization` header (Bearer token, API key, or session cookie).  
 **Retry:** `no_retry`
 
-### `invalid_credentials`
+### `INVALID_CREDENTIALS`
 **Cause:** Username/password combination is incorrect.  
 **Fix:** Verify credentials and try again. After multiple failures, account may be locked.  
 **Retry:** `no_retry`
 
-### `expired_token`
+### `EXPIRED_TOKEN`
 **Cause:** The authentication token (JWT, session token) has expired.  
 **Fix:** Obtain a new token using the refresh token endpoint or re-authenticate.  
 **Retry:** `retry_immediate` (after refreshing token)
 
-### `invalid_token`
+### `INVALID_TOKEN`
 **Cause:** The authentication token is malformed or has been tampered with.  
 **Fix:** Obtain a fresh token from the authentication endpoint.  
 **Retry:** `no_retry`
 
-### `session_expired`
+### `SESSION_EXPIRED`
 **Cause:** The user session has timed out due to inactivity.  
 **Fix:** Re-authenticate to start a new session.  
 **Retry:** `no_retry`
 
-### `mfa_required`
+### `MFA_REQUIRED`
 **Cause:** Multi-factor authentication is required but the MFA challenge has not been completed.  
 **Fix:** Complete the MFA verification step before proceeding.  
 **Retry:** `no_retry`
 
-### `email_not_verified`
+### `EMAIL_NOT_VERIFIED`
 **Cause:** The user's email address has not been verified.  
 **Fix:** Complete email verification through the link sent to the user's email.  
 **Retry:** `no_retry`
@@ -170,37 +173,37 @@ Reconciling the two vocabularies is [#3841](https://github.com/objectstack-ai/ob
 
 ## Authorization Errors (403)
 
-### `permission_denied`
+### `PERMISSION_DENIED`
 **Cause:** The authenticated user does not have permission for this operation.  
 **Fix:** Request the necessary permissions from an administrator, or use an account with the required role.  
 **Retry:** `no_retry`
 
-### `insufficient_privileges`
+### `INSUFFICIENT_PRIVILEGES`
 **Cause:** The user has some access but lacks the specific privilege required for this action.  
 **Fix:** Contact an administrator to grant the necessary privilege.  
 **Retry:** `no_retry`
 
-### `field_not_accessible`
+### `FIELD_NOT_ACCESSIBLE`
 **Cause:** The user does not have access to a specific field on the object.  
 **Fix:** Remove the inaccessible field from the request, or request field-level access.  
 **Retry:** `no_retry`
 
-### `record_not_accessible`
+### `RECORD_NOT_ACCESSIBLE`
 **Cause:** The user cannot access this specific record due to record-level sharing rules.  
 **Fix:** Request access to the record from its owner or an administrator.  
 **Retry:** `no_retry`
 
-### `license_required`
+### `LICENSE_REQUIRED`
 **Cause:** The feature requires a specific license that is not active.  
 **Fix:** Upgrade the license or contact your administrator.  
 **Retry:** `no_retry`
 
-### `ip_restricted`
+### `IP_RESTRICTED`
 **Cause:** The request originates from an IP address that is not in the allowlist.  
 **Fix:** Ensure the request comes from an approved IP range, or update the IP restriction settings.  
 **Retry:** `no_retry`
 
-### `time_restricted`
+### `TIME_RESTRICTED`
 **Cause:** Access is limited to specific time windows and the current time is outside the allowed range.  
 **Fix:** Retry during the allowed time window.  
 **Retry:** `retry_after`
@@ -209,27 +212,27 @@ Reconciling the two vocabularies is [#3841](https://github.com/objectstack-ai/ob
 
 ## Not Found Errors (404)
 
-### `resource_not_found`
+### `RESOURCE_NOT_FOUND`
 **Cause:** The requested resource does not exist (generic).  
 **Fix:** Verify the resource identifier and endpoint path.  
 **Retry:** `no_retry`
 
-### `object_not_found`
+### `OBJECT_NOT_FOUND`
 **Cause:** The specified object (table/entity) does not exist in the schema.  
 **Fix:** Check the object name. Use `os meta list object` to list available objects.  
 **Retry:** `no_retry`
 
-### `record_not_found`
+### `RECORD_NOT_FOUND`
 **Cause:** No record exists with the given ID in the specified object.  
 **Fix:** Verify the record ID. The record may have been deleted.  
 **Retry:** `no_retry`
 
-### `field_not_found`
+### `FIELD_NOT_FOUND`
 **Cause:** The specified field does not exist on the object.  
 **Fix:** Check the field name against the object schema. Field names are snake_case.  
 **Retry:** `no_retry`
 
-### `endpoint_not_found`
+### `ENDPOINT_NOT_FOUND`
 **Cause:** The API endpoint path does not match any registered route.  
 **Fix:** Verify the URL path and HTTP method. Check the API discovery endpoint for available routes.  
 **Retry:** `no_retry`
@@ -238,27 +241,27 @@ Reconciling the two vocabularies is [#3841](https://github.com/objectstack-ai/ob
 
 ## Conflict Errors (409)
 
-### `resource_conflict`
+### `RESOURCE_CONFLICT`
 **Cause:** The operation conflicts with the current state of the resource.  
 **Fix:** Fetch the latest resource state and retry the operation.  
 **Retry:** `retry_immediate`
 
-### `concurrent_modification`
+### `CONCURRENT_MODIFICATION`
 **Cause:** The record was modified by another user/process since you last read it (optimistic locking failure).  
 **Fix:** Re-fetch the record, merge changes, and retry.  
 **Retry:** `retry_immediate`
 
-### `delete_restricted`
+### `DELETE_RESTRICTED`
 **Cause:** The record cannot be deleted because other records depend on it (referential integrity).  
 **Fix:** Delete or reassign dependent records first, then retry the delete.  
 **Retry:** `no_retry`
 
-### `duplicate_record`
+### `DUPLICATE_RECORD`
 **Cause:** A record with the same unique key already exists.  
 **Fix:** Update the existing record instead, or use a different unique key value.  
 **Retry:** `no_retry`
 
-### `lock_conflict`
+### `LOCK_CONFLICT`
 **Cause:** The record is locked by another process or user.  
 **Fix:** Wait for the lock to be released, or contact the lock holder.  
 **Retry:** `retry_backoff`
@@ -271,12 +274,12 @@ Added in #3842 so `standardErrorCodeForHttpStatus` can name every status the
 runtime actually returns. Without them a `405` would fall into the generic 4xx
 bucket and be reported as a validation failure.
 
-### `method_not_allowed`
+### `METHOD_NOT_ALLOWED`
 **Cause:** The route exists but does not serve this HTTP method.  
 **Fix:** Use the method named in the response's `Allow` header.  
 **Retry:** `no_retry`
 
-### `precondition_required`
+### `PRECONDITION_REQUIRED`
 **Cause:** The request is missing a precondition the route requires — most often
 an environment scope (no `X-Environment-Id` header and no hostname mapping).  
 **Fix:** Send the missing header, or address the environment-scoped URL form.  
@@ -286,17 +289,17 @@ an environment scope (no `X-Environment-Id` header and no hostname mapping).
 
 ## Rate Limit Errors (429)
 
-### `rate_limit_exceeded`
+### `RATE_LIMIT_EXCEEDED`
 **Cause:** Too many requests in the current time window.  
 **Fix:** Reduce request frequency. Check the `retryAfter` field for the wait time.  
 **Retry:** `retry_after`
 
-### `quota_exceeded`
+### `QUOTA_EXCEEDED`
 **Cause:** The API usage quota for the current period has been exhausted.  
 **Fix:** Wait for the quota to reset (check `retryAfter`), or upgrade the plan.  
 **Retry:** `retry_after`
 
-### `concurrent_limit_exceeded`
+### `CONCURRENT_LIMIT_EXCEEDED`
 **Cause:** Too many concurrent requests from the same client.  
 **Fix:** Reduce parallel request count. Implement request queuing.  
 **Retry:** `retry_backoff`
@@ -305,27 +308,27 @@ an environment scope (no `X-Environment-Id` header and no hostname mapping).
 
 ## Server Errors (500)
 
-### `internal_error`
+### `INTERNAL_ERROR`
 **Cause:** An unexpected server-side error occurred.  
 **Fix:** Report the issue with the `requestId` and `traceId`. Retry may succeed.  
 **Retry:** `retry_backoff`
 
-### `database_error`
+### `DATABASE_ERROR`
 **Cause:** A database operation failed (connection, query, constraint).  
 **Fix:** Report the issue. May be transient — retry with backoff.  
 **Retry:** `retry_backoff`
 
-### `timeout`
+### `TIMEOUT`
 **Cause:** The operation exceeded the maximum allowed time.  
 **Fix:** Simplify the query/operation. For large datasets, use pagination or async processing.  
 **Retry:** `retry_backoff`
 
-### `service_unavailable`
+### `SERVICE_UNAVAILABLE`
 **Cause:** A required internal service is temporarily unavailable.  
 **Fix:** Retry after a brief delay. Check system status.  
 **Retry:** `retry_backoff`
 
-### `not_implemented`
+### `NOT_IMPLEMENTED`
 **Cause:** The requested feature or endpoint is not yet implemented.  
 **Fix:** Check the documentation for alternative approaches, or wait for the feature release.  
 **Retry:** `no_retry`
@@ -334,17 +337,17 @@ an environment scope (no `X-Environment-Id` header and no hostname mapping).
 
 ## External Service Errors (502)
 
-### `external_service_error`
+### `EXTERNAL_SERVICE_ERROR`
 **Cause:** An external API or service returned an error.  
 **Fix:** Check the external service status. The `details` field may contain the upstream error.  
 **Retry:** `retry_backoff`
 
-### `integration_error`
+### `INTEGRATION_ERROR`
 **Cause:** An integration connector encountered an error.  
 **Fix:** Verify the integration configuration and credentials.  
 **Retry:** `retry_backoff`
 
-### `webhook_delivery_failed`
+### `WEBHOOK_DELIVERY_FAILED`
 **Cause:** A webhook delivery attempt failed (target unreachable or returned error).  
 **Fix:** Verify the webhook URL is accessible. The system will auto-retry per delivery policy.  
 **Retry:** `retry_backoff`
@@ -353,17 +356,17 @@ an environment scope (no `X-Environment-Id` header and no hostname mapping).
 
 ## Batch Operation Errors
 
-### `batch_partial_failure`
+### `BATCH_PARTIAL_FAILURE`
 **Cause:** Some operations in a batch request succeeded while others failed.  
 **Fix:** Check the `details` for individual operation results. Retry only the failed operations.  
 **Retry:** `retry_immediate` (failed operations only)
 
-### `batch_complete_failure`
+### `BATCH_COMPLETE_FAILURE`
 **Cause:** All operations in the batch request failed.  
 **Fix:** Check the `details` for root cause. Fix and retry the entire batch.  
 **Retry:** `retry_backoff`
 
-### `transaction_failed`
+### `TRANSACTION_FAILED`
 **Cause:** A database transaction failed and was rolled back.  
 **Fix:** Check the `details` for the specific failure. Retry the entire transaction.  
 **Retry:** `retry_backoff`
@@ -442,7 +445,9 @@ interface EnhancedApiError {
 ```typescript
 interface FieldError {
   field: string;            // Field path (supports dot notation)
-  code: StandardErrorCode;  // Field-level error code
+  code: string;             // Field-level error code — a SEPARATE vocabulary from
+                            // error.code (`required`, `max_length`, `invalid_email`, …);
+                            // its own catalog is #3977 (ADR-0112 D6)
   message: string;          // Human-readable error for this field
   value?: unknown;          // The invalid value (if safe to include)
   constraint?: unknown;     // The constraint that was violated (e.g., max length)
@@ -502,7 +507,7 @@ async function handleApiCall() {
 
       case 'authentication':
         // Redirect to login
-        if (apiError.code === 'expired_token') {
+        if (apiError.code === 'EXPIRED_TOKEN') {
           await refreshToken();
           return handleApiCall(); // Retry
         }
@@ -534,12 +539,12 @@ async function handleApiCall() {
 
 | Status | Category | Common Codes |
 |:---:|:---|:---|
-| 400 | `validation` | `validation_error`, `invalid_field`, `missing_required_field`, `invalid_query` |
-| 401 | `authentication` | `unauthenticated`, `expired_token`, `invalid_credentials` |
-| 403 | `authorization` | `permission_denied`, `field_not_accessible`, `license_required` |
-| 404 | `not_found` | `record_not_found`, `object_not_found`, `endpoint_not_found` |
-| 409 | `conflict` | `concurrent_modification`, `duplicate_record`, `delete_restricted` |
-| 429 | `rate_limit` | `rate_limit_exceeded`, `quota_exceeded` |
-| 500 | `server` | `internal_error`, `database_error`, `timeout` |
-| 502 | `external` | `external_service_error`, `integration_error` |
-| 503 | `maintenance` | `service_unavailable` |
+| 400 | `validation` | `VALIDATION_ERROR`, `INVALID_FIELD`, `MISSING_REQUIRED_FIELD`, `INVALID_QUERY` |
+| 401 | `authentication` | `UNAUTHENTICATED`, `EXPIRED_TOKEN`, `INVALID_CREDENTIALS` |
+| 403 | `authorization` | `PERMISSION_DENIED`, `FIELD_NOT_ACCESSIBLE`, `LICENSE_REQUIRED` |
+| 404 | `not_found` | `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`, `ENDPOINT_NOT_FOUND` |
+| 409 | `conflict` | `CONCURRENT_MODIFICATION`, `DUPLICATE_RECORD`, `DELETE_RESTRICTED` |
+| 429 | `rate_limit` | `RATE_LIMIT_EXCEEDED`, `QUOTA_EXCEEDED` |
+| 500 | `server` | `INTERNAL_ERROR`, `DATABASE_ERROR`, `TIMEOUT` |
+| 502 | `external` | `EXTERNAL_SERVICE_ERROR`, `INTEGRATION_ERROR` |
+| 503 | `maintenance` | `SERVICE_UNAVAILABLE` |

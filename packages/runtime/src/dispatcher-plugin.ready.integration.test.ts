@@ -81,7 +81,7 @@ describe('GET /ready over a real HTTP server (integration)', () => {
       expect(body.success).toBe(false);
       // [#3842] The status moved to `httpStatus`; `code` is the semantic string,
       // derived from 503 since /ready carries no code of its own.
-      expect(body.error.code).toBe('service_unavailable');
+      expect(body.error.code).toBe('SERVICE_UNAVAILABLE');
       expect(body.error.httpStatus).toBe(503);
       expect(body.error.details.state).toBe('stopping');
     } finally {

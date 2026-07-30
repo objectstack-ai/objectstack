@@ -38,6 +38,8 @@
     "package-api",
     "package-registry",
     "plugin-rest-api",
-    "storage"
+    "storage",
+    "---More---",
+    "error-code-ledger"
   ]
 }

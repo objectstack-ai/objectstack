@@ -50,77 +50,77 @@ export type ErrorCategory = z.infer<typeof ErrorCategory>;
  */
 export const StandardErrorCode = z.enum([
   // Validation Errors (400)
-  'validation_error',           // Generic validation failure
-  'invalid_field',              // Invalid field value
-  'missing_required_field',     // Required field missing
-  'invalid_format',             // Field format invalid (e.g., email, date)
-  'value_too_long',             // Field value exceeds max length
-  'value_too_short',            // Field value below min length
-  'value_out_of_range',         // Numeric value out of range
-  'invalid_reference',          // Invalid foreign key reference
-  'duplicate_value',            // Unique constraint violation
-  'invalid_query',              // Malformed query syntax
-  'invalid_filter',             // Invalid filter expression
-  'invalid_sort',               // Invalid sort specification
-  'max_records_exceeded',       // Query would return too many records
+  'VALIDATION_ERROR',           // Generic validation failure
+  'INVALID_FIELD',              // Invalid field value
+  'MISSING_REQUIRED_FIELD',     // Required field missing
+  'INVALID_FORMAT',             // Field format invalid (e.g., email, date)
+  'VALUE_TOO_LONG',             // Field value exceeds max length
+  'VALUE_TOO_SHORT',            // Field value below min length
+  'VALUE_OUT_OF_RANGE',         // Numeric value out of range
+  'INVALID_REFERENCE',          // Invalid foreign key reference
+  'DUPLICATE_VALUE',            // Unique constraint violation
+  'INVALID_QUERY',              // Malformed query syntax
+  'INVALID_FILTER',             // Invalid filter expression
+  'INVALID_SORT',               // Invalid sort specification
+  'MAX_RECORDS_EXCEEDED',       // Query would return too many records
   
   // Authentication Errors (401)
-  'unauthenticated',            // No valid authentication provided
-  'invalid_credentials',        // Wrong username/password
-  'expired_token',              // Authentication token expired
-  'invalid_token',              // Authentication token invalid
-  'session_expired',            // User session expired
-  'mfa_required',               // Multi-factor authentication required
-  'email_not_verified',         // Email verification required
+  'UNAUTHENTICATED',            // No valid authentication provided
+  'INVALID_CREDENTIALS',        // Wrong username/password
+  'EXPIRED_TOKEN',              // Authentication token expired
+  'INVALID_TOKEN',              // Authentication token invalid
+  'SESSION_EXPIRED',            // User session expired
+  'MFA_REQUIRED',               // Multi-factor authentication required
+  'EMAIL_NOT_VERIFIED',         // Email verification required
   
   // Authorization Errors (403)
-  'permission_denied',          // User lacks required permission
-  'insufficient_privileges',    // Operation requires higher privileges
-  'field_not_accessible',       // Field-level security restriction
-  'record_not_accessible',      // Sharing rule restriction
-  'license_required',           // Feature requires license
-  'ip_restricted',              // IP address not allowed
-  'time_restricted',            // Access outside allowed time window
+  'PERMISSION_DENIED',          // User lacks required permission
+  'INSUFFICIENT_PRIVILEGES',    // Operation requires higher privileges
+  'FIELD_NOT_ACCESSIBLE',       // Field-level security restriction
+  'RECORD_NOT_ACCESSIBLE',      // Sharing rule restriction
+  'LICENSE_REQUIRED',           // Feature requires license
+  'IP_RESTRICTED',              // IP address not allowed
+  'TIME_RESTRICTED',            // Access outside allowed time window
   
   // Not Found Errors (404)
-  'resource_not_found',         // Generic resource not found
-  'object_not_found',           // Object/table not found
-  'record_not_found',           // Record with given ID not found
-  'field_not_found',            // Field not found in object
-  'endpoint_not_found',         // API endpoint not found
+  'RESOURCE_NOT_FOUND',         // Generic resource not found
+  'OBJECT_NOT_FOUND',           // Object/table not found
+  'RECORD_NOT_FOUND',           // Record with given ID not found
+  'FIELD_NOT_FOUND',            // Field not found in object
+  'ENDPOINT_NOT_FOUND',         // API endpoint not found
   
   // Conflict Errors (409)
-  'resource_conflict',          // Generic resource conflict
-  'concurrent_modification',    // Record modified by another user
-  'delete_restricted',          // Cannot delete due to dependencies
-  'duplicate_record',           // Record already exists
-  'lock_conflict',              // Record is locked by another process
+  'RESOURCE_CONFLICT',          // Generic resource conflict
+  'CONCURRENT_MODIFICATION',    // Record modified by another user
+  'DELETE_RESTRICTED',          // Cannot delete due to dependencies
+  'DUPLICATE_RECORD',           // Record already exists
+  'LOCK_CONFLICT',              // Record is locked by another process
   
   // Request Errors (405/428)
-  'method_not_allowed',         // Route exists but the HTTP method is not supported
-  'precondition_required',      // Request is missing a required precondition (e.g. environment scope)
+  'METHOD_NOT_ALLOWED',         // Route exists but the HTTP method is not supported
+  'PRECONDITION_REQUIRED',      // Request is missing a required precondition (e.g. environment scope)
 
   // Rate Limiting (429)
-  'rate_limit_exceeded',        // Too many requests
-  'quota_exceeded',             // API quota exceeded
-  'concurrent_limit_exceeded',  // Too many concurrent requests
+  'RATE_LIMIT_EXCEEDED',        // Too many requests
+  'QUOTA_EXCEEDED',             // API quota exceeded
+  'CONCURRENT_LIMIT_EXCEEDED',  // Too many concurrent requests
 
   // Server Errors (500)
-  'internal_error',             // Generic internal server error
-  'database_error',             // Database operation failed
-  'timeout',                    // Operation timed out
-  'service_unavailable',        // Service temporarily unavailable
-  'not_implemented',            // Feature not yet implemented
+  'INTERNAL_ERROR',             // Generic internal server error
+  'DATABASE_ERROR',             // Database operation failed
+  'TIMEOUT',                    // Operation timed out
+  'SERVICE_UNAVAILABLE',        // Service temporarily unavailable
+  'NOT_IMPLEMENTED',            // Feature not yet implemented
   
   // External Service Errors (502/503)
-  'external_service_error',     // External API call failed
-  'integration_error',          // Integration service error
-  'webhook_delivery_failed',    // Webhook delivery failed
+  'EXTERNAL_SERVICE_ERROR',     // External API call failed
+  'INTEGRATION_ERROR',          // Integration service error
+  'WEBHOOK_DELIVERY_FAILED',    // Webhook delivery failed
   
   // Batch Operation Errors
-  'batch_partial_failure',      // Batch operation partially succeeded
-  'batch_complete_failure',     // Batch operation completely failed
-  'transaction_failed',         // Transaction rolled back
+  'BATCH_PARTIAL_FAILURE',      // Batch operation partially succeeded
+  'BATCH_COMPLETE_FAILURE',     // Batch operation completely failed
+  'TRANSACTION_FAILED',         // Transaction rolled back
 ]);
 
 export type StandardErrorCode = z.infer<typeof StandardErrorCode>;
@@ -160,40 +160,39 @@ export const ErrorHttpStatusMap: Record<string, number> = {
  *
  * A specific code always wins — this is the floor, not the ceiling. `403 +
  * PASSWORD_EXPIRED` stays `PASSWORD_EXPIRED`; only a bare `403` becomes
- * `permission_denied`.
+ * `PERMISSION_DENIED`.
  *
- * Vocabulary note (#3841): the values are `StandardErrorCode`'s lowercase
- * snake_case because that is the only error vocabulary the spec declares and
- * `content/docs/api/error-catalog.mdx` documents. Much of the wire is
- * SCREAMING_SNAKE and #3841 owns reconciling the two; this map is deliberately
- * the ONE place a derived code is spelled, so that decision is a one-file sweep
- * rather than a hunt through every producer.
+ * Vocabulary note (ADR-0112, settles #3841): error codes are SCREAMING_SNAKE —
+ * machine constants, not data values (recorded Prime Directive #3 deviation).
+ * This map was deliberately the ONE place a derived code is spelled, which is
+ * why that decision landed here as a one-file sweep rather than a hunt through
+ * every producer.
  */
 export const HttpStatusErrorCodeMap: Record<number, StandardErrorCode> = {
-  400: 'validation_error',
-  401: 'unauthenticated',
-  403: 'permission_denied',
-  404: 'resource_not_found',
-  405: 'method_not_allowed',
-  409: 'resource_conflict',
-  428: 'precondition_required',
-  429: 'rate_limit_exceeded',
-  500: 'internal_error',
-  501: 'not_implemented',
-  502: 'external_service_error',
-  503: 'service_unavailable',
-  504: 'timeout',
+  400: 'VALIDATION_ERROR',
+  401: 'UNAUTHENTICATED',
+  403: 'PERMISSION_DENIED',
+  404: 'RESOURCE_NOT_FOUND',
+  405: 'METHOD_NOT_ALLOWED',
+  409: 'RESOURCE_CONFLICT',
+  428: 'PRECONDITION_REQUIRED',
+  429: 'RATE_LIMIT_EXCEEDED',
+  500: 'INTERNAL_ERROR',
+  501: 'NOT_IMPLEMENTED',
+  502: 'EXTERNAL_SERVICE_ERROR',
+  503: 'SERVICE_UNAVAILABLE',
+  504: 'TIMEOUT',
 };
 
 /**
  * The {@link StandardErrorCode} for an HTTP status, falling back to the
  * client-error / server-error bucket for a status {@link HttpStatusErrorCodeMap}
- * does not name (e.g. `415` → `validation_error`, `507` → `internal_error`).
+ * does not name (e.g. `415` → `VALIDATION_ERROR`, `507` → `INTERNAL_ERROR`).
  * Total by construction: a producer can always fill a required `code`.
  */
 export function standardErrorCodeForHttpStatus(status: number): StandardErrorCode {
   return HttpStatusErrorCodeMap[status]
-    ?? (status >= 500 ? 'internal_error' : 'validation_error');
+    ?? (status >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR');
 }
 
 /**
@@ -215,7 +214,13 @@ export type RetryStrategy = z.infer<typeof RetryStrategy>;
  */
 export const FieldErrorSchema = lazySchema(() => z.object({
   field: z.string().describe('Field path (supports dot notation)'),
-  code: StandardErrorCode.describe('Error code for this field'),
+  // ⚠️ DELIBERATELY WIDE (ADR-0112 D6, #3977): field-level codes are a separate
+  // vocabulary from top-level `error.code` and were never `StandardErrorCode` in
+  // practice — the validators emit `required` / `max_length` / `invalid_email` /
+  // …, import coercion adds its own, and one route leaks raw Zod issue codes.
+  // Declaring the enum here was a lie the wire never honoured. #3977 owns the
+  // real field-level catalog; when it lands, this tightens to that enum.
+  code: z.string().describe('Error code for this field (field-level vocabulary — see #3977)'),
   message: z.string().describe('Human-readable error message'),
   value: z.unknown().optional().describe('The invalid value that was provided'),
   constraint: z.unknown().optional().describe('The constraint that was violated (e.g., max length)'),
@@ -229,7 +234,7 @@ export type FieldError = z.infer<typeof FieldErrorSchema>;
  * 
  * @example Validation Error
  * {
- *   "code": "validation_error",
+ *   "code": "VALIDATION_ERROR",
  *   "message": "Validation failed for 2 fields",
  *   "category": "validation",
  *   "httpStatus": 400,
@@ -245,7 +250,7 @@ export type FieldError = z.infer<typeof FieldErrorSchema>;
  *       },
  *       {
  *         "field": "age",
- *         "code": "value_out_of_range",
+ *         "code": "max_value",
  *         "message": "Age must be between 0 and 120",
  *         "value": 150,
  *         "constraint": { "min": 0, "max": 120 }
@@ -254,12 +259,12 @@ export type FieldError = z.infer<typeof FieldErrorSchema>;
  *   },
  *   "timestamp": "2026-01-29T12:00:00Z",
  *   "requestId": "req_123456",
- *   "documentation": "https://docs.objectstack.dev/errors/validation_error"
+ *   "documentation": "https://docs.objectstack.dev/errors/VALIDATION_ERROR"
  * }
  * 
  * @example Rate Limit Error
  * {
- *   "code": "rate_limit_exceeded",
+ *   "code": "RATE_LIMIT_EXCEEDED",
  *   "message": "Rate limit exceeded. Try again in 60 seconds.",
  *   "category": "rate_limit",
  *   "httpStatus": 429,
@@ -304,7 +309,7 @@ export type EnhancedApiError = z.infer<typeof EnhancedApiErrorSchema>;
  * {
  *   "success": false,
  *   "error": {
- *     "code": "permission_denied",
+ *     "code": "PERMISSION_DENIED",
  *     "message": "You do not have permission to update this record",
  *     "category": "authorization",
  *     "httpStatus": 403,

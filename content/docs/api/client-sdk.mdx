@@ -511,7 +511,7 @@ All errors follow a standardized format:
 try {
   await client.data.create('todo_task', { subject: '' });
 } catch (error) {
-  console.error(error.code);       // 'validation_error'
+  console.error(error.code);       // 'VALIDATION_ERROR'
   console.error(error.category);   // 'validation'
   console.error(error.httpStatus); // 400
   console.error(error.retryable);  // false
@@ -554,15 +554,15 @@ field-anchored".
 
 | Code | HTTP | Category | Retryable | Description |
 |:-----|:-----|:---------|:----------|:------------|
-| `validation_error` | 400 | validation | No | Input validation failed |
-| `invalid_query` | 400 | validation | No | Malformed query expression |
-| `unauthenticated` | 401 | authentication | No | Authentication required |
-| `permission_denied` | 403 | authorization | No | Insufficient permissions |
-| `resource_not_found` | 404 | not_found | No | Resource does not exist |
-| `rate_limit_exceeded` | 429 | rate_limit | Yes | Too many requests |
-| `internal_error` | 500 | server | Yes | Unexpected server error |
-| `service_unavailable` | 503 | server | Yes | Service temporarily unavailable |
-| `not_implemented` | 501 | server | No | Service not installed (plugin missing) |
+| `VALIDATION_ERROR` | 400 | validation | No | Input validation failed |
+| `INVALID_QUERY` | 400 | validation | No | Malformed query expression |
+| `UNAUTHENTICATED` | 401 | authentication | No | Authentication required |
+| `PERMISSION_DENIED` | 403 | authorization | No | Insufficient permissions |
+| `RESOURCE_NOT_FOUND` | 404 | not_found | No | Resource does not exist |
+| `RATE_LIMIT_EXCEEDED` | 429 | rate_limit | Yes | Too many requests |
+| `INTERNAL_ERROR` | 500 | server | Yes | Unexpected server error |
+| `SERVICE_UNAVAILABLE` | 503 | server | Yes | Service temporarily unavailable |
+| `NOT_IMPLEMENTED` | 501 | server | No | Service not installed (plugin missing) |
 
 ---
 
