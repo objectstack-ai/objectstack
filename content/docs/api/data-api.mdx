@@ -28,6 +28,35 @@ Query records with filtering, sorting, selection, and pagination.
 
 > **Note:** OData-style `$`-prefixed parameters (`$filter`, `$select`, `$orderby`, `$top`, `$skip`, `$expand`, `$count`, `$search`) are also accepted directly on this same endpoint as aliases — they're normalized internally to the parameter names above. There is no separate standalone OData endpoint.
 
+#### Any other parameter is a field filter — and must name a real field
+
+A query parameter the endpoint does not reserve is read as a field-level
+equality filter, so `?status=done` is shorthand for
+`?filter={"status":"done"}`. Because such a parameter *is* a predicate, one
+naming a field the object does not have could only ever match zero records —
+so the endpoint rejects it instead of returning an empty page:
+
+```http
+GET /api/v1/data/showcase_task?pageSize=5
+```
+```json
+{
+  "error": "Unknown field 'pageSize' on object 'showcase_task'. Query parameters that are not reserved are read as field filters, so an unknown name can only match zero records. Did you mean the 'top' query parameter (OData spelling '$top')?",
+  "code": "INVALID_FIELD",
+  "field": "pageSize",
+  "object": "showcase_task"
+}
+```
+
+This is the same `400 INVALID_FIELD` the write path returns for an unknown
+field name, and it applies whether or not an explicit `filter` rode along.
+Page size is `top` / `$top` / `limit` — `pageSize`, `page_size` and `perPage`
+are not accepted spellings.
+
+Reserved names cannot double as implicit filters. An object with a field
+literally called `count`, `cursor`, `distinct`, `object`, `search` or `top`
+filters it through the explicit form (`?filter={"count":3}`).
+
 **Response**:
 ```json
 {

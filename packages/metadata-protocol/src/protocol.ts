@@ -18,7 +18,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
-import { parseFilterAST, isFilterAST, type DroppedFieldsEvent } from '@objectstack/spec/data';
+import { parseFilterAST, isFilterAST, type DroppedFieldsEvent, type QueryAST } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
@@ -710,6 +710,149 @@ function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEve
         for (const f of ev.fields) bucket.fields.add(f);
     }
     return Array.from(byKey.values()).map((b) => ({ object: b.object, fields: Array.from(b.fields), reason: b.reason }));
+}
+
+/**
+ * The canonical `QueryAST` surface (`spec/data/query.zod.ts`), enumerated.
+ *
+ * Typed as `Record<keyof QueryAST, true>` so `tsc` pins it to the spec in BOTH
+ * directions: a key added there is a missing-property error here, a key removed
+ * there is an excess-property error here. That matters because the set below
+ * decides what is a query parameter and what is a field filter — silently
+ * drifting from the AST would resurrect exactly the #4134 failure for whatever
+ * key was added.
+ */
+const QUERY_AST_KEYS: Readonly<Record<keyof QueryAST, true>> = {
+    object: true, fields: true, where: true, search: true, orderBy: true,
+    limit: true, offset: true, top: true, cursor: true, joins: true,
+    aggregations: true, groupBy: true, having: true, windowFunctions: true,
+    distinct: true, expand: true,
+};
+
+/**
+ * [#4134] Every query-parameter name `findData` consumes itself, consulted
+ * AFTER the alias normalization in `findData` has run — so the wire spellings
+ * that get rewritten (`$top`→`top`→`limit`, `select`→`fields`, `sort`→
+ * `orderBy`, `filter`/`filters`/`$filter`→`where`, `populate`/`$expand`→
+ * `expand`, `skip`→`offset`, …) are already gone by this point and
+ * deliberately do NOT appear here. Anything still standing is either a name in
+ * this set or a candidate field filter.
+ *
+ * The structural AST keys (`object`, `joins`, `having`, `windowFunctions`)
+ * matter even though no querystring carries them: `POST /data/:object/query`
+ * hands its body in as `query`, and that body IS a `Partial<QueryAST>`. Without
+ * them, `client.data.query('task', { object: 'task', limit: 5 })` would have
+ * its `object` key read as a filter and match zero rows.
+ *
+ * A name in this set can never be used as an implicit field filter, so an
+ * object with a field genuinely called e.g. `count` or `cursor` must filter it
+ * through the explicit form (`?filter={"count":3}`). That trade-off predates
+ * #4134 for the original members; it is called out here so the next person to
+ * add one knows what they are spending.
+ */
+const RESERVED_LIST_QUERY_PARAMS: ReadonlySet<string> = new Set([
+    ...Object.keys(QUERY_AST_KEYS),
+    // Transport-only extras the normalizer consumes but the AST does not name.
+    'count',        // ?count / $count — response flag, not a projection
+    'searchFields', // ?searchFields / $searchFields — ADR-0061 override
+    // Server-derived, never caller input (stripped then re-set from `request`).
+    'context',
+]);
+
+/**
+ * [#4134] High-frequency wrong guesses → the parameter that actually works.
+ * Keys are normalized (lower-cased, `_`/`-` stripped) so `pageSize`,
+ * `page_size` and `PAGE-SIZE` all land on the same entry.
+ *
+ * This is a HINT table, not an alias table: nothing here is accepted as input.
+ * Adding an entry makes a rejection more helpful; it never makes a request
+ * succeed, so it does not create the second de-facto contract Prime Directive
+ * #12 warns about.
+ */
+const QUERY_PARAM_NEAR_MISS: Readonly<Record<string, string>> = {
+    // page-size dialects (the #4134 repro: `?pageSize=5` → 200 + empty list)
+    pagesize: 'top', persize: 'top', perpage: 'top', pagelimit: 'top',
+    rowsperpage: 'top', pagecount: 'top', size: 'top', take: 'top',
+    first: 'top', max: 'top', maxresults: 'top', maxrecords: 'top',
+    // page-offset dialects
+    page: 'skip', pageno: 'skip', pagenum: 'skip', pagenumber: 'skip',
+    pageindex: 'skip', start: 'skip', startindex: 'skip', startat: 'skip',
+    // sorting
+    sortby: 'sort', sortfield: 'sort', sortorder: 'sort', order: 'sort',
+    ordering: 'sort',
+    // search
+    q: 'search', keyword: 'search', keywords: 'search', term: 'search',
+    searchterm: 'search', querytext: 'search',
+    // filtering
+    filterby: 'filter', criteria: 'filter', conditions: 'filter',
+    // projection / relations
+    columns: 'select', include: 'expand', includes: 'expand', with: 'expand',
+};
+
+/**
+ * The OData spelling of each parameter {@link QUERY_PARAM_NEAR_MISS} points at.
+ * NOT derivable by prefixing `$` — `sort` is `$orderby`, and suggesting a
+ * `$sort` that the unsupported-`$` guard rejects would just hand the caller a
+ * second 400.
+ */
+const ODATA_SPELLING: Readonly<Record<string, string>> = {
+    top: '$top', skip: '$skip', sort: '$orderby', search: '$search',
+    filter: '$filter', select: '$select', expand: '$expand',
+};
+
+/** Fold a parameter name to its near-miss lookup key. */
+function nearMissKey(name: string): string {
+    return name.toLowerCase().replace(/[_-]/g, '');
+}
+
+/** Levenshtein distance, bailed out early once it exceeds `max`. */
+function editDistance(a: string, b: string, max: number): number {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        const row = [i];
+        let best = i;
+        for (let j = 1; j <= b.length; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost);
+            if (row[j] < best) best = row[j];
+        }
+        if (best > max) return max + 1;
+        prev = row;
+    }
+    return prev[b.length];
+}
+
+/**
+ * [#4134] Actionable tail for an unknown list query parameter: the canonical
+ * spelling when the caller used a known dialect (`pageSize` → `$top`), else the
+ * closest real field name when it reads like a typo (`stauts` → `status`).
+ * Returns `''` when nothing is close enough to be worth guessing.
+ */
+function suggestQueryParam(param: string, knownFields: readonly string[]): string {
+    const canonical = QUERY_PARAM_NEAR_MISS[nearMissKey(param)];
+    if (canonical) {
+        const odata = ODATA_SPELLING[canonical];
+        return ` Did you mean the '${canonical}' query parameter`
+            + (odata ? ` (OData spelling '${odata}')` : '')
+            + '?';
+    }
+    const folded = nearMissKey(param);
+    // Only worth guessing for names long enough that a small distance is
+    // meaningful — at 3 chars everything is within 2 edits of everything.
+    if (folded.length >= 4) {
+        const max = folded.length <= 5 ? 1 : 2;
+        let best: string | undefined;
+        let bestDistance = max + 1;
+        for (const field of knownFields) {
+            const d = editDistance(folded, nearMissKey(field), max);
+            if (d < bestDistance) { bestDistance = d; best = field; }
+        }
+        if (best !== undefined && bestDistance <= max) {
+            return ` Did you mean the field '${best}'?`;
+        }
+    }
+    return '';
 }
 
 /**
@@ -2781,6 +2924,57 @@ export class ObjectStackProtocolImplementation implements
         throw err;
     }
 
+    /**
+     * [#4134] Read-path unknown-field gate for the implicit filters `findData`
+     * derives from leftover query parameters.
+     *
+     * Rejects with the SAME envelope the write path produces for the same
+     * mistake — `400 INVALID_FIELD` + `field` + `object` (see `mapDataError` in
+     * `@objectstack/rest`) — so "does this field exist" has one answer on both
+     * sides of the API instead of being enforced on write and silently
+     * zeroed on read.
+     *
+     * Tiering mirrors {@link assertObjectRegistered}, one level down:
+     *
+     * - **Schema present with a field map → authoritative.** An unlisted name
+     *   is a 400. The registry injects the audit/tenant/owner columns
+     *   (`created_at`, `created_by`, `updated_at`, `updated_by`,
+     *   `organization_id`, `owner_id`) into `fields`, so those filter normally;
+     *   `id` is added here because it is the primary key rather than a declared
+     *   field. Dotted paths are judged on their head segment only
+     *   (`owner_id.name`), matching how `engine.find()` validates projections.
+     * - **No registry, or a schema with no field map → skip.** Nothing to check
+     *   against (registry-less Lite/edge hosts, engine doubles, external
+     *   datasources whose columns are not mirrored locally). The
+     *   object-existence gate above already warns once when the registry itself
+     *   is missing, so this stays quiet rather than warning twice per process.
+     */
+    private assertQueryParamsAreFields(object: string, params: readonly string[]): void {
+        const schema: any = this.engine?.registry?.getObject?.(object);
+        const declared = schema?.fields;
+        if (!declared || typeof declared !== 'object') return;
+        const fieldNames = Object.keys(declared);
+        if (fieldNames.length === 0) return;
+        const known = new Set(fieldNames);
+        known.add('id');
+        const unknown = params.filter((p) => !known.has(String(p).split('.')[0]));
+        if (unknown.length === 0) return;
+        const first = unknown[0];
+        const err: any = new Error(
+            `Unknown field '${first}' on object '${object}'`
+            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
+            + '. Query parameters that are not reserved are read as field filters, so an '
+            + 'unknown name can only match zero records.'
+            + suggestQueryParam(first, fieldNames),
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = unknown;
+        err.object = object;
+        throw err;
+    }
+
     async findData(request: { object: string, query?: any, context?: any }) {
         // [#3770] Existence first: an unregistered object is a 404 before any
         // query parameter is even parsed, so an unknown name can never be
@@ -2849,8 +3043,12 @@ export class ObjectStackProtocolImplementation implements
         }
         if (options.skip != null) {
             options.offset = Number(options.skip);
-            delete options.skip;
         }
+        // Deleted unconditionally, unlike `top` (a declared QueryAST key the
+        // engine aliases itself): `skip` is wire-only, so a null/undefined one
+        // left behind would reach the #4134 field gate below and be reported as
+        // an unknown FIELD — a confusing rejection for a real parameter.
+        delete options.skip;
         if (options.limit != null) options.limit = Number(options.limit);
         if (options.offset != null) options.offset = Number(options.offset);
 
@@ -2965,32 +3163,48 @@ export class ObjectStackProtocolImplementation implements
             throw err;
         }
 
+        // [#4134] A leftover key is about to be lowered into a field-equality
+        // predicate (or, when an explicit `where` won, dropped on the floor).
+        // Both readings are only sound if the key names a REAL field: a filter
+        // on a field that does not exist can never match, so `?pageSize=5`
+        // returned 200 + `total: 0` — indistinguishable from "no data". The
+        // write path already rejects the same input loudly (`INVALID_FIELD`);
+        // this is the read half of that one piece of knowledge, and the mirror
+        // of #3948's rule for driver-memory: an unapplied filter must not look
+        // like a satisfied one.
+        //
+        // Validated BEFORE the `!options.where` branch below, so a bad param is
+        // a 400 whether or not the caller also sent an explicit filter — the
+        // failure must not depend on which other params rode along.
+        const leftoverParams = Object.keys(options).filter((k) => !RESERVED_LIST_QUERY_PARAMS.has(k));
+        if (leftoverParams.length > 0) {
+            this.assertQueryParamsAreFields(request.object, leftoverParams);
+        }
+
         // Flat field filters: REST-style query params like ?id=abc&status=open
         // After extracting all known query parameters, any remaining keys are
         // treated as implicit field-level equality filters merged into `where`.
-        const knownParams = new Set([
-            'top', 'limit', 'offset',
-            'orderBy',
-            'fields',
-            'where',
-            'expand',
-            'distinct', 'count',
-            'aggregations', 'groupBy',
-            'search', 'searchFields', 'context', 'cursor',
-        ]);
+        // Every one of them is a verified field name by this point.
+        //
+        // The `!options.where` guard is #4134's deliberate scope edge: when an
+        // explicit filter won, a leftover REAL field name is still dropped
+        // silently (it rides on to `engine.find` as a stray AST key no driver
+        // reads). Same disease, opposite direction — over-returning rather than
+        // zeroing — and fixing it means choosing a semantics (AND-merge vs.
+        // reject the conflict), so it is filed as #4164 rather than smuggled in
+        // here. The UNKNOWN half is already loud: the gate above runs before
+        // this branch, so a bad name 400s either way.
         if (!options.where) {
             const implicitFilters: Record<string, unknown> = {};
-            for (const key of Object.keys(options)) {
-                if (!knownParams.has(key)) {
-                    implicitFilters[key] = options[key];
-                    delete options[key];
-                }
+            for (const key of leftoverParams) {
+                implicitFilters[key] = options[key];
+                delete options[key];
             }
             if (Object.keys(implicitFilters).length > 0) {
                 options.where = implicitFilters;
             }
         }
-        
+
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without
         // this branch a spec-shape aggregate request would silently return

@@ -653,4 +653,212 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             expect(engine.find).toHaveBeenCalledOnce();
         });
     });
+
+    // ═══════════════════════════════════════════════════════════════
+    // #4134 — unknown query params were silently lowered into field filters
+    //
+    // `?pageSize=5` on a 10-row object returned 200 + `total: 0`: the param
+    // fell into the implicit-filter bucket as `where.pageSize = '5'`, a
+    // predicate no row can satisfy. The failure direction is "fewer", not
+    // "wrong", so it is indistinguishable from an empty table — and the write
+    // path rejects the SAME unknown name loudly (`INVALID_FIELD`). Mirror of
+    // #3948's rule for driver-memory: an unapplied filter must not look like a
+    // satisfied one.
+    // ═══════════════════════════════════════════════════════════════
+
+    describe('unknown query params are rejected, not lowered into filters (#4134)', () => {
+        const TASK_FIELDS = {
+            title: { type: 'text' },
+            status: { type: 'text' },
+            due_date: { type: 'date' },
+            owner_id: { type: 'lookup', reference: 'sys_user' },
+            created_at: { type: 'datetime' },
+        };
+
+        function makeProtocol(fields: Record<string, unknown> = TASK_FIELDS) {
+            const engine: any = {
+                find: vi.fn().mockResolvedValue([]),
+                findOne: vi.fn().mockResolvedValue(null),
+                count: vi.fn().mockResolvedValue(0),
+                registry: {
+                    getObject: vi.fn((name: string) => ({ name, fields })),
+                },
+            };
+            return { protocol: new ObjectStackProtocolImplementation(engine), engine };
+        }
+
+        it('rejects a param that names no field with 400 INVALID_FIELD, before the engine', async () => {
+            const { protocol, engine } = makeProtocol();
+            await expect(
+                protocol.findData({ object: 'showcase_task', query: { zzzz: '1' } }),
+            ).rejects.toMatchObject({
+                status: 400,
+                code: 'INVALID_FIELD',
+                field: 'zzzz',
+                object: 'showcase_task',
+            });
+            expect(engine.find).not.toHaveBeenCalled();
+        });
+
+        it('uses the write path\'s wording so one mistake reads the same on both sides', async () => {
+            const { protocol } = makeProtocol();
+            await expect(
+                protocol.findData({ object: 'showcase_task', query: { zzzz: '1' } }),
+            ).rejects.toThrow(/Unknown field 'zzzz' on object 'showcase_task'/);
+        });
+
+        it.each([
+            ['pageSize', 'top'],
+            ['page_size', 'top'],
+            ['perPage', 'top'],
+            ['page', 'skip'],
+            ['sortBy', 'sort'],
+            ['q', 'search'],
+        ])('points %s at the parameter that actually works (%s)', async (bad, canonical) => {
+            const { protocol } = makeProtocol();
+            await expect(
+                protocol.findData({ object: 'showcase_task', query: { [bad]: '5' } }),
+            ).rejects.toThrow(new RegExp(`Did you mean the '${canonical}' query parameter`));
+        });
+
+        it('only ever suggests spellings the endpoint really accepts', async () => {
+            // A hint that hands the caller a second 400 is worse than no hint.
+            // The trap here is `$sort`, which does not exist — sorting's OData
+            // spelling is `$orderby`, so the suggestion cannot be built by
+            // prefixing `$`.
+            const { protocol, engine } = makeProtocol();
+            const suggested = new Set<string>();
+            for (const bad of ['pageSize', 'page', 'sortBy', 'q', 'criteria', 'columns', 'include']) {
+                const err: any = await protocol
+                    .findData({ object: 'showcase_task', query: { [bad]: 'x' } })
+                    .then(() => undefined, (e: any) => e);
+                for (const m of String(err?.message).matchAll(/'(\$?[a-zA-Z]+)'/g)) {
+                    if (m[1] !== bad) suggested.add(m[1]);
+                }
+            }
+            expect(suggested.size).toBeGreaterThan(0);
+            for (const spelling of suggested) {
+                await expect(
+                    protocol.findData({ object: 'showcase_task', query: { [spelling]: spelling === 'top' || spelling === '$top' || spelling === 'skip' || spelling === '$skip' ? 1 : 'title' } }),
+                    `suggested '${spelling}' must be accepted`,
+                ).resolves.toBeDefined();
+            }
+            expect(engine.find).toHaveBeenCalledTimes(suggested.size);
+        });
+
+        it('suggests the closest real field when the param reads like a typo', async () => {
+            const { protocol } = makeProtocol();
+            await expect(
+                protocol.findData({ object: 'showcase_task', query: { stauts: 'done' } }),
+            ).rejects.toThrow(/Did you mean the field 'status'\?/);
+        });
+
+        it('names every offending param, not just the first', async () => {
+            const { protocol } = makeProtocol();
+            await expect(
+                protocol.findData({ object: 'showcase_task', query: { zzzz: '1', yyyy: '2' } }),
+            ).rejects.toMatchObject({ field: 'zzzz', fields: ['zzzz', 'yyyy'] });
+        });
+
+        it('leaves the known-field-plus-explicit-filter case alone (#4164)', async () => {
+            // The scope edge, pinned so a later change to it is deliberate: a
+            // REAL field name alongside an explicit filter is still dropped
+            // silently. #4134 made only the UNKNOWN half loud.
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { filter: { status: 'open' }, owner_id: 'usr_1' },
+            });
+            expect(engine.find.mock.calls[0][1].where).toEqual({ status: 'open' });
+        });
+
+        it('rejects even when an explicit filter rode along — the 400 must not depend on it', async () => {
+            // Without this, `?filter={...}&pageSize=5` takes the `options.where`
+            // short-circuit: the bad param is neither applied nor reported, so
+            // the caller silently gets an unpaginated page.
+            const { protocol, engine } = makeProtocol();
+            await expect(
+                protocol.findData({
+                    object: 'showcase_task',
+                    query: { filter: { status: 'open' }, pageSize: '5' },
+                }),
+            ).rejects.toMatchObject({ code: 'INVALID_FIELD', field: 'pageSize' });
+            expect(engine.find).not.toHaveBeenCalled();
+        });
+
+        it('still lowers a REAL field name into an implicit equality filter', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({ object: 'showcase_task', query: { status: 'done' } });
+            expect(engine.find.mock.calls[0][1].where).toEqual({ status: 'done' });
+        });
+
+        it('allows `id` — the primary key is not a declared field', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({ object: 'showcase_task', query: { id: 'rec_1' } });
+            expect(engine.find.mock.calls[0][1].where).toEqual({ id: 'rec_1' });
+        });
+
+        it('judges a dotted path on its head segment, like engine.find() does for projections', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({ object: 'showcase_task', query: { 'owner_id.name': 'Ada' } });
+            expect(engine.find.mock.calls[0][1].where).toEqual({ 'owner_id.name': 'Ada' });
+        });
+
+        it('never rejects a reserved parameter — every real spelling still works', async () => {
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: {
+                    $top: 5, $skip: 2, $orderby: 'title', $select: 'id,title',
+                    $search: 'x', $count: 'true', $expand: 'owner_id',
+                },
+            });
+            await protocol.findData({
+                object: 'showcase_task',
+                query: { top: 5, skip: 2, sort: '-title', select: 'id,title', populate: 'owner_id', search: 'x' },
+            });
+            expect(engine.find).toHaveBeenCalledTimes(2);
+            for (const call of engine.find.mock.calls) expect(call[1].where).toBeUndefined();
+        });
+
+        it('accepts the structural QueryAST keys the POST /query body carries', async () => {
+            // `client.data.query(object, query)` posts a `Partial<QueryAST>`,
+            // whose documented shape includes `object`. Treated as a field
+            // filter it would become `where.object` and match zero rows.
+            const { protocol, engine } = makeProtocol();
+            await protocol.findData({
+                object: 'showcase_task',
+                query: {
+                    object: 'showcase_task',
+                    limit: 5,
+                    joins: [],
+                    having: {},
+                    windowFunctions: [],
+                    distinct: true,
+                    cursor: { id: 'rec_1' },
+                },
+            });
+            expect(engine.find).toHaveBeenCalledOnce();
+            expect(engine.find.mock.calls[0][1].where).toBeUndefined();
+        });
+
+        it('stands down when the schema carries no field map — nothing to check against', async () => {
+            // External datasources / engine doubles whose columns are not
+            // mirrored locally. Same tiering as the #3770 object gate one level
+            // up: no source of truth ⇒ no verdict, so the old behavior stands.
+            const { protocol, engine } = makeProtocol({});
+            await protocol.findData({ object: 'external_thing', query: { zzzz: '1' } });
+            expect(engine.find.mock.calls[0][1].where).toEqual({ zzzz: '1' });
+        });
+
+        it('stands down when the engine exposes no registry at all', async () => {
+            const engine: any = {
+                find: vi.fn().mockResolvedValue([]),
+                count: vi.fn().mockResolvedValue(0),
+            };
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            await protocol.findData({ object: 'showcase_task', query: { zzzz: '1' } });
+            expect(engine.find.mock.calls[0][1].where).toEqual({ zzzz: '1' });
+        });
+    });
 });

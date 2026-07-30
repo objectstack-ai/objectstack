@@ -2340,6 +2340,43 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.field).toBe('label');
   });
 
+  // #4134: the READ half of the same knowledge. The protocol's list normalizer
+  // throws a structured INVALID_FIELD rather than letting `?pageSize=5` become
+  // a `where.pageSize` predicate that can only return 200 + an empty list.
+  // The envelope must match the driver-string branch above field-for-field —
+  // one condition, one wire shape, whichever layer noticed it.
+  it('maps a structured read-path INVALID_FIELD → 400 with the field (same shape as the write path)', () => {
+    const r = mapDataError(
+      Object.assign(new Error("Unknown field 'pageSize' on object 'showcase_task'. Did you mean the 'top' query parameter?"), {
+        code: 'INVALID_FIELD',
+        status: 400,
+        field: 'pageSize',
+        fields: ['pageSize'],
+        object: 'showcase_task',
+      }),
+      'showcase_task',
+    );
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('INVALID_FIELD');
+    expect(r.body.field).toBe('pageSize');
+    expect(r.body.object).toBe('showcase_task');
+    expect(String(r.body.error)).toContain("Unknown field 'pageSize'");
+  });
+
+  it('does not let the generic 4xx passthrough swallow INVALID_FIELD\'s `field`', () => {
+    // The passthrough branch keeps `code` but drops every structured field, so
+    // the dedicated branch has to win the ordering.
+    const r = mapDataError(
+      Object.assign(new Error("Unknown field 'zzzz' on object 'widget'"), {
+        code: 'INVALID_FIELD',
+        status: 400,
+        field: 'zzzz',
+      }),
+      'widget',
+    );
+    expect(r.body.field).toBe('zzzz');
+  });
+
   it('maps SQLite NOT NULL constraint → 400 VALIDATION_FAILED with required field', () => {
     const r = mapDataError(
       sqliteError(

@@ -345,6 +345,25 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             },
         };
     }
+    // [#4134] Unknown field named by a READ — the protocol's list normalizer
+    // refusing to lower a query parameter that matches no field into an
+    // implicit filter that could only ever match zero rows. Emitted in the SAME
+    // envelope as the driver-string branch below (which catches the write-path
+    // form of the identical mistake), so one condition has one wire shape no
+    // matter which layer noticed it. Must precede the generic 4xx passthrough,
+    // which would ship the message but drop `field`.
+    if (error?.code === 'INVALID_FIELD') {
+        const name = error?.object ?? object;
+        return {
+            status: 400,
+            body: {
+                error: String(error?.message ?? 'Request references a field that does not exist'),
+                code: 'INVALID_FIELD',
+                ...(typeof error?.field === 'string' && error.field ? { field: error.field } : {}),
+                ...(name ? { object: name } : {}),
+            },
+        };
+    }
     // Generic passthrough for domain errors that already carry an explicit
     // HTTP status (e.g. plugin-sharing's record-scope denial: status 403 +
     // code FORBIDDEN) — mirrors sendError's `.status` handling, which the
@@ -588,6 +607,17 @@ function sendError(res: any, error: any, object?: string): void {
  */
 function isExpectedDataStatus(status: number): boolean {
     return status === 403 || status === 404 || status === 409 || status === 502 || status === 503;
+}
+
+/**
+ * Malformed-query rejections from the list normalizer (`findData`). They are
+ * 400s the CALLER caused by naming a parameter the API does not have
+ * (`UNSUPPORTED_QUERY_PARAM`, #2926 ⑩) or a field the object does not have
+ * (`INVALID_FIELD`, #4134) — a client mistake the response already explains,
+ * not a server fault worth an "[REST] Unhandled error" line per request.
+ */
+function isExpectedQueryRejection(body: Record<string, unknown> | undefined): boolean {
+    return body?.code === 'UNSUPPORTED_QUERY_PARAM' || body?.code === 'INVALID_FIELD';
 }
 
 /**
@@ -3867,7 +3897,7 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
-                        if (isExpectedDataStatus(mapped.status) || mapped.body?.code === 'UNSUPPORTED_QUERY_PARAM') {
+                        if (isExpectedDataStatus(mapped.status) || isExpectedQueryRejection(mapped.body)) {
                             res.status(mapped.status).json(mapped.body);
                         } else {
                             logError("[REST] Unhandled error:", error);
@@ -3977,7 +4007,9 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
-                        if (!isExpectedDataStatus(mapped.status)) logError("[REST] Unhandled error:", error);
+                        if (!isExpectedDataStatus(mapped.status) && !isExpectedQueryRejection(mapped.body)) {
+                            logError("[REST] Unhandled error:", error);
+                        }
                         res.status(mapped.status).json(mapped.body);
                     }
                 },
