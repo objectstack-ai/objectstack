@@ -336,9 +336,15 @@ resolvers; `isProfile` → `isDefault`, ADR-0090 D2).
 Migration is by construction behavior-preserving: any key now rejected was
 previously stripped, so it never had a runtime effect — remove it or rename it
 to the canonical key the error suggests; nothing about a working app changes.
-One gap the gate itself caught: `PermissionSetSchema` gains the previously
-unrepresentable-but-consumed **`description`** key (persisted to
-`sys_permission_set.description`, shown in Setup).
+
+The gate paid for itself immediately by exposing keys the platform *writes*
+but the spec could not express, so `PermissionSetSchema` gains three: the
+**`description`** shown in Setup (persisted to
+`sys_permission_set.description`), the author-facing **`protection`** block,
+and the ADR-0010 **runtime protection envelope** (`_lock`, `_packageId`,
+`_provenance`, …) that every sibling metadata type already carried — without
+it, a package-owned permission set could not round-trip through an
+environment overlay.
 
 ### `agent.tools[]` is removed — capability comes from skills (ADR-0109, #3820)
 

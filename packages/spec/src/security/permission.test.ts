@@ -596,6 +596,24 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       expect(message).toContain('`isDefault`');
     });
 
+    it('round-trips the ADR-0010 runtime protection envelope', () => {
+      // `MetadataPlugin`'s artifact loader calls `applyProtection` on EVERY
+      // metadata type, and `getMetaItemLayered` → `saveMetaItem` round-trips a
+      // body carrying the stamped envelope. Until #4001 the schema could not
+      // represent these keys, so they were stripped at every parse.
+      const parsed = PermissionSetSchema.parse({
+        name: 'showcase_contributor',
+        objects: {},
+        _packageId: 'com.showcase',
+        _packageVersion: '1.0.0',
+        _provenance: 'package',
+        _lock: 'full',
+      });
+      expect(parsed._packageId).toBe('com.showcase');
+      expect(parsed._provenance).toBe('package');
+      expect(parsed._lock).toBe('full');
+    });
+
     it('points wrong-layer keys (profiles/roles/users) at the binding mechanism', () => {
       for (const key of ['profiles', 'roles', 'users']) {
         const message = unknownKeyIssue(PermissionSetSchema, {
@@ -612,6 +630,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
         objects: { task: { allowRead: true } }, fields: { 'task.secret': { readable: false } },
         systemPermissions: ['manage_users'], tabPermissions: { app_crm: 'visible' },
         rowLevelSecurity: [], adminScope: { businessUnit: 'east' },
+        protection: { lock: 'none' },
       };
       for (const [key, value] of Object.entries(probes)) {
         const result = PermissionSetSchema.safeParse({ name: 'p', objects: {}, [key]: value });

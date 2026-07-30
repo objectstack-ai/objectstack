@@ -67,14 +67,42 @@ the first application of this gate (below) caught a real spec gap.
 | `FlowSchema`, `FlowNodeSchema`, `FlowEdgeSchema`, `FlowVariableSchema` | `automation/flow.zod.ts` | Most AI-authored surface; cloud#688 / #2419 class. Node `config` stays **open** (executor `configSchema` owns it, #4027/#4040) |
 | `ActionParamSchema` re-homed onto the shared factory | `ui/action.zod.ts` | #3746 template, byte-identical messages |
 
-**Findings log** (what the gate caught the day it was turned on):
-`PermissionSetSchema` could not represent `description` — yet the built-in
-default sets author it and `plugin-security`'s Setup projection reads it
-(`permission-set-projection.ts`). It had been silently stripped at every parse
-(the ADR-0078 §3 inverse-drift class). Fixed contract-first: `description` is
-now a declared key. This is the empirical argument for the ratchet: the
-inference "no metadata in the repo carries unknown keys" was **false**, and
-only the strict gate could prove it.
+**Findings log** — three real defects the gate caught in its first two runs.
+All three had been invisible: each key was written by real code, silently
+dropped at parse, and nothing failed.
+
+1. **`PermissionSetSchema` could not represent `description`** — yet the
+   built-in default sets author it and `plugin-security`'s Setup projection
+   reads it (`permission-set-projection.ts`). Fixed contract-first: it is now
+   a declared key.
+2. **`PermissionSetSchema` could not represent the ADR-0010 protection
+   envelope** — `MetadataPlugin`'s artifact loader calls `applyProtection` on
+   **every** metadata type, and `getMetaItemLayered` → `saveMetaItem`
+   round-trips a body carrying the stamped `_packageId` / `_provenance`. Every
+   sibling registered type (object / view / app / dashboard / report /
+   dataset / flow / agent / tool / skill / email_template) spreads
+   `MetadataProtectionFields`; permission was the outlier, so the envelope was
+   stripped on every parse. Now declared, with the author-facing `protection`
+   block alongside it (translated generically by `applyProtection`).
+   Caught by the dogfood gate as a hard 422 on the ADR-0094 overlay path.
+3. **A dogfood fixture flow carried `sharingModel`** — an object-level OWD key
+   copy-pasted onto `flowTouch` in `flow-touch-fixture.ts`, complete with an
+   ADR-0090 "grandfather stamp" comment describing a gate that does not exist
+   for flows. Exactly the #4001 failure mode in the wild: authored in good
+   faith, silently discarded, believed to be in effect. Removed (the identical
+   stamp on the fixture's *object* is real and stays).
+
+This is the empirical argument for the ratchet: the inference "no metadata in
+the repo carries unknown keys" was **false three times over**, and only the
+strict gate could prove it. Note the asymmetry in the two schema gaps — both
+were *inverse* drift (runtime writes a key the spec cannot express), which the
+liveness ledger's per-property direction cannot see.
+
+**Known sibling gap (follow-up, not this step):** `identity/position.zod.ts`
+— the other registered security type — also omits `MetadataProtectionFields`
+while `applyProtection` stamps it. Harmless today because the schema is not
+strict (the keys are silently stripped, as permission's were), but it must be
+declared before `position` joins the ratchet.
 
 ## File-level triage — the five authorable directories
 

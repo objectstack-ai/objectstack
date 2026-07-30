@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { RowLevelSecurityPolicySchema } from './rls.zod';
 import { ApiOperationSchema } from '../data/object.zod';
+import { ProtectionSchema } from '../shared/protection.zod';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /**
  * Entity (Object) Level Permissions
@@ -333,6 +335,10 @@ export const FieldPermissionSchema = lazySchema(() => z.object({
 const PERMISSION_SET_KEYS = [
   'name', 'label', 'description', 'packageId', 'managedBy', 'isDefault', 'objects',
   'fields', 'systemPermissions', 'tabPermissions', 'rowLevelSecurity', 'adminScope',
+  'protection',
+  // ADR-0010 runtime protection envelope (MetadataProtectionFields spread).
+  '_lock', '_lockReason', '_lockSource', '_provenance', '_packageId',
+  '_packageVersion', '_lockDocsUrl',
 ] as const;
 
 /** Semantic near-misses borrowed from neighbouring schemas / products. */
@@ -513,6 +519,29 @@ export const PermissionSetSchema = lazySchema(() => z.object({
    */
   adminScope: AdminScopeSchema.optional()
     .describe('[ADR-0090 D12] Scoped delegated-administration grant (BU subtree + assignable-set allowlist)'),
+
+  /**
+   * ADR-0010 §3.7 — Package-level protection envelope. Package authors declare
+   * lock policy here; the loader translates it into the private `_lock`
+   * envelope at registration time and strips this block before persistence.
+   * See `shared/protection.zod.ts`.
+   */
+  protection: ProtectionSchema.optional().describe(
+    'Package author protection block — lock policy for this permission set.',
+  ),
+
+  // ADR-0010 — runtime protection envelope (internal — set by loader).
+  //
+  // Declared in #4001 alongside every sibling registered metadata type
+  // (object / view / app / dashboard / report / dataset / flow / agent / tool /
+  // skill / email_template). `MetadataPlugin`'s artifact loader calls
+  // `applyProtection` on EVERY type, so a permission set has always carried
+  // these keys at runtime — and `getMetaItemLayered` → `saveMetaItem`
+  // round-trips a body that includes them. The schema simply could not
+  // represent them, so they were silently stripped at every parse (the same
+  // ADR-0078 §3 inverse-drift class as `description`); the `.strict()` gate
+  // turned that into a visible 422 and surfaced the gap.
+  ...MetadataProtectionFields,
 }, { error: permissionSetUnknownKeyError }).strict());
 
 export type PermissionSet = z.infer<typeof PermissionSetSchema>;

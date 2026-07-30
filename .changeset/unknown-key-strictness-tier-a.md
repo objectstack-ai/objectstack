@@ -27,10 +27,15 @@ authorable surfaces, per the ADR-0054 ratchet and the
   #3746 hand-rolled map, generalized): every rejection names the offending
   key(s) and, where recognisable, the canonical spelling or a retired-key
   tombstone. `ui/action.zod.ts` re-homes onto it with byte-identical messages.
-- **`PermissionSetSchema.description` is now a declared key.** The strict
-  gate's first catch: the built-in default sets always authored it and the
-  Setup projection reads it, but the schema could not represent it, so it was
-  silently stripped at every parse (ADR-0078 §3 inverse drift).
+- **`PermissionSetSchema` gains `description`, `protection` and the ADR-0010
+  runtime protection envelope (`_lock`, `_packageId`, `_provenance`, …).** The
+  strict gate's own catches: all of these are written by real code — the
+  built-in default sets author `description` and the Setup projection reads
+  it; `applyProtection` stamps the envelope on every metadata type and
+  `getMetaItemLayered` → `saveMetaItem` round-trips it — but the schema could
+  not represent them, so they were silently stripped at every parse (ADR-0078
+  §3 inverse drift). Every sibling registered metadata type already spread
+  `MetadataProtectionFields`; permission was the outlier.
 
 **Migration.** Any key these schemas now reject was previously stripped and
 therefore had **no runtime effect** — removing or renaming it never changes
