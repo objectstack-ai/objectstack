@@ -337,13 +337,15 @@ Three properties, same syntactic shape (an optional list or predicate that
 | Property | Empty means |
 |---|---|
 | `object.apiMethods` | `undefined` = unrestricted, **`[]` = deny-all** |
-| `plugin-runtime.allowedSources` | was *"empty = all allowed"* — corrected |
+| `sys_user_permission_set.organization_id` | NULL = the grant applies in **every** org — and is what derives `platform_admin` |
+| `plugin-runtime.allowedSources` | was *"empty = all allowed"* — schema since removed (#3950) |
 | sharing `condition` | nothing is shared (#3929) |
 
 Nothing marked which was which. A maintainer knows by memory; a model authoring
 metadata cannot, and guessing wrong is silent and permissive. So the gate scans
-the schema surface for statements declaring an empty state to be permissive, and
-requires each to be classified in `../scripts/liveness/empty-state-registry.mts`:
+the authorable surface for statements declaring an empty state to be permissive,
+and requires each to be classified in
+`../scripts/liveness/empty-state-registry.mts`:
 
 | `semantics` | Meaning |
 |---|---|
@@ -372,6 +374,41 @@ this README is blunt about where a guessy check ends up: a permanently-noisy
 check is a check nobody reads. A statement that resolves to no property is
 narrative — a file header explaining a past bug — and is reported as a
 non-failing note.
+
+### What it scans, and why it is not just `packages/spec`
+
+Two surfaces:
+
+- `packages/spec/src/**/*.zod.ts` — the schema surface.
+- `**/*.object.ts` anywhere under `packages/` — platform-object definitions, in
+  plugins, `platform-objects`, `metadata-core`, and the `create-objectstack`
+  templates (a starter file is the highest-leverage thing a model copies from).
+
+**The second one is the point.** The sentence that shipped #3896 — *"leave empty
+to share every record"* — was the `description` of
+`sys_sharing_rule.criteria_json`, which lives in `plugin-sharing`. A gate scoped
+to `packages/spec` could not see the crime scene. Extending the scan immediately
+surfaced one unclassified access-control default-open that no sweep of the schema
+surface would ever have reached (`sys_user_permission_set.organization_id`).
+
+Two things the two surfaces do NOT share, both learned by getting them wrong:
+
+- **The property-search window.** A `.zod.ts` statement sits on or beside its
+  property; a platform-object field is a nested call whose `description:` can be
+  15+ lines below the name. The window is therefore per-surface — widening it
+  globally would let `.zod.ts` narrative be mis-attributed to a distant property,
+  turning a correct note into a wrong failure.
+- **How the owning property is found.** Not by a list of key names. Skipping
+  `description:` is not enough — the next key up from it is `required:`, equally
+  not the field. What separates a field from its own config is *nesting*, so the
+  resolver takes the nearest key at a **shallower indent**.
+
+Finally, a match whose permissive claim is **negated or explicitly disowned** is
+dropped, in both directions: `[]` = `deny-all` is the opposite of the hazard, and
+so is #3929's own comment saying *Deliberately NOT "leave empty to share
+everything"*. The escape is narrow on purpose — the negator has to be attached to
+the phrase, not merely nearby, because a false negative here is a missed
+over-share.
 
 ## Files & usage
 
