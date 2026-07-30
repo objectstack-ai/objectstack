@@ -636,6 +636,7 @@
     "sequenceWidth (function)",
     "stripLegacyApiMethods (function)",
     "suggestFieldType (function)",
+    "utcInstantMs (function)",
     "valueSchemaFor (function)"
   ],
   "./system": [

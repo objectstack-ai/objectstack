@@ -122,6 +122,36 @@
  * sets, cell for cell, as the canonical sweep. Any cell that differs means
  * that backend's repair path has drifted from the consensus — the signal
  * #3773 / #3994 / #4047 all lacked.
+ *
+ * ## What the axis means on a TYPE-BLIND backend
+ *
+ * `formula`'s write-side `check` and the analytics preview evaluator have no
+ * storage to inject into — but they get the same cross-type pairing handed to
+ * them, and from real callers rather than from a fixture:
+ *
+ * - the RLS `check` post-image is the caller's RAW write payload (built in
+ *   `plugin-security` before any driver `formatInput` runs), so an SDK write
+ *   of `new Date()` arrives as a `Date` against wire-text comparands — and the
+ *   mirror pairing arrives too, since a CEL `today()` lowers to a `Date`;
+ *   - a preview row fetched from a mongo-backed dataset arrives as a BSON
+ *   `Date` (D-E2), against the same wire-text comparands.
+ *
+ * So those consumers run the shared cases a second time over a `Date`-valued
+ * `at`, seeded by the same `writerForm` tag, and must reach the same row ids.
+ * Both diverged on 10 of the 16 cases when the axis was first pointed at them
+ * (#4191): JS relational operators coerce a `Date`/string pair to
+ * `epoch`/`NaN`, so `formula` denied writes fail-closed, while the preview —
+ * which falls back to `String(value)` — both dropped and ADMITTED rows, and a
+ * drafted chart's numbers changed at publish. `utcInstantMs`
+ * (`spec/data/calendar-day.ts`) is the shared primitive that fixed both, the
+ * same single-definition discipline D-D2 applied to `nextUtcCalendarDay`.
+ *
+ * The `date` column and the whole `Field.time` table stay out of that second
+ * sweep, by the scope rule this file already applies to `$gt`-on-`datetime`: a
+ * wall clock denotes no instant, so a type-blind surface must leave those
+ * operands exactly as it found them rather than invent a calendar day for
+ * them, and what a native `date` write denotes belongs with the backends that
+ * own a `date` storage form.
  */
 
 import type { FilterCondition } from './filter.zod';
