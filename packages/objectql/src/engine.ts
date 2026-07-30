@@ -2262,6 +2262,36 @@ export class ObjectQL implements IDataEngine {
     this.fileReferencesMigrationVerified = null;
   }
 
+  /**
+   * Did this process CREATE the datastore it is talking to, from empty?
+   *
+   * True only when every driver that can account for its schema sync created
+   * tables and found none already there. That conjunction is the whole point:
+   * one pre-existing table anywhere means something ran here before us, so
+   * this store's history is not ours to vouch for. A driver that cannot
+   * report (`getSchemaSyncStats` absent, deferred DDL, sync skipped) makes the
+   * answer no rather than maybe — the consumers of this fact grant
+   * permissions, so "cannot say" must read as "no".
+   *
+   * The one caller is the fresh-datastore attestation (#3438, ADR-0104's
+   * 2026-07-30 addendum), which records that a store born empty needs no data
+   * migration. Ask it only during boot: once the process starts serving, the
+   * counts describe a moment that has passed.
+   */
+  wasDatastoreCreatedFromEmpty(): boolean {
+    let created = 0;
+    let existing = 0;
+    let reporting = 0;
+    for (const driver of this.drivers.values()) {
+      const stats = (driver as any).getSchemaSyncStats?.();
+      if (!stats) continue;
+      reporting += 1;
+      created += Number(stats.created) || 0;
+      existing += Number(stats.existing) || 0;
+    }
+    return reporting > 0 && existing === 0 && created > 0;
+  }
+
   async destroy() {
     this.logger.info('Destroying ObjectQL engine', { driverCount: this.drivers.size });
     

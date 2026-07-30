@@ -218,6 +218,28 @@ export interface IDataDriver {
    */
   registerExternalObject?(schema: unknown): void | Promise<void>;
 
+  /**
+   * What this driver's schema synchronisation has DONE since `connect()`:
+   * how many tables it created, and how many it found already present.
+   *
+   * The pair answers a question no other surface can: **was this datastore
+   * empty when the process reached it?** `existing === 0 && created > 0` means
+   * every table here was made by this boot — nothing preceded it, so no row
+   * written by an earlier version can exist. That is an observation of
+   * creating a store, not an inference from finding one that looks empty, and
+   * it is what lets a fresh deployment attest data migrations it can never
+   * need (ADR-0104's 2026-07-30 addendum, #3438).
+   *
+   * Counts tables the driver actually inspected: deferred DDL (`os migrate
+   * plan`) and skipped sync leave both at zero, which reads as "cannot say"
+   * and keeps the conservative posture. A table that existed and was rebuilt
+   * counts as `existing` — it was here before us.
+   *
+   * Optional and purely observational; drivers that omit it simply cannot
+   * vouch for a store's newness.
+   */
+  getSchemaSyncStats?(): { created: number; existing: number };
+
   /** Drop the underlying table or collection (destructive) */
   dropTable(object: string, options?: DriverOptions): Promise<void>;
 

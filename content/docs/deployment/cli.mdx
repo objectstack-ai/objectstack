@@ -675,6 +675,25 @@ delete check re-reads the flag fresh, so a later failing run stops collection
 without a restart.
 </Callout>
 
+#### A database created by this version needs no migration
+
+A deployment whose database the platform **creates from empty** records these
+flags at that moment, so it is enforcing from its first boot and never enters
+the warn regime at all. Nothing to run: the fact a migration would establish —
+no legacy value is stored here — is already settled by the store having no
+history.
+
+The platform attests this only for a store it watched itself create: every
+table made by that first boot, none found already present. A database that
+existed before — an upgrade, a restore, a store shared with anything else —
+attests nothing and produces its evidence by running the command, because
+"found empty" and "created empty" are not the same claim.
+
+Importing legacy values into such a deployment is rejected at the write path
+rather than silently accepted. That is the intended outcome; if you must admit
+them temporarily, `OS_ALLOW_LAX_MEDIA_VALUES=1` re-opens leniency, and
+re-running the migration re-establishes the flag from the data itself.
+
 ### Scaffolding
 
 | Command | Alias | Description |

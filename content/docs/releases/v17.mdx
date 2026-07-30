@@ -910,6 +910,13 @@ records** — never the platform version — is what authorises irreversible
 behaviour, and media value shapes enforce only once *this* deployment has
 verified its own migration.
 
+**A database created by 17 attests both flags at creation** (#3438), so a new
+deployment enforces from its first boot instead of waiting for someone to run a
+migration that, for an empty store, does nothing. The platform attests only a
+store it watched itself create — every table made by that boot, none found
+already there; an upgraded or restored database attests nothing and produces its
+evidence by running the command.
+
 **Released-file collection is live behind that same flag** (#3459). On a
 verified deployment, a field file whose one owning record lets go — the field
 cleared, or the record deleted — is tombstoned into the declared 30-day grace

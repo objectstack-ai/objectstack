@@ -201,6 +201,10 @@ export class InMemoryDriver implements IDataDriver {
    * The "Database": A map of TableName -> Array of Records
    */
   private db: Record<string, any[]> = {};
+  /** Tables this driver created since connect — see {@link getSchemaSyncStats}. */
+  private tablesCreatedHere: Set<string> = new Set();
+  /** Tables that were already populated when this driver first synced them. */
+  private tablesFoundExisting: Set<string> = new Set();
 
   // ===================================
   // Lifecycle
@@ -1149,7 +1153,14 @@ export class InMemoryDriver implements IDataDriver {
   async syncSchema(object: string, schema: any, options?: DriverOptions) {
     if (!this.db[object]) {
       this.db[object] = [];
+      this.tablesCreatedHere.add(object);
       this.logger.info('Created in-memory table', { object });
+    } else if (!this.tablesCreatedHere.has(object)) {
+      // Present without us having made it: a persistence adapter restored it,
+      // or fixtures seeded it before any schema was declared. Either way the
+      // store did not start empty here. A re-sync of a table we created this
+      // boot is not that, and is ignored. See {@link getSchemaSyncStats}.
+      this.tablesFoundExisting.add(object);
     }
     // Learn the object's temporal fields, then converge the rows ALREADY in the
     // table (#4047). Both halves matter: the map is what the write and filter
@@ -1175,6 +1186,17 @@ export class InMemoryDriver implements IDataDriver {
       delete this.db[object];
       this.logger.info('Dropped in-memory table', { object, recordCount });
     }
+  }
+
+  /**
+   * Tables created vs found since connect — the `IDataDriver.getSchemaSyncStats`
+   * contract. An in-memory store is normally born empty on every boot, so
+   * `existing === 0 && created > 0` is the common case here; a store a
+   * persistence adapter restored reports `existing > 0` and vouches for
+   * nothing (#3438 / ADR-0104).
+   */
+  getSchemaSyncStats(): { created: number; existing: number } {
+    return { created: this.tablesCreatedHere.size, existing: this.tablesFoundExisting.size };
   }
 
   // ===================================
