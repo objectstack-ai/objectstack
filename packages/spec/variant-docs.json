@@ -1,0 +1,144 @@
+{
+  "$comment": [
+    "Discriminated-union variant → hand-written doc ledger. See scripts/check-variant-docs.mts.",
+    "",
+    "`key` is the union's identity: '<discriminator>:<variants sorted, pipe-joined>'. It is",
+    "deliberately NOT a source path — a union is reachable by several paths and the walk order",
+    "decides which one you see, so a path would churn. Keying on the variant set instead means",
+    "adding or removing a variant CHANGES THE KEY, which fails the ratchet and forces the author",
+    "back through this file — and therefore back to the doc. That is the whole point.",
+    "",
+    "Each entry either binds `docs` (governed: every variant must appear in at least one of them)",
+    "or declares `exempt` with a reason. Two exemption classes are in use:",
+    "  generated-reference-only — the type is documented solely under content/docs/references/,",
+    "      which build-docs.ts generates FROM these schemas. Generated docs cannot drift.",
+    "  not-authorable — wire protocol, engine RPC, or a runtime-derived discriminator. Nobody",
+    "      hand-writes the variant, so no hand-written doc owes it a mention."
+  ],
+  "entries": [
+    {
+      "key": "type:action|component|dashboard|group|object|page|report|separator|url",
+      "label": "app navigation item",
+      "docs": ["content/docs/ui/apps.mdx"],
+      "note": "The gate's founding case: apps.mdx claimed eight types and omitted `separator` (#4165)."
+    },
+    {
+      "key": "provider:api|object|schema|value",
+      "label": "view data provider",
+      "docs": [
+        "content/docs/ui/views.mdx",
+        "content/docs/ui/forms.mdx",
+        "content/docs/data-modeling/fields.mdx"
+      ]
+    },
+    {
+      "key": "type:conditional|cross_field|format|json_schema|script|state_machine",
+      "label": "validation rule",
+      "docs": [
+        "content/docs/data-modeling/validation-rules.mdx",
+        "content/docs/data-modeling/validation.mdx"
+      ]
+    },
+    {
+      "key": "language:expression|js",
+      "label": "hook body language",
+      "docs": ["content/docs/automation/hook-bodies.mdx"]
+    },
+    {
+      "key": "kind:file|http|object",
+      "label": "knowledge source kind",
+      "docs": ["content/docs/protocol/knowledge.mdx"]
+    },
+
+    {
+      "key": "type:inline|npm|remote",
+      "label": "widget implementation",
+      "exempt": "generated-reference-only",
+      "reason": "Documented at content/docs/references/ui/widget.mdx, generated from WidgetManifestSchema."
+    },
+    {
+      "key": "type:cron|interval|once",
+      "label": "job schedule",
+      "exempt": "generated-reference-only",
+      "reason": "Documented at content/docs/references/system/job.mdx."
+    },
+    {
+      "key": "type:api-key|basic|bearer|none|oauth2",
+      "label": "connector authentication",
+      "exempt": "generated-reference-only",
+      "reason": "Documented at content/docs/references/integration/connector-auth.mdx."
+    },
+    {
+      "key": "type:api-key|basic|bearer|none",
+      "label": "connector auth (environment-artifact projection)",
+      "exempt": "generated-reference-only",
+      "reason": "Narrower projection of the connector-auth union carried in the deploy artifact; same generated reference."
+    },
+    {
+      "key": "strategy:isolated_db|isolated_schema|shared_schema",
+      "label": "tenant isolation strategy",
+      "exempt": "generated-reference-only",
+      "reason": "Documented at content/docs/references/system/tenant.mdx. Operator-set, not tenant-authored."
+    },
+    {
+      "key": "type:cast|constant|javascript|lookup|map",
+      "label": "sync mapping transform",
+      "exempt": "generated-reference-only",
+      "reason": "Generated reference only; no hand-written page covers the sync transform set yet."
+    },
+    {
+      "key": "kind:action|http|navigate",
+      "label": "settings-manifest handler",
+      "exempt": "generated-reference-only",
+      "reason": "Generated reference only; consumed by Setup/Studio, not tenant-authored metadata."
+    },
+    {
+      "key": "viewKind:form|list",
+      "label": "view item kind",
+      "exempt": "not-authorable",
+      "reason": "Loader-derived. Authors write the `list` / `listViews` / `formViews` containers; the loader expands them and stamps `viewKind`. No author ever types it."
+    },
+    {
+      "key": "type:ack|cursor|edit|error|event|ping|pong|presence|subscribe|unsubscribe",
+      "label": "websocket message",
+      "exempt": "not-authorable",
+      "reason": "Wire protocol between client and gateway."
+    },
+    {
+      "key": "status:approved|expired|pending",
+      "label": "device-token response status",
+      "exempt": "not-authorable",
+      "reason": "API response envelope, not authored metadata."
+    },
+    {
+      "key": "method:aggregate|batch|count|delete|execute|find|findOne|insert|update|vectorFind",
+      "label": "data-engine request",
+      "exempt": "not-authorable",
+      "reason": "Engine RPC contract."
+    },
+    {
+      "key": "method:aggregate|count|delete|execute|find|findOne|insert|update|vectorFind",
+      "label": "data-engine batch request item",
+      "exempt": "not-authorable",
+      "reason": "Engine RPC contract; the batch member set excludes `batch` itself."
+    },
+    {
+      "key": "type:delete|insert|retain",
+      "label": "collaboration op component",
+      "exempt": "not-authorable",
+      "reason": "CRDT operation encoding."
+    },
+    {
+      "key": "type:g-counter|lww-register|or-set|pn-counter|text",
+      "label": "CRDT merge state",
+      "exempt": "not-authorable",
+      "reason": "CRDT internal state encoding."
+    },
+    {
+      "key": "type:add_field|create_object|delete_object|execute_sql|modify_field|remove_field|rename_object",
+      "label": "migration changeset operation",
+      "exempt": "not-authorable",
+      "reason": "Emitted by the diff engine, not hand-written."
+    }
+  ]
+}

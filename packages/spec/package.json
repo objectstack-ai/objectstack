@@ -207,6 +207,7 @@
     "test:coverage": "vitest run --coverage",
     "check:liveness": "tsx scripts/liveness/check-liveness.mts",
     "check:empty-state": "tsx scripts/liveness/check-empty-state.mts",
+    "check:variant-docs": "tsx scripts/check-variant-docs.mts",
     "gen:react-blocks": "tsx scripts/build-react-blocks-contract.ts",
     "check:react-blocks": "tsx scripts/build-react-blocks-contract.ts --check",
     "check:react-conformance": "tsx scripts/check-react-blocks-conformance.ts",
