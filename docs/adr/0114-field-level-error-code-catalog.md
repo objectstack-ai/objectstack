@@ -2,7 +2,7 @@
 
 **Status**: Accepted (2026-07-30)
 **Deciders**: ObjectStack Protocol Architects
-**Builds on**: [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (D6 deferred exactly this decision, and its catalog+ledger shape is the model reused here), [ADR-0049](./0049-no-unenforced-security-properties.md) (declare-and-enforce — the wire `fields[]` element currently has no schema at all), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert declarations — `EnhancedApiErrorSchema.fieldErrors` is declared and never emitted), [ADR-0104](./0104-field-runtime-value-shape-contract.md) (the silently-stripped-key line its contract guard enforces — why D4's rename is deferred rather than done here)
+**Builds on**: [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (D6 deferred exactly this decision, and its catalog+ledger shape is the model reused here), [ADR-0049](./0049-no-unenforced-security-properties.md) (declare-and-enforce — the wire `fields[]` element had no schema at all), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert declarations — `EnhancedApiErrorSchema.fieldErrors` was declared and never emitted), [ADR-0104](./0104-field-runtime-value-shape-contract.md) (the silently-stripped-key line its contract guard enforces — why D4's rename is tombstoned rather than deleted)
 **Consumers**: `@objectstack/spec` (`api/errors.zod.ts`, `ui/action-params.zod.ts`), `@objectstack/objectql` (`validation/record-validator.ts`, `validation/rule-validator.ts`), `@objectstack/rest` (`import-coerce.ts`, `import-runner.ts`, `zodIssuesToFields`), `@objectstack/plugin-sharing` (`rule-criteria.ts`), `@objectstack/runtime` (`validation-failure.ts`), `@objectstack/client`, objectui (`react/src/utils/error-message.ts` — the only console consumer)
 **Surfaced by**: [#3977](https://github.com/objectstack-ai/objectstack/issues/3977), split out of [#3841](https://github.com/objectstack-ai/objectstack/issues/3841) by ADR-0112 D6.
 
@@ -12,7 +12,7 @@
 
 A field-level code names **which constraint the value violated**, and constraints are already named in the metadata's own snake_case vocabulary — `required: true`, `max_length: 50`, `min_value: 0`. So the field vocabulary stays **lowercase snake_case**, deliberately *not* following ADR-0112's SCREAMING_SNAKE, because here the code is a constraint name and the correspondence with the schema property is the point.
 
-It becomes a **closed catalog** (`FieldErrorCode` in spec, 27 members) that `FieldErrorSchema.code` validates against, and Zod's issue codes get **mapped at the `zodIssuesToFields` boundary** instead of leaking library internals onto the wire. The `fields`-vs-`fieldErrors` naming split is decided (`fields` is right) but **not executed**: it is an authorable-key retirement, so ADR-0104's tombstone-plus-migration machinery applies and gets its own change.
+It becomes a **closed catalog** (`FieldErrorCode` in spec, 27 members) that `FieldErrorSchema.code` validates against, and Zod's issue codes get **mapped at the `zodIssuesToFields` boundary** instead of leaking library internals onto the wire. The declared envelope also stops calling the array `fieldErrors`: it is `fields`, the name every producer already emitted, with the old key **tombstoned** rather than deleted.
 
 ## Context
 
@@ -65,7 +65,7 @@ That last row is a real bug, not a tidy-up: Zod reports a missing required prope
 
 It is also the one case `origin`/`format` cannot settle. A v4 issue carries `expected` and a message but **not the offending value**, so a missing property and a wrong-typed one are byte-identical on the issue — same `code`, same `expected`, same keys. The only other signal is the message text ("received undefined"), and depending on Zod's phrasing for a wire contract is precisely the leak this decision removes. So the discriminator is the **parsed input**, walked to the issue's `path`: the mapper takes it as an optional argument, and a caller that cannot supply it gets the accurate-but-less-specific `invalid_type` rather than a guess.
 
-### `fieldErrors` is declared and never emitted
+### `fieldErrors` was declared and never emitted
 
 The wire carries `fields` — `runtime/src/validation-failure.ts`, all six emitters, `@objectstack/client`, and objectui's extractor all say `fields`. `EnhancedApiErrorSchema` declares `fieldErrors`, which nothing emits and nothing reads. That is ADR-0078's silently-inert declaration, on the error envelope.
 
@@ -77,9 +77,11 @@ The wire carries `fields` — `runtime/src/validation-failure.ts`, all six emitt
 
 **D3 — Zod is mapped at the boundary, never passed through.** `zodIssuesToFields` translates using `origin` / `format` per the table above, plus the parsed input for the `invalid_type` split. An unmapped Zod code becomes `invalid_value` (a catalog member) rather than leaking. The mapping is tested by driving **real** `safeParse` calls, not by hand-written issue fixtures — which is how the `input` problem above surfaced at all: the first draft read `issue.input`, and a real parse showed that branch could never fire.
 
-**D4 — The wire's `fields` is the right name, and the rename is deferred with its cost written down.** `EnhancedApiErrorSchema.fieldErrors` should become `fields`; nothing has ever emitted `fieldErrors`, so the declaration points away from reality. But it is an **authorable key**, and the contract guard in `build-schemas.ts` (#3733, ADR-0104) rightly blocks a bare rename: these schemas are not `.strict()`, so Zod silently strips an unknown key, and an author or producer still writing the old name would get a clean parse and a value that never takes effect. Retiring it properly needs a `retiredKey()` tombstone carrying the fix, a D2 conversion (and D3 chain step) so `os migrate meta` can rewrite consumers, and a major changeset with the FROM → TO mapping.
+**D4 — The wire's `fields` wins, and `fieldErrors` is retired the way ADR-0104 requires.** `EnhancedApiErrorSchema` now declares `fields`; nothing ever emitted `fieldErrors`, so the old declaration pointed away from reality (ADR-0078's silently-inert declaration, on the error envelope).
 
-That is a change of its own, not a rider on this one. What lands here is the half that makes a validation body **assertable** — the element schema, with `code` closed — and the property keeps its name plus a banner naming the mismatch and the machinery its retirement needs. Declaring the wrong name loudly beats renaming it quietly.
+The old key is **tombstoned, not deleted**. The contract guard in `build-schemas.ts` (#3733, ADR-0104) is right to block a bare rename: these schemas are not `.strict()`, so Zod silently strips an unknown key — a producer still writing `fieldErrors` would parse clean and lose the per-field detail, answering a validation failure that mentions no field. `retiredKey()` turns that into a rejection carrying the rename.
+
+The change reaches the documentation channel as a **semantic** chain entry, not a conversion, and that distinction is the point rather than a shortcut. A conversion's job is rewriting author *metadata*; this is a response envelope, and no stack, example or template has ever carried the key (verified across `packages/`, `examples/`, `templates/`, `apps/`). A no-op conversion with an identity fixture would claim a rewrite that does not exist. The `analytics-query-request-*` entries set the precedent one step earlier in the same major: an HTTP-only surface with nothing stored to rewrite is a semantic entry with a reason and an acceptance criterion, which is what reaches `spec-changes.json`, the generated upgrade guide, and the `spec_changes` MCP tool.
 
 **D5 — What this catalog does NOT govern, restated from ADR-0112.** The three neighbouring vocabularies stay put: persisted columns (D6b), diagnostics inside a 200 (D6c), and the top-level catalog. The line from ADR-0112 holds — *the field catalog governs the code that names which constraint a value violated*. `check-error-code-casing.mjs` already recognises the field-addressed shape structurally, so this catalog needs no new guard exemptions; what it needs, and now gets, is a schema.
 
@@ -98,11 +100,9 @@ That is a change of its own, not a rider on this one. What lands here is the hal
 - `FieldErrorSchema.code` tightens from `z.string()` to `FieldErrorCode`, and ADR-0112's banner comment comes off. The conformance suites that parse error bodies gain a value check for free.
 - The wire `fields[]` element has a schema for the first time, so a validation response can be asserted structurally rather than by duck-typing.
 - Zod-served routes change their field codes (`too_small` → `min_length`, and a missing property stops reporting as a type error). This is a wire-visible fix; nothing in-repo or in the console branches on the old values.
-- `EnhancedApiErrorSchema.fieldErrors` keeps a name the wire does not use, now with a banner saying so. That is a deliberate debt: loud and documented beats a quiet rename that strips an author's key.
+- `EnhancedApiErrorSchema.fieldErrors` is gone as a writable key: constructing one with the old name now fails to parse, carrying the rename. Anyone reading `error.fieldErrors` was reading a field no server sent, so the read has no behaviour to preserve — but the failure is now loud at the write side instead of silent at the read side.
 - Adding a constraint kind now means adding a catalog member, which is the intended friction: a new *kind* of constraint is a type-system change and deserves a line in the spec.
 
 ## Rollout
 
-One PR — the emitters already speak the chosen vocabulary, so the change is the catalog, the schema tightening, and the Zod mapping. No sweep, no batches, no consumer migration.
-
-Deferred to its own change (D4): retiring `fieldErrors` for `fields`, which needs the ADR-0104 sequence — tombstone, D2 conversion + D3 chain step, major changeset.
+Two PRs. The first (#4035) landed the catalog, the schema tightening and the Zod mapping — the emitters already spoke the chosen vocabulary, so there was no sweep and no consumer migration. The second lands D4's rename with the ADR-0104 sequence: `retiredKey()` tombstone, a D3 semantic chain entry (not a conversion — see D4), and a major changeset carrying FROM → TO.

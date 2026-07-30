@@ -54,7 +54,7 @@ ObjectStack uses a structured error system with **9 error categories** and **53 
 
 ### `VALIDATION_ERROR`
 **Cause:** Generic validation failure — request body does not match expected schema.  
-**Fix:** Check the `fieldErrors` array for specific field-level issues.  
+**Fix:** Check the `fields` array for specific field-level issues.  
 **Retry:** `no_retry`
 
 ```json
@@ -64,7 +64,7 @@ ObjectStack uses a structured error system with **9 error categories** and **53 
   "category": "validation",
   "httpStatus": 400,
   "retryable": false,
-  "fieldErrors": [
+  "fields": [
     { "field": "email", "message": "Invalid email format", "code": "invalid_format" }
   ]
 }
@@ -77,7 +77,7 @@ ObjectStack uses a structured error system with **9 error categories** and **53 
 
 ### `MISSING_REQUIRED_FIELD`
 **Cause:** A required field was not provided in the request body.  
-**Fix:** Include the missing field. Check `fieldErrors` for the field name.  
+**Fix:** Include the missing field. Check `fields` for the field name.  
 **Retry:** `no_retry`
 
 ### `INVALID_FORMAT`
@@ -429,7 +429,7 @@ interface EnhancedApiError {
   retryStrategy?: RetryStrategy; // Recommended retry approach
   retryAfter?: number;           // Seconds to wait (for rate limits)
   details?: unknown;             // Additional error context
-  fieldErrors?: FieldError[];    // Field-specific validation errors
+  fields?: FieldError[];         // One entry per offending value
   timestamp?: string;            // ISO 8601 timestamp
   requestId?: string;            // Request tracking ID
   traceId?: string;              // Distributed trace ID
@@ -478,11 +478,12 @@ Routes that parse with Zod map its issue codes into this catalog rather than
 passing them through, so `fields[]` speaks one vocabulary whichever route served
 it.
 
-<Callout type="warn">
-The declared envelope still calls this array `fieldErrors`, while every producer
-emits **`fields`**. Read `fields`. The rename is decided but deferred — retiring
-an authorable key needs a tombstone plus a migration, so it lands on its own
-(ADR-0114 D4).
+<Callout type="info">
+The array is `fields` everywhere — producers, the SDK, the console, and now the
+declared envelope. It was declared as `fieldErrors` and emitted by nobody; that
+name is **tombstoned** (ADR-0114 D4), so writing it fails to parse with the rename
+rather than silently losing the array. If you read `error.fieldErrors`, you were
+reading a field no server sent — move to `error.fields`.
 </Callout>
 
 ---
@@ -498,8 +499,8 @@ directly; if your server populates those on the response body, read them from
 
 Two naming details matter here:
 
-- The per-field list is `apiError.fields`, matching the wire (`fields[]`), not
-  the spec contract's `fieldErrors`. Each entry is `{ field, code, message }`.
+- The per-field list is `apiError.fields`, matching the wire and (since ADR-0114
+  D4) the spec contract too. Each entry is `{ field, code, message }`.
   It is left **unset** when the server reported no per-field detail, so
   `if (apiError.fields)` tests "this failure is field-anchored".
 - `apiError.code` is always the semantic code as a **string**. The numeric HTTP
@@ -514,10 +515,9 @@ Two naming details matter here:
 ```typescript
 import type { EnhancedApiError, FieldError } from '@objectstack/spec/api';
 
-// The spec type names the per-field list `fieldErrors`; what the client
-// actually attaches at runtime is `fields` (the wire name). Widen the cast
-// until the two names converge.
-type ThrownApiError = EnhancedApiError & { fields?: FieldError[] };
+// The two names converged in ADR-0114 D4: the spec type and the client both say
+// `fields`, so no widening cast is needed any more.
+type ThrownApiError = EnhancedApiError;
 
 async function handleApiCall() {
   try {
@@ -528,9 +528,7 @@ async function handleApiCall() {
 
     switch (apiError.category) {
       case 'validation':
-        // Show field-level errors to the user. `fields` is what the client
-        // attaches (the wire name); the spec type calls the same idea
-        // `fieldErrors`.
+        // Show field-level errors to the user. One entry per offending value.
         apiError.fields?.forEach(fe => {
           showFieldError(fe.field, fe.message);
         });

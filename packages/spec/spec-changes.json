@@ -214,6 +214,13 @@
         "rationale": "The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves."
       },
       {
+        "surface": "api.enhancedApiError.fieldErrors",
+        "replacement": "fields",
+        "migrationId": "enhanced-api-error-field-errors-renamed",
+        "toMajor": 17,
+        "rationale": "The wire has always carried `fields` — the validators, import coercion, validation-failure.ts, @objectstack/client and the console's field-error extractor all say `fields`, and nothing ever emitted `fieldErrors`, so a reader keying on it was reading a field no server sent (ADR-0078's silently-inert declaration, on the error envelope). This is a RESPONSE surface: no stack, example or template carries the key, so there is no source for the chain to rewrite — the schema tombstones it via retiredKey() and consumers move their read themselves. ADR-0114 D4, #3977."
+      },
+      {
         "surface": "api.analyticsQueryRequest.format",
         "replacement": "(removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)",
         "migrationId": "analytics-query-request-format-retired",
@@ -490,6 +497,13 @@
           "migrationId": "analytics-query-request-envelope-retired",
           "toMajor": 17,
           "rationale": "The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded analytics shim (#3891), never stored in stack metadata — there is no source for the chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the query.* fields to the body top level themselves."
+        },
+        {
+          "surface": "api.enhancedApiError.fieldErrors",
+          "replacement": "fields",
+          "migrationId": "enhanced-api-error-field-errors-renamed",
+          "toMajor": 17,
+          "rationale": "The wire has always carried `fields` — the validators, import coercion, validation-failure.ts, @objectstack/client and the console's field-error extractor all say `fields`, and nothing ever emitted `fieldErrors`, so a reader keying on it was reading a field no server sent (ADR-0078's silently-inert declaration, on the error envelope). This is a RESPONSE surface: no stack, example or template carries the key, so there is no source for the chain to rewrite — the schema tombstones it via retiredKey() and consumers move their read themselves. ADR-0114 D4, #3977."
         },
         {
           "surface": "api.analyticsQueryRequest.format",

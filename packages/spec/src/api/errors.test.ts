@@ -116,11 +116,9 @@ describe('EnhancedApiErrorSchema', () => {
       retryable: false,
       retryStrategy: 'no_retry',
       details: { count: 2 },
-      // Still `fieldErrors` — the wire says `fields`, but retiring an authorable
-      // key needs ADR-0104's tombstone machinery, so ADR-0114 D4 defers it. The
-      // code below IS fixed: the field-level catalog's lowercase `invalid_email`,
-      // where this block used to assert a top-level SCREAMING member.
-      fieldErrors: [
+      // `fields` — the name every producer already emitted. `fieldErrors` is
+      // tombstoned (ADR-0114 D4); the case below asserts that it now rejects.
+      fields: [
         {
           field: 'email',
           code: 'invalid_email',
@@ -136,7 +134,7 @@ describe('EnhancedApiErrorSchema', () => {
 
     expect(error.category).toBe('validation');
     expect(error.httpStatus).toBe(400);
-    expect(error.fieldErrors).toHaveLength(1);
+    expect(error.fields).toHaveLength(1);
     expect(error.documentation).toContain('objectstack.dev');
   });
 
@@ -332,5 +330,34 @@ describe('FieldErrorCode', () => {
     }
     // …and a top-level code, which is what the schema used to declare.
     expect(() => FieldErrorCode.parse('VALIDATION_ERROR')).toThrow();
+  });
+});
+
+describe('EnhancedApiErrorSchema.fieldErrors retirement (ADR-0114 D4)', () => {
+  it('rejects the old name instead of silently dropping the array', () => {
+    // The whole reason for a tombstone rather than a delete: this schema is not
+    // `.strict()`, so a plain removal would let the write parse clean and lose
+    // the per-field detail — a validation response that mentions no field.
+    const attempt = () => EnhancedApiErrorSchema.parse({
+      code: 'VALIDATION_ERROR',
+      message: 'Validation failed',
+      fieldErrors: [{ field: 'email', code: 'invalid_email', message: 'nope' }],
+    });
+    expect(attempt).toThrow();
+    // …and the rejection carries the fix, not just "invalid".
+    try {
+      attempt();
+    } catch (e) {
+      expect(String(e)).toContain('fields');
+    }
+  });
+
+  it('accepts the new name', () => {
+    const parsed = EnhancedApiErrorSchema.parse({
+      code: 'VALIDATION_ERROR',
+      message: 'Validation failed',
+      fields: [{ field: 'email', code: 'invalid_email', message: 'nope' }],
+    });
+    expect(parsed.fields).toHaveLength(1);
   });
 });
