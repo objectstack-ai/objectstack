@@ -198,6 +198,7 @@
     "gen:sbom": "tsx scripts/generate-sbom.ts",
     "gen:api-surface": "tsx scripts/build-api-surface.ts",
     "check:api-surface": "tsx scripts/build-api-surface.ts --check",
+    "check:exported-any": "tsx scripts/check-exported-any.ts --self-test && tsx scripts/check-exported-any.ts",
     "check:authorable-surface": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --check",
     "gen:spec-changes": "tsx scripts/build-spec-changes.ts",
     "check:spec-changes": "tsx scripts/build-spec-changes.ts --check",

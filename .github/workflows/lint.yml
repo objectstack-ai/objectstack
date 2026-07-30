@@ -284,6 +284,19 @@ jobs:
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
 
+      # Same surface, the other axis: api-surface.json records that an export
+      # EXISTS, never what it resolves to — so four exported types sat at `any`
+      # across a whole major with every gate green (#4171). #4115 tells consumers
+      # to replace a local declaration with the spec import, which for those four
+      # traded a precise type for one that constrains nothing, silently: `any` is
+      # mutually assignable with everything, so the check that would catch the
+      # swap reports "identical, safe to re-export". Reads the built dist a
+      # consumer's import actually resolves to, so it runs after the build step
+      # with the other consumer gates. Self-tests first — a scan whose green
+      # result is "nothing found" has to prove it can still find something.
+      - name: Check no exported spec type resolves to `any`
+        run: pnpm --filter @objectstack/spec run check:exported-any
+
       # Anti-drift for the skill EXAMPLES, not just the skill reference indexes
       # (#3094). The TypeScript in skills/ is the first thing an AI copies when
       # authoring metadata, yet nothing type-checked it — so it rotted silently

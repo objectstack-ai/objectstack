@@ -90,6 +90,38 @@
  * can seed a genuinely mixed writer population through its own `create()` —
  * the assertion stays "which rows match", the convergence itself remains each
  * driver's own suite's claim.
+ *
+ * # The storage-form axis (D-B3/D-E3 → the D-A3 legacy sweep, #4191)
+ *
+ * Seeding through `create()` proves "what I write I can read back" — but two
+ * of the four incidents were about reading forms the CURRENT write path never
+ * produces: rows written before the convention existed and never backfilled
+ * (D-B3 allows the backfill to fail; D-E3 gives MongoDB no automatic backfill
+ * at all, so its legacy data is PERMANENT, not transitional). A consumer with
+ * a read-repair or convergence path therefore runs the same cases a SECOND
+ * time against rows injected BELOW its write path, in the raw forms the
+ * pre-convention writers left behind.
+ *
+ * The {@link TemporalWriterForm} tag is the per-row seeding basis for that
+ * sweep too — the same two populations, just left UNconverged:
+ *
+ * - `native` → the platform-native instant bound raw, in whatever shape the
+ *   store kept it (INTEGER epoch ms on SQLite, a BSON `Date` on mongo, a JS
+ *   `Date` in memory). For a {@link TemporalTimeRow} the instant is the epoch
+ *   day's — `1970-01-01T${at}Z` — so `a_midnight` lands as the measured
+ *   #3994 hazard: INTEGER `0`, which sorts before every TEXT row.
+ * - `wire` → raw text the write path did not rewrite: for `datetime` the
+ *   zone-naive `YYYY-MM-DD HH:MM:SS` a `CURRENT_TIMESTAMP` default emitted;
+ *   for `time` a full-timestamp spelling that still carries a calendar day —
+ *   pin it to the fixture's boundary day (`2026-07-28T${at}Z`) so every
+ *   consumer seeds the same bytes.
+ *
+ * The physical spelling is each driver's own suite's business (that is why no
+ * per-dialect values live here); what is shared is the acceptance rule: the
+ * legacy sweep must land on the same {@link TemporalCase.expected} row-id
+ * sets, cell for cell, as the canonical sweep. Any cell that differs means
+ * that backend's repair path has drifted from the consensus — the signal
+ * #3773 / #3994 / #4047 all lacked.
  */
 
 import type { FilterCondition } from './filter.zod';
@@ -110,6 +142,12 @@ export const TEMPORAL_NOW = '2026-07-28T12:00:00.000Z';
  * write delivers; `native` = a JS `Date`, what SDK callers and the drivers'
  * own timestamp defaults produce. Both writer populations appear inside AND
  * outside every window, so a backend that converges only one form fails.
+ *
+ * The same tag doubles as the seeding basis for the storage-form axis (see
+ * "The storage-form axis" in the module doc): a legacy sweep injects the
+ * SAME populations below the write path, unconverged — `native` as the raw
+ * platform-native instant, `wire` as the raw text spelling — and must reach
+ * the same expected row-id sets.
  */
 export type TemporalWriterForm = 'wire' | 'native';
 

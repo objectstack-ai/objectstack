@@ -56,7 +56,10 @@ export async function handleShareLinksRequest(
     query: any,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    const svc: any = await deps.resolveService('shareLinks', context.environmentId);
+    // [#4127 batch 3] `plugin-sharing` registers `ShareLinkService`, which
+    // declares `implements IShareLinkService`; the four methods called below
+    // were all already on that contract. Only the ledger entry was missing.
+    const svc = await deps.resolveService('shareLinks', context.environmentId);
     if (!svc) {
         return { handled: true, response: deps.error('Sharing is not configured for this environment', 501) };
     }

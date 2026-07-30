@@ -57,6 +57,12 @@ canonical example of each linked from that page.
   surface.
 - `src/ui/actions/` — the ActionType × location matrix (script / url /
   modal / flow / api / form), visible as buttons across Task screens.
+- Actions over a SELECTION come in two flavours, one view each: Task's
+  **Bulk Actions** names declared actions in `bulkActions`, and each selected
+  record is fanned out through the action runner (a script and a custom
+  endpoint, neither of them a field patch); Project's `bulkActionDefs` instead
+  mass-EDITS through the data API. `action.bulkEnabled` is not a third way —
+  it was retired in spec 17 and its tombstone points at `bulkActions`.
 
 ## Themes
 

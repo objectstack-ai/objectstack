@@ -181,6 +181,28 @@ export const JoinType = z.enum(['inner', 'left', 'right', 'full']);
  */
 export const JoinStrategy = z.enum(['auto', 'database', 'hash', 'loop']);
 
+/** Non-recursive half of {@link JoinNodeSchema} — every key except `subquery`. */
+const JoinNodeBaseSchema = lazySchema(() => z.object({
+  type: JoinType.describe('Join type'),
+  strategy: JoinStrategy.optional().describe('Execution strategy hint'),
+  object: z.string().describe('Object/table to join'),
+  alias: z.string().optional().describe('Table alias'),
+  on: FilterConditionSchema.describe('Join condition'),
+}));
+
+/**
+ * A single join — the TYPE half of {@link JoinNodeSchema}.
+ *
+ * `subquery` is what makes the schema recursive (through {@link QuerySchema}),
+ * so it is declared here rather than inferred: `z.lazy()` needs an annotation,
+ * and the `z.ZodType<any>` this carried before #4171 made the exported
+ * `JoinNode` — and `QueryAST['joins']` with it — resolve to `any`.
+ */
+export type JoinNode = z.infer<typeof JoinNodeBaseSchema> & {
+  /** Join against a derived dataset instead of a plain object/table. */
+  subquery?: QueryAST;
+};
+
 /**
  * Join Node
  * Represents table joins for combining data from multiple objects.
@@ -259,13 +281,8 @@ export const JoinStrategy = z.enum(['auto', 'database', 'hash', 'loop']);
  *   ]
  * }
  */
-export const JoinNodeSchema: z.ZodType<any> = z.lazy(() => 
-  z.object({
-    type: JoinType.describe('Join type'),
-    strategy: JoinStrategy.optional().describe('Execution strategy hint'),
-    object: z.string().describe('Object/table to join'),
-    alias: z.string().optional().describe('Table alias'),
-    on: FilterConditionSchema.describe('Join condition'),
+export const JoinNodeSchema: z.ZodType<JoinNode> = z.lazy(() =>
+  JoinNodeBaseSchema.extend({
     subquery: z.lazy(() => QuerySchema).optional().describe('Subquery instead of object'),
   })
 );
@@ -419,10 +436,30 @@ export const WindowFunctionNodeSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One entry of a select list: a plain field name, or a relationship field
+ * carrying a nested select.
+ *
+ * The TYPE half of {@link FieldNodeSchema} — it is that schema's recursion
+ * annotation, which used to be `z.ZodType<any>`, making `QueryAST['fields']`
+ * `any[]` and leaving this one alias away from being a fifth entry in #4171's
+ * table.
+ */
+export type FieldNode =
+  | string
+  | {
+      /** Relationship field name (e.g. `owner`). */
+      field: string;
+      /** Nested select on the related object. */
+      fields?: FieldNode[];
+      /** Result alias. */
+      alias?: string;
+    };
+
+/**
  * Field Selection Node
  * Represents "Select" attributes, including joins.
  */
-export const FieldNodeSchema: z.ZodType<any> = z.lazy(() => 
+export const FieldNodeSchema: z.ZodType<FieldNode> = z.lazy(() =>
   z.union([
     z.string(), // Primitive field: "name"
     z.object({
@@ -598,6 +635,7 @@ export type SortNode = z.infer<typeof SortNodeSchema>;
 export type AggregationNode = z.infer<typeof AggregationNodeSchema>;
 export type GroupByNode = z.infer<typeof GroupByNodeSchema>;
 export type DateGranularityValue = z.infer<typeof DateGranularity>;
-export type JoinNode = z.infer<typeof JoinNodeSchema>;
+// `JoinNode` / `FieldNode` are declared next to their schemas — they ARE those
+// schemas' annotations, so they cannot be inferred back out of them (#4171).
 export type WindowFunctionNode = z.infer<typeof WindowFunctionNodeSchema>;
 export type WindowSpec = z.infer<typeof WindowSpecSchema>;

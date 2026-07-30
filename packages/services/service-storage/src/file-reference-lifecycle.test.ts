@@ -358,18 +358,20 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
     });
 
     /**
-     * R4 REGRESSION. Releasing must NOT tombstone: `deleted_at` is what makes a
-     * row a reap candidate, and the reap guard's sweep-time re-verify still
-     * only consults `sys_attachment` (always empty for a field file). Setting
-     * the tombstone here without extending that guard in the same change turns
-     * every released file into a guaranteed byte delete.
+     * R4 REGRESSION (updated by #3459 PR-5b). Release may tombstone ONLY on a
+     * deployment whose file-as-reference migration is verified — and every way
+     * of not knowing (no engine method, an unverified flag, a failing read)
+     * must keep release tombstone-free, because `deleted_at` is what makes a
+     * row a reap candidate. The matching half — the reap guard re-verifying
+     * the ownership columns at sweep time — lives in attachment-lifecycle and
+     * shipped in the same change; its own regression tests are there.
      */
-    it('never tombstones on release — the file stays as retained as it was', async () => {
+    it('never tombstones on release when the engine cannot attest the migration (fail closed)', async () => {
       const engine = fakeEngine({
         files: [file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' })],
         records: { product: [{ id: 'p1', image: 'file_a' }] },
       });
-      install(engine);
+      install(engine); // fake engine has no isFileReferencesMigrationVerified
 
       await driveDelete(engine, 'product', { id: 'p1' });
 
@@ -381,6 +383,79 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
         expect(w.arg).not.toHaveProperty('status');
         expect(w.arg).not.toHaveProperty('deleted_at');
       }
+    });
+
+    it('never tombstones on release while the deployment is unverified', async () => {
+      const engine = fakeEngine({
+        files: [file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' })],
+        records: { product: [{ id: 'p1', image: 'file_a' }] },
+      });
+      engine.isFileReferencesMigrationVerified = async () => false;
+      install(engine);
+
+      await driveDelete(engine, 'product', { id: 'p1' });
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ status: 'committed', ref_id: null });
+      expect(engine.tables.sys_file[0].deleted_at).toBeUndefined();
+    });
+
+    it('a failing flag read keeps release tombstone-free (unreadable evidence is not permission)', async () => {
+      const engine = fakeEngine({
+        files: [file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' })],
+        records: { product: [{ id: 'p1', image: 'file_a' }] },
+      });
+      engine.isFileReferencesMigrationVerified = async () => {
+        throw new Error('sys_migration unreadable');
+      };
+      install(engine);
+
+      await driveDelete(engine, 'product', { id: 'p1' });
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ status: 'committed', ref_id: null });
+    });
+
+    it('tombstones on release once the deployment has verified its migration (#3459 PR-5b)', async () => {
+      const engine = fakeEngine({
+        files: [file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' })],
+        records: { product: [{ id: 'p1', image: 'file_a' }] },
+      });
+      engine.isFileReferencesMigrationVerified = async () => true;
+      install(engine);
+
+      await driveDelete(engine, 'product', { id: 'p1' });
+
+      const row = engine.tables.sys_file[0];
+      expect(row).toMatchObject({ ref_object: null, ref_id: null, ref_field: null, status: 'deleted' });
+      expect(typeof row.deleted_at).toBe('string');
+    });
+
+    it('tombstones when an update replaces the field value, on a verified deployment', async () => {
+      const engine = fakeEngine({
+        files: [file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' })],
+        records: { product: [{ id: 'p1', image: 'file_a' }] },
+      });
+      engine.isFileReferencesMigrationVerified = async () => true;
+      install(engine);
+
+      await driveUpdate(engine, 'product', 'p1', { image: null });
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: null, status: 'deleted' });
+    });
+
+    it('releases a non-committed file without tombstoning it, even when verified', async () => {
+      // A `pending` row already has its own never-completed reap policy;
+      // tombstoning it here would hand it to the wrong lifecycle.
+      const engine = fakeEngine({
+        files: [file({ status: 'pending', ref_object: 'product', ref_id: 'p1', ref_field: 'image' })],
+        records: { product: [{ id: 'p1', image: 'file_a' }] },
+      });
+      engine.isFileReferencesMigrationVerified = async () => true;
+      install(engine);
+
+      await driveDelete(engine, 'product', { id: 'p1' });
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ status: 'pending', ref_id: null });
+      expect(engine.tables.sys_file[0].deleted_at).toBeUndefined();
     });
   });
 

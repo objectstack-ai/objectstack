@@ -8,7 +8,88 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * Defines the interception points in the ObjectQL execution pipeline.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { HookBodySchema } from './hook-body.zod';
+
+/*
+ * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
+ *
+ * {@link HookSchema} (the AUTHORING shape) and its `retryPolicy` block are
+ * `.strict()`. `hook` is a registered metadata type — it sits in
+ * BUILTIN_METADATA_TYPE_SCHEMAS, so the same shape backs `defineStack({ hooks })`
+ * parsing, the `/api/v1/meta/types/hook` endpoint, and the Studio form. A key it
+ * silently dropped was invisible on every one of those surfaces.
+ *
+ * {@link HookContextSchema} is deliberately NOT strict, and must not become so.
+ * It is the RUNTIME shape the engine hands to a handler — nobody authors it.
+ * Strictness there would invert the contract: adding a field to the context
+ * (as `provenance` was in #3712) would turn an engine-internal enrichment into
+ * a breaking change for anyone parsing a context they were handed. Same
+ * reasoning as `RLSUserContextSchema` / `FlowVersionHistorySchema`.
+ *
+ * Two near-miss key names, both now aliased because they are genuinely easy to
+ * cross:
+ *   - hook-level `timeout` vs body-level `timeoutMs` (see hook-body.zod.ts)
+ *   - hook `retryPolicy.backoffMs` vs datasource `retryPolicy.baseDelayMs`
+ */
+
+/** Keys {@link HookSchema} declares (drift-guarded by hook.test.ts). */
+const HOOK_KEYS = [
+  'name', 'label', 'object', 'events', 'handler', 'body', 'priority',
+  'async', 'condition', 'description', 'retryPolicy', 'timeout', 'onError',
+] as const;
+
+/** Keys the hook `retryPolicy` block declares (drift-guarded by hook.test.ts). */
+const HOOK_RETRY_POLICY_KEYS = ['maxRetries', 'backoffMs'] as const;
+
+const hookUnknownKeyError = strictUnknownKeyError({
+  surface: 'this hook',
+  knownKeys: HOOK_KEYS,
+  aliases: {
+    hookname: 'name',
+    objectname: 'object',
+    objects: 'object',
+    event: 'events',
+    fn: 'handler',
+    callback: 'handler',
+    order: 'priority',
+    sequence: 'priority',
+    background: 'async',
+    isasync: 'async',
+    when: 'condition',
+    predicate: 'condition',
+    retry: 'retryPolicy',
+    timeoutms: 'timeout',
+    errorpolicy: 'onError',
+    onfailure: 'onError',
+  },
+  guidance: {
+    enabled:
+      '`enabled` is not a hook key — a hook has no on/off switch. Gate it with `condition` '
+      + '(the hook is skipped when the predicate is false), or remove the hook.',
+    active:
+      '`active` is not a hook key — a hook has no on/off switch. Gate it with `condition`, '
+      + 'or remove the hook.',
+  },
+  history: 'Until #4001 these were dropped silently — the hook still registered and ran.',
+});
+
+const hookRetryPolicyUnknownKeyError = strictUnknownKeyError({
+  surface: "this hook's retryPolicy",
+  knownKeys: HOOK_RETRY_POLICY_KEYS,
+  aliases: {
+    retries: 'maxRetries',
+    attempts: 'maxRetries',
+    basedelayms: 'backoffMs',
+    backoff: 'backoffMs',
+    delayms: 'backoffMs',
+  },
+  history:
+    'Until #4001 these were dropped silently — the hook retried on the defaults rather '
+    + 'than the policy that was written. Note a datasource retryPolicy spells its delay '
+    + '`baseDelayMs`; a hook spells it `backoffMs`.',
+});
+
 export const HookEvent = z.enum([
   // Read — one event per read, regardless of shape. `beforeFind`/`afterFind`
   // fire for BOTH `find` and `findOne` (the event attaches to record
@@ -141,7 +222,7 @@ export const HookSchema = lazySchema(() => z.object({
   retryPolicy: z.object({
     maxRetries: z.number().default(3).describe('Maximum retry attempts on failure'),
     backoffMs: z.number().default(1000).describe('Backoff delay between retries in milliseconds'),
-  }).optional().describe('Retry policy for failed hook executions'),
+  }, { error: hookRetryPolicyUnknownKeyError }).strict().optional().describe('Retry policy for failed hook executions'),
 
   /**
    * Execution Timeout
@@ -155,7 +236,7 @@ export const HookSchema = lazySchema(() => z.object({
    * - log: Log error and continue
    */
   onError: z.enum(['abort', 'log']).default('abort').describe('Error handling strategy'),
-}));
+}, { error: hookUnknownKeyError }).strict());
 
 /**
  * Hook Runtime Context

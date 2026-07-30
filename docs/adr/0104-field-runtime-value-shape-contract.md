@@ -719,21 +719,32 @@ point into `sys_file`" reaches production rather than revisiting whether to do
 it. A future choice that stands on its own (say, a chunked-migration protocol,
 or byte-layer content dedup) would earn its own ADR.
 
-## Addendum (2026-07-30) — evidence for the remaining flips: a scan gate for references / structured JSON; the action-param flip rides a declared major
+## Addendum (2026-07-30) — evidence for the remaining flips: a scan gate for references / structured JSON; the action-param default flips in 17.0
 
 The 2026-07-27 amendment split #3438 into three and settled only the first:
 media value shapes flip per deployment, on the `adr-0104-file-references` flag
 (#3681). The other two were left "blocked on someone deciding what would
 constitute evidence." This addendum decides — differently for the two, because
-their facts have different epistemic reach — and fixes the release vehicle for
-each around the v17 major.
+their facts have different epistemic reach — and lands both on the v17 major.
 
-One timeline fact frames everything: **warn-first itself first reaches stable
+One timeline fact frames the choice: **warn-first itself first reaches stable
 deployments in 17.0.** D1 and D2 ride the v17 train (their changesets sit in
 the same pre-mode window as this addendum), so no stable deployment has served
-a single day of the warn window yet. Whatever the right gate is, 17.0 cannot
-flip any default version-wide without deleting the warn window R2/R3 promised
-— independent of the per-deployment argument.
+a single day of the warn window yet. That does *not* settle the question, and
+an earlier draft of this addendum wrongly treated it as if it did. It bounds
+one option only: no deployment can have *already* produced warn-window
+evidence, so a gate that requires such evidence must either produce it fresh
+(D1, below) or be declined on the merits (D2, below). It is not an argument
+for postponement — a break served later is not a break served gently.
+
+The governing consideration is the one D4 already stated and the 2026-07-24
+addendum repeated: **ride a planned breaking window to amortise the migration
+cost.** Every deployment on 16.x must perform a substantial, tested 16→17
+upgrade regardless. Spreading this ADR's own breaking changes across two
+majors charges that ceremony twice, and the second charge buys something only
+where it buys real safety. So the question is asked per half — *what does
+withholding the version-wide flip actually protect here?* — and the answers
+differ.
 
 ### D1 references + structured JSON: the evidence can exist, so build it
 
@@ -745,8 +756,30 @@ validator's own non-media branch — `REFERENCE_VALUE_TYPES` (single-value
 `json`'s derived schema is deliberately `z.unknown()`, so it can yield no
 findings). Unlike caller behaviour, data at rest is enumerable: a scan that
 walks every row is **complete** evidence, with the same epistemic standing the
-file reconciliation has. So the gate takes the #3617 shape, minus the
-backfill:
+file reconciliation has.
+
+What the per-deployment gate protects here — the amortisation question from
+the preamble — is **records, not callers**. The failure mode of a wrong flip
+is read-modify-write: an application reads a record, edits one field, writes
+the whole thing back, and the malformed `location` payload it never touched
+rides along — so the application's own *correct* code starts failing, above
+data possibly written years ago, at a scale ("which of my million rows?") the
+operator cannot even enumerate without the scanner. And one slice of that
+data is **our fault**: the spec exported `LocationCoordinatesSchema`
+declaring `{latitude, longitude}` while reality stored `{lat, lng}` (this
+ADR's own Context section) — an app written faithfully against our published
+contract holds exactly the values a version-wide flip would reject.
+Punishing spec-faithful authors for having believed the spec is not a
+migration; it is a breach. That is what the gate buys, and it is worth
+buying.
+
+The cost, meanwhile, rounds to zero for the deployments that are clean —
+which is most of them: the scan runs inside the same 16→17 upgrade ceremony
+as `os migrate files-to-references`, and a clean deployment that runs it is
+strict *immediately*, one upgrade, done — indistinguishable from a
+version-wide flip. The gate's only observable difference is on dirty data,
+where it converts a stream of production failures into a report with row
+ids. So the gate takes the #3617 shape, minus the backfill:
 
 ```
 os migrate value-shapes
@@ -787,6 +820,14 @@ os migrate value-shapes
   opt-in) beats the flag. Same contradictory-config rule as
   `mediaStrictEffective`, for the same reason: wrongly lax costs a warning,
   wrongly strict stops a working app.
+- **The upgrade path advertises the scan, so "one upgrade, done" is the
+  default experience rather than a discovery.** `os migrate meta --from 16` —
+  the command every 16→17 upgrade already runs — ends by naming the two data
+  migrations (`files-to-references`, `value-shapes`) with their gate status,
+  and a deployment booting ≥17 with covered fields and no
+  `adr-0104-value-shapes` row logs one line at startup saying warn-mode is in
+  effect and which command ends it. A gate nobody is told about is served by
+  nobody.
 
 ### Fresh datastores attest at creation — both flags
 
@@ -816,7 +857,7 @@ canary for R2 (a codified shape stricter than some legitimate client's
 writes): showcase/CRM boots are fresh datastores, so they enforce from birth,
 and a false rejection fails our suites before any customer sees it.
 
-### D2 action params: the evidence cannot exist, so the honest gate is a declared major
+### D2 action params: the evidence cannot exist, so strict is the 17.0 default
 
 What per-deployment evidence would have to prove is: *no caller of this
 deployment still depends on the lax contract.* Callers are not enumerable —
@@ -827,46 +868,54 @@ completeness it cannot have — the unlocatable-gate error of the 2026-07-27
 addendum, reproduced one layer down. A gate must not claim evidence that
 cannot exist, and we decline to build the theatre of one.
 
-What remains is the failure-mode calculus that already sequenced wave 2: a
-strict rejection here is **loud** (a 400 naming the offending param and the
-declared list), **caller-facing** (a developer or an AI mid-integration — not
-an end user stranded in a form above data they cannot fix), **recoverable**
-(fix the call), and **reversible** (the escape hatch below). No data is
-stranded, no byte is deleted. That is precisely the class of break wave 2's
-step 4 was allowed to ride a declared major for, while step 6 waits on
-evidence.
+With a per-deployment gate ruled out, the choice is the release vehicle, and
+the amortisation question answers it. What would parking the flip on a later
+major protect? Not records — no data is at stake, and the D1 read-modify-write
+hazard has no analogue here. Not end users — a strict rejection is **loud**
+(a 400 naming the offending param and the declared list), **caller-facing**
+(a developer or an AI mid-integration, who reads errors for a living), and
+**reversible** (the escape hatch below). The R3 hazard that once justified a
+long lax window is, in its dangerous half, already closed: dispatch's own
+injected keys (`recordId` / `objectName`) ride the `ACTION_PARAM_BUILTIN_KEYS`
+allowlist, so what strict rejects now is a bag that is genuinely wrong
+against its declaration. And v17 itself sets the severity bar: it flips
+unset-`allowExport` from allowed to **denied** and refuses undeclared action
+handlers with **no opt-out at all**, both with zero warn window. Holding D2 —
+gentler than either — to a stricter standard than the release it ships in is
+not caution, it is incoherence. So: **`actionParamsStrict()` defaults to true
+in 17.0.** A 16.x deployment meets the contract and its enforcement in one
+planned, tested upgrade; the alternative served nobody a gentler break — it
+scheduled a second one.
 
-So, owned explicitly rather than smuggled: **the D2 flip is a version flip —
-on the major *after* the warn window, not this one.** 17.0 ships warn-first
-(first exposure) and announces the coming default in its release notes; 18.0
-flips `actionParamsStrict()` to default-true. The v17→v18 gap is every
-deployment's own warn window, served on its own upgrade schedule; the warn
-line already names `OS_ACTION_PARAMS_STRICT_ENABLED=1`, which is the
-per-deployment act of opting into tomorrow's default today. Version-wide
-flips remain wrong where per-deployment evidence is *possible* (D1); where it
-is impossible in principle, a declared major with a served warn window and an
-escape hatch is what honest looks like. The alternative — warn forever —
-permanently un-enforces the declared contract at exactly the surface (AI/MCP
-callers) D2 was built for, where a 400 is corrective feedback the caller
-consumes and a server-side warn is feedback nobody sees.
+One windfall confirms the timing. The `OS_ACTION_PARAMS_STRICT_ENABLED`
+opt-in has only ever existed inside the 17.0 RC window — no stable release
+carries it — so flipping in 17.0 means the variable is **deleted before it
+ever reaches `latest`**: no redundant knob at GA, no deprecation debt, no
+`readEnvWithDeprecation` shim. Parking the flip on 18.0 would have shipped
+the knob stable and then carried it. Mechanics: the opt-in is removed (RC
+consumers get one release-note line); the new `OS_ALLOW_LAX_ACTION_PARAMS`
+escape hatch (Prime Directive #9 `OS_ALLOW_*` shape) is the single switch and
+restores warn-first verbatim for an operator mid-diagnosis; the dogfood
+contract suite (`action-params-contract.dogfood.test.ts`) flips its duals so
+the *default* path is the strict one and the escape hatch is the
+explicitly-set case; the v17 release notes carry the migration section (what
+a rejected bag looks like, how to fix the caller, the escape hatch's name).
 
-Mechanics at 18.0: `OS_ACTION_PARAMS_STRICT_ENABLED` stays accepted — it
-becomes a redundant opt-in to the default; its semantics never change, so no
-`readEnvWithDeprecation` rename, the same conclusion the media half reached.
-A new `OS_ALLOW_LAX_ACTION_PARAMS` opt-out wins over everything (the
-contradictory-config rule again), and the dogfood contract suite
-(`action-params-contract.dogfood.test.ts`) flips its duals so the *default*
-path is the strict one and the escape hatch is the explicitly-set case.
+Actions declaring no `params` keep their pass-through — that boundary is
+unchanged from D2's landing. And the asymmetry with D1 stays load-bearing in
+both directions: a version flip is wrong where complete per-deployment
+evidence is *possible* (D1's data), and right where it is impossible in
+principle and the failure mode is a self-describing 400 to the party who can
+fix it.
 
 ### What rides where
 
 | vehicle | change |
 |---|---|
-| 17.0 | warn-first first ships (D1 non-media + D2). `os migrate value-shapes` + the `adr-0104-value-shapes` gate wiring. Fresh-datastore attestation of both flags. Release notes announce the 18.0 D2 default. **No version-wide default changes.** |
-| each deployment, ≥17.0 | runs `os migrate value-shapes --apply` (or is born attested) → its own D1 non-media classes flip to strict. |
-| 18.0 | D2 strict by default + `OS_ALLOW_LAX_ACTION_PARAMS`; dogfood duals flip. |
+| 17.0 | D2 strict by default (`OS_ACTION_PARAMS_STRICT_ENABLED` deleted, `OS_ALLOW_LAX_ACTION_PARAMS` added, dogfood duals flipped). `os migrate value-shapes` + the `adr-0104-value-shapes` gate wiring. Fresh-datastore attestation of both flags. `os migrate meta` / boot-log advertisement of the scan. D1 non-media stays warn-first until the deployment's own gate opens. |
+| each deployment, ≥17.0 | runs `os migrate value-shapes --apply` (or is born attested) → its own D1 non-media classes flip to strict. Clean data ⇒ one upgrade, done. |
 
-#3438 then tracks two work items instead of an open question: the scan
-migration (command, engine wiring, creation-time attestation) targeting the
-17.0 train, and the D2 flip parked for the 18.0 train with its release-note
-announcement landing now.
+#3438 then tracks two work items instead of an open question, both on the
+17.0 train: the D2 default flip (validator default + env-var swap + dogfood
+duals + release notes), and the scan migration (command, engine wiring,
+creation-time attestation, upgrade-path advertisement).

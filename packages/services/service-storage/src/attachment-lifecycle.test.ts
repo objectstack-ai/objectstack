@@ -180,13 +180,13 @@ describe('installAttachmentLifecycleHooks — tombstoning', () => {
 describe('createSysFileReapGuard', () => {
   const storage = () => ({ delete: vi.fn(async () => {}) }) as any;
 
-  it('confirms zero-ref tombstones after deleting the bytes', async () => {
+  it('confirms zero-ref attachment tombstones after deleting the bytes — no migration flag needed', async () => {
     const engine = fakeEngine({ attachments: [], files: [] });
     const s = storage();
     const guard = createSysFileReapGuard(engine, () => s, silentLogger());
 
     const confirmed = await guard('sys_file', [
-      { id: 'f1', key: 'attachments/f1.bin', status: 'deleted' },
+      { id: 'f1', key: 'attachments/f1.bin', status: 'deleted', scope: 'attachments' },
     ]);
 
     expect(s.delete).toHaveBeenCalledWith('attachments/f1.bin');
@@ -217,11 +217,115 @@ describe('createSysFileReapGuard', () => {
     const guard = createSysFileReapGuard(engine, () => s, logger);
 
     const confirmed = await guard('sys_file', [
-      { id: 'f1', key: 'attachments/f1.bin', status: 'deleted' },
+      { id: 'f1', key: 'attachments/f1.bin', status: 'deleted', scope: 'attachments' },
     ]);
 
     expect(confirmed).toEqual([]);
     expect(logger.warn).toHaveBeenCalled();
+  });
+
+  // ── Field-file lineage (#3459 PR-5b) ──────────────────────────────
+  // The gated, irreversible half-pair: released field files only become byte
+  // deletes when (a) nothing owns them at sweep time AND (b) this deployment's
+  // file-as-reference migration flag is verified, re-read fresh each sweep.
+
+  it('reaps a released field file when the deployment gate is open', async () => {
+    const engine = fakeEngine({ attachments: [], files: [] });
+    const s = storage();
+    const guard = createSysFileReapGuard(engine, () => s, silentLogger(), async () => true);
+
+    const confirmed = await guard('sys_file', [
+      { id: 'f1', key: 'user/f1.png', status: 'deleted', scope: 'user', ref_object: null, ref_id: null },
+    ]);
+
+    expect(s.delete).toHaveBeenCalledWith('user/f1.png');
+    expect(confirmed).toEqual(['f1']);
+  });
+
+  /**
+   * R4 REGRESSION (the "two halves ship together" lock, #3459 PR-5b). A
+   * tombstoned file whose ownership columns name a current owner — re-claimed
+   * inside the grace window, or a release/claim race — must be un-tombstoned
+   * and vetoed, exactly like an attachment that regained join rows. Without
+   * this, every release would be a guaranteed byte delete.
+   */
+  it('vetoes and un-tombstones a field file that regained an owner (ownership re-verify)', async () => {
+    const engine = fakeEngine({
+      attachments: [],
+      files: [{ id: 'f1', key: 'user/f1.png', status: 'deleted', scope: 'user' }],
+    });
+    const s = storage();
+    const guard = createSysFileReapGuard(engine, () => s, silentLogger(), async () => true);
+
+    const confirmed = await guard('sys_file', [
+      { id: 'f1', key: 'user/f1.png', status: 'deleted', scope: 'user', ref_object: 'product', ref_id: 'p1', ref_field: 'image' },
+    ]);
+
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates[0].data).toMatchObject({ id: 'f1', status: 'committed', deleted_at: null });
+  });
+
+  it('vetoes field-file tombstones when no gate callback is wired (fail closed)', async () => {
+    const engine = fakeEngine({ attachments: [], files: [] });
+    const s = storage();
+    const logger = silentLogger();
+    const guard = createSysFileReapGuard(engine, () => s, logger);
+
+    const confirmed = await guard('sys_file', [
+      { id: 'f1', key: 'user/f1.png', status: 'deleted', scope: 'user' },
+    ]);
+
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    // Kept tombstoned — the observed release stands; only deletion is withheld.
+    expect(engine.updates).toHaveLength(0);
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('files-to-references'));
+  });
+
+  it('vetoes field-file tombstones while the deployment gate is closed (flag regression)', async () => {
+    const engine = fakeEngine({ attachments: [], files: [] });
+    const s = storage();
+    const guard = createSysFileReapGuard(engine, () => s, silentLogger(), async () => false);
+
+    const confirmed = await guard('sys_file', [
+      { id: 'f1', key: 'user/f1.png', status: 'deleted', scope: 'user' },
+    ]);
+
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+  });
+
+  it('a failing gate read vetoes field files but never blocks attachment reaps', async () => {
+    const engine = fakeEngine({ attachments: [], files: [] });
+    const s = storage();
+    const guard = createSysFileReapGuard(engine, () => s, silentLogger(), async () => {
+      throw new Error('sys_migration unreadable');
+    });
+
+    const confirmed = await guard('sys_file', [
+      { id: 'f1', key: 'user/f1.png', status: 'deleted', scope: 'user' },
+      { id: 'a1', key: 'attachments/a1.bin', status: 'deleted', scope: 'attachments' },
+    ]);
+
+    expect(confirmed).toEqual(['a1']);
+    expect(s.delete).toHaveBeenCalledTimes(1);
+    expect(s.delete).toHaveBeenCalledWith('attachments/a1.bin');
+  });
+
+  it('reads the gate once per sweep batch', async () => {
+    const engine = fakeEngine({ attachments: [], files: [] });
+    const s = storage();
+    const isOpen = vi.fn(async () => true);
+    const guard = createSysFileReapGuard(engine, () => s, silentLogger(), isOpen);
+
+    await guard('sys_file', [
+      { id: 'f1', key: 'user/f1.png', status: 'deleted', scope: 'user' },
+      { id: 'f2', key: 'user/f2.png', status: 'deleted', scope: 'user' },
+      { id: 'f3', key: 'user/f3.png', status: 'deleted', scope: 'user' },
+    ]);
+
+    expect(isOpen).toHaveBeenCalledTimes(1);
   });
 
   it('confirms abandoned pending uploads with best-effort byte cleanup', async () => {

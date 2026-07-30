@@ -38,6 +38,8 @@ import type { INotificationService } from './notification-service';
 import type { IAIService } from './ai-service';
 import type { II18nService } from './i18n-service';
 import type { IWorkflowService } from './workflow-service';
+import type { ISecurityService } from './security-service';
+import type { IShareLinkService } from './share-link-service';
 
 /**
  * The evidenced slot → contract bindings.
@@ -86,3 +88,57 @@ export interface CoreServiceContracts {
  */
 export type CoreServiceContract<K extends string> =
     K extends keyof CoreServiceContracts ? CoreServiceContracts[K] : unknown;
+
+/**
+ * Every evidenced slot → contract binding, including slots that are **not**
+ * `CoreServiceName` members.
+ *
+ * [#4127 batch 3] `CoreServiceName` and this ledger answer two different
+ * questions, and conflating them is what left these slots untyped:
+ *
+ *  - **`CoreServiceName`** answers *"what happens at boot when this slot is
+ *    empty?"* — it sits beside `ServiceCriticality` and drives startup
+ *    orchestration and discovery. Adding a member changes runtime behaviour.
+ *  - **This ledger** answers *"what shape is whatever occupies this slot?"* —
+ *    pure type information, zero runtime effect.
+ *
+ * `security`, `shareLinks` and `objectql` need only the second. Widening the
+ * enum to type them would pay for a type answer with a runtime-vocabulary
+ * change, and enum members are effectively permanent once added. So the ledger
+ * extends past the enum instead, and each side keeps its own meaning.
+ *
+ * This is not a permanent split: if one of these is later promoted to a genuine
+ * core service — criticality semantics and all — its entry moves up into
+ * {@link CoreServiceContracts} and nothing else changes.
+ *
+ * The evidence bar is unchanged from {@link CoreServiceContracts}: an entry is a
+ * claim, made only where the binding is established.
+ */
+export interface ServiceSlotContracts extends CoreServiceContracts {
+    /**
+     * `plugin-security` registers it (`security-plugin.ts`), and
+     * `ISecurityService`'s own doc names the registration — `ctx.registerService('security', …)`.
+     * The contract, the provider and the three methods `domains/security.ts`
+     * calls all already agreed; only the binding was unwritten.
+     */
+    security: ISecurityService;
+    /** `plugin-sharing` registers `ShareLinkService`, which declares `implements IShareLinkService`. */
+    shareLinks: IShareLinkService;
+    /**
+     * An **alias of `data`**, not a second service: `packages/objectql`'s plugin
+     * registers the *same instance* under both names, two lines apart —
+     * `ctx.registerService('objectql', this.ql)` and
+     * `ctx.registerService('data', this.ql)  // ObjectQL implements IDataEngine`.
+     * `data` resolved to `IDataEngine` and `objectql` to `any`, for one object.
+     */
+    objectql: IDataEngine;
+}
+
+/**
+ * The contract for any evidenced slot `K` — core or not — or `unknown` when no
+ * binding has been evidenced. Same deliberate `unknown` as
+ * {@link CoreServiceContract}: `protocol` and `mcp` have no written contract, so
+ * they stay unmapped and visible rather than being given a shape nothing checks.
+ */
+export type ServiceSlotContract<K extends string> =
+    K extends keyof ServiceSlotContracts ? ServiceSlotContracts[K] : unknown;
