@@ -307,9 +307,11 @@ If server-side logic should never be reachable over HTTP at all, do not register
 it as an action — export a plain function and call it from your own code.
 `engine.registerAction` means "publish this on the HTTP and MCP surfaces".
 
-Migrating an app that has undeclared handlers? Boot logs list every one of them
-under `[action-governance]`, and `OS_ALLOW_UNDECLARED_ACTIONS=1` runs them
-(warning each time) while you add the declarations. That valve is removed in 18.
+Migrating an app that has undeclared handlers? Startup lists every one of them
+under `[action-governance]`, with the object and key to declare. There is no
+flag that runs them meanwhile — one would be the same ungoverned execution this
+rule exists to prevent — so declare each one, or drop the registration if
+nothing should invoke it over HTTP.
 </Callout>
 
 ## Expose it to AI (MCP)

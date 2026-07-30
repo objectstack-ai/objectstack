@@ -29,18 +29,6 @@ function actionParamsStrict(): boolean {
     return typeof process !== 'undefined' && process.env?.OS_ACTION_PARAMS_STRICT_ENABLED === '1';
 }
 
-/**
- * [ADR-0110 D3/D6] Migration valve for executing an action that has no
- * declaration. Enforcement is the DEFAULT and this opts OUT of it — the
- * direction matters: a security gate whose strictness is opt-in (as
- * `OS_ACTION_PARAMS_STRICT_ENABLED` is, acceptably, for a DX contract) ships
- * open for everyone who never read the release notes. `OS_ALLOW_*` is the
- * sanctioned shape for a security escape hatch; it warns on every invocation
- * and is slated for removal in 18.
- */
-export function undeclaredActionsAllowed(deps: ActionExecutionDeps): boolean {
-    return typeof process !== 'undefined' && process.env?.OS_ALLOW_UNDECLARED_ACTIONS === '1';
-}
 
 const _warnedActionParams = new Set<string>();
 function warnActionParamsOnce(key: string, message: string): void {

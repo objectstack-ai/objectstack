@@ -353,8 +353,7 @@ describe('REST /actions — script dispatch is unchanged (#3915 regression guard
     // [ADR-0110 D3] An UNDECLARED action used to run here, ungated — this test
     // asserted exactly that. A handler with no declaration has no
     // `requiredPermissions` to enforce, no param contract, and materialises no
-    // `action_<name>` tool, yet it executes TRUSTED; it now refuses. The valve
-    // test below is the only path that still runs it.
+    // `action_<name>` tool, yet it executes TRUSTED; it now refuses.
     it('refuses an UNDECLARED action with a prescriptive error instead of running it ungated', async () => {
         const { dispatcher, executeAction } = makeDispatcher({ objectDef: { name: 'crm_lead', actions: [] } });
 
@@ -363,24 +362,28 @@ describe('REST /actions — script dispatch is unchanged (#3915 regression guard
         expect(res.response.status).toBe(404);
         expect(res.response.body.error.message).toMatch(/has no declaration/i);
         expect(res.response.body.error.message).toMatch(/defineAction\(\{ name: 'handler_only'/);
-        expect(res.response.body.error.message).toMatch(/OS_ALLOW_UNDECLARED_ACTIONS=1/);
+        // The way out is the boot inventory, not a flag.
+        expect(res.response.body.error.message).toMatch(/\[action-governance\]/);
         expect(executeAction).not.toHaveBeenCalled();
     });
 
-    it('runs an UNDECLARED action when the migration valve is set, warning every time', async () => {
+    // The refusal has NO opt-out. A draft of ADR-0110 shipped
+    // `OS_ALLOW_UNDECLARED_ACTIONS` as a migration valve; it was dropped before
+    // 17 went out, because a flag that runs an ungoverned handler IS the
+    // fail-open the ruling closes. This pins that no environment variable
+    // resurrects the old behaviour — the failure a stale deployment script
+    // would otherwise produce is silent re-opening, not a loud error.
+    it('refuses regardless of the retired OS_ALLOW_UNDECLARED_ACTIONS flag', async () => {
         const prev = process.env.OS_ALLOW_UNDECLARED_ACTIONS;
         process.env.OS_ALLOW_UNDECLARED_ACTIONS = '1';
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {
             const { dispatcher, executeAction } = makeDispatcher({ objectDef: { name: 'crm_lead', actions: [] } });
 
             const res = await dispatcher.handleActions('/crm_lead/handler_only', 'POST', {}, ctxFor());
 
-            expect(executeAction).toHaveBeenCalledTimes(1);
-            expect(res.response.body.data.success).toBe(true);
-            expect(warn).toHaveBeenCalledWith(expect.stringMatching(/UNDECLARED action 'crm_lead\/handler_only'/));
+            expect(res.response.status).toBe(404);
+            expect(executeAction).not.toHaveBeenCalled();
         } finally {
-            warn.mockRestore();
             if (prev === undefined) delete process.env.OS_ALLOW_UNDECLARED_ACTIONS;
             else process.env.OS_ALLOW_UNDECLARED_ACTIONS = prev;
         }

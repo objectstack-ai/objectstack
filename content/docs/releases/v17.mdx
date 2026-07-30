@@ -188,11 +188,19 @@ Three changes land together:
 
 **Migration:** boot logs list every registered-but-undeclared handler under
 `[action-governance]`, alongside declared script actions bound to no handler.
-Declare each one. `OS_ALLOW_UNDECLARED_ACTIONS=1` runs them meanwhile, warning
-on every invocation; **it is removed in 18**. Apps whose actions are all
-declared — anything with working Console buttons — need no changes, other than
-gaining enforcement of the `requiredPermissions` they already declared. Callers
-that hard-coded a `target` in an action URL switch to the action's `name`.
+Declare each one with `defineAction`, or drop the registration if nothing should
+invoke it over HTTP. **There is no opt-out flag** — a switch that ran an
+ungoverned handler would be the same fail-open this change closes, and a sweep
+of the platform, every package and every example found zero undeclared handlers,
+so it would have shipped a way to reopen the gate for a case nobody has
+observed. The failure is bounded: the app still boots and every declared action
+still works; only an undeclared one returns 404, and it names the `defineAction`
+to add.
+
+Apps whose actions are all declared — anything with working Console buttons —
+need no changes, other than gaining enforcement of the `requiredPermissions`
+they already declared. Callers that hard-coded a `target` in an action URL
+switch to the action's `name`.
 
 ### A flow run with no trigger user may not touch data (#3760)
 
