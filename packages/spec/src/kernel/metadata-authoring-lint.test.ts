@@ -144,6 +144,82 @@ describe('the #4148 behaviours survive the generalization', () => {
   });
 });
 
+describe('nested descent (#4001 evidence phase)', () => {
+  // Before this the walk stopped at each item's top level plus a hard-coded
+  // hop into `object.fields`, leaving 227 strip-mode objects below those roots
+  // reporting nothing. These pin the four structural moves the descent makes
+  // and — just as importantly — the two cases where it must stay quiet.
+
+  it('reports inside a nested object', () => {
+    const [finding, ...rest] = lintUnknownAuthoringKeys({
+      objects: [{ name: 'o1', userActions: { zzz_nested: 1 } }],
+    });
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({
+      path: 'objects.o1.userActions.zzz_nested',
+      surface: 'object',
+      key: 'zzz_nested',
+    });
+  });
+
+  it('reports inside an array element, indexed by position', () => {
+    const [finding] = lintUnknownAuthoringKeys({
+      pages: [{ name: 'p1', regions: [{ name: 'r', zzz_nested: 1 }] }],
+    });
+    expect(finding).toMatchObject({ path: 'pages.p1.regions.0.zzz_nested', surface: 'page' });
+  });
+
+  it('carries the field surface through a record INTO its nested array', () => {
+    // The override is keyed on the path relative to the item root, so a record's
+    // author-chosen keys must not join that path — otherwise only the first
+    // field would resolve as `field`. This also proves the descent continues
+    // BELOW the override rather than stopping at it.
+    const [finding] = lintUnknownAuthoringKeys({
+      objects: [{
+        name: 'o2',
+        fields: { s: { type: 'select', options: [{ label: 'A', value: 'a', zzz_nested: 1 }] } },
+      }],
+    });
+    expect(finding).toMatchObject({
+      path: 'objects.o2.fields.s.options.0.zzz_nested',
+      surface: 'field',
+    });
+  });
+
+  it('stays silent where the nested parse is already strict', () => {
+    // A dashboard widget is .strict(); reporting here would double-report what
+    // the parse rejects loudly on its own.
+    expect(lintUnknownAuthoringKeys({
+      dashboards: [{ name: 'd1', widgets: [{ id: 'w', type: 'chart', zzz_nested: 1 }] }],
+    })).toEqual([]);
+  });
+
+  it('does not guess a union branch the author never picked', () => {
+    // `type: 'not_a_real_component'` matches no discriminator literal. Descending
+    // into an arbitrary member would invent findings against a shape nobody wrote.
+    expect(lintUnknownAuthoringKeys({
+      pages: [{ name: 'p1', regions: [{ name: 'r', components: [{ type: 'not_a_real_component', zzz_nested: 1 }] }] }],
+    })).toEqual([]);
+  });
+
+  it('still survives malformed nested input rather than throwing', () => {
+    for (const junk of [
+      { objects: [{ name: 'o', userActions: 'nope' }] },
+      { pages: [{ name: 'p', regions: 'nope' }] },
+      { pages: [{ name: 'p', regions: [null, 7, { name: 'r' }] }] },
+      { objects: [{ name: 'o', fields: { f: { type: 'select', options: 'nope' } } }] },
+    ]) {
+      expect(() => lintUnknownAuthoringKeys(junk)).not.toThrow();
+    }
+  });
+
+  it('keeps ignoring the underscore channel at depth', () => {
+    expect(lintUnknownAuthoringKeys({
+      pages: [{ name: 'p1', regions: [{ name: 'r', _provenance: 'x' }] }],
+    })).toEqual([]);
+  });
+});
+
 describe('top-level stack keys (#4167)', () => {
   const lint = (raw: unknown) => lintUnknownStackKeys(raw, ObjectStackDefinitionSchema);
 

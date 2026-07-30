@@ -213,13 +213,12 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 
 ## Next steps (verify-then-enforce, one shape at a time)
 
-1. The `@objectstack/lint` unknown-key WARNING layer: non-breaking, shippable
-   in a minor, and it extends AI-detectable coverage to every remaining
-   authorable site at once while accumulating evidence (which keys real
-   tenant projects actually carry) for a v18 strict close-out.
-2. Promote this ledger to a machine-checked gate (pattern of
+1. Promote this ledger to a machine-checked gate (pattern of
    `packages/spec/liveness/` + `check:liveness`) once enough of the surface is
    classified that the table above is enforceable rather than descriptive.
+2. Let the warning layer run in the wild for a release, then schedule the v18
+   strict close-out on what it actually reports — which is the whole point of
+   having built it. Nothing more to do here until there is field data.
 
 Done in step 2: `security/rls.zod.ts` + `security/sharing.zod.ts` strict;
 `PositionSchema` strict with the protection envelope declared (closing the
@@ -261,6 +260,37 @@ the parse with the contract that was already published, rather than widening it.
 the flip carried strictness INTO the JSON schema. It did not; approval's schema
 would have said `false` regardless. The registration-time rejection it describes
 is real, but it came from the published schema, not from the flip.)
+
+## The warning layer (was "next step 1" — it already existed)
+
+The `@objectstack/lint` unknown-key WARNING layer this list carried as a pending
+next step **had already been built** by the time the data step landed: #3786's
+`lintUnknownAuthoringKeys` plus #4167's `lintUnknownStackKeys`, exported from
+`@objectstack/spec` and wired into `defineStack()`, `os validate` and
+`os compile` as non-blocking warnings. Anyone reading this file for what to do
+next was being sent to build something that shipped releases ago.
+
+What was genuinely missing was **depth**, not existence. The walk covered each
+metadata item's top level plus one hard-coded descent into `object.fields`,
+which left 227 strip-mode objects nested below those roots reporting nothing —
+concentrated exactly where authoring volume is: `object` 71, `view` 49,
+`page` 24, `dashboard` 18, `agent` 16, `mapping` 14. Those sites were both
+silently eating keys AND contributing nothing to the evidence base the v18
+close-out is supposed to be scheduled on.
+
+The walk now descends the authored value alongside its schema through nested
+objects, arrays and records, applying the same posture rules (`strict` and
+`passthrough` stay silent; only `strip` reports). Unions descend only when the
+authored value picks a branch unambiguously — guessing would invent findings
+against a shape nobody wrote. `object.fields` keeps reporting as `field` with
+its curated guidance, now via an explicit override table rather than a special
+case, so its own nested sites (`fields.*.options[]`, …) are covered too.
+
+Audited after the change, since "our own assets are clean" has been wrong
+before: 43 platform objects + 3 apps + 1 dashboard + 3 pages, and both example
+apps (23 + 6 objects, 20 + 1 pages, 4 + 1 datasets, 3 + 1 dashboards) report
+**zero** unknown keys. No finding this time — worth recording precisely because
+the app step's `ACCOUNT_APP.defaultOpen` came from exactly this class of check.
 
 Long tail stays gated on a verification pass per shape — never a one-shot
 "make all ~453 sites strict" (ADR-0054 ratchet; #4001's own recommendation).
