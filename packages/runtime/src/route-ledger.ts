@@ -109,6 +109,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /discovery', domain: '/discovery', disposition: 'sdk', client: 'connect' },
 
   // ── analytics ─────────────────────────────────────────────────────────────
+  // Capability-conditional (#3891 follow-through): the plugin mounts these
+  // only when an `analytics` service is registered (or on a multi-tenant
+  // host). The ledger row is the SDK-expressibility claim, not a mount
+  // guarantee — see the header's "A ROW HERE IS NOT A WIRE GUARANTEE".
   { route: 'POST /analytics/query', domain: '/analytics', disposition: 'sdk', client: 'analytics.query' },
   { route: 'GET /analytics/meta', domain: '/analytics', disposition: 'sdk', client: 'analytics.meta',
     note: 'optional ?cube= filter honored server-side; was mismatch — the client called /meta/:cube, a shape no server ever mounted (#3584)' },

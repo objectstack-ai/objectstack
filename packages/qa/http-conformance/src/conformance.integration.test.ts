@@ -36,10 +36,29 @@ const ADAPTERS: AdapterCase[] = [
 /**
  * Boot the full HTTP stack (ObjectQL engine + REST generator + dispatcher
  * bridge) on the given adapter and return its base URL + kernel.
+ *
+ * `withAnalytics` (default true) registers a minimal in-memory `analytics`
+ * service so the capability-conditional `/analytics` routes mount (#3891
+ * follow-through) — the transport contracts under test (405 method mismatch,
+ * parity) need the routes to exist. Pass false to exercise the
+ * capability-absent posture: no mounts, shared 404.
  */
-async function bootStack(makePlugin: () => any) {
+async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean } = {}) {
     const kernel = new LiteKernel();
     kernel.use(new ObjectQLPlugin());
+    if (opts.withAnalytics !== false) {
+        kernel.use({
+            name: 'com.test.analytics-stub',
+            version: '0.0.0',
+            init: (c: any) => {
+                c.registerService('analytics', {
+                    query: async () => ({ rows: [], fields: [] }),
+                    getMeta: async () => ({ cubes: [] }),
+                    generateSql: async () => ({ sql: null, params: [] }),
+                });
+            },
+        } as any);
+    }
     kernel.use(makePlugin());
     kernel.use(createRestApiPlugin({
         api: {
@@ -161,11 +180,53 @@ describe.each(ADAPTERS)('IHttpServer conformance on $label adapter', ({ makePlug
     });
 
     it('405s a method mismatch with an Allow header', async () => {
-        // /api/v1/analytics/query is registered POST-only by the bridge.
+        // /api/v1/analytics/query is registered POST-only by the bridge —
+        // mounted here because bootStack registers the analytics stub
+        // (capability-conditional since #3891 follow-through).
         const res = await fetch(`${base}/api/v1/analytics/query`, { method: 'PUT' });
         expect(res.status).toBe(405);
         expect(res.headers.get('allow')).toContain('POST');
         expect((await res.json()).code).toBe('METHOD_NOT_ALLOWED');
+    });
+});
+
+/**
+ * [#3891 follow-through] Capability-conditional mounting: without an
+ * `analytics` service the routes are NOT mounted, so the path answers the
+ * adapter's shared not-found contract — for EVERY method. No 405 Allow hint
+ * may leak for an API that isn't there. Single adapter suffices: the
+ * conditional lives in the dispatcher plugin, above the adapter seam.
+ */
+describe('analytics capability-conditional mounting (no service installed)', () => {
+    let stack: { kernel: LiteKernel; base: string };
+
+    beforeAll(async () => {
+        stack = await bootStack(ADAPTERS[0].makePlugin, { withAnalytics: false });
+    }, 30_000);
+
+    afterAll(async () => {
+        if (stack?.kernel) {
+            await Promise.race([
+                stack.kernel.shutdown(),
+                new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+            ]);
+        }
+    }, 30_000);
+
+    it.each(['POST', 'PUT', 'GET'])('%s /api/v1/analytics/query answers the shared 404', async (method) => {
+        const res = await fetch(`${stack.base}/api/v1/analytics/query`, { method });
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: 'Not found' });
+    });
+
+    it('GET /api/v1/analytics/meta answers the shared 404 too', async () => {
+        const res = await fetch(`${stack.base}/api/v1/analytics/meta`);
+        expect(res.status).toBe(404);
+    });
+
+    it('a sibling dispatcher route is still mounted (the absence is analytics-scoped)', async () => {
+        const res = await fetch(`${stack.base}/api/v1/health`);
+        expect(res.status).toBe(200);
     });
 });
 

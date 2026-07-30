@@ -666,35 +666,67 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
 
             // ── Analytics ───────────────────────────────────────────────
+            // [#3891 follow-through / ADR-0076 D11] The /analytics wire
+            // surface exists only when the capability does. Phase-1 init has
+            // completed by the time this start() runs, so in single-kernel
+            // mode "is the `analytics` service registered" is authoritative:
+            // absent ⇒ the routes are NOT mounted and the path answers the
+            // adapter's shared not-found contract — no route-table entry, no
+            // 405 Allow hint for an API that isn't there. A multi-tenant host
+            // (kernel-resolver wired) mounts unconditionally: mounts are
+            // host-global while the analytics service lives in the per-project
+            // kernel, so presence is a per-request question — answered by the
+            // analytics domain's existing `handled:false` → 404.
+            //
             // Route via dispatch() (not handleAnalytics directly) so the host
-            // dispatcher's project-aware kernel swap runs first — the per-project
-            // kernel owns the `analytics` service (registered by ObjectQLPlugin).
-            server.post(`${prefix}/analytics/query`, async (req: any, res: any) => {
+            // dispatcher's project-aware kernel swap runs first — the
+            // per-project kernel owns the `analytics` service.
+            const analyticsInstalled = dispatcher.isMultiTenantHost() || await (async () => {
+                const k: any = kernel;
                 try {
-                    const result = await dispatcher.dispatch('POST', '/analytics/query', req.body, req.query, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
+                    if (k && typeof k.getServiceAsync === 'function') {
+                        const svc = await k.getServiceAsync('analytics').catch(() => undefined);
+                        if (svc) return true;
+                    }
+                    return !!k?.getService?.('analytics');
+                } catch {
+                    return false;
                 }
-            });
+            })();
 
-            server.get(`${prefix}/analytics/meta`, async (req: any, res: any) => {
-                try {
-                    const result = await dispatcher.dispatch('GET', '/analytics/meta', undefined, req.query, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
-                }
-            });
+            if (analyticsInstalled) {
+                server.post(`${prefix}/analytics/query`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', '/analytics/query', req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
 
-            server.post(`${prefix}/analytics/sql`, async (req: any, res: any) => {
-                try {
-                    const result = await dispatcher.dispatch('POST', '/analytics/sql', req.body, req.query, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
-                }
-            });
+                server.get(`${prefix}/analytics/meta`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/analytics/meta', undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                server.post(`${prefix}/analytics/sql`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', '/analytics/sql', req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            } else {
+                ctx.logger?.info?.(
+                    '[dispatcher] /analytics not mounted — no `analytics` service is registered. ' +
+                    'Install @objectstack/service-analytics to enable the analytics API.',
+                );
+            }
 
             // ── MCP (Streamable HTTP) + API keys (ADR-0036) ─────────────
             // Mounted explicitly (there is no catch-all) and routed through

@@ -283,6 +283,19 @@ export class HttpDispatcher {
     };
 
     /**
+     * Whether this dispatcher serves a multi-tenant host (a `kernel-resolver`
+     * is wired, so each request may resolve to a different per-project
+     * kernel). Consulted by the dispatcher plugin's capability-conditional
+     * route mounting (#3891 follow-through): on a multi-tenant host, route
+     * mounts are host-global while optional services live per project kernel,
+     * so "is the capability installed" is a per-request question the domain
+     * handler answers — never a mount-time one.
+     */
+    isMultiTenantHost(): boolean {
+        return !!this.kernelResolver;
+    }
+
+    /**
      * ADR-0076 D11 step ③ — seed the domain registry with the domains lifted
      * out of the `dispatch()` if-chain. Bodies of the four service-backed
      * domains live under `./domains/` (PR-2); `/health` + `/ready` stay
