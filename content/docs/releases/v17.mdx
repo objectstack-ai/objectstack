@@ -304,6 +304,42 @@ model), while `url` platform-wide means an HTTP endpoint to call (`http` node,
 webhooks). The singular `input` on `map` / `subflow` / `connector_action` is
 those nodes' own canonical key and is untouched.
 
+### Flow and permission schemas reject unknown keys (#4001)
+
+Zod's default is `.strip`: a key a schema does not declare is silently
+discarded and the instance keeps parsing. On an authorable surface that is the
+worst failure mode — the author (human or AI) gets a success envelope and
+ships metadata that quietly ignores their config; that is exactly how a
+correctly intended action-param `reference: 'sys_user'` degraded into a
+paste-a-UUID text box (#3405). 17.0 extends #3746's strictness from that one
+schema to the two highest-risk authorable surfaces, per the triage in
+`docs/audits/2026-07-unknown-key-strictness-ledger.md`:
+
+- **Permission sets** — `PermissionSetSchema`, `ObjectPermissionSchema`,
+  `FieldPermissionSchema`, `AdminScopeSchema`. A silently dropped key on the
+  capability container meant the author believed a grant or restriction was in
+  place that the runtime never saw. The response-side
+  `EffectiveObjectPermissionSchema` stays wire-tolerant.
+- **Flows** — `FlowSchema`, `FlowNodeSchema`, `FlowEdgeSchema`,
+  `FlowVariableSchema`. A node's `config` stays an **open** record: it is
+  per-node-type, owned by the executor's `configSchema` and the conversion
+  layer (see the alias table above).
+
+Every rejection is written to be self-fixing: it names the offending key and,
+where recognisable, the canonical spelling (`steps` → `nodes`, edge
+`from`/`to` → `source`/`target`, `read` → `allowRead`, `tabs` →
+`tabPermissions`), a wrong-layer pointer (a flow-level `objectName` belongs on
+the start node's `config`; `apiOperations` is response-side only), or a
+retired-key tombstone (`contextVariables` → ADR-0105 D11's `rlsMembership`
+resolvers; `isProfile` → `isDefault`, ADR-0090 D2).
+
+Migration is by construction behavior-preserving: any key now rejected was
+previously stripped, so it never had a runtime effect — remove it or rename it
+to the canonical key the error suggests; nothing about a working app changes.
+One gap the gate itself caught: `PermissionSetSchema` gains the previously
+unrepresentable-but-consumed **`description`** key (persisted to
+`sys_permission_set.description`, shown in Setup).
+
 ### `agent.tools[]` is removed — capability comes from skills (ADR-0109, #3820)
 
 ADR-0064's invariant is "an agent's tool set is the union of its

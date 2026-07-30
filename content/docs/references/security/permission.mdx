@@ -127,6 +127,7 @@ const result = AdminScope.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Permission set unique name (lowercase snake_case) |
 | **label** | `string` | optional | Display label |
+| **description** | `string` | optional | Human-readable description shown in Setup (persisted as sys_permission_set.description) |
 | **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored) |
 | **managedBy** | `Enum<'package' \| 'platform' \| 'user'>` | optional | [ADR-0086 D3] Record provenance: package (upgrade-owned metadata) vs platform/user (env config) |
 | **isDefault** | `boolean` | ✅ | [ADR-0090 D5] App baseline for the everyone position: app-level sets are auto-bound at boot (guarded, idempotent); package-level sets become install-time suggestions an admin confirms |

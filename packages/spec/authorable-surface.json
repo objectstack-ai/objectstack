@@ -5721,6 +5721,7 @@
     "security/ObjectPermission:viewAllRecords",
     "security/ObjectPermission:writeScope",
     "security/PermissionSet:adminScope",
+    "security/PermissionSet:description",
     "security/PermissionSet:fields",
     "security/PermissionSet:isDefault",
     "security/PermissionSet:label",
