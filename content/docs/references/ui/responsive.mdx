@@ -16,8 +16,8 @@ Standard Tailwind-style breakpoint names (xs–2xl).
 ## TypeScript Usage
 
 ```typescript
-import { BreakpointColumnMap, BreakpointName, BreakpointOrderMap, PerformanceConfig, ResponsiveConfig, ResponsiveStyles, StyleMap } from '@objectstack/spec/ui';
-import type { BreakpointColumnMap, BreakpointName, BreakpointOrderMap, PerformanceConfig, ResponsiveConfig, ResponsiveStyles, StyleMap } from '@objectstack/spec/ui';
+import { BreakpointColumnMap, BreakpointName, BreakpointOrderMap, ResponsiveConfig, ResponsiveStyles, StyleMap } from '@objectstack/spec/ui';
+import type { BreakpointColumnMap, BreakpointName, BreakpointOrderMap, ResponsiveConfig, ResponsiveStyles, StyleMap } from '@objectstack/spec/ui';
 
 // Validate data
 const result = BreakpointColumnMap.parse(data);
@@ -71,24 +71,6 @@ Display order per breakpoint
 | **lg** | `number` | optional |  |
 | **xl** | `number` | optional |  |
 | **2xl** | `number` | optional |  |
-
-
----
-
-## PerformanceConfig
-
-Performance optimization configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **lazyLoad** | `boolean` | optional | Enable lazy loading (defer rendering until visible) |
-| **virtualScroll** | `{ enabled: boolean; itemHeight?: number; overscan?: number }` | optional | Virtual scrolling configuration |
-| **cacheStrategy** | `Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>` | optional | Client-side data caching strategy |
-| **prefetch** | `boolean` | optional | Prefetch data before component is visible |
-| **pageSize** | `number` | optional | Number of items per page for pagination |
-| **debounceMs** | `number` | optional | Debounce interval for user interactions in milliseconds |
 
 
 ---

@@ -598,10 +598,25 @@ export const ActionSchema = lazySchema(() => z.object({
   requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there.'),
 
   /** Keyboard Shortcut */
-  shortcut: z.string().optional().describe('Keyboard shortcut to trigger this action (e.g., "Ctrl+S")'),
-
-  /** Bulk Operations */
-  bulkEnabled: z.boolean().optional().describe('Whether this action can be applied to multiple selected records'),
+  // `shortcut` and `bulkEnabled` REMOVED by the 2026-07 #3896 audit close-out —
+  // both were authorable capability claims nothing enforced (ledger: dead,
+  // #3686 re-verification): ActionEngine registered them but no keydown path
+  // ever dispatched a shortcut, and the multi-select toolbar reads the LIST
+  // VIEW's bulkActions, never this flag. Tombstoned with the prescription;
+  // `action-inert-keys-removed` strips them from authored sources.
+  shortcut: retiredKey(
+    '`action.shortcut` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    'it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and ' +
+    "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
+    'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
+    'keyboard stack and have its handler invoke the action by name.',
+  ),
+  bulkEnabled: retiredKey(
+    '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
+    'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
+    "in the view's `bulkActions` instead.",
+  ),
 
   /**
    * AI exposure block (ADR-0011). Opt-in, default off: an action is exposed

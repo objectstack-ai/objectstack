@@ -76,7 +76,9 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
   the capabilities-descriptor cluster, `FeatureFlagSchema`, `SkillSchema.permissions`,
   `tool.requiresConfirmation`, `agent.tools[]`, `object.enable.trash`/`mru`,
   report `aria`/`performance`, `DEFAULT_DISPATCHER_ROUTES`, the four inert tool
-  authoring keys (`category`/`permissions`/`active`/`builtIn`) and the last three
+  authoring keys (`category`/`permissions`/`active`/`builtIn`), the close-out
+  sweep across action/flow/view/dashboard/agent/skill (fourteen more inert
+  keys, `flow.active` and `agent.knowledge` among them) and the last three
   deprecated authorable aliases are removed — each one had been parsed and
   ignored.
 
@@ -242,7 +244,7 @@ swallows flow errors.
 |---|---|---|
 | `action.execute` | `action.target` | unchanged |
 | `field.conditionalRequired` | `field.requiredWhen` | unchanged |
-| `agent.knowledge.topics` | `agent.knowledge.sources` | unchanged |
+| `agent.knowledge.topics` | ~~`agent.knowledge.sources`~~ → the whole `knowledge` block was later removed (#3896 close-out — see the dead-cluster table) | — |
 
 All three are pure key renames — each alias was already lowered into its
 canonical key at parse time, so what shrinks is the authorable surface, not the
@@ -263,7 +265,8 @@ three plus every earlier step you skipped. Manual alternative: rename the key.
 + fields: { due_date: { type: 'date', requiredWhen: 'record.stage == "closed"' } }
 
 - knowledge: { topics: ['faq', 'policies'], indexes: ['docs'] }
-+ knowledge: { sources: ['faq', 'policies'], indexes: ['docs'] }
++ (delete the block — `agent.knowledge` was removed outright in the #3896
++  close-out: declaring sources never scoped retrieval)
 ```
 
 Each removed key is **tombstoned** as `never` rather than simply deleted, so
@@ -681,6 +684,12 @@ import or the authored key.
 | `DynamicLoadingConfig` / `PluginDiscoveryConfig` / `PluginDiscoverySource` | promised plugin sandboxing / integrity verification / source allow-listing / load approval; none of it was ever wired (#3950) |
 | `RowLevelSecurityPolicy.priority` | conflict-resolution semantics that cannot exist under OR-combination (#3990) |
 | `tool.category` / `.permissions` / `.active` / `.builtIn` (+ `ToolCategorySchema`) | authorable and inert — `permissions` gated nothing, `active: false` withdrew nothing; strict-rejected with prescriptions (#3896 close-out) |
+| `action.shortcut` / `.bulkEnabled` | no keydown path dispatches shortcuts; the multi-select toolbar reads the view's `bulkActions` (#3896 close-out) |
+| `flow.active` / `.template` / node `outputSchema` / `errorHandling.fallbackNodeId` | `active: false` never stopped a flow — `status` is the enforced lifecycle; faults route via per-node fault edges (#3896 close-out) |
+| view: list `responsive`/`performance`, form `data`/`defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` stay live (#3896 close-out) |
+| `dashboard.aria` / `.performance` / widget `performance` (+ `PerformanceConfigSchema`) | no renderer applied them; virtual scrolling is the live top-level `virtualScroll` (#3896 close-out) |
+| `agent.knowledge` (+ `AIKnowledgeSchema`) | declaring sources/indexes never scoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's tool-call arguments (#3896 close-out) |
+| `skill.triggerPhrases` | phrases were never matched; activation is `triggerConditions` + the agent's `skills[]` allowlist (#3896 close-out) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
 | `ChartInteraction.zoom` / `.clickAction` | never implemented (#3752) |
@@ -1024,7 +1033,7 @@ objectui commits on top of the pin 16.1.0 shipped.
   six remain. Watch for a legacy-only whitelist stripping to deny-all.
 - **Metadata renames:** run `os migrate meta --from <your current major>` — it
   applies `execute`→`target`, `conditionalRequired`→`requiredWhen`,
-  `knowledge.topics`→`knowledge.sources`, sharing `full`→`edit`, and every
+  the retired-key deletions (`os migrate meta` handles all of them), sharing `full`→`edit`, and every
   earlier step you skipped, in one pass.
 - **Flows:** declare `runAs: 'system'` on any flow that reacts to system writes
   and must act beyond one user's grants; otherwise ensure the trigger supplies a
@@ -1053,6 +1062,12 @@ objectui commits on top of the pin 16.1.0 shipped.
   metadata (`os migrate meta` does it; none ever had an effect). To gate a tool,
   gate the underlying action (`action.requiredPermissions`); to withdraw one,
   remove it from the skills/agents that reference it.
+- **Close-out sweep:** run `os migrate meta` once more — it also strips
+  `action.shortcut`/`bulkEnabled`, `flow.active`/`template`/node
+  `outputSchema`/`errorHandling.fallbackNodeId`, the inert view keys,
+  dashboard/widget `aria`/`performance`, `agent.knowledge` and
+  `skill.triggerPhrases`. If you set `flow.active: false` expecting a flow to
+  stop, set `status: 'obsolete'` — the flag never worked.
 - **Required fields:** run `os migrate meta` — it stamps
   `storage: { notNull: true }` onto every pre-17 `required: true` field so your
   columns keep their exact constraints. New fields: `required: true` alone

@@ -411,11 +411,22 @@ const step17: MigrationStep = {
     'real caller already sends; the schema tombstones `query`/`format`, and the ' +
     'dispatcher entry validates bodies and answers 400 with the prescription. No ' +
     'stored metadata carries this shape (it was HTTP-only), so the change is two ' +
-    'semantic TODOs for API callers rather than a stack conversion.',
+    'semantic TODOs for API callers rather than a stack conversion.\n\n' +
+    'The close-out sweep finishes the enforce-or-remove worklist across the ' +
+    'remaining types: action `shortcut`/`bulkEnabled` (no keydown path; the ' +
+    "multi-select toolbar reads the view's bulkActions), flow `active`/`template`/" +
+    'node `outputSchema`/errorHandling `fallbackNodeId` (`active: false` never ' +
+    'stopped a flow — `status` is the enforced lifecycle; faults route via ' +
+    'per-node fault edges), the inert view keys (list `responsive`/`performance`, ' +
+    'form `data`/`defaultSort`/`aria` — list aria/data stay live), dashboard and ' +
+    'widget `aria`/`performance`, `agent.knowledge` (declaring sources never ' +
+    'scoped retrieval — absorbs the former topics→sources rename), and ' +
+    "`skill.triggerPhrases` (phrases were never matched; routing is " +
+    'triggerConditions + the agent allowlist). All pure lossless deletes, each ' +
+    'tombstoned at its schema with the prescription.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
-    'agent-knowledge-topics-to-sources',
     'agent-tools-to-skills',
     'sharing-rule-access-level-full-to-edit',
     'flow-node-crud-object-alias',
@@ -424,6 +435,12 @@ const step17: MigrationStep = {
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',
     'field-required-notnull-explicit',
+    'action-inert-keys-removed',
+    'flow-inert-keys-removed',
+    'view-inert-keys-removed',
+    'dashboard-inert-keys-removed',
+    'agent-knowledge-removed',
+    'skill-trigger-phrases-removed',
   ],
   semantic: [
     {

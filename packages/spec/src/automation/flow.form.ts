@@ -20,7 +20,8 @@ export const flowForm = defineForm({
         { field: 'name', required: true, colSpan: 1, helpText: 'Unique identifier (snake_case)' },
         { field: 'label', required: true, colSpan: 1, helpText: 'Display name for users' },
         { field: 'type', required: true, colSpan: 1, helpText: 'How the flow starts (autolaunched, record_change, schedule, screen, api)' },
-        { field: 'template', colSpan: 1, helpText: 'Is this a reusable subflow (can be called from other flows)' },
+        // `template` input removed with the key (#3896 close-out): no designer or
+        // engine path read it — subflows are invoked via a subflow NODE by name.
         { field: 'description', widget: 'textarea', colSpan: 2, helpText: 'What this flow does' },
       ],
     },

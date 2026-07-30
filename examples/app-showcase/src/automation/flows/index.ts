@@ -587,7 +587,6 @@ export const NotifyOwnerSubflow = defineFlow({
   label: 'Notify Owner (reusable subflow)',
   description: 'Reusable subflow: notifies a record owner. Invoked by other flows via a subflow node.',
   type: 'autolaunched',
-  template: true,
   variables: [
     { name: 'ownerId', type: 'text', isInput: true },
     { name: 'message', type: 'text', isInput: true },
@@ -672,7 +671,6 @@ export const ClosureSignoffSubflow = defineFlow({
   label: 'Closure Sign-off (approval subflow)',
   description: 'Reusable subflow: requests a manager sign-off and outputs the decision. Demonstrates approval inside a subflow (nested durable pause).',
   type: 'autolaunched',
-  template: true,
   variables: [
     { name: 'reason', type: 'text', isInput: true },
     { name: 'decision', type: 'text', isOutput: true },
@@ -1183,7 +1181,6 @@ export const OneTaskSignoffSubflow = defineFlow({
   label: 'One Task Sign-off (per-item subflow)',
   description: 'Reusable subflow: requests sign-off on a single task. Invoked per item by the batch sign-off map.',
   type: 'autolaunched',
-  template: true,
   variables: [{ name: 'decision', type: 'text', isOutput: true }],
   nodes: [
     { id: 'start', type: 'start', label: 'Start' },

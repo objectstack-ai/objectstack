@@ -212,12 +212,12 @@ Column footer summary configuration
 | **sections** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
-| **defaultSort** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Default sort order for related list views within this form |
+| **defaultSort** | `any` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior |
 | **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
-| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the form view |
+| **aria** | `any` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. |
 
 
 ---
@@ -411,8 +411,8 @@ List chart view configuration
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string; message?: string; icon?: string }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `{ breakpoint?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>; hiddenOn?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]; columns?: object; order?: object }` | optional | Responsive layout configuration |
-| **performance** | `{ lazyLoad?: boolean; virtualScroll?: object; cacheStrategy?: Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>; prefetch?: boolean; … }` | optional | Performance optimization settings |
+| **responsive** | `any` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. |
+| **performance** | `any` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. |
 
 
 ---
@@ -499,8 +499,8 @@ List chart view configuration
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string; message?: string; icon?: string }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `{ breakpoint?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>; hiddenOn?: Enum<'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| '2xl'>[]; columns?: object; order?: object }` | optional | Responsive layout configuration |
-| **performance** | `{ lazyLoad?: boolean; virtualScroll?: object; cacheStrategy?: Enum<'none' \| 'cache-first' \| 'network-first' \| 'stale-while-revalidate'>; prefetch?: boolean; … }` | optional | Performance optimization settings |
+| **responsive** | `any` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. |
+| **performance** | `any` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: { field: string; label?: string; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: { value: string \| number \| boolean; label: string; color?: string }[]; … }[] }` | optional |  |
 
 

@@ -132,13 +132,14 @@ ADR-0113 splits the `required` tri-binding: post-17, `required` is ONLY the writ
 
 On the wire contract it also retires the `/analytics/query` request ENVELOPE (#3878): `AnalyticsQueryRequestSchema` used to describe `{ cube, query: {...}, format }` — the dialect of the retired degraded analytics shim (#3891) that the real engine never understood (an envelope body inferred a column-less cube and died as an SQL syntax error). The canonical request body is now the BARE AnalyticsQuery — `cube` + `measures` at the top level — which is what every real caller already sends; the schema tombstones `query`/`format`, and the dispatcher entry validates bodies and answers 400 with the prescription. No stored metadata carries this shape (it was HTTP-only), so the change is two semantic TODOs for API callers rather than a stack conversion.
 
+The close-out sweep finishes the enforce-or-remove worklist across the remaining types: action `shortcut`/`bulkEnabled` (no keydown path; the multi-select toolbar reads the view's bulkActions), flow `active`/`template`/node `outputSchema`/errorHandling `fallbackNodeId` (`active: false` never stopped a flow — `status` is the enforced lifecycle; faults route via per-node fault edges), the inert view keys (list `responsive`/`performance`, form `data`/`defaultSort`/`aria` — list aria/data stay live), dashboard and widget `aria`/`performance`, `agent.knowledge` (declaring sources never scoped retrieval — absorbs the former topics→sources rename), and `skill.triggerPhrases` (phrases were never matched; routing is triggerConditions + the agent allowlist). All pure lossless deletes, each tombstoned at its schema with the prescription.
+
 ### Mechanical (applied for you)
 
 | Conversion | Surface | Change | Load window |
 |---|---|---|---|
 | `action-execute-to-target` | `action.execute` | action key 'execute' → 'target' (the deprecated handler alias, #3713) | retired — `migrate meta` only |
 | `field-conditionalRequired-to-requiredWhen` | `field.conditionalRequired` | field key 'conditionalRequired' → 'requiredWhen' (the deprecated predicate alias, #3754) | retired — `migrate meta` only |
-| `agent-knowledge-topics-to-sources` | `agent.knowledge.topics` | agent knowledge key 'topics' → 'sources' (the deprecated RAG-source alias, #1891) | retired — `migrate meta` only |
 | `agent-tools-to-skills` | `agent.tools` | agent key 'tools' removed — declare capability in a skill (ADR-0064, #3894) | retired — `migrate meta` only |
 | `sharing-rule-access-level-full-to-edit` | `sharingRule.accessLevel` | sharing-rule accessLevel 'full' → 'edit' (#3865 — `full` never granted more than `edit`) | live — protocol 17 loader accepts the old shape |
 | `flow-node-crud-object-alias` | `flow.node.config.objectName` | CRUD flow-node config key 'object' → 'objectName' (#3796 — `readAliasedConfig` shim graduation) | live — protocol 17 loader accepts the old shape |
@@ -147,6 +148,12 @@ On the wire contract it also retires the `/analytics/query` request ENVELOPE (#3
 | `permission-rls-priority-removed` | `permission.rowLevelSecurity.priority` | RLS-policy key 'priority' removed (#3896 audit — policies OR-combine, so the promised conflict-resolution semantics cannot exist; dropping it changes no outcome) | retired — `migrate meta` only |
 | `tool-inert-authoring-keys-removed` | `tool.category / tool.permissions / tool.active / tool.builtIn` | tool keys 'category'/'permissions'/'active'/'builtIn' removed (#3896 close-out — authorable and inert; permissions gated nothing, active:false withdrew nothing) | retired — `migrate meta` only |
 | `field-required-notnull-explicit` | `object.fields.*.required / object.fields.*.storage.notNull` | required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract) | retired — `migrate meta` only |
+| `action-inert-keys-removed` | `action.shortcut / action.bulkEnabled` | action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions) | retired — `migrate meta` only |
+| `flow-inert-keys-removed` | `flow.active / flow.template / flow.nodes[].outputSchema / flow.errorHandling.fallbackNodeId` | flow keys 'active'/'template', node 'outputSchema' and errorHandling 'fallbackNodeId' removed (#3896 close-out — active:false never stopped a flow; status is the enforced lifecycle) | retired — `migrate meta` only |
+| `view-inert-keys-removed` | `view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria` | view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live) | retired — `migrate meta` only |
+| `dashboard-inert-keys-removed` | `dashboard.aria / dashboard.performance / dashboard.widgets[].performance` | dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them) | retired — `migrate meta` only |
+| `agent-knowledge-removed` | `agent.knowledge` | agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level) | retired — `migrate meta` only |
+| `skill-trigger-phrases-removed` | `skill.triggerPhrases` | skill key 'triggerPhrases' removed (#3896 close-out — activation is triggerConditions + the agent's skills[] allowlist; phrases were a dead-end projection) | retired — `migrate meta` only |
 
 ### Semantic (delegated to you, with acceptance criteria)
 

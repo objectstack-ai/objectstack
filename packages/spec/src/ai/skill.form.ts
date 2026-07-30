@@ -36,7 +36,8 @@ export const skillForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'triggerPhrases', widget: 'string-tags', helpText: 'Natural language phrases that activate this skill' },
+        // `triggerPhrases` input removed with the key (#3896 close-out): phrases
+        // were never matched; routing is triggerConditions + the agent allowlist.
         { field: 'triggerConditions', type: 'repeater', helpText: 'Programmatic conditions (e.g., objectName == "case")' },
       ],
     },
