@@ -23,6 +23,7 @@
  * plugin wires those pieces up.
  */
 
+import type { FieldError } from '@objectstack/spec/api';
 import type { SettingsActionResult, SpecifierScope } from '@objectstack/spec/system';
 import { type CryptoAdapter } from './crypto-adapter.js';
 
@@ -267,19 +268,29 @@ export class SettingsForbiddenError extends Error {
 /**
  * Thrown when a write would leave the namespace in an invalid state —
  * a `required` field that is visible under the post-write values is
- * empty (e.g. provider=cloudflare saved without an API key). The whole
- * batch is rejected; `fields` maps each offending key to a message the
- * UI can render inline.
+ * empty (e.g. provider=cloudflare saved without an API key), or a value
+ * that does not match its specifier's declared `pattern`. The whole
+ * batch is rejected; `fields` carries one entry per offending key, which
+ * the UI can render inline against the input it addresses.
+ *
+ * `fields` is `FieldError[]` — the field-level vocabulary ADR-0114 closed
+ * (#3977) — rather than the `Record<key, message>` map it was until #4224.
+ * The map predated that catalog and named the constraint only in prose, so
+ * a consumer could render the sentence but not branch on *which* constraint
+ * failed; `code` (`required` / `invalid_format`) now says it in the one
+ * spelling every other validator in the platform uses. `label` and
+ * `constraint` carry what the message interpolates, so a form can compose
+ * its own text instead of parsing ours.
  */
 export class SettingsValidationError extends Error {
   readonly code = 'SETTINGS_VALIDATION' as const;
   constructor(
     readonly namespace: string,
-    readonly fields: Record<string, string>,
+    readonly fields: FieldError[],
   ) {
     super(
       `Settings for '${namespace}' are incomplete: ` +
-        Object.entries(fields).map(([k, msg]) => `${k} — ${msg}`).join('; '),
+        fields.map((f) => `${f.field} — ${f.message}`).join('; '),
     );
   }
 }
