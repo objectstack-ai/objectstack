@@ -27,11 +27,11 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // #4148 covered object+field: 2 surfaces. The point of this walker is the
     // rest. If the derivation regresses to a handful, the "evidence base" for
     // the #4001 strict tiers quietly becomes a sample again.
-    expect(lintables.length).toBeGreaterThanOrEqual(15);
+    expect(lintables.length).toBeGreaterThanOrEqual(14);
     // `view` matters doubly: it is a UNION (container | ViewItem | overlay), so
     // its presence pins the union half of the posture logic — a regression that
     // silently dropped unions would shrink coverage without failing the count.
-    for (const expected of ['object', 'page', 'agent', 'dashboard', 'action', 'report', 'hook', 'view']) {
+    for (const expected of ['object', 'page', 'agent', 'dashboard', 'action', 'report', 'view']) {
       expect(lintableTypes, `expected '${expected}' to be lint-covered`).toContain(expected);
     }
   });
@@ -42,7 +42,11 @@ describe('coverage derivation (#3786 — no third hand-written list)', () => {
     // `app` graduated mid-flight (#4165) while this very test was in review:
     // the derivation adapted on its own, and the pinned expectation above is
     // what forced a human to confirm the shrink was a graduation, not a bug.
-    for (const strict of ['flow', 'permission', 'position', 'tool', 'app']) {
+    // It did that job again for `hook` + `datasource` (#4001 data step): the
+    // count fell 16 → 14 and the pin above failed until both were confirmed
+    // graduations and moved into this list. `hook` also had to leave the
+    // pinned-coverage list above, where it had been an expected lint target.
+    for (const strict of ['flow', 'permission', 'position', 'tool', 'app', 'hook', 'datasource']) {
       expect(lintableTypes, `'${strict}' is .strict(); the lint must not double-report`).not.toContain(strict);
     }
   });

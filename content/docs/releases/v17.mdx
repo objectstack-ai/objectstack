@@ -358,6 +358,38 @@ schema to the two highest-risk authorable surfaces, per the triage in
   schema carries `additionalProperties: false` into the Studio form and
   `registerFlow()` config validation, so a mis-keyed approval `config` is
   rejected at registration too.
+- **Hooks** — `HookSchema`, its `retryPolicy`, and both hook-body branches
+  (`expression` and `js`). A body was the worst place to lose a key quietly: a
+  misspelt `capabilities` stripped to the empty default and the sandbox then
+  threw at *invocation* time, on whichever code path first touched `ctx.api` —
+  far from the typo. A misspelt `timeoutMs`/`memoryMb` silently downgraded the
+  body to the enclosing hook's looser limits. Two near-miss spellings now carry
+  aliases because they are genuinely easy to cross: hook-level `timeout` vs
+  body-level `timeoutMs`, and hook `retryPolicy.backoffMs` vs datasource
+  `retryPolicy.baseDelayMs`. `HookContextSchema` — the runtime shape the engine
+  hands your handler — stays tolerant and always will.
+- **Datasources** — `DatasourceSchema` with its `pool` / `healthCheck` / `ssl` /
+  `retryPolicy` blocks, the ADR-0015 `external` federation settings and their
+  `validation` policy, `DatasourceCapabilities`, and `DriverDefinitionSchema`.
+  `config` and `readReplicas` stay **open** records: their shape is per-driver
+  and the driver's own `configSchema` validates them. That openness is why the
+  top level had to close — a connection key written one level too high (`host`
+  next to `driver` instead of inside `config`) was stripped, and the datasource
+  then connected on driver defaults rather than failing. Those keys now
+  prescribe the move into `config`; a top-level `password` is instead pointed at
+  `external.credentialsRef`, because relocating an inlined secret is not the fix.
+  A dropped key in `capabilities` was quieter still: an unregistered capability
+  reads as `false`, so the engine stopped pushing that work down to the driver
+  and recomputed it in memory.
+
+One clarification, since these flips are easy to over-read: making a schema
+strict does **not** change its published JSON Schema. `build-schemas.ts`
+converts with `io: 'output'`, and in output mode zod emits
+`additionalProperties: false` for a `.strip()` object too — the post-parse shape
+genuinely has no extra keys. So the JSON Schema was already advertising
+`additionalProperties: false` while the zod parse quietly accepted and discarded
+unknown keys. These flips align the parse with the contract that was already
+published; they do not widen it.
 
 Every rejection is written to be self-fixing: it names the offending key and,
 where recognisable, the canonical spelling (`steps` → `nodes`, edge
