@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { createMemoryMetadata } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 
 describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => {
@@ -144,6 +145,40 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.services.metadata.status).toBe('available');
     expect(discovery.services.data.enabled).toBe(true);
     expect(discovery.services.data.status).toBe('available');
+  });
+
+  // #4089 — `metadata` was in the hardcoded kernel block, so it reported
+  // `available` even when the slot held the kernel's in-memory fallback: a
+  // registry that never reaches disk read exactly like a sys_metadata-backed
+  // one. The slot is now computed from the implementation's own D12
+  // self-description, like every optional service below it.
+  it('should report the kernel in-memory metadata fallback as degraded, never available', async () => {
+    const mockServices = new Map<string, any>();
+    mockServices.set('metadata', createMemoryMetadata());
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
+    expect(discovery.services.metadata.enabled).toBe(true);
+    expect(discovery.services.metadata.status).toBe('degraded');
+    // The message names what is missing and what to install for the real thing.
+    expect(discovery.services.metadata.message).toContain('MetadataPlugin');
+    // Still served: `/api/v1/meta` is the protocol's route, not this service's.
+    expect(discovery.services.metadata.handlerReady).toBe(true);
+    expect(discovery.services.metadata.route).toBe('/api/v1/meta');
+    expect(discovery.routes.metadata).toBe('/api/v1/meta');
+  });
+
+  it('should report an unmarked (real) metadata service as available', async () => {
+    const mockServices = new Map<string, any>();
+    mockServices.set('metadata', { register: async () => {}, list: async () => [] });
+
+    protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
+    const discovery = await protocol.getDiscovery();
+
+    expect(discovery.services.metadata.status).toBe('available');
+    expect(discovery.services.metadata.message).toBeUndefined();
+    expect(discovery.services.metadata.handlerReady).toBe(true);
   });
 
   // #3891 — the degraded ObjectQL fallback is retired. Analytics is an
