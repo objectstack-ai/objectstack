@@ -903,6 +903,7 @@ import or the authored key.
 | view: list `responsive`/`performance`, form `defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` **and form `data`** stay live — `defineForm` writes `data: { provider: 'schema', schemaId }` onto every metadata form (#3896 close-out) |
 | `dashboard.aria` / `.performance` / widget `performance` (+ `PerformanceConfigSchema`) | no renderer applied them; virtual scrolling is the live top-level `virtualScroll` (#3896 close-out) |
 | `agent.knowledge` (+ `AIKnowledgeSchema`) | declaring sources/indexes never scoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's tool-call arguments (#3896 close-out) |
+| `PluginLifecycleSchema` (`onInstall`/`onEnable`/`onDisable`/`onUninstall`/`onUpgrade`) + `UpgradeContextSchema` + the `ObjectStackPlugin` interface family (`@objectstack/spec/system`) | a plugin lifecycle the kernel never implemented — the real contract is `init`/`start`/`destroy`; code written against the hooks silently never ran (#4212) |
 | `skill.triggerPhrases` | phrases were never matched; activation is `triggerConditions` + the agent's `skills[]` allowlist (#3896 close-out) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |

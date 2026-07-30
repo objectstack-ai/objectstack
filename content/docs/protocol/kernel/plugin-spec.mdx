@@ -97,16 +97,11 @@ export default definePlugin({
     configSchema: 'src/config.schema.ts',
   },
   
-  // LIFECYCLE HOOKS
-  lifecycle: {
-    onInstall: 'src/lifecycle/install.ts',
-    onUninstall: 'src/lifecycle/uninstall.ts',
-    onEnable: 'src/lifecycle/enable.ts',
-    onDisable: 'src/lifecycle/disable.ts',
-    onUpgrade: 'src/lifecycle/upgrade.ts',
-    onBoot: 'src/lifecycle/boot.ts',
-  },
-  
+  // NOTE: there is no `lifecycle` file-map. Earlier revisions of this page
+  // showed one (`onInstall: 'src/lifecycle/install.ts'`, …) — ManifestSchema
+  // never declared it and nothing ever loaded those files (#4212). Runtime
+  // behaviour lives on the plugin class (`init`/`start`/`destroy`, below).
+
   // PERMISSIONS
   permissions: {
     // System capabilities plugin requires
@@ -492,108 +487,70 @@ Solutions:
   3. Contact plugin authors to update dependencies
 ```
 
-## Lifecycle Hooks
+## Runtime Contract
 
-Plugins can define hooks that execute at specific lifecycle events:
-
-### Hook Signatures
+A runtime plugin implements exactly three lifecycle methods
+(`packages/core/src/types.ts`); `init` is required, the rest optional:
 
 ```typescript
-// src/lifecycle/install.ts
-export async function onInstall({ context, transaction }) {
-  // Runs after plugin files are extracted, before metadata is registered
-  
-  // Example: Create default data
-  await context.db.insert('crm_settings', {
-    maxAccountsPerUser: 1000,
-    enableScoring: true,
-  }, { transaction });
-}
+export class CRMPlugin implements Plugin {
+  name = 'plugin.crm';
+  version = '2.0.0';
 
-// src/lifecycle/uninstall.ts
-export async function onUninstall({ context, transaction }) {
-  // Runs before plugin is removed
-  
-  // Example: Archive plugin data instead of deleting
-  await context.db.update('account', 
-    { where: { plugin: 'crm' }},
-    { archived: true },
-    { transaction }
-  );
-}
+  // Phase 1 — sequential, registration order. Register services, schemas,
+  // routes. Other plugins' services may not exist yet.
+  async init(ctx: PluginContext) {
+    ctx.registerService('crm', new CRMService());
+  }
 
-// src/lifecycle/enable.ts
-export async function onEnable({ context }) {
-  // Runs when plugin is enabled (after install or manual enable)
-  
-  // Example: Start background sync
-  await context.scheduler.create({
-    name: 'crm-sync',
-    schedule: '0 * * * *', // Every hour
-    handler: 'crm.sync',
-  });
-}
+  // Phase 2 — after every plugin's init. All services resolvable; begin work.
+  async start(ctx: PluginContext) {
+    ctx.logger.info('CRM sync running');
+  }
 
-// src/lifecycle/disable.ts
-export async function onDisable({ context }) {
-  // Runs when plugin is disabled (before uninstall or manual disable)
-  
-  // Example: Stop background jobs
-  await context.scheduler.pause('crm-sync');
-}
-
-// src/lifecycle/upgrade.ts
-export async function onUpgrade({ context, fromVersion, toVersion, transaction }) {
-  // Runs during plugin upgrade
-  
-  // Example: Data migration
-  if (fromVersion === '1.0.0' && toVersion === '2.0.0') {
-    await context.db.query(`
-      UPDATE account 
-      SET account_number = CONCAT('ACC-', id::text)
-      WHERE account_number IS NULL
-    `, { transaction });
+  // Shutdown (reverse registration order), and rollback when a later
+  // plugin's start() fails.
+  async destroy() {
+    /* stop timers, close connections */
   }
 }
-
-// src/lifecycle/boot.ts
-export async function onBoot({ context }) {
-  // Runs every time ObjectStack boots (after plugin is loaded)
-  
-  // Example: Validate configuration
-  const config = context.config.get('crm');
-  if (!config.apiKey) {
-    context.logger.warn('CRM API key not configured');
-  }
-  
-  // Example: Register custom services
-  context.services.register('crm', new CRMService(config));
-}
 ```
 
-### Hook Execution Order
+A plugin may also expose `healthCheck()`, which the kernel invokes on demand
+(`kernel.checkPluginHealth`) rather than at boot.
 
-During **installation**:
-```
-1. onInstall
-2. Register metadata (objects, views, etc.)
-3. onEnable (if --enable flag)
-```
+### Execution Order
 
-During **upgrade**:
+During **boot** (`kernel.bootstrap()`):
 ```
-1. onUpgrade
-2. Apply migrations
-3. Update metadata
+1. use(plugin)      — validate structure + version, store (no code runs)
+2. init             — every plugin, sequentially, registration order
+3. start            — every plugin that defines it
+4. kernel:ready → kernel:bootstrapped → kernel:listening events
 ```
 
-During **boot**:
+During **shutdown**:
 ```
-1. Load all plugins
-2. Resolve dependencies
-3. onBoot (for each plugin in dependency order)
-4. Start services
+1. kernel:shutdown event
+2. destroy          — every plugin, REVERSE registration order
 ```
+
+During **installation / uninstallation / upgrade** — no plugin code runs.
+A package is metadata: install validates the manifest and signature, records
+the package (`registry.installPackage()` → `sys_packages`), hot-registers
+metadata and syncs schemas; upgrade applies metadata migrations (ADR-0087);
+uninstall removes the registration. The one authored-code seam an app bundle
+has is its module-level `onEnable` export, invoked by `AppPlugin.start()` at
+boot — not at install.
+
+<Callout type="warn">
+Earlier revisions of this page documented an `onInstall` / `onEnable` /
+`onDisable` / `onUninstall` / `onUpgrade` / `onBoot` hook family loaded from a
+manifest `lifecycle` file-map. **None of it existed** — ManifestSchema never
+declared the map and the kernel never called the hooks, so code written
+against them silently never ran. The family was retired from the protocol
+(#4212, ADR-0049 enforce-or-remove).
+</Callout>
 
 ## Permissions
 

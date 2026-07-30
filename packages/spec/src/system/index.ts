@@ -85,5 +85,10 @@ export * from './environment-artifact.zod';
 // Constants
 export * from './constants';
 
-// Types
-export * from './types';
+// `./types` (the `ObjectStackPlugin` lifecycle interface and its
+// `PluginContext` / `PluginLogger` / `ObjectQLClient` / `IKernel` /
+// `ObjectOSKernel` companions) was retired in #4212: it described an
+// `onInstall`/`onEnable`/`onDisable` contract the kernel never implemented —
+// the real plugin contract is `init`/`start`/`destroy` in
+// `packages/core/src/types.ts` — and nothing in any repo imported it. It was
+// seeded by the aspirational spec in issue #2 and survived as fiction.

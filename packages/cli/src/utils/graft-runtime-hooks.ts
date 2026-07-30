@@ -39,9 +39,9 @@ import { STACK_RUNTIME_MEMBERS } from '@objectstack/spec';
  *  - `functions` — the name → handler map that string-named hook and job
  *    handlers (`Hook.handler: 'foo'`) resolve against.
  *
- * `onDisable` is deliberately absent: it is declared in `packages/spec` but no
- * kernel, runtime or service ever calls it, so grafting it would wire a hook
- * nothing runs.
+ * `onDisable` is deliberately absent: no kernel, runtime or service ever
+ * calls it (`packages/spec` declared it until #4212 retired the uninvoked
+ * lifecycle family), so grafting it would wire a hook nothing runs.
  *
  * **Derived, not restated** (framework#4167). The same list decides what the
  * undeclared-top-level-key lint stays quiet about: these members are not
