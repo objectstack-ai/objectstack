@@ -109,8 +109,7 @@ Returns the full discovery manifest.
   "apiName": "ObjectStack API",
   "routes": {
     "data": "/api/v1/data",
-    "metadata": "/api/v1/meta",
-    "analytics": "/api/v1/analytics"
+    "metadata": "/api/v1/meta"
   },
   "services": {
     "metadata": {
@@ -120,7 +119,7 @@ Returns the full discovery manifest.
       "provider": "objectql"
     },
     "data": { "enabled": true, "status": "available", "route": "/api/v1/data", "provider": "objectql" },
-    "analytics": { "enabled": true, "status": "available", "route": "/api/v1/analytics", "provider": "objectql" },
+    "analytics": { "enabled": false, "status": "unavailable", "message": "Install service-analytics to enable" },
     "auth": { "enabled": false, "status": "unavailable", "message": "Install plugin-auth to enable" }
   },
   "capabilities": {
@@ -131,7 +130,7 @@ Returns the full discovery manifest.
 }
 ```
 
-Disabled/uninstalled route keys (e.g. `auth`, `workflow`) are omitted from `routes` entirely rather than set to `null`; check `services` to tell "not installed" apart from "installed but not yet mounted here."
+Disabled/uninstalled route keys (e.g. `auth`, `analytics`, `workflow`) are omitted from `routes` entirely rather than set to `null`; check `services` to tell "not installed" apart from "installed but not yet mounted here." The sample above shows a minimal install: `analytics` reports `unavailable` and advertises no route until `@objectstack/service-analytics` registers the engine — the dispatcher then also mounts `/api/v1/analytics/*` (the routes are capability-conditional; an uninstalled capability answers 404 for every method).
 
 ### `GET /.well-known/objectstack`
 
