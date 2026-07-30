@@ -643,6 +643,15 @@ canonical `.000` trim on SQLite, `timezone('utc', now())::time(3)` on Postgres,
 `(cast(utc_timestamp(3) as time(3)))` on MySQL (8.0.13+/MariaDB 10.2+ for the
 expression-default syntax) — all reading the UTC clock.
 
+The same construction closes the `Field.date` half of the gap (#4022):
+`nowColumnDefault('date')` emits `timezone('utc', now())::date` on Postgres and
+`(cast(utc_timestamp() as date))` on MySQL. Measured: the bare
+`CURRENT_TIMESTAMP` default recorded YESTERDAY's calendar day on a UTC-12
+Postgres server, and MySQL 8.0 rejects it on a DATE column outright (the
+driver's UTC-pinned session masked the semantic half on MariaDB). Legacy
+columns keep their old default — defaults only govern newly created columns,
+the standing policy since D-B3.
+
 The D-B3 caveat applies unchanged: the backfill converges *shapes*; a wall
 clock the old path never recorded correctly (a pg `Date` bind serialised in the
 host's zone) is not recoverable. Regression cover:

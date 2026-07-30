@@ -192,8 +192,11 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); vi.restoreAllMo
 describe('marketplace install — seed lookup resolution', () => {
     // Generous timeout: the install handler dynamically imports the real
     // @objectstack/runtime (unmocked on purpose), and that cold import alone
-    // can eat several seconds on a fresh CI runner.
-    it('writes target record ids (never raw externalId strings) for package objects unknown to the metadata service', { timeout: 30_000 }, async () => {
+    // can eat several seconds on a fresh CI runner — and multiples of that
+    // under a fully parallel turbo run, where this test competes with every
+    // other package's suite for cores. 30s was observed flaking exactly that
+    // way (an import stall, not a hang); a genuine hang still fails, just later.
+    it('writes target record ids (never raw externalId strings) for package objects unknown to the metadata service', { timeout: 120_000 }, async () => {
         const { engine, store, registry } = makeEngine();
         const rawApp = makeRawApp();
         const { ctx, fire } = makeCtx(rawApp, {

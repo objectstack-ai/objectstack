@@ -5107,6 +5107,18 @@ export class SqlDriver implements IDataDriver {
         if (this.isMysql) return this.knex.raw('(cast(utc_timestamp(3) as time(3)))');
         if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::time(3))");
       }
+      // `date` has the same two problems one type over (#4022): a bare
+      // CURRENT_TIMESTAMP default resolves the calendar day in the SERVER's
+      // timezone on Postgres (measured: a UTC-12 server records YESTERDAY),
+      // and MySQL 8.0 rejects it on a DATE column outright (MariaDB is merely
+      // permissive; the driver's UTC-pinned session masked the semantic half
+      // there). Same fix as `time`: an expression default reading the UTC
+      // clock, which is also what `formatInput`'s NOW() safety-net and the
+      // SQLite branch below store.
+      if (type === 'date') {
+        if (this.isMysql) return this.knex.raw('(cast(utc_timestamp() as date))');
+        if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::date)");
+      }
       return this.knex.fn.now();
     }
     switch (type) {
