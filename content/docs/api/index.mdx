@@ -132,6 +132,8 @@ Returns the full discovery manifest.
 
 Disabled/uninstalled route keys (e.g. `auth`, `analytics`, `workflow`) are omitted from `routes` entirely rather than set to `null`; check `services` to tell "not installed" apart from "installed but not yet mounted here." The sample above shows a minimal install: `analytics` reports `unavailable` and advertises no route until `@objectstack/service-analytics` registers the engine — the dispatcher then also mounts `/api/v1/analytics/*` (the routes are capability-conditional; an uninstalled capability answers 404 for every method).
 
+`metadata` is reported from whatever implementation fills its slot, so the sample's `available` is the `MetadataPlugin` case (a persisted `sys_metadata` registry). A stack running the kernel's in-memory fallback instead reports `status: "degraded"` with a `message` naming what is missing and what to install. `handlerReady` is `true` either way: `/api/v1/meta` is served by the protocol, so the route is mounted whichever registry sits behind it.
+
 ### `GET /.well-known/objectstack`
 
 Served by the runtime dispatcher (`@objectstack/runtime`), not `@objectstack/rest` — its body is wrapped as `{ "data": { ... } }` and includes fields (`name`, `environment`, `features`, `locale`) that the `@objectstack/rest`-served `/api/v1` response above does not. The client SDK's `connect()` tries `/api/v1/discovery` first and falls back to this endpoint, unwrapping either `body.data` or the bare `body`.
