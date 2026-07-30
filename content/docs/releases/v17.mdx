@@ -324,6 +324,65 @@ declares `ai.exposed: true` + `ai.description` **and** has a headless path —
 warns on a stack declaring `stack.agents`, which the runtime has filtered from
 the catalog since ADR-0063.
 
+### Error codes are one SCREAMING_SNAKE vocabulary, and `error.code` is a closed set (ADR-0112, #3841)
+
+The platform shipped two live error-code dialects: `StandardErrorCode` declared
+lowercase `snake_case` members while 139 codes on the wire were SCREAMING_SNAKE,
+and `ApiErrorSchema.code` was a bare `z.string()`, so nothing validated either.
+Now there is one vocabulary — the standard catalog plus `ERROR_CODE_LEDGER` for
+service-specific codes — and `error.code` validates against their union, so an
+unregistered code fails parse instead of quietly becoming a new dialect.
+
+**Wire-visible.** Codes change spelling on every surface that spoke lowercase.
+Generic conditions collapse onto the standard catalog rather than keeping a
+synonym: `unauthorized`/`unauthenticated` → `UNAUTHENTICATED`, `forbidden` →
+`PERMISSION_DENIED`, `not_found` → `RESOURCE_NOT_FOUND`, `internal` →
+`INTERNAL_ERROR`, `unavailable` → `SERVICE_UNAVAILABLE`, `not_supported` →
+`NOT_IMPLEMENTED`, `bad_request` → `INVALID_REQUEST` (a status name is not a
+semantic code). Domain conditions get a registered SCREAMING code.
+
+**Migration:** branch on `error.code` **values**, and do not pattern-match their
+case. A code branch that misses fails *silently* — nothing throws, the affordance
+it guards just disappears — which is how eleven console branches broke without a
+single test failing (objectui#2977). If you support servers on both sides of the
+upgrade, compare case-insensitively; that is what the console does.
+
+Four routes also stop putting a code in the message slot: the webhook redeliver
+route, the API-trigger webhook and two `rest` routes answered
+`{ success: false, error: '<code>', message }`. They now emit
+`error: { code, message }`, so a client reading `body.error` as a string on those
+routes must read `body.error.code`.
+
+Not swept, deliberately: `sys_metadata_audit.code` (persisted audit history, and
+the column also holds non-errors like `ok`), diagnostics records that ship inside
+a 200, field-level codes (see below), and the CLI's `--json` output contract.
+
+### Field-level error codes are their own closed catalog, and `fieldErrors` becomes `fields` (ADR-0114, #3977)
+
+The per-field `code` inside `fields[]` is a **different** vocabulary from
+`error.code`, and it stays lowercase on purpose: a top-level code names the
+condition the *request* hit, while a field-level code names the *constraint* the
+value violated — and constraints are declared in the metadata's own snake_case,
+so `max_length` the code and `max_length: 50` the property are the same word.
+`FieldErrorCode` closes that set (27 members) and `FieldErrorSchema.code`
+validates against it, where it used to be `z.string()`.
+
+**`EnhancedApiError.fieldErrors` is renamed to `fields`** — the name every
+producer already emitted. The old key was declared and emitted by nobody, so a
+reader keying on it was reading a field no server sent. It is tombstoned rather
+than deleted: writing it now fails with the rename instead of parsing clean and
+losing the array.
+
+**Wire-visible.** Routes that validate with Zod stopped leaking Zod's issue codes:
+`too_small` now becomes `min_length` / `min_value` / `min_items` depending on what
+was too small, `unrecognized_keys` becomes `unknown_field`, and — the one that was
+a real bug — a **missing** required property now reports `required` instead of the
+`invalid_type` Zod uses for it, so a form marks it as missing rather than
+wrong-typed.
+
+**Migration:** read `error.fields`; branch on the catalog's lowercase codes for
+per-field handling, and show `message` to the user rather than the code.
+
 ### Approval requests are visible to participants, not the whole tenant (#3590)
 
 `getRequest` / `listRequests` / `countRequests` query with `SYSTEM_CTX` to
