@@ -18,6 +18,10 @@ export * from './object.zod';
 // `enable.apiMethods` whitelist into its effective operation set (#3391).
 export * from './api-derivation';
 export * from './field.zod';
+// Pre-parse report of authored keys ObjectSchema/FieldSchema would strip (#3786).
+// Neither schema is `.strict()`, so an undeclared key parses clean and is dropped;
+// this is what turns that silence into a warning the author can act on.
+export * from './authoring-key-lint';
 // Field runtime value-shape contract (ADR-0104 D1)
 export * from './field-value.zod';
 export * from './autonumber-format';
