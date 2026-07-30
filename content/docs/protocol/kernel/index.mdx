@@ -214,7 +214,7 @@ const config = context.config.resolve('stripe.apiKey', {
 **Kernel Solution:**
 - **Package Manifest:** The `manifest` block in `objectstack.config.ts` (compiled to `objectstack.json`) declares what a package provides and needs
 - **Dependency Resolution:** Automatic validation that plugin versions are compatible with core platform
-- **Lifecycle Hooks:** `onInstall`, `onEnable`, `onDisable` hooks for setup/teardown
+- **Lifecycle:** every plugin implements `init` / `start` / `destroy`, driven by `kernel.bootstrap()` and shutdown
 - **Sandboxing:** Plugins can't access each other's data or crash each other
 
 **Results:**
@@ -272,8 +272,9 @@ await kernel.use(new AppPlugin(stack));
 await kernel.bootstrap();
 ```
 
-The kernel resolves plugin dependencies, calls each plugin's `onInstall` / `onEnable`
-hooks in order, and exposes the resulting services through DI.
+The kernel validates each plugin at `use()`, then `bootstrap()` runs every
+plugin's `init` in registration order followed by every plugin's `start`, and
+exposes the resulting services through DI.
 
 ### 2. Request Handling
 ```typescript
@@ -307,35 +308,23 @@ async function handleRequest(req) {
 }
 ```
 
-### 3. Plugin Installation
+### 3. Package Installation
 ```typescript
 // Install a package: os package install @vendor/salesforce-sync
-await Kernel.installPlugin({
-  source: '@vendor/salesforce-sync@1.5.0',
-  
-  // Step 1: Validate dependencies
-  validate: (manifest) => {
-    PluginRegistry.checkDependencies(manifest.dependencies);
-    // Ensures '@objectstack/core@^2.0.0' is installed
-  },
-  
-  // Step 2: Run onInstall hook
-  onInstall: async (plugin) => {
-    // Plugin may create custom objects (ObjectQL)
-    await ObjectQL.createObjects(plugin.objects);
-    
-    // Plugin may register UI views (ObjectUI)
-    await ObjectUI.registerViews(plugin.views);
-    
-    // Plugin may set default config
-    await ConfigStore.set(plugin.defaultConfig);
-  },
-  
-  // Step 3: Enable plugin
-  enable: () => {
-    PluginRegistry.enable('@vendor/salesforce-sync');
-  }
-});
+//
+// A package is METADATA — no package code executes at install time.
+// What actually happens:
+//
+// 1. Validate — manifest shape, engines.protocol compatibility (ADR-0087),
+//    artifact signature.
+// 2. Register — registry.installPackage() gates the namespace and records
+//    the InstalledPackage; the durable copy lands in `sys_packages` and is
+//    rehydrated on every boot.
+// 3. Materialize — metadata is hot-registered, `syncSchemas` applies the
+//    schema, and declared side effects (translations, seed data) run.
+//
+// Executable members of an app bundle (`onEnable`, `functions`) run at BOOT,
+// invoked by AppPlugin — installation only stores them.
 ```
 
 ## Philosophy: Infrastructure as Code

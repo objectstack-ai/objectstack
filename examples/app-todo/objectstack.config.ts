@@ -36,6 +36,10 @@ export default defineStack({
     type: 'app',
     name: 'Todo Manager',
     description: 'A comprehensive Todo app demonstrating ObjectStack Protocol features including automation, dashboards, and reports',
+    // Protocol major this package is authored against (ADR-0087). The kernel
+    // checks the range at load time and refuses a major-incompatible runtime
+    // with a structured diagnostic instead of failing deep in a schema parse.
+    engines: { protocol: '^17' },
   },
 
   // Seed Data (top-level, registered as metadata)

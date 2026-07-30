@@ -264,9 +264,10 @@ describe('top-level stack keys (#4167)', () => {
   });
 
   it('still reports `onDisable`, which really does go nowhere', () => {
-    // The distinction the exclusion list has to preserve: `onDisable` is
-    // declared in the protocol but no kernel, runtime or service calls it, so
-    // a value written there IS lost and the author should hear about it.
+    // The distinction the exclusion list has to preserve: no kernel, runtime
+    // or service ever called `onDisable` (the protocol declared it until
+    // #4212 retired the uninvoked lifecycle family), so a value written there
+    // IS lost and the author should hear about it.
     const [finding, ...rest] = lint({ onDisable: () => {} });
     expect(rest).toEqual([]);
     expect(finding).toMatchObject({ path: 'stack.onDisable', key: 'onDisable' });

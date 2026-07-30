@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -169,6 +170,20 @@ describe('scaffold rendering — round-trip', () => {
       expect(namespace).toBe('my_app');
       const cfg = fs.readFileSync(path.join(tmpRoot, 'objectstack.config.ts'), 'utf8');
       expect(cfg).toMatch(/namespace: 'my_app'/);
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  // #4097 — every scaffold stamps an `engines.protocol` range admitting the
+  // protocol major it was generated under, so new projects never boot with
+  // the ADR-0087 handshake silently skipped ("no-range" grandfathering).
+  it('stamps engines.protocol with the current protocol major in every template', () => {
+    for (const key of Object.keys(TEMPLATES)) {
+      const { tmpRoot } = renderTemplate(key as keyof typeof TEMPLATES, 'my-app');
+      const cfg = fs.readFileSync(path.join(tmpRoot, 'objectstack.config.ts'), 'utf8');
+      expect(cfg, `template "${key}" must declare engines.protocol`).toContain(
+        `engines: { protocol: '^${PROTOCOL_MAJOR}' }`,
+      );
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });

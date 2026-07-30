@@ -27,9 +27,9 @@
  * self-service view, platform admins get the browsable tables.
  */
 
-import type { App } from '@objectstack/spec/ui';
+import type { AppInput } from '@objectstack/spec/ui';
 
-export const ACCOUNT_APP: App = {
+export const ACCOUNT_APP: AppInput = {
   name: 'account',
   label: 'Account',
   description: 'Personal security and identity settings',
@@ -55,12 +55,9 @@ export const ACCOUNT_APP: App = {
   // manage their own linked accounts / personal OAuth apps. RLS on each
   // object scopes rows to the caller.
   //
-  // Group open-state is `expanded` — the spec key. These entries said
-  // `defaultOpen`, objectui's legacy alias, which the spec has never declared
-  // and `.strict()` would reject; it worked only because objectui's
-  // NavigationRenderer still falls back to it, and because `NavigationItem`
-  // resolved to `any` so nothing checked the key here (#4171). Per Prime
-  // Directive #12 the producer is the place to fix that, not the renderer.
+  // Group open-state is `expanded` — the spec key. These said `defaultOpen`,
+  // objectui's legacy alias the spec never declared; #4171 fixed that at the
+  // producer per Prime Directive #12.
   navigation: [
     // Profile is the canonical landing — a hand-written React settings card
     // (Vercel/Linear style) registered in the Console SPA as

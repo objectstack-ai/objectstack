@@ -903,6 +903,7 @@ import or the authored key.
 | view: list `responsive`/`performance`, form `defaultSort`/`aria` | no renderer read any of them; list `aria`/`data` **and form `data`** stay live — `defineForm` writes `data: { provider: 'schema', schemaId }` onto every metadata form (#3896 close-out) |
 | `dashboard.aria` / `.performance` / widget `performance` (+ `PerformanceConfigSchema`) | no renderer applied them; virtual scrolling is the live top-level `virtualScroll` (#3896 close-out) |
 | `agent.knowledge` (+ `AIKnowledgeSchema`) | declaring sources/indexes never scoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's tool-call arguments (#3896 close-out) |
+| `PluginLifecycleSchema` (`onInstall`/`onEnable`/`onDisable`/`onUninstall`/`onUpgrade`) + `UpgradeContextSchema` + the `ObjectStackPlugin` interface family (`@objectstack/spec/system`) | a plugin lifecycle the kernel never implemented — the real contract is `init`/`start`/`destroy`; code written against the hooks silently never ran (#4212) |
 | `skill.triggerPhrases` | phrases were never matched; activation is `triggerConditions` + the agent's `skills[]` allowlist (#3896 close-out) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
@@ -982,6 +983,13 @@ ledger against what records actually hold. The **deployment-level flag it
 records** — never the platform version — is what authorises both strict media
 value shapes and irreversible file collection. Upgrading changes neither;
 running the migration does.
+
+**A database created by 17 attests both flags at creation** (#3438), so a new
+deployment enforces from its first boot instead of waiting for someone to run a
+migration that, for an empty store, does nothing. The platform attests only a
+store it watched itself create — every table made by that boot, none found
+already there; an upgraded or restored database attests nothing and produces its
+evidence by running the command.
 
 **Released-file collection is live behind that same flag** (#3459). On a
 verified deployment, a field file whose one owning record lets go — the field
