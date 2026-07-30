@@ -324,6 +324,14 @@ publicSharing:
   maxExpiryDays: 30
 ```
 
+**Who may mint and revoke** (ADR-0111 D8). Minting a link requires the object's
+`publicSharing` opt-in **and** that the caller can see the record — an opted-in
+object deliberately delegates re-share power to anyone who can view the row.
+Revoking a link is allowed for the link's **creator**, a **record share-manager**
+(the record's owner or a `modifyAllRecords` admin — the same authority as
+`canManageShares`), or system context: a link someone else minted on your record
+is your record's exposure to kill, not only its creator's.
+
 ---
 
 ## 6. Field-Level Encryption

@@ -489,7 +489,17 @@ export class SharingServicePlugin implements Plugin {
       // access can set `registerShareLinkRoutes: false` and call the
       // service via `ctx.getService('shareLinks')`.
       try {
-        this.linkService = new ShareLinkService({ engine: engine as SharingEngine });
+        this.linkService = new ShareLinkService({
+          engine: engine as SharingEngine,
+          // [ADR-0111 D8] Let a record's share-manager (owner / Modify All)
+          // revoke a link someone else minted on their record. `this.service`
+          // is always constructed above — even under `enforce: false` (the
+          // multi-tenant share-link-only config), where only the RLS middleware
+          // is skipped — so the probe is available in every posture.
+          canManageShares: this.service
+            ? (o, r, c) => this.service!.canManageShares(o, r, c as any)
+            : undefined,
+        });
         ctx.registerService('shareLinks', this.linkService);
 
         if (this.options.registerShareLinkRoutes !== false) {
