@@ -317,3 +317,30 @@ describe('validatePageFieldBindings — false-positive floor', () => {
     expect(findings).toEqual([]);
   });
 });
+
+describe('validatePageFieldBindings — legacy bare-string sort (#4340)', () => {
+  /**
+   * `ListViewSchema.sort` still accepts `"created_at desc"`. Reading the whole
+   * string as a field name reported `"amount desc"` as unknown — a finding
+   * whose "field" the author never wrote, and one no fix could satisfy. The
+   * shared `sortFieldRefs` reads its head instead, the way the renderer does.
+   */
+  it('judges the head segment, not the whole "field desc" string', () => {
+    const listPage = (sort: unknown) => ({
+      ...baseStack(),
+      pages: [
+        {
+          name: 'list_page',
+          type: 'list',
+          object: 'crm_lead',
+          interfaceConfig: { source: 'crm_lead', columns: ['name'], sort },
+        },
+      ],
+    });
+    expect(validatePageFieldBindings(listPage('amount desc'))).toEqual([]);
+    const bad = validatePageFieldBindings(listPage('ghost_col desc'));
+    expect(bad).toHaveLength(1);
+    expect(bad[0].message).toContain('"ghost_col"');
+    expect(bad[0].message).not.toContain('ghost_col desc');
+  });
+});

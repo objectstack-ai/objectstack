@@ -502,22 +502,22 @@
     {
       "tag": "RecordRelatedList",
       "schemaType": "record:related_list",
-      "summary": "Related child records via a lookup. Config props from the spec RecordRelatedList schema.",
+      "summary": "Related child records via a lookup. `objectName` is the RELATED (child) object whose records are listed — NOT the parent; the parent record is bound by `recordId`, and `relationshipField` is the child field pointing back at it. Config props from the spec RecordRelatedList schema.",
       "specSchema": true,
       "props": [
         {
           "name": "objectName",
           "type": "string",
           "kind": "binding",
-          "required": false,
-          "description": "The parent object."
+          "required": true,
+          "description": "The RELATED (child) object whose records this list renders — e.g. objectName=\"invoice\" on an account page. NOT the parent object: the parent record is bound by recordId."
         },
         {
           "name": "recordId",
           "type": "string | number",
           "kind": "controlled",
           "required": false,
-          "description": "The parent record."
+          "description": "The parent record whose children are listed."
         },
         {
           "name": "relationshipField",

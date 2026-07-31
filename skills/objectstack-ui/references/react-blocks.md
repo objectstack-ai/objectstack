@@ -113,12 +113,12 @@ Highlights panel — a strip of key fields. Config props from the spec RecordHig
 
 ## `<RecordRelatedList>` — `record:related_list`
 
-Related child records via a lookup. Config props from the spec RecordRelatedList schema.
+Related child records via a lookup. `objectName` is the RELATED (child) object whose records are listed — NOT the parent; the parent record is bound by `recordId`, and `relationshipField` is the child field pointing back at it. Config props from the spec RecordRelatedList schema.
 
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|
-| `objectName` | `string` | binding |  | The parent object. |
-| `recordId` | `string \| number` | controlled |  | The parent record. |
+| `objectName` | `string` | binding | ✓ | The RELATED (child) object whose records this list renders — e.g. objectName="invoice" on an account page. NOT the parent object: the parent record is bound by recordId. |
+| `recordId` | `string \| number` | controlled |  | The parent record whose children are listed. |
 | `relationshipField` | `string` | data | ✓ | Field on related object that points to this record (e.g., "account_id") |
 | `relationshipValueField` | `string` | data |  | Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions). |
 | `columns` | `string[]` | data |  | Fields to display in the related list. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list … |

@@ -3400,6 +3400,7 @@
     "PluralRule (type)",
     "PluralRuleSchema (const)",
     "REACT_BLOCKS (const)",
+    "REACT_OVERLAY_SHADOWS (const)",
     "ReactBlockDef (interface)",
     "ReactInteractionProp (interface)",
     "ReactPropKind (type)",

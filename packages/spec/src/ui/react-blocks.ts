@@ -24,6 +24,16 @@ import { ChartConfigSchema } from './chart.zod';
 
 export type ReactPropKind = 'data' | 'binding' | 'controlled' | 'callback';
 
+/**
+ * One hand-authored overlay prop.
+ *
+ * ⚠️ An overlay entry that shares a NAME with a prop of the block's spec schema
+ * SHADOWS it: `build-react-blocks-contract` publishes the overlay's type and
+ * description and drops the schema's, so the two can mean different things and
+ * nothing says so. That is not hypothetical — see {@link REACT_OVERLAY_SHADOWS}
+ * for the one that shipped. Add an overlay prop only when the schema does not
+ * declare it; when a restatement really is wanted, ledger it there.
+ */
 export interface ReactInteractionProp {
   name: string;
   type: string;
@@ -31,6 +41,40 @@ export interface ReactInteractionProp {
   required?: boolean;
   description: string;
 }
+
+/**
+ * Overlay props that deliberately RESTATE a prop the block's spec schema also
+ * declares, per block tag. Anything not listed here must be absent from the
+ * schema — `react-blocks.test.ts` asserts the ledger equals the real collision
+ * set, so the next accidental shadow fails a test instead of shipping.
+ *
+ * ## Why the ledger exists (#4340)
+ *
+ * `RecordRelatedListProps.objectName` is the RELATED (child) object — that is
+ * what `record:related_list` means on every metadata surface, what
+ * `validate-page-field-bindings` resolves its `columns` against, and what the
+ * one registry component behind both surfaces consumes. The React overlay
+ * nonetheless declared `objectName` a second time, glossed "The parent object"
+ * by analogy with the blocks whose schema genuinely has no `objectName`. The
+ * generated contract published only that gloss, so the react surface both
+ * contradicted the spec AND lost any way to name the object it renders — and
+ * the one live page authored against the gloss listed the wrong object.
+ *
+ * A shadow is therefore allowed only when it is deliberate and
+ * MEANING-PRESERVING, and the reason has to be written down next to it.
+ */
+export const REACT_OVERLAY_SHADOWS: Readonly<Record<string, readonly string[]>> = {
+  // Same prop, same meaning. The overlay restates it to publish the JSX
+  // shorthand an author writes (`navigation={{ mode: 'none' }}`) together with
+  // the React-side rule that pairs it with `onRowClick` — neither of which the
+  // declarative schema has anywhere to say.
+  ListView: ['navigation'],
+  // Same prop, same meaning as the schema's "Related object name". Kept in the
+  // overlay because it IS this block's data binding (`kind: 'binding'`, and
+  // required, as the schema declares it) and because the trap #4340 found is
+  // worth spelling out where an author reads it.
+  RecordRelatedList: ['objectName'],
+};
 
 export interface ReactBlockDef {
   /** PascalCase name the author writes in JSX, e.g. `<ObjectForm>`. */
@@ -147,11 +191,18 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
   {
     tag: 'RecordRelatedList',
     schemaType: 'record:related_list',
-    summary: 'Related child records via a lookup. Config props from the spec RecordRelatedList schema.',
+    summary:
+      'Related child records via a lookup. `objectName` is the RELATED (child) object whose records are listed — NOT the parent; the parent record is bound by `recordId`, and `relationshipField` is the child field pointing back at it. Config props from the spec RecordRelatedList schema.',
     schema: RecordRelatedListProps,
     interactions: [
-      { name: 'recordId', type: 'string | number', kind: 'controlled', description: 'The parent record.' },
-      { name: 'objectName', type: 'string', kind: 'binding', description: 'The parent object.' },
+      { name: 'recordId', type: 'string | number', kind: 'controlled', description: 'The parent record whose children are listed.' },
+      // Restates RecordRelatedListProps.objectName — ledgered in
+      // REACT_OVERLAY_SHADOWS. This block is the ONE whose spec schema already
+      // declares `objectName`, and it means the CHILD object; the overlay used
+      // to gloss it as the parent, which is the contract conflict #4340 opened
+      // on. Same meaning as the schema now, said in the words that keep an
+      // author from writing the parent here.
+      { name: 'objectName', type: 'string', kind: 'binding', required: true, description: 'The RELATED (child) object whose records this list renders — e.g. objectName="invoice" on an account page. NOT the parent object: the parent record is bound by recordId.' },
     ],
   },
   {

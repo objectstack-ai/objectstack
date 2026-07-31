@@ -20,6 +20,8 @@
 //   - <ListView>'s `searchableFields` entries, resolved against the bound
 //     object's declared fields (#4329) — the react-surface twin of the
 //     metadata rule `searchable-field-unknown`, sharing its core.
+//   - EVERY OTHER field-bearing prop a react block can author (#4340) — see
+//     `REACT_FIELD_SPECS` below and the ledger beside it.
 //
 // Reading values is opt-in per block and per prop: everything below evaluates
 // only STATIC literals (`objectName="invoice"`, an `aggregate={{…}}` object
@@ -30,10 +32,23 @@
 import { createRequire } from 'node:module';
 import type ts from 'typescript';
 import { REACT_BLOCKS, chartAggregateResultKeys } from '@objectstack/spec/ui';
+import { VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import {
   checkSearchableFieldList,
   indexObjectSearchTargets,
 } from './validate-searchable-fields.js';
+import {
+  COMPONENT_FIELD_SPECS,
+  RELATED_LIST_TYPE,
+  checkFieldRefs,
+  componentFieldRefs,
+  fieldRefsFrom,
+  indexObjectFields,
+  relatedListFieldRefs,
+  sortFieldRefs,
+  type FieldRef,
+  type PageFieldFinding,
+} from './validate-page-field-bindings.js';
 
 import { SYSTEM_FIELDS } from './system-fields.js';
 
@@ -177,6 +192,29 @@ function attrValue(tsc: typeof ts, sf: ts.SourceFile, attr: ts.JsxAttribute): un
   return NOT_STATIC;
 }
 
+/**
+ * The value of a FILTER attribute, resolved position by position: an array
+ * literal survives even when some of its elements do not, each unknowable
+ * element left as `NOT_STATIC` in place.
+ *
+ * `staticValue` collapses such an array to `NOT_STATIC` whole, which is correct
+ * where the value only means something entire (an `aggregate={{…}}`) and wrong
+ * for a filter, whose positions are independent: `['status', '=', stage]` has a
+ * knowable FIELD beside an unknowable VALUE, and that is the shape a react page
+ * writes when it drives a list from React state. See `filterFieldRefs`.
+ */
+function filterAttrValue(tsc: typeof ts, sf: ts.SourceFile, attr: ts.JsxAttribute): unknown {
+  const init = attr.initializer;
+  if (!init || !tsc.isJsxExpression(init)) return NOT_STATIC;
+  const perPosition = (node: ts.Node | undefined): unknown => {
+    if (!node) return NOT_STATIC;
+    if (tsc.isParenthesizedExpression(node)) return perPosition(node.expression);
+    if (tsc.isArrayLiteralExpression(node)) return node.elements.map((el) => perPosition(el));
+    return staticValue(tsc, sf, node);
+  };
+  return perPosition(init.expression);
+}
+
 // ─── <ObjectChart> binding integrity (#3701) ──────────────────────────────
 //
 // `validate-chart-bindings` covers every DATASET-bound chart surface: a
@@ -210,37 +248,6 @@ export const REACT_CHART_AGGREGATE_INVALID = 'react-chart-aggregate-invalid';
 export const REACT_CHART_AXIS_UNKNOWN = 'react-chart-axis-unknown';
 
 const CHART_FUNCTIONS = ['count', 'sum', 'avg', 'min', 'max'] as const;
-
-/**
- * Both `objects` and an object's `fields` are authored either as an array of
- * `{ name }` records or as a name-keyed map — normalize to the array form, the
- * same way the other reference-integrity rules do.
- */
-function namedArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => !!x && typeof x === 'object');
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({
-      name,
-      ...(def && typeof def === 'object' ? (def as AnyRec) : {}),
-    }));
-  }
-  return [];
-}
-
-/** object name → its declared field names. */
-function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
-  const out = new Map<string, Set<string>>();
-  for (const obj of namedArray(stack.objects)) {
-    const name = typeof obj.name === 'string' ? obj.name : undefined;
-    if (!name) continue;
-    const names = new Set<string>();
-    for (const f of namedArray(obj.fields)) {
-      if (typeof f.name === 'string' && f.name) names.add(f.name);
-    }
-    out.set(name, names);
-  }
-  return out;
-}
 
 const isRec = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
@@ -380,6 +387,315 @@ function checkObjectChart(
   }
 }
 
+// ─── Field-bearing block props (#4340) ────────────────────────────────────
+//
+// #4329 closed ONE prop — `<ListView searchableFields>` — by running the
+// metadata rule's core from here. `searchableFields` was an instance, not the
+// class: every other prop a react block binds BY FIELD NAME shipped exactly as
+// typed, the same silent drift `validate-page-field-bindings` closes for the
+// page-component `properties` bag one surface over. This section closes the
+// class.
+//
+// ## Where the answers come from
+//
+// The `record:*` blocks ARE the components that rule already walks — one
+// registry component, two authoring surfaces — so they are not re-described
+// here at all: `componentFieldRefs` / `relatedListFieldRefs` read the SAME
+// `COMPONENT_FIELD_SPECS` table, keyed by the block's own `schemaType`. A prop
+// added there is checked on both surfaces at once, which is the point.
+//
+// `REACT_FIELD_SPECS` below covers only what the shared table cannot: the two
+// blocks whose metadata twin lives under different prop names —
+// `<ListView>` (twin: a list page's `interfaceConfig`) and `<ObjectForm>`
+// (twin: `element:form` + the form-layout rule).
+//
+// ## What is deliberately NOT checked, and why
+//
+//   - Anything non-static (a variable, a call, a value behind a spread) —
+//     ADR-0072 D1: unresolvable is not wrong. `filters` is the one place this
+//     is resolved PER POSITION rather than all-or-nothing; see below.
+//   - `<RecordRelatedList relationshipValueField>`: it names a field on the
+//     PARENT object, and the react surface binds the parent by `recordId`
+//     only — there is no parent OBJECT to resolve against. The metadata twin
+//     has the page's object and checks it there. This is the ONE field-bearing
+//     prop in the index that stays unresolved, and the reason is a missing
+//     binding rather than a missing rule.
+//   - `<ObjectChart>`'s axes: they name the aggregate's RESULT COLUMNS, not
+//     fields, and `checkObjectChart` above already owns them.
+//
+// `<ObjectForm subforms>` does not ride the table either, but IS checked:
+// each entry names its own `childObject`, so its refs are split per entry
+// rather than pooled against the block's object (`subformFieldRefs`).
+
+/**
+ * Which props of a block carry field names, and in what shape. Each bucket is
+ * a different SHAPE, not a different meaning — every entry resolves against the
+ * block's own `objectName`.
+ */
+interface ReactFieldSpec {
+  /** Bare names, `{field}`/`{name}` records, or arrays of either. */
+  fields?: readonly string[];
+  /** A `sort`: structured `{field,order}[]` or the legacy `"field desc"` string. */
+  sorts?: readonly string[];
+  /** A `{ fields: […] }` wrapper — one level of nesting. */
+  nestedFields?: readonly string[];
+  /** `{…}[]` sections whose `fields[]` name fields. */
+  sections?: readonly string[];
+  /** An object literal whose KEYS name fields. */
+  keyedByField?: readonly string[];
+  /** An ObjectQL FilterArray — its field POSITIONS gate (see `filterFieldRefs`). */
+  filterArrays?: readonly string[];
+}
+
+const REACT_FIELD_SPECS: Readonly<Record<string, ReactFieldSpec>> = {
+  ListView: {
+    // `fields` is the React overlay's "limit/order the columns"; `columns` the
+    // spec ListView prop. Both name columns on the bound object, and a page may
+    // write either. `hiddenFields`/`fieldOrder`/`filterableFields` are schema
+    // props outside the curated contract — unadvertised but honored by the
+    // renderer, so a stale name there is drift just the same.
+    fields: ['fields', 'columns', 'hiddenFields', 'fieldOrder', 'filterableFields'],
+    sorts: ['sort'],
+    nestedFields: ['userFilters', 'grouping'],
+    filterArrays: ['filters'],
+  },
+  ObjectForm: {
+    fields: ['fields'],
+    keyedByField: ['initialValues'],
+    // `groups` is FormViewSchema's legacy alias for `sections`.
+    sections: ['sections', 'groups'],
+  },
+  ObjectChart: {
+    // The axes are result columns (checkObjectChart owns them); `filter` is an
+    // ordinary ObjectQL predicate over the bound object, like ListView's.
+    filterArrays: ['filter'],
+  },
+};
+
+/**
+ * How a prop name joins onto a react page's `path`. The props live inside one
+ * opaque `source` string, so there is no config path to extend — #4329
+ * established `pages[0].source › searchableFields[1]` and every prop below
+ * follows it.
+ */
+const PATH_SEP = ' › ';
+
+/** tag → `schemaType`, read from the contract rather than restated. */
+const SCHEMA_TYPE_BY_TAG: ReadonlyMap<string, string> = new Map(
+  (REACT_BLOCKS as Array<{ tag: string; schemaType: string }>).map((b) => [b.tag, b.schemaType]),
+);
+
+/**
+ * Attribute names read POSITION BY POSITION rather than all-or-nothing (see
+ * `filterAttrValue`). Derived from the specs so a new `filterArrays` entry
+ * cannot forget to opt in — the failure mode would be silent, since the
+ * all-or-nothing reader simply finds nothing.
+ *
+ * `<RecordRelatedList filter>` rides along under the same name while holding a
+ * different shape (`{field, operator, value}[]`, not a FilterArray). That is
+ * harmless: a fully-static array reads identically either way, and the only
+ * difference — surviving with `NOT_STATIC` holes — is dropped by
+ * `fieldRefsFrom`, which ignores a non-string, non-record entry.
+ */
+const FILTER_PROPS: ReadonlySet<string> = new Set(
+  Object.values(REACT_FIELD_SPECS).flatMap((s) => s.filterArrays ?? []),
+);
+
+/** Strip the `NOT_STATIC` sentinel so a shared extractor sees plain data. */
+function readableProps(values: ReadonlyMap<string, unknown>): AnyRec {
+  const out: AnyRec = {};
+  for (const [k, v] of values) if (v !== NOT_STATIC) out[k] = v;
+  return out;
+}
+
+/**
+ * `<ObjectForm subforms>` — inline master-detail child collections. Each entry
+ * names the object its own refs resolve against (`childObject`), so unlike
+ * every bucket in {@link ReactFieldSpec} these cannot be pooled into one batch
+ * checked against the block's `objectName`. `totalField` is the exception
+ * inside the exception: it names the PARENT field the child sum rolls up into.
+ */
+function subformFieldRefs(
+  value: unknown,
+  basePath: string,
+): { child: Array<{ objectName: string | undefined; refs: FieldRef[] }>; parent: FieldRef[] } {
+  const child: Array<{ objectName: string | undefined; refs: FieldRef[] }> = [];
+  const parent: FieldRef[] = [];
+  if (!Array.isArray(value)) return { child, parent };
+  for (let i = 0; i < value.length; i++) {
+    const sub = value[i];
+    if (!isRec(sub)) continue;
+    const at = (key: string) => `${basePath}[${i}].${key}`;
+    child.push({
+      objectName: strOf(sub.childObject),
+      refs: [
+        ...fieldRefsFrom(sub.columns, at('columns')),
+        ...fieldRefsFrom(sub.relationshipField, at('relationshipField')),
+        ...fieldRefsFrom(sub.amountField, at('amountField')),
+      ],
+    });
+    parent.push(...fieldRefsFrom(sub.totalField, at('totalField')));
+  }
+  return { child, parent };
+}
+
+/**
+ * Field references in an ObjectQL FilterArray, resolved PER POSITION.
+ *
+ * `staticValue` is all-or-nothing by design: an array containing one unknowable
+ * element is not a knowable array. That is right for an `aggregate={{…}}`, and
+ * wrong here, because the common react filter is exactly the mixed case —
+ * `filters={['status', '=', stage]}` pairs a STATIC field position with a
+ * React-state value. Bailing on the whole array would skip the only position
+ * this rule can judge, on the shape authors actually write.
+ *
+ * So the reader keeps each position separate (`filterAttrValue`) and this walk
+ * only ever reads position 0, and only when position 1 is a recognised operator
+ * — the same test `isFilterAST` makes, using the spec's own operator vocabulary
+ * so the two cannot drift. A non-static field position, a non-static operator,
+ * or a shape that is not a filter node yields nothing.
+ */
+function filterFieldRefs(node: unknown, basePath: string, out: FieldRef[]): void {
+  if (!Array.isArray(node) || node.length === 0) return;
+  const head = node[0];
+  if (typeof head === 'string' && (head.toLowerCase() === 'and' || head.toLowerCase() === 'or')) {
+    for (let i = 1; i < node.length; i++) filterFieldRefs(node[i], `${basePath}[${i}]`, out);
+    return;
+  }
+  // Legacy flat array of conditions: `[[a,'=',1], [b,'>',2]]`.
+  if (Array.isArray(head)) {
+    for (let i = 0; i < node.length; i++) filterFieldRefs(node[i], `${basePath}[${i}]`, out);
+    return;
+  }
+  if (
+    typeof head === 'string' && head.length > 0 &&
+    node.length >= 2 && typeof node[1] === 'string' &&
+    VALID_AST_OPERATORS.has(node[1].toLowerCase())
+  ) {
+    out.push({ name: head, path: `${basePath}[0]` });
+  }
+}
+
+/** The field refs one block's statically-read attributes hold, by bucket. */
+function reactFieldRefs(
+  spec: ReactFieldSpec,
+  values: ReadonlyMap<string, unknown>,
+  basePath: string,
+): { own: FieldRef[]; queried: FieldRef[] } {
+  const own: FieldRef[] = [];
+  const queried: FieldRef[] = [];
+  const readable = (key: string): unknown => {
+    const v = values.get(key);
+    return v === NOT_STATIC ? undefined : v;
+  };
+  const at = (key: string) => `${basePath}${PATH_SEP}${key}`;
+
+  for (const key of spec.fields ?? []) {
+    own.push(...fieldRefsFrom(readable(key), at(key)));
+  }
+  for (const key of spec.sorts ?? []) {
+    own.push(...sortFieldRefs(readable(key), at(key)));
+  }
+  for (const key of spec.nestedFields ?? []) {
+    const v = readable(key);
+    if (isRec(v)) own.push(...fieldRefsFrom(v.fields, at(`${key}.fields`)));
+  }
+  for (const key of spec.sections ?? []) {
+    const v = readable(key);
+    if (!Array.isArray(v)) continue;
+    for (let i = 0; i < v.length; i++) {
+      const section = v[i];
+      if (!isRec(section)) continue;
+      own.push(...fieldRefsFrom(section.fields, at(`${key}[${i}].fields`)));
+    }
+  }
+  for (const key of spec.keyedByField ?? []) {
+    const v = readable(key);
+    if (!isRec(v)) continue;
+    for (const k of Object.keys(v)) own.push({ name: k, path: at(`${key}.${k}`) });
+  }
+  for (const key of spec.filterArrays ?? []) {
+    // Read the raw attribute here, NOT `readable`: a filter whose VALUE is
+    // non-static still has a knowable field position, and `filterAttrValue`
+    // preserved exactly that.
+    filterFieldRefs(values.get(key), at(key), queried);
+  }
+  return { own, queried };
+}
+
+/**
+ * Resolve every field-bearing prop of one block usage against its bound object.
+ *
+ * Three sources feed it, in the order a block can claim them:
+ *
+ *   1. `REACT_FIELD_SPECS` — the react-only descriptors (`ListView`,
+ *      `ObjectForm`, `ObjectChart`'s `filter`).
+ *   2. the `record:related_list` split, when the block IS that component.
+ *   3. `COMPONENT_FIELD_SPECS`, keyed by the block's `schemaType` — the shared
+ *      table the metadata surface already uses. `<Block type="…">` reaches it
+ *      by the type the author wrote, which is what makes the escape hatch
+ *      checked rather than a hole.
+ *
+ * Findings come back in this rule's own shape but under the metadata rule's id
+ * (`page-field-unknown`): the same question, asked of the same component, with
+ * the same fix.
+ */
+function checkBlockFieldProps(
+  tag: string,
+  values: ReadonlyMap<string, unknown>,
+  objectFields: ReadonlyMap<string, Set<string>>,
+  where: string,
+  path: string,
+): ReactPropFinding[] {
+  const objectName = strOf(values.get('objectName'));
+  const out: PageFieldFinding[] = [];
+
+  const spec = REACT_FIELD_SPECS[tag];
+  if (spec) {
+    const { own, queried } = reactFieldRefs(spec, values, path);
+    out.push(...checkFieldRefs(own, objectName, objectFields, where));
+    out.push(...checkFieldRefs(queried, objectName, objectFields, where, 'queried'));
+  }
+
+  if (tag === 'ObjectForm') {
+    const raw = values.get('subforms');
+    const subs = subformFieldRefs(raw === NOT_STATIC ? undefined : raw, `${path}${PATH_SEP}subforms`);
+    for (const sub of subs.child) {
+      out.push(...checkFieldRefs(sub.refs, sub.objectName, objectFields, where));
+    }
+    // `totalField` names the FORM object's field the child sum rolls up into.
+    out.push(...checkFieldRefs(subs.parent, objectName, objectFields, where));
+  }
+
+  // `<Block type="record:highlights">` renders the registered component the
+  // author names; every other block's type is fixed by its tag.
+  const schemaType = tag === 'Block' ? strOf(values.get('type')) : SCHEMA_TYPE_BY_TAG.get(tag);
+  if (schemaType) {
+    const props = readableProps(values);
+    if (schemaType === RELATED_LIST_TYPE) {
+      const split = relatedListFieldRefs(props, path, PATH_SEP);
+      out.push(...checkFieldRefs(split.related, split.relatedObject, objectFields, where));
+      out.push(...checkFieldRefs(split.picker, split.pickerObject, objectFields, where));
+      // `split.parent` (`relationshipValueField`) is deliberately dropped: the
+      // react surface binds the parent RECORD (`recordId`) but never its
+      // object, so there is nothing to resolve it against. See the section note.
+    } else if (COMPONENT_FIELD_SPECS[schemaType]) {
+      out.push(
+        ...checkFieldRefs(
+          componentFieldRefs(schemaType, props, path, PATH_SEP) ?? [],
+          objectName,
+          objectFields,
+          where,
+        ),
+      );
+    }
+  }
+
+  // The two finding shapes are structurally identical; `where`/`path` are
+  // already this surface's, so only the declared type differs.
+  return out as ReactPropFinding[];
+}
+
 export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
   const findings: ReactPropFinding[] = [];
   const objectFields = indexObjectFields(stack);
@@ -420,7 +736,12 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
             if (tsc.isJsxAttribute(a)) {
               const propName = a.name.getText(sf);
               used.add(propName);
-              values.set(propName, attrValue(tsc, sf, a));
+              values.set(
+                propName,
+                FILTER_PROPS.has(propName)
+                  ? filterAttrValue(tsc, sf, a)
+                  : attrValue(tsc, sf, a),
+              );
             }
           }
           const where = `page "${name}" › <${tag}>`;
@@ -471,6 +792,14 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
                 `${path} › searchableFields`,
                 'searchableFields',
               ),
+            );
+          }
+          // Every other field-bearing prop (#4340). Same skips as the chart
+          // and searchableFields checks: a spread hides the picture, and a
+          // non-static value is unresolvable rather than wrong.
+          if (!hasSpread) {
+            findings.push(
+              ...checkBlockFieldProps(tag, values, objectFields, where, path),
             );
           }
         }

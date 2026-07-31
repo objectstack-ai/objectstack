@@ -24,6 +24,15 @@ import { definePage } from '@objectstack/spec/ui';
  * `groupBy`) and `total` (its `field`) — not by a dataset-style measure name.
  * `os validate` checks both halves.
  *
+ * `<RecordRelatedList>` binds the CHILD object it lists (`showcase_invoice`),
+ * not the parent — the parent is `recordId`, and `relationshipField="account"`
+ * is the invoice's lookup back to it. This page used to pass the parent, which
+ * is what #4340 found: the react contract had glossed `objectName` as "the
+ * parent object" while the schema (and the renderer behind both surfaces) read
+ * it as the related one, so the list resolved `total` against an account and
+ * came back empty. Every field-bearing prop on the page is now checked against
+ * the object it actually names.
+ *
  * Styling (ADR-0065): no Tailwind — inline `style={{}}` with `hsl(var(--token))`;
  * data blocks and the drawer bring their own compiled styling. The drawer sets
  * NO pixel width: per #2578 pixel widths are deprecated (the author can't know
@@ -122,7 +131,7 @@ function Page() {
 
             <ObjectChart objectName="showcase_invoice" type="bar" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxis={{ field: 'status' }} yAxis={[{ field: 'total', format: '$0,0' }]} series={[{ name: 'total', label: 'Invoice value' }]} title="Invoice value by status" showLegend={true} />
 
-            <RecordRelatedList objectName="showcase_account" recordId={sel} relationshipField="account" columns={['name', 'status', 'total']} limit={5} showViewAll={true} title="Invoices" />
+            <RecordRelatedList objectName="showcase_invoice" recordId={sel} relationshipField="account" columns={['name', 'status', 'total']} limit={5} showViewAll={true} title="Invoices" />
 
             {editing ? (
               <ObjectForm objectName="showcase_account" mode="edit" recordId={sel}
