@@ -117,11 +117,55 @@ const ENGINE_QUERY_SLOTS: readonly QueryAliasSlot[] =
   RPC_QUERY_ALIAS_SLOTS.filter((slot) => slot.canonical === 'where' || slot.canonical === 'limit');
 
 /**
+ * [#4371] The slots the engine does NOT fold — the wire-only pairs
+ * (`select`→`fields`, `sort`→`orderBy`, `skip`→`offset`, `populate`→`expand`),
+ * derived as the complement of {@link ENGINE_QUERY_SLOTS} so a seventh pair
+ * added to the spec table lands on exactly one side of the split.
+ *
+ * Their values need shape lowering (`sort`'s `{field: 'asc'}` record form,
+ * `populate`'s name list) that belongs to the RPC/protocol layers, so folding
+ * here would re-implement the lowering per reader — the #3795 condition. But a
+ * DIRECT engine call never crosses those layers: the alias key used to ride
+ * the AST verbatim, drivers read only the canonical name, and the parameter
+ * was silently dropped — three shipped "latest N in arbitrary order" bugs
+ * (#4370) plus the engine's own `seedAutonumber`. Declared ≠ enforced
+ * (AGENTS.md PD #10): the find-shaped entry points now REJECT these spellings,
+ * naming the canonical key and shape, so the mistake throws at the call site
+ * instead of degrading the result.
+ *
+ * Deliberately NOT applied to the where-only methods
+ * (`update`/`delete`/`count`/`aggregate`): their contracts honour no
+ * sort/projection/pagination at all, so "pass `orderBy` instead" would
+ * redirect the caller to a key those methods silently ignore too. Unknown-key
+ * enforcement for those bags is #4371's option (2), scoped separately.
+ */
+const ENGINE_WIRE_ONLY_SLOTS: readonly QueryAliasSlot[] =
+  RPC_QUERY_ALIAS_SLOTS.filter((slot) => !ENGINE_QUERY_SLOTS.includes(slot));
+
+/**
+ * Canonical shape each wire-only slot's value must be rewritten into — quoted
+ * by the rejection so the error carries the full migration, not just the key
+ * rename (the value shapes differ; that is WHY the engine cannot fold them).
+ */
+const WIRE_ONLY_CANONICAL_SHAPES: Record<string, string> = {
+  fields: "a string[] of field names",
+  orderBy: "SortNode[]: [{ field, order: 'asc' | 'desc' }]",
+  offset: 'a number of rows to skip',
+  expand: 'a record of { relationName: QueryAST }',
+};
+
+/**
  * Fold the deprecated alias spellings of an engine option bag into their
  * canonical QueryAST keys, under the #3795/#4181 rule: an alias alone moves to
  * the canonical key, redundant identical spellings collapse, DIFFERENT values
  * for one slot are irreconcilable and throw (picking a winner IS the silent
  * drop), and an explicit `null` alias is a withdrawal.
+ *
+ * `rejectSlots` ({@link ENGINE_WIRE_ONLY_SLOTS}) names the slots whose alias
+ * spellings the engine can neither fold nor honour: a non-null value under one
+ * throws, quoting the canonical key and shape (#4371). `null` stays a
+ * withdrawal here too — it carries no intent a drop could lose — and rides
+ * through for drivers to ignore, exactly as before.
  *
  * Returns the SAME reference when no alias spelling is present (the common
  * path allocates nothing — `withResolvedWhere` discipline); otherwise folds a
@@ -133,8 +177,31 @@ function foldEngineOptionAliases<T extends object | undefined>(
   operation: string,
   bag: T,
   slots: readonly QueryAliasSlot[],
+  rejectSlots?: readonly QueryAliasSlot[],
 ): T {
   if (!bag) return bag;
+  if (rejectSlots) {
+    const refused = rejectSlots.flatMap((slot) =>
+      slot.aliases
+        .filter((alias) => (bag as Record<string, unknown>)[alias] != null)
+        .map((alias) => ({ alias, canonical: slot.canonical })),
+    );
+    if (refused.length > 0) {
+      throw new Error(
+        `${operation}('${object}') does not accept ` +
+        `${refused.map((r) => `'${r.alias}'`).join(', ')}: ` +
+        refused
+          .map(
+            (r) =>
+              `'${r.alias}' is a wire spelling of '${r.canonical}', folded by the RPC/protocol ` +
+              `layer — a direct engine call bypasses that fold, so the value would be silently ` +
+              `dropped, not applied. Pass '${r.canonical}' ` +
+              `(${WIRE_ONLY_CANONICAL_SHAPES[r.canonical] ?? 'the canonical QueryAST shape'}) instead.`,
+          )
+          .join(' '),
+      );
+    }
+  }
   if (!slots.some((slot) => slot.aliases.some((alias) => alias in bag))) return bag;
   const folded: Record<string, unknown> = { ...bag };
   foldQueryAliasSlots(folded, slots, (conflict) => {
@@ -1169,8 +1236,13 @@ export class ObjectQL implements IDataEngine {
     execCtx?: ExecutionContextInput,
   ): Promise<number> {
     try {
+      // Canonical `fields`, not the wire spelling `select` — this call sat on
+      // the exact #4371 silent drop (the projection never applied; the scan
+      // worked only because an unprojected row still carries `field`), and the
+      // catch below would have swallowed the guard's rejection into "seed
+      // from 0", i.e. duplicate autonumbers.
       const rows = await this.find(object, {
-        select: ['id', field],
+        fields: ['id', field],
         limit: 5000,
         context: execCtx,
       } as any);
@@ -2919,8 +2991,11 @@ export class ObjectQL implements IDataEngine {
     // spec's slot table — the driver AST only understands the canonical keys,
     // so an unfolded `{ filter }` would match ALL rows (silent over-grant —
     // surfaced by ADR-0057's sharing/graph read path). Same fold, same
-    // conflict rule on every engine entry point (#4346).
-    query = foldEngineOptionAliases(object, 'find', query, ENGINE_QUERY_SLOTS);
+    // conflict rule on every engine entry point (#4346). The wire-only
+    // spellings (`sort`/`select`/`skip`/`populate`) are REJECTED instead of
+    // folded — a direct call carrying one used to have it silently dropped
+    // (#4371, three shipped instances in #4370).
+    query = foldEngineOptionAliases(object, 'find', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
     const ast: QueryAST = { object, ...query };
@@ -3056,7 +3131,9 @@ export class ObjectQL implements IDataEngine {
     // matched the first row of the WHOLE table rather than the predicate.
     // `top` folds into `limit` here too, but findOne is single-row by
     // contract, so the literal `limit: 1` below wins over both spellings.
-    query = foldEngineOptionAliases(objectName, 'findOne', query, ENGINE_QUERY_SLOTS);
+    // Wire-only spellings are rejected, same as find() (#4371) — `sort`
+    // matters here too: findOne({ sort }) means "first row of THIS order".
+    query = foldEngineOptionAliases(objectName, 'findOne', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
     const ast: QueryAST = { object: objectName, ...query, limit: 1 };
