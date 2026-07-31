@@ -362,4 +362,23 @@ describe('subflow node executor', () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/depth|recursive/i);
   });
+
+  // #4278 — this proves the CONVERSION, not executor tolerance. The executor
+  // reads only the canonical `flowName` (its bare `cfg.flow` fallback was
+  // deleted with the graduation); a stored flow on the undeclared `flow`
+  // spelling reaches it because `registerFlow` applies
+  // 'flow-node-subflow-flow-alias', which renames it at load.
+  it('accepts the legacy `config.flow` spelling via the conversion layer (#4278)', async () => {
+    engine.registerFlow('parent_flow', parentFlow({
+      flow: 'child_flow',
+      input: { msg: '{greeting}' },
+      outputVariable: 'subResult',
+    }));
+
+    const result = await engine.execute('parent_flow', { params: { greeting: 'hi' } });
+
+    expect(result.success).toBe(true);
+    expect(ran).toEqual(['child']);
+    expect(captured).toEqual([{ result: 'CHILD_DONE' }]);
+  });
 });

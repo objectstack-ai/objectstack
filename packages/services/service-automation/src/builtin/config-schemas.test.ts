@@ -17,6 +17,12 @@
  * and `connector_action` (top-level `connectorConfig` block, #4045) — a
  * partial schema would drop those editors, and a schema rooted at `config`
  * would actively re-route sibling-block authoring to keys nothing reads.
+ *
+ * Schemaless ≠ contractless (#4278): `script` / `subflow` / `decision` publish
+ * executor-derived config Zods in spec `automation/schemaless-node-config.zod.ts`
+ * (wait / connector_action keep theirs as FlowNodeSchema sibling blocks), and
+ * objectui reconciles its hand-written form groups against those exports. The
+ * descriptors below still publish NO configSchema — that is what this file pins.
  */
 
 import { describe, it, expect } from 'vitest';

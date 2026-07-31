@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { defineActionDescriptor, SCRIPT_BUILTIN_ACTION_TYPES } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 
@@ -29,9 +29,12 @@ import { interpolate } from './template.js';
 
 /**
  * Built-in `script` side-effect action types with a (logger-backed) handler.
- * Anything else is treated as a registered-function name (#1870).
+ * Anything else is treated as a registered-function name (#1870). The member
+ * list is the spec-published `SCRIPT_BUILTIN_ACTION_TYPES` — the same constant
+ * the designer's `actionType` options reconcile against (#4278), so the form,
+ * this dispatch set, and the failure message below cannot disagree.
  */
-const SCRIPT_BUILTIN_ACTION_TYPES = new Set(['email', 'slack']);
+const SCRIPT_BUILTINS = new Set<string>(SCRIPT_BUILTIN_ACTION_TYPES);
 
 export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext): void {
     // screen — server-side pass-through (input vars already injected by engine).
@@ -206,7 +209,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
 
         // Built-in side-effect actions keep their logger-backed behavior — but
         // only when an explicit `function` isn't set (that always wins).
-        if (!fnName && actionType && SCRIPT_BUILTIN_ACTION_TYPES.has(actionType)) {
+        if (!fnName && actionType && SCRIPT_BUILTINS.has(actionType)) {
           ctx.logger.info(
             `[Script:${actionType}] template=${String(cfg.template)} ` +
               `recipients=${JSON.stringify(cfg.recipients)} ` +
@@ -255,7 +258,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             success: false,
             error:
               `script node '${node.id}': '${target}' is not a built-in action ` +
-              `(${[...SCRIPT_BUILTIN_ACTION_TYPES].join(', ')}) and no function named '${target}' is registered. ` +
+              `(${[...SCRIPT_BUILTINS].join(', ')}) and no function named '${target}' is registered. ` +
               `Register it via \`defineStack({ functions: { '${target}': fn } })\`, or fix the name (#1870).`,
           };
         }

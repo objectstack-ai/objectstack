@@ -38,8 +38,13 @@
  *    names (logic-nodes.ts). The ledger test pins that exemption with its
  *    reason instead of pretending a shape.
  *  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
- *    deliberately-schemaless class (config-schemas.test.ts); their contracts
- *    live elsewhere (edges, sibling blocks, conditional forms).
+ *    descriptor-schemaless class (config-schemas.test.ts). `wait` and
+ *    `connector_action` keep their contracts in FlowNodeSchema's sibling
+ *    blocks (`waitEventConfig` / `connectorConfig`); the other three publish
+ *    executor-derived config contracts in `schemaless-node-config.zod.ts`
+ *    (#4278) — separate from this module because they must NOT grow into
+ *    descriptor `configSchema`s (the forms they describe stay hand-written in
+ *    objectui, reconciled by a test there).
  */
 
 import { z } from 'zod';

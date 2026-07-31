@@ -481,6 +481,7 @@ const step17: MigrationStep = {
     'flow-node-wait-event-config-lift',
     'flow-node-connector-config-lift',
     'flow-node-map-flow-alias',
+    'flow-node-subflow-flow-alias',
     'flow-node-script-config-aliases',
     'permission-rls-priority-removed',
     'tool-inert-authoring-keys-removed',

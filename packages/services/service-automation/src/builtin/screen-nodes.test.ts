@@ -1,6 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import {
+    SCRIPT_BUILTIN_ACTION_TYPES,
+    SCRIPT_INVOKE_FUNCTION_ACTION_TYPE,
+    ScriptConfigSchema,
+} from '@objectstack/spec/automation';
 import { AutomationEngine, type FlowFunctionHandler } from '../engine.js';
 import { registerScreenNodes } from './screen-nodes.js';
 
@@ -152,6 +157,65 @@ it('canonicalizes a stored `functionName` key to `function` at load (#1870 DX, #
         const r = await engine.execute('chain', {} as any);
         expect(r.success).toBe(true);
         expect(seen).toEqual([{ cat: 'billing', conf: 0.9 }]);
+    });
+});
+
+/**
+ * #4278 — the script node's contract is the spec-published one. The designer
+ * form for `script` is objectui's hand-written group (this node deliberately
+ * publishes no descriptor configSchema — config-schemas.test.ts), so the only
+ * machine-readable statement of what it accepts is
+ * `SCRIPT_BUILTIN_ACTION_TYPES` / `ScriptConfigSchema` in
+ * `@objectstack/spec/automation`. These pins are the objectstack half of the
+ * cross-repo reconciliation: the executor dispatches exactly the published
+ * built-in set (it now builds its dispatch set FROM the constant), and its
+ * failure message names that same set — objectui's side reconciles its form
+ * options and key set against the same exports.
+ */
+describe('script contract ↔ spec-published constants (#4278)', () => {
+    let engine: AutomationEngine;
+
+    beforeEach(() => {
+        engine = new AutomationEngine(createTestLogger());
+        registerScreenNodes(engine, createCtx());
+    });
+
+    it.each([...SCRIPT_BUILTIN_ACTION_TYPES])(
+        "every published built-in actionType runs the built-in branch: '%s'",
+        async (actionType) => {
+            engine.registerFlow('script_flow', scriptFlow({ actionType, template: 't', recipients: ['a'] }));
+            const result = await engine.execute('script_flow', {} as any);
+            expect(result.success).toBe(true);
+        },
+    );
+
+    it('an actionType outside the published set fails naming exactly that set (the #4278 sms repro)', async () => {
+        // The old objectui form offered 'sms' / 'notification'; neither is in
+        // the published set, so they resolve as function names and fail. The
+        // error must name the published members — it is the message the #4278
+        // report quoted, and the form's options now come from the same constant.
+        engine.registerFlow('script_flow', scriptFlow({ actionType: 'sms' }));
+        const result = await engine.execute('script_flow', {} as any);
+        expect(result.success).toBe(false);
+        for (const builtin of SCRIPT_BUILTIN_ACTION_TYPES) {
+            expect(result.error).toContain(builtin);
+        }
+        expect(result.error).toMatch(/'sms' is not a built-in action/);
+    });
+
+    it('the published Zod accepts the canonical authoring shapes (contract sanity)', () => {
+        // Function path — the only shape that does real work.
+        expect(ScriptConfigSchema.parse({
+            actionType: SCRIPT_INVOKE_FUNCTION_ACTION_TYPE,
+            function: 'score_lead',
+            inputs: { leadId: '{record.id}' },
+            outputVariable: 'score',
+        })).toMatchObject({ function: 'score_lead' });
+        // Built-in side effect.
+        expect(ScriptConfigSchema.parse({ actionType: 'email', template: 't', recipients: ['a'], variables: { x: 1 } }))
+            .toMatchObject({ actionType: 'email' });
+        // Inline script — recognized (and documented as not executed).
+        expect(ScriptConfigSchema.parse({ script: 'return 1;' })).toMatchObject({ script: 'return 1;' });
     });
 });
 

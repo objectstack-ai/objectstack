@@ -1288,6 +1288,58 @@ const flowNodeMapFlowAlias: MetadataConversion = {
   },
 };
 
+/**
+ * Subflow flow-node config key alias → canonical (protocol 17, #4278).
+ *
+ * The same undeclared `flow` spelling {@link flowNodeMapFlowAlias} retired for
+ * `map`, found on `subflow` by writing `SubflowConfigSchema` from its executor
+ * for the #4278 schemaless-node reconciliation: the executor carried a bare
+ * `cfg.flowName ?? cfg.flow` fallback no schema or form ever described (PD
+ * #12). The fallback is deleted in the same change; this conversion is what
+ * keeps a stored `flow` spelling loading — rewritten to the canonical key,
+ * including the `AutomationEngine.registerFlow` rehydration seam, so the
+ * executor reads `cfg.flowName` only.
+ *
+ * A pure key rename with unchanged values. **Live window**; retires at 18.
+ */
+const flowNodeSubflowFlowAlias: MetadataConversion = {
+  id: 'flow-node-subflow-flow-alias',
+  toMajor: 17,
+  surface: 'flow.node.subflow.config.flowName',
+  summary: "subflow flow-node config key 'flow' → 'flowName' (#4278 — undeclared executor fallback graduation)",
+  apply(stack, emit) {
+    return renameFlowConfigAliases(stack, new Set(['subflow']), [['flow', 'flowName']], emit);
+  },
+  fixture: {
+    before: {
+      flows: [
+        {
+          name: 'escalate_case',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'subflow', config: { flow: 'escalation_flow', input: { caseId: '{record.id}' } } },
+            // canonical already present → the shadowed alias is left alone (no notice)
+            { id: 'n3', type: 'subflow', config: { flowName: 'audit_flow', flow: 'ignored' } },
+          ],
+        },
+      ],
+    },
+    after: {
+      flows: [
+        {
+          name: 'escalate_case',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'subflow', config: { flowName: 'escalation_flow', input: { caseId: '{record.id}' } } },
+            { id: 'n3', type: 'subflow', config: { flowName: 'audit_flow', flow: 'ignored' } },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 /** The `config` keys a mis-taught `connector_action` node carries, in declared-block order. */
 const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
 
@@ -2191,6 +2243,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     flowNodeWaitEventConfigLift,
     flowNodeConnectorConfigLift,
     flowNodeMapFlowAlias,
+    flowNodeSubflowFlowAlias,
     flowNodeScriptConfigAliases,
     permissionRlsPriorityRemoved,
     toolInertAuthoringKeysRemoved,
