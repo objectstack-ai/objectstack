@@ -8,7 +8,7 @@ description: Detailed status of protocol implementations across ObjectStack pack
 This document provides a comprehensive overview of which protocols from `@objectstack/spec` have been implemented in the ObjectStack packages.
 
 <Callout type="info">
-**Last Updated**: June 2026
+**Last Updated**: July 2026
 
 This matrix is generated from actual codebase analysis and represents the current implementation status.
 </Callout>
@@ -42,8 +42,8 @@ This matrix is generated from actual codebase analysis and represents the curren
 
 **Notes:**
 - Core package provides complete microkernel implementation
-- Plugin system supports lifecycle hooks, dependency resolution, and service injection
-- Event bus enables inter-plugin communication
+- Plugin system supports the `init`/`start`/`destroy` lifecycle, dependency resolution, and service injection — the `onInstall`/`onEnable`-style hook family was retired in v17 as never-implemented (#4212)
+- Event bus enables inter-plugin communication; `IPluginLifecycleEvents` registers the 14 lifecycle events that actually fire, and `LifecycleEventName` soft-types `hook`/`trigger` (#4241)
 - ObjectQL serves as the **example kernel** — a reference implementation that will be modularized into plugins
 
 ### Data Infrastructure

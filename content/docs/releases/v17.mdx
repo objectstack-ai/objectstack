@@ -904,6 +904,7 @@ import or the authored key.
 | `dashboard.aria` / `.performance` / widget `performance` (+ `PerformanceConfigSchema`) | no renderer applied them; virtual scrolling is the live top-level `virtualScroll` (#3896 close-out) |
 | `agent.knowledge` (+ `AIKnowledgeSchema`) | declaring sources/indexes never scoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's tool-call arguments (#3896 close-out) |
 | `PluginLifecycleSchema` (`onInstall`/`onEnable`/`onDisable`/`onUninstall`/`onUpgrade`) + `UpgradeContextSchema` + the `ObjectStackPlugin` interface family (`@objectstack/spec/system`) | a plugin lifecycle the kernel never implemented — the real contract is `init`/`start`/`destroy`; code written against the hooks silently never ran (#4212) |
+| The typed-event cluster (`kernel` plugin-lifecycle-events.zod — ten payload schemas (`PluginRegisteredEvent`, `HookTriggeredEvent`, `KernelReadyEvent`, …), the 21-name `PluginLifecycleEventType` enum, `ITypedEventEmitter`) | a typed-event system that was never built: zero consumers, and the enum was wrong in both directions — 17 names nothing fires, 10 real events missing. `IPluginLifecycleEvents` is now the registry of the 14 events with a real emitter, and the new `LifecycleEventName` union soft-types `PluginContext.hook`/`trigger` (#4212 follow-up, #4241) |
 | `skill.triggerPhrases` | phrases were never matched; activation is `triggerConditions` + the agent's `skills[]` allowlist (#3896 close-out) |
 | `DEFAULT_DISPATCHER_ROUTES` | dead route table |
 | Aspirational config on Theme / Translation / Webhook | still-dead after #3494 |
@@ -941,6 +942,18 @@ from `@objectstack/spec` directly.
   Fix: write `{ strategy: 'retry', maxRetries: 3 }`, or `strategy: 'fail'` if no
   retry was intended. `maxRetries: 0` stays legal under `'fail'` / `'continue'`,
   which never read it.
+- **`ObjectQLEngine.use()` and `ObjectQLHostContext` are removed** (#4212
+  follow-up, #4242). The engine's own plugin loader — register a manifest
+  part, then dispatch the runtime part's `onEnable` over an
+  `ObjectQLHostContext` — had zero callers repo-wide, and its `onEnable` was
+  the engine-level twin of the #4212 disease: a lifecycle entry point that
+  reads as a contract and never runs. Fix: `engine.use(manifest)` →
+  `engine.registerApp(manifest)`; `engine.use(_, { onEnable })` → a kernel
+  plugin (`kernel.use({ name, init(ctx) { … } })`, engine via
+  `ctx.getService('objectql')`, drivers via `engine.registerDriver()`).
+  `new ObjectQL({ logger })` and `ObjectQLPlugin`'s `hostContext` option keep
+  working, and the *app-bundle* `onEnable` module export (dispatched by
+  AppPlugin at boot) is a different, real contract — unchanged.
 
 ## New capabilities in 17.0.0
 
