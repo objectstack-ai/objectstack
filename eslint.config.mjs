@@ -69,11 +69,16 @@ const SLOT_LOOKUPS = ['resolveService', 'getService', 'getRequestKernelService']
 // place, not sprinkled through the code. Deleting a name from this list is how
 // the exemption ends once that contract gets written.
 //
-// Entries are spliced into a regex, so escape metacharacters (`http\\.server`).
-// `http.server` is served by three providers (plugin-hono-server, runtime's
-// config.server path, qa's node-plugin) and no IHttpServer contract exists;
-// callers read only `getPort()`.
-const UNCONTRACTED_SLOTS = ['protocol', 'mcp', 'kernel-resolver', 'scope-manager', 'http\\.server'].join('|');
+// Entries are spliced into a regex, so escape metacharacters if one returns.
+//
+// [#4251] `http.server` was here, on the stated ground that "no IHttpServer
+// contract exists". That was FALSE when it was written: the contract is
+// `packages/spec/src/contracts/http-server.ts`, and eight call sites were
+// already resolving the slot as `getService<IHttpServer>(…)`. An exemption is a
+// claim like any other, and this one rested on a premise nobody checked — the
+// same shape as the gaps this rule exists to find. Revoked; the slot is
+// accounted for like every other contracted slot.
+const UNCONTRACTED_SLOTS = ['protocol', 'mcp', 'kernel-resolver', 'scope-manager'].join('|');
 
 // Exported so `scripts/check-slot-lookup-ratchet.mjs` can identify THIS rule's
 // reports among the other `no-restricted-syntax` rules, by exact message —

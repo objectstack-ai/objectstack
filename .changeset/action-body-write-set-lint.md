@@ -10,8 +10,10 @@ that carries one. An action body is the same artefact: the same
 `HookBodySchema` union, parsed by the same `HookBodySchema.safeParse` in
 `actionBodyRunnerFactory`, run in the same QuickJS sandbox. So it fails the
 same way — `ctx.api.object('crm_deal').update({ stag: 'won' })` inside an
-action succeeds, returns success to the caller, and the unknown column simply
-never lands. Half the surface was still blind.
+action reaches the driver unfiltered, and the outcome splits by driver: on SQL
+the stray column fails the whole call with a driver-level error far from the
+authoring site, and on a schemaless driver the stray key is persisted. Half
+the surface was still blind.
 
 **New rule — `action-body-write-unknown-field` (advisory).** Wired into
 `REFERENCE_INTEGRITY_RULES`, so `os validate`, `os lint` and `os compile` all

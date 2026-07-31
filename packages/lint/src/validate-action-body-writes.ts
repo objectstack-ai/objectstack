@@ -6,11 +6,14 @@
 // An action body is the same artefact as a hook body: the same
 // `HookBodySchema` union, parsed by the same `HookBodySchema.safeParse` in
 // `actionBodyRunnerFactory` (packages/runtime/src/sandbox/body-runner.ts), run
-// in the same QuickJS sandbox. So it fails the same way — an action that
-// persists a field the target object never declares runs clean, returns
-// success to the caller, and the unknown column simply never lands. Same
-// silent no-op, same #4001 family; the hook rule alone left half the surface
-// uncovered.
+// in the same QuickJS sandbox. So it fails the same way — an action body that
+// writes a field the target object never declares reaches the driver
+// unfiltered, and the outcome is DRIVER-DEPENDENT: on SQL the stray column
+// fails the whole call with a driver-level error far from the authoring
+// mistake, on a schemaless driver the stray key is persisted. Same #4271
+// split as the hook side (see that file's header for the measured chain, and
+// `undeclared-field-write-driver-split.integration.test.ts` for the pin); the
+// hook rule alone left half the surface uncovered.
 //
 // ─── What does NOT carry over ───────────────────────────────────────────────
 //
@@ -77,6 +80,7 @@ import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 import {
   extractHookBodyWriteSet,
   indexObjectFields,
+  judgeableFieldsOf,
   IMPLICIT_FIELDS,
   HOOK_BODY_WRITE_PATTERNS,
   type BodyWritePatternExclusion,
@@ -319,8 +323,8 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
       const dedupeKey = `${w.object}\u0000${w.field}`;
       if (reported.has(dedupeKey)) continue;
 
-      const known = objectFields.get(w.object);
-      if (!known) continue; // object declared by another package — cannot judge
+      const known = judgeableFieldsOf(objectFields, w.object);
+      if (!known) continue; // cross-package, or no declared fields — cannot judge
       if (IMPLICIT_FIELDS.has(w.field) || known.has(w.field)) continue;
 
       reported.add(dedupeKey);
@@ -331,8 +335,9 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
         path: site.path,
         message:
           `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', but ` +
-          `object '${w.object}' declares no such field. The action returns success while the unknown column ` +
-          `silently never lands (#4271).`,
+          `object '${w.object}' declares no such field. The write-path validator skips the unknown key — ` +
+          `on a SQL driver the whole action then fails with a driver-level error far from here; on a ` +
+          `schemaless driver (memory, MongoDB) the stray key is persisted (#4271).`,
         hint: fixHint(w.field, [...known]),
       });
     }

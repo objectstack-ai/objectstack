@@ -6,6 +6,7 @@ import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { isMcpServerEnabled } from '@objectstack/types';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 /**
  * The statuses that mean "advertised but not actually served" — 404 (route not
@@ -126,8 +127,8 @@ async function bootServe(stubOpts: { notification?: boolean; mcp?: boolean } = {
     kernel.use(new HonoServerPlugin({ port: 0, cors: false }));
     kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false, requireAuth: true }));
     await kernel.bootstrap();
-    const httpServer = kernel.getService<any>('http.server');
-    const baseUrl = `http://127.0.0.1:${httpServer.getPort()}`;
+    const httpServer = kernel.getService<IHttpServer>('http.server');
+    const baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
     return { kernel, baseUrl };
 }
 

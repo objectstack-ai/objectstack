@@ -138,13 +138,17 @@ export type ExpressionBody = z.infer<typeof ExpressionBodySchema>;
  * `HOOK_BODY_WRITE_PATTERNS` ledger declares (`ctx.input.x = …`,
  * `Object.assign(ctx.input, { x })`, `ctx.api.object('y').update({ x })`)
  * are resolved against the target object's declared + system fields, and an
- * unknown field warns with a did-you-mean. Statically unknowable writes —
- * computed keys, spreads, aliased `ctx.input`, dynamic object names,
- * wildcard-target hooks — remain opaque and are skipped silently, so the
- * warning's absence is not proof of correctness. When the write set is fixed,
- * still prefer a flow `update_record` node: `validateFlowNodeWrites` resolves
- * its `config.fields` keys with no parser in between, so that surface gates
- * (`flow-node-write-unknown-field`, `error`) where this one advises.
+ * unknown field warns with a did-you-mean. Nothing downstream catches what the
+ * lint misses: the payload reaches the driver unfiltered, so a SQL driver
+ * fails the WHOLE write with a driver-level error far from the authoring site,
+ * while a schemaless driver (memory, MongoDB) persists the stray key.
+ * Statically unknowable writes — computed keys, spreads, aliased `ctx.input`,
+ * dynamic object names, wildcard-target hooks — remain opaque and are skipped
+ * silently, so the warning's absence is not proof of correctness. When the
+ * write set is fixed, still prefer a flow `update_record` node:
+ * `validateFlowNodeWrites` resolves its `config.fields` keys with no parser in
+ * between, so that surface gates (`flow-node-write-unknown-field`, `error`)
+ * where this one advises.
  *
  * An **action** body carrying this same schema is checked by the sibling rule
  * `validateActionBodyWrites`, over the subset of that ledger which survives the

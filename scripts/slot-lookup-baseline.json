@@ -7,7 +7,6 @@
   "packages/cloud-connection/src/marketplace-install-local-plugin.ts": 17,
   "packages/core/examples/kernel-features-example.ts": 5,
   "packages/metadata-protocol/src/plugin.ts": 1,
-  "packages/metadata/src/plugin.ts": 1,
   "packages/objectql/src/plugin.integration.test.ts": 23,
   "packages/objectql/src/plugin.ts": 7,
   "packages/plugins/plugin-approvals/src/approvals-plugin.ts": 9,

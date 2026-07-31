@@ -4,13 +4,28 @@
 //
 // An L2 body that writes a field the target object never declares —
 // `ctx.input.amout = 0`, `ctx.api.object('deal').update({ stag: 'won' })` —
-// runs clean in the QuickJS sandbox, reports success, and the unknown column
-// simply never lands in the stored record. No diagnostic anywhere: the exact
-// "silent no-op manufactures false completion" failure mode of #4001, at the
-// runtime-expression layer. The read side (`hook.condition`, ADR-0032) and the
-// capability surface are statically checked; until this rule, the write side
-// was the one blind face (the gap `hook-body.zod.ts` used to carry as
-// "accepted").
+// runs clean in the QuickJS sandbox and reaches the driver UNFILTERED:
+// `applyMutationsToInput` (runtime/src/sandbox/body-runner.ts) is a plain
+// `Object.assign`, and `validateRecord` walks declared fields on insert and
+// `continue`s past a key with no field def on update. What happens after that
+// is DRIVER-DEPENDENT, and neither half is acceptable:
+//
+//   • SQL — the stray column enters the knex statement and the WHOLE write
+//     fails with a driver-level error (`table deal has no column named
+//     stagee`). The write is lost, and the error surfaces far from the
+//     authoring mistake that caused it.
+//   • Schemaless (memory, MongoDB) — the driver spreads the payload, so the
+//     stray key IS persisted: an undeclared column nothing downstream reads.
+//
+// Either way the mistake is invisible where it is MADE — the #4001 family, if
+// not literally its silent-no-op shape. Both runtime outcomes are pinned by
+// `runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts`
+// so this rule's wording cannot drift from what the runtime does; the same
+// split is documented in `content/docs/automation/hook-bodies.mdx`.
+//
+// The read side (`hook.condition`, ADR-0032) and the capability surface are
+// statically checked; until this rule, the write side was the one blind face
+// (the gap `hook-body.zod.ts` used to carry as "accepted").
 //
 // Scope — the literal write patterns in {@link HOOK_BODY_WRITE_PATTERNS}, and
 // nothing else. The body is PARSED (TypeScript parser, never executed, never
@@ -288,6 +303,39 @@ export function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
   return out;
 }
 
+/**
+ * The declared field names of `objectName` — but ONLY when they are a sound
+ * basis for judging "this name resolves to nothing". Otherwise `undefined`.
+ *
+ * Two different unknowns collapse to one answer on purpose, because every
+ * caller in this family owes them the same silence:
+ *
+ *   • the object is not in this stack — another package declares it, and a
+ *     field map we cannot see cannot be judged;
+ *   • the object is here but declares NO fields at all — an external object or
+ *     a datasource-introspected schema whose columns are resolved at runtime.
+ *     Its field map is not empty, it is *unknown*, and an empty Set answers
+ *     `has(anything) === false`, which reads as "no such field" for EVERY write
+ *     to it. That is a false-positive generator, and a false positive kills an
+ *     advisory lint (#4383).
+ *
+ * The distinction is unused today — no rule in the family wants to act on one
+ * and not the other — so collapsing it here is what stops the guard from being
+ * hand-copied per call site and forgotten at one of them, which is exactly how
+ * it went missing from the hook and action rules while
+ * `validate-searchable-fields` (skip #2) and `validate-flow-node-writes` both
+ * had it. A future caller that genuinely needs to tell them apart should read
+ * the index directly and say why.
+ */
+export function judgeableFieldsOf(
+  index: ReadonlyMap<string, Set<string>>,
+  objectName: string,
+): Set<string> | undefined {
+  const declared = index.get(objectName);
+  if (!declared || declared.size === 0) return undefined;
+  return declared;
+}
+
 /** One statically-extracted field write found in an L2 body. */
 export interface ExtractedHookBodyWrite {
   /** Which {@link HOOK_BODY_WRITE_PATTERNS} entry matched. */
@@ -548,12 +596,18 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
 
     // The hook's own target set, for `ctx.input` writes. A wildcard target has
-    // no single object to check against; an unknown (cross-package) target
-    // cannot be judged — either way `ctx.input` writes are skipped, not guessed.
+    // no single object to check against; a target whose fields cannot be judged
+    // ({@link judgeableFieldsOf} — cross-package, or declaring no fields at all)
+    // gives nothing to resolve against — either way `ctx.input` writes are
+    // skipped, not guessed.
     const targets = (Array.isArray(hook.object) ? hook.object : [hook.object]).filter(
       (o): o is string => typeof o === 'string' && o.trim() !== '',
     );
-    const targetSets = targets.map((t) => objectFields!.get(t));
+    const targetSets = targets.map((t) => judgeableFieldsOf(objectFields!, t));
+    // ALL targets must be judgeable, not just one: the finding below fires only
+    // when a field is missing from EVERY target, and an unjudgeable target is
+    // one the field might well exist on. One opaque target therefore makes the
+    // whole "missing everywhere" claim unsound, not merely narrower (#4383).
     const inputJudgeable =
       targets.length > 0 && !targets.includes('*') && targetSets.every((s) => s !== undefined);
 
@@ -586,14 +640,15 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
           path,
           message:
             `body writes '${w.field}' to its input, but ${objDesc} ${declares}. The sandboxed script runs ` +
-            `clean and the value is copied back onto the record payload — then the unknown column silently ` +
-            `never lands in the stored record (#4271).`,
+            `clean and the value is copied back onto the record payload unfiltered — on a SQL driver the ` +
+            `stray column then fails the WHOLE write with a driver-level error far from here; on a ` +
+            `schemaless driver (memory, MongoDB) it is persisted as an undeclared key (#4271).`,
           hint: fixHint(w.field, unionCandidates(targetSets)),
         });
       } else {
         // ctx.api write → the named object.
-        const known = objectFields!.get(w.object);
-        if (!known) continue; // object declared by another package — cannot judge
+        const known = judgeableFieldsOf(objectFields!, w.object);
+        if (!known) continue; // cross-package, or no declared fields — cannot judge
         if (IMPLICIT_FIELDS.has(w.field) || known.has(w.field)) continue;
 
         reported.add(dedupeKey);
@@ -604,8 +659,9 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
           path,
           message:
             `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', but ` +
-            `object '${w.object}' declares no such field. The call succeeds while the unknown column silently ` +
-            `never lands (#4271).`,
+            `object '${w.object}' declares no such field. The write-path validator skips the unknown key — ` +
+            `on a SQL driver the whole call then fails with a driver-level error far from here; on a ` +
+            `schemaless driver (memory, MongoDB) the stray key is persisted (#4271).`,
           hint: fixHint(w.field, [...known]),
         });
       }

@@ -84,7 +84,7 @@
 
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 
-import { indexObjectFields, IMPLICIT_FIELDS } from './validate-hook-body-writes.js';
+import { indexObjectFields, judgeableFieldsOf, IMPLICIT_FIELDS } from './validate-hook-body-writes.js';
 
 export type FlowNodeWriteSeverity = 'error';
 
@@ -210,13 +210,12 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
       if (!objectName) return; // templated / dynamic object — resolved at run time
 
       objectFields ??= indexObjectFields(stack);
-      const known = objectFields.get(objectName);
-      if (!known) return; // object declared by another package — cannot judge its fields
-      // An object that declares NO fields is an external / datasource-introspected
-      // schema whose columns are resolved at runtime (the same skip
-      // validate-searchable-fields takes). Every write to it would otherwise be
-      // flagged, and this rule gates.
-      if (known.size === 0) return;
+      // Cross-package objects and objects declaring no fields at all (external /
+      // datasource-introspected schemas) are both unjudgeable, and this rule
+      // gates — see {@link judgeableFieldsOf}, which is where that guard now
+      // lives for the whole family rather than once per rule (#4383).
+      const known = judgeableFieldsOf(objectFields, objectName);
+      if (!known) return;
 
       const nodeName =
         typeof node.label === 'string' && node.label

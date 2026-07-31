@@ -477,8 +477,10 @@ const actionObject = () => z.object({
    *
    * Both are checked at author time by `validateActionBodyWrites` in
    * `@objectstack/lint`: a literal `ctx.api.object('y').update({ x })` naming a
-   * field object `y` never declares warns with a did-you-mean, because the call
-   * succeeds while the unknown column silently never lands (#4271); and a
+   * field object `y` never declares warns with a did-you-mean, because nothing
+   * downstream catches it — on a SQL driver the stray column fails the whole
+   * call with a driver-level error far from the authoring site, and on a
+   * schemaless driver it is persisted as an undeclared key (#4271); and a
    * provably dead `ctx.record.<field> = …` warns as discarded (#4345).
    * Advisory only, and blind to everything statically unknowable; see
    * `ScriptBodySchema` for the scope.

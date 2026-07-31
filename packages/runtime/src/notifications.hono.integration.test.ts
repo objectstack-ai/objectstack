@@ -10,6 +10,7 @@ import { MessagingServicePlugin, MessagingService } from '@objectstack/service-m
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 /**
  * End-to-end regression for framework #3362 (`#3354 not effective on hono`).
@@ -89,8 +90,8 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
 
     await kernel.bootstrap();
 
-    const httpServer = kernel.getService<any>('http.server');
-    baseUrl = `http://127.0.0.1:${httpServer.getPort()}`;
+    const httpServer = kernel.getService<IHttpServer>('http.server');
+    baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
     messaging = kernel.getService<MessagingService>('notification');
   }, 30_000);
 

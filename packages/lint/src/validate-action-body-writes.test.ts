@@ -199,6 +199,24 @@ describe('validateActionBodyWrites — ctx.api writes', () => {
     expect(findings).toEqual([]);
   });
 
+  // #4383 — an object declaring NO fields (external / datasource-introspected,
+  // columns resolved at runtime) is unjudgeable, not "has no such field". The
+  // empty Set used to answer `has()` false for every write to it.
+  it('stays silent on an object that declares no fields', () => {
+    const stack = {
+      objects: [dealObject, { name: 'legacy_deal', label: 'Legacy Deal', external: true }],
+      actions: [
+        {
+          name: 'sync_legacy',
+          label: 'Sync Legacy',
+          objectName: 'crm_deal',
+          body: { language: 'js', source: "await ctx.api.object('legacy_deal').update({ stage: 'won' });" },
+        },
+      ],
+    };
+    expect(validateActionBodyWrites(stack)).toEqual([]);
+  });
+
   it('reports each unknown field once per action, even when written repeatedly', () => {
     const findings = validateActionBodyWrites(
       stackWith(

@@ -5,6 +5,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/runtime';
 import { ObjectStackClient } from './index';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 describe('ObjectStackClient (with Hono Server)', () => {
     let baseUrl: string;
@@ -130,8 +131,8 @@ describe('ObjectStackClient (with Hono Server)', () => {
         await ql.syncObjectSchema('customer');
 
         // 5. Get Port from Service
-        const httpServer = kernel.getService<any>('http.server');
-        const port = httpServer.getPort();
+        const httpServer = kernel.getService<IHttpServer>('http.server');
+        const port = httpServer.getPort!();
         baseUrl = `http://localhost:${port}`;
 
         console.log(`Test server running at ${baseUrl}`);
