@@ -745,6 +745,22 @@ them temporarily, `OS_ALLOW_LAX_MEDIA_VALUES=1` (media) and
 per class, and re-running the corresponding migration re-establishes its flag
 from the data itself.
 
+#### How you find out a gate is open
+
+You are told, in the two places an upgrade actually looks.
+
+**`os migrate meta --from 16`** — the metadata half of the upgrade — ends by
+naming the data migrations that remain, scoped to the field classes *your*
+metadata declares. It reads no database, so it reports what is left to do,
+never what this deployment has already done. The machine-readable output
+carries the same list under `dataMigrations`.
+
+**The server, once per boot**, logs one line per gate that is still open here
+and the command that closes it. Only the lax posture announces itself: a
+closed gate logs that it is enforcing, and an app that declares neither class
+of field says nothing at all. So a running deployment always tells you the
+state of its own data — which is the question `os migrate meta` cannot answer.
+
 ### Scaffolding
 
 | Command | Alias | Description |

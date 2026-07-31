@@ -930,6 +930,17 @@ from `@objectstack/spec` directly.
 - **`sys_view_definition`'s all-six `apiMethods` whitelist is dropped** (#3026).
 - **`os migrate plan` shows index drift** — index DDL is no longer applied
   silently at boot (#3728).
+- **A flow's `errorHandling.strategy: 'retry'` must state `maxRetries` (>= 1)**
+  (#4247). `maxRetries` had two defaults — `.default(0)` in `FlowSchema` and
+  `?? 3` in the engine's `retryExecution` — so an unstated count retried 0 times
+  for a flow that had been through the schema and 3 times for a definition
+  handed to the engine directly. The engine's copy is gone (it reads the parsed
+  block with no fallback), and the case that was ambiguous is rejected rather
+  than guessed: retrying zero times is `strategy: 'fail'` under another name,
+  and a retry re-runs the *whole* flow, so the count is the author's to state.
+  Fix: write `{ strategy: 'retry', maxRetries: 3 }`, or `strategy: 'fail'` if no
+  retry was intended. `maxRetries: 0` stays legal under `'fail'` / `'continue'`,
+  which never read it.
 
 ## New capabilities in 17.0.0
 

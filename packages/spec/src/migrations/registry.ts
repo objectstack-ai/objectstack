@@ -456,7 +456,21 @@ const step17: MigrationStep = {
     'scoped retrieval — absorbs the former topics→sources rename), and ' +
     "`skill.triggerPhrases` (phrases were never matched; routing is " +
     'triggerConditions + the agent allowlist). All pure lossless deletes, each ' +
-    'tombstoned at its schema with the prescription.',
+    'tombstoned at its schema with the prescription.\n\n' +
+    'One flow key changes WITHOUT a lossless target: `errorHandling.maxRetries` ' +
+    '(#4247). It carried two defaults — `.default(0)` in FlowSchema and ' +
+    "`maxRetries ?? 3` in the engine's retryExecution — and because `??` fires " +
+    'only on `undefined`, an unstated count meant 0 retries for a flow parsed by ' +
+    'the schema and 3 for a definition handed to the engine directly: the retry ' +
+    "count was a function of the route in, not of the authored flow. The engine's " +
+    'copy is deleted (it reads the parsed block, no fallback), which makes an ' +
+    "unstated count unambiguously 0 — and `strategy: 'retry'` that retries zero " +
+    "times is `strategy: 'fail'` under another name, the declared-not-delivered " +
+    'shape ADR-0049 exists to close. The schema therefore requires `maxRetries` ' +
+    "at least 1 under `'retry'`, in both spellings (omitted, and an explicit 0). " +
+    'This is the one v17 flow change the chain cannot apply for you: choosing the ' +
+    'count is a judgment about re-running the WHOLE flow with its side effects, ' +
+    'so it is a semantic TODO rather than a rewrite.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -480,6 +494,26 @@ const step17: MigrationStep = {
     'skill-trigger-phrases-removed',
   ],
   semantic: [
+    {
+      id: 'flow-retry-max-retries-required',
+      surface: "flow.errorHandling.maxRetries (under strategy: 'retry')",
+      replacement: 'an explicit count >= 1 (e.g. maxRetries: 3), or strategy: \'fail\'',
+      reason:
+        'maxRetries had two defaults — FlowSchema `.default(0)` and the engine\'s ' +
+        '`maxRetries ?? 3` — so an unstated count retried 0 times through the schema and 3 ' +
+        'times through a hand-built definition (#4247). With the engine\'s copy removed the ' +
+        'unstated count is unambiguously 0, and retrying zero times is exactly ' +
+        "`strategy: 'fail'`, so the schema now refuses the combination instead of it silently " +
+        'doing nothing. There is no lossless rewrite: 0 preserves the behaviour a parsed flow ' +
+        'got but contradicts what its author wrote, and any positive count is a NEW decision ' +
+        'about re-running the whole flow with its side effects. That choice is the author\'s.',
+      acceptanceCriteria:
+        "Every flow declaring `errorHandling.strategy: 'retry'` also declares " +
+        '`maxRetries` >= 1, and each count was chosen knowing a retry replays the flow FROM ' +
+        'THE START (records re-created, callouts re-fired); flows that never actually wanted ' +
+        "retries say `strategy: 'fail'`. No flow fails to register with the maxRetries " +
+        'prescription.',
+    },
     {
       id: 'analytics-query-request-envelope-retired',
       surface: 'api.analyticsQueryRequest.query',

@@ -166,6 +166,22 @@ jobs:
       - name: Node-version drift guard
         run: pnpm check:node-version
 
+      # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
+      # whole package directory, and 20 of the 49 publishable packages declared
+      # none — so consumers installed TypeScript sources, unit tests and build
+      # tooling, with dist/ landing on top of them rather than instead of them
+      # (@objectstack/plugin-webhooks: 21 files, three of them unit tests). The
+      # other 29 did declare it, so this was a hand-copied line with no gate —
+      # the #3786 shape, where whoever forgets it gets no signal at all. Also
+      # checks the whitelist is SUFFICIENT (covers every entry point, so
+      # tightening one cannot ship a package that fails to resolve) and MINIMAL
+      # (admits no test or build script), which keeps #4206's "`<pkg>/scripts/**`
+      # is never runtime code" assumption continuously verified instead of
+      # hand-checked. Runs its own --self-test first: the pattern semantics can
+      # be wrong while every package is right.
+      - name: Published-files whitelist guard
+        run: pnpm check:published-files
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest
@@ -222,6 +238,23 @@ jobs:
 
       - name: Type check (@objectstack/spec)
         run: pnpm --filter @objectstack/spec exec tsc --noEmit
+
+      # Meta-gate (#4203): the `check:generated` aggregate reconciles its
+      # GATED/NO_GENERATOR ledger against packages/spec/package.json on every run,
+      # in both directions, so a `check:`/`gen:` script nobody classified fails
+      # instead of quietly dropping out of coverage. But the reconciliation only
+      # ran where the aggregate ran — locally. CI runs the gates as individual
+      # steps, so a PR adding an unclassified script kept every CI gate green
+      # while the wrapper AGENTS.md prescribes exited red on `main`, running zero
+      # gates. Twice in three days: #4177 (`check:variant-docs`, fixed only when
+      # #4194 collided with the same wall) and #4232 (`check:strictness-ledger`,
+      # caught while wiring this step). Not in ci.yml's `check-generated` job:
+      # its `generated` paths filter does not watch packages/spec/package.json —
+      # the one file every offending PR must touch — so both offenders skipped
+      # that job entirely. This job is unfiltered and required, so the meta-gate
+      # cannot go dormant. Reads package.json only; no build, sub-second.
+      - name: "Check every check:/gen: script is classified in the check:generated ledger"
+        run: pnpm --filter @objectstack/spec check:generated --reconcile-only
 
       # Generated-docs gate: content/docs/references/** is generated from the spec
       # by `gen:schema && gen:docs` and committed. Nothing regenerated it in CI, so

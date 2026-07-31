@@ -4,6 +4,7 @@ export * from './degraded-boot.js';
 export * from './env.js';
 export * from './error-leak.js';
 export * from './module-not-found.js';
+export * from './response-envelope.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

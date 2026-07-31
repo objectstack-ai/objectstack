@@ -2,6 +2,8 @@
 
 import type { PluginContext } from '@objectstack/core';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+import { sendOk, sendError } from '@objectstack/types';
 
 /**
  * External Datasource Federation REST routes (ADR-0015 §6.2).
@@ -22,8 +24,25 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
  * into the private `@objectstack/datasource-admin` package, which registers
  * them via its own `registerDatasourceAdminRoutes`.
  *
- * Every body is built by `sendOk` / `sendError` below, in the envelope
- * `BaseResponseSchema` declares (#3843).
+ * Every body is built by the shared `sendOk` / `sendError`, in the envelope
+ * `BaseResponseSchema` declares (#3843, consolidated in #3973). Before #3843
+ * this module emitted the pre-#3675 `{ error: '<string>' }`, with the message a
+ * SIBLING of `error` on the import path — so a caller reading
+ * `body.error.message` got `undefined`.
+ *
+ * Codes follow ADR-0112 (#3841, settled while #3843 was in review):
+ * `external_service_unavailable` → the standard `SERVICE_UNAVAILABLE`, since the
+ * ledger asks generic conditions to reuse the catalog rather than register a
+ * per-service synonym; `external_import_error` → `EXTERNAL_IMPORT_ERROR`,
+ * registered under this package because a refused federated import is specific
+ * to it.
+ *
+ * Note `POST /validate` keeps its `ok` — unlike the `{ ok: true, key }` #3689
+ * retired from storage, that one was a private second word for `success`, while
+ * this `ok` is a COMPUTED verdict over the federated objects
+ * (`results.every(r => r.ok)`). A domain verdict that happens to share the name
+ * is not a second envelope flag, so it belongs inside `data` rather than being
+ * dropped.
  */
 export function registerExternalDatasourceRoutes(
   server: IHttpServer,
@@ -39,38 +58,6 @@ export function registerExternalDatasourceRoutes(
       return undefined;
     }
   };
-
-  /**
-   * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
-   * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
-   * `{ success: false, error: { code, message } }`.
-   *
-   * Before #3843 this module emitted the pre-#3675 `{ error: '<string>' }`,
-   * with the message a SIBLING of `error` on the import path — so a caller
-   * reading `body.error.message` got `undefined`.
-   *
-   * Codes follow ADR-0112 (#3841, settled while this was in review):
-   * `external_service_unavailable` → the standard `SERVICE_UNAVAILABLE`, since the
-   * ledger asks generic conditions to reuse the catalog rather than register a
-   * per-service synonym; `external_import_error` → `EXTERNAL_IMPORT_ERROR`,
-   * registered under this package because a refused federated import is specific
-   * to it.
-   */
-  const sendError = (res: any, status: number, code: string, message: string) =>
-    res.status(status).json({ success: false, error: { code, message } });
-
-  /**
-   * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
-   *
-   * Payload keys are unchanged, one level deeper. Note `POST /validate` keeps
-   * its `ok` — unlike the `{ ok: true, key }` #3689 retired from storage, that
-   * one was a private second word for `success`, while this `ok` is a COMPUTED
-   * verdict over the federated objects (`results.every(r => r.ok)`). A domain
-   * verdict that happens to share the name is not a second envelope flag, so it
-   * belongs inside `data` rather than being dropped.
-   */
-  const sendOk = (res: any, data: unknown, status = 200) =>
-    res.status(status).json({ success: true, data });
 
   const unavailable = (res: any) =>
     sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The external-datasource service is not available.');
