@@ -406,7 +406,7 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
     const reported = new Set<string>();
 
     for (const w of writes) {
-      const dedupeKey = `${w.object ?? ''} ${w.field}`;
+      const dedupeKey = `${w.object ?? ''}\u0000${w.field}`;
       if (reported.has(dedupeKey)) continue;
 
       if (w.object === undefined) {
