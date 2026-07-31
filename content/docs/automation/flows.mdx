@@ -665,7 +665,7 @@ The two recovery mechanisms operate at different scopes and do not compound:
 | | Scope | On failure |
 | :--- | :--- | :--- |
 | `fault` edge | one node | traversal continues from the handler; the run completes |
-| `errorHandling: { strategy: 'retry' }` | the whole flow | the flow re-runs **from the start** |
+| `errorHandling: { strategy: 'retry', maxRetries: n }` | the whole flow | the flow re-runs **from the start**, up to `n` more times |
 
 A failure a fault edge handled is not a flow failure, so it does **not** consume
 a retry. That matters because flow-level retry replays every node that already
@@ -707,12 +707,45 @@ errorHandling: {
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
-| `strategy` | `enum` | `'fail'` (stop) or `'retry'` (re-run the whole flow). `'continue'` parses but the engine branches only on `'retry'`, so it behaves exactly like `'fail'` — use a `fault` edge to keep going past a failed node |
-| `maxRetries` | `number` | Maximum retry attempts (0-10) |
-| `retryDelayMs` | `number` | Delay between retries (ms) |
+| `strategy` | `enum` | `'fail'` (stop) or `'retry'` (re-run the whole flow). `'continue'` parses but the engine branches only on `'retry'`, so it behaves exactly like `'fail'` — use a `fault` edge to keep going past a failed node (default `'fail'`) |
+| `maxRetries` | `number` | Retry attempts **after** the initial one, `0`–`10`. Under `strategy: 'retry'` it must be at least `1` and there is no default — see below (default `0`, i.e. no retries, for the strategies that never retry) |
+| `retryDelayMs` | `number` | Delay between retries (ms) (default `1000`) |
 | `backoffMultiplier` | `number` | Exponential backoff multiplier (default `1`) |
 | `maxRetryDelayMs` | `number` | Ceiling on the backed-off delay (default `30000`) |
 | `jitter` | `boolean` | Randomize the delay to avoid a thundering herd (default `false`) |
+
+`maxRetries` counts the **re-runs**, not the total attempts: `maxRetries: 2`
+runs the flow up to three times.
+
+### `strategy: 'retry'` has to say how many times
+
+There is no default retry count. `strategy: 'retry'` without `maxRetries` — or
+with `maxRetries: 0` — is refused when the flow is registered:
+
+```typescript
+// ❌ rejected: "retry" that retries zero times is just "fail"
+errorHandling: { strategy: 'retry' }
+
+// ✅ state the attempts
+errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 5000 }
+```
+
+A retry re-runs the **whole flow from the start**, so every node that already
+succeeded runs again — records get created again, callouts fire again. That is
+too consequential a number to pick on the author's behalf, and picking `0`
+would make opting into `'retry'` do nothing at all. The knobs above are read
+only under `'retry'`; a fully spelled-out block under `'fail'` or `'continue'`
+is fine and simply ignored.
+
+<Callout type="info">
+  Before ObjectStack 17 the count depended on how the flow reached the engine:
+  a flow parsed by `FlowSchema` retried `0` times when the count was unstated,
+  while a hand-built definition passed straight to the engine retried `3` — the
+  schema and the engine each carried a default and they disagreed
+  ([#4247](https://github.com/objectstack-ai/objectstack/issues/4247)). The
+  engine's copy is gone; the schema is the only source, and the case that was
+  ambiguous is now rejected instead of guessed.
+</Callout>
 
 ## Discovery & Registration
 

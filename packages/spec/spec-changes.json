@@ -261,6 +261,13 @@
         "rationale": "The `.strict()` flip turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: bind a `dataset` and select `dimensions`/`values`, move a renderer setting under `options`, or delete the dead key."
       },
       {
+        "surface": "flow.errorHandling.maxRetries (under strategy: 'retry')",
+        "replacement": "an explicit count >= 1 (e.g. maxRetries: 3), or strategy: 'fail'",
+        "migrationId": "flow-retry-max-retries-required",
+        "toMajor": 17,
+        "rationale": "maxRetries had two defaults — FlowSchema `.default(0)` and the engine's `maxRetries ?? 3` — so an unstated count retried 0 times through the schema and 3 times through a hand-built definition (#4247). With the engine's copy removed the unstated count is unambiguously 0, and retrying zero times is exactly `strategy: 'fail'`, so the schema now refuses the combination instead of it silently doing nothing. There is no lossless rewrite: 0 preserves the behaviour a parsed flow got but contradicts what its author wrote, and any positive count is a NEW decision about re-running the whole flow with its side effects. That choice is the author's."
+      },
+      {
         "surface": "api.analyticsQueryRequest.query",
         "replacement": "bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)",
         "migrationId": "analytics-query-request-envelope-retired",
@@ -599,6 +606,13 @@
         }
       ],
       "migrated": [
+        {
+          "surface": "flow.errorHandling.maxRetries (under strategy: 'retry')",
+          "replacement": "an explicit count >= 1 (e.g. maxRetries: 3), or strategy: 'fail'",
+          "migrationId": "flow-retry-max-retries-required",
+          "toMajor": 17,
+          "rationale": "maxRetries had two defaults — FlowSchema `.default(0)` and the engine's `maxRetries ?? 3` — so an unstated count retried 0 times through the schema and 3 times through a hand-built definition (#4247). With the engine's copy removed the unstated count is unambiguously 0, and retrying zero times is exactly `strategy: 'fail'`, so the schema now refuses the combination instead of it silently doing nothing. There is no lossless rewrite: 0 preserves the behaviour a parsed flow got but contradicts what its author wrote, and any positive count is a NEW decision about re-running the whole flow with its side effects. That choice is the author's."
+        },
         {
           "surface": "api.analyticsQueryRequest.query",
           "replacement": "bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)",
