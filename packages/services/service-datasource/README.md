@@ -40,7 +40,10 @@ Mounted under `/api/v1/datasources` by `registerDatasourceAdminRoutes` (lifecycl
 degrades gracefully (`503` / "unavailable") when its service isn't wired, and the
 message names **that** service — one registrar, but two services behind it: the
 three routes marked below dispatch to `external-datasource`, the rest to
-`datasource-admin` (#4225).
+`datasource-admin` (#4225). A refusal (`400`) carries the same attribution
+machine-readably: `error.code` is `DATASOURCE_ADMIN_ERROR` from the
+datasource-admin routes and `EXTERNAL_DATASOURCE_ERROR` from the
+external-datasource ones (#4249) — both registered in the ADR-0112 ledger.
 
 **Lifecycle & connection**
 - `GET    /datasources` — list (code + runtime, with provenance/health)

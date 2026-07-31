@@ -15,12 +15,33 @@ import { DRIVER_CATALOG } from './driver-catalog.js';
 type ServiceName = 'datasource-admin' | 'external-datasource';
 
 /**
+ * The 400 `error.code` a refusal from each service carries. Both codes are
+ * registered in the error-code ledger (ADR-0112 D3,
+ * `packages/spec/src/api/error-code-ledger.zod.ts`) under this package.
+ *
+ * Keyed by `ServiceName` for the same reason `resolve` below takes one (#4225):
+ * the code is an attribution — the ledger reads `DATASOURCE_ADMIN_ERROR` as "a
+ * refusal from the datasource-admin service" — so it must come from the service
+ * the route dispatches to. It did not until #4249: `badRequest` hard-coded
+ * `DATASOURCE_ADMIN_ERROR`, so a `no such schema` raised by the
+ * external-datasource introspector was reported, machine-readably this time, as
+ * a lifecycle refusal from datasource-admin — the same mis-attribution #4225
+ * fixed in the 503 `message`, one field over.
+ */
+const SERVICE_ERROR_CODE: Record<ServiceName, string> = {
+  'datasource-admin': 'DATASOURCE_ADMIN_ERROR',
+  'external-datasource': 'EXTERNAL_DATASOURCE_ERROR',
+};
+
+/**
  * Datasource lifecycle REST routes (ADR-0015 Addendum §3.5).
  *
  * Mounted under `/api/v1/datasources`. Every route degrades gracefully
  * (`503 SERVICE_UNAVAILABLE`) when the service *it* needs is not wired in —
  * naming that service rather than the one this module is named after (#4225) —
- * and lifecycle/validation failures surface as `400` with the service's message.
+ * and refusals surface as `400` with the service's message, under the
+ * `error.code` registered for the service that refused (#4249):
+ * `DATASOURCE_ADMIN_ERROR` or `EXTERNAL_DATASOURCE_ERROR`.
  *
  * Served by `datasource-admin`:
  *
@@ -83,6 +104,11 @@ export function registerDatasourceAdminRoutes(
    *                                  lifecycle/validation refusal specific to
    *                                  this service, so not a standard synonym)
    *
+   * #4249 then split the third row in two: `DATASOURCE_ADMIN_ERROR` had been
+   * carried verbatim onto the three routes served by `external-datasource`,
+   * whose refusals are now the separately registered
+   * `EXTERNAL_DATASOURCE_ERROR` — see `SERVICE_ERROR_CODE` above.
+   *
    * Which service is unavailable is carried by `message`; the ledger explicitly
    * asks generic conditions to reuse the catalog instead of registering a
    * per-service 503. That puts the whole burden of naming the service on one
@@ -136,8 +162,14 @@ export function registerDatasourceAdminRoutes(
     return svc;
   };
 
-  const badRequest = (res: any, err: unknown) =>
-    sendError(res, 400, 'DATASOURCE_ADMIN_ERROR', err instanceof Error ? err.message : String(err));
+  /**
+   * Answer a refusal as `400`, with the code registered for the service the
+   * route dispatches to (`SERVICE_ERROR_CODE`) and the service's own message.
+   * `service` is the same name the route passed to `resolve` — restating it is
+   * what keeps the attribution honest per route (#4249).
+   */
+  const badRequest = (res: any, service: ServiceName, err: unknown) =>
+    sendError(res, 400, SERVICE_ERROR_CODE[service], err instanceof Error ? err.message : String(err));
 
   /** Split an inline `{ secret, ...draft }` body into (draft, secret). */
   const splitSecret = (body: any): { draft: any; secret: any } => {
@@ -179,7 +211,7 @@ export function registerDatasourceAdminRoutes(
       const tables = await svc.listRemoteTables(req.params.name);
       sendOk(res, { tables });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'external-datasource', err);
     }
   });
 
@@ -198,7 +230,7 @@ export function registerDatasourceAdminRoutes(
       if (!datasource) return sendError(res, 404, 'RESOURCE_NOT_FOUND', `Datasource "${req.params.name}" does not exist.`);
       sendOk(res, { datasource });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 
@@ -209,7 +241,7 @@ export function registerDatasourceAdminRoutes(
       const result = await svc.testConnection(req.params.name);
       sendOk(res, result);
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'external-datasource', err);
     }
   });
 
@@ -217,12 +249,12 @@ export function registerDatasourceAdminRoutes(
     const svc = resolve(res, 'external-datasource', 'generateObjectDraft');
     if (!svc) return;
     const { table, ...opts } = (req.body as Record<string, unknown>) ?? {};
-    if (!table) return badRequest(res, new Error('Body field "table" is required.'));
+    if (!table) return badRequest(res, 'external-datasource', new Error('Body field "table" is required.'));
     try {
       const draft = await svc.generateObjectDraft(req.params.name, String(table), opts);
       sendOk(res, { draft });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'external-datasource', err);
     }
   });
 
@@ -236,7 +268,7 @@ export function registerDatasourceAdminRoutes(
       const result = await svc.testConnection(draft, secret);
       sendOk(res, { result });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 
@@ -249,7 +281,7 @@ export function registerDatasourceAdminRoutes(
       const datasource = await svc.createDatasource(draft, secret);
       sendOk(res, { datasource }, 201);
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 
@@ -262,7 +294,7 @@ export function registerDatasourceAdminRoutes(
       const datasource = await svc.updateDatasource(req.params.name, draft, secret);
       sendOk(res, { datasource });
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 
@@ -274,7 +306,7 @@ export function registerDatasourceAdminRoutes(
       await svc.removeDatasource(req.params.name);
       res.status(204).end();
     } catch (err) {
-      badRequest(res, err);
+      badRequest(res, 'datasource-admin', err);
     }
   });
 }

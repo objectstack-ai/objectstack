@@ -55,6 +55,14 @@ export function registerExternalDatasourceRoutes(
    * per-service synonym; `external_import_error` → `EXTERNAL_IMPORT_ERROR`,
    * registered under this package because a refused federated import is specific
    * to it.
+   *
+   * `EXTERNAL_DATASOURCE_ERROR` (#4249) is the introspection twin: a refusal
+   * from `listRemoteTables` / `generateObjectDraft`. Before #4249 those two
+   * routes had no `catch` at all, so a `no such schema` surfaced as the
+   * adapter's non-envelope `500 { error: 'No response from handler' }` — while
+   * the SAME two service operations, reached through
+   * `service-datasource/admin-routes.ts`, answered 400. One operation, one
+   * failure contract now, on both paths.
    */
   const sendError = (res: any, status: number, code: string, message: string) =>
     res.status(status).json({ success: false, error: { code, message } });
@@ -75,25 +83,37 @@ export function registerExternalDatasourceRoutes(
   const unavailable = (res: any) =>
     sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The external-datasource service is not available.');
 
+  /** An introspection refusal — same code as the admin-routes path (#4249). */
+  const introspectionRefused = (res: any, err: unknown) =>
+    sendError(res, 400, 'EXTERNAL_DATASOURCE_ERROR', err instanceof Error ? err.message : String(err));
+
   // List remote tables (optionally filtered by ?schema=).
   server.get(`${ext}/tables`, async (req: any, res: any) => {
     const svc = externalService();
     if (!svc?.listRemoteTables) return unavailable(res);
-    const schema = typeof req.query?.schema === 'string' ? req.query.schema : undefined;
-    const tables = await svc.listRemoteTables(req.params.name, { schema });
-    sendOk(res, { tables });
+    try {
+      const schema = typeof req.query?.schema === 'string' ? req.query.schema : undefined;
+      const tables = await svc.listRemoteTables(req.params.name, { schema });
+      sendOk(res, { tables });
+    } catch (err) {
+      introspectionRefused(res, err);
+    }
   });
 
   // Generate an Object draft (structured + *.object.ts source) from a table.
   server.post(`${ext}/tables/:remote/draft`, async (req: any, res: any) => {
     const svc = externalService();
     if (!svc?.generateObjectDraft) return unavailable(res);
-    const draft = await svc.generateObjectDraft(
-      req.params.name,
-      req.params.remote,
-      (req.body as Record<string, unknown>) ?? {},
-    );
-    sendOk(res, { draft });
+    try {
+      const draft = await svc.generateObjectDraft(
+        req.params.name,
+        req.params.remote,
+        (req.body as Record<string, unknown>) ?? {},
+      );
+      sendOk(res, { draft });
+    } catch (err) {
+      introspectionRefused(res, err);
+    }
   });
 
   // Import a remote table as a live (runtime-origin) federated object so it's

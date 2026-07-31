@@ -239,6 +239,50 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     );
   });
 
+  /**
+   * #4249 — the 400 `error.code` names the service that refused, the way the
+   * 503 `message` above names the one that was missing (#4225). Same defect one
+   * field over: `badRequest` hard-coded `DATASOURCE_ADMIN_ERROR`, so the three
+   * external-datasource routes reported their refusals as datasource-admin's —
+   * and where #4225 misled a human reading prose, this misrouted a client
+   * switching on `error.code`.
+   *
+   * One row per route with a refusal path. The `code` column is a deliberate
+   * PIN, not derived from the route's service, so a wrong entry in the module's
+   * `SERVICE_ERROR_CODE` map has to disagree with a literal here. Each mount
+   * wires ONLY the service the route should resolve — a route dispatching to
+   * the other one answers 503, failing the row before the code is even read.
+   */
+  const REFUSALS: Array<{
+    route: string;
+    service: string;
+    code: string;
+    svc: Record<string, unknown>;
+    run: (app: any) => Promise<Response>;
+  }> = [
+    { route: 'GET /datasources/:name', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { getDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/pg')) },
+    { route: 'POST /datasources/test', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { testConnection: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/test', { method: 'POST', body: '{}' })) },
+    { route: 'POST /datasources', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { createDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources', { method: 'POST', body: '{}' })) },
+    { route: 'PATCH /datasources/:name', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { updateDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/pg', { method: 'PATCH', body: '{}' })) },
+    { route: 'DELETE /datasources/:name', service: 'datasource-admin', code: 'DATASOURCE_ADMIN_ERROR', svc: { removeDatasource: async () => { throw new Error('backing store offline'); } }, run: (a) => a.fetch(json('/api/v1/datasources/pg', { method: 'DELETE' })) },
+    { route: 'GET /datasources/:name/remote-tables', service: 'external-datasource', code: 'EXTERNAL_DATASOURCE_ERROR', svc: { listRemoteTables: async () => { throw new Error('no such schema'); } }, run: (a) => a.fetch(json('/api/v1/datasources/ext/remote-tables')) },
+    { route: 'POST /datasources/:name/test', service: 'external-datasource', code: 'EXTERNAL_DATASOURCE_ERROR', svc: { testConnection: async () => { throw new Error('connection refused'); } }, run: (a) => a.fetch(json('/api/v1/datasources/ext/test', { method: 'POST', body: '{}' })) },
+    { route: 'POST /datasources/:name/object-draft', service: 'external-datasource', code: 'EXTERNAL_DATASOURCE_ERROR', svc: { generateObjectDraft: async () => { throw new Error('no such table'); } }, run: (a) => a.fetch(json('/api/v1/datasources/ext/object-draft', { method: 'POST', body: JSON.stringify({ table: 'customers' }) })) },
+  ];
+
+  for (const c of REFUSALS) {
+    it(`${c.route} refuses as 400 ${c.code} (#4249)`, async () => {
+      const res = await c.run(mountServices({ [c.service]: c.svc }));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe(c.code);
+      // The service's own message still reads at `error.message`, as before.
+      expect(typeof body.error.message).toBe('string');
+      expect(body.error.message.length).toBeGreaterThan(0);
+    });
+  }
+
   it('surfaces lifecycle errors as 400 with the service message', async () => {
     const createDatasource = vi.fn().mockRejectedValue(new Error('duplicate name'));
     const app = mount({ createDatasource });
