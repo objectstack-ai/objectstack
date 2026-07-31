@@ -88,11 +88,23 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
 
             try {
                 const output = await handler((cfg.input ?? {}) as Record<string, unknown>, handlerCtx);
-                return { success: true, output };
+                // #4354 — the action reached an external system and the platform
+                // cannot say what it did there: `ConnectorActionDescriptor`
+                // declares `key` / `label` / `description` / `inputSchema` /
+                // `outputSchema` and NOTHING about whether the action reads or
+                // writes. `acted: 0` would understate a Salesforce create;
+                // `acted: 1` would overstate a lookup and make the broken-sweep
+                // alert never fire — the original bug back again. Report the
+                // honest third answer: this run's `acted` is incomplete.
+                // #4395 proposes declaring the effect kind on the descriptor,
+                // which would turn this into a real count.
+                return { success: true, output, metrics: { unmeasuredEffect: true } };
             } catch (err) {
                 return {
                     success: false,
                     error: `connector_action(${cfg.connectorId}.${cfg.actionId}) failed: ${(err as Error).message}`,
+                    // A handler that threw may still have reached the upstream.
+                    metrics: { unmeasuredEffect: true },
                 };
             }
         },

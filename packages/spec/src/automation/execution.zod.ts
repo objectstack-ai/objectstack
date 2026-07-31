@@ -51,12 +51,22 @@ export type ExecutionStatus = z.infer<typeof ExecutionStatus>;
  *
  * Absent ⇒ the node touched no records (a `decision`, an `assignment`), which
  * is different from `0` — "read nothing" is a fact, "reads nothing" is a kind.
+ *
+ * And `unmeasuredEffect` is the third answer, which a two-counter model would
+ * have had to fake: a `connector_action` reaches an external system through a
+ * descriptor that declares nothing about whether the action reads or writes, so
+ * `0` understates a write and `1` overstates a read. Both are worse than saying
+ * so — an understated `0` fires the broken-sweep alert on a healthy run until
+ * operators learn to ignore it, and an overstated `1` makes the alert never
+ * fire at all, which is the original bug back again.
  */
 export const ExecutionStepMetricsSchema = lazySchema(() => z.object({
   selected: z.number().int().min(0).optional()
     .describe('Records this node READ or matched (a `get_record` query, a lookup)'),
   acted: z.number().int().min(0).optional()
     .describe('Records this node WROTE (created / updated / deleted) or effects it dispatched (notifications delivered)'),
+  unmeasuredEffect: z.boolean().optional()
+    .describe('This execution may have caused an effect the platform cannot count (an external write through a connector). NOT interchangeable with `acted: 0` — it says the count is unknown, not that it is zero.'),
 }));
 export type ExecutionStepMetrics = z.infer<typeof ExecutionStepMetricsSchema>;
 
@@ -130,6 +140,7 @@ export const FlowRunNodeSummarySchema = lazySchema(() => z.object({
   skipped: z.number().int().min(0).describe('Times a closed gate kept this node from running at all'),
   selected: z.number().int().min(0).optional().describe('Records read across every execution — omitted for a node that reads none'),
   acted: z.number().int().min(0).optional().describe('Records written / effects dispatched across every execution — omitted for a node that writes none'),
+  unmeasured: z.number().int().min(0).optional().describe('Executions that may have caused an effect the platform cannot count (see ExecutionStepMetrics.unmeasuredEffect)'),
 }));
 export type FlowRunNodeSummary = z.infer<typeof FlowRunNodeSummarySchema>;
 
@@ -162,6 +173,19 @@ export const FlowRunSummarySchema = lazySchema(() => z.object({
   selected: z.number().int().min(0).describe('Total records read by the run'),
   acted: z.number().int().min(0).describe('Total records written / effects dispatched by the run'),
   skipped: z.number().int().min(0).describe('Total node executions a closed gate prevented'),
+  /**
+   * The qualifier `acted` needs to be trusted. A run that dispatched an
+   * uncountable effect (a `connector_action`) can report `acted: 0` while
+   * having done plenty, so the broken-sweep query is
+   * `selected > 0 AND acted = 0 AND unmeasured = 0` — the third clause is what
+   * keeps the alert off healthy connector-driven flows.
+   *
+   * Optional, and `undefined` is NOT `0`: a run recorded before this field
+   * existed did not track uncountable effects at all, and defaulting it to zero
+   * would tell an operator "fully measured" about a run nobody measured.
+   */
+  unmeasured: z.number().int().min(0).optional()
+    .describe('Total executions that may have caused an effect the platform cannot count. Absent = not tracked (an older run), which is not the same as zero.'),
   nodes: z.array(FlowRunNodeSummarySchema).describe('Per-node breakdown, in first-execution order'),
   gates: z.array(FlowRunGateSummarySchema).describe('Gates that closed during the run, most-skipped first'),
   detailOmitted: z.boolean().optional()

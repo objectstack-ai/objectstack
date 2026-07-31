@@ -268,6 +268,7 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       selected_count: record.summary?.selected ?? null,
       acted_count: record.summary?.acted ?? null,
       skipped_count: record.summary?.skipped ?? null,
+      unmeasured_count: record.summary?.unmeasured ?? null,
       summary_json: record.summary ? serializeSummaryBounded(record.summary) : null,
     };
     const existing = await this.engine.find(TABLE, {
@@ -446,6 +447,7 @@ function serializeSummaryBounded(summary: NonNullable<RunRecord['summary']>): st
     selected: summary.selected,
     acted: summary.acted,
     skipped: summary.skipped,
+    unmeasured: summary.unmeasured,
     nodes: [],
     gates: [],
     detailOmitted: true,

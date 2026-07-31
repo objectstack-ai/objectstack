@@ -2372,6 +2372,12 @@ export class AutomationEngine implements IAutomationService {
                 metrics: {
                     selected: (prior.selected ?? 0) + child.selected,
                     acted: (prior.acted ?? 0) + child.acted,
+                    // N uncountable effects in the child collapse to ONE flag on
+                    // the parent's step: this execution dispatched something the
+                    // platform cannot count. The child keeps the real count in
+                    // its own run row, and the question this feeds — "is the
+                    // parent's `acted` complete?" — is boolean either way.
+                    ...(prior.unmeasuredEffect || child.unmeasured ? { unmeasuredEffect: true } : {}),
                 },
             };
             return;
@@ -2873,6 +2879,7 @@ export class AutomationEngine implements IAutomationService {
                 selected: entry.summary.selected,
                 acted: entry.summary.acted,
                 skipped: entry.summary.skipped,
+                unmeasured: entry.summary.unmeasured,
                 gates: entry.summary.gates,
             };
             if (this.runSummaryLog === 'debug') this.logger.debug(line, meta);

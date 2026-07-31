@@ -35,6 +35,7 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
     let selected = 0;
     let acted = 0;
     let skipped = 0;
+    let unmeasured = 0;
 
     for (const step of steps) {
         let node = nodes.get(step.nodeId);
@@ -90,6 +91,13 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
             node.acted = (node.acted ?? 0) + metrics.acted;
             acted += metrics.acted;
         }
+        if (metrics?.unmeasuredEffect) {
+            // Counted per EXECUTION, like `runs` — a connector call in a 30-item
+            // loop leaves 30 unmeasured effects, and the alert has to see that
+            // the run's `acted` covers none of them.
+            node.unmeasured = (node.unmeasured ?? 0) + 1;
+            unmeasured += 1;
+        }
     }
 
     for (const node of nodes.values()) {
@@ -103,6 +111,7 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
         selected,
         acted,
         skipped,
+        unmeasured,
         nodes: [...nodes.values()],
         gates: [...gates.values()].sort((a, b) => b.skipped - a.skipped),
     };
@@ -140,6 +149,10 @@ export function formatRunSummaryLine(
         `acted=${summary.acted}`,
         `skipped=${summary.skipped}`,
     );
+    // Only when non-zero, like `gate=`: its absence is the common case and its
+    // PRESENCE is the thing a reader must not miss — `acted=0` on a line that
+    // also says `unmeasured=3` means "cannot tell", not "did nothing".
+    if (summary.unmeasured) parts.push(`unmeasured=${summary.unmeasured}`);
     const topGate = summary.gates[0];
     if (topGate) {
         parts.push(`gate=${topGate.nodeId}->${topGate.targetNodeId}:${topGate.skipped}`);

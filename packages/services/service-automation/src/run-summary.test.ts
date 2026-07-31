@@ -18,6 +18,8 @@ import { registerLogicNodes } from './builtin/logic-nodes.js';
 import { registerNotifyNode } from './builtin/notify-node.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
 import { registerMapNode } from './builtin/map-node.js';
+import { registerHttpNodes } from './builtin/http-nodes.js';
+import { registerConnectorNodes } from './builtin/connector-nodes.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 
 const AT = '2026-07-31T00:00:00.000Z';
@@ -620,6 +622,166 @@ describe('a child run that PAUSED still counts toward its parent', () => {
         expect(done.success).toBe(true);
         expect(written).toHaveLength(1);
         expect(done.summary!.acted).toBe(1);
+    });
+});
+
+// ── The third answer: effects the platform cannot count ─────────────────────
+
+describe('uncountable effects (#4354 follow-up)', () => {
+    // `acted: 0` and "we cannot tell" are different facts. Collapsing them
+    // either way breaks the detector: understating fires it on healthy runs
+    // until operators tune it out; overstating makes it never fire at all.
+
+    it('counts an unmeasured execution without touching acted', () => {
+        const s = summarizeRun([
+            step({ nodeId: 'q', nodeType: 'get_record', metrics: { selected: 5 } }),
+            step({ nodeId: 'push', nodeType: 'connector_action', metrics: { unmeasuredEffect: true } }),
+        ]);
+        expect(s).toMatchObject({ selected: 5, acted: 0, unmeasured: 1 });
+        expect(s.nodes.find((n) => n.nodeId === 'push')).toMatchObject({ runs: 1, unmeasured: 1 });
+    });
+
+    it('counts once per EXECUTION, so a connector call in a 30-item loop shows 30', () => {
+        const s = summarizeRun(
+            Array.from({ length: 30 }, (_, i) =>
+                step({ nodeId: 'push', nodeType: 'connector_action', metrics: { unmeasuredEffect: true }, parentNodeId: 'each', iteration: i }),
+            ),
+        );
+        expect(s.unmeasured).toBe(30);
+        expect(s.nodes).toHaveLength(1);
+    });
+
+    it('leaves unmeasured at 0 for a run with nothing uncountable', () => {
+        expect(summarizeRun([step({ nodeId: 'w', nodeType: 'create_record', metrics: { acted: 1 } })]).unmeasured).toBe(0);
+    });
+
+    it('names itself on the log line ONLY when non-zero', () => {
+        const clean = formatRunSummaryLine(
+            { flowName: 'f', runId: 'r', status: 'completed' },
+            summarizeRun([step({ nodeId: 'w', nodeType: 'create_record', metrics: { acted: 1 } })]),
+        );
+        expect(clean).not.toContain('unmeasured');
+
+        const murky = formatRunSummaryLine(
+            { flowName: 'f', runId: 'r', status: 'completed' },
+            summarizeRun([
+                step({ nodeId: 'q', nodeType: 'get_record', metrics: { selected: 9 } }),
+                step({ nodeId: 'push', nodeType: 'connector_action', metrics: { unmeasuredEffect: true } }),
+            ]),
+        );
+        // The line an operator greps for `acted=0` must carry the qualifier that
+        // says the zero is incomplete.
+        expect(murky).toContain('selected=9 acted=0 skipped=0 unmeasured=1');
+    });
+
+    it('an http node reports by METHOD — the one case the platform CAN count', async () => {
+        const calls: string[] = [];
+        const realFetch = globalThis.fetch;
+        globalThis.fetch = (async (_url: string, init: any) => {
+            calls.push(init.method);
+            return { ok: init.method !== 'PUT', status: init.method === 'PUT' ? 500 : 200, async json() { return {}; }, async text() { return ''; } };
+        }) as never;
+        try {
+            for (const [method, expected] of [
+                ['GET', { acted: 0, unmeasured: 0 }],
+                ['POST', { acted: 1, unmeasured: 0 }],
+                ['PUT', { acted: 0, unmeasured: 1 }], // rejected → unknown, not zero
+            ] as const) {
+                const logger = makeLogger();
+                const engine = new AutomationEngine(logger);
+                registerHttpNodes(engine, { logger, getService: () => undefined } as never);
+                engine.registerFlow('f', {
+                    name: 'f', label: 'f', type: 'autolaunched',
+                    nodes: [
+                        { id: 'start', type: 'start', label: 'S' },
+                        { id: 'call', type: 'http', label: 'C', config: { url: 'https://example.test/x', method } },
+                        { id: 'end', type: 'end', label: 'E' },
+                    ],
+                    edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
+                } as never);
+                const res = await engine.execute('f', {} as AutomationContext);
+                expect(res.summary, `method ${method}`).toMatchObject(expected);
+            }
+        } finally {
+            globalThis.fetch = realFetch;
+        }
+        expect(calls).toEqual(['GET', 'POST', 'PUT']);
+    });
+
+    it('a connector_action is unmeasured — its descriptor declares no read/write', async () => {
+        const logger = makeLogger();
+        const engine = new AutomationEngine(logger);
+        registerConnectorNodes(engine, { logger, getService: () => undefined } as never);
+        engine.registerConnector(
+            { name: 'crm', label: 'CRM', type: 'saas', actions: [{ key: 'push', label: 'Push' }] } as never,
+            { push: async () => ({ id: 'ext_1' }) },
+        );
+        engine.registerFlow('f', {
+            name: 'f', label: 'f', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'S' },
+                { id: 'push', type: 'connector_action', label: 'P', config: { connectorId: 'crm', actionId: 'push', input: {} } },
+                { id: 'end', type: 'end', label: 'E' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'push' }, { id: 'e2', source: 'push', target: 'end' }],
+        } as never);
+
+        const res = await engine.execute('f', {} as AutomationContext);
+        expect(res.success).toBe(true);
+        // NOT acted:1 — the platform cannot know whether `push` wrote anything.
+        expect(res.summary).toMatchObject({ acted: 0, unmeasured: 1 });
+    });
+
+    it('propagates through a subflow roll-up, so the parent knows its acted is incomplete', async () => {
+        const logger = makeLogger();
+        const engine = new AutomationEngine(logger);
+        const ctx: any = { logger, getService: () => undefined };
+        registerConnectorNodes(engine, ctx);
+        registerSubflowNode(engine, ctx);
+        engine.registerConnector(
+            { name: 'crm', label: 'CRM', type: 'saas', actions: [{ key: 'push', label: 'Push' }] } as never,
+            { push: async () => ({ id: 'ext_1' }) },
+        );
+        engine.registerFlow('child', {
+            name: 'child', label: 'child', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'S' },
+                { id: 'push', type: 'connector_action', label: 'P', config: { connectorId: 'crm', actionId: 'push', input: {} } },
+                { id: 'end', type: 'end', label: 'E' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'push' }, { id: 'e2', source: 'push', target: 'end' }],
+        } as never);
+        engine.registerFlow('parent', {
+            name: 'parent', label: 'parent', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'S' },
+                { id: 'sub', type: 'subflow', label: 'Sub', config: { flowName: 'child' } },
+                { id: 'end', type: 'end', label: 'E' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'sub' }, { id: 'e2', source: 'sub', target: 'end' }],
+        } as never);
+
+        const res = await engine.execute('parent', {} as AutomationContext);
+        expect(res.summary).toMatchObject({ acted: 0, unmeasured: 1 });
+    });
+
+    it('persists as a queryable column, null when never tracked', async () => {
+        const rows: any[] = [];
+        const engine: any = {
+            async find() { return []; },
+            async insert(_o: string, row: any) { rows.push(row); return row; },
+            async update() { return 1; },
+            async delete() { return 1; },
+        };
+        const store = new ObjectStoreSuspendedRunStore(engine);
+        await store.recordTerminal({
+            runId: 'r1', flowName: 'f', status: 'completed', startedAt: AT,
+            summary: { selected: 9, acted: 0, skipped: 0, unmeasured: 3, nodes: [], gates: [] },
+        });
+        await store.recordTerminal({ runId: 'r2', flowName: 'f', status: 'completed', startedAt: AT });
+
+        expect(rows[0].unmeasured_count).toBe(3);
+        expect(rows[1].unmeasured_count).toBeNull(); // not measured ≠ measured zero
     });
 });
 

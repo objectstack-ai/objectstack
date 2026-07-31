@@ -131,7 +131,9 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                             timeoutMs,
                             payload: body ?? {},
                         });
-                        return { success: true, output: { deliveryId, enqueued: true } };
+                        // #4354 — the outbox row IS a durable effect this run
+                        // caused, even though the upstream call happens later.
+                        return { success: true, output: { deliveryId, enqueued: true }, metrics: { acted: 1 } };
                     } catch (err) {
                         return { success: false, error: `http (durable) failed to enqueue: ${(err as Error).message}` };
                     }
@@ -144,6 +146,10 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
 
             // ── Request/response mode (default; preserves http_request) ───────
             const method = cfg.method ?? 'GET';
+            // #4354 — unlike a connector action, an HTTP call's effect IS
+            // knowable: the method says it. A GET reads and can never write, so
+            // it reports a real `0`; anything else is a mutating call.
+            const reads = /^(GET|HEAD|OPTIONS)$/i.test(method);
             const controller = new AbortController();
             const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
             try {
@@ -158,11 +164,26 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                     success: response.ok,
                     output: { response: data, status: response.status },
                     error: response.ok ? undefined : `HTTP ${response.status}`,
+                    // A mutating call the upstream ACCEPTED is one effect. One it
+                    // rejected is unknown, not zero: a 500 can arrive after the
+                    // write landed, and claiming `0` there would let a run report
+                    // it changed nothing while it had.
+                    metrics: reads
+                        ? { acted: 0 }
+                        : response.ok
+                            ? { acted: 1 }
+                            : { unmeasuredEffect: true },
                 };
             } catch (err) {
                 const e = err as { name?: string; message?: string };
                 const msg = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : e?.message ?? String(err);
-                return { success: false, error: `http: ${msg}` };
+                // A timed-out or aborted mutating request may well have landed —
+                // the response is what we lost, not necessarily the write.
+                return {
+                    success: false,
+                    error: `http: ${msg}`,
+                    metrics: reads ? { acted: 0 } : { unmeasuredEffect: true },
+                };
             } finally {
                 if (timer) clearTimeout(timer);
             }

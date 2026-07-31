@@ -138,6 +138,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       // child run bubbles back (AutomationEngine.creditChildRun).
       let selected = 0;
       let acted = 0;
+      let unmeasured = false;
 
       // Drive items in order. Synchronous items advance inline; a pausing item
       // suspends the run and is resumed via re-entry.
@@ -175,7 +176,10 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
           // Mark this item started and suspend; the engine re-enters on bubble.
           state.started = idx + 1;
           variables.set(stateKey, state);
-          return { success: true, suspend: true, correlation: `map:${child.runId}`, metrics: { selected, acted } };
+          return {
+            success: true, suspend: true, correlation: `map:${child.runId}`,
+            metrics: { selected, acted, ...(unmeasured ? { unmeasuredEffect: true } : {}) },
+          };
         }
         if (!child.success) {
           return {
@@ -183,7 +187,11 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
             error: `map '${node.id}': item ${idx} (subflow '${flowName}') failed: ${child.error ?? 'unknown error'}`,
             // Items that already succeeded wrote real rows; a later item's
             // failure must not erase them from the run's totals.
-            metrics: { selected: selected + (child.summary?.selected ?? 0), acted: acted + (child.summary?.acted ?? 0) },
+            metrics: {
+              selected: selected + (child.summary?.selected ?? 0),
+              acted: acted + (child.summary?.acted ?? 0),
+              ...(unmeasured || child.summary?.unmeasured ? { unmeasuredEffect: true } : {}),
+            },
           };
         }
         // Synchronous completion — record and advance.
@@ -191,6 +199,9 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         state.results.push(child.output ?? null);
         selected += child.summary?.selected ?? 0;
         acted += child.summary?.acted ?? 0;
+        // One uncountable effect anywhere in the batch makes the batch's
+        // `acted` incomplete — the flag rides out with this entry's metrics.
+        if (child.summary?.unmeasured) unmeasured = true;
       }
 
       // All items done.
@@ -199,7 +210,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       return {
         success: true,
         output: { results: state.results, count: state.results.length },
-        metrics: { selected, acted },
+        metrics: { selected, acted, ...(unmeasured ? { unmeasuredEffect: true } : {}) },
       };
     },
   });
