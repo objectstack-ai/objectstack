@@ -263,6 +263,19 @@ jobs:
       - name: Check every package is type-check covered or ledgered
         run: pnpm check:type-check-coverage
 
+      # Conformance meta-gate (#4363): `spec/src/data/*-conformance.ts` holds the
+      # shared case-sets that exist so the independent drivers answer ONE
+      # standard, and three separate changesets claimed a future driver "is held
+      # to this by a gate rather than by remembering it". There was no gate —
+      # nothing obliged a driver to import them — and the matrix had three holes,
+      # one of them in the case-set whose changeset made the claim. Same shape as
+      # the ratchet above: every (driver × case-set) cell is covered or carries a
+      # measured DEBT/EXEMPT entry, reconciled in both directions, plus a
+      # CLASSIFIED direction so a NEW shared fixture cannot start life uncovered.
+      # Reads source files only; no build, sub-second.
+      - name: Check every driver runs the shared conformance cases
+        run: pnpm check:driver-conformance
+
       - name: Type check (@objectstack/spec)
         run: pnpm --filter @objectstack/spec exec tsc --noEmit
 
