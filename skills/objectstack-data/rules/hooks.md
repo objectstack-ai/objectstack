@@ -28,9 +28,9 @@ The canonical reference includes:
 
 ```typescript
 import { P } from '@objectstack/spec';
-import { Hook, HookContext } from '@objectstack/spec/data';
+import { defineHook, HookContext } from '@objectstack/spec/data';
 
-const hook: Hook = {
+const hook = defineHook({
   name: 'my_hook',              // Required: unique identifier
   object: 'account',            // Required: target object(s)
   events: ['beforeInsert'],     // Required: lifecycle events
@@ -40,8 +40,15 @@ const hook: Hook = {
   priority: 100,                // Optional: execution order
   async: false,                 // Optional: background execution (after* only)
   condition: P`record.status == 'active'`, // Optional: conditional execution (CEL)
-};
+});
 ```
+
+Prefer `defineHook()` over a bare `: Hook` literal (the same rule as
+`defineDatasource`): it validates when the module is imported, so
+constraint-level mistakes a bare annotation can't catch — a non-`snake_case`
+`name`, a misspelled key routed through a spread — fail while you author
+instead of at deploy, and the export carries defaults already materialized
+(#4269).
 
 ### Logic: `body` (preferred) or `handler` (deprecated)
 
