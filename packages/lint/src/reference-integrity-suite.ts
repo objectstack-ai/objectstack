@@ -32,6 +32,15 @@
  * severities (see that module: a filter-position miss gates, every other
  * position advises), which is why the suite's contract is severity-agnostic.
  *
+ * `validateSearchableFields` is a member on the same reading, one layer in: an
+ * ADR-0061 `searchableFields` entry is a field name written in metadata,
+ * resolved against the object's own declared fields. It gates (`error`) because
+ * the engine's tolerance for a stale entry — silently filtering it out — either
+ * narrows the searched set below what the object declares or, once every entry
+ * is stale, falls through to the auto-default and searches a set the author
+ * never wrote. See that module for why the other field-existence rules stay
+ * advisory and this one does not.
+ *
  * Rules that check SHAPE rather than reference (view containers, responsive
  * styles, seed replay safety, seed state machines, seed/security posture) stay
  * out — they answer a different question and have their own call sites.
@@ -46,6 +55,7 @@
  */
 
 import { validateObjectReferences } from './validate-object-references.js';
+import { validateSearchableFields } from './validate-searchable-fields.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
@@ -91,6 +101,7 @@ export interface ReferenceIntegrityRule {
  */
 export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateObjectReferences', run: validateObjectReferences },
+  { name: 'validateSearchableFields', run: validateSearchableFields },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   { name: 'validateChartBindings', run: validateChartBindings },

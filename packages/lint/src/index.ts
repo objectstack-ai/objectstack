@@ -194,6 +194,15 @@ export {
 } from './validate-object-references.js';
 export type { ObjectRefFinding, ObjectRefSeverity } from './validate-object-references.js';
 
+export {
+  validateSearchableFields,
+  SEARCHABLE_FIELD_UNKNOWN,
+} from './validate-searchable-fields.js';
+export type {
+  SearchableFieldFinding,
+  SearchableFieldSeverity,
+} from './validate-searchable-fields.js';
+
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
 
