@@ -1121,12 +1121,38 @@ describe('ApprovalService (node era)', () => {
 
   // ── thread interactions ─────────────────────────────────────────
 
-  it('reassign: hands the slot to a new approver and audits the move', async () => {
+  it('reassign: hands the slot to a new approver and audits the move on structured fields (#4365)', async () => {
     const req = await svc.openNodeRequest(openInput(['u9', 'u2']), CTX);
     const out = await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
     expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
     const actions = await svc.listActions(req.id, SYS);
-    expect(actions.at(-1)).toMatchObject({ action: 'reassign', actor_id: 'u9', comment: 'u9 → u7' });
+    const audit = actions.at(-1)!;
+    expect(audit).toMatchObject({ action: 'reassign', actor_id: 'u9', reassign_from: 'u9', reassign_to: 'u7' });
+    // No user comment → none invented. The old default baked raw user ids
+    // into user-facing text ("u9 → u7").
+    expect(audit.comment).toBeUndefined();
+  });
+
+  it('reassign: a user comment is stored verbatim alongside the structured fields (#4365)', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.reassign(req.id, { actorId: 'u9', to: 'u7', comment: 'On leave next week' }, asUser('u9'));
+    const actions = await svc.listActions(req.id, SYS);
+    expect(actions.at(-1)).toMatchObject({
+      action: 'reassign', reassign_from: 'u9', reassign_to: 'u7', comment: 'On leave next week',
+    });
+  });
+
+  it('reassign: listActions resolves the hand-off parties to display names (#4365)', async () => {
+    engine._tables['sys_user'] = [
+      { id: 'u9', name: 'Grace Hopper', email: 'grace@example.com' },
+      { id: 'u7', name: 'Ada Lovelace', email: 'ada@example.com' },
+    ];
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
+    const actions = await svc.listActions(req.id, SYS);
+    expect(actions.at(-1)).toMatchObject({
+      reassign_from_name: 'Grace Hopper', reassign_to_name: 'Ada Lovelace',
+    });
   });
 
   it('reassign: notifies the new approver via messaging', async () => {

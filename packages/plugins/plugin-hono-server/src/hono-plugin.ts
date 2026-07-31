@@ -233,10 +233,13 @@ export class HonoServerPlugin implements Plugin {
             staticRoot: this.options.staticRoot
         });
 
-        // Register HTTP server service as IHttpServer
-        // Register as 'http.server' to match core requirements
+        // Register HTTP server service as IHttpServer — `http.server` is the
+        // CANONICAL name (the ledger entry in `@objectstack/spec/contracts`
+        // documents it; runtime's `config.server` path registers only this one).
         ctx.registerService('http.server', this.server);
-        // Alias 'http-server' for backward compatibility
+        // DEPRECATED alias (#4251): same instance, second name. Kept while
+        // alias readers migrate; dropped at a release boundary — new code must
+        // read `http.server`.
         ctx.registerService('http-server', this.server);
         ctx.logger.debug('HTTP server service registered', { serviceName: 'http.server' });
 

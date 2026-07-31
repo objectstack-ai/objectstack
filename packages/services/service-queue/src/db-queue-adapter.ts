@@ -174,7 +174,12 @@ export class DbQueueAdapter implements IQueueService {
       context: SYSTEM_CTX,
     });
     for (const row of rows ?? []) {
-      try { await this.engine.delete(QUEUE_TABLE, { id: row.id, context: SYSTEM_CTX }); }
+      // `where: { id }` — the engine's delete has no top-level `id` option.
+      // The old `{ id: row.id }` bag carried no predicate at all, so every
+      // purge delete threw "Delete requires an ID or options.multi=true"
+      // straight into this catch: purge logged a warn per row and deleted
+      // NOTHING (#4371 option-2 survey).
+      try { await this.engine.delete(QUEUE_TABLE, { where: { id: row.id }, context: SYSTEM_CTX }); }
       catch (err) { this.logger?.warn?.('DbQueueAdapter: purge delete failed', err as any); }
     }
   }
@@ -220,7 +225,7 @@ export class DbQueueAdapter implements IQueueService {
     if (row.status !== 'dlq' && row.status !== 'failed') {
       throw new Error(`INVALID_STATE: cannot purge message in status=${row.status}`);
     }
-    await this.engine.delete(QUEUE_TABLE, { id: messageId, context: SYSTEM_CTX });
+    await this.engine.delete(QUEUE_TABLE, { where: { id: messageId }, context: SYSTEM_CTX });
   }
 
   // ── Worker lifecycle ─────────────────────────────────────────────

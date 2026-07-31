@@ -65,27 +65,42 @@ export interface IDataDriver {
    * Find multiple records matching the structured query.
    * MUST return `id` as string. MUST NOT return implementation details like `_id`.
    *
-   * **Paged reads MUST be deterministic.** When `orderBy` is non-empty and
-   * `limit`/`offset` are used to walk the result set, the driver MUST produce a
-   * total order — reading page after page visits every matching row exactly
-   * once. A sort key the caller supplied usually does not identify a row
-   * (`orderBy: status`), and no backend promises that rows with equal keys keep
-   * the same relative arrangement between two queries: on MongoDB, `sort` +
-   * `skip`/`limit` on a non-unique key may return one document twice and never
-   * return another. Drivers close this by appending a unique tie-breaker column
-   * of their own to the ORDER BY — which column, and whether the table has one
-   * at all, is the driver's knowledge, which is why the obligation sits here
-   * and not in the query engine.
+   * **Paged reads MUST be deterministic.** Whenever `limit`/`offset` are used
+   * to walk the result set, the driver MUST produce a total order — reading
+   * page after page visits every matching row exactly once. The obligation
+   * covers a paged read whatever its `orderBy`, including none at all, and it
+   * holds across the whole walk rather than within one response.
+   *
+   * Two shapes break it, and they are the same defect at different strengths:
+   *
+   * - **A sort key that does not identify a row** (`orderBy: status`). No
+   *   backend promises rows with equal keys keep the same relative arrangement
+   *   between two queries — on MongoDB, `sort` + `skip`/`limit` on a non-unique
+   *   key may return one document twice and never return another.
+   * - **No `orderBy` at all**, which is the degenerate case of the first: every
+   *   row ties with every other, so the *entire* page boundary is arbitrary.
+   *   SQL leaves row order to the plan, and MongoDB's natural order moves when
+   *   a document does.
+   *
+   * Drivers close both by ordering on a unique column of their own — appended
+   * to a requested `orderBy`, or standing alone when there is none. Which
+   * column, and whether the table has one at all, is the driver's knowledge,
+   * which is why the obligation sits here and not in the query engine. A driver
+   * that cannot name one is not free to reshuffle: it must return rows in an
+   * order its own storage holds steady between reads (`driver-memory`), or the
+   * guarantee is simply unavailable on that table and the driver says so.
    *
    * The failure this rules out is invisible in any single response: every page
    * is full, every row is real and belongs, and the duplicate sits several
-   * screens away from the omission. Checked by the shared
-   * `PAGINATION_CASES` fixture (`data/pagination-conformance.ts`) — a driver
-   * ships with those cases running against it.
+   * screens away from the omission. Checked by the shared `PAGINATION_CASES`
+   * and `PAGINATION_UNORDERED_CASES` fixtures
+   * (`data/pagination-conformance.ts`) — a driver ships with those cases
+   * running against it.
    *
-   * Deliberately NOT covered: a paged read with no `orderBy` at all. That is
-   * non-deterministic on every backend by definition; imposing an order on
-   * callers who asked for none is a separate decision (objectstack#4363).
+   * Deliberately NOT covered: an **unpaged** read with no `orderBy`. Nothing is
+   * being sliced, so no caller can be shown a partial view of the set, and
+   * imposing an order there would change plan selection for the majority of
+   * reads to buy nothing (objectstack#4363).
    */
   find(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown>[]>;
 
@@ -99,6 +114,17 @@ export interface IDataDriver {
   /**
    * Find a single record by query.
    * MUST return `id` as string. MUST NOT return implementation details like `_id`.
+   *
+   * The paged-read guarantee on {@link find} does **not** extend here, and the
+   * distinction is deliberate rather than an oversight. This method promises
+   * *a* matching record, never a position in a sequence, so there is no
+   * partition for a second call to be inconsistent with. Engines reach a driver
+   * with `limit: 1`, which is shaped exactly like page one of a walk — and a
+   * driver that read it that way would impose an ORDER BY on the single hottest
+   * read in the system, for which `ORDER BY <key> LIMIT 1` is the classic shape
+   * that makes a planner abandon the predicate's own index. A driver that wants
+   * a deterministic single-row read should be handed an `orderBy`, which is a
+   * thing the caller can express (objectstack#4363).
    */
   findOne(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown> | null>;
 

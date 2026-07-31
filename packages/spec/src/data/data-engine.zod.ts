@@ -119,6 +119,15 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
   search: FullTextSearchSchema.optional(),
 
   /**
+   * Fields the `search` expansion may match against — intersected with the
+   * object's declared/derived searchable set (ADR-0061). Read by the engine's
+   * `$search` → cross-field `$or` expansion and sent by the protocol layer
+   * ever since; it was enforced but undeclared until #4371 (option 2) made
+   * the engine reject undeclared option keys.
+   */
+  searchFields: z.array(z.string()).optional(),
+
+  /**
    * Recursive relation loading map (expand).
    * 
    * Keys are lookup/master_detail field names; values are nested QueryAST

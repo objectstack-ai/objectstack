@@ -341,6 +341,15 @@ export const HookContextSchema = lazySchema(() => z.object({
   session: z.object({
     userId: z.string().optional(),
     /**
+     * Service-principal label for audit attribution when the caller is not a
+     * real user (`ExecutionContext.actor`, ADR-0014 D2) — e.g. a service token
+     * (`svc:<name>`) or an automation run (`svc:flow:<flowName>`, #4366).
+     * `userId` takes precedence when set; this is the fallback the audit
+     * writer records on `sys_audit_log.actor`. Attribution only — it grants
+     * nothing and no security middleware keys on it.
+     */
+    actor: z.string().optional().describe('Service-principal label for audit attribution when the caller is not a real user (e.g. svc:flow:<flowName>)'),
+    /**
      * Active organization ID — the developer-facing name for the caller's
      * current org. Same value everywhere a developer reads the org: the
      * `organization_id` column, `current_user.organizationId` (RLS/sharing),

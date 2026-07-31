@@ -35,19 +35,6 @@ import {
 
 import type { IHttpServer } from '@objectstack/spec/contracts';
 
-/**
- * The `http-server` slot plus the one member this plugin needs from it.
- *
- * [#4251] `IHttpServer` is a real contract (`@objectstack/spec/contracts`) and
- * this slot is bound to it — but `getRawApp()` is NOT on it, deliberately: the
- * contract is framework-agnostic and the raw app is the framework's own handle
- * (Hono here). So the escape is one named member returning `any`, scoped to the
- * one thing that genuinely cannot be typed framework-agnostically, instead of
- * the whole lookup collapsing to `any`. The probe below is what runs when a
- * host serves the slot with an adapter that exposes no raw app.
- */
-type RawAppHost = IHttpServer & { getRawApp?(): any };
-
 const MARKETPLACE_PREFIX = '/api/v1/marketplace';
 
 /**
@@ -196,14 +183,21 @@ export class MarketplaceProxyPlugin implements Plugin {
                 manifest?.register?.(MARKETPLACE_BROWSE_UI_BUNDLE);
             } catch { /* no manifest service */ }
 
-            let httpServer: RawAppHost | undefined;
-            try {
-                httpServer = ctx.getService<RawAppHost>('http-server');
-            } catch {
+            // [#4251] Read canonical-first with a REAL per-name fallback:
+            // `getService` THROWS for an empty slot, so a single try around
+            // `canonical ?? alias` never reaches the alias — the shape the old
+            // alias-first read had too, meaning its fallback never once fired.
+            const readServer = (name: string): IHttpServer | undefined => {
+                try { return ctx.getService<IHttpServer>(name); } catch { return undefined; }
+            };
+            // `http.server` is canonical (the only name every provider
+            // registers); the alias fallback dies with the alias registrations.
+            const httpServer = readServer('http.server') ?? readServer('http-server');
+            if (!httpServer) {
                 ctx.logger?.warn?.('[MarketplaceProxyPlugin] http-server not available — marketplace routes not mounted');
                 return;
             }
-            if (!httpServer || typeof httpServer.getRawApp !== 'function') {
+            if (typeof httpServer.getRawApp !== 'function') {
                 ctx.logger?.warn?.('[MarketplaceProxyPlugin] http-server missing getRawApp() — marketplace routes not mounted');
                 return;
             }

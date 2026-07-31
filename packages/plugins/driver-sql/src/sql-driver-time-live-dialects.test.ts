@@ -88,7 +88,7 @@ function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
         await driver.create(TABLE, { id, label: id, starts_at: v }, { bypassTenantAudit: true });
       }
       for (const [id, , presented] of WRITES) {
-        const row: any = await driver.findOne(TABLE, { object: TABLE, where: { id: id } }, { bypassTenantAudit: true });
+        const row: any = await driver.findOne(TABLE, { object: TABLE, where: { id } }, { bypassTenantAudit: true });
         expect(row.starts_at, id).toBe(presented);
       }
     });

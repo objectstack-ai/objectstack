@@ -111,8 +111,6 @@ export { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spe
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 
-/** `IHttpServer` plus the framework-specific raw-app handle this route needs. */
-type HttpServerWithRawApp = IHttpServer & { getRawApp?(): any };
 
 export interface MetadataPluginOptions {
     rootDir?: string;
@@ -409,14 +407,19 @@ export class MetadataPlugin implements Plugin {
         // Production deployments simply won't have a CLI POSTing to this
         // endpoint and won't surface the route to clients.
         try {
-            // [#4251] Both names are the SAME instance — plugin-hono-server and
-            // qa/node-plugin each register it twice, two lines apart. Typed to
-            // the contract now that the `http.server` exemption is revoked;
-            // `getRawApp()` is not on `IHttpServer` (framework-agnostic by
-            // design, the raw app is the framework's own handle), so that one
-            // member is named here — the third consumer to need it.
-            const httpServer = ctx.getService<HttpServerWithRawApp>('http-server')
-                ?? ctx.getService<HttpServerWithRawApp>('http.server');
+            // [#4251] Both names are the SAME instance; `http.server` is the
+            // canonical one (the only name every provider registers), read
+            // first. Per-name try — `getService` THROWS for an empty slot, so
+            // a single try around `canonical ?? alias` never reaches the
+            // alias: exactly the shape this read had before (alias-first),
+            // whose fallback therefore never once fired. `getRawApp?()` is on
+            // the contract now — the deliberate framework-handle escape,
+            // declared once there instead of per consumer. The alias fallback
+            // dies with the alias registrations.
+            const readServer = (name: string): IHttpServer | undefined => {
+                try { return ctx.getService<IHttpServer>(name); } catch { return undefined; }
+            };
+            const httpServer = readServer('http.server') ?? readServer('http-server');
             if (httpServer && typeof httpServer.getRawApp === 'function') {
                 const { registerMetadataHmrRoutes } = await import('./routes/hmr-routes.js');
                 const hub = registerMetadataHmrRoutes(httpServer.getRawApp(), this.manager);

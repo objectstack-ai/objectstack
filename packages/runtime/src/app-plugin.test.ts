@@ -436,11 +436,19 @@ describe('AppPlugin', () => {
             expect(mockManifest.register).not.toHaveBeenCalled();
         });
 
-        it('does not replace an already-installed default runner', async () => {
-            mockQL._defaultBodyRunner = () => undefined;
+        it('delegates keep-the-first to the engine — the setter is called unconditionally (#4251)', async () => {
+            // The caller-side guard (probing the engine's private
+            // `_defaultBodyRunner` field) is gone; the ENGINE's first-wins
+            // setter owns the invariant, pinned in objectql's hook-binder
+            // tests. This side only skips the "Installed" log when the engine
+            // answers `false`.
+            mockQL.setDefaultBodyRunner = vi.fn(() => false); // engine: already installed
             const plugin = new AppPlugin({ id: 'com.test.app' });
             await plugin.init(mockContext);
-            expect(mockQL.setDefaultBodyRunner).not.toHaveBeenCalled();
+            expect(mockQL.setDefaultBodyRunner).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(mockContext.logger.info).mock.calls.map((c) => c[0])).not.toContain(
+                '[AppPlugin] Installed default hook body runner (runtime-authored hooks can execute)',
+            );
         });
 
         it('honours the OS_DISABLE_AUTHORED_HOOKS=1 opt-out', async () => {

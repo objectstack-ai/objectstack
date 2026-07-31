@@ -54,9 +54,15 @@ function makeFakeEngine() {
       return r;
     },
     async delete(table: string, opts: any) {
+      // Real-engine contract: the target id lives at `where.id` — there is no
+      // top-level `id` option. The mock used to accept `opts.id`, a signature
+      // the real engine rejects, which is exactly how the adapter's broken
+      // `{ id }` bags stayed green (#4371 option-2 survey).
+      const id = opts?.where?.id;
+      if (id == null) throw new Error('Delete requires an ID or options.multi=true');
       const t = tables.get(table) ?? [];
-      tables.set(table, t.filter((r) => r.id !== opts.id));
-      return { id: opts.id };
+      tables.set(table, t.filter((r) => r.id !== id));
+      return { id };
     },
   };
 }

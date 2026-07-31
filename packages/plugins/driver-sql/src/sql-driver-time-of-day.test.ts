@@ -71,7 +71,7 @@ describe('Field.time canonical presentation (time-of-day, SQLite)', () => {
       ['d', '09:05:30.250', '09:05:30.250'],
     ] as const) {
       await driver.create('shift', { id, label: id, starts_at: written }, { bypassTenantAudit: true });
-      const row: any = await driver.findOne('shift', { object: 'shift', where: { id: id } }, { bypassTenantAudit: true });
+      const row: any = await driver.findOne('shift', { object: 'shift', where: { id } }, { bypassTenantAudit: true });
       expect(row.starts_at).toBe(presented);
     }
   });

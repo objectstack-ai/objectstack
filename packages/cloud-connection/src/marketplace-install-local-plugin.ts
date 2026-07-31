@@ -48,6 +48,7 @@ import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
+import type { IHttpServer } from '@objectstack/spec/contracts';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -120,14 +121,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             await this.rehydrate(ctx);
 
             // 2. Mount HTTP endpoints.
-            let httpServer: any;
-            try {
-                httpServer = ctx.getService('http-server');
-            } catch {
+            // [#4251] Read canonical-first with a REAL per-name fallback:
+            // `getService` THROWS for an empty slot, so a single try around
+            // `canonical ?? alias` never reaches the alias — the shape the old
+            // alias-first read had too, meaning its fallback never once fired.
+            const readServer = (name: string): IHttpServer | undefined => {
+                try { return ctx.getService<IHttpServer>(name); } catch { return undefined; }
+            };
+            // Canonical first — see marketplace-proxy-plugin.
+            const httpServer = readServer('http.server') ?? readServer('http-server');
+            if (!httpServer) {
                 ctx.logger?.warn?.('[MarketplaceInstallLocal] http-server not available — install endpoints not mounted');
                 return;
             }
-            if (!httpServer || typeof httpServer.getRawApp !== 'function') {
+            if (typeof httpServer.getRawApp !== 'function') {
                 ctx.logger?.warn?.('[MarketplaceInstallLocal] http-server missing getRawApp() — install endpoints not mounted');
                 return;
             }

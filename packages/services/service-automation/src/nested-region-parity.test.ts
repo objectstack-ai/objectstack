@@ -21,9 +21,20 @@ import { AutomationEngine } from './engine.js';
 import type { NodeExecutor } from './engine.js';
 import { registerLoopNode } from './builtin/loop-node.js';
 import { registerLogicNodes } from './builtin/logic-nodes.js';
+import { registerCrudNodes } from './builtin/crud-nodes.js';
 
 function silentLogger() {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } } as any;
+}
+
+/** A logger that records `warn` lines, for the soft-fail validators. */
+function recordingLogger(sink: string[]) {
+  const l: any = {
+    info() {}, error() {}, debug() {},
+    warn(msg: string) { sink.push(String(msg)); },
+    child() { return l; },
+  };
+  return l;
 }
 function ctx() {
   return { logger: silentLogger(), getService() { return undefined; } } as any;
@@ -212,6 +223,126 @@ describe('#4347 — predicate validation covers region graphs', () => {
   it('rejects the SAME brace trap inside a loop body, naming the region', () => {
     expect(() => engine.registerFlow('trap', braceTrapFlow(true))).toThrow(/invalid expression/i);
     expect(() => engine.registerFlow('trap', braceTrapFlow(true))).toThrow(/loop 'loop' body/);
+  });
+});
+
+/**
+ * #4389 — the three registration validators #4347 left walking `flow.nodes`
+ * only. Same parity shape: identical bad metadata at the top level and one
+ * level in must get the identical verdict.
+ *
+ * Measured before extending them: 0 new findings across app-showcase / app-crm
+ * / app-todo (9 region graphs), so nothing that registers today stops.
+ */
+describe('#4389 — registration validators cover region graphs', () => {
+  /** Wrap `nodes` in a loop body when `nested`, else splice them in flat. */
+  const flowWith = (nested: boolean, bodyNodes: Array<Record<string, unknown>>) => ({
+    name: 'sweep', label: 'Sweep', type: 'schedule' as const, status: 'active' as const, runAs: 'system' as const,
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { schedule: '0 0 * * *' } },
+      ...(nested
+        ? [{
+            id: 'loop', type: 'loop', label: 'Loop',
+            config: {
+              collection: [1], iteratorVariable: 'row',
+              body: { nodes: bodyNodes, edges: [] },
+            },
+          }]
+        : bodyNodes),
+    ],
+    edges: [{ id: 'e1', source: 'start', target: nested ? 'loop' : String(bodyNodes[0]!.id), type: 'default' as const }],
+  });
+
+  describe('validateNodeConfigKeys (hard-fail)', () => {
+    let engine: AutomationEngine;
+    beforeEach(() => {
+      engine = new AutomationEngine(silentLogger());
+      registerLoopNode(engine, ctx());
+      registerCrudNodes(engine, ctx());
+    });
+
+    // `fieldz` is not on the `create_record` descriptor — the #4277 typo class.
+    const typoNode = [{ id: 'w', type: 'create_record', label: 'W', config: { objectName: 'lead', fieldz: { a: 1 } } }];
+
+    it('rejects an undeclared config key at the top level (unchanged)', () => {
+      expect(() => engine.registerFlow('sweep', flowWith(false, typoNode))).toThrow(/undeclared config key/);
+    });
+
+    it('rejects the SAME key inside a loop body, naming the region', () => {
+      expect(() => engine.registerFlow('sweep', flowWith(true, typoNode))).toThrow(/undeclared config key/);
+      expect(() => engine.registerFlow('sweep', flowWith(true, typoNode))).toThrow(/loop 'loop' body · node 'w'/);
+    });
+
+    it('reports each nested key ONCE — the container config physically contains it', () => {
+      try {
+        engine.registerFlow('sweep', flowWith(true, typoNode));
+        throw new Error('expected a rejection');
+      } catch (err) {
+        const msg = (err as Error).message;
+        expect(msg).toMatch(/1 undeclared config key/);
+        expect(msg.match(/`fieldz`/g)).toHaveLength(1);
+      }
+    });
+
+    it('leaves a correct region alone', () => {
+      const ok = [{ id: 'w', type: 'create_record', label: 'W', config: { objectName: 'lead', fields: { a: 1 } } }];
+      expect(() => engine.registerFlow('sweep', flowWith(true, ok))).not.toThrow();
+    });
+  });
+
+  describe('validateNodeTypes (soft-fail)', () => {
+    const unknownNode = [{ id: 'x', type: 'no_such_node_type', label: 'X' }];
+
+    const warningsFor = (nested: boolean) => {
+      const warnings: string[] = [];
+      const engine = new AutomationEngine(recordingLogger(warnings));
+      registerLoopNode(engine, ctx());
+      engine.registerFlow('sweep', flowWith(nested, unknownNode));
+      return warnings.filter(w => w.includes('no registered executor'));
+    };
+
+    it('warns about an unknown node type at the top level (unchanged)', () => {
+      expect(warningsFor(false)).toHaveLength(1);
+    });
+
+    it('warns about the SAME type inside a loop body', () => {
+      const warnings = warningsFor(true);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('no_such_node_type');
+    });
+  });
+
+  describe('validateControlFlow (hard-fail)', () => {
+    let engine: AutomationEngine;
+    beforeEach(() => {
+      engine = new AutomationEngine(silentLogger());
+      registerLoopNode(engine, ctx());
+      engine.registerNodeExecutor({ type: 'mark', async execute() { return { success: true }; } } as NodeExecutor);
+    });
+
+    /** A two-entry (malformed) region — `analyzeRegion`'s single-entry rule. */
+    const malformed = { nodes: [{ id: 'a', type: 'mark', label: 'A' }, { id: 'b', type: 'mark', label: 'B' }], edges: [] };
+    const innerLoop = { id: 'inner', type: 'loop', label: 'Inner', config: { collection: [1], body: malformed } };
+
+    it('rejects a malformed region on a top-level container (unchanged)', () => {
+      expect(() => engine.registerFlow('sweep', flowWith(false, [innerLoop]))).toThrow(/single-entry/);
+    });
+
+    it('rejects a malformed region on a NESTED container, naming both levels', () => {
+      // Previously this registered clean and threw mid-run from `findRegionEntry`
+      // — after the outer loop had begun iterating.
+      expect(() => engine.registerFlow('sweep', flowWith(true, [innerLoop]))).toThrow(/single-entry/);
+      expect(() => engine.registerFlow('sweep', flowWith(true, [innerLoop])))
+        .toThrow(/loop 'loop' body → loop 'inner' body/);
+    });
+
+    it('leaves a well-formed nested container alone', () => {
+      const wellFormed = {
+        id: 'inner', type: 'loop', label: 'Inner',
+        config: { collection: [1], body: { nodes: [{ id: 'a', type: 'mark', label: 'A' }], edges: [] } },
+      };
+      expect(() => engine.registerFlow('sweep', flowWith(true, [wellFormed]))).not.toThrow();
+    });
   });
 });
 

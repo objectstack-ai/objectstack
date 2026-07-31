@@ -39,7 +39,7 @@ The obligation is now normative on `IDataDriver.find`, with shared cases in
 `@objectstack/spec/data` (`PAGINATION_CASES`) that all three drivers run — so a
 future driver is held to it by a gate rather than by remembering.
 
-Deliberately not covered: a paged read with **no** `orderBy`. That is
-non-deterministic on every backend by definition and imposing an order on
-callers who asked for none changes plan selection far more broadly; filed as
-#4363.
+Not covered by this change: a paged read with **no** `orderBy`. Same defect,
+wider blast radius, so it was carved out to #4363 rather than folded in — and
+closed there, in the same release. The contract, the shared cases and both
+drivers now cover a paged read whatever its `orderBy`, including none at all.

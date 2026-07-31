@@ -207,6 +207,25 @@ describe('FlowRunSummarySchema', () => {
     expect(() => FlowRunSummarySchema.parse({ ...brokenSweep, acted: -1 })).toThrow();
   });
 
+  it('carries an uncountable-effect tally distinct from acted', () => {
+    // A connector-driven run: `acted: 0` is INCOMPLETE, not zero, and the
+    // broken-sweep query has to be able to tell.
+    const summary = FlowRunSummarySchema.parse({
+      selected: 9, acted: 0, skipped: 0, unmeasured: 3,
+      nodes: [{ nodeId: 'push', nodeType: 'connector_action', status: 'success' as const, runs: 3, failures: 0, skipped: 0, unmeasured: 3 }],
+      gates: [],
+    });
+    expect(summary.unmeasured).toBe(3);
+    expect(summary.nodes[0].unmeasured).toBe(3);
+  });
+
+  it('leaves `unmeasured` absent on a run that never tracked it — absent is not zero', () => {
+    // A row written before the field existed did not measure uncountable
+    // effects at all; defaulting it to 0 would tell an operator "fully
+    // measured" about a run nobody measured.
+    expect(FlowRunSummarySchema.parse(brokenSweep).unmeasured).toBeUndefined();
+  });
+
   it('rides on an execution log', () => {
     const log = ExecutionLogSchema.parse({
       id: 'exec_004',

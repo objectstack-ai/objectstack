@@ -1665,7 +1665,12 @@ export class ObjectQLPlugin implements Plugin {
     // deleting the last authored action must unregister it.
     ql.removeActionsByPackage('metadata-service');
 
-    const runner: any = ql._defaultActionRunner;
+    // [#4251] The public accessor — this read used to reach the private
+    // `_defaultActionRunner` field directly. Probed because `ql` can be a
+    // test double that predates the accessor.
+    const runner: any = typeof ql.getDefaultActionRunner === 'function'
+      ? ql.getDefaultActionRunner()
+      : undefined;
     let registered = 0;
     let skippedNoHandler = 0;
     for (const action of bindable) {

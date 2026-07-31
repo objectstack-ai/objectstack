@@ -282,6 +282,15 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           // exposes it as a flow variable so a later declarative node persists it
           // (e.g. `update_record fields: { ai_category: '{aiResult.ai_category}' }`).
           // Data I/O stays on the flow graph — the function itself does no writes.
+          //
+          // #4354 — which is why this node reports NO metrics, deliberately: by
+          // that contract every write it causes is a downstream `update_record`
+          // counting itself, so "absent" (this kind of node touches no records)
+          // is the accurate answer, not a guess. Nothing ENFORCES the purity
+          // though, so a function that writes behind the platform's back makes
+          // its run under-report. Filed as #4396 rather than accommodated: a blanket
+          // `unmeasuredEffect` here would suppress the broken-sweep signal on
+          // every flow that calls any function, to cover a contract violation.
           if (outputVariable) variables.set(outputVariable, result);
           return { success: true, output: { function: target, result } };
         } catch (err) {

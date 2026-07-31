@@ -375,35 +375,52 @@ const MAX_REGION_DEPTH = 32;
 /**
  * Validate every structured control-flow construct in a flow, throwing on the
  * first malformed region (ADR-0031 — "reject the malformed before run"). Covers
- * `loop` bodies, `parallel` branches, and `try_catch` try/catch regions. Only
- * validates the *nested structure* when present, so legacy flat-graph `loop`
- * nodes (no `config.body`) are untouched — the constructs are additive.
+ * `loop` bodies, `parallel` branches, and `try_catch` try/catch regions —
+ * **at every depth** (#4389), so a container nested inside another container's
+ * region is checked too. Only validates the *nested structure* when present, so
+ * legacy flat-graph `loop` nodes (no `config.body`) are untouched — the
+ * constructs are additive.
  *
- * Intended to be called from `registerFlow()` after DAG cycle detection.
+ * The recursion is not extra strictness looking for work: a malformed nested
+ * region already failed, just later and worse. `runRegion` calls
+ * `findRegionEntry`, which throws mid-run — after the enclosing container has
+ * begun iterating and its side effects have landed. Refusing it at
+ * `registerFlow` is what ADR-0031's "reject the malformed before it can run"
+ * asks for, and it cannot break a flow that works today: everything newly
+ * rejected here was already guaranteed to throw on execution.
+ *
+ * Intended to be called from `registerFlow()` after DAG cycle detection. Region
+ * bodies are cycle-checked here rather than by `detectCycles` — `analyzeRegion`
+ * carries its own DAG pass — so this recursion is also what closes cycle
+ * detection over nested regions.
  */
 export function validateControlFlow(flow: { nodes: FlowNodeParsed[] }): void {
-  for (const node of flow.nodes) {
-    const cfg = node.config as Record<string, unknown> | undefined;
-    if (!cfg) continue;
-    if (node.type === PARALLEL_NODE_TYPE && Array.isArray(cfg.branches) && cfg.branches.length < 2) {
-      throw new Error(`parallel '${node.id}': a parallel block needs at least 2 branches`);
-    }
-    for (const slot of regionSlotsOf(node)) {
-      const parsed = slot.schema.safeParse(slot.raw);
-      if (!parsed.success) {
-        throw new Error(
-          `${slot.label}: invalid region — ${parsed.error.issues.map(i => i.message).join('; ')}`,
-        );
+  for (const graph of collectFlowGraphs(flow)) {
+    for (const node of graph.nodes) {
+      const cfg = node.config as Record<string, unknown> | undefined;
+      if (!cfg) continue;
+      if (node.type === PARALLEL_NODE_TYPE && Array.isArray(cfg.branches) && cfg.branches.length < 2) {
+        throw new Error(`parallel '${node.id}': a parallel block needs at least 2 branches`);
       }
-      // Both region schemas produce `{ nodes, edges }` (a parallel branch adds
-      // `name` — a superset); `z.ZodTypeAny` just cannot say so.
-      const analysis = analyzeRegion(parsed.data as { nodes: FlowNodeParsed[]; edges?: FlowEdgeParsed[] });
-      if (analysis.errors.length > 0) {
-        throw new Error(`${slot.label}: ${analysis.errors.join('; ')}`);
+      for (const slot of regionSlotsOf(node)) {
+        const where = graph.scope ? `${graph.scope} → ${slot.label}` : slot.label;
+        const parsed = slot.schema.safeParse(slot.raw);
+        if (!parsed.success) {
+          throw new Error(
+            `${where}: invalid region — ${parsed.error.issues.map(i => i.message).join('; ')}`,
+          );
+        }
+        // Both region schemas produce `{ nodes, edges }` (a parallel branch adds
+        // `name` — a superset); `z.ZodTypeAny` just cannot say so.
+        const analysis = analyzeRegion(parsed.data as { nodes: FlowNodeParsed[]; edges?: FlowEdgeParsed[] });
+        if (analysis.errors.length > 0) {
+          throw new Error(`${where}: ${analysis.errors.join('; ')}`);
+        }
       }
     }
   }
 }
+
 
 // ─── Region normalization ────────────────────────────────────────────
 

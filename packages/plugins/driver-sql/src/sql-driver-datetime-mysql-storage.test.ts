@@ -319,7 +319,7 @@ async function columnTypes(driver: SqlDriver, table: string): Promise<Record<str
  * is itself a 32-bit epoch function and returns 0 there.
  */
 async function readInstant(driver: SqlDriver, id: string, table = TABLE): Promise<string> {
-  const row: any = await driver.findOne(table, { object: table, where: { id: id } }, { bypassTenantAudit: true });
+  const row: any = await driver.findOne(table, { object: table, where: { id } }, { bypassTenantAudit: true });
   return new Date(row.at).toISOString();
 }
 

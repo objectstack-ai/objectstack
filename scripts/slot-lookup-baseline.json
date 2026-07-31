@@ -4,7 +4,7 @@
   "packages/cli/src/commands/serve.ts": 10,
   "packages/client/src/client.hono.test.ts": 2,
   "packages/cloud-connection/src/cloud-connection-plugin.ts": 5,
-  "packages/cloud-connection/src/marketplace-install-local-plugin.ts": 17,
+  "packages/cloud-connection/src/marketplace-install-local-plugin.ts": 16,
   "packages/core/examples/kernel-features-example.ts": 5,
   "packages/metadata-protocol/src/plugin.ts": 1,
   "packages/objectql/src/plugin.integration.test.ts": 23,

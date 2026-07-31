@@ -55,26 +55,22 @@ interface AppEngineSurface {
     registerAction(objectKey: string, name: string, handler: unknown, packageId: string): void;
     registerDriver(driver: unknown): void;
     setDatasourceMapping(rules: unknown): void;
-    setDefaultBodyRunner(runner: unknown): void;
+    /**
+     * FIRST-WINS setters (#4251): the engine keeps the first runner and
+     * returns whether this call installed it. The idempotence guard used to
+     * live HERE, as a probe of the engine's private `_defaultBodyRunner` /
+     * `_defaultActionRunner` fields through this surface — an invariant owned
+     * by every caller and enforced by none. It is the engine's now.
+     * `boolean | void` because pre-first-wins engines (and bare `vi.fn()`
+     * doubles) return undefined — treated as installed.
+     */
+    setDefaultBodyRunner(runner: unknown): boolean | void;
     setDefaultActionRunner(
         runner: (actionDef: any) => ((ctx: any) => Promise<unknown>) | undefined,
-    ): void;
+    ): boolean | void;
     setHookMetricsRecorder(recorder: unknown): void;
     getHookMetricsRecorder(): any;
     readonly registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void };
-    /**
-     * The idempotence guards for the two runners above, read directly.
-     *
-     * These are NOT part of any declared API: the engine attaches them with
-     * `(this as any)._defaultBodyRunner = runner` and publishes no reader, so
-     * "has another AppPlugin already installed one?" has no answer except
-     * reaching for the field. Declared here to keep that reach visible instead
-     * of laundering it through `any` — the fix is a public accessor on the
-     * engine beside `getHookMetricsRecorder`, which already exists for exactly
-     * this question about the metrics recorder. Filed on #4251.
-     */
-    _defaultBodyRunner?: unknown;
-    _defaultActionRunner?: unknown;
 }
 
 /** The engine as AppPlugin uses it: the data contract plus those seams. */
@@ -326,13 +322,17 @@ export class AppPlugin implements Plugin {
             return; // no engine on this kernel — nothing to wire
         }
         if (!ql || typeof ql.setDefaultBodyRunner !== 'function') return;
-        if (ql._defaultBodyRunner) return; // another AppPlugin already installed one
-        ql.setDefaultBodyRunner(hookBodyRunnerFactory(new QuickJSScriptRunner(), {
+        // [#4251] The setter is first-wins — the engine keeps the first runner
+        // when several AppPlugins share one kernel; this caller no longer
+        // probes the engine's private `_defaultBodyRunner` field to find out.
+        const installed = ql.setDefaultBodyRunner(hookBodyRunnerFactory(new QuickJSScriptRunner(), {
             ql,
             logger: ctx.logger,
             appId: 'runtime-authored',
         }));
-        ctx.logger.info('[AppPlugin] Installed default hook body runner (runtime-authored hooks can execute)');
+        if (installed !== false) {
+            ctx.logger.info('[AppPlugin] Installed default hook body runner (runtime-authored hooks can execute)');
+        }
     }
 
     /**
@@ -364,13 +364,15 @@ export class AppPlugin implements Plugin {
             return; // no engine on this kernel — nothing to wire
         }
         if (!ql || typeof ql.setDefaultActionRunner !== 'function') return;
-        if (ql._defaultActionRunner) return; // another AppPlugin already installed one
-        ql.setDefaultActionRunner(actionBodyRunnerFactory(new QuickJSScriptRunner(), {
+        // [#4251] First-wins setter — same as the hook body runner above.
+        const installed = ql.setDefaultActionRunner(actionBodyRunnerFactory(new QuickJSScriptRunner(), {
             ql,
             logger: ctx.logger,
             appId: 'runtime-authored',
         }));
-        ctx.logger.info('[AppPlugin] Installed default action body runner (runtime-authored actions can execute)');
+        if (installed !== false) {
+            ctx.logger.info('[AppPlugin] Installed default action body runner (runtime-authored actions can execute)');
+        }
     }
 
     /**

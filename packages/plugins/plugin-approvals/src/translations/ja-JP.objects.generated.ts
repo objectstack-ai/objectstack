@@ -235,6 +235,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "コメント"
       },
+      reassign_from: {
+        label: "引き継ぎ元",
+        help: "承認待ちスロットを引き渡したユーザー（引き継ぎ操作のみ）"
+      },
+      reassign_to: {
+        label: "引き継ぎ先",
+        help: "承認待ちスロットを受け取ったユーザー（引き継ぎ操作のみ）"
+      },
       attachments: {
         label: "添付ファイル",
         help: "この操作を裏付けるファイル——署名済み契約書や証憑など（#3266）。"

@@ -130,7 +130,7 @@ describe('engine write path — validation messages honour ExecutionContext.loca
       ql.update(
         'mes_settlement',
         { quota_hours: -3 },
-        { multi: true, filters: [['name', '=', 'S1']], context: zhCN } as any,
+        { multi: true, where: { name: 'S1' }, context: zhCN } as any,
       ),
     );
     expect(msg).toBe('定额工时必须大于或等于 0');

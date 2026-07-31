@@ -37,7 +37,7 @@ const result = HookContext.parse(data);
 | **input** | `Record<string, any>` | ✅ | Mutable input parameters |
 | **result** | `any` | optional | Operation result (After hooks only) |
 | **previous** | `Record<string, any>` | optional | Record state before operation |
-| **session** | `{ userId?: string; organizationId?: string; roles?: string[]; accessToken?: string; … }` | optional | Current session context |
+| **session** | `{ userId?: string; actor?: string; organizationId?: string; roles?: string[]; … }` | optional | Current session context |
 | **provenance** | `{ flowRunId?: string }` | optional | Server-stamped write provenance (never client-supplied, never an authorization input) |
 | **transaction** | `any` | optional | Database transaction handle |
 | **ql** | `any` | ✅ | ObjectQL Engine Reference |

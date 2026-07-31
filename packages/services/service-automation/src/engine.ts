@@ -1830,6 +1830,10 @@ export class AutomationEngine implements IAutomationService {
         const runContext: AutomationContext = {
             ...(context ?? {}),
             runAs: flow.runAs ?? 'user',
+            // `flowName` shares the same lifetime and construction point: it feeds
+            // audit attribution (`svc:flow:<name>` on ExecutionContext.actor) for
+            // runs that resolve no user (#4366).
+            flowName: flow.name,
             ...(runId ? { flowRunId: runId } : {}),
         };
 
@@ -2372,6 +2376,12 @@ export class AutomationEngine implements IAutomationService {
                 metrics: {
                     selected: (prior.selected ?? 0) + child.selected,
                     acted: (prior.acted ?? 0) + child.acted,
+                    // N uncountable effects in the child collapse to ONE flag on
+                    // the parent's step: this execution dispatched something the
+                    // platform cannot count. The child keeps the real count in
+                    // its own run row, and the question this feeds — "is the
+                    // parent's `acted` complete?" — is boolean either way.
+                    ...(prior.unmeasuredEffect || child.unmeasured ? { unmeasuredEffect: true } : {}),
                 },
             };
             return;
@@ -2873,6 +2883,7 @@ export class AutomationEngine implements IAutomationService {
                 selected: entry.summary.selected,
                 acted: entry.summary.acted,
                 skipped: entry.summary.skipped,
+                unmeasured: entry.summary.unmeasured,
                 gates: entry.summary.gates,
             };
             if (this.runSummaryLog === 'debug') this.logger.debug(line, meta);
@@ -2923,6 +2934,11 @@ export class AutomationEngine implements IAutomationService {
      * warned about (not rejected) so flows authored against a temporarily
      * absent plugin still register; the runtime surfaces a hard NO_EXECUTOR
      * error if such a node is actually executed.
+     *
+     * Covers nodes inside ADR-0031 regions (#4389). A node in a `loop` body is
+     * as executable as one beside it, so leaving regions out meant the warning
+     * that exists to predict NO_EXECUTOR went quiet on exactly the nodes whose
+     * failure is hardest to place at run time.
      */
     private validateNodeTypes(flowName: string, flow: FlowParsed): void {
         const known = new Set<string>([
@@ -2931,7 +2947,9 @@ export class AutomationEngine implements IAutomationService {
             ...this.actionDescriptors.keys(),
         ]);
         const unknown = [...new Set(
-            flow.nodes.map(n => n.type).filter(t => !known.has(t)),
+            collectFlowGraphs(flow)
+                .flatMap(g => g.nodes.map(n => n.type))
+                .filter(t => !known.has(t)),
         )];
         if (unknown.length > 0) {
             this.logger.warn(
@@ -2995,13 +3013,23 @@ export class AutomationEngine implements IAutomationService {
      */
     private validateNodeConfigKeys(flowName: string, flow: FlowParsed): void {
         const violations: string[] = [];
-        for (const node of flow.nodes) {
-            // `assignment` config keys are the author's variable names — see the
-            // exemption note above.
-            if (node.type === 'assignment') continue;
-            const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
-            if (!schema) continue;
-            this.collectUndeclaredConfigKeys(node, schema, node.config, 'config', violations);
+        // #4389 — every graph, not just the flow's own. `visibleIf` is the typo
+        // this check exists to catch, and moving the node into a `loop` body
+        // used to restore the silence #4277 closed. No double-reporting from the
+        // container side: all three container descriptors declare their region
+        // slot as a bare `nodes: { type: 'array' }` with no `items`, so the
+        // schema-lockstep walk stops there rather than descending twice.
+        for (const graph of collectFlowGraphs(flow)) {
+            const scoped: string[] = [];
+            for (const node of graph.nodes) {
+                // `assignment` config keys are the author's variable names — see the
+                // exemption note above.
+                if (node.type === 'assignment') continue;
+                const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
+                if (!schema) continue;
+                this.collectUndeclaredConfigKeys(node, schema, node.config, 'config', scoped);
+            }
+            for (const v of scoped) violations.push(graph.scope ? `${graph.scope} · ${v}` : v);
         }
         if (violations.length > 0) {
             throw new Error(

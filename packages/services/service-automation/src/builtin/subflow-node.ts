@@ -119,7 +119,15 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       // broken sweep. The child keeps its own run row with its own summary;
       // the parent's answers "what did this run cause", subflows included.
       const rolled = child.summary
-        ? { metrics: { selected: child.summary.selected, acted: child.summary.acted } }
+        ? {
+            metrics: {
+              selected: child.summary.selected,
+              acted: child.summary.acted,
+              // An uncountable effect inside the child is uncountable for the
+              // parent too — the parent's `acted` cannot be read as complete.
+              ...(child.summary.unmeasured ? { unmeasuredEffect: true } : {}),
+            },
+          }
         : {};
 
       if (!child.success) {

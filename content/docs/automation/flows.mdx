@@ -596,6 +596,7 @@ run in `listRuns` / `getRun`, and in the log:
 | `selected` | Records **read** by the run's data nodes |
 | `acted` | Records **created / updated / deleted**, plus effects dispatched (notifications delivered) |
 | `skipped` | Node executions a **closed gate** prevented — one per loop iteration whose conditional edge evaluated false |
+| `unmeasured` | Executions that reached something the platform **cannot count** — see below |
 | `nodes[]` | Per-node terminal status with `runs` / `failures` / `skipped` and its own selected/acted |
 | `gates[]` | Which gates closed and how often, most-skipped first |
 
@@ -605,9 +606,32 @@ from the engine guessing at a node's output shape. A node that touches no
 records (`decision`, `assignment`) reports nothing at all, which is different
 from reporting zero.
 
+#### When the platform cannot count
+
+Some nodes reach outside the platform, and for those `acted` has a third
+possible answer. A `connector_action` dispatches to an external system through a
+descriptor that declares nothing about whether the action reads or writes, so
+counting it `0` would understate a Salesforce create and counting it `1` would
+overstate a lookup — and the overstatement is the worse one, because it makes
+the broken-sweep alert never fire. Those executions increment `unmeasured`
+instead:
+
+| Node | Reported |
+| :--- | :--- |
+| `http`, `GET`/`HEAD`/`OPTIONS` | `acted: 0` — a read can never write |
+| `http`, mutating method, response OK | `acted: 1` |
+| `http`, mutating method, rejected / timed out | `unmeasured` — a 500 can arrive after the write landed |
+| `http`, `durable: true` | `acted: 1` — the outbox row is a real, durable effect |
+| `connector_action` | `unmeasured` |
+| `script` | nothing — a registered function is **contractually pure**: data I/O stays on the flow graph, so every write it causes is a downstream node that counts itself |
+
+`unmeasured` propagates through `subflow` and `map` roll-ups, so a parent whose
+child dispatched an uncountable effect knows its own `acted` is incomplete.
+
 The same counts land on `sys_automation_run` as **queryable columns**
-(`selected_count`, `acted_count`, `skipped_count`, plus a `summary_json`
-breakdown), so a broken sweep is something you can alert on rather than notice:
+(`selected_count`, `acted_count`, `skipped_count`, `unmeasured_count`, plus a
+`summary_json` breakdown), so a broken sweep is something you can alert on
+rather than notice:
 
 ```typescript
 // Runs that selected work and did none of it, newest first.
@@ -616,18 +640,22 @@ const suspect = await engine.find('sys_automation_run', {
     status: 'completed',
     selected_count: { $gt: 0 },
     acted_count: 0,
+    // Without this clause the alert fires on every healthy connector-driven
+    // flow: those runs report acted 0 because the count is INCOMPLETE, not zero.
+    unmeasured_count: 0,
     started_at: { $gte: since },
   },
   orderBy: [{ field: 'started_at', order: 'desc' }],
 });
 ```
 
-`selected > 0 && acted == 0` over several consecutive runs is a near-perfect
-broken-sweep detector — the case that is otherwise invisible, because nobody is
-watching automation until it has already been dead for a month. A single such
-run is not proof of anything: a sweep whose work is all already done reports the
-same thing legitimately, which is why the signal is *consecutive* runs, and why
-the platform reports the counts rather than raising the alarm itself.
+`selected > 0 && acted == 0 && unmeasured == 0` over several consecutive runs is
+a near-perfect broken-sweep detector — the case that is otherwise invisible,
+because nobody is watching automation until it has already been dead for a
+month. A single such run is not proof of anything: a sweep whose work is all
+already done reports the same thing legitimately, which is why the signal is
+*consecutive* runs, and why the platform reports the counts rather than raising
+the alarm itself.
 
 Rows written before summaries existed carry `null` counts, not `0` — "not
 measured" must not read as "measured zero". The log line defaults to `info`;

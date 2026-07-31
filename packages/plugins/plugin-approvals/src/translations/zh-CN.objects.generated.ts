@@ -235,6 +235,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       comment: {
         label: "评论"
       },
+      reassign_from: {
+        label: "转出人",
+        help: "被移交待审批槽位的用户（仅转签操作）"
+      },
+      reassign_to: {
+        label: "转入人",
+        help: "接收待审批槽位的用户（仅转签操作）"
+      },
       attachments: {
         label: "附件",
         help: "支持该操作的文件——例如已签署的合同或证明材料（#3266）。"

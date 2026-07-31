@@ -14,6 +14,14 @@ import { markGuardRefusal } from './guard-refusal.js';
 export interface RunIdentityContext {
   /** Elevated, RLS-bypassing system principal (full access) when true. */
   isSystem: boolean;
+  /**
+   * Service-principal label for audit attribution (`ExecutionContext.actor`,
+   * ADR-0014 D2): `svc:flow:<flowName>` on a `runAs:'system'` run, which
+   * resolves no user. Without it the audit writer records `user_id=null,
+   * actor=null` and the history UI renders "Unknown user" (#4366).
+   * Attribution only — no security middleware keys on it.
+   */
+  actor?: string;
   /** Acting user id — drives owner/role RLS for `runAs:'user'` runs. */
   userId?: string;
   /** Acting user's role names (RLS parity with a direct REST request). */
@@ -105,8 +113,10 @@ export type RunDataContext = RunIdentityContext | RunProvenanceContext;
  * Translate a flow run's {@link AutomationContext} into the ObjectQL `context`
  * its CRUD nodes must pass, honoring `runAs` (ADR-0049 / #1888):
  *
- *  - `runAs:'system'` → `{ isSystem: true }` — the security middleware
- *    short-circuits, so the run reads/writes with full access, bypassing RLS.
+ *  - `runAs:'system'` → `{ isSystem: true, actor: 'svc:flow:<flowName>' }` —
+ *    the security middleware short-circuits, so the run reads/writes with full
+ *    access, bypassing RLS; the `actor` label keeps those writes attributable
+ *    in the audit log (ADR-0014 D2, #4366).
  *  - `runAs:'user'` (default) → the triggering user's identity
  *    (`{ userId, positions, permissions, tenantId? }`), so the security middleware
  *    enforces that user's row-level security. The run can never exceed the
@@ -139,7 +149,12 @@ export type RunDataContext = RunIdentityContext | RunProvenanceContext;
 export function resolveRunDataContext(context: AutomationContext | undefined): RunDataContext | undefined {
   const flowRunId = context?.flowRunId;
   if (context?.runAs === 'system') {
-    return { isSystem: true, positions: [], permissions: [], ...(flowRunId ? { flowRunId } : {}) };
+    // A system run resolves no user, so name the flow as the acting service
+    // principal (`svc:flow:<name>`, ADR-0014 D2) — the audit writer falls back
+    // to `session.actor` when `userId` is absent, which is what keeps these
+    // writes attributable instead of "Unknown user" (#4366).
+    const actor = `svc:flow:${context.flowName ?? 'automation'}`;
+    return { isSystem: true, actor, positions: [], permissions: [], ...(flowRunId ? { flowRunId } : {}) };
   }
   if (!context?.userId) {
     // #3760 — FAIL CLOSED. There is no identity to present, and presenting none

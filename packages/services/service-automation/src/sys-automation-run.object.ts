@@ -212,6 +212,13 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'Outcome',
     }),
 
+    unmeasured_count: Field.number({
+      label: 'Uncountable Effects',
+      required: false,
+      description: 'Executions that reached something the platform cannot count (a `connector_action`, a mutating `http` call whose response was lost). The qualifier `acted_count` needs to be trusted: the broken-sweep alert is `selected_count > 0 AND acted_count = 0 AND unmeasured_count = 0`, because a run with uncountable effects has an INCOMPLETE acted count, not a zero one. Null on rows written before this was tracked.',
+      group: 'Outcome',
+    }),
+
     summary_json: Field.textarea({
       label: 'Run Summary',
       required: false,

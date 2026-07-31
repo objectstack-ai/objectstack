@@ -123,7 +123,7 @@ describe('User NOW()-default temporal fields — canonical format (SQLite)', () 
     expect(sorted.map((r: any) => r.id)).toEqual(['explicit', 'defaulted']);
 
     for (const id of ['explicit', 'defaulted']) {
-      const row: any = await driver.findOne('event', { object: 'event', where: { id: id } }, { bypassTenantAudit: true });
+      const row: any = await driver.findOne('event', { object: 'event', where: { id } }, { bypassTenantAudit: true });
       expect(row.starts_at).toMatch(ISO_Z);
       expect(Number.isNaN(new Date(row.starts_at).getTime())).toBe(false);
     }
