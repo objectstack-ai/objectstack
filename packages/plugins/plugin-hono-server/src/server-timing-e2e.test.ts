@@ -1,15 +1,21 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// End-to-end regression for #3361 on the STANDALONE Hono CRUD surface (the
-// minimal server used when `@objectstack/rest` is not mounted). It drives a real
-// request through the perf middleware AND the real `/api/v1/data/:object`
-// handler — whose `resolveCtx` resolves the principal — instead of a handler
-// that calls `allowPerfDisclosure()` by hand "as the dispatcher would" (the gap
-// the existing unit tests left invisible). An admin sending `X-OS-Debug-Timing`
-// must get a `Server-Timing` header; a member and an anonymous caller must not.
+// End-to-end regression for #3361. It drives a real request through the perf
+// middleware AND a real handler that resolves the principal itself — instead of
+// a handler calling `allowPerfDisclosure()` by hand "as the dispatcher would",
+// which is the gap the unit tests left invisible. An admin sending
+// `X-OS-Debug-Timing` must get a `Server-Timing` header; a member and an
+// anonymous caller must not.
+//
+// Originally driven through the standalone `/api/v1/data/:object` surface. That
+// surface is gone (#4073), so this runs against `/auth/me/permissions` — one of
+// the three endpoints this plugin still owns, and one that resolves the same
+// principal from the same permission-set fixtures. The property under test is
+// the perf gate, not the route.
 
 import { describe, it, expect } from 'vitest';
 import { HonoServerPlugin } from './hono-plugin';
+import { registerCurrentUserEndpoints } from './current-user-endpoints';
 import type { PluginContext } from '@objectstack/core';
 
 /**
@@ -67,17 +73,17 @@ async function setup() {
     const plugin = new HonoServerPlugin({ cors: false });
     const ctx = fakeCtx({ objectql: makeQl(), auth: makeAuth() });
     await (plugin as any).init(ctx);
-    // Register the real standard CRUD/data endpoints (normally wired on
-    // kernel:ready) so `/api/v1/data/:object` runs its real `resolveCtx`.
-    (plugin as any).registerDiscoveryAndCrudEndpoints(ctx);
+    // Register the real current-user endpoints (normally wired on kernel:ready)
+    // so the request runs their real principal resolution.
+    registerCurrentUserEndpoints({ rawApp: (plugin as any).server.getRawApp(), ctx });
     const app = (plugin as any).server.getRawApp();
     return { app };
 }
 
-describe('Hono standalone data route — admin-gated Server-Timing (#3361 e2e)', () => {
+describe('Hono current-user route — admin-gated Server-Timing (#3361 e2e)', () => {
     it('emits Server-Timing for a platform admin sending X-OS-Debug-Timing', async () => {
         const { app } = await setup();
-        const res = await app.request('/api/v1/data/widget', {
+        const res = await app.request('/api/v1/auth/me/permissions', {
             headers: { cookie: 'admin', 'X-OS-Debug-Timing': '1' },
         });
         expect(res.status).toBe(200);
@@ -88,26 +94,28 @@ describe('Hono standalone data route — admin-gated Server-Timing (#3361 e2e)',
 
     it('withholds Server-Timing from an ordinary member (same debug header)', async () => {
         const { app } = await setup();
-        const res = await app.request('/api/v1/data/widget', {
+        const res = await app.request('/api/v1/auth/me/permissions', {
             headers: { cookie: 'member', 'X-OS-Debug-Timing': '1' },
         });
         expect(res.status).toBe(200);
         expect(res.headers.get('Server-Timing')).toBeNull();
     });
 
-    it('withholds Server-Timing from an anonymous caller (401, no header)', async () => {
+    it('withholds Server-Timing from an anonymous caller', async () => {
         const { app } = await setup();
-        const res = await app.request('/api/v1/data/widget', {
+        const res = await app.request('/api/v1/auth/me/permissions', {
             headers: { 'X-OS-Debug-Timing': '1' },
         });
-        // requireAuth defaults on → anonymous is denied, and nothing opened the gate.
-        expect(res.status).toBe(401);
+        // This endpoint answers anonymous callers with `{authenticated:false}`
+        // rather than denying them; what must hold is that nothing opened the
+        // disclosure gate.
+        expect(res.status).toBe(200);
         expect(res.headers.get('Server-Timing')).toBeNull();
     });
 
     it('does NOT emit for an admin when no debug header is sent (opt-in only)', async () => {
         const { app } = await setup();
-        const res = await app.request('/api/v1/data/widget', { headers: { cookie: 'admin' } });
+        const res = await app.request('/api/v1/auth/me/permissions', { headers: { cookie: 'admin' } });
         expect(res.status).toBe(200);
         expect(res.headers.get('Server-Timing')).toBeNull();
     });
