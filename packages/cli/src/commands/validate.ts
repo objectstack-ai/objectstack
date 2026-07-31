@@ -23,7 +23,7 @@ import { validateDashboardActionRefs } from '@objectstack/lint';
 import { validateFilterTokens } from '@objectstack/lint';
 import { validateReferenceIntegrity } from '@objectstack/lint';
 import { validateResponsiveStyles } from '@objectstack/lint';
-import { validateJsxPages, validateReactPages, validateReactPageProps, validatePageSourceStyling } from '@objectstack/lint';
+import { validateJsxPages, validateReactPages, validatePageSourceStyling } from '@objectstack/lint';
 import { validateCapabilityReferences } from '@objectstack/lint';
 import { validateVisibilityPredicates } from '@objectstack/lint';
 import { validateSecurityPosture, validateOrgAxisRedLines } from '@objectstack/lint';
@@ -454,38 +454,13 @@ export default class Validate extends Command {
         this.exit(1);
       }
 
-      // 3d. React-source pages — prop usage against the component contract
-      //     (ADR-0081 Phase 2): missing required bindings (error) + likely
-      //     prop typos (warning), parsed from the real JSX.
-      if (!flags.json) printStep('Checking React-source page props (ADR-0081)...');
-      const reactPropFindings = validateReactPageProps(result.data as Record<string, unknown>);
-      const reactPropErrors = reactPropFindings.filter((f) => f.severity === 'error');
-      const reactPropWarnings = reactPropFindings.filter((f) => f.severity === 'warning');
-      if (!flags.json) {
-        for (const w of reactPropWarnings.slice(0, 50)) {
-          console.log(chalk.yellow(`  \u26a0 ${w.where}: ${w.message}`));
-          console.log(chalk.dim(`      ${w.hint}`));
-        }
-      }
-      if (reactPropErrors.length > 0) {
-        if (flags.json) {
-          await emitJson({
-            valid: false,
-            errors: reactPropErrors,
-            warnings: [...widgetWarnings, ...styleWarnings, ...jsxWarnings, ...reactPropWarnings],
-            duration: timer.elapsed(),
-          });
-          this.exit(1);
-        }
-        console.log('');
-        printError(`React-source page prop check failed (${reactPropErrors.length} issue${reactPropErrors.length > 1 ? 's' : ''})`);
-        for (const f of reactPropErrors.slice(0, 50)) {
-          console.log(`  \u2022 ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
-        this.exit(1);
-      }
+      // 3d. React-source page PROPS are checked by `REFERENCE_INTEGRITY_RULES`
+      //     (step 3a above), not from here (#4340 follow-up). They ran from
+      //     this call site ALONE, so `os lint` and `os compile` accepted a
+      //     react page whose every field binding was stale — including the
+      //     gating ones. That is `validateReadonlyFlowWrites`' divergence
+      //     (#4394) one surface over. The input is unchanged: the suite is
+      //     handed the same `result.data` this block passed.
 
       // 3e. Source-tier page styling (ADR-0065): Tailwind className in a
       //     kind:'html'/'react' page source silently no-ops (the build never

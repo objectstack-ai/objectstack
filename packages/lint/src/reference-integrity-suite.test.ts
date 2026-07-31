@@ -30,6 +30,7 @@ describe('reference-integrity suite — membership', () => {
       'validateActionBodyWrites',
       'validateFlowNodeWrites',
       'validateReadonlyFlowWrites',
+      'validateReactPageProps',
     ]);
   });
 
@@ -106,6 +107,17 @@ describe('reference-integrity suite — every member actually runs', () => {
             ],
           },
         ],
+      },
+      // validateReactPageProps: the same component family one surface over,
+      // authored as JSX. `<ObjectForm>` with no `objectName` binds nothing, so
+      // this GATES — and it gated on `os validate` alone until this member
+      // joined the suite. A separate page from `lead_detail` on purpose: the
+      // metadata walk above must stay the only source of `page-field-unknown`
+      // here, or this member could go silent behind it.
+      {
+        name: 'lead_console',
+        kind: 'react',
+        source: 'function Page(){ return <ObjectForm mode="edit" />; }',
       },
     ],
     datasets: [
@@ -221,11 +233,21 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('agent-authoring-withdrawn');
     expect(rules).toContain('hook-body-write-unknown-field');
     expect(rules).toContain('action-body-write-unknown-field');
-    // The one member that emits a second rule id — see the suite's comment on
-    // why it rides along instead of becoming its own entry.
+    // Members that emit a rule id beyond their resolution one — see the suite's
+    // comments on why these ride along instead of becoming their own entries.
     expect(rules).toContain('action-record-write-discarded');
     expect(rules).toContain('flow-node-write-unknown-field');
     expect(rules).toContain('flow-update-readonly-field');
+    expect(rules).toContain('react-prop-missing-required');
+  });
+
+  it('carries a gating react-page-prop finding through the suite (#4340)', () => {
+    const findings = validateReferenceIntegrity(stack);
+    const react = findings.find((f) => f.rule === 'react-prop-missing-required');
+    // Must reach the CLI as an ERROR: `os lint` and `os compile` saw NOTHING
+    // from this rule until it joined the suite, so a react page binding nothing
+    // sailed through the build the way a readonly flow write did (#4394).
+    expect(react?.severity).toBe('error');
   });
 
   it('carries a gating flow-template finding through the suite (#3810)', () => {
@@ -247,9 +269,9 @@ describe('reference-integrity suite — every member actually runs', () => {
       expect(typeof f.message).toBe('string');
       expect(typeof f.hint).toBe('string');
     }
-    // Object references run first, readonly flow writes last.
+    // Object references run first, react page props last.
     expect(findings[0].rule).toBe('object-reference-unknown');
-    expect(findings[findings.length - 1].rule).toBe('flow-update-readonly-field');
+    expect(findings[findings.length - 1].rule).toBe('react-prop-missing-required');
   });
 
   it('returns nothing for an empty stack', () => {
