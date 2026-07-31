@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { InMemoryMetricsRegistry, SEMCONV } from '@objectstack/observability';
-import { MemoryCacheAdapter } from './memory-cache-adapter';
+import { MemoryCacheAdapter } from './memory-cache-adapter.js';
 
 describe('MemoryCacheAdapter instrumentation', () => {
     it('emits cache_lookups_total{result=hit|miss} on get()', async () => {

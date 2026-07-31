@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { FileI18nAdapter } from './file-i18n-adapter';
+import { FileI18nAdapter } from './file-i18n-adapter.js';
 import type { II18nService } from '@objectstack/spec/contracts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

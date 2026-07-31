@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DbJobAdapter } from './db-job-adapter';
+import { DbJobAdapter } from './db-job-adapter.js';
 
 function makeFakeEngine() {
   const tables = new Map<string, any[]>();

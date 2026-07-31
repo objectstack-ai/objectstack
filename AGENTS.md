@@ -29,6 +29,19 @@ workspace package declares a `typecheck` script or carries a measured DEBT/EXEMP
 in `scripts/check-type-check-coverage.mjs`. New packages must arrive covered; a package
 that graduates deletes its ledger entry in the same PR.
 
+**Do not `exclude` `*.test.ts` / `*.spec.ts` from a package's `tsconfig.json`.** `tsc
+--noEmit` reads that config, so an exclusion there hides the tests from the check the
+`typecheck` script advertises — a green gate over source nothing read, which is the
+#4311 defect itself. The ratchet's `TESTS_COVERED` invariant fails on any new exclusion;
+the packages that already had one carry a measured `TEST_DEBT` entry and graduate by
+dropping the exclusion.
+
+One trap worth knowing before you read any of these counts: under `moduleResolution:
+NodeNext` a relative import missing its `.js` extension does not resolve, every symbol it
+names becomes `any`, and the callbacks over those symbols then report TS7006 "implicitly
+any". A pile of TS7006 is usually one broken import upstream, not a package that needs
+type annotations — fix the extension first and re-measure.
+
 ### Running the dev server
 
 | Scenario | Command | Notes |

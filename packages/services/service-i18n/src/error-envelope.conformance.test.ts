@@ -33,7 +33,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
-import { I18nServicePlugin } from './i18n-service-plugin';
+import { I18nServicePlugin } from './i18n-service-plugin.js';
 
 const BASE = '/api/v1/i18n';
 

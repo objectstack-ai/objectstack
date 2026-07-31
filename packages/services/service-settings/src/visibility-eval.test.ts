@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it } from 'vitest';
-import { evaluateVisibility, referencedKeys, VisibilityParseError } from './visibility-eval';
+import { evaluateVisibility, referencedKeys, VisibilityParseError } from './visibility-eval.js';
 
 describe('evaluateVisibility', () => {
   it('handles every expression shape used by the bundled manifests', () => {

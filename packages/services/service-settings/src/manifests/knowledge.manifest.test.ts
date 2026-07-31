@@ -5,7 +5,7 @@ import { SettingsManifestSchema } from '@objectstack/spec/system';
 import {
   knowledgeSettingsManifest,
   knowledgeTestActionHandler,
-} from './knowledge.manifest';
+} from './knowledge.manifest.js';
 
 describe('knowledgeSettingsManifest', () => {
   it('parses against SettingsManifestSchema', () => {
@@ -137,21 +137,21 @@ describe('knowledgeTestActionHandler', () => {
 
 describe('aiTestEmbedderActionHandler', () => {
   it('returns warning when embedder is disabled', async () => {
-    const handler = await import('./ai.manifest').then((m) => m.aiTestEmbedderActionHandler);
+    const handler = await import('./ai.manifest.js').then((m) => m.aiTestEmbedderActionHandler);
     const r = await handler({ values: { embedder_provider: 'none' } } as any);
     expect(r.ok).toBe(false);
     expect(r.severity).toBe('warning');
   });
 
   it('rejects OpenAI-compatible provider without api key', async () => {
-    const handler = await import('./ai.manifest').then((m) => m.aiTestEmbedderActionHandler);
+    const handler = await import('./ai.manifest.js').then((m) => m.aiTestEmbedderActionHandler);
     const r = await handler({ values: { embedder_provider: 'dashscope' } } as any);
     expect(r.ok).toBe(false);
     expect(r.severity).toBe('error');
   });
 
   it('rejects custom / azure without base URL', async () => {
-    const handler = await import('./ai.manifest').then((m) => m.aiTestEmbedderActionHandler);
+    const handler = await import('./ai.manifest.js').then((m) => m.aiTestEmbedderActionHandler);
     const r = await handler({
       values: { embedder_provider: 'custom', embedder_api_key: 'k' },
     } as any);
@@ -160,7 +160,7 @@ describe('aiTestEmbedderActionHandler', () => {
   });
 
   it('does not require api key for ollama', async () => {
-    const handler = await import('./ai.manifest').then((m) => m.aiTestEmbedderActionHandler);
+    const handler = await import('./ai.manifest.js').then((m) => m.aiTestEmbedderActionHandler);
     const r = await handler({
       values: { embedder_provider: 'ollama', embedder_model: 'bge-m3' },
     } as any);
@@ -169,7 +169,7 @@ describe('aiTestEmbedderActionHandler', () => {
   });
 
   it('accepts siliconflow with key + model', async () => {
-    const handler = await import('./ai.manifest').then((m) => m.aiTestEmbedderActionHandler);
+    const handler = await import('./ai.manifest.js').then((m) => m.aiTestEmbedderActionHandler);
     const r = await handler({
       values: {
         embedder_provider: 'siliconflow',
