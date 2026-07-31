@@ -123,14 +123,16 @@ Static validation around a hook is asymmetric, and it is worth knowing exactly w
 - **Checked — read side.** `hook.condition` is validated at build time against the target object's fields by the expression validator (`@objectstack/lint`), including array-valued `hook.object` targets. A condition referencing a nonexistent field fails the lint.
 - **Checked — capability side.** `body.capabilities` gates which `ctx` APIs the body may call at all; the sandbox throws on an undeclared call.
 - **Checked — write side, advisory and literal-only.** Since [#4271](https://github.com/objectstack-ai/objectstack/issues/4271), `body.source` is **parsed** (never executed, never type-checked) and the field names it writes are resolved against the target object's declarations. An unknown field raises `hook-body-write-unknown-field` — a **warning** carrying a did-you-mean suggestion, which never blocks a build. Action bodies get the same check on their `ctx.api` writes (`action-body-write-unknown-field`). Both run under `os validate`, `os lint` and `os compile`.
+- **Checked — writes that reach nothing at all.** Since [#4345](https://github.com/objectstack-ai/objectstack/issues/4345), an action body assigning to `ctx.record` raises `action-record-write-discarded`, also a warning. This one is **not** a field-resolution question: an action's `ctx.record` is a snapshot the runtime never writes back, so the assignment is discarded whether or not the field is declared — see [Signature conventions](#signature-conventions) below.
 
-Three literal write shapes are recognized, and only these:
+Four literal write shapes are recognized, and only these:
 
 | Write shape | Hook body | Action body |
 |---|---|---|
 | `ctx.input.<field> = …` / `ctx.input['<field>'] ⟨op⟩= …` (including `+=`, `??=`, …) | checked | not checked — an action's `ctx.input` is its **params bag**, not a record |
 | `Object.assign(ctx.input, { <field>: … })` | checked | not checked — same surface |
 | `ctx.api.object('<literal>').insert\|create\|update({ <field>: … })`, `.updateById(id, { <field>: … })` | checked | checked |
+| `ctx.record.<field> = …` / `ctx.record['<field>'] ⟨op⟩= …` | n/a — a hook context has no `ctx.record` (the expression throws) | checked: warns as **discarded**, declared field or not |
 
 **A missing warning is not a clean bill of health.** The rule bails *silently* on everything it cannot resolve statically, deliberately preferring a missed finding to a false one — a false positive kills an advisory lint, while a miss just leaves the gap open a little longer:
 
@@ -139,7 +141,8 @@ Three literal write shapes are recognized, and only these:
 - `ctx.input` writes in a wildcard (`object: '*'`) hook — there is no single target to resolve against;
 - multi-target hooks where the field exists on *some* target: a body may legitimately branch per object, so only a field missing on **every** named target is flagged;
 - objects declared by another package;
-- aliased input (`const doc = ctx.input; doc.x = 1`) — v1 does no data-flow analysis.
+- aliased input (`const doc = ctx.input; doc.x = 1`) — v1 does no data-flow analysis;
+- `ctx.record` writes in a body that hands `ctx.record` to anything — an argument, an assignment RHS, a spread, a return. Mutating the snapshot and then persisting it (`ctx.record.stage = 'won'; await ctx.api.object('crm_deal').update(ctx.record)`) is a **live** payload, so the whole body's record writes are skipped rather than guessed at. Truthiness and type guards (`ctx.record && ctx.record.id`, `if (!ctx.record) …`) are not escapes — they cannot persist anything.
 
 System/audit columns and the flat-input envelope keys (`id`, `options`, `ast`, `data`) are never flagged.
 
@@ -169,6 +172,14 @@ Because the checking is advisory and literal-only:
 | Action | `(input: I, ctx: ActionContext) => Promise<O>` | `(input, ctx) => Promise<O>` |
 
 Hooks mutate `ctx.input`/`ctx.result`; actions return their output value explicitly.
+
+An action's `ctx` is **not** a hook's. `ctx.input` is the action's **params bag** — validated against its declared `params`, not a record. `ctx.record` is the record the dispatcher pre-fetched, and it is **read-only in effect**: the sandbox receives a plain snapshot and the runtime never writes it back, so `ctx.record.<field> = …` is discarded even for a perfectly valid field name. There is exactly one way an action body persists anything:
+
+```js
+await ctx.api.object('crm_deal').updateById(ctx.recordId, { stage: 'won' });
+```
+
+Mutating the snapshot *as a payload* and then handing it to such a call is fine — that write is live, and the lint leaves it alone.
 
 ### Engine
 

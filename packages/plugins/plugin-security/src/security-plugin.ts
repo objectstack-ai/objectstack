@@ -17,6 +17,7 @@ import {
   intersectFieldMasks,
 } from './explain-engine.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
+import type { II18nService } from '@objectstack/spec/contracts';
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapDeclaredPermissions, upsertPackagePermissionSet, readDeclared } from './bootstrap-declared-permissions.js';
 import { applyManagedWriteDenies } from './managed-object-write-denies.js';
@@ -451,7 +452,7 @@ export class SecurityPlugin implements Plugin {
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', async () => {
         try {
-          const i18n = ctx.getService<any>('i18n');
+          const i18n = ctx.getService<II18nService>('i18n');
           if (i18n && typeof i18n.loadTranslations === 'function') {
             const { SecurityTranslations } = await import('./translations/index.js');
             for (const [locale, data] of Object.entries(SecurityTranslations)) {

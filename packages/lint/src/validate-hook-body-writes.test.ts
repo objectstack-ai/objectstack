@@ -4,7 +4,10 @@ import { describe, it, expect } from 'vitest';
 import {
   validateHookBodyWrites,
   extractHookBodyWrites,
+  extractHookBodyWriteSet,
   HOOK_BODY_WRITE_PATTERNS,
+  HOOK_BODY_WRITE_PATTERN_IDS,
+  HOOK_BODY_WRITE_EXCLUSIONS,
   HOOK_BODY_WRITE_UNKNOWN_FIELD,
 } from './validate-hook-body-writes.js';
 
@@ -49,6 +52,35 @@ describe('HOOK_BODY_WRITE_PATTERNS — ledger ⇄ extractor reconciliation', () 
   it('declares unique pattern ids', () => {
     const ids = HOOK_BODY_WRITE_PATTERNS.map((p) => p.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  // The ledger is the extractor's shape inventory, not this rule's — it now
+  // carries a shape (`record-property-assign`) the hook surface does not have.
+  // So this rule declares which shapes it consumes, and the two halves must
+  // cover the ledger exactly: the next added shape fails here until someone
+  // decides whether a hook body can even express it.
+  it('partitions the ledger into what this rule consumes and what it leaves alone', () => {
+    const declared = HOOK_BODY_WRITE_PATTERNS.map((p) => p.id).sort();
+    const classified = [
+      ...HOOK_BODY_WRITE_PATTERN_IDS,
+      ...HOOK_BODY_WRITE_EXCLUSIONS.map((e) => e.id),
+    ].sort();
+    expect(classified).toEqual(declared);
+    for (const exclusion of HOOK_BODY_WRITE_EXCLUSIONS) {
+      expect(exclusion.reason.length, `exclusion '${exclusion.id}' carries no reason`).toBeGreaterThan(0);
+    }
+  });
+
+  it('leaves an excluded shape extractable but unreported', () => {
+    // `ctx.record` does not exist in a hook sandbox context at all, so the
+    // expression throws at run time rather than silently no-op'ing — a loud
+    // failure this advisory rule deliberately stays out of. What must NOT
+    // happen is it landing in the ctx.input branch as "hook writes 'stage' to
+    // its input", which is what an unpartitioned rule would have reported.
+    expect(extractHookBodyWrites("ctx.record.stage = 'won';")).toEqual([
+      { patternId: 'record-property-assign', field: 'stage' },
+    ]);
+    expect(validateHookBodyWrites(stackWith("ctx.record.stage = 'won'; ctx.record.nope = 1;"))).toEqual([]);
   });
 
   for (const pattern of HOOK_BODY_WRITE_PATTERNS) {
@@ -237,5 +269,62 @@ describe('validateHookBodyWrites — scope and shape tolerance', () => {
 
   it('does not throw on source with syntax errors — fewer matches, never a crash', () => {
     expect(() => validateHookBodyWrites(stackWith('ctx.input.x = ; if ('))).not.toThrow();
+  });
+});
+
+describe('extractHookBodyWriteSet — the ctx.record liveness signal', () => {
+  // One parse yields both the writes and whether `ctx.record` ever leaves the
+  // body as a value. The action rule needs the second to tell a dead snapshot
+  // write from a payload under construction; nothing else may consume it
+  // without this distinction, so it is pinned here at the extractor.
+  const escapes = (source: string) => extractHookBodyWriteSet(source).ctxRecordEscapes;
+
+  it('does not escape when ctx.record is only read from and written to', () => {
+    expect(escapes("var id = ctx.record.id; ctx.record.stage = 'won';")).toBe(false);
+    expect(escapes("ctx.record['amount'] += 1; if (ctx.record.done) { return null; }")).toBe(false);
+    expect(escapes('ctx.record.address.city = "SF";')).toBe(false);
+  });
+
+  it('does not escape through a truthiness or type test', () => {
+    // The defensive idiom real bodies open with — the showcase's own mark_done
+    // action is `ctx.recordId || (ctx.record && ctx.record.id)`. Reading a test
+    // as an escape would silence the rule on most bodies that have a record
+    // write at all.
+    expect(escapes('var id = ctx.recordId || (ctx.record && ctx.record.id);')).toBe(false);
+    expect(escapes('if (ctx.record) { ctx.record.stage = "won"; }')).toBe(false);
+    expect(escapes('if (!ctx.record) return null;')).toBe(false);
+    expect(escapes("if (typeof ctx.record === 'object') { ctx.record.x = 1; }")).toBe(false);
+    expect(escapes('var v = ctx.record ? 1 : 2;')).toBe(false);
+    expect(escapes('var v = ctx.record ?? {};')).toBe(false);
+  });
+
+  it('still escapes when a test position yields the object itself', () => {
+    // Only the LEFT operand of &&/||/?? is a pure test; the right one is the
+    // expression's value when the left is truthy/nullish.
+    expect(escapes('var r = fallback || ctx.record;')).toBe(true);
+    expect(escapes('var r = ctx.record ? ctx.record : {};')).toBe(true);
+  });
+
+  it('escapes when the object itself is handed to anything', () => {
+    expect(escapes("await ctx.api.object('crm_deal').update(ctx.record);")).toBe(true); // argument
+    expect(escapes('const r = ctx.record;')).toBe(true); // alias
+    expect(escapes('return ctx.record;')).toBe(true); // returned
+    expect(escapes('const copy = { ...ctx.record };')).toBe(true); // spread
+    expect(escapes('Object.assign(ctx.record, { a: 1 });')).toBe(true); // assign target
+  });
+
+  it('is false when the body never mentions ctx.record, including the no-parse fast path', () => {
+    expect(escapes("ctx.input.total = 1;")).toBe(false);
+    expect(escapes('return 1;')).toBe(false); // prefiltered out before the parse
+  });
+
+  it('reports one escape for the whole body, not per write', () => {
+    // A single escape anywhere disqualifies every record write in the body —
+    // the signal is body-scoped by design (no data-flow analysis).
+    const set = extractHookBodyWriteSet(
+      "ctx.record.stage = 'won'; ctx.record.amount = 1; await ctx.api.object('d').update(ctx.record);",
+    );
+    expect(set.writes.filter((w) => w.patternId === 'record-property-assign')).toHaveLength(2);
+    expect(set.ctxRecordEscapes).toBe(true);
   });
 });

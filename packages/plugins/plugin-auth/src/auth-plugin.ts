@@ -2,7 +2,14 @@
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
-import { AuthConfig, type SocialProviderConfig, SystemObjectName, SystemUserId } from '@objectstack/spec/system';
+import {
+  AuthConfig,
+  type SocialProviderConfig,
+  type SettingsChangeHandler,
+  type SettingsUnsubscribe,
+  SystemObjectName,
+  SystemUserId,
+} from '@objectstack/spec/system';
 import {
   // ADR-0048 — the Setup/Studio/Account apps moved to their own packages
   // (@objectstack/{setup,studio,account}); plugin-auth no longer registers them.
@@ -12,6 +19,7 @@ import {
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
+import type { IDataEngine, IEmailService, ISmsService } from '@objectstack/spec/contracts';
 import {
   AuthManager,
   resolveOidcProviderEnabled,
@@ -35,6 +43,87 @@ import {
   authIdentityObjects,
   authPluginManifestHeader,
 } from './manifest.js';
+
+/**
+ * The `objectql` slot BEYOND `IDataEngine` — the hook and middleware seams this
+ * plugin installs on the engine.
+ *
+ * [#4251] The slot's ledger entry is `IDataEngine` and it covers every read and
+ * write below; it does not cover `registerHook` / `registerMiddleware`, and no
+ * contract has been written for the wider ObjectQL surface yet (the standing
+ * record of why is on `getObjectQL` in `@objectstack/runtime`'s
+ * `DomainHandlerContext`). Declared here, narrow and named, so the extension is
+ * legible instead of hidden under `any` — and so it is deleted, not migrated,
+ * when that contract lands.
+ *
+ * Both members are optional and every call site already guards with
+ * `typeof … === 'function'`: the slot is satisfiable by engines that implement
+ * neither (mock mode), and this plugin degrades rather than fails there.
+ */
+interface EngineExtensionSurface {
+  registerHook?(
+    event: string,
+    handler: (context: any) => Promise<void> | void,
+    options?: { object?: string | string[]; priority?: number; packageId?: string },
+  ): void;
+  registerMiddleware?(
+    fn: (opCtx: any, next: () => Promise<void>) => Promise<void>,
+    options?: { object?: string },
+  ): void;
+}
+
+/** The engine as this plugin uses it: the data contract plus those two seams. */
+type AuthEngine = IDataEngine & EngineExtensionSurface;
+
+/**
+ * The `settings` slot, as this plugin reads it.
+ *
+ * [#4251] `service-settings` registers its `SettingsService` here and the slot
+ * carries no `packages/spec` contract, so this declares the two resolver methods
+ * this plugin calls. Structural on purpose — plugin-auth must not depend on
+ * service-settings, which is optional (both readers below already return early
+ * when the slot is empty or the method is missing).
+ */
+interface SettingsReadSurface {
+  /** Resolve one key; `source` distinguishes a stored/env value from a manifest default. */
+  get(
+    namespace: string,
+    key: string,
+    ctx?: Record<string, unknown>,
+  ): Promise<{ value?: unknown; source?: string } | undefined>;
+  /** Resolve a whole namespace as `key → { value, source }`. */
+  getNamespace(
+    namespace: string,
+    ctx?: Record<string, unknown>,
+  ): Promise<{ values: Record<string, { value?: unknown; source?: string } | undefined> }>;
+  /**
+   * Re-run a binding when the namespace changes — how the brand name, SMS
+   * locale and auth namespace stay live without a redeploy. Optional: an
+   * implementation without a change bus leaves the initial read in place, which
+   * is what the `typeof … === 'function'` guards at each call site already say.
+   *
+   * The handler and unsubscribe types are the SPEC's
+   * (`@objectstack/spec/system`), not re-declared here — the change bus has a
+   * published contract even though the slot does not.
+   */
+  subscribe?(
+    namespace: string | undefined,
+    handler: SettingsChangeHandler,
+  ): SettingsUnsubscribe;
+}
+
+/**
+ * The `protocol` slot's metadata reader, as the user-import route uses it.
+ *
+ * [#4251] `protocol` is a deliberately UNCONTRACTED slot (see
+ * `UNCONTRACTED_SLOTS` in `eslint.config.mjs`), so the one method this route
+ * needs is declared here rather than erased. It reads `sys_user`'s field
+ * definitions so imported values are coerced to their declared types —
+ * best-effort by contract: without it the import still runs, uncoerced.
+ */
+interface MetaItemReaderSurface {
+  getMetaItem(ref: { type: string; name: string }): Promise<any>;
+}
 
 /**
  * Auth Plugin Options
@@ -222,7 +311,7 @@ export class AuthPlugin implements Plugin {
     // that advertises a tolerance the composition forbids is worse than no
     // branch — it reads as a supported degraded mode (#4187). AuthManager keeps
     // its own `dataEngine?` guards because it is usable outside this plugin.
-    const dataEngine = ctx.getService<any>('data');
+    const dataEngine = ctx.getService<IDataEngine>('data');
 
     const authConfig: AuthManagerOptions & AuthPluginOptions = {
       ...this.options,
@@ -451,8 +540,8 @@ export class AuthPlugin implements Plugin {
         if (this.authManager) {
           await this.bindAuthSettings(ctx);
 
-          let emailSvc: any;
-          try { emailSvc = ctx.getService<any>('email'); } catch { emailSvc = undefined; }
+          let emailSvc: IEmailService | undefined;
+          try { emailSvc = ctx.getService<IEmailService>('email'); } catch { emailSvc = undefined; }
           if (emailSvc) {
             this.authManager.setEmailService(emailSvc);
             ctx.logger.info('Auth: email service wired (transactional mail enabled)');
@@ -480,8 +569,8 @@ export class AuthPlugin implements Plugin {
           // SMS-invite path can deliver. Same lazy-resolution contract as
           // the email service: absent ⇒ OTP endpoints keep failing loudly
           // (NOT_SUPPORTED) while phone+password sign-in still works.
-          let smsSvc: any;
-          try { smsSvc = ctx.getService<any>('sms'); } catch { smsSvc = undefined; }
+          let smsSvc: ISmsService | undefined;
+          try { smsSvc = ctx.getService<ISmsService>('sms'); } catch { smsSvc = undefined; }
           if (smsSvc) {
             this.authManager.setSmsService(smsSvc);
             if (this.authManager.isPhoneNumberEnabled()) {
@@ -503,7 +592,7 @@ export class AuthPlugin implements Plugin {
           // the override so the deployment's `appName` (e.g. `OS_APP_NAME`)
           // keeps precedence. Mirrors EmailServicePlugin's settings binding.
           try {
-            const settings = ctx.getService<any>('settings');
+            const settings = ctx.getService<SettingsReadSurface>('settings');
             if (settings && typeof settings.get === 'function') {
               const applyBrand = async () => {
                 try {
@@ -628,7 +717,7 @@ export class AuthPlugin implements Plugin {
     // whose rows already carry an issuer costs one empty query.
     ctx.hook('kernel:ready', async () => {
       try {
-        const ql: any = ctx.getService<any>('objectql');
+        const ql = ctx.getService<IDataEngine>('objectql');
         if (!ql) return;
         const { backfillAccountIssuer } = await import('./backfill-account-issuer.js');
         await backfillAccountIssuer(ql, {
@@ -656,7 +745,7 @@ export class AuthPlugin implements Plugin {
     if (this.options.autoDefaultOrganization !== false && !postureEnforcesWall(resolveTenancyPosture())) {
       const runEnsure = async () => {
         try {
-          const ql: any = ctx.getService<any>('objectql');
+          const ql = ctx.getService<IDataEngine>('objectql');
           if (!ql) return;
           const res = await ensureDefaultOrganization(ql, { logger: ctx.logger });
           if (res.defaultOrgCreated) {
@@ -675,7 +764,7 @@ export class AuthPlugin implements Plugin {
       // to platform admin" case where kernel:ready fired before any user
       // existed (same wiring the multi-org bootstrap uses).
       try {
-        const ql: any = ctx.getService<any>('objectql');
+        const ql = ctx.getService<AuthEngine>('objectql');
         if (ql && typeof ql.registerMiddleware === 'function') {
           ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
             await next();
@@ -708,7 +797,7 @@ export class AuthPlugin implements Plugin {
       const runBackfill = (source: string): Promise<void> => {
         backfillChain = backfillChain.then(async () => {
           try {
-            const ql: any = ctx.getService<any>('objectql');
+            const ql = ctx.getService<IDataEngine>('objectql');
             const tenancy = this.tenancy;
             if (!ql || !tenancy) return;
             const res = await backfillMemberships(ql, {
@@ -752,7 +841,7 @@ export class AuthPlugin implements Plugin {
       try {
         // Use the kernel's ObjectQL engine (available + hookable at kernel:ready);
         // the auth manager's getDataEngine() is not yet wired this early.
-        const engine: any = ctx.getService<any>('objectql');
+        const engine = ctx.getService<AuthEngine>('objectql');
         if (!engine || typeof engine.registerHook !== 'function') return;
         const SYSTEM_CTX = { isSystem: true, roles: [], permissions: [] };
         engine.registerHook('afterInsert', async (hookCtx: any) => {
@@ -794,7 +883,7 @@ export class AuthPlugin implements Plugin {
     // bypass — see identity-write-guard.ts for the full contract.
     ctx.hook('kernel:ready', async () => {
       try {
-        const engine: any = ctx.getService<any>('objectql');
+        const engine = ctx.getService<AuthEngine>('objectql');
         if (!engine || typeof engine.registerHook !== 'function') return;
         registerManagedUpdateWhitelist(SystemObjectName.USER, SYS_USER_PROFILE_EDIT_FIELDS);
         // [ADR-0105 D7] Extension fields ObjectStack adds to better-auth-managed
@@ -821,7 +910,7 @@ export class AuthPlugin implements Plugin {
 
     // Register auth middleware on ObjectQL engine (if available)
     try {
-      const ql = ctx.getService<any>('objectql');
+      const ql = ctx.getService<AuthEngine>('objectql');
       if (ql && typeof ql.registerMiddleware === 'function') {
         ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
           // If context already has userId or isSystem, skip auth resolution
@@ -850,9 +939,9 @@ export class AuthPlugin implements Plugin {
   private async bindAuthSettings(ctx: PluginContext): Promise<void> {
     if (!this.authManager) return;
 
-    let settings: any;
+    let settings: SettingsReadSurface | undefined;
     try {
-      settings = ctx.getService<any>('settings');
+      settings = ctx.getService<SettingsReadSurface>('settings');
     } catch {
       return;
     }
@@ -1136,8 +1225,8 @@ export class AuthPlugin implements Plugin {
     const password = process.env.OS_SEED_ADMIN_PASSWORD?.trim() || 'admin123';
     const name = process.env.OS_SEED_ADMIN_NAME?.trim() || 'Dev Admin';
 
-    let ql: any;
-    try { ql = ctx.getService<any>('objectql'); } catch { /* unavailable */ }
+    let ql: IDataEngine | undefined;
+    try { ql = ctx.getService<IDataEngine>('objectql'); } catch { /* unavailable */ }
     if (!ql || typeof ql.find !== 'function') return;
 
     try {
@@ -1627,15 +1716,24 @@ export class AuthPlugin implements Plugin {
           const actor = await gateAdmin(c);
           if (actor instanceof Response) return actor;
           const { runAdminImportUsers } = await import('./admin-import-users.js');
-          const metadataService: any = (() => {
-            try { return ctx.getService?.('metadata'); } catch { return undefined; }
+          // [#4251] Resolved from `protocol`, not `metadata`. `getMetaItem` is a
+          // PROTOCOL method (`ObjectStackProtocolImplementation`, registered by
+          // MetadataProtocolPlugin); the `metadata` slot holds MetadataManager,
+          // which has never had it. So `metadataService?.getMetaItem` was always
+          // falsy and the field-coercion dep was never passed — an import row's
+          // values reached `sys_user` uncoerced, with the branch that says
+          // otherwise sitting right here. Invisible while the lookup was `any`:
+          // typing it to the slot's contract is what turned the dead probe into
+          // a compile error.
+          const metaReader = (() => {
+            try { return ctx.getService?.<MetaItemReaderSurface>('protocol'); } catch { return undefined; }
           })();
           const { status, body } = await runAdminImportUsers(
             {
               getAuthApi: () => this.authManager!.getApi() as any,
               getDataEngine: () => this.authManager!.getDataEngine(),
-              ...(metadataService?.getMetaItem
-                ? { getMetaItem: (ref: { type: string; name: string }) => metadataService.getMetaItem(ref) }
+              ...(typeof metaReader?.getMetaItem === 'function'
+                ? { getMetaItem: (ref: { type: string; name: string }) => metaReader.getMetaItem(ref) }
                 : {}),
               phoneNumberEnabled: () => this.authManager!.isPhoneNumberEnabled(),
               emailServiceAvailable: () => this.authManager!.isEmailServiceAvailable(),

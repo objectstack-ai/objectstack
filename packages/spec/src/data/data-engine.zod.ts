@@ -712,6 +712,24 @@ export const DataEngineRequestSchema = lazySchema(() => z.discriminatedUnion('me
 // ==========================================================================
 
 // --- New: QueryAST-aligned types (preferred) ---
+/**
+ * Trailing options for the READ methods (`find` / `findOne` / `count` /
+ * `aggregate`) — the execution context, and nothing else.
+ *
+ * [#4251] The schema always existed; the exported type did not, so
+ * `IDataEngine`'s read methods could not declare the trailing argument their
+ * implementation has taken since the split was unified. Reads once took their
+ * context INSIDE the query while writes took it in trailing `options.context`,
+ * and passing the write shape to a read SILENTLY DROPPED it — an intended
+ * `isSystem` bypass just vanished. The engine accepts both channels now
+ * (`options.context` wins), but a caller typed to the contract could not reach
+ * the trailing one at all, so the callers that use it were reaching it through
+ * `any`. Same shape as {@link BaseEngineOptionsSchema} by construction: this is
+ * naming what is already there, not widening it. (The type itself is not new —
+ * it sat unused under the "legacy/deprecated" heading below, which is why the
+ * contract went looking for it and did not find it.)
+ */
+export type BaseEngineOptions = z.infer<typeof BaseEngineOptionsSchema>;
 export type EngineQueryOptions = z.infer<typeof EngineQueryOptionsSchema>;
 export type EngineUpdateOptions = z.infer<typeof EngineUpdateOptionsSchema>;
 export type DroppedFieldsEvent = z.infer<typeof DroppedFieldsEventSchema>;
@@ -723,7 +741,6 @@ export type EngineCountOptions = z.infer<typeof EngineCountOptionsSchema>;
 export type DataEngineFilter = z.infer<typeof DataEngineFilterSchema>;
 /** @deprecated Use standard `SortNode[]` from QueryAST instead. */
 export type DataEngineSort = z.infer<typeof DataEngineSortSchema>;
-export type BaseEngineOptions = z.infer<typeof BaseEngineOptionsSchema>;
 /** @deprecated Use `EngineQueryOptions` instead. */
 export type DataEngineQueryOptions = z.infer<typeof DataEngineQueryOptionsSchema>;
 export type DataEngineInsertOptions = z.infer<typeof DataEngineInsertOptionsSchema>;

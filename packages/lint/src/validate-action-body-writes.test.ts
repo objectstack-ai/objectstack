@@ -5,8 +5,11 @@ import {
   validateActionBodyWrites,
   ACTION_BODY_WRITE_PATTERNS,
   ACTION_BODY_WRITE_PATTERN_IDS,
+  ACTION_RECORD_WRITE_PATTERNS,
+  ACTION_RECORD_WRITE_PATTERN_IDS,
   ACTION_BODY_WRITE_EXCLUSIONS,
   ACTION_BODY_WRITE_UNKNOWN_FIELD,
+  ACTION_RECORD_WRITE_DISCARDED,
 } from './validate-action-body-writes.js';
 import {
   extractHookBodyWrites,
@@ -56,13 +59,22 @@ describe('ACTION_BODY_WRITE_PATTERNS — ledger partition and reconciliation', (
     const shared = HOOK_BODY_WRITE_PATTERNS.map((p) => p.id).sort();
     const classified = [
       ...ACTION_BODY_WRITE_PATTERN_IDS,
+      ...ACTION_RECORD_WRITE_PATTERN_IDS,
       ...ACTION_BODY_WRITE_EXCLUSIONS.map((e) => e.id),
     ].sort();
     expect(classified).toEqual(shared);
   });
 
-  it('derives the applicable subset from the shared ledger, in ledger order', () => {
+  it('assigns each ledger shape to at most one check', () => {
+    const overlap = ACTION_BODY_WRITE_PATTERN_IDS.filter((id) =>
+      ACTION_RECORD_WRITE_PATTERN_IDS.includes(id),
+    );
+    expect(overlap).toEqual([]);
+  });
+
+  it('derives each subset from the shared ledger, in ledger order', () => {
     expect(ACTION_BODY_WRITE_PATTERNS.map((p) => p.id)).toEqual([...ACTION_BODY_WRITE_PATTERN_IDS]);
+    expect(ACTION_RECORD_WRITE_PATTERNS.map((p) => p.id)).toEqual([...ACTION_RECORD_WRITE_PATTERN_IDS]);
   });
 
   it('gives every exclusion a non-empty reason', () => {
@@ -96,6 +108,22 @@ describe('ACTION_BODY_WRITE_PATTERNS — ledger partition and reconciliation', (
       for (const finding of findings) {
         expect(finding.severity).toBe('warning');
         expect(finding.rule).toBe(ACTION_BODY_WRITE_UNKNOWN_FIELD);
+      }
+    });
+  }
+
+  for (const pattern of ACTION_RECORD_WRITE_PATTERNS) {
+    // Same end-to-end demand on the other check: prefilter, pattern filter and
+    // the escape analysis all sit between the ledger example and a finding.
+    it(`reports every declared write of '${pattern.id}' as a discarded record write`, () => {
+      const fields = [...new Set(pattern.example.writes.map((w) => w.field))];
+      expect(fields.length, `'${pattern.id}' declares no write`).toBeGreaterThan(0);
+
+      const findings = validateActionBodyWrites(stackWith(pattern.example.source));
+      expect(findings).toHaveLength(fields.length);
+      for (const finding of findings) {
+        expect(finding.severity).toBe('warning');
+        expect(finding.rule).toBe(ACTION_RECORD_WRITE_DISCARDED);
       }
     });
   }
@@ -182,12 +210,10 @@ describe('validateActionBodyWrites — ctx.api writes', () => {
   });
 });
 
-describe('validateActionBodyWrites — the params/record surfaces stay unchecked', () => {
+describe('validateActionBodyWrites — the params surface stays unchecked', () => {
   // `ctx.input` is the action's PARAMS bag, not a record: flagging a declared
   // parameter name against object fields is the false positive that would kill
-  // the rule. `ctx.record` is a snapshot the runner never writes back, so every
-  // write to it is discarded — declared fields included — which is a different
-  // defect, not this one.
+  // the rule.
   it('ignores ctx.input writes, however they are spelled', () => {
     const findings = validateActionBodyWrites(
       stackWith(
@@ -198,20 +224,78 @@ describe('validateActionBodyWrites — the params/record surfaces stay unchecked
     expect(findings).toEqual([]);
   });
 
-  it('ignores ctx.record writes', () => {
-    const findings = validateActionBodyWrites(stackWith("ctx.record.stge = 'won'; ctx.record.nope = 1;"));
-    expect(findings).toEqual([]);
+  it('still checks the ctx.api writes of a body that also writes params', () => {
+    const findings = validateActionBodyWrites(
+      stackWith("ctx.input.whatever = 1; await ctx.api.object('crm_deal').update({ stag: 'won' });"),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(ACTION_BODY_WRITE_UNKNOWN_FIELD);
+  });
+});
+
+describe('validateActionBodyWrites — discarded ctx.record writes (#4345)', () => {
+  it('warns on a provably dead snapshot write, declared field or not', () => {
+    // `stage` IS declared on crm_deal — and that is the point: the runner hands
+    // the body a plain snapshot and never writes it back, so the assignment is
+    // discarded either way. A rule that only flagged the undeclared half would
+    // imply this one persists.
+    const findings = validateActionBodyWrites(stackWith("ctx.record.stage = 'won';"));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].rule).toBe(ACTION_RECORD_WRITE_DISCARDED);
+    expect(findings[0].where).toBe('action "close_deal" › body');
+    expect(findings[0].path).toBe('actions[0].body.source');
+    expect(findings[0].message).toContain('ctx.record.stage');
+    expect(findings[0].message).toContain('#4345');
+    expect(findings[0].hint).toContain('updateById');
   });
 
-  it('still checks the ctx.api writes of a body that also touches params and record', () => {
+  it('reads from ctx.record do not rescue the write', () => {
+    const findings = validateActionBodyWrites(
+      stackWith("var id = ctx.recordId || ctx.record.id; ctx.record.stage = 'won'; return { ok: true, id: id };"),
+    );
+    expect(findings.map((f) => f.rule)).toEqual([ACTION_RECORD_WRITE_DISCARDED]);
+  });
+
+  it('stays silent when the snapshot is a payload under construction', () => {
+    // The legitimate idiom: mutate the snapshot, then persist it. The writes
+    // are live, and flagging them would be the false positive that kills an
+    // advisory rule.
+    expect(
+      validateActionBodyWrites(
+        stackWith("ctx.record.stage = 'won'; await ctx.api.object('crm_deal').update(ctx.record);"),
+      ),
+    ).toEqual([]);
+    // …and every other way the object can leave the body.
+    for (const escape of ['return ctx.record;', 'const r = ctx.record;', 'const c = { ...ctx.record };']) {
+      expect(validateActionBodyWrites(stackWith(`ctx.record.stage = 'won'; ${escape}`)), escape).toEqual([]);
+    }
+  });
+
+  it('reports each field once, and both rule ids from one body', () => {
     const findings = validateActionBodyWrites(
       stackWith(
-        "ctx.input.whatever = 1; ctx.record.whatever = 2; " +
+        "ctx.record.stage = 'won'; ctx.record.stage = 'lost'; ctx.record['amount'] += 1; " +
           "await ctx.api.object('crm_deal').update({ stag: 'won' });",
       ),
     );
-    expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain("'stag'");
+    expect(findings.map((f) => f.rule)).toEqual([
+      ACTION_RECORD_WRITE_DISCARDED,
+      ACTION_RECORD_WRITE_DISCARDED,
+      ACTION_BODY_WRITE_UNKNOWN_FIELD,
+    ]);
+    expect(findings.slice(0, 2).map((f) => f.message.match(/ctx\.record\.(\w+)/)?.[1])).toEqual([
+      'stage',
+      'amount',
+    ]);
+  });
+
+  it('stays silent on statically-opaque record writes', () => {
+    const findings = validateActionBodyWrites(
+      // computed key; nested sub-object write — neither is a literal field write
+      stackWith("const k = 'x'; ctx.record[k] = 1; ctx.record.address.city = 'SF';"),
+    );
+    expect(findings).toEqual([]);
   });
 });
 
