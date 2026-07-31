@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import type { MongoMemoryServer } from 'mongodb-memory-server';
 import {
   TEMPORAL_CASES,
   TEMPORAL_NOW,
@@ -29,19 +29,12 @@ import {
 } from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
 import { MongoDBDriver } from './mongodb-driver.js';
+import { createTestMongod } from './test-mongod.js';
 
 const resolveTokens = <T,>(filter: T): T =>
   resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
 
-let sharedMongod: MongoMemoryServer | undefined;
-try {
-  sharedMongod = await MongoMemoryServer.create({ instance: { launchTimeout: 60_000 } });
-} catch (err) {
-  console.warn(
-    '[driver-mongodb] Skipping temporal conformance — mongodb-memory-server could not start: ' +
-      `${(err as Error)?.message ?? String(err)}`,
-  );
-}
+const sharedMongod: MongoMemoryServer | undefined = await createTestMongod('temporal conformance');
 
 describe.skipIf(!sharedMongod)('driver-mongodb — temporal conformance', () => {
   const mongod = sharedMongod as MongoMemoryServer;

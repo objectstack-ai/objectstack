@@ -20,18 +20,11 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoDBDriver } from './mongodb-driver.js';
+import { createTestMongod } from './test-mongod.js';
 
-let sharedMongod: MongoMemoryServer | undefined;
-try {
-  sharedMongod = await MongoMemoryServer.create({ instance: { launchTimeout: 60_000 } });
-} catch (err) {
-  console.warn(
-    '[driver-mongodb] Skipping datetime-storage suite — mongodb-memory-server could not start: ' +
-      `${(err as Error)?.message ?? String(err)}`,
-  );
-}
+const sharedMongod: MongoMemoryServer | undefined = await createTestMongod('datetime-storage');
 
 const ids = (rows: any[]) => rows.map((r: any) => r.id).sort();
 
