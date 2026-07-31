@@ -1,7 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { FlowParsed, FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
-import type { ExecutionLog, ActionDescriptor } from '@objectstack/spec/automation';
+import type {
+    ExecutionLog,
+    ActionDescriptor,
+    ExecutionStepMetrics,
+    ExecutionStepSkipReason,
+    FlowRunSummary,
+} from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, ScreenSpec } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
@@ -67,6 +73,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
 };
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
 import { isGuardRefusal } from './guard-refusal.js';
+import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 
 // ─── Node Executor Interface (Plugin Extension Point) ───────────────
 
@@ -172,6 +179,23 @@ export interface NodeExecutionResult {
      * so per-iteration / per-branch body steps surface in run observability.
      */
     childSteps?: StepLogEntry[];
+    /**
+     * #4354: how many records this execution **read** and **wrote**, reported by
+     * the executor and folded into the run summary by {@link summarizeRun}.
+     *
+     * Declared by the node rather than inferred by the engine from `output`,
+     * because only the node knows what its result *means*: `update_record`'s
+     * `result` is a row count on a bulk write and the updated record on a
+     * by-id one, `delete_record`'s can be a boolean, `notify`'s is a delivery
+     * count. An engine that sniffed those shapes would be guessing, and a
+     * machine-readable count that guesses is worse than none (ADR-0076 D12 —
+     * "machine-readable surfaces must not lie").
+     *
+     * Omit it entirely for a node that touches no records (`decision`,
+     * `assignment`): absent means "reads/writes nothing", which is a different
+     * fact from `0`.
+     */
+    metrics?: ExecutionStepMetrics;
 }
 
 // ─── Trigger Interface (Plugin Extension Point) ─────────────────────
@@ -395,6 +419,18 @@ export const DEFAULT_MAX_EXECUTION_LOG_SIZE = 1000;
  */
 export const MAX_PERSISTED_HISTORY_STEPS = 200;
 
+/**
+ * Level the one-line-per-terminal-run summary is logged at (#4354), or `'off'`.
+ *
+ * Defaults to `'info'` — deliberately. The whole premise of #4354 is that a
+ * scheduled flow which silently stopped working emits **no signal at all**, and
+ * a line nobody sees at their production log level is the same non-signal. A
+ * host running very high-frequency record-change flows can turn the volume down
+ * to `'debug'` (or off) via {@link AutomationServicePluginOptions.runSummaryLog},
+ * which is a decision about noise, not about whether the platform measures.
+ */
+export type RunSummaryLogLevel = 'info' | 'debug' | 'off';
+
 /** Construction options for {@link AutomationEngine}. */
 export interface AutomationEngineOptions {
     /**
@@ -402,6 +438,11 @@ export interface AutomationEngineOptions {
      * Defaults to {@link DEFAULT_MAX_EXECUTION_LOG_SIZE}. Must be > 0.
      */
     maxLogSize?: number;
+    /**
+     * Level for the per-terminal-run summary line (#4354). Defaults to `'info'`.
+     * See {@link RunSummaryLogLevel}.
+     */
+    runSummaryLog?: RunSummaryLogLevel;
 }
 
 /**
@@ -437,6 +478,19 @@ export interface StepLogEntry {
     iteration?: number;
     /** Which region kind the step ran in: `loop-body` | `parallel-branch` | `try` | `catch`. */
     regionKind?: string;
+    /**
+     * #4354: records this step read / wrote, copied from
+     * {@link NodeExecutionResult.metrics}. Folded into the run summary.
+     */
+    metrics?: ExecutionStepMetrics;
+    /**
+     * #4354: the gate that closed in front of this node, on a `skipped` step.
+     * Written by {@link AutomationEngine.traverseNext} when a conditional
+     * out-edge evaluates false — the shape #4347 could not surface: a loop-body
+     * edge that never opened left no trace at all, so a sweep that nudged
+     * nobody looked exactly like a sweep with nobody to nudge.
+     */
+    skippedBy?: ExecutionStepSkipReason;
 }
 
 /**
@@ -537,6 +591,13 @@ interface ExecutionLogEntry {
     variables?: Record<string, unknown>;
     output?: unknown;
     error?: string;
+    /**
+     * #4354: what the run did, folded out of the FULL step log by
+     * {@link AutomationEngine.recordLog} — before history compaction, so a
+     * 5000-iteration loop's counts are exact even though only 200 of its steps
+     * are persisted.
+     */
+    summary?: FlowRunSummary;
 }
 
 /**
@@ -717,6 +778,15 @@ export interface RunRecord {
      * written before this field existed have none.
      */
     steps?: StepLogEntry[];
+    /**
+     * #4354: the run's selected / acted / skipped rollup, computed from the
+     * un-compacted step log. Persisted alongside `steps` so the Runs surface
+     * and an operator's `selected > 0 AND acted = 0` alert both read exact
+     * counts, not counts inferred from the 200 steps that survived compaction.
+     * Optional — rows written before this field existed have none, and an
+     * absent summary must never be read as "this run did nothing".
+     */
+    summary?: FlowRunSummary;
 }
 
 export interface SuspendedRunStore {
@@ -808,6 +878,8 @@ export class AutomationEngine implements IAutomationService {
     private recordExpander: FlowRecordExpander | null = null;
     private executionLogs: ExecutionLogEntry[] = [];
     private readonly maxLogSize: number;
+    /** Level for the per-run summary line (#4354). See {@link RunSummaryLogLevel}. */
+    private readonly runSummaryLog: RunSummaryLogLevel;
     private logger: Logger;
     /**
      * Runs paused at a node, keyed by runId (ADR-0019). In-memory hot cache —
@@ -831,6 +903,7 @@ export class AutomationEngine implements IAutomationService {
         this.logger = logger;
         this.store = store;
         this.maxLogSize = options?.maxLogSize ?? DEFAULT_MAX_EXECUTION_LOG_SIZE;
+        this.runSummaryLog = options?.runSummaryLog ?? 'info';
     }
 
     /**
@@ -1676,6 +1749,10 @@ export class AutomationEngine implements IAutomationService {
             trigger: { type: '', userId: r.userId ?? undefined },
             steps: r.steps ?? [],
             error: r.error,
+            // #4354 — the PERSISTED summary, never re-folded from `r.steps`:
+            // those are compacted (200 max), so recomputing here would report a
+            // 5000-row sweep as having acted on a couple of hundred.
+            summary: r.summary,
         };
     }
 
@@ -1974,7 +2051,7 @@ export class AutomationEngine implements IAutomationService {
             const durationMs = Date.now() - startTime;
 
             // Record execution log
-            this.recordLog({
+            const logged = this.recordLog({
                 id: runId,
                 flowName,
                 flowVersion: flow.version,
@@ -1995,6 +2072,10 @@ export class AutomationEngine implements IAutomationService {
                 success: true,
                 output,
                 durationMs,
+                // #4354 — hand the counts back synchronously so a caller
+                // (a `subflow` roll-up, a runtime test asserting the sweep wrote
+                // something) never has to re-read the run to learn what it did.
+                summary: logged.summary,
             };
         } catch (err: unknown) {
             // A node asked to suspend the run (ADR-0019 durable pause). Snapshot
@@ -2043,7 +2124,7 @@ export class AutomationEngine implements IAutomationService {
 
             // Record failed execution log
             const durationMs = Date.now() - startTime;
-            this.recordLog({
+            const logged = this.recordLog({
                 id: runId,
                 flowName,
                 flowVersion: flow.version,
@@ -2068,6 +2149,9 @@ export class AutomationEngine implements IAutomationService {
                 success: false,
                 error: errorMessage,
                 durationMs,
+                // A failed run's counts matter MORE, not less: they say how far
+                // it got before dying — how many rows it had already written.
+                summary: logged.summary,
             };
         } finally {
             // Release the re-entrancy guard for this (flow, record). Runs before
@@ -2245,11 +2329,49 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Credit a completed child run's totals to the parent step waiting on it
+     * (#4354).
+     *
+     * A `subflow` / `map` child that PAUSED cannot report through
+     * `NodeExecutionResult.metrics` the way a synchronous one does: the parent's
+     * step for that node was written at suspend time, before the child had done
+     * anything. Without this, a sweep whose writes all happen inside a paused
+     * child would report `acted: 0` — a healthy run indistinguishable from a
+     * dead one, which is the exact confusion this feature exists to remove.
+     *
+     * The credit lands on the LAST step for the node, which is the entry that
+     * suspended awaiting this child — so a `map` re-entering once per item
+     * credits each item to its own step and nothing is counted twice.
+     */
+    private creditChildRun(steps: StepLogEntry[], nodeId: string, child: FlowRunSummary | undefined): void {
+        if (!child) return;
+        for (let i = steps.length - 1; i >= 0; i--) {
+            if (steps[i].nodeId !== nodeId) continue;
+            const prior = steps[i].metrics ?? {};
+            steps[i] = {
+                ...steps[i],
+                metrics: {
+                    selected: (prior.selected ?? 0) + child.selected,
+                    acted: (prior.acted ?? 0) + child.acted,
+                },
+            };
+            return;
+        }
+    }
+
+    /**
      * @param skipBubble - Set when the caller is the subflow DELEGATION path,
      *   which continues the parent itself after the child completes — the
      *   child's own up-bubble must stay off so the parent isn't resumed twice.
+     * @param childSummary - #4354: totals of the child run whose completion
+     *   triggered this resume (the up-bubble path), credited to the awaiting step.
      */
-    private async resumeInternal(runId: string, signal: ResumeSignal | undefined, skipBubble: boolean): Promise<AutomationResult> {
+    private async resumeInternal(
+        runId: string,
+        signal: ResumeSignal | undefined,
+        skipBubble: boolean,
+        childSummary?: FlowRunSummary,
+    ): Promise<AutomationResult> {
         // Idempotency guard (set synchronously, before any await): reject a
         // concurrent duplicate resume of the same run so side effects can't run
         // twice. A duplicate that arrives *after* this one finishes finds no
@@ -2273,6 +2395,11 @@ export class AutomationEngine implements IAutomationService {
             if (!node) {
                 return { success: false, error: `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'` };
             }
+
+            // #4354 — up-bubble: the child that just finished did work this run
+            // is accountable for. Credit it to the step that suspended awaiting
+            // it, before traversal appends anything further.
+            this.creditChildRun(run.steps, run.nodeId, childSummary);
 
             // ── Subflow delegation (nested pause): this run is paused at a
             // `subflow` node whose child run itself suspended. The caller's
@@ -2312,6 +2439,9 @@ export class AutomationEngine implements IAutomationService {
                     // resume signal (replaces the caller's signal, which the
                     // child already consumed).
                     signal = this.buildSubflowResumeSignal(childRun.context, childRes.output);
+                    // #4354 — down-delegation is the other way a child's work
+                    // lands under a parent step written at suspend time.
+                    this.creditChildRun(run.steps, run.nodeId, childRes.summary);
                 } else {
                     this.logger.warn(
                         `[automation] run '${runId}' is paused at subflow node '${run.nodeId}' but child run '${childRunId}' ` +
@@ -2369,7 +2499,7 @@ export class AutomationEngine implements IAutomationService {
                     }
                 }
                 const durationMs = Date.now() - run.startTime;
-                this.recordLog({
+                const logged = this.recordLog({
                     id: runId,
                     flowName: run.flowName,
                     flowVersion: run.flowVersion,
@@ -2393,12 +2523,20 @@ export class AutomationEngine implements IAutomationService {
                 // continues the parent itself). Best-effort: the child's own
                 // completion stands even if the parent continuation fails.
                 if (!skipBubble) {
-                    await this.bubbleToParent(run, output);
+                    await this.bubbleToParent(run, output, logged.summary);
                 }
 
                 // Surface the flow's friendly completion message so a screen-flow
-                // runner shows it instead of a generic "Done".
-                return { success: true, output, durationMs, successMessage: flow.successMessage };
+                // runner shows it instead of a generic "Done". `summary` (#4354)
+                // covers the WHOLE run — the steps before the pause and after it
+                // are one log, so a resumed approval reports what it did in total.
+                return {
+                    success: true,
+                    output,
+                    durationMs,
+                    successMessage: flow.successMessage,
+                    summary: logged.summary,
+                };
             } catch (err: unknown) {
                 // Re-suspended at a downstream node: persist a fresh continuation.
                 if (isSuspendSignal(err)) {
@@ -2431,7 +2569,7 @@ export class AutomationEngine implements IAutomationService {
 
                 const errorMessage = err instanceof Error ? err.message : String(err);
                 const durationMs = Date.now() - run.startTime;
-                this.recordLog({
+                const logged = this.recordLog({
                     id: runId,
                     flowName: run.flowName,
                     flowVersion: run.flowVersion,
@@ -2455,7 +2593,13 @@ export class AutomationEngine implements IAutomationService {
                 }
                 // Surface the flow's friendly error message (the raw error stays
                 // in `error` for logs/diagnostics).
-                return { success: false, error: errorMessage, durationMs, errorMessage: flow.errorMessage };
+                return {
+                    success: false,
+                    error: errorMessage,
+                    durationMs,
+                    errorMessage: flow.errorMessage,
+                    summary: logged.summary,
+                };
             }
         } finally {
             this.resuming.delete(runId);
@@ -2488,7 +2632,12 @@ export class AutomationEngine implements IAutomationService {
      * a failed parent continuation is logged, never thrown back at the
      * caller who resumed the child.
      */
-    private async bubbleToParent(run: SuspendedRun, output: Record<string, unknown>): Promise<void> {
+    private async bubbleToParent(
+        run: SuspendedRun,
+        output: Record<string, unknown>,
+        /** #4354 — this child's totals, credited to the parent's awaiting step. */
+        summary?: FlowRunSummary,
+    ): Promise<void> {
         const ctx = run.context as Record<string, unknown> | undefined;
         const parentRunId = ctx?.$parentRunId;
         if (typeof parentRunId !== 'string' || !parentRunId) return;
@@ -2502,7 +2651,7 @@ export class AutomationEngine implements IAutomationService {
                 // the one writer allowed to set them (#3853 follow-up).
                 ? engineBuilt({ variables: { [`${mapNode}.$mapItemOutput`]: output ?? null, [`${mapNode}.$mapItemDone`]: true } })
                 : this.buildSubflowResumeSignal(run.context, output);
-            const parentRes = await this.resumeInternal(parentRunId, sig, false);
+            const parentRes = await this.resumeInternal(parentRunId, sig, false, summary);
             if (!parentRes.success) {
                 this.logger.warn(
                     `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' failed: ${parentRes.error}`,
@@ -2652,7 +2801,22 @@ export class AutomationEngine implements IAutomationService {
 
     // ── DAG Traversal Core ──────────────────────────────────
 
-    private recordLog(entry: ExecutionLogEntry): void {
+    /**
+     * Append a run to the in-memory ring buffer, fold its {@link FlowRunSummary},
+     * log the one-line-per-run summary (#4354) and mirror a terminal run to
+     * durable history.
+     *
+     * @returns the same entry, now carrying `summary` — so a caller returning an
+     *   {@link AutomationResult} hands the counts straight back without a second
+     *   fold or a `getRun` round-trip.
+     */
+    private recordLog(entry: ExecutionLogEntry): ExecutionLogEntry {
+        // #4354 — fold the run's outcome BEFORE anything downstream trims the
+        // step log. History compaction keeps 200 steps; the summary must count
+        // all 5000, or a long sweep's `acted` would shrink with its step log and
+        // the broken-sweep detector would read a bounded artefact as truth.
+        entry.summary = summarizeRun(entry.steps);
+
         this.executionLogs.push(entry);
         // Evict oldest logs when exceeding max size
         if (this.executionLogs.length > this.maxLogSize) {
@@ -2667,6 +2831,35 @@ export class AutomationEngine implements IAutomationService {
             entry.status === 'failed' ||
             entry.status === 'cancelled' ||
             entry.status === 'timed_out';
+
+        // The MVP of #4354, and the half that needs no console: one structured
+        // line per terminal run. `selected=30 acted=0` in a log file is the
+        // difference between an invisible failure and a greppable one. Only
+        // terminal runs — a `paused` run has not finished doing its work yet.
+        if (terminal && this.runSummaryLog !== 'off') {
+            const line = formatRunSummaryLine(
+                {
+                    flowName: entry.flowName,
+                    runId: entry.id,
+                    status: entry.status,
+                    durationMs: entry.durationMs,
+                },
+                entry.summary,
+            );
+            const meta = {
+                flow: entry.flowName,
+                runId: entry.id,
+                status: entry.status,
+                durationMs: entry.durationMs,
+                selected: entry.summary.selected,
+                acted: entry.summary.acted,
+                skipped: entry.summary.skipped,
+                gates: entry.summary.gates,
+            };
+            if (this.runSummaryLog === 'debug') this.logger.debug(line, meta);
+            else this.logger.info(line, meta);
+        }
+
         if (terminal && this.store?.recordTerminal) {
             const lastStep = entry.steps[entry.steps.length - 1];
             const record: RunRecord = {
@@ -2681,6 +2874,7 @@ export class AutomationEngine implements IAutomationService {
                 userId: entry.trigger?.userId,
                 nodeId: lastStep?.nodeId,
                 steps: this.compactStepsForHistory(entry.steps),
+                summary: entry.summary,
             };
             void this.store.recordTerminal(record).catch((err) => {
                 this.logger.warn(
@@ -2688,6 +2882,7 @@ export class AutomationEngine implements IAutomationService {
                 );
             });
         }
+        return entry;
     }
 
     /**
@@ -3120,8 +3315,17 @@ export class AutomationEngine implements IAutomationService {
         // 200-iteration `loop` region is legitimate) and fail the run loudly
         // past the cap. Product-level guards (e.g. an approval node's
         // `maxRevisions`) terminate far earlier; this is the engine backstop.
+        //
+        // A `skipped` step is NOT a visit (#4354): those entries record a gate
+        // that closed in FRONT of a node, so counting them would let a flow whose
+        // gate refuses often abort itself as a runaway — a new observability
+        // signal changing execution semantics, which it must never do.
         const priorVisits = steps.reduce(
-            (n, s) => (s.nodeId === node.id && s.parentNodeId === undefined ? n + 1 : n), 0,
+            (n, s) =>
+                s.nodeId === node.id && s.parentNodeId === undefined && s.status !== 'skipped'
+                    ? n + 1
+                    : n,
+            0,
         );
         if (priorVisits >= AutomationEngine.MAX_NODE_REENTRIES) {
             throw new Error(
@@ -3213,6 +3417,9 @@ export class AutomationEngine implements IAutomationService {
                     durationMs: Date.now() - stepStart,
                     error: { code: 'NODE_FAILURE', message: errMsg },
                     ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+                    // #4354 — a node that failed PART WAY may still have written
+                    // rows; dropping its counts would understate what the run did.
+                    ...(result.metrics ? { metrics: result.metrics } : {}),
                 });
 
                 // Write error output to variable context for downstream nodes
@@ -3238,7 +3445,10 @@ export class AutomationEngine implements IAutomationService {
             }
 
             // Log successful step (#3407: advisory executor warnings ride along
-            // so a legal-but-partial outcome never reads as a clean success).
+            // so a legal-but-partial outcome never reads as a clean success;
+            // #4354: the executor's own record counts ride along too, so the run
+            // summary can tell a sweep that had nothing to do from one that did
+            // nothing).
             steps.push({
                 nodeId: node.id,
                 nodeType: node.type,
@@ -3247,6 +3457,7 @@ export class AutomationEngine implements IAutomationService {
                 completedAt: new Date().toISOString(),
                 durationMs: Date.now() - stepStart,
                 ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+                ...(result.metrics ? { metrics: result.metrics } : {}),
             });
 
             // #1479: fold a structured-region container's body/branch/handler
@@ -3329,11 +3540,38 @@ export class AutomationEngine implements IAutomationService {
 
         // Conditional edges: evaluate sequentially (mutually exclusive)
         for (const edge of conditionalEdges) {
+            const nextNode = flow.nodes.find(n => n.id === edge.target);
             if (this.evaluateCondition(edge.condition!, variables)) {
-                const nextNode = flow.nodes.find(n => n.id === edge.target);
                 if (nextNode) {
                     await this.executeNode(nextNode, flow, variables, context, steps);
                 }
+            } else if (nextNode) {
+                // #4354 — the gate closed. Record it: this is THE event that had
+                // no trace anywhere, and the reason #4347 shipped three inert
+                // production flows. A closed gate inside a loop body is logged
+                // once per iteration (region tagging in `runRegion` attaches the
+                // container + iteration), so the run summary can say
+                // "selected 30, acted 0, skipped 30 by <gate>" instead of
+                // reporting a green run that did nothing.
+                //
+                // The step is `skipped`, never a run: the re-entrancy guard,
+                // per-node `runs` counts and node status all exclude it, so
+                // recording a non-event stays a non-event to execution.
+                const at = new Date().toISOString();
+                steps.push({
+                    nodeId: nextNode.id,
+                    nodeType: nextNode.type,
+                    ...(nextNode.label ? { nodeLabel: nextNode.label } : {}),
+                    status: 'skipped',
+                    startedAt: at,
+                    completedAt: at,
+                    durationMs: 0,
+                    skippedBy: {
+                        nodeId: node.id,
+                        ...(edge.id ? { edgeId: edge.id } : {}),
+                        ...(edge.label ? { label: edge.label } : {}),
+                    },
+                });
             }
         }
 
@@ -3666,7 +3904,7 @@ export class AutomationEngine implements IAutomationService {
             }
 
             const durationMs = Date.now() - startTime;
-            this.recordLog({
+            const logged = this.recordLog({
                 id: runId,
                 flowName,
                 flowVersion: flow.version,
@@ -3683,11 +3921,13 @@ export class AutomationEngine implements IAutomationService {
                 output,
             });
 
-            return { success: true, output, durationMs };
+            // #4354 — a retried run reports its own attempt's counts, not the
+            // failed one's: `retryExecution` returns THIS result on success.
+            return { success: true, output, durationMs, summary: logged.summary };
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             const durationMs = Date.now() - startTime;
-            this.recordLog({
+            const logged = this.recordLog({
                 id: runId,
                 flowName,
                 flowVersion: flow.version,
@@ -3703,7 +3943,7 @@ export class AutomationEngine implements IAutomationService {
                 steps,
                 error: errorMessage,
             });
-            return { success: false, error: errorMessage, durationMs };
+            return { success: false, error: errorMessage, durationMs, summary: logged.summary };
         }
     }
 }

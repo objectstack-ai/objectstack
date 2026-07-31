@@ -14,7 +14,7 @@
  */
 
 import type { FlowParsed } from '../automation/flow.zod';
-import type { ExecutionLog } from '../automation/execution.zod';
+import type { ExecutionLog, FlowRunSummary } from '../automation/execution.zod';
 import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor } from '../integration/connector-descriptor';
 
@@ -206,6 +206,17 @@ export interface AutomationResult {
      */
     successMessage?: string;
     errorMessage?: string;
+    /**
+     * #4354: what the run did — records selected / acted on, gate skips,
+     * per-node status. Set on a TERMINAL result (a paused run has not finished
+     * doing it yet).
+     *
+     * On the result rather than only in the run log because a caller that
+     * invokes a flow synchronously — the `subflow` node rolling a child run up
+     * into its parent, a test asserting a sweep wrote something — needs the
+     * answer without a second round-trip through `getRun`.
+     */
+    summary?: FlowRunSummary;
 }
 
 /**

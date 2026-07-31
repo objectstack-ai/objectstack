@@ -39,6 +39,43 @@ export type ExecutionStatus = z.infer<typeof ExecutionStatus>;
 // ==========================================
 
 /**
+ * What one node execution did to the data, reported by the node executor
+ * itself (#4354).
+ *
+ * A scheduled sweep that selects records and then writes none looks — in every
+ * surface the platform had — exactly like a sweep with nothing to do: both
+ * report success, emit no log and write nothing. These two counters are what
+ * tells them apart, so they are declared by the executor rather than inferred
+ * by the engine from a node's output shape: only the node knows whether its
+ * `result` was a row count, a record, or a boolean.
+ *
+ * Absent ⇒ the node touched no records (a `decision`, an `assignment`), which
+ * is different from `0` — "read nothing" is a fact, "reads nothing" is a kind.
+ */
+export const ExecutionStepMetricsSchema = lazySchema(() => z.object({
+  selected: z.number().int().min(0).optional()
+    .describe('Records this node READ or matched (a `get_record` query, a lookup)'),
+  acted: z.number().int().min(0).optional()
+    .describe('Records this node WROTE (created / updated / deleted) or effects it dispatched (notifications delivered)'),
+}));
+export type ExecutionStepMetrics = z.infer<typeof ExecutionStepMetricsSchema>;
+
+/**
+ * The gate that kept a step from running — recorded on a `skipped` step so the
+ * run trace names *which* condition closed, not merely that something did.
+ *
+ * This is the signal #4347 had no way to emit: a conditional edge inside a
+ * `loop` body evaluated false on every iteration, so the flow selected every
+ * stalled deal and nudged nobody, silently and green.
+ */
+export const ExecutionStepSkipReasonSchema = lazySchema(() => z.object({
+  nodeId: z.string().describe('Node whose out-edge did not open (the gate)'),
+  edgeId: z.string().optional().describe('Edge whose condition evaluated false'),
+  label: z.string().optional().describe('Edge label, when the flow names its branches'),
+}));
+export type ExecutionStepSkipReason = z.infer<typeof ExecutionStepSkipReasonSchema>;
+
+/**
  * Execution Step Log Entry
  * Records the result of executing a single node in the flow graph.
  */
@@ -65,8 +102,72 @@ export const ExecutionStepLogSchema = lazySchema(() => z.object({
   parentNodeId: z.string().optional().describe('Enclosing structured-region container node ID (loop/parallel/try_catch)'),
   iteration: z.number().int().min(0).optional().describe('Zero-based loop iteration or parallel branch index of the enclosing region'),
   regionKind: z.string().optional().describe('Region kind the step ran in: loop-body | parallel-branch | try | catch'),
+  // #4354: what the step did to the data, and — for a `skipped` step — which
+  // gate stopped it. Both feed the run summary aggregated on ExecutionLog.
+  metrics: ExecutionStepMetricsSchema.optional()
+    .describe('Records this step selected / acted on, as reported by the node executor'),
+  skippedBy: ExecutionStepSkipReasonSchema.optional()
+    .describe('The gate that closed, when `status` is `skipped`'),
 }));
 export type ExecutionStepLog = z.infer<typeof ExecutionStepLogSchema>;
+
+// ==========================================
+// 2b. Flow Run Summary (#4354)
+// ==========================================
+
+/**
+ * One node's contribution to a run, folded across every time it ran — a loop
+ * body node that ran 30 times is ONE entry with `runs: 30`, not 30 entries.
+ */
+export const FlowRunNodeSummarySchema = lazySchema(() => z.object({
+  nodeId: z.string().describe('Node ID'),
+  nodeType: z.string().describe('Node action type (e.g., "get_record", "decision")'),
+  nodeLabel: z.string().optional().describe('Human-readable node label'),
+  status: z.enum(['success', 'failure', 'skipped'])
+    .describe('Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped`'),
+  runs: z.number().int().min(0).describe('Times the node executed (loop iterations and parallel branches each count)'),
+  failures: z.number().int().min(0).describe('Executions that failed'),
+  skipped: z.number().int().min(0).describe('Times a closed gate kept this node from running at all'),
+  selected: z.number().int().min(0).optional().describe('Records read across every execution — omitted for a node that reads none'),
+  acted: z.number().int().min(0).optional().describe('Records written / effects dispatched across every execution — omitted for a node that writes none'),
+}));
+export type FlowRunNodeSummary = z.infer<typeof FlowRunNodeSummarySchema>;
+
+/** A gate that closed during the run, and how often. */
+export const FlowRunGateSummarySchema = lazySchema(() => z.object({
+  nodeId: z.string().describe('Node whose out-edge did not open (the gate)'),
+  targetNodeId: z.string().describe('Node the closed edge would have run'),
+  edgeId: z.string().optional().describe('Edge whose condition evaluated false'),
+  label: z.string().optional().describe('Edge label, when the flow names its branches'),
+  skipped: z.number().int().min(1).describe('Times this gate evaluated false (once per loop iteration)'),
+}));
+export type FlowRunGateSummary = z.infer<typeof FlowRunGateSummarySchema>;
+
+/**
+ * Per-run rollup of what a flow execution actually *did* (#4354).
+ *
+ * The counters exist to answer one question no other surface could: is a green
+ * run doing its job, or has it silently stopped? `selected > 0 && acted == 0`
+ * over consecutive runs is the broken-sweep signal — the platform ships the
+ * measurement so every flow gets it, rather than each app rebuilding a detector
+ * out of the same primitives that fail silently.
+ *
+ * Totals are sums over `nodes`, which is itself a fold of the run's step log,
+ * so a loop that ran a write 30 times contributes 30 to `acted`. A `subflow`
+ * node rolls its child run's totals up into this one — the child keeps its own
+ * run row, so the child's work is counted there too, deliberately: this summary
+ * answers "what did this run cause", not "what did this run's own nodes do".
+ */
+export const FlowRunSummarySchema = lazySchema(() => z.object({
+  selected: z.number().int().min(0).describe('Total records read by the run'),
+  acted: z.number().int().min(0).describe('Total records written / effects dispatched by the run'),
+  skipped: z.number().int().min(0).describe('Total node executions a closed gate prevented'),
+  nodes: z.array(FlowRunNodeSummarySchema).describe('Per-node breakdown, in first-execution order'),
+  gates: z.array(FlowRunGateSummarySchema).describe('Gates that closed during the run, most-skipped first'),
+  detailOmitted: z.boolean().optional()
+    .describe('Set when persistence dropped `nodes`/`gates` to keep the stored row bounded — the totals are still exact. Declared so empty arrays are never mistaken for "nothing ran".'),
+}));
+export type FlowRunSummary = z.infer<typeof FlowRunSummarySchema>;
 
 /**
  * Execution Log Schema
@@ -110,6 +211,15 @@ export const ExecutionLogSchema = lazySchema(() => z.object({
 
   /** Step-by-step execution history */
   steps: z.array(ExecutionStepLogSchema).describe('Ordered list of executed steps'),
+
+  /**
+   * #4354: what the run did, folded out of `steps`. Present on terminal runs;
+   * absent on a run written before the summary existed (or by an engine that
+   * does not compute one) — which is why it is optional rather than defaulted
+   * to zeros: an absent summary must not read as "this run did nothing".
+   */
+  summary: FlowRunSummarySchema.optional()
+    .describe('Per-run rollup: records selected / acted on, gate skips, per-node status'),
 
   /** Execution variables snapshot */
   variables: z.record(z.string(), z.unknown()).optional().describe('Final state of flow variables'),
@@ -275,6 +385,7 @@ export type ScheduleState = z.infer<typeof ScheduleStateSchema>;
 
 export type ExecutionStepLogParsed = z.infer<typeof ExecutionStepLogSchema>;
 export type ExecutionLogParsed = z.infer<typeof ExecutionLogSchema>;
+export type FlowRunSummaryParsed = z.infer<typeof FlowRunSummarySchema>;
 export type ExecutionErrorParsed = z.infer<typeof ExecutionErrorSchema>;
 export type CheckpointParsed = z.infer<typeof CheckpointSchema>;
 export type ConcurrencyPolicyParsed = z.infer<typeof ConcurrencyPolicySchema>;

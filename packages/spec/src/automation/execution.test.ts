@@ -8,6 +8,7 @@ import {
   CheckpointSchema,
   ConcurrencyPolicySchema,
   ScheduleStateSchema,
+  FlowRunSummarySchema,
 } from './execution.zod';
 
 // ==========================================
@@ -166,6 +167,69 @@ describe('ExecutionLogSchema', () => {
       steps: [],
       startedAt: '2026-02-01T10:00:00Z',
     })).toThrow(); // missing trigger
+  });
+});
+
+// ==========================================
+// Flow Run Summary (#4354)
+// ==========================================
+
+describe('FlowRunSummarySchema', () => {
+  const brokenSweep = {
+    selected: 30,
+    acted: 0,
+    skipped: 30,
+    nodes: [
+      { nodeId: 'query', nodeType: 'get_record', status: 'success' as const, runs: 1, failures: 0, skipped: 0, selected: 30 },
+      { nodeId: 'nudge', nodeType: 'notify', status: 'skipped' as const, runs: 0, failures: 0, skipped: 30 },
+    ],
+    gates: [{ nodeId: 'gate', targetNodeId: 'nudge', edgeId: 'b1', label: 'Go', skipped: 30 }],
+  };
+
+  it('accepts the shape that separates a broken sweep from an idle one', () => {
+    const summary = FlowRunSummarySchema.parse(brokenSweep);
+    expect(summary.selected).toBe(30);
+    expect(summary.acted).toBe(0);
+    expect(summary.gates[0].nodeId).toBe('gate');
+  });
+
+  it('leaves selected / acted absent for a node that touches no records', () => {
+    const summary = FlowRunSummarySchema.parse({
+      selected: 0, acted: 0, skipped: 0, gates: [],
+      nodes: [{ nodeId: 'gate', nodeType: 'decision', status: 'success' as const, runs: 1, failures: 0, skipped: 0 }],
+    });
+    // Absent ≠ 0: "this kind of node reads nothing" is not "it read nothing".
+    expect(summary.nodes[0].selected).toBeUndefined();
+    expect(summary.nodes[0].acted).toBeUndefined();
+  });
+
+  it('rejects negative counts', () => {
+    expect(() => FlowRunSummarySchema.parse({ ...brokenSweep, acted: -1 })).toThrow();
+  });
+
+  it('rides on an execution log', () => {
+    const log = ExecutionLogSchema.parse({
+      id: 'exec_004',
+      flowName: 'stalled_deal_sweep',
+      status: 'completed',
+      trigger: { type: 'schedule' },
+      steps: [],
+      startedAt: '2026-02-01T10:00:00Z',
+      summary: brokenSweep,
+    });
+    expect(log.summary?.acted).toBe(0);
+  });
+
+  it('is optional — an un-summarized run is not a run that did nothing', () => {
+    const log = ExecutionLogSchema.parse({
+      id: 'exec_005',
+      flowName: 'legacy_flow',
+      status: 'completed',
+      trigger: { type: 'schedule' },
+      steps: [],
+      startedAt: '2026-02-01T10:00:00Z',
+    });
+    expect(log.summary).toBeUndefined();
   });
 });
 

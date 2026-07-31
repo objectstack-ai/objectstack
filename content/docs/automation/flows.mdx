@@ -579,6 +579,61 @@ panel. Recent runs are held in an in-memory ring buffer; terminal runs
 history with a bounded step log, so `listRuns` / `getRun` still report a run's
 status, steps, and failure reason after a restart or ring-buffer eviction.
 
+### Run summaries
+
+A run that reports `success: true` has not told you it did its job. A scheduled
+sweep that selects thirty records and writes none looks *identical* to one with
+nothing to do: same green status, same empty output, same silence. Every
+terminal run therefore carries a **summary** — on the `AutomationResult`, on the
+run in `listRuns` / `getRun`, and in the log:
+
+```
+[automation] run flow=stalled_deal_sweep run=run_a1b2 status=completed durationMs=142 selected=30 acted=0 skipped=30 gate=check_stalled->send_nudge:30
+```
+
+| Field | Meaning |
+| :--- | :--- |
+| `selected` | Records **read** by the run's data nodes |
+| `acted` | Records **created / updated / deleted**, plus effects dispatched (notifications delivered) |
+| `skipped` | Node executions a **closed gate** prevented — one per loop iteration whose conditional edge evaluated false |
+| `nodes[]` | Per-node terminal status with `runs` / `failures` / `skipped` and its own selected/acted |
+| `gates[]` | Which gates closed and how often, most-skipped first |
+
+The counts come from the node executors themselves — `get_record` reports what
+it matched, the write nodes report what the data engine actually changed — not
+from the engine guessing at a node's output shape. A node that touches no
+records (`decision`, `assignment`) reports nothing at all, which is different
+from reporting zero.
+
+The same counts land on `sys_automation_run` as **queryable columns**
+(`selected_count`, `acted_count`, `skipped_count`, plus a `summary_json`
+breakdown), so a broken sweep is something you can alert on rather than notice:
+
+```typescript
+// Runs that selected work and did none of it, newest first.
+const suspect = await engine.find('sys_automation_run', {
+  where: {
+    status: 'completed',
+    selected_count: { $gt: 0 },
+    acted_count: 0,
+    started_at: { $gte: since },
+  },
+  orderBy: [{ field: 'started_at', order: 'desc' }],
+});
+```
+
+`selected > 0 && acted == 0` over several consecutive runs is a near-perfect
+broken-sweep detector — the case that is otherwise invisible, because nobody is
+watching automation until it has already been dead for a month. A single such
+run is not proof of anything: a sweep whose work is all already done reports the
+same thing legitimately, which is why the signal is *consecutive* runs, and why
+the platform reports the counts rather than raising the alarm itself.
+
+Rows written before summaries existed carry `null` counts, not `0` — "not
+measured" must not read as "measured zero". The log line defaults to `info`;
+`AutomationServicePlugin`'s `runSummaryLog: 'debug' | 'off'` turns the volume
+down on a very high-frequency flow without turning the measurement off.
+
 ## Edges
 
 Edges connect nodes and define the execution path:

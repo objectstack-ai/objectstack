@@ -122,6 +122,28 @@ function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {
 }
 
 /**
+ * How many rows an `update` / `delete` actually touched (#4354).
+ *
+ * The data engine returns a DIFFERENT shape per route, by design: a bulk write
+ * lands on `driver.updateMany` / `deleteMany`, whose contract is
+ * `Promise<number>` (the row count), while a by-id write returns the updated
+ * record — or, for delete, whatever the driver reports (typically a boolean).
+ * The executor is the only place that knows which route it asked for, which is
+ * exactly why {@link NodeExecutionResult.metrics} is declared by the node and
+ * not sniffed by the engine.
+ *
+ * `null` / `false` / `undefined` ⇒ nothing was written. Anything else the driver
+ * hands back that is neither a count nor a list is one row — the write returned,
+ * so a row was touched.
+ */
+function writtenRowCount(result: unknown): number {
+    if (typeof result === 'number') return Number.isFinite(result) && result > 0 ? Math.trunc(result) : 0;
+    if (Array.isArray(result)) return result.length;
+    if (result === null || result === undefined || result === false) return 0;
+    return 1;
+}
+
+/**
  * CRUD built-in nodes — `get_record` / `create_record` / `update_record` /
  * `delete_record`, wired to the runtime data layer (ObjectQL / IDataEngine).
  * Part of the platform baseline, so the core {@link AutomationServicePlugin}
@@ -205,7 +227,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const data = getData();
                 if (!data) {
                     ctx.logger.warn(`[get_record] no data engine; skipping ${objectName}`);
-                    return { success: true, output: { records: [], object: objectName } };
+                    return { success: true, output: { records: [], object: objectName }, metrics: { selected: 0 } };
                 }
 
                 // #1888 — honor flow.runAs: read under the run's effective identity
@@ -215,11 +237,22 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     if (limit && limit > 1) {
                         const records = await data.find(objectName, { where: filter, fields, limit, context: dataCtx });
                         if (outputVariable) variables.set(outputVariable, records);
-                        return { success: true, output: { records, object: objectName } };
+                        // #4354 — the `selected` half of the broken-sweep signal:
+                        // this is the count that made #4347 diagnosable at all
+                        // ("found every stalled deal and nudged nobody").
+                        return {
+                            success: true,
+                            output: { records, object: objectName },
+                            metrics: { selected: Array.isArray(records) ? records.length : 0 },
+                        };
                     }
                     const record = await data.findOne(objectName, { where: filter, fields, context: dataCtx });
                     if (outputVariable) variables.set(outputVariable, record);
-                    return { success: true, output: { record, id: record?.id, object: objectName } };
+                    return {
+                        success: true,
+                        output: { record, id: record?.id, object: objectName },
+                        metrics: { selected: record ? 1 : 0 },
+                    };
                 } catch (err) {
                     return { success: false, error: `get_record(${objectName}) failed: ${(err as Error).message}` };
                 }
@@ -260,7 +293,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     ctx.logger.warn(`[create_record] no data engine; skipping ${objectName}`);
                     const mockId = `mock-${objectName}-${Date.now()}`;
                     if (outputVariable) variables.set(outputVariable, { id: mockId });
-                    return { success: true, output: { id: mockId, object: objectName } };
+                    // `acted: 0` — the mock id is a placeholder for downstream
+                    // templates, not a row. A summary that counted it would
+                    // report writes that never happened (#4354).
+                    return { success: true, output: { id: mockId, object: objectName }, metrics: { acted: 0 } };
                 }
 
                 // #1888 — honor flow.runAs (system → RLS-bypassing; user → trigger user).
@@ -302,6 +338,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         ...(dropped.length > 0
                             ? { warnings: dropped.map((e) => droppedFieldsWarning('create_record', e)) }
                             : {}),
+                        metrics: { acted: 1 },
                     };
                 } catch (err) {
                     return { success: false, error: `create_record(${objectName}) failed: ${(err as Error).message}` };
@@ -349,7 +386,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const data = getData();
                 if (!data) {
                     ctx.logger.warn(`[update_record] no data engine; skipping ${objectName}`);
-                    return { success: true };
+                    return { success: true, metrics: { acted: 0 } };
                 }
 
                 // #1888 — honor flow.runAs (system → RLS-bypassing; user → trigger user).
@@ -378,6 +415,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         ...(dropped.length > 0
                             ? { warnings: dropped.map((e) => droppedFieldsWarning('update_record', e)) }
                             : {}),
+                        metrics: { acted: writtenRowCount(result) },
                     };
                 } catch (err) {
                     return { success: false, error: `update_record(${objectName}) failed: ${(err as Error).message}` };
@@ -421,13 +459,17 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const filter = filterResult.filter;
 
                 const data = getData();
-                if (!data) return { success: true };
+                if (!data) return { success: true, metrics: { acted: 0 } };
 
                 // #1888 — honor flow.runAs (system → RLS-bypassing; user → trigger user).
                 const dataCtx = resolveRunDataContext(context);
                 try {
                     const result = await data.delete(objectName, { where: filter, context: dataCtx });
-                    return { success: true, output: { result, object: objectName } };
+                    return {
+                        success: true,
+                        output: { result, object: objectName },
+                        metrics: { acted: writtenRowCount(result) },
+                    };
                 } catch (err) {
                     return { success: false, error: `delete_record(${objectName}) failed: ${(err as Error).message}` };
                 }

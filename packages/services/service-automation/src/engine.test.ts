@@ -44,9 +44,12 @@ describe('AutomationEngine', () => {
             expect((e as unknown as { maxLogSize: number }).maxLogSize).toBe(3);
 
             // Drive the private ring buffer directly: push 5, keep newest 3.
+            // `steps` is required on the entry (recordLog folds it into the run
+            // summary, #4354) — an empty log is the honest value for a synthetic
+            // entry that never ran a node.
             const rec = (e as any).recordLog.bind(e);
             for (let i = 0; i < 5; i++) {
-                rec({ id: `run_${i}`, flowName: 'f', status: 'success' });
+                rec({ id: `run_${i}`, flowName: 'f', status: 'success', steps: [] });
             }
             const buf = (e as unknown as { executionLogs: Array<{ id: string }> }).executionLogs;
             expect(buf).toHaveLength(3);
@@ -1727,7 +1730,16 @@ describe('AutomationEngine - Back-edge re-entry (ADR-0044)', () => {
         expect(getCount()).toBe(3);
         // Every visit is its own step entry — observability shows each round.
         const run = (await engine.listRuns('counter_flow'))[0];
-        expect(run.steps.filter(s => s.nodeId === 'inc')).toHaveLength(3);
+        const visits = run.steps.filter(s => s.nodeId === 'inc' && s.status !== 'skipped');
+        expect(visits).toHaveLength(3);
+        // #4354 — the round that CLOSED the back-edge is recorded too, as a
+        // `skipped` step naming the gate. It is not a visit: the re-entry guard
+        // and the summary's per-node `runs` both exclude it, so recording the
+        // non-event must not inflate either.
+        const closed = run.steps.filter(s => s.nodeId === 'inc' && s.status === 'skipped');
+        expect(closed).toHaveLength(1);
+        expect(closed[0].skippedBy).toMatchObject({ nodeId: 'inc', edgeId: 'e_back' });
+        expect(run.summary?.nodes.find(n => n.nodeId === 'inc')).toMatchObject({ runs: 3, skipped: 1 });
     });
 
     it('aborts a runaway back-edge loop at the re-entry cap', async () => {

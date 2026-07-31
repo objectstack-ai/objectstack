@@ -250,6 +250,10 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                 return {
                     success: true,
                     output: { delivered: 0, failed: 0, skipped: true },
+                    // #4354 — nothing was delivered, and the run summary must say
+                    // so: a nudge sweep whose messaging service is absent is
+                    // precisely the "green but inert" case this counter exists for.
+                    metrics: { acted: 0 },
                 };
             }
 
@@ -274,6 +278,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                         delivered: result.delivered,
                         failed: result.failed,
                     },
+                    // A notification IS the action for a nudge/alert sweep, so it
+                    // counts toward `acted` (#4354) — otherwise the flow whose
+                    // whole job is to notify would report acting on nothing, and
+                    // the broken-sweep detector would fire on every healthy run.
+                    metrics: { acted: Number(result.delivered) || 0 },
                 };
             } catch (err) {
                 return { success: false, error: `notify failed: ${(err as Error).message}` };

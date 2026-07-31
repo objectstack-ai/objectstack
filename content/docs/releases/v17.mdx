@@ -1152,6 +1152,17 @@ is gone.
 
 ### Automation & flows
 
+- **Every terminal run reports what it did** (#4354): `selected` / `acted` /
+  `skipped` totals, a per-node breakdown, and *which gate closed* — on the run
+  result, in `listRuns` / `getRun`, as one greppable log line
+  (`selected=30 acted=0 skipped=30 gate=check_stalled->send_nudge:30`), and as
+  queryable `selected_count` / `acted_count` / `skipped_count` columns on
+  `sys_automation_run`. `success: true` never meant "it did its job": a sweep
+  that selected thirty records and wrote none was indistinguishable from one
+  with nothing to do, which is how three inert production flows ran green for
+  as long as they had existed. `selected > 0 && acted == 0` over consecutive
+  runs is now the detector. See
+  [Run summaries](/docs/automation/flows#run-summaries).
 - **`record-after-write`** fires one flow on create **or** update (#3427), with
   `previous` bound as `null` on the create leg so start conditions can
   discriminate.

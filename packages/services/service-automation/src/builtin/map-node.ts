@@ -131,6 +131,14 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
 
       const parentRunId = variables.get('$runId');
 
+      // #4354 — totals of the items completed SYNCHRONOUSLY during THIS entry.
+      // Per-entry, not cumulative: the node re-runs (and logs a fresh step) on
+      // every re-entry, so a running total would be counted once per item. An
+      // item that PAUSED is credited to this entry's step by the engine when its
+      // child run bubbles back (AutomationEngine.creditChildRun).
+      let selected = 0;
+      let acted = 0;
+
       // Drive items in order. Synchronous items advance inline; a pausing item
       // suspends the run and is resumed via re-entry.
       while (state.started < collection.length) {
@@ -167,20 +175,32 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
           // Mark this item started and suspend; the engine re-enters on bubble.
           state.started = idx + 1;
           variables.set(stateKey, state);
-          return { success: true, suspend: true, correlation: `map:${child.runId}` };
+          return { success: true, suspend: true, correlation: `map:${child.runId}`, metrics: { selected, acted } };
         }
         if (!child.success) {
-          return { success: false, error: `map '${node.id}': item ${idx} (subflow '${flowName}') failed: ${child.error ?? 'unknown error'}` };
+          return {
+            success: false,
+            error: `map '${node.id}': item ${idx} (subflow '${flowName}') failed: ${child.error ?? 'unknown error'}`,
+            // Items that already succeeded wrote real rows; a later item's
+            // failure must not erase them from the run's totals.
+            metrics: { selected: selected + (child.summary?.selected ?? 0), acted: acted + (child.summary?.acted ?? 0) },
+          };
         }
         // Synchronous completion — record and advance.
         state.started = idx + 1;
         state.results.push(child.output ?? null);
+        selected += child.summary?.selected ?? 0;
+        acted += child.summary?.acted ?? 0;
       }
 
       // All items done.
       variables.set(stateKey, state);
       if (outVar) variables.set(outVar, state.results);
-      return { success: true, output: { results: state.results, count: state.results.length } };
+      return {
+        success: true,
+        output: { results: state.results, count: state.results.length },
+        metrics: { selected, acted },
+      };
     },
   });
 

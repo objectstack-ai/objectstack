@@ -50,6 +50,11 @@ const OVERFLOW_PRUNE_BATCH = 50;
  *  tail is halved until it fits — the newest steps carry the failure. */
 const MAX_STEPS_JSON_BYTES = 64 * 1024;
 
+/** Byte cap for a terminal row's persisted `summary_json` (#4354). Generous
+ *  relative to the shape it holds — one entry per node that ran, one per gate
+ *  that closed — so only a pathological flow ever trips it. */
+const MAX_SUMMARY_JSON_BYTES = 16 * 1024;
+
 function isTerminalStatus(status: unknown): boolean {
     return status === 'completed' || status === 'failed';
 }
@@ -255,6 +260,15 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       duration_ms: record.durationMs ?? null,
       error: record.error ?? null,
       steps_json: serializeStepsBounded(record.steps),
+      // #4354 — the totals land in COLUMNS so an operator can alert on
+      // `selected_count > 0 AND acted_count = 0`; the per-node / per-gate detail
+      // rides in the JSON blob. Null (not 0) when the engine computed no
+      // summary: "not measured" and "measured zero" are different answers, and
+      // only one of them should trip an alarm.
+      selected_count: record.summary?.selected ?? null,
+      acted_count: record.summary?.acted ?? null,
+      skipped_count: record.summary?.skipped ?? null,
+      summary_json: record.summary ? serializeSummaryBounded(record.summary) : null,
     };
     const existing = await this.engine.find(TABLE, {
       where: { id }, limit: 1, context: SYSTEM_CTX,
@@ -345,6 +359,10 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       organizationId: row.organization_id ?? null,
       userId: row.user_id ?? undefined,
       steps: parseJson<RunRecord['steps']>(row.steps_json, undefined),
+      // #4354 — rehydrate from `summary_json`, never re-fold `steps_json`: those
+      // steps are compacted (200 max), so recomputing would report a
+      // 5000-iteration sweep as having acted a couple of hundred times.
+      summary: parseJson<RunRecord['summary']>(row.summary_json, undefined),
     };
   }
 
@@ -408,4 +426,28 @@ function serializeStepsBounded(steps: RunRecord['steps']): string | null {
     tail = tail.slice(Math.ceil(tail.length / 2));
   }
   return null;
+}
+
+/**
+ * JSON-encode a run summary under {@link MAX_SUMMARY_JSON_BYTES} (#4354).
+ *
+ * The detail arrays are bounded by the flow's STATIC shape — one entry per node
+ * that ran, one per gate that closed — not by iteration count, so a 5000-row
+ * sweep over a 6-node flow serializes six entries. A pathological flow with
+ * thousands of nodes is the only way over the cap; there the detail is dropped
+ * and the TOTALS are kept, because the totals are what the broken-sweep alert
+ * queries and losing them to a size limit would be the one unacceptable outcome.
+ * The dropped detail stays visible as `detailOmitted`, never silently absent.
+ */
+function serializeSummaryBounded(summary: NonNullable<RunRecord['summary']>): string {
+  const json = JSON.stringify(summary);
+  if (json.length <= MAX_SUMMARY_JSON_BYTES) return json;
+  return JSON.stringify({
+    selected: summary.selected,
+    acted: summary.acted,
+    skipped: summary.skipped,
+    nodes: [],
+    gates: [],
+    detailOmitted: true,
+  });
 }

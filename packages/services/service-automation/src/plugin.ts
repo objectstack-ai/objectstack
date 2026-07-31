@@ -11,6 +11,7 @@ import type {
 } from '@objectstack/spec/integration';
 import { isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
 import { AutomationEngine } from './engine.js';
+import type { RunSummaryLogLevel } from './engine.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
@@ -75,6 +76,18 @@ export interface AutomationServicePluginOptions {
      * to {@link DEFAULT_MAX_EXECUTION_LOG_SIZE} (1000).
      */
     maxLogSize?: number;
+    /**
+     * Level for the one-line-per-terminal-run summary (#4354) — the line that
+     * makes `selected=30 acted=0` greppable in a plain log file. Defaults to
+     * `'info'`; a host running very high-frequency record-change flows can drop
+     * it to `'debug'` or `'off'`.
+     *
+     * Turning it down is a decision about log volume only: the summary is still
+     * computed, still returned on {@link AutomationResult}, still persisted to
+     * `sys_automation_run`, and still queryable. The measurement is not optional
+     * — only its default-level narration is.
+     */
+    runSummaryLog?: RunSummaryLogLevel;
     /**
      * Per-flow cap on terminal run-history rows, enforced at write time (the
      * "or 100 runs/flow, whichever first" half of the #2585 retention
@@ -368,6 +381,7 @@ export class AutomationServicePlugin implements Plugin {
     async init(ctx: PluginContext): Promise<void> {
         this.engine = new AutomationEngine(ctx.logger, undefined, {
             maxLogSize: this.options.maxLogSize,
+            runSummaryLog: this.options.runSummaryLog,
         });
 
         // Register as global service — other plugins access via ctx.getService('automation')

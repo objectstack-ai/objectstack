@@ -59,7 +59,10 @@ export const SysAutomationRun = ObjectSchema.create({
   displayNameField: 'id',
   nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{flow_name} · {node_id}',
-  highlightFields: ['flow_name', 'node_id', 'status', 'correlation', 'started_at', 'updated_at'],
+  // `selected_count`/`acted_count` sit in the highlight set on purpose (#4354):
+  // "selected 30, acted 0" has to be visible on the run row itself, not one
+  // drill-down away — a signal you must click to find is a signal nobody sees.
+  highlightFields: ['flow_name', 'node_id', 'status', 'selected_count', 'acted_count', 'correlation', 'started_at', 'updated_at'],
 
   fields: {
     id: Field.text({ label: 'Run ID', required: true, readonly: true, group: 'System' }),
@@ -179,6 +182,40 @@ export const SysAutomationRun = ObjectSchema.create({
       label: 'Error',
       required: false,
       description: 'Failure reason for a `failed` run — the message a designer needs to fix it.',
+      group: 'Outcome',
+    }),
+
+    // ── Run summary (#4354) ────────────────────────────────────────────────
+    // COLUMNS, not just a blob: `selected_count > 0 AND acted_count = 0` over N
+    // consecutive runs is a near-perfect broken-sweep detector, and an operator
+    // can only alert on what is filterable. Buried inside `summary_json` these
+    // would be readable but not queryable — the difference between a dashboard
+    // and an alarm.
+    selected_count: Field.number({
+      label: 'Records Selected',
+      required: false,
+      description: 'Records this run READ across its data nodes. Null on rows written before run summaries existed — which is NOT the same as zero.',
+      group: 'Outcome',
+    }),
+
+    acted_count: Field.number({
+      label: 'Records Acted On',
+      required: false,
+      description: 'Records this run created / updated / deleted, plus effects dispatched (notifications delivered). `selected_count > 0 AND acted_count = 0` over consecutive runs is the broken-sweep signal.',
+      group: 'Outcome',
+    }),
+
+    skipped_count: Field.number({
+      label: 'Gate Skips',
+      required: false,
+      description: 'Node executions a closed gate prevented — one per loop iteration whose conditional edge evaluated false. Many skips with no writes names the gate as the suspect.',
+      group: 'Outcome',
+    }),
+
+    summary_json: Field.textarea({
+      label: 'Run Summary',
+      required: false,
+      description: 'JSON per-node breakdown (terminal status, runs, failures, selected/acted) plus which gates closed and how often. Folded from the FULL step log, so its counts stay exact even when `steps_json` is compacted.',
       group: 'Outcome',
     }),
 

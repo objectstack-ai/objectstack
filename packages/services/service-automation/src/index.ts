@@ -4,6 +4,7 @@
 export { AutomationEngine, DEFAULT_MAX_EXECUTION_LOG_SIZE, MAX_PERSISTED_HISTORY_STEPS } from './engine.js';
 export type {
     AutomationEngineOptions,
+    RunSummaryLogLevel,
     NodeExecutor,
     NodeExecutionResult,
     FlowTrigger,
@@ -16,6 +17,12 @@ export type {
     RunRecord,
     StepLogEntry,
 } from './engine.js';
+
+// Per-run summary (#4354): the fold that turns a run's step log into
+// "selected N, acted M, skipped K by <gate>". Exported so a host building its
+// own observability surface (or a test asserting a sweep actually wrote
+// something) reuses the platform's definition instead of re-deriving one.
+export { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 
 // Connector provider contract (ADR-0097) and the registry vocabulary that goes
 // with it — re-exported from @objectstack/spec so hosts/tests can reach them via

@@ -113,15 +113,26 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
           screen: child.screen,
         };
       }
+      // #4354 — roll the child's totals up into this node's step. The child's
+      // steps live in the CHILD's run log, so without this a parent that
+      // delegates its writes to a subflow reports `acted: 0` and reads as a
+      // broken sweep. The child keeps its own run row with its own summary;
+      // the parent's answers "what did this run cause", subflows included.
+      const rolled = child.summary
+        ? { metrics: { selected: child.summary.selected, acted: child.summary.acted } }
+        : {};
+
       if (!child.success) {
-        return { success: false, error: `subflow '${flowName}' failed: ${child.error ?? 'unknown error'}` };
+        // A failed child may still have written rows before it died — carry its
+        // counts so the parent's summary does not understate what happened.
+        return { success: false, error: `subflow '${flowName}' failed: ${child.error ?? 'unknown error'}`, ...rolled };
       }
 
       // Bare output variable (like the assignment node, the executor may write
       // directly to the parent variable map).
       if (outVar) variables.set(outVar, child.output ?? null);
 
-      return { success: true, output: { output: child.output ?? null } };
+      return { success: true, output: { output: child.output ?? null }, ...rolled };
     },
   });
 
