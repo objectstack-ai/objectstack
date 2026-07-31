@@ -145,13 +145,21 @@ export type ExpressionBody = z.infer<typeof ExpressionBodySchema>;
  * still prefer a flow `update_record` node, whose structural `fields` config
  * is error-checked rather than advisory.
  *
- * **On an ACTION body, `ctx.record` is not a write surface at all (#4345).**
- * The hook path writes `ctx.input` back to the engine; the action path returns
- * only the script's value, so a write to the pre-fetched `ctx.record` snapshot
- * is discarded whether or not the field is declared — a different defect from
- * the unknown-column one above, and the reason the write-set lint deliberately
- * leaves `ctx.record` to `validateActionRecordWrites`. An action persists
- * through `ctx.api.object(...).update({ id: ctx.recordId, … })`.
+ * An **action** body carrying this same schema is checked by the sibling rule
+ * `validateActionBodyWrites`, over the subset of that ledger which survives the
+ * context change — `ctx.api.object('y').insert|create|update|updateById({ x })`
+ * and nothing else. An action's `ctx.input` is its PARAMS bag, not a record, so
+ * it is never resolved against object fields.
+ *
+ * **`ctx.record` is not a write surface at all (#4345).** The hook path writes
+ * `ctx.input` back to the engine; the action path returns only the script's
+ * value, so a write to the pre-fetched `ctx.record` snapshot is discarded
+ * whether or not the field is declared. That is a DIFFERENT defect from the
+ * unknown-column one above — warning on only its undeclared half would imply
+ * the declared half persists — which is why the rule above leaves it alone and
+ * `validateActionRecordWrites` reports all of it, with the sandbox reporting
+ * the same at invocation time. An action persists through
+ * `ctx.api.object(...).update({ id: ctx.recordId, … })`.
  *
  * @example
  * ```json

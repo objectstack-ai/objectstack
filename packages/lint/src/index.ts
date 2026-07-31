@@ -271,6 +271,28 @@ export type {
   ExtractedHookBodyWrite,
 } from './validate-hook-body-writes.js';
 
+// The same write-set check on action bodies — same schema, same sandbox, same
+// silent no-op. Its ledger is a declared partition of HOOK_BODY_WRITE_PATTERNS
+// (only the `ctx.api` family survives the context change), so the two rules
+// share one extractor rather than growing two.
+export {
+  validateActionBodyWrites,
+  ACTION_BODY_WRITE_PATTERNS,
+  ACTION_BODY_WRITE_PATTERN_IDS,
+  ACTION_BODY_WRITE_EXCLUSIONS,
+  ACTION_BODY_WRITE_UNKNOWN_FIELD,
+} from './validate-action-body-writes.js';
+export type {
+  ActionBodyWriteFinding,
+  ActionBodyWriteSeverity,
+  ActionBodyWriteExclusion,
+} from './validate-action-body-writes.js';
+
+// The OTHER half of an action body's write surface, and a different defect:
+// `ctx.record` is a read-only snapshot, so writes to it are discarded for
+// DECLARED fields too (#4345). The rule above deliberately excludes it — see
+// this module for why reporting only the undeclared half would imply the
+// declared half persists. Shares that module's action walk.
 export {
   validateActionRecordWrites,
   extractActionRecordWrites,

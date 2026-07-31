@@ -482,10 +482,20 @@ const actionObject = () => z.object({
    * ```
    *
    * (with `capabilities: ['api.write']`). Do not reason by analogy from
-   * `ctx.input`, which IS written back on the hook path. Both ends now report
-   * the mistake instead of swallowing it: `validateActionRecordWrites`
-   * (`@objectstack/lint`, advisory) at authoring time for the literal patterns,
-   * and the sandbox itself at invocation time for every write, including the
+   * `ctx.input`, which IS written back on the hook path.
+   *
+   * Both halves of that write surface are checked at author time, by two rules
+   * answering two different questions — and both advisory, both blind to what
+   * is statically unknowable (see `ScriptBodySchema` for the scope):
+   *
+   * - `validateActionBodyWrites` — a literal `ctx.api.object('y').update({ x })`
+   *   naming a field object `y` never declares warns with a did-you-mean: the
+   *   call succeeds while the unknown column silently never lands (#4271).
+   * - `validateActionRecordWrites` — any literal write to `ctx.record` warns,
+   *   declared or not, because none of them land (#4345). No did-you-mean: the
+   *   field name is not the bug.
+   *
+   * The sandbox reports the second at invocation time too, covering the
    * computed keys and aliases static analysis cannot see.
    */
   body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),

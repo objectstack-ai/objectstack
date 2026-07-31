@@ -12,6 +12,7 @@
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { IAutomationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
+import { validationFailure } from '../validation-failure.js';
 import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -160,7 +161,22 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // POST / → createFlow
     if (parts.length === 0 && m === 'POST') {
         if (typeof automationService.registerFlow === 'function') {
-            automationService.registerFlow(body?.name, body);
+            // [#3899] `registerFlow(body?.name, body)` used to run unchecked, so
+            // a definition whose `name` was missing or mistyped registered the
+            // flow under the key `undefined` — 200, body echoed back, caller
+            // convinced it succeeded, flow unreachable ever after. The name is
+            // the registry key; require it before touching the registry.
+            if (!body || typeof body !== 'object' || Array.isArray(body)) {
+                throw validationFailure('Flow definition body required', [
+                    { field: '(body)', code: 'invalid_type', message: 'expected a flow definition object' },
+                ]);
+            }
+            if (typeof body.name !== 'string' || body.name.trim() === '') {
+                throw validationFailure('Flow definition requires a non-empty `name` (the registry key this flow is stored and triggered under)', [
+                    { field: 'name', code: body.name === undefined ? 'required' : 'invalid_type', message: 'expected a non-empty string' },
+                ]);
+            }
+            automationService.registerFlow(body.name, body);
             return { handled: true, response: deps.success(body) };
         }
     }
@@ -253,8 +269,35 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // POST /:name/toggle → toggleFlow
         if (parts[1] === 'toggle' && m === 'POST') {
             if (typeof automationService.toggleFlow === 'function') {
-                await automationService.toggleFlow(name, body?.enabled ?? true);
-                return { handled: true, response: deps.success({ name, enabled: body?.enabled ?? true }) };
+                // [#3899] The old read was `body?.enabled ?? true` on an
+                // otherwise-unchecked body, so `{"enable": false}` — one letter
+                // off — ENABLED the flow and answered 200 `{enabled: true}`;
+                // `{"enabled": "false"}` (a string) toggled on too. The caller
+                // trying to switch a flow OFF is exactly the caller this must
+                // not silently invert. Contract: `{ enabled?: boolean }`, empty
+                // body = enable (the SDK always sends the key; bodyless enable
+                // is the documented legacy shape).
+                const toggleBody = body ?? {};
+                if (typeof toggleBody !== 'object' || Array.isArray(toggleBody)) {
+                    throw validationFailure('Invalid toggle body — expected { enabled?: boolean }', [
+                        { field: '(body)', code: 'invalid_type', message: 'expected an object' },
+                    ]);
+                }
+                const unknownKeys = Object.keys(toggleBody).filter((k) => k !== 'enabled');
+                if (unknownKeys.length > 0) {
+                    throw validationFailure(
+                        `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the toggle body is { enabled?: boolean }`,
+                        unknownKeys.map((k) => ({ field: k, code: 'unrecognized_keys', message: 'not a toggle field — did you mean `enabled`?' })),
+                    );
+                }
+                if ('enabled' in toggleBody && typeof (toggleBody as Record<string, unknown>).enabled !== 'boolean') {
+                    throw validationFailure('`enabled` must be a boolean (JSON true/false, not a string)', [
+                        { field: 'enabled', code: 'invalid_type', message: 'expected a boolean' },
+                    ]);
+                }
+                const enabled = (toggleBody as { enabled?: boolean }).enabled ?? true;
+                await automationService.toggleFlow(name, enabled);
+                return { handled: true, response: deps.success({ name, enabled }) };
             }
         }
 
@@ -343,8 +386,21 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // PUT /:name → updateFlow
         if (parts.length === 1 && m === 'PUT') {
             if (typeof automationService.registerFlow === 'function') {
-                automationService.registerFlow(name, body?.definition ?? body);
-                return { handled: true, response: deps.success(body?.definition ?? body) };
+                // [#3899] Same class as POST /: an unchecked body stored
+                // whatever arrived as the flow definition. The name rides the
+                // path here, so only the definition's shape needs guarding.
+                // (`body.definition ?? body` is a pre-existing two-dialect
+                // unwrap — kept as-is, not a new alias.)
+                const definition = (body && typeof body === 'object' && !Array.isArray(body))
+                    ? ((body as { definition?: unknown }).definition ?? body)
+                    : undefined;
+                if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+                    throw validationFailure('Flow definition body required', [
+                        { field: '(body)', code: 'invalid_type', message: 'expected a flow definition object' },
+                    ]);
+                }
+                automationService.registerFlow(name, definition);
+                return { handled: true, response: deps.success(definition) };
             }
         }
 

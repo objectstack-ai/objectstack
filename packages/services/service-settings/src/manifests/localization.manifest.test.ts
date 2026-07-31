@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
-import { localizationSettingsManifest } from './localization.manifest';
+import { localizationSettingsManifest } from './localization.manifest.js';
 
 describe('localizationSettingsManifest', () => {
   it('parses against SettingsManifestSchema', () => {

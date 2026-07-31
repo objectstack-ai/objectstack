@@ -74,7 +74,10 @@ ObjectStack uses a structured error system with **9 error categories** and **53 
 **Cause:** A field name in the request does not exist on the target object. On a
 list read this also covers an unreserved query parameter — `GET /data/:object`
 reads those as field filters, so one naming no field could only match zero
-records and is rejected rather than answered with an empty page.  
+records and is rejected rather than answered with an empty page — plus every
+other read axis that names a field: `select`, `expand` (a real field that holds
+no reference gets its own message), `searchFields` (a real field outside the
+searchable set gets its own message), `groupBy`, and `aggregations[].field`.  
 **Fix:** Check the object schema for valid field names. Use `os meta get object <name>` to inspect the object's fields. If the name was meant as a
 *parameter* rather than a field, use the real one — page size is `top` / `$top`
 / `limit`, not `pageSize` / `perPage`; the response's `error` names the
@@ -117,8 +120,20 @@ substitute. See the [Data API](/docs/api/data-api).
 **Retry:** `no_retry`
 
 ### `INVALID_QUERY`
-**Cause:** The query structure is malformed.  
-**Fix:** Check the query syntax against the [Query Cheat Sheet](/docs/data-modeling/queries).  
+**Cause:** A `groupBy` / `aggregations` value the spec cannot read: a bare
+string where an array belongs, an entry that names no field, an aggregation
+function or `dateGranularity` outside the spec's enums, or a missing `alias`.
+(Field names that simply don't exist on the object are `INVALID_FIELD`
+instead.)  
+**Fix:** Check the aggregation shapes against the
+[Query Cheat Sheet](/docs/data-modeling/queries) — e.g.
+`{ "groupBy": ["status"], "aggregations": [{ "function": "sum", "field":
+"amount", "alias": "total" }] }`. `count` is the only function that may omit
+`field`.  
+**Why it is an error and not an empty result:** every one of these shapes used
+to be silently ignored or mis-read — rows came back **ungrouped**, or an
+unknown function computed `null` — in a response indistinguishable from a
+served aggregation.  
 **Retry:** `no_retry`
 
 ### `INVALID_FILTER`

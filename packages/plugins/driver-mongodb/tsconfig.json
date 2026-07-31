@@ -2,7 +2,14 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    // `src/test-mongod.ts` uses `setTimeout` / `clearTimeout` / `console`. The
+    // `.test.ts` files that call it have always used them too, but they are
+    // excluded below, so this package never needed Node's globals declared
+    // until a shared test helper — which cannot be named `*.test.ts`, or vitest
+    // would collect it as a suite with no tests — became typechecked source.
+    // Same line a dozen sibling packages carry (client, core, lint, cli, …).
+    "types": ["node"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]

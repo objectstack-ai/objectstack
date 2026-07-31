@@ -18,8 +18,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import * as manifestsModule from '../manifests/index';
-import { zhCN, jaJP, esES } from './index';
+import * as manifestsModule from '../manifests/index.js';
+import { zhCN, jaJP, esES } from './index.js';
 
 type Specifier = { type?: string; id?: string; key?: string; label?: string; description?: string };
 type Manifest = { namespace: string; description?: string; specifiers: Specifier[] };

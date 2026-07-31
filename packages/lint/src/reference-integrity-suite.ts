@@ -86,6 +86,7 @@ import { validateAiSurfaceAffinity } from './validate-ai-surface-affinity.js';
 import { validateAiToolReferences } from './validate-ai-tool-references.js';
 import { validateAiAgentAuthoring } from './validate-ai-agent-authoring.js';
 import { validateHookBodyWrites } from './validate-hook-body-writes.js';
+import { validateActionBodyWrites } from './validate-action-body-writes.js';
 import { validateActionRecordWrites } from './validate-action-record-writes.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
@@ -139,9 +140,15 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // read-side membership (#4271). Lazy: only a hook that actually carries a
   // `language:'js'` body loads the TypeScript parser.
   { name: 'validateHookBodyWrites', run: validateHookBodyWrites },
-  // Writes an L2 ACTION body aims at `ctx.record` (#4345). Lazy on the same
-  // terms as the rule above. See "One deliberate non-member" in this module's
-  // header for why a rule that resolves no name is nevertheless carried here.
+  // The same check on the other surface that carries a `HookBodySchema` body:
+  // action bodies, run by the same sandbox. Only the `ctx.api` write family
+  // carries over — an action's `ctx.input` is its params bag, not a record
+  // (see that module's ledger). Lazy on the same terms.
+  { name: 'validateActionBodyWrites', run: validateActionBodyWrites },
+  // The half the rule above deliberately leaves alone: writes aimed at
+  // `ctx.record`, discarded for DECLARED fields too (#4345). See "One
+  // deliberate non-member" in this module's header for why a rule that
+  // resolves no name against the stack is nevertheless carried here.
   { name: 'validateActionRecordWrites', run: validateActionRecordWrites },
 ];
 

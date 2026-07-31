@@ -12,13 +12,21 @@
 //
 // ## Why this is a rule of its own, and not a case of #4271
 //
-// The #4271 family (`hook-body-write-unknown-field`, and its action sibling)
-// catches "an UNKNOWN column silently never lands, while declared fields land
-// normally". This is the opposite shape: EVERY write is dropped, a correctly
-// spelled and fully declared field included. Reporting only the unknown half
-// would imply the declared half persists — manufacturing exactly the false
-// completion this family exists to kill — which is why the unknown-field rule
-// deliberately excludes `ctx.record` and points here instead.
+// The #4271 family (`hook-body-write-unknown-field` and its action sibling
+// `action-body-write-unknown-field`) catches "an UNKNOWN column silently never
+// lands, while declared fields land normally". This is the opposite shape:
+// EVERY write is dropped, a correctly spelled and fully declared field
+// included. Reporting only the unknown half would imply the declared half
+// persists — manufacturing exactly the false completion this family exists to
+// kill — which is why `validate-action-body-writes.ts` deliberately excludes
+// `ctx.record` and points here instead.
+//
+// The two rules therefore split one surface, and they walk it through ONE
+// shared `collectActionBodies` (that module) so they cannot disagree about
+// which bodies exist — including the value-dedupe of `defineStack`'s merged
+// action copies, which is subtle enough that a second implementation would
+// drift silently. (It already did once: an identity-based dedupe reported the
+// showcase app's single warning twice.)
 //
 // So this rule never consults the object's declared fields: field existence is
 // irrelevant to whether the write lands, and a did-you-mean on the field name
@@ -54,6 +62,8 @@
 
 import { createRequire } from 'node:module';
 import type ts from 'typescript';
+
+import { collectActionBodies } from './validate-action-body-writes.js';
 
 // The TypeScript compiler must NOT be imported at module top level — ~9 MB of
 // CJS on the kernel boot path, while this gate only parses when an action
@@ -150,20 +160,6 @@ export const ACTION_RECORD_WRITE_PATTERNS: readonly ActionRecordWritePattern[] =
 ];
 
 type AnyRec = Record<string, unknown>;
-
-const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
-
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => isRec(x));
-  if (isRec(v)) {
-    return Object.entries(v).map(([name, def]) => ({
-      name,
-      ...(isRec(def) ? def : {}),
-    }));
-  }
-  return [];
-}
 
 /** One statically-extracted `ctx.record` write found in an L2 action body. */
 export interface ExtractedActionRecordWrite {
@@ -277,67 +273,15 @@ export function extractActionRecordWrites(source: string): ExtractedActionRecord
   return writes;
 }
 
-/** An action reachable from the stack, with where it was found. */
-interface WalkedAction {
-  action: AnyRec;
-  /** The object the action binds to, when statically known. */
-  object?: string;
-  path: string;
-}
-
-/**
- * Every action in the stack: top-level first, then object-embedded.
- *
- * Order matters. `defineStack`'s `mergeObjectActions` appends a top-level
- * action carrying `objectName` into that object's `actions` while KEEPING the
- * top-level entry, so one authored action is reachable twice. After a Zod parse
- * the two copies are structurally equal but not reference-identical, which is
- * why the caller dedupes by VALUE, not identity — and why walking top-level
- * first makes the surviving report land where the author actually wrote it.
- */
-function walkActions(stack: AnyRec): WalkedAction[] {
-  const out: WalkedAction[] = [];
-  asArray(stack.actions).forEach((action, i) => {
-    out.push({
-      action,
-      object: typeof action.objectName === 'string' ? action.objectName : undefined,
-      path: `actions[${i}]`,
-    });
-  });
-  asArray(stack.objects).forEach((obj, oi) => {
-    const objectName = typeof obj.name === 'string' ? obj.name : undefined;
-    asArray(obj.actions).forEach((action, ai) => {
-      out.push({
-        action,
-        object: typeof action.objectName === 'string' ? action.objectName : objectName,
-        path: `objects[${oi}].actions[${ai}]`,
-      });
-    });
-  });
-  return out;
-}
-
 /**
  * Flag `ctx.record` writes in L2 action bodies. Pure `(stack) => Finding[]`
  * (ADR-0019); safe on pre- or post-parse stacks.
  */
 export function validateActionRecordWrites(stack: AnyRec): ActionRecordWriteFinding[] {
   const findings: ActionRecordWriteFinding[] = [];
-  const seen = new Set<string>();
 
-  for (const { action, object, path } of walkActions(stack)) {
-    const body = action.body;
-    if (!isRec(body) || body.language !== 'js') continue;
-    const source = body.source;
-    if (typeof source !== 'string' || source.trim() === '') continue;
-
-    // Value-identity, not reference-identity: see walkActions.
-    const name = typeof action.name === 'string' && action.name ? action.name : undefined;
-    const dedupeKey = `${object ?? ''} ${name ?? path} ${source}`;
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
-
-    const writes = extractActionRecordWrites(source);
+  for (const site of collectActionBodies(stack)) {
+    const writes = extractActionRecordWrites(site.source);
     if (writes.length === 0) continue;
 
     const fields: string[] = [];
@@ -348,8 +292,8 @@ export function validateActionRecordWrites(stack: AnyRec): ActionRecordWriteFind
     findings.push({
       severity: 'warning',
       rule: ACTION_BODY_RECORD_WRITE_DISCARDED,
-      where: `action "${name ?? path}" › body`,
-      path: `${path}.body.source`,
+      where: `action "${site.name}" \u203a body`,
+      path: site.path,
       message:
         `body writes ${fields.length} field${plural} to ctx.record (${quoted}), but ctx.record is a READ-ONLY ` +
         `pre-fetched snapshot: the action path returns the script's value and never writes the record back, so ` +
@@ -358,9 +302,9 @@ export function validateActionRecordWrites(stack: AnyRec): ActionRecordWriteFind
         `record is unchanged (#4345).`,
       hint:
         `To persist, write through the repository: ` +
-        `await ctx.api.object('${object ?? '<object>'}').update({ id: ctx.recordId, ${fields[0]}: … }) — and declare ` +
-        `the 'api.write' capability on the body. To compute a value for the RESPONSE instead, return it ` +
-        `(\`return { ${fields[0]}: … }\`) rather than assigning to ctx.record. Only the literal patterns in ` +
+        `await ctx.api.object('${site.object ?? '<object>'}').update({ id: ctx.recordId, ${fields[0]}: \u2026 }) — and ` +
+        `declare the 'api.write' capability on the body. To compute a value for the RESPONSE instead, return it ` +
+        `(\`return { ${fields[0]}: \u2026 }\`) rather than assigning to ctx.record. Only the literal patterns in ` +
         `ACTION_RECORD_WRITE_PATTERNS are checked — computed keys and aliased references are not, and the runtime ` +
         `reports those at invocation time — and this warning never blocks a build.`,
     });

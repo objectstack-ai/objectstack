@@ -6,7 +6,7 @@ import {
   OBSERVABILITY_METRICS_SERVICE,
   SEMCONV,
 } from '@objectstack/observability';
-import { CacheServicePlugin } from './cache-service-plugin';
+import { CacheServicePlugin } from './cache-service-plugin.js';
 
 /**
  * Verifies the metrics resolution chain wired in PR #3:

@@ -27,6 +27,7 @@ describe('reference-integrity suite — membership', () => {
       'validateAiToolReferences',
       'validateAiAgentAuthoring',
       'validateHookBodyWrites',
+      'validateActionBodyWrites',
       'validateActionRecordWrites',
     ]);
   });
@@ -60,15 +61,28 @@ describe('reference-integrity suite — every member actually runs', () => {
     ],
     actions: [
       // validateObjectReferences: a param pointing at an object nothing declares.
+      { name: 'assign', label: 'Assign', params: [{ name: 'owner', reference: 'user' }] },
+      // validateActionBodyWrites: the L2 body persists a field crm_lead does
+      // not declare — the action returns success and the column never lands
+      // (#4271, the action half of the hook rule below).
+      {
+        name: 'score_now',
+        label: 'Score Now',
+        objectName: 'crm_lead',
+        body: {
+          language: 'js',
+          source: "await ctx.api.object('crm_lead').update({ lead_score: 100 });",
+        },
+      },
       // validateActionRecordWrites: the L2 body assigns to `ctx.record`, a
       // read-only snapshot — discarded even though `name` IS declared on
-      // crm_lead (#4345). One fixture, two rules.
+      // crm_lead (#4345). Deliberately a SEPARATE action from the one above:
+      // the two rules answer different questions, and one fixture carrying
+      // both would let either rule's silence hide behind the other's finding.
       {
-        name: 'assign',
-        label: 'Assign',
+        name: 'mark_assigned',
+        label: 'Mark Assigned',
         objectName: 'crm_lead',
-        type: 'script',
-        params: [{ name: 'owner', reference: 'user' }],
         body: { language: 'js', source: "ctx.record.name = 'assigned';" },
       },
     ],
@@ -182,6 +196,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('ai-skill-tool-unresolved');
     expect(rules).toContain('agent-authoring-withdrawn');
     expect(rules).toContain('hook-body-write-unknown-field');
+    expect(rules).toContain('action-body-write-unknown-field');
     expect(rules).toContain('action-body-record-write-discarded');
   });
 

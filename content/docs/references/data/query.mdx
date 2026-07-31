@@ -126,7 +126,8 @@ Type: `string`
 | **object** | `string` | ✅ | Object name (e.g. account) |
 | **fields** | `string[]` | optional | Fields to retrieve — field names, optionally dotted to reach through a relationship (`owner.name`). Related *records* are selected with `expand`, not from inside this list. |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
-| **search** | `{ query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search configuration ($search parameter) |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
+| **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
 | **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
 | **limit** | `number` | optional | Max records to return (LIMIT) |
 | **offset** | `number` | optional | Records to skip (OFFSET) |
