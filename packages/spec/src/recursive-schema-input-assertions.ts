@@ -73,7 +73,7 @@ import type {
 /** The authoring shape: only `object` is required, `expand` recurses. */
 export const queryInput: QueryInput = {
   object: 'account',
-  fields: ['name', { field: 'owner', fields: ['email'] }],
+  fields: ['name', 'owner.email'],
   expand: { owner: { object: 'user', fields: ['name'] } },
 };
 
@@ -97,12 +97,24 @@ export const joinNotANumber: JoinNodeInput = 42;
 // @ts-expect-error — `type` must be one of the four declared join kinds
 export const joinBadType: JoinNodeInput = { type: 'sideways', object: 'c', on: {} };
 
-/** A select entry is a bare name or a nested relation select. */
+/**
+ * A select entry is a field name, optionally dotted through a relationship.
+ *
+ * `FieldNode` stopped being recursive in #4196 — the `{ field, fields, alias }`
+ * member it used to carry was declared-but-inert and is gone, so
+ * `FieldNodeSchema` infers both halves itself rather than carrying a
+ * `z.ZodType<Output, Input>` annotation. The probes stay: this file's job is that
+ * the input side is CHECKED, and a `z.string()` that someone re-widens to
+ * `z.ZodType<FieldNode>` fails here exactly as a dropped type parameter would.
+ */
 export const fieldNodeString: FieldNode = 'name';
-export const fieldNodeNested: FieldNode = { field: 'owner', fields: ['email'], alias: 'o' };
+export const fieldNodeDotted: FieldNode = 'owner.email';
 
 // @ts-expect-error — a select entry is not a number
 export const fieldNodeNotANumber: FieldNode = 42;
+
+// @ts-expect-error — nor the nested-select object form retired in #4196
+export const fieldNodeNotTheRetiredForm: FieldNode = { field: 'owner', fields: ['email'] };
 
 /* ── data/filter.zod.ts ────────────────────────────────────────────────────── */
 

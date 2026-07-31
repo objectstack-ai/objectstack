@@ -44,5 +44,9 @@
     "type": "git",
     "url": "https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/services/service-cluster"
-  }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }

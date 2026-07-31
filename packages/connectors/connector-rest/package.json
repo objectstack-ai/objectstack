@@ -32,5 +32,9 @@
     "rest",
     "integration",
     "http"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }

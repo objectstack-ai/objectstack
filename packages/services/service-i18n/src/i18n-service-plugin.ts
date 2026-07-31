@@ -6,50 +6,10 @@ import type { IHttpServer, IHttpRequest, IHttpResponse } from '@objectstack/spec
 import type { II18nService } from '@objectstack/spec/contracts';
 import type { TranslationData } from '@objectstack/spec/system';
 import { resolveObjectFieldLabels, toLocaleDescriptors } from '@objectstack/spec/system';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+import { sendOk, sendError } from '@objectstack/types';
 import { FileI18nAdapter } from './file-i18n-adapter.js';
 import type { FileI18nAdapterOptions } from './file-i18n-adapter.js';
-
-/**
- * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
- * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
- * `{ success: false, error: { code, message } }` with `code` a semantic
- * STRING.
- *
- * These routes used to emit a bare `{ error: '<message>' }`, so the same SDK
- * method handed callers a string against this provider and an object against
- * the dispatcher's `/i18n` domain — the error-path twin of the success-path
- * asymmetry #3636 fixed (#3675). `ObjectStackClient` tolerates both shapes by
- * sniffing, which is the consumer-side shim Prime Directive #12 says to
- * delete by fixing the producer.
- *
- * Shape borrowed from the sibling services that already nest the error object
- * (`settings-routes.ts`, `share-link-routes.ts`); the `success` flag is what
- * those two still omit and the contract requires.
- */
-function sendError(res: IHttpResponse, status: number, code: string, message: string): void {
-  res.status(status).json({ success: false, error: { code, message } });
-}
-
-/**
- * Emit a success body in the DECLARED envelope — `BaseResponseSchema`
- * (`packages/spec/src/api/contract.zod.ts`), i.e. `{ success: true, data }`.
- *
- * #3636 put the right shape on all three read routes, but built it inline in each
- * one — four call sites for one envelope half, while the error half had already
- * been consolidated behind `sendError` (#3675). Those bodies were never wrong;
- * this is about the GUARD, not the wire.
- *
- * `scripts/check-route-envelope.mjs` counts response write sites per module, so a
- * consolidated module sits at a fixed two no matter how many routes it grows. This
- * one sat at five with a declared ratchet (#3973) precisely because a fifth read
- * route could have hand-rolled a fourth-dialect body and only a driven test would
- * have caught it — and a driven test only covers the routes that existed when it
- * was written. Collapsing the four inline builders into this one retires that
- * ratchet: the module now declares the same `2 / 1 / 1` as the other five.
- */
-function sendOk(res: IHttpResponse, data: unknown): void {
-  res.json({ success: true, data });
-}
 
 /**
  * Configuration options for the I18nServicePlugin.

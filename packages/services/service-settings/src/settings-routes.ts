@@ -13,8 +13,11 @@
  * `SettingsService`.
  */
 
-import type { ApiError, ErrorCode } from '@objectstack/spec/api';
-import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/contracts';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+// Its `extra` is `ApiError`'s own optional fields, so the undeclared siblings
+// #4224 retired from this module cannot come back through it either.
+import { sendOk, sendError } from '@objectstack/types';
 import { SettingsService } from './settings-service.js';
 import {
   SettingsForbiddenError,
@@ -46,59 +49,6 @@ export interface SettingsRoutesOptions {
 // request headers — a deployment that wants authenticated settings access must
 // wire a verified `contextFromRequest` (the plugin does).
 const defaultContext = (_req: IHttpRequest): SettingsContext => ({ enforced: true });
-
-/**
- * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
- * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
- * `{ success: false, error: { code, message } }`.
- *
- * This module was already half-right before #3843: `error` was correctly a
- * nested `{ code, message }` object, but no body carried the `success` flag the
- * envelope declares — so `BaseResponseSchema.safeParse` failed on every
- * response, success and error alike, and a caller keying on `success` (as
- * `ObjectStackClient.unwrapResponse` does) could not tell these routes' bodies
- * apart from an already-unwrapped payload.
- *
- * ## Why the last parameter is the declared fields, not a `Record` (#4224)
- *
- * It used to be `extra?: Record<string, unknown>`, spread straight into `error`,
- * and four branches used it to hang `namespace` / `key` / `reason` / `fields`
- * beside `code` and `message`. `ApiErrorSchema` declares none of those. The
- * bodies still passed every gate — `ApiErrorSchema` is a plain `z.object`, so
- * unknown keys were STRIPPED rather than rejected, and `envelopeViolations`
- * inspects only the body's top level — which made them conformant *by
- * stripping* rather than by declaration, and made a `safeParse` pass mean less
- * than it looked like it meant.
- *
- * Typing the parameter as `ApiError`'s own optional fields is what stops that
- * coming back: an undeclared sibling is now a compile error at the call site
- * instead of a key that quietly evaporates at the schema boundary. `code` is
- * likewise the closed ADR-0112 `ErrorCode` union rather than `string`, so an
- * unregistered code fails to typecheck rather than to parse.
- */
-function sendError(
-  res: IHttpResponse,
-  status: number,
-  code: ErrorCode,
-  message: string,
-  extra?: Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId'>,
-) {
-  res.status(status).json({ success: false, error: { code, message, ...extra } });
-}
-
-/**
- * Emit a success body in the DECLARED envelope — `{ success: true, data }`.
- *
- * The three success bodies keep their payload keys, one level deeper:
- * `{ manifests }` → `{ success: true, data: { manifests } }`. The
- * `GET /:namespace` payload is `SettingsNamespacePayloadSchema`
- * (`{ manifest, values }`) and moves under `data` whole, so that schema still
- * describes exactly what the route returns — now as the envelope's `data`
- * rather than as the entire body.
- */
-function sendOk(res: IHttpResponse, data: unknown, status = 200) {
-  res.status(status).json({ success: true, data });
-}
 
 export function registerSettingsRoutes(
   http: IHttpServer,

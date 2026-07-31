@@ -2,59 +2,14 @@
 
 import { randomUUID } from 'node:crypto';
 import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '@objectstack/spec/contracts';
+// The declared envelope is written in ONE place for the whole platform (#3973).
+import { sendOk, sendError } from '@objectstack/types';
 import type { StorageMetadataStore, FileRecord } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
 import { contentDispositionValue } from './content-disposition.js';
 
 /** Authorization verdict for an attachments-scope download (#2970 item 2). */
 export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
-
-/**
- * Emit an error in the DECLARED envelope — `BaseResponseSchema` +
- * `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`), i.e.
- * `{ success: false, error: { code, message } }` with `code` a semantic
- * STRING.
- *
- * These routes used to emit a bare `{ error: '<message>' }`, with the code —
- * where one existed at all — as a SIBLING of `error` rather than a field of
- * it. So a caller reading `body.error.message` got `undefined` here and the
- * real message from the dispatcher (#3675). `ObjectStackClient` papers over
- * the difference by sniffing four shapes; that shim is the consumer-side
- * symptom Prime Directive #12 says to cure at the producer.
- */
-function sendError(res: IHttpResponse, status: number, code: string, message: string): void {
-  res.status(status).json({ success: false, error: { code, message } });
-}
-
-/**
- * Emit a success body in the DECLARED envelope — `BaseResponseSchema`
- * (`packages/spec/src/api/contract.zod.ts`), i.e. `{ success: true, data }`.
- * That is what `storage.zod.ts` has declared for these routes all along, and
- * what `ObjectStackClient.unwrapResponse` keys on.
- *
- * #3675 normalized the error path and deliberately left this one alone,
- * because unlike the errors it is not additive. The success bodies were three
- * shapes, none carrying `success` (#3689):
- *
- *   - the six upload routes:    `{ data: {…} }`     — flag missing, payload already in place
- *   - `GET /files/:fileId/url`: `{ url }`           — no envelope at all
- *   - `PUT /_local/raw/:token`: `{ ok: true, key }` — a second, private word for `success`
- *
- * so the last two MOVE their payload under `data`. The consumers were taught
- * both shapes first — `storage.getDownloadUrl` reads through the SDK's
- * standard `unwrapResponse`, the console's two attachment openers already read
- * `body?.url ?? body?.data?.url` — so the repos are not coupled by merge
- * order, the same way the error path was landed. `ok` is dropped rather than
- * kept beside `success`: one envelope, one word for it.
- *
- * Every success body in this module goes through here, so the shape lives in
- * exactly one line. `success-envelope.conformance.test.ts` drives each route,
- * parses the result against the real spec schemas, and scans this source so a
- * new route cannot quietly reintroduce a bare one.
- */
-function sendOk(res: IHttpResponse, data: unknown): void {
-  res.json({ success: true, data });
-}
 
 /**
  * Options for the storage route registration helper.

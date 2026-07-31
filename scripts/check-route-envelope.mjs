@@ -22,8 +22,11 @@
  *
  * The platform answers REST from two kinds of file, and this audits both:
  *
- *   1. **Route modules** (`*-routes.ts`) — call `res.json(...)`. Counted below
- *      in `MODULES`.
+ *   1. **Route modules** (`*-routes.ts`) — write to a response object. Since
+ *      #3973 every one of them writes through ONE shared pair — `sendOk` /
+ *      `sendError` in `@objectstack/types` — so a converted module calls
+ *      `res.json` zero times itself. Counted below in `MODULES`; the shared
+ *      pair is pinned separately in `SHARED_BUILDER`.
  *   2. **Dispatcher domains** (`runtime/src/domains/*.ts`) — RETURN
  *      `{ status, body }` for a central sender, so they never call `res.json`
  *      and the first scan cannot see them. Counted in `DISPATCHER_DOMAINS`.
@@ -36,13 +39,22 @@
  * ## Why a whole-repo scan rather than a per-module test
  *
  * The load-bearing check is structural, not per-route: it COUNTS the sites where
- * a response gets built. When every body in a module goes through its `sendOk` /
- * `sendError` pair, that count is fixed at two and does not grow with the route
- * list — so a *new* route that hand-rolls a body moves the count and fails here,
- * which is the one thing a driven-body test can never cover (it can only drive
- * the routes that existed the day it was written). The domain table applies the
- * same idea from the other end: a domain that answers only through the `deps.*`
- * helpers hand-builds zero responses, so any hand-built one has to be classified.
+ * a response gets built. A module that routes every body through the shared
+ * `sendOk` / `sendError` builds none itself, so that count is fixed at ZERO and
+ * does not grow with the route list — a *new* route that hand-rolls a body moves
+ * it off zero and fails here, which is the one thing a driven-body test can never
+ * cover (it can only drive the routes that existed the day it was written). The
+ * domain table applies the same idea from the other end: a domain that answers
+ * only through the `deps.*` helpers hand-builds zero responses, so any hand-built
+ * one has to be classified.
+ *
+ * Until #3973 each module carried its own copy of the pair and so declared a
+ * fixed `2 / 1 / 1`. That proved the seven copies agreed — it could not stop an
+ * eighth module from copying the pair again, which is what moving them onto one
+ * writer does. So what the count asserts per module is now strictly
+ * stronger: not "your two builders are the enveloped ones" but "you have no
+ * builders". The two write sites that remain in the whole surface are the shared
+ * pair itself, pinned by `SHARED_BUILDER` below.
  *
  * #3675 / #3689 shipped this as a regex block copied into each converted
  * package. Three copies was the signal it wanted lifting (#3843 option 3), and
@@ -55,7 +67,7 @@
  * than surveying.
  *
  * A module discovered by the scan but absent from the table is an ERROR, not a
- * default: silently applying `2 / 1 / 1` to an unknown module would let a new
+ * default: silently applying `0 / 0 / 0` to an unknown module would let a new
  * one pass by coincidence.
  *
  * ## Why AST, not regex
@@ -113,21 +125,25 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
  * There is no fourth state where nobody looked.
  */
 const MODULES = {
-  // ── Conformant (#3675, #3689, #3843) ────────────────────────────────────
-  'packages/services/service-storage/src/storage-routes.ts': { responses: 2, ok: 1, err: 1 },
-  'packages/services/service-settings/src/settings-routes.ts': { responses: 2, ok: 1, err: 1 },
-  'packages/services/service-datasource/src/admin-routes.ts': { responses: 2, ok: 1, err: 1 },
-  'packages/rest/src/external-datasource-routes.ts': { responses: 2, ok: 1, err: 1 },
-  'packages/rest/src/package-routes.ts': { responses: 2, ok: 1, err: 1 },
-  // Consolidated by #3973: #3636 put the right envelope on its three read routes
-  // but built it inline in four places, so this module carried a ratchet at 5 / 4 / 1
-  // until those collapsed behind a `sendOk`.
-  'packages/services/service-i18n/src/i18n-service-plugin.ts': { responses: 2, ok: 1, err: 1 },
+  // ── Conformant (#3675, #3689, #3843, #3983 — consolidated by #3973) ──────
+  //
+  // All zero: every body these seven emit is written by the shared pair, so
+  // none of them builds a response itself. They each declared `2 / 1 / 1` while
+  // they carried their own copy of that pair.
+  'packages/services/service-storage/src/storage-routes.ts': { responses: 0, ok: 0, err: 0 },
+  'packages/services/service-settings/src/settings-routes.ts': { responses: 0, ok: 0, err: 0 },
+  'packages/services/service-datasource/src/admin-routes.ts': { responses: 0, ok: 0, err: 0 },
+  'packages/rest/src/external-datasource-routes.ts': { responses: 0, ok: 0, err: 0 },
+  'packages/rest/src/package-routes.ts': { responses: 0, ok: 0, err: 0 },
+  // #3636 put the right envelope on this module's three read routes but built it
+  // inline in four places, so it carried a ratchet at 5 / 4 / 1 until those
+  // collapsed behind a local `sendOk` — and then onto the shared one.
+  'packages/services/service-i18n/src/i18n-service-plugin.ts': { responses: 0, ok: 0, err: 0 },
   // Converted by #3983, the last ratchet. This module was never emitting a
   // `success` flag at all, which broke `client.shareLinks.create()`/`.list()`
   // through `unwrapResponse`; it converged onto the shapes its dispatcher twin
   // (`runtime/src/domains/share-links.ts`) had always returned.
-  'packages/plugins/plugin-sharing/src/share-link-routes.ts': { responses: 2, ok: 1, err: 1 },
+  'packages/plugins/plugin-sharing/src/share-link-routes.ts': { responses: 0, ok: 0, err: 0 },
 
   // ── Exempt ──────────────────────────────────────────────────────────────
 
@@ -154,6 +170,26 @@ const MODULES = {
 
 /** Identifiers whose `.json()` READS a request rather than writing a response. */
 const REQUEST_RECEIVERS = new Set(['req', 'request']);
+
+/**
+ * The one file that writes the envelope for surface 1, and the counts that make
+ * it that file (#3973).
+ *
+ * Every zero in `MODULES` above is only meaningful because these two write sites
+ * exist somewhere: a module can reach `0 / 0 / 0` either by routing everything
+ * through the shared pair, or by answering nothing at all. Pinning the pair here
+ * keeps the invariant total rather than per-module — two write sites, one
+ * `success: true`, one `success: false`, for every REST body the route modules
+ * emit.
+ *
+ * It also makes deleting or relocating the builders a loud failure instead of a
+ * silent one: the path is asserted to exist, so moving it without updating this
+ * line fails the gate rather than quietly leaving nothing pinned.
+ */
+const SHARED_BUILDER = {
+  file: 'packages/types/src/response-envelope.ts',
+  counts: { responses: 2, ok: 1, err: 1 },
+};
 
 // ── The dispatcher's OTHER surface ───────────────────────────────────────────
 
@@ -404,7 +440,8 @@ function audit() {
     if (!declared) {
       problems.push(
         `${file}\n    NOT DECLARED. Add it to MODULES in scripts/check-route-envelope.mjs.\n` +
-        `    If it emits the envelope, declare { responses: 2, ok: 1, err: 1 }. If it still\n` +
+        `    If it emits the envelope through the shared sendOk/sendError from\n` +
+        `    @objectstack/types, declare { responses: 0, ok: 0, err: 0 }. If it still\n` +
         `    drifts, declare its CURRENT counts plus a \`ratchet\` naming the issue that\n` +
         `    will fix it — never leave a route module unaudited.`,
       );
@@ -420,7 +457,9 @@ function audit() {
         problems.push(
           `${file}\n    ${key}: found ${got[key]}, declared ${want[key]}` +
           (key === 'responses' && got[key] > want[key]
-            ? `\n    A route is building its own body instead of calling the envelope helper.` +
+            ? `\n    A route is building its own body instead of calling the shared envelope` +
+              `\n    helper. Import { sendOk, sendError } from '@objectstack/types' rather than` +
+              `\n    writing the shape again — see packages/types/src/response-envelope.ts.` +
               `\n    Write sites: ${got.sites.join(', ')}`
             : '') +
           (want.ratchet ? `\n    (ratchet for ${want.ratchet} — the declared numbers pin current drift)` : ''),
@@ -432,6 +471,31 @@ function audit() {
   for (const file of Object.keys(MODULES)) {
     if (!discovered.includes(file)) {
       problems.push(`${file}\n    declared in MODULES but not found — moved or deleted? Update the table.`);
+    }
+  }
+
+  // ── The shared builder every zero above depends on ────────────────────────
+  let sharedSource;
+  try {
+    sharedSource = readFileSync(join(ROOT, SHARED_BUILDER.file), 'utf8');
+  } catch {
+    problems.push(
+      `${SHARED_BUILDER.file}\n    the shared envelope builder is MISSING. Every route module declares\n` +
+      `    0 write sites because this file holds them; without it nothing pins the\n` +
+      `    envelope's shape at all. Restore it, or update SHARED_BUILDER if it moved.`,
+    );
+  }
+  if (sharedSource !== undefined) {
+    const got = scanSource(sharedSource, SHARED_BUILDER.file);
+    for (const [key, want] of Object.entries(SHARED_BUILDER.counts)) {
+      if (got[key] !== want) {
+        problems.push(
+          `${SHARED_BUILDER.file}\n    ${key}: found ${got[key]}, declared ${want}\n` +
+          `    This is the ONE writer for every route module's bodies. A third write site\n` +
+          `    here is a third dialect for all of them at once; a missing one means a half\n` +
+          `    of the envelope nobody emits. Sites: ${got.sites.join(', ') || '(none)'}`,
+        );
+      }
     }
   }
 
@@ -484,8 +548,9 @@ function audit() {
     for (const p of problems) console.error('  ' + p + '\n');
     console.error(
       'Every REST body must be built in ONE place per surface, in the envelope\n' +
-      'BaseResponseSchema declares — a route module\'s sendOk / sendError pair, or a\n' +
-      'dispatcher domain\'s deps.* helpers. See scripts/check-route-envelope.mjs.',
+      'BaseResponseSchema declares — the shared sendOk / sendError in\n' +
+      '@objectstack/types for route modules, or a dispatcher domain\'s deps.* helpers.\n' +
+      'See scripts/check-route-envelope.mjs.',
     );
     process.exit(1);
   }
@@ -497,6 +562,10 @@ function audit() {
   console.log(
     `✓ Route-envelope conformance — ${discovered.length} route module(s) audited: ` +
     `${conformant} conformant, ${ratcheted.length} ratcheted, ${exempt.length} exempt`,
+  );
+  console.log(
+    `  all bodies written by ${SHARED_BUILDER.file} ` +
+    `(${SHARED_BUILDER.counts.responses} write sites, pinned)`,
   );
   for (const [file, m] of ratcheted) {
     console.log(`  ⚠ ratchet ${m.ratchet}: ${file} (pinned at current drift, not conformant)`);
@@ -532,6 +601,32 @@ function selfTest() {
   `;
   let r = scanSource(sound);
   assert(r.responses === 2 && r.ok === 1 && r.err === 1, `sound module → ${JSON.stringify(r)}`);
+
+  // The shape every route module has had since #3973: the builders live in
+  // @objectstack/types, so the module itself writes NOTHING. This is the state
+  // the MODULES table now declares, and the reason it declares zeros.
+  r = scanSource(`
+    import { sendOk, sendError } from '@objectstack/types';
+    http.get('/a', (q, res) => sendOk(res, { a: 1 }));
+    http.post('/b', (q, res) => sendOk(res, { b: 2 }, 201));
+    http.get('/c', (q, res) => sendError(res, 404, 'RESOURCE_NOT_FOUND', 'gone'));
+  `);
+  assert(
+    r.responses === 0 && r.ok === 0 && r.err === 0,
+    `a fully consolidated module must scan to zero → ${JSON.stringify(r)}`,
+  );
+
+  // …and a module that consolidated MOST of its bodies is exactly what the
+  // zeros are for: one hand-rolled body moves the count off zero and fails.
+  r = scanSource(`
+    import { sendOk } from '@objectstack/types';
+    http.get('/a', (q, res) => sendOk(res, { a: 1 }));
+    http.get('/b', (q, res) => res.status(200).json({ success: true, data: { b: 2 } }));
+  `);
+  assert(
+    r.responses === 1 && r.ok === 1,
+    `one hand-rolled body among helper calls must be seen → ${JSON.stringify(r)}`,
+  );
 
   // (1) A `//` inside a string truncated the rest of the line for the regex
   // version, hiding the response write after it.

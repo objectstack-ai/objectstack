@@ -31,5 +31,9 @@
     "sms",
     "aliyun",
     "twilio"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }

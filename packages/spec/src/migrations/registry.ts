@@ -579,9 +579,37 @@ const step18: MigrationStep = {
     + 'mutation got it executed. That is the dangerous direction of declared ≠ enforced: a flag '
     + 'lying about a data-safety guarantee. No dry-run exists today; the schema tombstones the '
     + 'key with the prescription. It is HTTP-only (never stored in stack metadata), so the '
-    + 'change is one semantic TODO for API callers rather than a stack conversion.',
+    + 'change is one semantic TODO for API callers rather than a stack conversion.\n\n'
+    + 'It also narrows `QueryAST.fields` to field names (#4196): the `FieldNode` union carried a '
+    + 'second `{ field, fields, alias }` nested-select member that nothing produced and nothing '
+    + 'consumed — every reader on the path treats the list as `string[]`, so the object form was '
+    + 'dropped by the SQL and memory drivers, projected as a column named "[object Object]" by '
+    + 'MongoDB, and refused by the REST ingress as an unknown field of that name. `expand` is the '
+    + 'one spelling for nested selection (ADR-0049 enforce-or-remove; Prime Directive #12: one '
+    + 'capability, one contract). Like the two above it is a request shape, never stored, so the '
+    + 'chain has no source to rewrite.',
   conversionIds: ['stack-api-require-auth-removed'],
   semantic: [
+    {
+      id: 'query-field-node-object-form-retired',
+      surface: 'data.query.fields',
+      replacement: "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted path for a single related column (`fields: ['owner.name']`)",
+      reason:
+        'The `FieldNode` union declared a nested-select object form `{ field, fields, alias }` that '
+        + 'was inert end to end: no producer emitted it, and no consumer read `.fields` or `.alias` '
+        + '— objectql\'s formula projection and known-field filters, driver-sql\'s `select()` and '
+        + 'driver-memory\'s projection all treat the list as `string[]`, driver-mongodb keyed its '
+        + 'projection with the entry itself, and the REST ingress stringified it. Nested selection '
+        + 'is `expand`, which the engine resolves via batch `$in` queries. This is a REQUEST '
+        + 'surface — `QueryAST` is never stored in stack metadata (no view, dataset or report '
+        + 'authors one), so there is no source for the chain to rewrite: the schema narrows to '
+        + '`z.string()` and callers move their own select lists. ADR-0049 / ADR-0078, #4196.',
+      acceptanceCriteria:
+        'No caller puts an object in `fields[]`; related records are read through `expand` and '
+        + 'single related columns through dotted paths. A `fields` entry that is not a string '
+        + 'fails to parse with the removal prescription, and the list/query/export routes answer '
+        + '400 INVALID_FIELD naming the retired form instead of the field `"[object Object]"`.',
+    },
     {
       id: 'batch-options-validate-only-retired',
       surface: 'api.batchOptions.validateOnly',

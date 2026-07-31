@@ -40,7 +40,8 @@
     "check:wildcard-fallthrough": "node scripts/check-wildcard-fallthrough.mjs --self-test && node scripts/check-wildcard-fallthrough.mjs",
     "check:console-sha": "node scripts/check-console-sha.mjs",
     "check:release-notes": "node scripts/check-release-notes.mjs",
-    "check:node-version": "node scripts/check-node-version.mjs"
+    "check:node-version": "node scripts/check-node-version.mjs",
+    "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs"
   },
   "keywords": [
     "objectstack",

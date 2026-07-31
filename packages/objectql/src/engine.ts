@@ -2267,7 +2267,58 @@ export class ObjectQL implements IDataEngine {
   invalidateDataMigrationFlags(): void {
     this.fileReferencesMigrationVerified = null;
     this.valueShapesMigrationVerified = null;
+    this.migrationGatesAnnounced = false;
   }
+
+  /**
+   * Say, once at boot, which value-shape gates are still open here and what
+   * closes them (ADR-0104's 2026-07-30 addendum, #3438).
+   *
+   * Both gates fail toward leniency: a deployment that never runs its
+   * migration keeps warning instead of rejecting, and keeps every released
+   * file forever. That default is deliberate — but silent, and a gate nobody
+   * is told about is served by nobody. The LAX posture is the one worth
+   * announcing, so this logs only when a gate is open *and* this deployment's
+   * own metadata says the gate is about something it stores; the verified case
+   * already logs from the flag read.
+   *
+   * Costs one flag read per applicable gate (both memoized, and both already
+   * paid by the first write to such an object), and nothing at all for an app
+   * that declares neither class of field.
+   */
+  async announceOpenMigrationGates(): Promise<void> {
+    if (this.migrationGatesAnnounced) return;
+    this.migrationGatesAnnounced = true;
+    try {
+      let media = false;
+      let covered = false;
+      for (const obj of this._registry.getAllObjects() as any[]) {
+        if (!media && this.objectHasMediaField(obj)) media = true;
+        if (!covered && this.objectHasCoveredValueField(obj)) covered = true;
+        if (media && covered) break;
+      }
+
+      if (media && !(await this.isFileReferencesMigrationVerified())) {
+        this.logger.info(
+          '[value-shape] media values are checked but NOT enforced here, and released files are ' +
+            'never collected — this deployment has not verified its file migration. Run ' +
+            '`os migrate files-to-references` (dry run) to see what it would do, then `--apply` ' +
+            'to close the gate (ADR-0104 / #3617).',
+        );
+      }
+      if (covered && !(await this.isValueShapesMigrationVerified())) {
+        this.logger.info(
+          '[value-shape] reference and structured-JSON values are checked but NOT enforced here — ' +
+            'this deployment has not verified its value-shape scan. Run `os migrate value-shapes` ' +
+            '(dry run) to see what it would report, then `--apply` to close the gate ' +
+            '(ADR-0104 / #3438).',
+        );
+      }
+    } catch {
+      // An advisory must never be the reason a boot fails.
+    }
+  }
+  private migrationGatesAnnounced = false;
 
   /**
    * Did this process CREATE the datastore it is talking to, from empty?
@@ -2833,7 +2884,7 @@ export class ObjectQL implements IDataEngine {
       delete (ast as any).searchFields;
       delete (ast as any).$searchFields;
     }
-    const _findFormula = planFormulaProjection(_findSchema, ast.fields as string[] | undefined);
+    const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
 
     // Drop any requested field that doesn't exist on the schema. Without
@@ -2851,10 +2902,10 @@ export class ObjectQL implements IDataEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = (ast.fields as string[]).filter(f => {
+      const filtered = ast.fields.filter(f => {
         // Keep relationship paths like `owner.name` — the engine will
         // resolve those via populate; only validate top-level segment.
-        const head = String(f).split('.')[0];
+        const head = f.split('.')[0];
         return known.has(head);
       });
       // Guard against an empty projection — fall back to `*` so the
@@ -2936,7 +2987,7 @@ export class ObjectQL implements IDataEngine {
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
     const _findOneSchema = this._registry.getObject(objectName);
-    const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields as string[] | undefined);
+    const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 
     // Drop unknown fields — see equivalent block in `find()` for rationale.
@@ -2947,7 +2998,7 @@ export class ObjectQL implements IDataEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = (ast.fields as string[]).filter(f => known.has(String(f).split('.')[0]));
+      const filtered = ast.fields.filter(f => known.has(f.split('.')[0]));
       ast.fields = filtered.length > 0 ? filtered : undefined;
     }
 

@@ -37,5 +37,9 @@
   "bugs": "https://github.com/objectstack-ai/objectstack/issues",
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }

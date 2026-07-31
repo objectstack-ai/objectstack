@@ -32,5 +32,9 @@
     "plugin",
     "email",
     "smtp"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }

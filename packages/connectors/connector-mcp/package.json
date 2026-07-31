@@ -35,5 +35,9 @@
     "integration",
     "ai",
     "tools"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }

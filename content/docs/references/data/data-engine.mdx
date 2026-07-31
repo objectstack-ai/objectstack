@@ -186,7 +186,7 @@ Reference: any
 | :--- | :--- | :--- | :--- |
 | **method** | `'findOne'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
 
 
 ---
@@ -199,7 +199,7 @@ Reference: any
 | :--- | :--- | :--- | :--- |
 | **method** | `'find'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
 
 
 ---
@@ -268,7 +268,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **method** | `'find'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
 
 ---
 
@@ -280,7 +280,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **method** | `'findOne'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: { field: string; order: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
 
 ---
 
@@ -540,14 +540,14 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; email?: string; tenantId?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
-| **fields** | `string \| { field: string; fields?: object[]; alias?: string }[]` | optional |  |
+| **fields** | `string[]` | optional |  |
 | **orderBy** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **limit** | `number` | optional |  |
 | **offset** | `number` | optional |  |
 | **top** | `number` | optional |  |
 | **cursor** | `Record<string, any>` | optional |  |
 | **search** | `{ query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string \| { field: string; fields?: object[]; alias?: string }[]; where?: any; search?: object; … }>` | optional |  |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: object; … }>` | optional |  |
 | **distinct** | `boolean` | optional |  |
 
 

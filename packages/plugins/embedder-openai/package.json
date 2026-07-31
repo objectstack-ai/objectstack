@@ -36,5 +36,9 @@
     "zhipu",
     "siliconflow",
     "ollama"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }

@@ -342,7 +342,7 @@ export class InMemoryDriver implements IDataDriver {
 
     // 5. Field Projection
     if (query.fields && Array.isArray(query.fields) && query.fields.length > 0) {
-      results = results.map(record => this.projectFields(record, query.fields as string[]));
+      results = results.map(record => this.projectFields(record, query.fields!));
     } else {
       // Return shallow copies, never live references into the backing table.
       // `create()` already honors this contract (`return { ...newRecord }`),

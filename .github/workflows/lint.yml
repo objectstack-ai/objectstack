@@ -166,6 +166,22 @@ jobs:
       - name: Node-version drift guard
         run: pnpm check:node-version
 
+      # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
+      # whole package directory, and 20 of the 49 publishable packages declared
+      # none — so consumers installed TypeScript sources, unit tests and build
+      # tooling, with dist/ landing on top of them rather than instead of them
+      # (@objectstack/plugin-webhooks: 21 files, three of them unit tests). The
+      # other 29 did declare it, so this was a hand-copied line with no gate —
+      # the #3786 shape, where whoever forgets it gets no signal at all. Also
+      # checks the whitelist is SUFFICIENT (covers every entry point, so
+      # tightening one cannot ship a package that fails to resolve) and MINIMAL
+      # (admits no test or build script), which keeps #4206's "`<pkg>/scripts/**`
+      # is never runtime code" assumption continuously verified instead of
+      # hand-checked. Runs its own --self-test first: the pattern semantics can
+      # be wrong while every package is right.
+      - name: Published-files whitelist guard
+        run: pnpm check:published-files
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest

@@ -32,5 +32,9 @@
     "slack",
     "integration",
     "messaging"
+  ],
+  "files": [
+    "dist",
+    "README.md"
   ]
 }
