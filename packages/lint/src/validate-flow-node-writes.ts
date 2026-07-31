@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// Author-time write-set check for a flow `update_record` node's `fields` — the
+// Author-time write-set check for a flow CRUD node's `fields` write map — the
 // THIRD surface in the family #4271 opened, and the one the docs spent the
 // longest recommending as the safe alternative to the other two.
 //
@@ -29,22 +29,26 @@
 // advisory. Nothing between the node and storage removes the key: the flow
 // executor calls the data engine directly (bypassing the metadata-protocol
 // ingress, which strips `readonly` — not unknown — keys anyway), the engine's
-// UPDATE path strips only readonly/readonlyWhen, and the SQL driver's
+// write paths strip only readonly/readonlyWhen, and the SQL driver's
 // `formatInput` / `applyWriteColumnMap` pass an unrecognized key straight
-// through (`m[k] ?? k`). Both halves were measured, not inferred:
+// through (`m[k] ?? k`). Every branch below was measured, not inferred:
 //
-//   • Through the engine, an undeclared key reaches `driver.update` verbatim,
-//     alongside the audit stamps.
-//   • On SQLite/knex it then becomes `update "deal" set "name" = 'n2',
+//   • Through the engine, an undeclared key reaches `driver.update` /
+//     `driver.create` verbatim, alongside the audit stamps.
+//   • On SQLite/knex an UPDATE becomes `update "deal" set "name" = 'n2',
 //     "stagee" = 'won' … → no such column: stagee`. The statement is rejected
 //     WHOLE: `name` — spelled correctly, in the same payload — does not land
 //     either, and the step fails with a driver error naming a column, far from
 //     the authoring mistake.
+//   • An INSERT fails the same way (`table deal has no column named stagee`),
+//     and one notch harder: the row is never created at all, so every later
+//     node that expected `{<node>.id}` is working from a record that does not
+//     exist.
 //   • On a schemaless datasource (memory, MongoDB) nothing rejects it, so the
 //     stray key is persisted into a column the object never declares — where no
 //     schema-driven read surface will return it.
 //
-// Neither outcome is "the rest still works". That is the same call
+// No outcome is "the rest still works". That is the same call
 // `validate-searchable-fields` makes for a stale entry and
 // `validate-flow-template-paths` makes for a filter-position token: gate when
 // the miss breaks or corrupts the operation, advise when it merely narrows the
@@ -52,12 +56,20 @@
 //
 // ─── Scope ──────────────────────────────────────────────────────────────────
 //
-// {@link FLOW_WRITE_NODE_TYPES} — today `update_record` alone — with the
-// deliberate non-member (`create_record`) declared as data in
-// {@link FLOW_WRITE_NODE_TYPES_DEFERRED} rather than left as silence, and the
-// two halves partition-tested against the CRUD node types that carry a `fields`
-// write map. A node type that grows one later fails that test until someone
-// classifies it.
+// {@link FLOW_WRITE_NODE_TYPES} — every CRUD node type that carries a `fields`
+// WRITE map: `update_record` (#4369) and `create_record` (#4371). The deferred
+// half, {@link FLOW_WRITE_NODE_TYPES_DEFERRED}, is now empty, and the partition
+// test still derives the full set behaviourally from the spec's
+// executor-written config schemas — so a node type that grows a write map later
+// lands on neither side and fails that test until someone classifies it.
+//
+// `get_record.fields` is NOT a member and never will be: it is a projection
+// (`z.array(z.string())`), a READ, and an unknown entry there narrows the
+// selection rather than breaking the statement. `screen.defaults` is not one
+// either — an object-form screen forwards it into the `ScreenSpec` the client
+// renders, so an unknown key is a form prefill the renderer ignores: inert, the
+// "skips it and renders the rest" case this rule's severity is defined against.
+// Both are excluded on the shape of their failure, not by omission.
 //
 // `runAs` is deliberately NOT consulted, unlike its readonly sibling. A
 // `runAs:'system'` flow is elevated past the readonly strip, which is why that
@@ -101,7 +113,7 @@ export const FLOW_NODE_WRITE_UNKNOWN_FIELD = 'flow-node-write-unknown-field';
 // a write map later cannot land on the uncovered side by nobody noticing.
 
 /** Flow node types whose `config.fields` keys this rule resolves. */
-export const FLOW_WRITE_NODE_TYPES: readonly string[] = ['update_record'];
+export const FLOW_WRITE_NODE_TYPES: readonly string[] = ['update_record', 'create_record'];
 
 /** A `fields`-bearing node type this rule does NOT cover yet, and why. */
 export interface FlowWriteNodeDeferral {
@@ -112,24 +124,21 @@ export interface FlowWriteNodeDeferral {
 }
 
 /**
- * `fields`-bearing CRUD node types deliberately left out of v1.
+ * `fields`-bearing CRUD node types deliberately left uncovered.
  *
- * `create_record` fails identically — same literal map, same `objectName`
- * binding, same driver fate — and covering it is one entry in
- * {@link FLOW_WRITE_NODE_TYPES} plus its fixtures. It is out of scope here only
- * because the reported gap (#4001 family, the `update_record` surface the docs
- * recommended) is the UPDATE one, and a gating rule earns its severity one
- * measured surface at a time. Recorded rather than omitted so the remaining
- * half is a decision on the record, not a discovery someone makes twice.
+ * **Empty, and that is the point.** #4369 shipped `update_record` alone and
+ * parked `create_record` here with its reason — a gating rule earning its
+ * severity one measured surface at a time — rather than leaving the other half
+ * as silence. #4371 measured the INSERT path (`table deal has no column named
+ * stagee`, and the row never created at all), found it strictly worse than the
+ * UPDATE one, and moved it across.
+ *
+ * The slot stays because the partition test derives the full `fields`-write-map
+ * set from the spec's own config schemas: a node type that grows one later
+ * belongs to neither list and fails that test until someone puts it in one.
+ * Deleting this array would turn that forced decision back into a default.
  */
-export const FLOW_WRITE_NODE_TYPES_DEFERRED: readonly FlowWriteNodeDeferral[] = [
-  {
-    type: 'create_record',
-    reason:
-      "same literal `config.fields` map and same `objectName` binding as update_record, so the check carries " +
-      'over verbatim; deferred only to land the gating severity on one surface first',
-  },
-];
+export const FLOW_WRITE_NODE_TYPES_DEFERRED: readonly FlowWriteNodeDeferral[] = [];
 
 type AnyRec = Record<string, unknown>;
 
@@ -231,7 +240,9 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
             `${node.type} writes '${fieldName}', but object '${objectName}' declares no such field. Nothing ` +
             `between the node and storage removes the key: on a SQL datasource the driver rejects the whole ` +
             `statement ('no such column'), so the correctly named fields in this same payload never land ` +
-            `either; on a schemaless one the stray key is persisted into a column no read surface returns.`,
+            `either${
+              node.type === 'create_record' ? ' and the record is never created at all' : ''
+            }; on a schemaless one the stray key is persisted into a column no read surface returns.`,
           hint: fixHint(fieldName, [...known]),
         });
       }
