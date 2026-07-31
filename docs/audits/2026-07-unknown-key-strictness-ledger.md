@@ -165,14 +165,14 @@ tightening (the #4001 "sharing-rule lesson": candidates, not verdicts).
 | `external-catalog.zod.ts` | 4 | wire (p) | |
 | `field-value.zod.ts` / `seed.zod.ts` / `validation.zod.ts` | 1 ea | mixed (p) | |
 
-### `automation/` — 93 sites
+### `automation/` — 98 sites
 
 | File | Sites | Class | Note |
 |---|---|---|---|
 | `flow.zod.ts` | 11 | authorable | **strict as of #4001** (4 schemas; `FlowVersionHistorySchema` is runtime — stays tolerant) |
 | `sync.zod.ts` / `etl.zod.ts` | 12+10 | authorable (p) | authored pipelines — **candidates** |
 | `trigger-registry.zod.ts` | 11 | mixed | descriptors are code-registered (wire-ish); bindings authored |
-| `execution.zod.ts` | 8 | wire | run-state envelopes — never strict |
+| `execution.zod.ts` | 13 | wire | run-state envelopes — never strict. +5 at #4354 (the run-summary family: step metrics / skip reason / per-node / per-gate / the summary itself) — engine-emitted telemetry read by the Console and by operator queries, nobody authors them, so the `wire` verdict covers them unchanged |
 | `state-machine.zod.ts` | 7 | authorable (p) | |
 | `control-flow.zod.ts` | 6 | authorable (p) | validated structurally by `validateControlFlow` |
 | `bpmn-interop.zod.ts` | 5 | wire (p) | interop import shapes |
