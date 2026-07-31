@@ -52,6 +52,10 @@ export interface IDataEngine {
 
   // Raw Command Escape Hatch (optional)
   execute?(command: any, options?: Record<string, any>): Promise<any>;
+
+  // Driver Registry (optional — engines that own named drivers)
+  getDefaultDriverName?(): string | undefined;
+  getDriverByName?(name: string): IDataDriver | undefined;
 }
 ```
 
@@ -364,6 +368,21 @@ const result = await engine.execute?.(
   { params: ['open'] }
 );
 ```
+
+### getDefaultDriverName / getDriverByName (Driver Registry)
+
+Look up the engine's registered drivers. Only engines that own a named-driver
+registry implement these (ObjectQL does; test fakes and remote/virtual engines
+need not) — always probe with `?.`:
+
+```typescript
+const driverName = engine.getDefaultDriverName?.();
+const driver = driverName ? engine.getDriverByName?.(driverName) : undefined;
+```
+
+This is the surface the runtime uses to re-register the default driver as a
+`driver.<name>` kernel service, which is where `os migrate` and serve's storage
+detection locate drivers.
 
 ---
 
