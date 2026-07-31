@@ -28,7 +28,8 @@
     "  - the remaining exemptions now state the gap plainly instead of pointing at the",
     "    generated page as if it settled the question. Connector authentication is the one",
     "    worth acting on: it is tenant-authored (ADR-0097 declarative `connectors:`) and the",
-    "    repo has no hand-written connector guide at all."
+    "    repo has no hand-written connector guide at all. (Since closed: #4289 wrote",
+    "    content/docs/automation/connectors.mdx and both connector-auth entries are governed.)"
   ],
   "entries": [
     {
@@ -80,14 +81,14 @@
     {
       "key": "type:api-key|basic|bearer|none|oauth2",
       "label": "connector authentication",
-      "exempt": "generated-reference-only",
-      "reason": "DOCUMENTATION GAP, not a non-authorable surface — the strongest candidate among the exemptions for a real guide. Connector auth IS tenant-authored (ADR-0097 materializes a declarative `connectors:` entry naming a `provider` into a live connector at boot), but the repo has no hand-written connector page at all: the only prose is one paragraph inside automation/flows.mdx about the `connector_action` node. Until a guide exists there is nothing for this entry to bind to; when one is written, bind it and delete this exemption."
+      "docs": ["content/docs/automation/connectors.mdx"],
+      "note": "The runtime auth shape (ConnectorAuthConfigSchema) — five variants including the enterprise-tier `oauth2`. Was exempt generated-reference-only while no hand-written connector page existed; #4289 wrote the guide and bound it, per the old exemption's own instruction."
     },
     {
       "key": "type:api-key|basic|bearer|none",
       "label": "connector auth (environment-artifact projection)",
-      "exempt": "generated-reference-only",
-      "reason": "The declarative connector-instance auth shape (ADR-0097), reached via EnvironmentArtifactSchema.metadata.connectors[].auth. It carries a `credentialRef` rather than an inline secret, and omits `oauth2` because the authorization-code/refresh lifecycle is the enterprise tier (ADR-0015) — not because the artifact narrows it. Inherits the gap above; a connector guide would govern both."
+      "docs": ["content/docs/automation/connectors.mdx"],
+      "note": "The declarative connector-instance auth shape (ADR-0097), reached via EnvironmentArtifactSchema.metadata.connectors[].auth: `credentialRef` references only, and `oauth2` deliberately absent (enterprise tier, ADR-0015) — the guide states that absence explicitly so authors don't read it as an omission."
     },
     {
       "key": "strategy:isolated_db|isolated_schema|shared_schema",

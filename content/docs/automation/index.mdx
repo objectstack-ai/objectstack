@@ -1,6 +1,6 @@
 ---
 title: Automation
-description: Hooks, flows, workflows, approvals, scheduled jobs, and durable webhooks — the process engine that reacts to your data.
+description: Hooks, flows, workflows, approvals, scheduled jobs, durable webhooks, and connectors — the process engine that reacts to your data.
 ---
 
 # Automation
@@ -33,6 +33,7 @@ export const OpportunityStageHook: Hook = {
 - **Workflows** model a record's lifecycle as a **finite state machine**: states, transitions, and guards ([Workflows](/docs/automation/workflows)).
 - **Approvals** are flow nodes with approver resolution, approve/reject decisions, and escalation ([Approvals](/docs/automation/approvals)).
 - **Webhooks** deliver events to external systems through a **durable outbox** — exponential/linear/fixed retry with dead-lettering, HMAC signing, and an admin redeliver endpoint ([Webhook Delivery](/docs/automation/webhooks)).
+- **Connectors** package external systems behind named actions that flows dispatch — registered by plugins, or **declared as pure metadata** (`provider: 'rest' | 'openapi' | 'mcp'`) and materialized at boot, with reference-based credentials ([Connectors](/docs/automation/connectors)).
 - **Scheduled jobs** run on `setInterval` or cron via the job service, alongside `schedule`-type flows.
 
 Rule of thumb: model *state* with workflows, model *steps* with flows, use hooks for *code-level* reactions, and webhooks to *notify the outside world*.
@@ -46,6 +47,7 @@ Rule of thumb: model *state* with workflows, model *steps* with flows, use hooks
   <Card href="/docs/automation/workflows" title="Workflows" description="State-machine lifecycle modeling" />
   <Card href="/docs/automation/approvals" title="Approvals" description="Approval nodes: approvers, decisions, escalation" />
   <Card href="/docs/automation/webhooks" title="Webhook Delivery" description="Durable outbox, retries, HMAC signing" />
+  <Card href="/docs/automation/connectors" title="Connectors" description="Declarative rest/openapi/mcp instances, credentialRef auth" />
 </Cards>
 
 ## Related
