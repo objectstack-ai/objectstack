@@ -61,9 +61,10 @@ describe('reference-integrity suite — every member actually runs', () => {
     actions: [
       // validateObjectReferences: a param pointing at an object nothing declares.
       { name: 'assign', label: 'Assign', params: [{ name: 'owner', reference: 'user' }] },
-      // validateActionBodyWrites: the L2 body persists a field crm_lead does
-      // not declare — the action returns success and the column never lands
-      // (#4271, the action half of the hook rule below).
+      // validateActionBodyWrites: the L2 body writes a field crm_lead does not
+      // declare — on SQL that fails the whole call at the driver, on a
+      // schemaless driver it persists a stray key (#4271, the action half of
+      // the hook rule below).
       {
         name: 'score_now',
         label: 'Score Now',
@@ -139,7 +140,8 @@ describe('reference-integrity suite — every member actually runs', () => {
     skills: [{ name: 'metadata_authoring', surface: 'build', tools: ['forecast_revenue'] }],
     hooks: [
       // validateHookBodyWrites: the L2 body writes a field crm_lead does not
-      // declare — runs clean in the sandbox, never lands in the record (#4271).
+      // declare — runs clean in the sandbox, then fails the whole write at a
+      // SQL driver / persists a stray key on a schemaless one (#4271).
       {
         name: 'score_lead',
         object: 'crm_lead',

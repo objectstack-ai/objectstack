@@ -4,13 +4,28 @@
 //
 // An L2 body that writes a field the target object never declares —
 // `ctx.input.amout = 0`, `ctx.api.object('deal').update({ stag: 'won' })` —
-// runs clean in the QuickJS sandbox, reports success, and the unknown column
-// simply never lands in the stored record. No diagnostic anywhere: the exact
-// "silent no-op manufactures false completion" failure mode of #4001, at the
-// runtime-expression layer. The read side (`hook.condition`, ADR-0032) and the
-// capability surface are statically checked; until this rule, the write side
-// was the one blind face (the gap `hook-body.zod.ts` used to carry as
-// "accepted").
+// runs clean in the QuickJS sandbox and reaches the driver UNFILTERED:
+// `applyMutationsToInput` (runtime/src/sandbox/body-runner.ts) is a plain
+// `Object.assign`, and `validateRecord` walks declared fields on insert and
+// `continue`s past a key with no field def on update. What happens after that
+// is DRIVER-DEPENDENT, and neither half is acceptable:
+//
+//   • SQL — the stray column enters the knex statement and the WHOLE write
+//     fails with a driver-level error (`table deal has no column named
+//     stagee`). The write is lost, and the error surfaces far from the
+//     authoring mistake that caused it.
+//   • Schemaless (memory, MongoDB) — the driver spreads the payload, so the
+//     stray key IS persisted: an undeclared column nothing downstream reads.
+//
+// Either way the mistake is invisible where it is MADE — the #4001 family, if
+// not literally its silent-no-op shape. Both runtime outcomes are pinned by
+// `runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts`
+// so this rule's wording cannot drift from what the runtime does; the same
+// split is documented in `content/docs/automation/hook-bodies.mdx`.
+//
+// The read side (`hook.condition`, ADR-0032) and the capability surface are
+// statically checked; until this rule, the write side was the one blind face
+// (the gap `hook-body.zod.ts` used to carry as "accepted").
 //
 // Scope — the literal write patterns in {@link HOOK_BODY_WRITE_PATTERNS}, and
 // nothing else. The body is PARSED (TypeScript parser, never executed, never
@@ -449,8 +464,9 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
           path,
           message:
             `body writes '${w.field}' to its input, but ${objDesc} ${declares}. The sandboxed script runs ` +
-            `clean and the value is copied back onto the record payload — then the unknown column silently ` +
-            `never lands in the stored record (#4271).`,
+            `clean and the value is copied back onto the record payload unfiltered — on a SQL driver the ` +
+            `stray column then fails the WHOLE write with a driver-level error far from here; on a ` +
+            `schemaless driver (memory, MongoDB) it is persisted as an undeclared key (#4271).`,
           hint: fixHint(w.field, unionCandidates(targetSets)),
         });
       } else {
@@ -467,8 +483,9 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
           path,
           message:
             `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', but ` +
-            `object '${w.object}' declares no such field. The call succeeds while the unknown column silently ` +
-            `never lands (#4271).`,
+            `object '${w.object}' declares no such field. The write-path validator skips the unknown key — ` +
+            `on a SQL driver the whole call then fails with a driver-level error far from here; on a ` +
+            `schemaless driver (memory, MongoDB) the stray key is persisted (#4271).`,
           hint: fixHint(w.field, [...known]),
         });
       }

@@ -7,12 +7,23 @@ feat(lint): L2 hook-body writes to undeclared fields warn at author time (#4271)
 
 An L2 (`language:'js'`) hook body that writes a field the target object never
 declares — `ctx.input.amout = 0`, `ctx.api.object('deal').update({ stag: … })`
-— runs clean in the QuickJS sandbox, reports success, and the unknown column
-simply never lands in the stored record. No diagnostic anywhere: the #4001
-"silent no-op manufactures false completion" failure mode at the
-runtime-expression layer. The read side (`hook.condition`) and the capability
-surface were already statically checked; the write side was the one blind face,
-and `hook-body.zod.ts` carried it as an **accepted gap**.
+— runs clean in the QuickJS sandbox and reaches the driver **unfiltered**:
+`applyMutationsToInput` is a plain `Object.assign`, and the write-path
+validator walks declared fields on insert and skips a key it has no field def
+for on update. What happens next depends on the driver, and neither half is
+acceptable:
+
+- **SQL** — the stray column enters the statement and the **whole write fails**
+  with a driver-level error (`table deal has no column named stagee`). The
+  write is lost, and the error surfaces far from the mistake that caused it.
+- **Schemaless** (memory, MongoDB) — the driver spreads the payload, so the
+  stray key **is** persisted: an undeclared column nothing downstream reads.
+
+No diagnostic anywhere, and nothing at the authoring site either way — the
+#4001 "the mistake is invisible where it is made" family. The read side
+(`hook.condition`) and the capability surface were already statically checked;
+the write side was the one blind face, and `hook-body.zod.ts` carried it as an
+**accepted gap**.
 
 **New rule — `hook-body-write-unknown-field` (advisory).** `@objectstack/lint`
 now parses each L2 body (TypeScript parser; parsed, never executed, never
