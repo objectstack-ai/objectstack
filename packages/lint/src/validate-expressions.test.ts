@@ -597,6 +597,82 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues).toHaveLength(0);
     });
 
+    /**
+     * #4347 — the walk used to stop at a container, so a predicate written in
+     * the wrong dialect inside a `loop` body passed `objectstack validate` and
+     * shipped, while the identical predicate one level out was a build error.
+     */
+    describe('structured regions', () => {
+      const flowWith = (container: Record<string, unknown>) => ({
+        objects,
+        flows: [{
+          name: 'sweep',
+          nodes: [{ id: 'start', type: 'start', config: { objectName: 'crm_lead' } }, container],
+          edges: [],
+        }],
+      });
+      const badRegion = () => ({
+        nodes: [
+          { id: 'gate', type: 'decision', config: { condition: '{record.rating} >= 4' } },
+          { id: 'act', type: 'update_record' },
+        ],
+        edges: [{ id: 'b1', source: 'gate', target: 'act', condition: '{record.status} == "open"' }],
+      });
+
+      it('flags a brace-in-CEL predicate inside a loop body, naming the region', () => {
+        const issues = validateStackExpressions(flowWith({
+          id: 'loop_1', type: 'loop', config: { collection: '{rows}', body: badRegion() },
+        }));
+        // Both the body node's `config.condition` and the body edge's condition.
+        expect(issues).toHaveLength(2);
+        for (const issue of issues) expect(issue.where).toContain("loop 'loop_1' body");
+        expect(issues.map(i => i.source)).toEqual(['{record.rating} >= 4', '{record.status} == "open"']);
+      });
+
+      it('flags them in parallel branches and try_catch regions too', () => {
+        expect(validateStackExpressions(flowWith({
+          id: 'par', type: 'parallel', config: { branches: [badRegion(), badRegion()] },
+        }))).toHaveLength(4);
+
+        const tc = validateStackExpressions(flowWith({
+          id: 'tc', type: 'try_catch', config: { try: badRegion(), catch: badRegion() },
+        }));
+        expect(tc).toHaveLength(4);
+        expect(tc.filter(i => i.where.includes("try_catch 'tc' catch"))).toHaveLength(2);
+      });
+
+      it('reaches a container nested inside another region', () => {
+        const issues = validateStackExpressions(flowWith({
+          id: 'outer', type: 'loop',
+          config: {
+            collection: '{rows}',
+            body: {
+              nodes: [{ id: 'inner', type: 'loop', config: { collection: '{cols}', body: badRegion() } }],
+              edges: [],
+            },
+          },
+        }));
+        expect(issues).toHaveLength(2);
+        for (const issue of issues) expect(issue.where).toContain("loop 'outer' body → loop 'inner' body");
+      });
+
+      it('leaves a correct region alone', () => {
+        expect(validateStackExpressions(flowWith({
+          id: 'loop_1', type: 'loop',
+          config: {
+            collection: '{rows}',
+            body: {
+              nodes: [
+                { id: 'gate', type: 'decision', config: { condition: 'record.rating >= 4' } },
+                { id: 'act', type: 'update_record' },
+              ],
+              edges: [{ id: 'b1', source: 'gate', target: 'act', condition: 'record.status == "open"' }],
+            },
+          },
+        }))).toHaveLength(0);
+      });
+    });
+
     it('tolerates a screen with no fields, a non-array fields, and no config', () => {
       expect(validateStackExpressions(screenFlow([]))).toHaveLength(0);
       expect(validateStackExpressions({

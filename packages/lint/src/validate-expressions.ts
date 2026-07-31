@@ -18,7 +18,8 @@
  */
 
 import { validateExpression } from '@objectstack/formula';
-import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+import type { FlowNodeParsed } from '@objectstack/spec/automation';
 
 export interface ExprIssue {
   where: string;
@@ -130,76 +131,85 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   for (const flow of asArray(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
     const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
-    const edges = Array.isArray(flow.edges) ? (flow.edges as AnyRec[]) : [];
     // The record-change target object — `record.*` refs resolve against it.
     const startNode = nodes.find(n => n.type === 'start');
     const startCfg = (startNode?.config ?? {}) as AnyRec;
     const objectName = typeof startCfg.objectName === 'string' ? startCfg.objectName : undefined;
 
-    for (const node of nodes) {
-      const cfg = (node.config ?? {}) as AnyRec;
-      check(`flow '${flowName}' · node '${node.id}' (${node.type}) condition`, cfg.condition, objectName);
+    // #4347 — every graph in the flow, not just `flow.nodes`/`flow.edges`. An
+    // ADR-0031 container keeps a whole sub-graph in its `config`, so the
+    // top-level walk validated PART of the flow while reporting on all of it: a
+    // predicate written in the wrong dialect inside a `loop` body passed
+    // `objectstack validate` and shipped. This is the author-time half of the
+    // same traversal the engine's registration pass now does; `scope` names the
+    // region so the located message still points at one edge.
+    for (const graph of collectFlowGraphs(flow as { nodes?: FlowNodeParsed[] })) {
+      const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;
+      for (const node of graph.nodes as unknown as AnyRec[]) {
+        const cfg = (node.config ?? {}) as AnyRec;
+        check(`${at} · node '${node.id}' (${node.type}) condition`, cfg.condition, objectName);
 
-      // Descriptor-declared expression slots (#4027). Before this, the traversal
-      // hardcoded `condition` and assumed every other node string was a `{var}`
-      // template — so `screen.fields[].visibleWhen`, declared bare CEL since
-      // #3304, was validated by nobody and #3528 shipped a template-dialect
-      // predicate through compile, validate and run time in silence.
-      // Only `predicate` slots are checkable: `flow-template` slots take the
-      // single-brace `{var}` dialect `interpolate()` implements, which no
-      // validator covers (the `template` role enforces ADR-0032 §3's
-      // double-brace text template and would reject every correct
-      // `loop.collection`). The ledger records them regardless, so the
-      // reconciliation ratchet still sees the marker.
-      const nodeType = typeof node.type === 'string' ? node.type : '';
-      for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
-        if (found.entry.role !== 'predicate') continue;
-        checkDeclaredPredicate(
-          `flow '${flowName}' · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`,
-          found.value,
-        );
-      }
-      // #1870 — a `script` node must declare a callable target (`actionType` or
-      // `function`). A node with neither is a silent no-op that otherwise passes
-      // build. (Function *existence* isn't checkable here — functions are code,
-      // not serialized into the artifact — so this is a structural check; the
-      // runtime verifies the named function is actually registered.)
-      if (node.type === 'script') {
-        // `function` is canonical; a pre-parse source may still carry the
-        // `functionName` alias during the protocol-17 window, until the
-        // 'flow-node-script-config-aliases' conversion (#3796) canonicalizes it.
-        const fn =
-          (typeof cfg.function === 'string' ? cfg.function.trim() : '') ||
-          (typeof cfg.functionName === 'string' ? cfg.functionName.trim() : '');
-        const action = typeof cfg.actionType === 'string' ? cfg.actionType.trim() : '';
-        // Inline `config.script` (a JS body) is also a declared form — the
-        // built-in runtime doesn't execute it (warned at run time), but the node
-        // is not the empty no-op this check targets, so don't flag it.
-        const inline = typeof cfg.script === 'string' ? cfg.script.trim() : '';
-        if (!fn && !action && !inline) {
-          issues.push({
-            where: `flow '${flowName}' · node '${node.id}' (script) callable`,
-            message:
-              `script node declares neither \`actionType\` nor \`function\` — it would do nothing at runtime. ` +
-              `Name a built-in action (e.g. \`actionType: 'email'\`) or a registered function ` +
-              `(\`function: 'my_fn'\`, registered via \`defineStack({ functions })\`).`,
-            source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
-          });
-        } else if (action === 'invoke_function' && !fn) {
-          // `actionType: 'invoke_function'` is a marker that names no callable on
-          // its own — the function name must be in `function`/`functionName`.
-          issues.push({
-            where: `flow '${flowName}' · node '${node.id}' (script) callable`,
-            message:
-              `script node uses \`actionType: 'invoke_function'\` but no \`function\` (or \`functionName\`) — ` +
-              `it names no callable. Set \`function: 'my_fn'\` and register it via \`defineStack({ functions })\`.`,
-            source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
-          });
+        // Descriptor-declared expression slots (#4027). Before this, the traversal
+        // hardcoded `condition` and assumed every other node string was a `{var}`
+        // template — so `screen.fields[].visibleWhen`, declared bare CEL since
+        // #3304, was validated by nobody and #3528 shipped a template-dialect
+        // predicate through compile, validate and run time in silence.
+        // Only `predicate` slots are checkable: `flow-template` slots take the
+        // single-brace `{var}` dialect `interpolate()` implements, which no
+        // validator covers (the `template` role enforces ADR-0032 §3's
+        // double-brace text template and would reject every correct
+        // `loop.collection`). The ledger records them regardless, so the
+        // reconciliation ratchet still sees the marker.
+        const nodeType = typeof node.type === 'string' ? node.type : '';
+        for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
+          if (found.entry.role !== 'predicate') continue;
+          checkDeclaredPredicate(
+            `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`,
+            found.value,
+          );
+        }
+        // #1870 — a `script` node must declare a callable target (`actionType` or
+        // `function`). A node with neither is a silent no-op that otherwise passes
+        // build. (Function *existence* isn't checkable here — functions are code,
+        // not serialized into the artifact — so this is a structural check; the
+        // runtime verifies the named function is actually registered.)
+        if (node.type === 'script') {
+          // `function` is canonical; a pre-parse source may still carry the
+          // `functionName` alias during the protocol-17 window, until the
+          // 'flow-node-script-config-aliases' conversion (#3796) canonicalizes it.
+          const fn =
+            (typeof cfg.function === 'string' ? cfg.function.trim() : '') ||
+            (typeof cfg.functionName === 'string' ? cfg.functionName.trim() : '');
+          const action = typeof cfg.actionType === 'string' ? cfg.actionType.trim() : '';
+          // Inline `config.script` (a JS body) is also a declared form — the
+          // built-in runtime doesn't execute it (warned at run time), but the node
+          // is not the empty no-op this check targets, so don't flag it.
+          const inline = typeof cfg.script === 'string' ? cfg.script.trim() : '';
+          if (!fn && !action && !inline) {
+            issues.push({
+              where: `${at} · node '${node.id}' (script) callable`,
+              message:
+                `script node declares neither \`actionType\` nor \`function\` — it would do nothing at runtime. ` +
+                `Name a built-in action (e.g. \`actionType: 'email'\`) or a registered function ` +
+                `(\`function: 'my_fn'\`, registered via \`defineStack({ functions })\`).`,
+              source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
+            });
+          } else if (action === 'invoke_function' && !fn) {
+            // `actionType: 'invoke_function'` is a marker that names no callable on
+            // its own — the function name must be in `function`/`functionName`.
+            issues.push({
+              where: `${at} · node '${node.id}' (script) callable`,
+              message:
+                `script node uses \`actionType: 'invoke_function'\` but no \`function\` (or \`functionName\`) — ` +
+                `it names no callable. Set \`function: 'my_fn'\` and register it via \`defineStack({ functions })\`.`,
+              source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
+            });
+          }
         }
       }
-    }
-    for (const edge of edges) {
-      check(`flow '${flowName}' · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition, objectName);
+      for (const edge of graph.edges as unknown as AnyRec[]) {
+        check(`${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition, objectName);
+      }
     }
   }
 

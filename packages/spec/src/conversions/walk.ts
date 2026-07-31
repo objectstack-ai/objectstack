@@ -20,12 +20,127 @@ function isDict(v: unknown): v is Dict {
 }
 
 /**
- * Immutably map every flow node in `stack.flows[].nodes[]`.
+ * Where each ADR-0031 structured container carries its nested region(s) — the
+ * map that makes {@link mapFlowNodes} reach a node inside a `loop` body, a
+ * `parallel` branch, or a `try_catch` block (#4347).
  *
- * `mapper` receives each node dict and its path (`flows[i].nodes[j]`) and
- * returns either the same reference (no change) or a new dict. The stack, the
- * `flows` array, an individual flow, and its `nodes` array are each copied only
- * when a descendant actually changed.
+ * A region is a self-contained mini-flow (`{ nodes, edges }`) living in the
+ * container's OPEN `config` record, so a pass that walked only
+ * `flows[].nodes[]` saw the container and stopped there. The consequence was
+ * **position-dependent metadata**: the same node converted at the top level and
+ * did not one level in — a `webhook` callout inside a loop body kept its
+ * protocol-11 type (no executor owns that id, so the run fails), and a
+ * `delete_record` kept `config.filters`, leaving the canonical `filter` the
+ * executor reads absent — the erased-condition hazard
+ * `flow-node-crud-filter-alias` exists to prevent. Same flow, same
+ * `registerFlow` call, different outcome by nesting depth.
+ *
+ * Declared here rather than imported from `automation/control-flow.zod.ts` to
+ * keep this module free of schema imports (it is a pure shape walker). The ids
+ * and keys are pinned to that module's `LOOP_NODE_TYPE` / `PARALLEL_NODE_TYPE` /
+ * `TRY_CATCH_NODE_TYPE` and to the `LoopConfigSchema` / `ParallelConfigSchema` /
+ * `TryCatchConfigSchema` shapes by a reconciliation test (`region-walk.test.ts`),
+ * so a new construct cannot be added there and silently go unwalked here.
+ *
+ * A `Map` rather than an object literal so a node whose `type` is
+ * `'constructor'` / `'__proto__'` cannot reach `Object`'s prototype chain.
+ */
+export const FLOW_REGION_SLOTS: ReadonlyMap<
+  string,
+  ReadonlyArray<{ readonly key: string; readonly many: boolean }>
+> = new Map([
+  ['loop', [{ key: 'body', many: false }]],
+  ['parallel', [{ key: 'branches', many: true }]],
+  ['try_catch', [{ key: 'try', many: false }, { key: 'catch', many: false }]],
+]);
+
+/**
+ * Depth ceiling for the region recursion. Containers nest, but not deeply, and
+ * a stack handed to `defineStack` is hand-built objects rather than parsed JSON
+ * — so a self-referencing region is reachable, and would otherwise be an
+ * unbounded recursion on the load path. Mirrors the ceiling the region walks in
+ * `automation/control-flow.zod.ts` use.
+ */
+const MAX_REGION_DEPTH = 32;
+
+/**
+ * Immutably map every node of one structured region (`{ nodes, edges }`).
+ *
+ * A value that is not region-shaped passes through untouched: the `config` keys
+ * above are only *conventionally* regions (`config` is an open record, and
+ * `body` in particular is also an ordinary key elsewhere — an `http` node's
+ * request payload), so the shape is checked, never assumed.
+ */
+function mapRegionNodes(
+  region: unknown,
+  path: string,
+  mapper: (node: Dict, path: string) => Dict,
+  depth: number,
+): unknown {
+  if (!isDict(region) || !Array.isArray(region.nodes)) return region;
+  let changed = false;
+  const nextNodes = region.nodes.map((node, i) => {
+    if (!isDict(node)) return node;
+    const mapped = mapNodeTree(node, `${path}.nodes[${i}]`, mapper, depth);
+    if (mapped !== node) changed = true;
+    return mapped;
+  });
+  return changed ? { ...region, nodes: nextNodes } : region;
+}
+
+/**
+ * Map one flow node **and everything nested under it**: the node itself, then
+ * the nodes of every region its `config` carries, recursively — regions nest (a
+ * `loop` inside a `try_catch` inside a `loop`).
+ *
+ * The mapper runs on the container FIRST and the region lookup keys off the
+ * *mapped* node's `type`, so a conversion that renames a container type still
+ * has its body walked, under the canonical id.
+ */
+function mapNodeTree(
+  node: Dict,
+  path: string,
+  mapper: (node: Dict, path: string) => Dict,
+  depth: number,
+): Dict {
+  const mapped = mapper(node, path);
+  if (depth >= MAX_REGION_DEPTH) return mapped;
+  const slots = typeof mapped.type === 'string' ? FLOW_REGION_SLOTS.get(mapped.type) : undefined;
+  if (!slots) return mapped;
+  const config = mapped.config;
+  if (!isDict(config)) return mapped;
+
+  let nextConfig = config;
+  for (const { key, many } of slots) {
+    const raw = nextConfig[key];
+    if (many) {
+      if (!Array.isArray(raw)) continue;
+      let branchesChanged = false;
+      const nextBranches = raw.map((branch, i) => {
+        const next = mapRegionNodes(branch, `${path}.config.${key}[${i}]`, mapper, depth + 1);
+        if (next !== branch) branchesChanged = true;
+        return next;
+      });
+      if (branchesChanged) nextConfig = { ...nextConfig, [key]: nextBranches };
+    } else {
+      const next = mapRegionNodes(raw, `${path}.config.${key}`, mapper, depth + 1);
+      if (next !== raw) nextConfig = { ...nextConfig, [key]: next };
+    }
+  }
+
+  return nextConfig === config ? mapped : { ...mapped, config: nextConfig };
+}
+
+/**
+ * Immutably map every flow node in `stack.flows[].nodes[]` — **including the
+ * nodes nested inside ADR-0031 structured regions** (`loop.config.body`,
+ * `parallel.config.branches[]`, `try_catch.config.try`/`.catch`), to any depth.
+ *
+ * `mapper` receives each node dict and its path (`flows[i].nodes[j]`, or
+ * `flows[i].nodes[j].config.body.nodes[k]` for a nested one) and returns either
+ * the same reference (no change) or a new dict. The stack, the `flows` array, an
+ * individual flow, its `nodes` array, and every container `config` on the way
+ * down are each copied only when a descendant actually changed.
  */
 export function mapFlowNodes(
   stack: Dict,
@@ -40,7 +155,7 @@ export function mapFlowNodes(
     let nodesChanged = false;
     const nextNodes = flow.nodes.map((node, ni) => {
       if (!isDict(node)) return node;
-      const mapped = mapper(node, `flows[${fi}].nodes[${ni}]`);
+      const mapped = mapNodeTree(node, `flows[${fi}].nodes[${ni}]`, mapper, 0);
       if (mapped !== node) nodesChanged = true;
       return mapped;
     });

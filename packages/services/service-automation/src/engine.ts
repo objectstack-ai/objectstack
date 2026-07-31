@@ -5,7 +5,7 @@ import type { ExecutionLog, ActionDescriptor } from '@objectstack/spec/automatio
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, ScreenSpec } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
-import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
+import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, normalizeControlFlowRegions, collectFlowGraphs, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
 import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import { applyConversionsToFlow } from '@objectstack/spec';
 import type { FlowRegionParsed } from '@objectstack/spec/automation';
@@ -24,6 +24,15 @@ import { ConnectorSchema } from '@objectstack/spec/integration';
 // `previous.*`, `budget > 100000`, …) skipped its flow. A static import binds the
 // engine at module load in both ESM and CJS builds.
 import { ExpressionEngine, validateExpression, nearestName } from '@objectstack/formula';
+
+/**
+ * A bare **dotted reference** (`record.amount`, `row.shouldRun`,
+ * `previous.status`) — a CEL path, and a shape `{var}` template substitution can
+ * never leave behind, since it replaces the whole `{…}` token with a value.
+ * Each segment must start like an identifier, so numeric literals (`1.5`,
+ * `500.00`) are not references. See {@link AutomationEngine.refuseUnresolvedCelOperand}.
+ */
+const UNRESOLVED_CEL_REFERENCE = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/;
 
 /**
  * The slice of a descriptor's JSON-Schema `configSchema` that the undeclared-key
@@ -1459,15 +1468,25 @@ export class AutomationEngine implements IAutomationService {
             onNotice: (n) => this.logger.warn(`[flow '${name}'] ${n.code}: ${n.message}`),
             onConflict: (c) => this.logger.warn(`[flow '${name}'] ${c.code}: ${c.message}`),
         });
-        const parsed = FlowSchema.parse(converted);
+        const flowShell = FlowSchema.parse(converted);
 
         // DAG cycle detection
-        this.detectCycles(parsed);
+        this.detectCycles(flowShell);
 
         // ADR-0031 — validate structured control-flow constructs (loop bodies,
         // parallel branches, try/catch regions) are well-formed (single-entry/
         // single-exit, acyclic). Reject the malformed before it can run.
-        validateControlFlow(parsed);
+        validateControlFlow(flowShell);
+
+        // #4347 — then canonicalize what lives INSIDE those regions. A region
+        // sits in `FlowNodeSchema.config`, which is an open `z.record`, so the
+        // parse above stopped at the container: a bare-string `condition` on a
+        // top-level edge came back as the canonical `{ dialect: 'cel', source }`
+        // envelope while the identical predicate on a loop-body edge stayed a
+        // bare string. Same flow, same call, different stored shape by nesting
+        // depth. Runs after `validateControlFlow` so a malformed region is
+        // still reported by the validator that owns that message.
+        const parsed = normalizeControlFlowRegions(flowShell);
 
         // ADR-0018 §M1 — validate node types against the live action registry.
         // The protocol no longer gates `type` with a closed enum; membership is
@@ -2939,36 +2958,46 @@ export class AutomationEngine implements IAutomationService {
             }
         };
 
-        for (const node of flow.nodes) {
-            const cfg = (node.config ?? {}) as Record<string, unknown>;
-            // start-node trigger gate + decision/branch predicates live in config.condition
-            check(`node '${node.id}' (${node.type}) condition`, cfg.condition);
+        // #4347 — every graph in the flow, not just the top-level arrays. An
+        // ADR-0031 container keeps a whole sub-graph in its `config`, so
+        // iterating `flow.nodes`/`flow.edges` checked PART of the flow while
+        // reporting on all of it: the `{record.x}` brace-trap this pass exists
+        // to catch registered in silence one level in, and the flow then failed
+        // at run time with the loud diagnostic suppressed. `scope` names the
+        // region so a nested finding says where it is.
+        for (const graph of collectFlowGraphs(flow)) {
+            const at = graph.scope ? `${graph.scope}: ` : '';
+            for (const node of graph.nodes) {
+                const cfg = (node.config ?? {}) as Record<string, unknown>;
+                // start-node trigger gate + decision/branch predicates live in config.condition
+                check(`${at}node '${node.id}' (${node.type}) condition`, cfg.condition);
 
-            // Descriptor-declared expression slots (#4027). The ledger names them
-            // per node type and carries the dialect each one takes, so a declared
-            // key like `screen.fields[].visibleWhen` is checked as the bare CEL it
-            // is — the traversal gap that let #3528 ship a `{var}` predicate.
-            //
-            // Only `predicate` slots are checked: `flow-template` slots take the
-            // single-brace `{var}` dialect `interpolate()` implements, and no
-            // validator implements it (validateExpression's `template` role is the
-            // ADR-0032 §3 double-brace text template and would reject every
-            // correct `loop.collection`). They are declared in the ledger so the
-            // reconciliation ratchet still covers the marker.
-            for (const found of resolveFlowNodeExpressions(node.type, node.config)) {
-                if (found.entry.role !== 'predicate') continue;
-                // No schema hint: a screen's `visibleWhen` binds the screen's OWN
-                // collected values, not the trigger record's fields, so the
-                // field-existence pass would report every field name as unknown.
-                check(
-                    `node '${node.id}' (${node.type}) ${found.entry.label} at config.${found.path}`,
-                    found.value,
-                    false,
-                );
+                // Descriptor-declared expression slots (#4027). The ledger names them
+                // per node type and carries the dialect each one takes, so a declared
+                // key like `screen.fields[].visibleWhen` is checked as the bare CEL it
+                // is — the traversal gap that let #3528 ship a `{var}` predicate.
+                //
+                // Only `predicate` slots are checked: `flow-template` slots take the
+                // single-brace `{var}` dialect `interpolate()` implements, and no
+                // validator implements it (validateExpression's `template` role is the
+                // ADR-0032 §3 double-brace text template and would reject every
+                // correct `loop.collection`). They are declared in the ledger so the
+                // reconciliation ratchet still covers the marker.
+                for (const found of resolveFlowNodeExpressions(node.type, node.config)) {
+                    if (found.entry.role !== 'predicate') continue;
+                    // No schema hint: a screen's `visibleWhen` binds the screen's OWN
+                    // collected values, not the trigger record's fields, so the
+                    // field-existence pass would report every field name as unknown.
+                    check(
+                        `${at}node '${node.id}' (${node.type}) ${found.entry.label} at config.${found.path}`,
+                        found.value,
+                        false,
+                    );
+                }
             }
-        }
-        for (const edge of flow.edges) {
-            check(`edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition as unknown);
+            for (const edge of graph.edges) {
+                check(`${at}edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition as unknown);
+            }
         }
 
         if (failures.length > 0) {
@@ -3503,30 +3532,72 @@ export class AutomationEngine implements IAutomationService {
         }
         resolved = resolved.trim();
 
-        try {
-            // Boolean literals
-            if (resolved === 'true') return true;
-            if (resolved === 'false') return false;
+        // No `try { … } catch { return false }` around this block (#4347). Nothing
+        // in it throws — `indexOf` / `slice` / `Number` / `compareValues` are all
+        // total — so the catch guarded nothing, and the one thing that CAN throw
+        // here now is the deliberate refusal below, which a swallow-to-`false`
+        // would turn straight back into the silent wrong answer it exists to
+        // prevent (ADR-0032 §1c, same rule as the CEL path above).
 
-            // Comparison operators (ordered by length to match longer operators first)
-            const operators = ['===', '!==', '>=', '<=', '!=', '==', '>', '<'] as const;
-            for (const op of operators) {
-                const idx = resolved.indexOf(op);
-                if (idx !== -1) {
-                    const left = resolved.slice(0, idx).trim();
-                    const right = resolved.slice(idx + op.length).trim();
-                    return this.compareValues(left, op, right);
-                }
+        // Boolean literals
+        if (resolved === 'true') return true;
+        if (resolved === 'false') return false;
+
+        // Comparison operators (ordered by length to match longer operators first)
+        const operators = ['===', '!==', '>=', '<=', '!=', '==', '>', '<'] as const;
+        for (const op of operators) {
+            const idx = resolved.indexOf(op);
+            if (idx !== -1) {
+                const left = resolved.slice(0, idx).trim();
+                const right = resolved.slice(idx + op.length).trim();
+                this.refuseUnresolvedCelOperand(exprStr, left, right);
+                return this.compareValues(left, op, right);
             }
-
-            // Numeric truthy check
-            const numVal = Number(resolved);
-            if (!isNaN(numVal)) return numVal !== 0;
-
-            return false;
-        } catch {
-            return false;
         }
+
+        // Numeric truthy check
+        const numVal = Number(resolved);
+        if (!isNaN(numVal)) return numVal !== 0;
+
+        return false;
+    }
+
+    /**
+     * Refuse a comparison whose operand is an **unresolved CEL reference**
+     * (#4347).
+     *
+     * The legacy path substitutes `{var}` tokens and then compares whatever text
+     * is left. A dotted path can never be what that substitution produced — it
+     * replaces the whole `{…}` token with a VALUE — so a surviving
+     * `record.amount` means a CEL predicate reached the template path. Comparing
+     * it as a string is not merely unhelpful, it is silently WRONG *in the
+     * true direction*:
+     *
+     *     'oppRecord.amount > 500000'  →  'oppRecord.amount' > '500000'
+     *                                 →  'o' > '5'  →  TRUE, for every record
+     *
+     * — a gate that reports success while never actually gating. So this refuses
+     * rather than warns, the same rule ADR-0032 §1c set for the CEL path: a
+     * predicate that cannot be evaluated is a fault, never a quiet `false` (or,
+     * here, a quiet `true`).
+     *
+     * Only *dotted* references are refused. A bare word compares as a string on
+     * purpose — `'{status} == active'` is the documented legacy spelling, and
+     * after substitution both sides are plain words.
+     */
+    private refuseUnresolvedCelOperand(source: string, ...operands: readonly string[]): void {
+        const offender = operands.find(o => UNRESOLVED_CEL_REFERENCE.test(o));
+        if (!offender) return;
+        throw new Error(
+            `condition evaluation error: '${offender}' is an unresolved expression reference — ` +
+            `source: \`${source}\`. This predicate reached the legacy \`{var}\` template path, which ` +
+            `compares leftover text as STRINGS: a dotted reference is then compared character by ` +
+            `character (\`record.amount > 500000\` compares 'r' against '5' and is true for every ` +
+            `record), so the branch would be silently wrong rather than merely unevaluated. ` +
+            `Write it as CEL — a \`{ dialect: 'cel', source }\` envelope or the \`P\` tagged template ` +
+            `— which resolves references properly; or, if the \`{var}\` template dialect was meant, ` +
+            `brace the reference (\`{${offender}}\`).`,
+        );
     }
 
     /**

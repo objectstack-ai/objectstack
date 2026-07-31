@@ -300,6 +300,78 @@ export function findRegionEntry(region: { nodes: FlowNodeParsed[]; edges?: FlowE
   return analysis.entryId;
 }
 
+// ─── Where the containers keep their regions ─────────────────────────
+
+/** A dict — region-shaped enough to reach its `nodes` / `edges`. */
+function isRegionDict(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** One region slot found on a node: its raw value, its `config` key, and a label. */
+interface RegionSlot {
+  /** The raw value at `config[key]` — region-shaped or not; callers check. */
+  readonly raw: unknown;
+  /** Replace this `config` key to write a normalized region back. */
+  readonly key: string;
+  /** Index within `key`, for the array-valued slot (`parallel.branches`). */
+  readonly index?: number;
+  /** Diagnostic label, e.g. `loop 'sweep' body` / `parallel 'fan' branch 0`. */
+  readonly label: string;
+  /** The schema this slot's value parses as. */
+  readonly schema: z.ZodTypeAny;
+}
+
+/**
+ * The region slots one node carries — the single place that knows where each
+ * ADR-0031 container keeps its nested graph(s). Three passes read it
+ * ({@link validateControlFlow}, {@link normalizeControlFlowRegions},
+ * {@link collectFlowGraphs}), which is exactly why it is one function: a fourth
+ * container construct is added here once, not in three walks that drift.
+ *
+ * Emits a slot for a declared key even when its value is not region-shaped —
+ * `validateControlFlow` needs to reject that, not skip it.
+ */
+function regionSlotsOf(node: FlowNodeParsed): RegionSlot[] {
+  const cfg = node.config as Record<string, unknown> | undefined;
+  if (!cfg) return [];
+
+  if (node.type === LOOP_NODE_TYPE) {
+    return cfg.body == null
+      ? []
+      : [{ raw: cfg.body, key: 'body', label: `loop '${node.id}' body`, schema: FlowRegionSchema }];
+  }
+  if (node.type === PARALLEL_NODE_TYPE && Array.isArray(cfg.branches)) {
+    return cfg.branches.map((raw, index) => ({
+      raw,
+      key: 'branches',
+      index,
+      label: `parallel '${node.id}' branch ${index}`,
+      // A branch also carries an optional `name`, which the plain region schema
+      // (a non-strict `z.object`) would strip.
+      schema: ParallelBranchSchema,
+    }));
+  }
+  if (node.type === TRY_CATCH_NODE_TYPE) {
+    const slots: RegionSlot[] = [];
+    if (cfg.try != null) {
+      slots.push({ raw: cfg.try, key: 'try', label: `try_catch '${node.id}' try`, schema: FlowRegionSchema });
+    }
+    if (cfg.catch != null) {
+      slots.push({ raw: cfg.catch, key: 'catch', label: `try_catch '${node.id}' catch`, schema: FlowRegionSchema });
+    }
+    return slots;
+  }
+  return [];
+}
+
+/**
+ * Depth ceiling for the recursive region walks below. Regions nest (a `loop`
+ * inside a `try_catch` inside a `loop`) but not deeply, and a flow arriving as
+ * hand-built objects rather than parsed JSON could carry a self-reference —
+ * which would otherwise be an unbounded recursion at the load seam.
+ */
+const MAX_REGION_DEPTH = 32;
+
 /**
  * Validate every structured control-flow construct in a flow, throwing on the
  * first malformed region (ADR-0031 — "reject the malformed before run"). Covers
@@ -310,31 +382,158 @@ export function findRegionEntry(region: { nodes: FlowNodeParsed[]; edges?: FlowE
  * Intended to be called from `registerFlow()` after DAG cycle detection.
  */
 export function validateControlFlow(flow: { nodes: FlowNodeParsed[] }): void {
-  const assertRegion = (raw: unknown, where: string): void => {
-    const parsed = FlowRegionSchema.safeParse(raw);
-    if (!parsed.success) {
-      throw new Error(`${where}: invalid region — ${parsed.error.issues.map(i => i.message).join('; ')}`);
-    }
-    const analysis = analyzeRegion(parsed.data);
-    if (analysis.errors.length > 0) {
-      throw new Error(`${where}: ${analysis.errors.join('; ')}`);
-    }
-  };
-
   for (const node of flow.nodes) {
     const cfg = node.config as Record<string, unknown> | undefined;
     if (!cfg) continue;
-
-    if (node.type === LOOP_NODE_TYPE && cfg.body != null) {
-      assertRegion(cfg.body, `loop '${node.id}' body`);
-    } else if (node.type === PARALLEL_NODE_TYPE && Array.isArray(cfg.branches)) {
-      if (cfg.branches.length < 2) {
-        throw new Error(`parallel '${node.id}': a parallel block needs at least 2 branches`);
+    if (node.type === PARALLEL_NODE_TYPE && Array.isArray(cfg.branches) && cfg.branches.length < 2) {
+      throw new Error(`parallel '${node.id}': a parallel block needs at least 2 branches`);
+    }
+    for (const slot of regionSlotsOf(node)) {
+      const parsed = slot.schema.safeParse(slot.raw);
+      if (!parsed.success) {
+        throw new Error(
+          `${slot.label}: invalid region — ${parsed.error.issues.map(i => i.message).join('; ')}`,
+        );
       }
-      cfg.branches.forEach((branch, i) => assertRegion(branch, `parallel '${node.id}' branch ${i}`));
-    } else if (node.type === TRY_CATCH_NODE_TYPE) {
-      if (cfg.try != null) assertRegion(cfg.try, `try_catch '${node.id}' try`);
-      if (cfg.catch != null) assertRegion(cfg.catch, `try_catch '${node.id}' catch`);
+      // Both region schemas produce `{ nodes, edges }` (a parallel branch adds
+      // `name` — a superset); `z.ZodTypeAny` just cannot say so.
+      const analysis = analyzeRegion(parsed.data as { nodes: FlowNodeParsed[]; edges?: FlowEdgeParsed[] });
+      if (analysis.errors.length > 0) {
+        throw new Error(`${slot.label}: ${analysis.errors.join('; ')}`);
+      }
     }
   }
+}
+
+// ─── Region normalization ────────────────────────────────────────────
+
+/**
+ * Parse ONE region value through its own schema, then recurse into the
+ * containers its nodes carry.
+ *
+ * A value that does not parse is returned untouched: rejecting a malformed
+ * region is {@link validateControlFlow}'s job (and, at run time, the container
+ * executor's `parseNodeConfig`). A normalization pass that also threw would
+ * change *which* flows register, which is not what it is for.
+ */
+function normalizeRegion(slot: RegionSlot, depth: number): unknown {
+  if (!isRegionDict(slot.raw)) return slot.raw;
+  const parsed = slot.schema.safeParse(slot.raw);
+  if (!parsed.success) return slot.raw;
+  const region = parsed.data as { nodes?: FlowNodeParsed[] };
+  if (!Array.isArray(region.nodes)) return region;
+  return { ...region, nodes: region.nodes.map(n => normalizeNodeRegions(n, depth + 1)) };
+}
+
+/** Normalize every region one node carries — recursively, since regions nest. */
+function normalizeNodeRegions(node: FlowNodeParsed, depth: number): FlowNodeParsed {
+  if (depth >= MAX_REGION_DEPTH) return node;
+  const cfg = node.config as Record<string, unknown> | undefined;
+  if (!cfg) return node;
+
+  let next = cfg;
+  for (const slot of regionSlotsOf(node)) {
+    const normalized = normalizeRegion(slot, depth);
+    if (normalized === slot.raw) continue;
+    if (slot.index === undefined) {
+      next = { ...next, [slot.key]: normalized };
+    } else {
+      const branches = [...(next[slot.key] as unknown[])];
+      branches[slot.index] = normalized;
+      next = { ...next, [slot.key]: branches };
+    }
+  }
+
+  return next === cfg ? node : { ...node, config: next };
+}
+
+/**
+ * Canonicalize the metadata **inside** every structured region of a flow (#4347).
+ *
+ * `FlowSchema.parse` normalizes a flow's own `nodes[]` / `edges[]` — most
+ * visibly, `FlowEdgeSchema.condition` is `ExpressionInputSchema`, so a
+ * bare-string predicate becomes the canonical `{ dialect: 'cel', source }`
+ * envelope. It does not reach a region, because a region lives inside
+ * `FlowNodeSchema.config`, which is deliberately `z.record(z.unknown())` — open,
+ * per node type. So the *same predicate* was stored enveloped on a top-level edge
+ * and left a bare string on a loop-body edge: a representation that depended on
+ * where in the graph it sat, which no flow author can be expected to predict.
+ *
+ * This pass closes that. Each region is run through its own schema — recursively,
+ * because regions nest — producing a flow whose nested edges and nodes carry the
+ * same canonical shapes as its top-level ones. Copy-on-write: a flow with no
+ * structured container comes back untouched.
+ *
+ * Call it at the load seam, after `FlowSchema.parse` and `validateControlFlow`.
+ * The container executors parse their own config at run time (`parseNodeConfig`,
+ * #4277), so this is not what makes a nested predicate *evaluate* correctly — it
+ * is what makes the stored flow SAY so, for every reader that is not the
+ * executor: the Studio designer, `getFlow`, the version history, and any
+ * consumer that reads a region without re-parsing it.
+ */
+export function normalizeControlFlowRegions<T extends { nodes: FlowNodeParsed[] }>(flow: T): T {
+  if (!Array.isArray(flow.nodes)) return flow;
+  let changed = false;
+  const nodes = flow.nodes.map(node => {
+    const next = normalizeNodeRegions(node, 0);
+    if (next !== node) changed = true;
+    return next;
+  });
+  return changed ? { ...flow, nodes } : flow;
+}
+
+// ─── Whole-flow graph traversal ──────────────────────────────────────
+
+/** One executable graph within a flow: the flow's own, or a nested region's. */
+export interface FlowGraph {
+  /**
+   * Where this graph sits. Empty string for the flow's own `nodes`/`edges`;
+   * otherwise the region path, e.g. `loop 'sweep' body` or
+   * `loop 'sweep' body → try_catch 'guard' catch`.
+   */
+  readonly scope: string;
+  readonly nodes: readonly FlowNodeParsed[];
+  readonly edges: readonly FlowEdgeParsed[];
+}
+
+/**
+ * Every graph in a flow — its own, plus each nested structured region, depth
+ * first (#4347).
+ *
+ * A flow's nodes and edges are not all in `flow.nodes` / `flow.edges`: an
+ * ADR-0031 container keeps a whole sub-graph in its `config`. A validator that
+ * iterates only the top-level arrays therefore checks *part* of the flow while
+ * reporting on all of it — which is how a `{record.x}` brace-trap inside a loop
+ * body passed registration while the identical predicate one level out was a
+ * hard error. Iterate this instead of `flow.nodes` wherever a pass means "every
+ * node in this flow", and use {@link FlowGraph.scope} to say where a finding is.
+ */
+export function collectFlowGraphs(
+  flow: { nodes?: readonly FlowNodeParsed[]; edges?: readonly FlowEdgeParsed[] },
+): FlowGraph[] {
+  const graphs: FlowGraph[] = [];
+
+  const visit = (
+    nodes: readonly FlowNodeParsed[],
+    edges: readonly FlowEdgeParsed[],
+    scope: string,
+    depth: number,
+  ): void => {
+    graphs.push({ scope, nodes, edges });
+    if (depth >= MAX_REGION_DEPTH) return;
+    for (const node of nodes) {
+      for (const slot of regionSlotsOf(node)) {
+        if (!isRegionDict(slot.raw) || !Array.isArray(slot.raw.nodes)) continue;
+        visit(
+          slot.raw.nodes as FlowNodeParsed[],
+          Array.isArray(slot.raw.edges) ? (slot.raw.edges as FlowEdgeParsed[]) : [],
+          scope ? `${scope} → ${slot.label}` : slot.label,
+          depth + 1,
+        );
+      }
+    }
+  };
+
+  visit(flow.nodes ?? [], flow.edges ?? [], '', 0);
+  return graphs;
 }
